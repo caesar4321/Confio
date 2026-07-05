@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { BottomTabParamList } from '../types/navigation';
@@ -144,6 +145,7 @@ const ChargeScreen = () => {
       name: 'Confío Dollar',
       symbol: 'cUSD',
       color: colors.primary,
+      colorDark: colors.primaryDark,
       textColor: colors.primaryText,
       icon: cUSDIcon
     },
@@ -151,6 +153,7 @@ const ChargeScreen = () => {
       name: 'Confío',
       symbol: 'CONFIO',
       color: colors.secondary,
+      colorDark: colors.secondaryDark,
       textColor: colors.secondaryText,
       icon: CONFIOIcon
     }
@@ -345,29 +348,29 @@ const ChargeScreen = () => {
       case 'submitted':
         return {
           text: 'Pago enviado — esperando confirmación',
-          color: '#d97706', // amber-600
-          bgColor: '#fef3c7', // amber-100
+          color: colors.warning.icon,
+          bgColor: colors.warning.background,
           icon: 'clock'
         };
       case 'paid':
         return {
-          text: '¡Pago Confirmado!',
-          color: '#10B981',
-          bgColor: '#d1fae5',
+          text: '¡Pago confirmado!',
+          color: colors.primaryDark,
+          bgColor: colors.primaryLight,
           icon: 'check-circle'
         };
       case 'expired':
         return {
-          text: 'Factura Expirada',
-          color: '#dc2626',
-          bgColor: '#fee2e2',
+          text: 'Factura expirada',
+          color: colors.error.icon,
+          bgColor: colors.error.background,
           icon: 'clock'
         };
       default:
         return {
-          text: 'Esperando Pago...',
-          color: '#d97706',
-          bgColor: '#fef3c7',
+          text: 'Esperando pago…',
+          color: colors.warning.icon,
+          bgColor: colors.warning.background,
           icon: 'clock'
         };
     }
@@ -400,11 +403,23 @@ const ChargeScreen = () => {
       </Modal>
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header */}
+        {/* Header — brand field: per-instrument gradient + coin ring;
+            padding on headerInner (Yoga insets absolute children). */}
         <View style={[
           styles.header,
           { backgroundColor: mode === 'cobrar' ? currentCurrency.color : colors.primary }
         ]}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id={`chargeField-${mode}-${selectedCurrency}`} x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={mode === 'cobrar' ? currentCurrency.color : colors.primary} />
+                <Stop offset="1" stopColor={mode === 'cobrar' ? currentCurrency.colorDark : colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill={`url(#chargeField-${mode}-${selectedCurrency})`} />
+            <Circle cx="105%" cy="30%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.headerInner}>
           <View style={styles.headerContent}>
             <View style={styles.qrIconContainer}>
               <Icon name="maximize" size={32} color={mode === 'cobrar' ? currentCurrency.color : colors.primary} />
@@ -418,6 +433,7 @@ const ChargeScreen = () => {
                 : 'Escanea códigos QR para realizar pagos'
               }
             </Text>
+          </View>
           </View>
         </View>
 
@@ -495,7 +511,7 @@ const ChargeScreen = () => {
                               styles.currencySymbol,
                               selectedCurrency === 'cUSD' && styles.currencySymbolSelected
                             ]}>
-                              ${currencies.cUSD.symbol}
+                              {currencies.cUSD.symbol}
                             </Text>
                           </View>
                         </View>
@@ -522,7 +538,7 @@ const ChargeScreen = () => {
                               styles.currencySymbol,
                               selectedCurrency === 'CONFIO' && styles.currencySymbolSelected
                             ]}>
-                              ${currencies.CONFIO.symbol}
+                              {currencies.CONFIO.symbol}
                             </Text>
                           </View>
                         </View>
@@ -537,14 +553,16 @@ const ChargeScreen = () => {
                     <View style={styles.inputContainer}>
                       <Text style={styles.inputLabel}>Monto a cobrar</Text>
                       <View style={styles.amountInputContainer}>
-                        <Icon name="dollar-sign" size={20} color="#9ca3af" style={styles.amountInputIcon} />
+                        {selectedCurrency === 'cUSD' && (
+                          <Icon name="dollar-sign" size={20} color={colors.text.light} style={styles.amountInputIcon} />
+                        )}
                         <TextInput
                           style={styles.amountInput}
                           value={amount}
                           onChangeText={setAmount}
                           placeholder="0.00"
                           keyboardType="numeric"
-                          placeholderTextColor="#9ca3af"
+                          placeholderTextColor={colors.text.light}
                         />
                         <Text style={[styles.currencyLabel, { color: currentCurrency.color }]}>
                           {currentCurrency.symbol}
@@ -576,7 +594,9 @@ const ChargeScreen = () => {
                             style={styles.quickAmountButton}
                             onPress={() => setAmount(quickAmount)}
                           >
-                            <Text style={styles.quickAmountText}>${quickAmount}</Text>
+                            <Text style={styles.quickAmountText}>
+                              {selectedCurrency === 'cUSD' ? `$${quickAmount}` : quickAmount}
+                            </Text>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -608,7 +628,7 @@ const ChargeScreen = () => {
                 <>
                   {/* QR Code Display with Real-time Status */}
                   <View style={styles.card}>
-                    <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ backgroundColor: '#ffffff' }}>
+                    <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ backgroundColor: colors.white }}>
                       <Text style={styles.qrTitle}>Código QR de Pago</Text>
                       <Text style={styles.qrSubtitle}>
                         Comparte este código con tu cliente para recibir el pago
@@ -637,7 +657,7 @@ const ChargeScreen = () => {
 
                       <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
                         <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
-                          ${invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
+                          {selectedCurrency === 'cUSD' ? '$' : ''}{invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
                         </Text>
                         <Text style={styles.paymentDescription}>
                           {invoice?.description || description || 'Sin descripción'}
@@ -660,7 +680,7 @@ const ChargeScreen = () => {
                           }
                         }}
                       >
-                        <Icon name={copied ? "check-circle" : "copy"} size={16} color="#374151" />
+                        <Icon name={copied ? "check-circle" : "copy"} size={16} color={colors.text.primary} />
                         <Text style={styles.actionButtonText}>
                           {copied ? 'Copiado' : 'Copiar enlace'}
                         </Text>
@@ -670,17 +690,17 @@ const ChargeScreen = () => {
                         style={styles.actionButton}
                         onPress={handleShareLink}
                       >
-                        <Icon name="share-2" size={16} color="#374151" />
+                        <Icon name="share-2" size={16} color={colors.text.primary} />
                         <Text style={styles.actionButtonText}>Enviar Enlace</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity style={styles.actionButton} onPress={handleShareQR}>
-                        <Icon name="share" size={16} color="#374151" />
+                        <Icon name="share" size={16} color={colors.text.primary} />
                         <Text style={styles.actionButtonText}>Enviar QR</Text>
                       </TouchableOpacity>
 
                       <TouchableOpacity style={styles.actionButton} onPress={handleDownloadQR}>
-                        <Icon name="download" size={16} color="#374151" />
+                        <Icon name="download" size={16} color={colors.text.primary} />
                         <Text style={styles.actionButtonText}>Guardar</Text>
                       </TouchableOpacity>
                     </View>
@@ -697,7 +717,7 @@ const ChargeScreen = () => {
                       setPaymentStatus('pending');
                     }}
                   >
-                    <Icon name="plus" size={16} color="white" />
+                    <Icon name="plus" size={16} color={colors.white} />
                     <Text style={styles.newPaymentButtonText}>Crear nuevo cobro</Text>
                   </TouchableOpacity>
                 </>
@@ -724,7 +744,7 @@ const ChargeScreen = () => {
                     style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 24 }]}
                     onPress={() => navigation.navigate('Scan', { mode: 'pagar' })}
                   >
-                    <Icon name="camera" size={20} color="white" style={{ marginRight: 8 }} />
+                    <Icon name="camera" size={20} color={colors.white} style={{ marginRight: 8 }} />
                     <Text style={styles.scanButtonText}>Abrir Escáner QR</Text>
                   </TouchableOpacity>
                 </View>
@@ -753,6 +773,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutral,
   },
   header: {
+    overflow: 'hidden',
+  },
+  headerInner: {
     paddingTop: 60,
     paddingBottom: 24,
     paddingHorizontal: 16,
@@ -763,7 +786,7 @@ const styles = StyleSheet.create({
   qrIconContainer: {
     width: 64,
     height: 64,
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
@@ -772,12 +795,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: 'white',
+    color: colors.white,
     marginBottom: 8,
   },
   headerSubtitle: {
     fontSize: 14,
-    color: 'white',
+    color: colors.white,
     opacity: 0.8,
     textAlign: 'center',
   },
@@ -787,15 +810,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   modeToggle: {
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 4,
     flexDirection: 'row',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   modeButton: {
     flex: 1,
@@ -806,11 +826,11 @@ const styles = StyleSheet.create({
   modeButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4b5563',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   modeButtonTextActive: {
-    color: 'white',
+    color: colors.white,
   },
   content: {
     paddingHorizontal: 16,
@@ -823,19 +843,16 @@ const styles = StyleSheet.create({
     gap: 24,
   },
   card: {
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 16,
   },
   currencyGrid: {
@@ -847,7 +864,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     backgroundColor: colors.neutralDark,
   },
   currencyButtonSelected: {
@@ -880,7 +897,7 @@ const styles = StyleSheet.create({
   currencyName: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     textAlign: 'center',
   },
   currencyNameSelected: {
@@ -888,7 +905,7 @@ const styles = StyleSheet.create({
   },
   currencySymbol: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   currencySymbolSelected: {
@@ -900,7 +917,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   amountInputContainer: {
@@ -908,7 +925,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.neutralDark,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 12,
   },
@@ -920,7 +937,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     paddingVertical: 16,
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   currencyLabel: {
     fontSize: 16,
@@ -929,15 +946,15 @@ const styles = StyleSheet.create({
   descriptionInput: {
     backgroundColor: colors.neutralDark,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     padding: 12,
     fontSize: 16,
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   characterCount: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   quickAmountsContainer: {
@@ -947,7 +964,7 @@ const styles = StyleSheet.create({
   quickAmountsLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   quickAmountsGrid: {
@@ -965,7 +982,7 @@ const styles = StyleSheet.create({
   quickAmountText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
   },
   infoCard: {
     padding: 16,
@@ -994,13 +1011,13 @@ const styles = StyleSheet.create({
   qrTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 8,
   },
   qrSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -1016,7 +1033,7 @@ const styles = StyleSheet.create({
   },
   qrCodeText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginTop: 8,
   },
   paymentDetails: {
@@ -1051,7 +1068,7 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
     marginLeft: 8,
   },
   newPaymentButton: {
@@ -1064,43 +1081,8 @@ const styles = StyleSheet.create({
   newPaymentButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'white',
+    color: colors.white,
     marginLeft: 8,
-  },
-  scanTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1f2937',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  scannerContainer: {
-    width: 256,
-    height: 256,
-    backgroundColor: colors.dark,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: 24,
-    position: 'relative',
-  },
-  scannerFrame: {
-    position: 'absolute',
-    width: 224,
-    height: 224,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderRadius: 8,
-  },
-  scanSubtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  scanButtons: {
-    gap: 12,
   },
   scanButton: {
     paddingVertical: 12,
@@ -1110,23 +1092,12 @@ const styles = StyleSheet.create({
   scanButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'white',
-  },
-  scanButtonSecondary: {
-    paddingVertical: 12,
-    backgroundColor: colors.neutralDark,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  scanButtonSecondaryText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
+    color: colors.white,
   },
 
   cardSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
 
@@ -1156,7 +1127,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',
@@ -1181,7 +1152,7 @@ const styles = StyleSheet.create({
   },
   modalMessage: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 20,
@@ -1191,7 +1162,7 @@ const styles = StyleSheet.create({
   },
   modalNote: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: colors.text.light,
     textAlign: 'center',
     fontStyle: 'italic',
   },
