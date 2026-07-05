@@ -42,6 +42,7 @@ import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
 import 'moment/locale/es';
+import 'moment/locale/es';
 import { useAccount } from '../contexts/AccountContext';
 import * as Keychain from 'react-native-keychain';
 import { useContactNameSync } from '../hooks/useContactName';
@@ -976,31 +977,39 @@ export const AccountDetailScreen = () => {
     }
   };
 
-  const getTransactionIcon = (transaction: Transaction) => {
+  // Icon chip per category: colored glyph on a soft tint of the same color,
+  // matching the app-wide icon-chip grammar. Sent stays neutral — outgoing
+  // money is not an alert.
+  const getTransactionVisual = (transaction: Transaction): { icon: string; color: string; bg: string } => {
     switch (transaction.type) {
       case 'received':
-        return <Icon name="arrow-down" size={20} color={colors.primaryDark} />;
+        return { icon: 'arrow-down', color: colors.primaryDark, bg: colors.primarySoft };
       case 'sent':
-        return <Icon name="arrow-up" size={20} color={colors.danger} />;
+        return { icon: 'arrow-up', color: colors.text.primary, bg: colors.neutralDark };
       case 'exchange':
-        return <Icon name="refresh-cw" size={20} color={colors.accent} />;
+        return { icon: 'refresh-cw', color: colors.accent, bg: '#EFF6FF' };
       case 'conversion':
-        return <Icon name="repeat" size={20} color={colors.primary} />;
+        return { icon: 'repeat', color: colors.primaryDark, bg: colors.primarySoft };
       case 'ramp':
-        return <Icon name="repeat" size={20} color="#0EA5E9" />;
+        return { icon: 'repeat', color: '#0EA5E9', bg: '#E0F2FE' };
       case 'payment':
-        return <Icon name="shopping-bag" size={20} color={colors.secondary} />;
+        return { icon: 'shopping-bag', color: colors.secondary, bg: colors.violetLight };
       case 'reward':
-        return <Icon name="gift" size={20} color={colors.offRampIcon} />;
+        return { icon: 'gift', color: colors.offRampIcon, bg: colors.warningLight };
       case 'presale':
-        return <Icon name="lock" size={20} color="#6366F1" />;
+        return { icon: 'lock', color: '#6366F1', bg: '#EEF2FF' };
       case 'payroll':
-        return <Icon name="briefcase" size={20} color={colors.primaryDark} />;
+        return { icon: 'briefcase', color: colors.primaryDark, bg: colors.primarySoft };
       case 'humanitarian':
-        return <Icon name="heart" size={20} color="#E11D48" />;
+        return { icon: 'heart', color: '#E11D48', bg: '#FFE4E6' };
       default:
-        return <Icon name="arrow-up" size={20} color={colors.text.secondary} />;
+        return { icon: 'arrow-up', color: colors.text.secondary, bg: colors.neutralDark };
     }
+  };
+
+  const getTransactionIcon = (transaction: Transaction) => {
+    const visual = getTransactionVisual(transaction);
+    return <Icon name={visual.icon} size={20} color={visual.color} />;
   };
 
   // Use unified transactions if available, fallback to legacy format
@@ -1052,6 +1061,8 @@ export const AccountDetailScreen = () => {
         const currency = tx.currency.toLowerCase();
         const hash = tx.hash.toLowerCase();
         const date = moment(tx.date).format('DD/MM/YYYY').toLowerCase();
+        // Rows display the short form ("4 jul"), so match what the user sees too
+        const dateDisplay = moment(tx.date).format('D MMM').toLowerCase();
         const fromPhone = (tx.fromPhone || '').toLowerCase();
         const toPhone = (tx.toPhone || '').toLowerCase();
 
@@ -1060,6 +1071,7 @@ export const AccountDetailScreen = () => {
           currency.includes(query) ||
           hash.includes(query) ||
           date.includes(query) ||
+          dateDisplay.includes(query) ||
           fromPhone.includes(query) ||
           toPhone.includes(query);
       });
@@ -1189,8 +1201,9 @@ export const AccountDetailScreen = () => {
   }, [unifiedTransactionsData, transactionLimit, loadingMore, unifiedLoading, canQueryTransactions]);
 
   const TransactionItem = memo(({ transaction, activeAccount, userProfile }: { transaction: Transaction, activeAccount: any, userProfile: any }) => {
-    // Format the date properly
-    const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
+    // Short date — rows sit under Hoy/Ayer/month section headers, so the
+    // full DD/MM/YYYY repeats what the header already says.
+    const formattedDate = moment(transaction.date).format('D MMM');
     const formattedTime = transaction.time;
     const isRewardTransaction = transaction.type === 'reward' || transaction.isRewardPayout;
     const isPresaleTransaction = transaction.type === 'presale';
@@ -1450,13 +1463,19 @@ export const AccountDetailScreen = () => {
 
     return (
       <TouchableOpacity
-        style={[styles.transactionItem, transaction.isInvitation && styles.invitedTransactionItem]}
+        style={[
+          styles.transactionItem,
+          // Invitation states: pending = warning amber, reverted = error red,
+          // claimed = a normal card (nothing is wrong anymore).
+          transaction.isInvitation && !transaction.invitationClaimed && !transaction.invitationReverted && styles.invitedTransactionItem,
+          transaction.isInvitation && transaction.invitationReverted && styles.revertedTransactionItem,
+        ]}
         onPress={handlePress}
         accessibilityRole="button"
         accessibilityLabel={transactionAccessibilityLabel}
         accessibilityHint="Abre el detalle de la transacción."
       >
-        <View style={styles.transactionIconContainer}>
+        <View style={[styles.transactionIconContainer, { backgroundColor: getTransactionVisual(transaction).bg }]}>
           {getTransactionIcon(transaction)}
         </View>
         <View style={styles.transactionInfo}>
@@ -1496,10 +1515,15 @@ export const AccountDetailScreen = () => {
             )}
           </View>
           {transaction.isInvitation && transaction.type === 'sent' && (
-            <Text style={styles.invitationNote}>
-              {transaction.invitationClaimed ? '✅ Invitación reclamada' :
-                transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
-                  '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
+            <Text style={[
+              styles.invitationNote,
+              transaction.invitationClaimed ? styles.invitationNoteClaimed :
+                transaction.invitationReverted ? styles.invitationNoteReverted :
+                  styles.invitationNotePending,
+            ]}>
+              {transaction.invitationClaimed ? '✓ Invitación reclamada' :
+                transaction.invitationReverted ? 'Expiró — fondos devueltos' :
+                  'Tu amigo tiene 7 días para reclamar • Avísale ya'}
             </Text>
           )}
           {/* Show external wallet indicator for sends to addresses without phone */}
@@ -1532,27 +1556,23 @@ export const AccountDetailScreen = () => {
           ]}>
             {formatTransactionAmount(transaction.amount)} {transaction.currency}
           </Text>
-          <View style={styles.transactionStatus}>
-            {(() => {
-              const isCompleted = transaction.status === 'completed';
-              const isFailed = transaction.status === 'failed';
-              const statusLabel = isCompleted ? 'Completado' : isFailed ? 'Fallido' : 'Pendiente';
-              const textStyle = [
-                styles.statusText,
-                isCompleted ? styles.statusTextCompleted : isFailed ? styles.statusTextFailed : styles.statusTextPending,
-              ];
-              const dotStyle = [
-                styles.statusDot,
-                isCompleted ? styles.statusDotCompleted : isFailed ? styles.statusDotFailed : styles.statusDotPending,
-              ];
-              return (
-                <>
-                  <Text style={textStyle}>{statusLabel}</Text>
-                  <View style={dotStyle} />
-                </>
-              );
-            })()}
-          </View>
+          {/* Status only when it carries information — completed is the
+              normal case and stays silent. */}
+          {transaction.status !== 'completed' && (
+            <View style={styles.transactionStatus}>
+              {(() => {
+                const isFailed = transaction.status === 'failed';
+                return (
+                  <>
+                    <Text style={[styles.statusText, isFailed ? styles.statusTextFailed : styles.statusTextPending]}>
+                      {isFailed ? 'Fallido' : 'Pendiente'}
+                    </Text>
+                    <View style={[styles.statusDot, isFailed ? styles.statusDotFailed : styles.statusDotPending]} />
+                  </>
+                );
+              })()}
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -2913,13 +2933,17 @@ const styles = StyleSheet.create({
     borderColor: colors.neutralDark,
   },
   invitedTransactionItem: {
+    backgroundColor: colors.warning.background,
+    borderColor: colors.warning.border,
+  },
+  revertedTransactionItem: {
     backgroundColor: colors.error.background,
-    borderColor: colors.danger,
+    borderColor: colors.error.border,
   },
   transactionIconContainer: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2970,9 +2994,17 @@ const styles = StyleSheet.create({
   },
   invitationNote: {
     fontSize: 12,
-    color: colors.error.icon,
     marginTop: 2,
-    fontWeight: 'bold',
+    fontWeight: '600',
+  },
+  invitationNotePending: {
+    color: colors.warning.text,
+  },
+  invitationNoteClaimed: {
+    color: colors.primaryDark,
+  },
+  invitationNoteReverted: {
+    color: colors.error.icon,
   },
   externalWalletNote: {
     fontSize: 12,
@@ -3002,19 +3034,18 @@ const styles = StyleSheet.create({
   positiveAmount: {
     color: colors.primaryDark,
   },
+  // Outgoing money is normal, not an alert — red stays reserved for failures.
   negativeAmount: {
-    color: colors.danger,
+    color: colors.text.primary,
   },
   transactionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 2,
   },
   statusText: {
     fontSize: 12,
     marginRight: 4,
-  },
-  statusTextCompleted: {
-    color: colors.primaryDark, // green
   },
   statusTextPending: {
     color: colors.offRampIcon, // amber
@@ -3027,7 +3058,6 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  statusDotCompleted: { backgroundColor: colors.primaryDark },
   statusDotPending: { backgroundColor: colors.offRampIcon },
   statusDotFailed: { backgroundColor: colors.danger },
   viewMoreButton: {
