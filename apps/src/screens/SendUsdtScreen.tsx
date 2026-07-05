@@ -1,12 +1,13 @@
-// Enviar USDT (BEP-20) — the savings exit for crypto-native users:
-// auto-converts from cUSD+ in ONE transaction. The vault's
-// redeemToUsdt(shares, minOut, to) pays USDT to ANY address directly —
-// no intermediate balance, no bridge, no saga. Confío fee: NONE
-// (Julian, 2026-07-05) — same as the Koywe withdrawal rail.
+// Enviar USDT (BEP-20) — the savings exit for crypto-native users, in the
+// SendWithAddress house grammar (compact instrument header, balance card,
+// auto-convert banner, amount + currency badge, quick amounts, paste/scan
+// address row with live validation, fee row, footer button).
 //
-// Amounts display in USD only (decision A: share math stays invisible;
-// shares = usd / pPlus computed at signing). Execution wires at vault
-// deploy — onConfirm is a stub in the ConvertAhorro pattern until then.
+// Auto-converts from cUSD+ in ONE transaction: the vault's
+// redeemToUsdt(shares, minOut, to) pays USDT to ANY address directly — no
+// intermediate balance, no bridge. Confío fee: NONE (Julian, 2026-07-05).
+// Amounts display in USD only (decision A: share math stays invisible).
+// Execution wires at vault deploy — handleSend is a stub until then.
 
 import React, { useMemo, useState } from 'react';
 import {
@@ -16,154 +17,256 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  StatusBar,
   Image,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../config/theme';
-import { useNumberFormat } from '../utils/numberFormatting';
+import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
+import { AddressScannerModal } from '../components/AddressScannerModal';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
-import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import USDTLogo from '../assets/png/USDT.png';
 
-const MIN_AMOUNT_USD = 1;
-
-const isPlausibleEvmAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
+const USDT_COLOR = '#26A17B'; // Tether brand teal (nominative use)
+const MIN_SEND_USD = 1;
+const QUICK_AMOUNTS = ['10.00', '50.00', '100.00'];
 
 export const SendUsdtScreen = () => {
   const navigation = useNavigation();
-  const { formatNumber } = useNumberFormat();
   const { savings } = useAhorrosPortfolio();
 
-  const [dest, setDest] = useState('');
-  const [raw, setRaw] = useState('');
-  const amount = useMemo(() => {
-    const v = parseFloat(raw.replace(',', '.'));
+  const [amount, setAmount] = useState('');
+  const [destination, setDestination] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const amountNum = useMemo(() => {
+    const v = parseFloat((amount || '0').replace(',', '.'));
     return Number.isFinite(v) ? v : 0;
-  }, [raw]);
+  }, [amount]);
 
-  const fmtUsd = (v: number) =>
-    `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const available = savings.balanceUsd;
+  const isValidAddress = /^0x[0-9a-fA-F]{40}$/.test(destination.trim());
 
-  const destValid = isPlausibleEvmAddress(dest);
-  const overBalance = amount > savings.balanceUsd;
-  const belowMin = amount > 0 && amount < MIN_AMOUNT_USD;
-  const canConfirm = destValid && amount >= MIN_AMOUNT_USD && !overBalance;
+  const formatFixedFloor = (value: number, decimals = 2) => {
+    const m = Math.pow(10, decimals);
+    const floored = Math.floor(value * m) / m;
+    return floored.toLocaleString('es-ES', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  };
 
-  const onConfirm = () => {
+  const handlePaste = async () => {
+    try {
+      const text = await Clipboard.getString();
+      if (text) setDestination(text.trim());
+    } catch {}
+  };
+
+  const handleMax = () => {
+    const floored = Math.floor(available * 100) / 100;
+    if (floored > 0) setAmount(String(floored));
+  };
+
+  const handleSend = () => {
+    if (!amountNum || amountNum < MIN_SEND_USD) {
+      setErrorMessage(`El mínimo para enviar es $${MIN_SEND_USD}.`);
+      setShowError(true);
+      return;
+    }
+    if (!isValidAddress) {
+      setErrorMessage(
+        destination.startsWith('0x')
+          ? 'La dirección BEP-20 debe tener 40 caracteres hexadecimales después de 0x.'
+          : 'Formato inválido. Usa una dirección BNB Smart Chain (empieza con 0x).',
+      );
+      setShowError(true);
+      return;
+    }
+    if (amountNum > available) {
+      setErrorMessage('Saldo insuficiente en tu ahorro.');
+      setShowError(true);
+      return;
+    }
     // TODO(cusd+ vault deploy): shares = usd / pPlus (eth_call) →
-    // vault.redeemToUsdt(shares, minUsdtOut, dest) signed by evmWallet,
-    // gas-dusted; then Movimientos entry. One transaction, no fee.
+    // vault.redeemToUsdt(shares, minUsdtOut, destination) signed by
+    // evmWallet, gas-dusted → Movimientos entry. One transaction, no fee.
   };
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-            <Icon name="arrow-left" size={24} color="#fff" />
+      {/* Compact instrument header — house send-screen grammar */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: USDT_COLOR }}>
+        <View style={[styles.header, { backgroundColor: USDT_COLOR }]}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Volver"
+          >
+            <Icon name="arrow-left" size={24} color={colors.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Enviar USDT</Text>
-          <View style={styles.headerIconBtn} />
+          <View style={styles.headerCenter}>
+            <Image source={USDTLogo} style={styles.headerLogo} />
+            <Text style={styles.headerTitle}>Enviar USDT</Text>
+          </View>
+          <View style={styles.placeholder} />
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {/* Destination */}
-          <View style={styles.card}>
-            <Text style={styles.label}>Dirección de destino (BEP-20)</Text>
-            <TextInput
-              style={styles.addressInput}
-              value={dest}
-              onChangeText={setDest}
-              placeholder="0x…"
-              placeholderTextColor={colors.text.light}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {dest.length > 0 && !destValid && (
-              <Text style={styles.hintError}>Dirección inválida — debe empezar con 0x (42 caracteres).</Text>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* Available Balance */}
+        <View style={styles.balanceCard}>
+          <Text style={styles.balanceLabel}>Saldo disponible</Text>
+          <Text style={styles.balanceAmount}>
+            ${formatFixedFloor(available, 2)} en tu ahorro
+          </Text>
+          <Text style={styles.balanceMin}>Mínimo para enviar: ${MIN_SEND_USD}.00</Text>
+        </View>
+
+        {/* Auto-convert banner — the USDC screen's grammar, savings edition */}
+        <InlineBanner
+          variant="info"
+          message="Tu saldo se muestra en tu ahorro (Confío Dollar+). Al enviar, se convierte automáticamente a USDT y se envía por la red BNB Smart Chain (BEP-20)."
+          style={{ marginHorizontal: 16, marginTop: 16 }}
+        />
+
+        {showError && (
+          <InlineBanner
+            message={errorMessage}
+            variant="error"
+            onDismiss={() => setShowError(false)}
+            style={{ marginHorizontal: 16, marginTop: 16 }}
+          />
+        )}
+
+        {/* Send Form */}
+        <View style={styles.formCard}>
+          {/* Amount */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Cantidad a enviar</Text>
+            <View style={styles.amountContainer}>
+              <TextInput
+                style={[styles.amountField, { flex: 1 }]}
+                value={amount}
+                onChangeText={setAmount}
+                placeholder="0.00"
+                keyboardType="numeric"
+              />
+              <View style={styles.currencyBadge}>
+                <Image source={USDTLogo} style={styles.currencyBadgeLogo} />
+                <Text style={styles.currencyBadgeText}>USDT</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Quick amounts */}
+          <View style={styles.quickAmounts}>
+            {QUICK_AMOUNTS.map((val) => (
+              <TouchableOpacity
+                key={val}
+                style={styles.quickAmountButton}
+                onPress={() => setAmount(val)}
+                accessibilityRole="button"
+                accessibilityLabel={`Enviar ${val}`}
+              >
+                <Text style={styles.quickAmountText}>{val}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.quickAmountButton}
+              onPress={handleMax}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar el máximo disponible"
+            >
+              <Text style={[styles.quickAmountText, styles.maxText]}>MAX</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Address */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Dirección BNB Smart Chain (BEP-20)</Text>
+            <View style={styles.addressRow}>
+              <TextInput
+                style={styles.addressField}
+                value={destination}
+                onChangeText={setDestination}
+                placeholder="0x…"
+                placeholderTextColor={colors.text.light}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.pasteButton}
+                onPress={handlePaste}
+                accessibilityRole="button"
+                accessibilityLabel="Pegar dirección del portapapeles"
+              >
+                <Icon name="clipboard" size={15} color={colors.primaryDark} />
+                <Text style={styles.pasteButtonText}>Pegar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.scanButton}
+                onPress={() => setShowScanner(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Escanear código QR de la dirección"
+              >
+                <Icon name="camera" size={18} color={colors.primaryDark} />
+              </TouchableOpacity>
+            </View>
+            {destination.length === 0 ? (
+              <Text style={styles.addressHelp}>
+                Pega o escanea la dirección BEP-20 del destinatario (0x + 40 caracteres). Si
+                envías a un exchange, usa su dirección de depósito BEP-20.
+              </Text>
+            ) : isValidAddress ? (
+              <View style={styles.addressValidRow}>
+                <Icon name="check-circle" size={13} color={colors.success} />
+                <Text style={styles.addressValidText}>Dirección válida</Text>
+              </View>
+            ) : (
+              <Text style={styles.addressHelp}>
+                {destination.length}/42 caracteres · empieza con 0x
+              </Text>
             )}
           </View>
 
-          {/* Amount */}
-          <View style={styles.card}>
-            <Text style={styles.label}>¿Cuánto quieres enviar?</Text>
-            <View style={styles.amountRow}>
-              <Text style={styles.amountCurrency}>$</Text>
-              <TextInput
-                style={styles.amountInput}
-                value={raw}
-                onChangeText={setRaw}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={colors.text.light}
-              />
-              <TouchableOpacity
-                onPress={() => setRaw(savings.balanceUsd > 0 ? String(savings.balanceUsd) : '')}
-              >
-                <Text style={styles.maxBtn}>MAX</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={[styles.balanceLine, overBalance && styles.hintError]}>
-              En tu ahorro: {fmtUsd(savings.balanceUsd)}
-            </Text>
-          </View>
-
-          {/* Source instrument — payment-method grammar */}
-          <View style={styles.fundingSource}>
-            <Image source={cUSDPlusLogo} style={styles.fundingLogo} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.fundingTitle}>Sale de tu ahorro</Text>
-              <Text style={styles.fundingSub}>
-                Confío Dollar+ · se convierte a USDT al enviar · sin comisión de Confío
-              </Text>
+          {/* Fee */}
+          <View style={styles.feeInfo}>
+            <Text style={styles.feeLabel}>Comisión de Confío</Text>
+            <View style={styles.feeAmountContainer}>
+              <Text style={styles.feeAmount}>Gratis</Text>
+              <Text style={styles.sponsoredBadge}>Red cubierta por Confío</Text>
             </View>
           </View>
+        </View>
+      </ScrollView>
 
-          {/* Receipt */}
-          {amount > 0 && !belowMin && !overBalance && (
-            <View style={styles.card}>
-              <View style={styles.quoteRow}>
-                <Text style={styles.quoteLabelStrong}>Recibirá</Text>
-                <Text style={styles.quoteValueStrong}>≈ {fmtUsd(amount)} en USDT</Text>
-              </View>
-            </View>
-          )}
-          {belowMin && <Text style={styles.hintError}>El monto mínimo es {fmtUsd(MIN_AMOUNT_USD)}.</Text>}
+      {/* Send Button */}
+      <View style={[styles.footer, { paddingBottom: 20 }]}>
+        <Button
+          title={amountNum > available ? 'Saldo insuficiente' : 'Enviar'}
+          onPress={handleSend}
+          disabled={!amount || !destination || amountNum > available}
+          accessibilityLabel="Enviar"
+          icon={<Icon name="send" size={20} color="#ffffff" />}
+          style={{ backgroundColor: USDT_COLOR }}
+        />
+      </View>
 
-          {/* THE warning — mirror of the receive screen */}
-          <View style={styles.warnCard}>
-            <Icon name="alert-triangle" size={18} color="#B45309" />
-            <Text style={styles.warnText}>
-              El destinatario debe aceptar <Text style={styles.warnStrong}>USDT por la red
-              BNB Smart Chain (BEP-20)</Text>. Si envías a un exchange, usa su dirección de
-              depósito BEP-20. Una dirección o red equivocada significa pérdida permanente.
-            </Text>
-          </View>
-
-          <View style={{ flex: 1 }} />
-
-          <TouchableOpacity
-            style={[styles.confirmBtn, !canConfirm && styles.confirmBtnDisabled]}
-            onPress={onConfirm}
-            disabled={!canConfirm}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.confirmBtnText}>
-              {amount > 0 && canConfirm ? `Enviar ${fmtUsd(amount)}` : 'Enviar'}
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      <AddressScannerModal
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onScanned={(addr) => {
+          setDestination(addr.trim());
+          setShowScanner(false);
+        }}
+      />
     </View>
   );
 };
@@ -174,65 +277,115 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.primary,
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 14,
   },
-  headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  scrollContent: { padding: 16, paddingBottom: 32, flexGrow: 1 },
+  backButton: { padding: 6, width: 40, alignItems: 'center' },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerLogo: { width: 24, height: 24, borderRadius: 12 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
+  placeholder: { width: 40 },
 
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 12 },
-  label: { fontSize: 13, fontWeight: '600', color: colors.text.secondary, marginBottom: 8 },
-  addressInput: {
-    fontSize: 14,
+  content: { flex: 1 },
+  contentContainer: { paddingBottom: 24 },
+
+  balanceCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  balanceLabel: { fontSize: 13, color: colors.text.secondary },
+  balanceAmount: { fontSize: 24, fontWeight: '700', color: colors.text.primary, marginTop: 4 },
+  balanceMin: { fontSize: 12, color: colors.text.light, marginTop: 4 },
+
+  formCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  inputContainer: { marginBottom: 14 },
+  inputLabel: { fontSize: 13, fontWeight: '600', color: colors.text.secondary, marginBottom: 8 },
+  amountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.neutral,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  amountField: { fontSize: 22, fontWeight: '700', color: colors.text.primary, paddingVertical: 12 },
+  currencyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  currencyBadgeLogo: { width: 18, height: 18, borderRadius: 9 },
+  currencyBadgeText: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
+
+  quickAmounts: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  quickAmountButton: {
+    flex: 1,
+    backgroundColor: colors.neutral,
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  quickAmountText: { fontSize: 13, fontWeight: '600', color: colors.text.primary },
+  maxText: { color: colors.primaryDark, fontWeight: '800' },
+
+  addressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addressField: {
+    flex: 1,
+    backgroundColor: colors.neutral,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 13,
     color: colors.text.primary,
     fontFamily: 'monospace' as any,
-    padding: 0,
   },
-  amountRow: { flexDirection: 'row', alignItems: 'center' },
-  amountCurrency: { fontSize: 28, fontWeight: '700', color: colors.text.primary, marginRight: 6 },
-  amountInput: { flex: 1, fontSize: 28, fontWeight: '700', color: colors.text.primary, padding: 0 },
-  maxBtn: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
-  balanceLine: { fontSize: 12, color: colors.text.secondary, marginTop: 8 },
-
-  fundingSource: {
+  pasteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    gap: 5,
+    borderWidth: 1.5,
+    borderColor: colors.primaryDark,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
-  fundingLogo: { width: 30, height: 30, borderRadius: 15 },
-  fundingTitle: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
-  fundingSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
+  pasteButtonText: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
+  scanButton: {
+    borderWidth: 1.5,
+    borderColor: colors.primaryDark,
+    borderRadius: 10,
+    padding: 10,
+  },
+  addressHelp: { fontSize: 12, color: colors.text.light, marginTop: 8, lineHeight: 17 },
+  addressValidRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
+  addressValidText: { fontSize: 12, fontWeight: '600', color: colors.success },
 
-  quoteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  quoteLabelStrong: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  quoteValueStrong: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
-
-  warnCard: {
+  feeInfo: {
     flexDirection: 'row',
-    gap: 10,
-    backgroundColor: '#FEF3C7',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-  },
-  warnText: { flex: 1, fontSize: 13, color: '#92400E', lineHeight: 18 },
-  warnStrong: { fontWeight: '800' },
-
-  hintError: { fontSize: 12, color: '#DC2626', marginTop: 6 },
-
-  confirmBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: 14,
-    paddingVertical: 15,
+    justifyContent: 'space-between',
     alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.neutral,
+    paddingTop: 12,
   },
-  confirmBtnDisabled: { opacity: 0.4 },
-  confirmBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  feeLabel: { fontSize: 13, color: colors.text.secondary },
+  feeAmountContainer: { alignItems: 'flex-end' },
+  feeAmount: { fontSize: 14, fontWeight: '700', color: colors.success },
+  sponsoredBadge: { fontSize: 11, color: colors.text.light, marginTop: 1 },
+
+  footer: { paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.neutral },
 });
