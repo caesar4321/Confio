@@ -2263,9 +2263,9 @@ export const AccountDetailScreen = () => {
                     <View style={styles.confioPresaleInfo}>
                       <Text style={styles.confioPresaleTitle}>Utilidad, gobernanza y cómo obtenerla</Text>
                       <Text style={styles.confioPresaleDescription}>
-                        La moneda de la comunidad detrás de Confío: dólares para
-                        usar todos los días, ahorro con rendimiento y acciones de
-                        EE.UU.
+                        La moneda de la comunidad Confío: tu voz en las
+                        decisiones del proyecto. Gánala invitando amigos o
+                        consíguela temprano en la preventa.
                       </Text>
                     </View>
                   </View>
