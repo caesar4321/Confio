@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
     padding: 20,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#F3F4F6',
+    borderColor: colors.neutralDark,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     marginVertical: 14,
     marginLeft: 50,
   },
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     marginLeft: 10,
-    color: '#991B1B',
+    color: colors.error.icon,
     fontSize: 14,
     lineHeight: 20,
   },

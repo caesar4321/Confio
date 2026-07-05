@@ -396,8 +396,8 @@ const PhoneVerificationScreen = () => {
         : 'Enviar código';
     const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Verifica tu número';
     const subtitle = isProfileUpdateFlow
-      ? `Selecciona cómo quieres verificar tu nuevo número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`
-      : `Selecciona cómo quieres verificar tu número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`;
+      ? `Selecciona cómo quieres verificar tu nuevo número\n${selectedCountry?.[1] || ''} ${phoneNumber}`
+      : `Selecciona cómo quieres verificar tu número\n${selectedCountry?.[1] || ''} ${phoneNumber}`;
 
     return (
       <View style={styles.screenContainer}>
