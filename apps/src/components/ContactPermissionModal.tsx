@@ -26,12 +26,12 @@ const GradientBackground: React.FC<{
   <View style={{ width, height, borderRadius, overflow: 'hidden' }}>
     <Svg width={width} height={height} style={{ position: 'absolute' }}>
       <Defs>
-        <LinearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <LinearGradient id="contactPermGrad" x1="0%" y1="0%" x2="100%" y2="0%">
           <Stop offset="0%" stopColor="#34d399" />
           <Stop offset="100%" stopColor="#10b981" />
         </LinearGradient>
       </Defs>
-      <Rect x="0" y="0" width={width} height={height} fill="url(#grad)" rx={borderRadius} />
+      <Rect x="0" y="0" width={width} height={height} fill="url(#contactPermGrad)" rx={borderRadius} />
     </Svg>
     {children && (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>

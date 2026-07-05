@@ -1844,18 +1844,23 @@ export const AccountDetailScreen = () => {
           );
         }}
       >
+        {/* Gradient id is per-account-type: cUSD and CONFIO detail screens can
+            be mounted at once in the nav stack, and RNSVG brush ids collide
+            across live instances — the last registered gradient wins for both.
+            key forces a clean remount whenever the measured size changes. */}
         <Svg
+          key={`field-${route.params.accountType}-${fieldSize.width}x${fieldSize.height}`}
           width={fieldSize.width || '100%'}
           height={fieldSize.height || '100%'}
           style={StyleSheet.absoluteFill}
         >
           <Defs>
-            <SvgLinearGradient id="accountField" x1="0" y1="0" x2="0" y2="1">
+            <SvgLinearGradient id={`accountField-${route.params.accountType}`} x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor={account.color} />
               <Stop offset="1" stopColor={account.colorDark} />
             </SvgLinearGradient>
           </Defs>
-          <Rect width="100%" height="100%" fill="url(#accountField)" />
+          <Rect width="100%" height="100%" fill={`url(#accountField-${route.params.accountType})`} />
           <Circle cx="105%" cy="20%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
         </Svg>
         <View style={styles.balanceInner}>

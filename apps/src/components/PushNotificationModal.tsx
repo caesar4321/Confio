@@ -134,12 +134,12 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
             <View style={styles.header}>
               <Svg height="200" width={width} style={StyleSheet.absoluteFillObject}>
                 <Defs>
-                  <LinearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <LinearGradient id="pushNotifGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                     <Stop offset="0%" stopColor={colors.primary} stopOpacity="0.1" />
                     <Stop offset="100%" stopColor={colors.secondary} stopOpacity="0.1" />
                   </LinearGradient>
                 </Defs>
-                <Rect x="0" y="0" width={width} height="200" fill="url(#grad)" />
+                <Rect x="0" y="0" width={width} height="200" fill="url(#pushNotifGrad)" />
               </Svg>
               
               <View style={styles.iconContainer}>

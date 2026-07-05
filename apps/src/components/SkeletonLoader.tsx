@@ -70,7 +70,7 @@ export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
           style={StyleSheet.absoluteFillObject}
         >
           <Defs>
-            <LinearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <LinearGradient id="skeletonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
               <Stop offset="0%" stopColor="#e5e7eb" stopOpacity="1" />
               <Stop offset="20%" stopColor="#f3f4f6" stopOpacity="1" />
               <Stop offset="50%" stopColor="#ffffff" stopOpacity="1" />
@@ -83,7 +83,7 @@ export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
             y="0"
             width={300}
             height="100%"
-            fill="url(#grad)"
+            fill="url(#skeletonGrad)"
           />
         </Svg>
       </Animated.View>
