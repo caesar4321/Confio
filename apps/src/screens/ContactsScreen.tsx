@@ -6,6 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { RouteSheet } from '../components/RouteSheet';
 import { AnalyticsService } from '../services/analyticsService';
+import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import USDTLogo from '../assets/png/USDT.png';
 import Icon from 'react-native-vector-icons/Feather';
@@ -610,6 +611,12 @@ export const ContactsScreen = () => {
   );
 
   const [showReceiveSelection, setShowReceiveSelection] = useState(false);
+  // Geo-eligibility (Ondo): savings ENTRIES hide in restricted regions;
+  // the USDT send option is an EXIT and stays visible whenever the user
+  // holds savings (exits are never gated).
+  const { savings: ahorroSavings } = useAhorrosPortfolio();
+  const savingsEntryAllowed = ahorroSavings.enabled;
+  const savingsExitVisible = ahorroSavings.enabled || ahorroSavings.balanceUsd > 0;
 
   const handleReceiveWithAddress = () => {
     setShowReceiveSelection(true);
@@ -1498,6 +1505,7 @@ export const ContactsScreen = () => {
                 navigation.navigate('USDCDeposit', {});
               },
             },
+            ...(savingsEntryAllowed ? [
             {
               icon: 'download',
               image: USDTLogo,
@@ -1521,6 +1529,7 @@ export const ContactsScreen = () => {
               subtitle: 'Red Tron (TRC-20) · aún no disponible · tócalo y te avisamos',
               onPress: () => handleReceiveRailInterest('usdt_tron', 'USDT (Tron)'),
             },
+            ] : []),
           ]}
         />
         <RouteSheet
@@ -1549,7 +1558,7 @@ export const ContactsScreen = () => {
               subtitle: 'Red Algorand · desde tu saldo cUSD',
               onPress: () => handleSendTokenSelection('usdc'),
             },
-            {
+            ...(savingsExitVisible ? [{
               icon: 'send',
               image: USDTLogo,
               title: 'Tether · USDT',
@@ -1558,7 +1567,7 @@ export const ContactsScreen = () => {
                 setShowSendTokenSelection(false);
                 navigation.navigate('SendUsdt');
               },
-            },
+            }] : []),
           ]}
         />
         <RouteSheet

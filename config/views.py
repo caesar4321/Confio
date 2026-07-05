@@ -630,6 +630,11 @@ def guardarian_transaction_proxy(request):
         and to_currency_clean == 'USDT'
         and _to_net_early in ('BSC', 'BEP20', 'BEP-20', 'BNB', 'BSC_BNB')
     )
+    if is_savings_rail:
+        # Geo-eligibility (Ondo): savings entries blocked in restricted regions.
+        from cusd_plus.eligibility import is_ondo_eligible, INELIGIBLE_MESSAGE
+        if not is_ondo_eligible(user):
+            return JsonResponse({'error': INELIGIBLE_MESSAGE}, status=403)
     if not is_sell_transaction:
         try:
             account_type = payload.get('account_type', 'personal')

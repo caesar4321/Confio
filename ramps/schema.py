@@ -908,6 +908,12 @@ class CreateRampOrder(graphene.Mutation):
         if destination not in ('cusd', 'cusd_plus'):
             return RampOrderType(success=False, error='destination must be cusd or cusd_plus')
         savings_rail = destination == 'cusd_plus'
+        if savings_rail and normalized_direction == 'ON_RAMP':
+            # Geo-eligibility (Ondo): savings ENTRIES are blocked in
+            # restricted regions; exits (OFF_RAMP) are never gated.
+            from cusd_plus.eligibility import is_ondo_eligible, INELIGIBLE_MESSAGE
+            if not is_ondo_eligible(user):
+                return RampOrderType(success=False, error=INELIGIBLE_MESSAGE)
         if savings_rail and not getattr(current_account, 'bsc_address', None):
             return RampOrderType(
                 success=False,

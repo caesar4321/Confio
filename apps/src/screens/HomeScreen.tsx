@@ -783,7 +783,7 @@ export const HomeScreen = () => {
       subtitle: 'Enviar, pagar y comprar CONFIO · cUSD',
       onPress: () => navigateToRampOrEfectivo('TopUp'),
     },
-    {
+    ...(ahorrosPortfolio.savings.enabled ? [{
       icon: 'trending-up',
       title: 'Para ahorrar e invertir',
       subtitle: 'Gana rendimiento mientras decides · cUSD+',
@@ -791,7 +791,7 @@ export const HomeScreen = () => {
         // Savings rail: Koywe delivers USDT-BSC to the user's own address.
         navigation.navigate('TopUp', { destination: 'cusd_plus' });
       },
-    },
+    }] : []),
   ];
 
   // Both options land in the user's bank — the differentiator is where the
