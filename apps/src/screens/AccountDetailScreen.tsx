@@ -23,6 +23,7 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { isRampBlockedCountry } from '../config/env';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -1663,6 +1664,23 @@ export const AccountDetailScreen = () => {
     navigation.navigate('BottomTabs', { screen: 'Contacts' });
   }, [navigation]);
 
+  // Retirar mirrors Home: where no ramp provider operates, point to the
+  // Efectivo directory up front instead of failing inside the provider flow.
+  const handleRetirar = useCallback(() => {
+    if (isRampBlockedCountry(userProfile?.phoneCountry)) {
+      Alert.alert(
+        'No disponible en tu país',
+        'Los retiros con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Ir a Efectivo', onPress: () => (navigation as any).navigate('Financieras') },
+        ],
+      );
+      return;
+    }
+    (navigation as any).navigate('Sell');
+  }, [navigation, userProfile?.phoneCountry]);
+
   const hasActiveFilters = useCallback(() => {
     const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
     const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
@@ -2085,6 +2103,29 @@ export const AccountDetailScreen = () => {
                   <Icon name="dollar-sign" size={22} color={colors.white} />
                 </View>
                 <Text style={styles.actionButtonText}>Recargar</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Retirar — cUSD only: the Sell flow settles from cUSD */}
+            {route.params.accountType === 'cusd' && !activeAccount?.isEmployee && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleRetirar}
+                accessibilityRole="button"
+                accessibilityLabel="Retirar"
+              >
+                <View style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: colors.offRampIcon,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}>
+                  <MCIcon name="bank" size={22} color={colors.white} />
+                </View>
+                <Text style={styles.actionButtonText}>Retirar</Text>
               </TouchableOpacity>
             )}
           </View>
