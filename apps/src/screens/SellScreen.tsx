@@ -406,7 +406,7 @@ export const SellScreen = () => {
   if (isBoliviaOffRampUnavailable) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#10b981" />
+        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <RampReveal delay={0}>
             <RampHero
@@ -415,8 +415,6 @@ export const SellScreen = () => {
               subtitle="Por ahora en Bolivia solo está habilitada la Recarga. Cuando Koywe habilite retiros en BOB, aparecerán aquí."
               onBack={() => navigation.goBack()}
               compact={isCompact}
-              fromColor={colors.primaryDark}
-              toColor={colors.primary}
             />
           </RampReveal>
 
@@ -441,7 +439,7 @@ export const SellScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#10b981" />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* ─── Hero with gradient ─── */}
         <RampReveal delay={0}>
@@ -451,8 +449,6 @@ export const SellScreen = () => {
           subtitle="Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final."
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.primaryDark}
-          toColor={colors.primary}
         />
         </RampReveal>
 
@@ -571,7 +567,7 @@ export const SellScreen = () => {
                       </View>
                       <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
                         {selected
-                          ? <Icon name="check" size={13} color="#ffffff" />
+                          ? <Icon name="check" size={13} color={colors.white} />
                           : null}
                       </View>
                     </TouchableOpacity>
@@ -789,7 +785,7 @@ const styles = StyleSheet.create({
     gap: 12,
     borderWidth: 1,
     borderColor: '#bbf7d0',
-    shadowColor: '#10B981',
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -844,7 +840,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     alignItems: 'center',
     gap: 12,
-    shadowColor: '#111827',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.06,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 4 },
@@ -862,7 +858,7 @@ const styles = StyleSheet.create({
     padding: 20,
     marginHorizontal: 22,
     gap: 14,
-    shadowColor: '#111827',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.06,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
@@ -923,8 +919,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#d1fae5',
-    shadowColor: '#111827',
+    borderColor: colors.primaryLight,
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.06,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
@@ -1020,7 +1016,7 @@ const styles = StyleSheet.create({
     gap: 14,
     borderWidth: 1.5,
     borderColor: '#eef2f7',
-    shadowColor: '#111827',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.05,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -1057,7 +1053,7 @@ const styles = StyleSheet.create({
     color: colors.dark,
   },
   methodTitleSelected: {
-    color: '#ffffff',
+    color: colors.white,
   },
   methodText: {
     color: colors.textSecondary,
@@ -1086,7 +1082,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
   },
 
   /* ── Add button ── */
@@ -1094,7 +1090,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1114,7 +1110,7 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 8,
     alignItems: 'center',
-    shadowColor: '#111827',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.04,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -1139,8 +1135,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#d1fae5',
-    shadowColor: '#111827',
+    borderColor: colors.primaryLight,
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.06,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
@@ -1196,7 +1192,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderWidth: 1,
     borderColor: '#eef2f7',
-    shadowColor: '#111827',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.05,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -1228,8 +1224,8 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 10,
     borderWidth: 1.5,
-    borderColor: '#6ee7b7',
-    shadowColor: '#10B981',
+    borderColor: colors.primary,
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.14,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
@@ -1286,7 +1282,7 @@ const styles = StyleSheet.create({
   disclaimerPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1327,7 +1323,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     gap: 14,
     borderWidth: 1,
-    borderColor: '#d1fae5',
+    borderColor: colors.primaryLight,
     borderLeftWidth: 5,
     borderLeftColor: colors.primary,
     shadowColor: colors.primary,

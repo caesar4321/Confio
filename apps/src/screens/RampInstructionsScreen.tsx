@@ -295,8 +295,6 @@ export const RampInstructionsScreen = () => {
           subtitle={instructionView.subtitle}
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.primaryDark}
-          toColor={colors.primary}
         />
         </RampReveal>
 

@@ -412,7 +412,7 @@ const TopUpScreen = () => {
         </View>
         <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
           {selected
-            ? <Icon name="check" size={13} color="#ffffff" />
+            ? <Icon name="check" size={13} color={colors.white} />
             : null}
         </View>
       </TouchableOpacity>
@@ -422,7 +422,7 @@ const TopUpScreen = () => {
   return (
     <>
       <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#10b981" />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero
@@ -431,8 +431,6 @@ const TopUpScreen = () => {
           subtitle="Elige tu medio de pago, revisa la cotización y confirma cuando estés listo."
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.primaryDark}
-          toColor={colors.primary}
         />
         </RampReveal>
 
@@ -727,7 +725,7 @@ const styles = StyleSheet.create({
     gap: 12,
     borderWidth: 1,
     borderColor: '#bbf7d0',
-    shadowColor: '#10B981',
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -800,8 +798,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#ecfdf5',
-    shadowColor: '#111827',
+    borderColor: colors.primarySoft,
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.06,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
@@ -816,7 +814,7 @@ const styles = StyleSheet.create({
   amountInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -877,7 +875,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#111827',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.04,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -915,7 +913,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   methodTitleSelected: {
-    color: '#ffffff',
+    color: colors.white,
   },
   methodDescription: {
     fontSize: 13,
@@ -943,15 +941,15 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
   },
   quoteCard: {
     backgroundColor: '#f0fdf8',
     borderRadius: 20,
     padding: 20,
     borderWidth: 1.5,
-    borderColor: '#6ee7b7',
-    shadowColor: '#10B981',
+    borderColor: colors.primary,
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.14,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
@@ -1036,7 +1034,7 @@ const styles = StyleSheet.create({
     padding: 20,
     marginHorizontal: 22,
     borderWidth: 1,
-    borderColor: '#d1fae5',
+    borderColor: colors.primaryLight,
     borderLeftWidth: 5,
     borderLeftColor: colors.primary,
     shadowColor: colors.primary,
@@ -1103,7 +1101,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 22,
     borderWidth: 1,
-    borderColor: '#d1fae5',
+    borderColor: colors.primaryLight,
     shadowColor: '#000000',
     shadowOpacity: 0.16,
     shadowRadius: 24,
@@ -1187,7 +1185,7 @@ const styles = StyleSheet.create({
   modalPrimaryButtonText: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#ffffff',
+    color: colors.white,
   },
 });
 

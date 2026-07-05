@@ -347,8 +347,6 @@ export const RampHistoryScreen = () => {
               title={title}
               subtitle={subtitle}
               onBack={() => navigation.goBack()}
-              fromColor={colors.primaryDark}
-              toColor={colors.primary}
             />
             <View style={styles.filtersRow}>
               {renderFilterChip('all', 'Todo')}

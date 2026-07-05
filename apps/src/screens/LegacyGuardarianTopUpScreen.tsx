@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
+import { colors } from '../config/theme';
 import { Linking } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -351,7 +353,8 @@ const TopUpScreen = () => {
       <Header
         navigation={navigation as any}
         title="Recargar con Guardarian"
-        backgroundColor="#fff"
+        backgroundColor={colors.primary}
+        isLight
         showBackButton
         rightAccessory={(
           <TouchableOpacity
@@ -366,19 +369,33 @@ const TopUpScreen = () => {
       />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Hero Section */}
-        <View style={styles.heroSection}>
-          <View style={styles.heroIconContainer}>
-            <Icon name="credit-card" size={32} color="#34D399" />
+
+        {/* Emerald brand field under the flat nav header (PayoutMethods
+            pattern) — padding on fieldInner per the Yoga absolute-child rule. */}
+        <View style={styles.brandField}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="guardarianTopUpField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#guardarianTopUpField)" />
+            <Circle cx="105%" cy="18%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.fieldInner}>
+            <Text style={styles.fieldEyebrow}>RECARGAR CON GUARDARIAN</Text>
+            <Text style={styles.fieldTitle}>Recarga tu cuenta</Text>
+            <Text style={styles.fieldSubtitle}>Compra USDC con tu tarjeta o transferencia bancaria. Rápido, seguro y sin complicaciones.</Text>
           </View>
-          <Text style={styles.heroTitle}>Recarga tu cuenta</Text>
-          <Text style={styles.heroSubtitle}>
-            Compra USDC con tu tarjeta o transferencia bancaria. Rápido, seguro y sin complicaciones.
-          </Text>
-          <Text style={styles.heroSubtitleSmall}>
-            Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no el retiro) por regulación local. Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}.
-          </Text>
         </View>
+
+        <Text style={styles.regulatoryNote}>
+          Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no el
+          retiro) por regulación local. Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN{' '}
+          {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS{' '}
+          {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}.
+        </Text>
 
         {/* Info card */}
         <View style={styles.infoCard}>
@@ -422,7 +439,7 @@ const TopUpScreen = () => {
             <TextInput
               style={styles.amountInput}
               placeholder="0"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.text.light}
               keyboardType="decimal-pad"
               value={amount}
               onChangeText={setAmount}
@@ -430,7 +447,7 @@ const TopUpScreen = () => {
           </View>
 
           <View style={styles.conversionHint}>
-            <Icon name="arrow-down" size={14} color="#34D399" />
+            <Icon name="arrow-down" size={14} color={colors.primary} />
             <Text style={styles.conversionText}>Recibirás USDC en tu cuenta</Text>
           </View>
         </View>
@@ -439,19 +456,19 @@ const TopUpScreen = () => {
         <View style={styles.featuresContainer}>
           <View style={styles.featureItem}>
             <View style={styles.featureIconCircle}>
-              <Icon name="zap" size={16} color="#34D399" />
+              <Icon name="zap" size={16} color={colors.primary} />
             </View>
             <Text style={styles.featureText}>Instantáneo</Text>
           </View>
           <View style={styles.featureItem}>
             <View style={styles.featureIconCircle}>
-              <Icon name="shield" size={16} color="#34D399" />
+              <Icon name="shield" size={16} color={colors.primary} />
             </View>
             <Text style={styles.featureText}>Seguro</Text>
           </View>
           <View style={styles.featureItem}>
             <View style={styles.featureIconCircle}>
-              <Icon name="credit-card" size={16} color="#34D399" />
+              <Icon name="credit-card" size={16} color={colors.primary} />
             </View>
             <Text style={styles.featureText}>Tarjeta o banco</Text>
           </View>
@@ -463,14 +480,14 @@ const TopUpScreen = () => {
           onPress={handleStartTopUp}
           loading={loading}
           disabled={!amount}
-          icon={<Icon name="arrow-right" size={20} color="#fff" />}
+          icon={<Icon name="arrow-right" size={20} color={colors.white} />}
           style={!amount
-            ? { backgroundColor: '#D1D5DB', borderRadius: 16, paddingHorizontal: 24 }
+            ? { backgroundColor: colors.borderMedium, borderRadius: 16, paddingHorizontal: 24 }
             : {
-                backgroundColor: '#34D399',
+                backgroundColor: colors.primary,
                 borderRadius: 16,
                 paddingHorizontal: 24,
-                shadowColor: '#34D399',
+                shadowColor: colors.primary,
                 shadowOpacity: 0.3,
                 shadowRadius: 12,
                 shadowOffset: { width: 0, height: 4 },
@@ -483,7 +500,7 @@ const TopUpScreen = () => {
           style={styles.supportButton}
           onPress={() => Linking.openURL('https://t.me/confio4world')}
         >
-          <Icon name="help-circle" size={16} color="#4B5563" />
+          <Icon name="help-circle" size={16} color={colors.text.secondary} />
           <Text style={styles.supportButtonText}>¿Estás perdido? ¡Pide ayuda en soporte!</Text>
         </TouchableOpacity>
 
@@ -523,9 +540,9 @@ const TopUpScreen = () => {
 
             {/* Progress Dots Animation */}
             <View style={styles.dotsContainer}>
-              <View style={[styles.dot, { backgroundColor: '#34D399' }]} />
-              <View style={[styles.dot, { backgroundColor: '#34D399', opacity: 0.6 }]} />
-              <View style={[styles.dot, { backgroundColor: '#34D399', opacity: 0.3 }]} />
+              <View style={[styles.dot, { backgroundColor: colors.primary }]} />
+              <View style={[styles.dot, { backgroundColor: colors.primary, opacity: 0.6 }]} />
+              <View style={[styles.dot, { backgroundColor: colors.primary, opacity: 0.3 }]} />
             </View>
           </View>
         </View>
@@ -543,24 +560,62 @@ const TopUpScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  brandField: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+    marginHorizontal: -20,
+    marginTop: -24,
+    marginBottom: 4,
+  },
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 22,
+  },
+  fieldEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.primaryLight,
+    marginBottom: 6,
+  },
+  fieldTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  fieldSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 6,
+  },
+  regulatoryNote: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.text.secondary,
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 4,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   historyButton: {
     minWidth: 72,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: 'rgba(255,255,255,0.18)',
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
   },
   historyButtonText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#047857',
+    color: colors.white,
   },
   content: {
     paddingHorizontal: 20,
@@ -569,41 +624,6 @@ const styles = StyleSheet.create({
   },
 
   // Hero Section
-  heroSection: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  heroIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#D1FAE5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  heroTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  heroSubtitle: {
-    fontSize: 15,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: 16,
-  },
-  heroSubtitleSmall: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 6,
-  },
 
   // Info Card
   infoCard: {
@@ -619,7 +639,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
@@ -630,7 +650,7 @@ const styles = StyleSheet.create({
   },
   infoCardText: {
     fontSize: 12,
-    color: '#1F2937',
+    color: colors.text.primary,
     lineHeight: 16,
   },
 
@@ -648,7 +668,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -659,18 +679,18 @@ const styles = StyleSheet.create({
   noticeTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   noticeText: {
     fontSize: 13,
-    color: '#4B5563',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
 
   // Amount Input Card
   inputCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 20,
     marginBottom: 24,
@@ -683,18 +703,18 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 16,
   },
   amountInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderWidth: 2,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
   currencySymbol: {
     display: 'none',
@@ -703,13 +723,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 32,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     padding: 0,
   },
   currencyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -722,7 +742,7 @@ const styles = StyleSheet.create({
   currencyCodeText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   conversionHint: {
     flexDirection: 'row',
@@ -733,7 +753,7 @@ const styles = StyleSheet.create({
   },
   conversionText: {
     fontSize: 13,
-    color: '#34D399',
+    color: colors.primary,
     fontWeight: '600',
   },
 
@@ -751,14 +771,14 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#D1FAE5',
+    backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   featureText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
 
   // CTA Button
@@ -771,17 +791,17 @@ const styles = StyleSheet.create({
   },
   poweredByLabel: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.text.light,
     fontWeight: '500',
     textAlign: 'center',
   },
   guardarianLogoContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -793,7 +813,7 @@ const styles = StyleSheet.create({
   },
   legalText: {
     fontSize: 9,
-    color: '#9CA3AF',
+    color: colors.text.light,
     textAlign: 'center',
     lineHeight: 13,
     paddingHorizontal: 16,
@@ -807,7 +827,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',
@@ -829,7 +849,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 16,
   },
@@ -849,7 +869,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 20,
@@ -858,7 +878,7 @@ const styles = StyleSheet.create({
   },
   supportButtonText: {
     fontSize: 14,
-    color: '#4B5563',
+    color: colors.text.secondary,
     fontWeight: '600',
   },
 });

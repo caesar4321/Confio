@@ -16,6 +16,8 @@ import {
 import { Header } from '../navigation/Header';
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
+import { colors } from '../config/theme';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -247,13 +249,13 @@ export const SellScreen = () => {
                 <Header
                     navigation={navigation as any}
                     title="Orden Creada"
-                    backgroundColor="#fff"
+                    backgroundColor={colors.white}
                     showBackButton
                 />
 
                 <ScrollView contentContainerStyle={styles.content}>
                     <View style={styles.successIconContainer}>
-                        <Icon name="check" size={40} color="#34D399" />
+                        <Icon name="check" size={40} color={colors.primary} />
                     </View>
 
                     <Text style={styles.successTitle}>Envía tus USDC</Text>
@@ -265,7 +267,7 @@ export const SellScreen = () => {
                         <Text style={styles.addressLabel}>Dirección de depósito (Algorand)</Text>
                         <TouchableOpacity style={styles.addressContainer} onPress={handleCopyAddress}>
                             <Text style={styles.addressText}>{depositAddress}</Text>
-                            <Icon name="copy" size={20} color="#3B82F6" />
+                            <Icon name="copy" size={20} color={colors.accent} />
                         </TouchableOpacity>
                         {depositMemo ? (
                             <View style={styles.memoContainer}>
@@ -276,7 +278,7 @@ export const SellScreen = () => {
                     </View>
 
                     <View style={styles.warningCard}>
-                        <Icon name="alert-triangle" size={20} color="#F59E0B" style={styles.warningIcon} />
+                        <Icon name="alert-triangle" size={20} color={colors.offRampIcon} style={styles.warningIcon} />
                         <Text style={styles.warningText}>
                             Asegúrate de enviar a través de la red Algorand. Enviar por otra red resultará en pérdida de fondos.
                         </Text>
@@ -284,7 +286,7 @@ export const SellScreen = () => {
 
                     <TouchableOpacity style={styles.ctaButton} onPress={handleNavigateToWithdraw}>
                         <Text style={styles.ctaButtonText}>Ir a Enviar USDC</Text>
-                        <Icon name="arrow-right" size={20} color="#fff" />
+                        <Icon name="arrow-right" size={20} color={colors.white} />
                     </TouchableOpacity>
                 </ScrollView>
             </View>
@@ -296,7 +298,8 @@ export const SellScreen = () => {
             <Header
                 navigation={navigation as any}
                 title="Retirar USDC a banco"
-                backgroundColor="#fff"
+                backgroundColor={colors.primary}
+                isLight
                 showBackButton
                 rightAccessory={(
                     <TouchableOpacity
@@ -311,14 +314,26 @@ export const SellScreen = () => {
             />
 
             <ScrollView contentContainerStyle={styles.content}>
-                <View style={styles.heroSection}>
-                    <View style={styles.heroIconContainer}>
-                        <MCIcon name="bank" size={28} color="#F59E0B" />
+                {/* Emerald brand field under the flat nav header (PayoutMethods
+                    pattern) — padding on fieldInner per the Yoga absolute-child rule. */}
+                <View style={styles.brandField}>
+                    <Svg style={StyleSheet.absoluteFill}>
+                        <Defs>
+                            <SvgLinearGradient id="guardarianSellField" x1="0" y1="0" x2="0" y2="1">
+                                <Stop offset="0" stopColor={colors.primary} />
+                                <Stop offset="1" stopColor={colors.primaryDark} />
+                            </SvgLinearGradient>
+                        </Defs>
+                        <Rect width="100%" height="100%" fill="url(#guardarianSellField)" />
+                        <Circle cx="105%" cy="18%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
+                    </Svg>
+                    <View style={styles.fieldInner}>
+                        <Text style={styles.fieldEyebrow}>RETIRAR CON GUARDARIAN</Text>
+                        <Text style={styles.fieldTitle}>Retira a tu banco</Text>
+                        <Text style={styles.fieldSubtitle}>
+                            Convierte tus USDC a moneda local y recíbelos directamente en tu cuenta bancaria.
+                        </Text>
                     </View>
-                    <Text style={styles.heroTitle}>Retira a tu banco</Text>
-                    <Text style={styles.heroSubtitle}>
-                        Convierte tus USDC a moneda local y recíbelos directamente en tu cuenta bancaria. Rápido, seguro y sin complicaciones.
-                    </Text>
                 </View>
 
                 {/* Info card */}
@@ -351,7 +366,7 @@ export const SellScreen = () => {
                         <TextInput
                             style={styles.amountInput}
                             placeholder="0"
-                            placeholderTextColor="#9CA3AF"
+                            placeholderTextColor={colors.text.light}
                             keyboardType="decimal-pad"
                             value={amount}
                             onChangeText={setAmount}
@@ -362,7 +377,7 @@ export const SellScreen = () => {
                     </View>
 
                     <View style={styles.conversionHint}>
-                        <Icon name="arrow-down" size={14} color="#F59E0B" />
+                        <Icon name="arrow-down" size={14} color={colors.offRampIcon} />
                         <Text style={styles.conversionText}>Recibirás moneda local en tu banco</Text>
                     </View>
                 </View>
@@ -371,19 +386,19 @@ export const SellScreen = () => {
                 <View style={styles.featuresContainer}>
                     <View style={styles.featureItem}>
                         <View style={styles.featureIconCircle}>
-                            <Icon name="zap" size={16} color="#F59E0B" />
+                            <Icon name="zap" size={16} color={colors.offRampIcon} />
                         </View>
                         <Text style={styles.featureText}>Rápido</Text>
                     </View>
                     <View style={styles.featureItem}>
                         <View style={styles.featureIconCircle}>
-                            <Icon name="shield" size={16} color="#F59E0B" />
+                            <Icon name="shield" size={16} color={colors.offRampIcon} />
                         </View>
                         <Text style={styles.featureText}>Seguro</Text>
                     </View>
                     <View style={styles.featureItem}>
                         <View style={styles.featureIconCircle}>
-                            <Icon name="credit-card" size={16} color="#F59E0B" />
+                            <Icon name="credit-card" size={16} color={colors.offRampIcon} />
                         </View>
                         <Text style={styles.featureText}>A tu banco</Text>
                     </View>
@@ -396,11 +411,11 @@ export const SellScreen = () => {
                     disabled={!amount || loading}
                 >
                     {loading ? (
-                        <ActivityIndicator color="#fff" />
+                        <ActivityIndicator color={colors.white} />
                     ) : (
                         <>
                             <Text style={styles.ctaButtonText}>Continuar con Guardarian</Text>
-                            <Icon name="arrow-right" size={20} color="#fff" />
+                            <Icon name="arrow-right" size={20} color={colors.white} />
                         </>
                     )}
                 </TouchableOpacity>
@@ -409,7 +424,7 @@ export const SellScreen = () => {
                     style={styles.supportButton}
                     onPress={() => Linking.openURL('https://t.me/confio4world')}
                 >
-                    <Icon name="help-circle" size={16} color="#4B5563" />
+                    <Icon name="help-circle" size={16} color={colors.text.secondary} />
                     <Text style={styles.supportButtonText}>¿Estás perdido? ¡Pide ayuda en soporte!</Text>
                 </TouchableOpacity>
 
@@ -451,24 +466,54 @@ export const SellScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  brandField: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+    marginHorizontal: -20,
+    marginTop: -20,
+    marginBottom: 4,
+  },
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 22,
+  },
+  fieldEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.primaryLight,
+    marginBottom: 6,
+  },
+  fieldTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  fieldSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 6,
+  },
     container: {
         flex: 1,
-        backgroundColor: '#F9FAFB',
+        backgroundColor: colors.neutral,
     },
     historyButton: {
         minWidth: 72,
         paddingHorizontal: 12,
         paddingVertical: 8,
         borderRadius: 999,
-        backgroundColor: '#FEF3C7',
+        backgroundColor: 'rgba(255,255,255,0.18)',
         borderWidth: 1,
-        borderColor: '#FCD34D',
+        borderColor: 'rgba(255,255,255,0.3)',
         alignItems: 'center',
     },
     historyButtonText: {
         fontSize: 12,
         fontWeight: '700',
-        color: '#B45309',
+        color: colors.white,
     },
     content: {
         padding: 20,
@@ -481,7 +526,7 @@ const styles = StyleSheet.create({
         width: 72,
         height: 72,
         borderRadius: 36,
-        backgroundColor: '#FEF3C7', // Amber-100
+        backgroundColor: colors.warningLight, // Amber-100
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 16,
@@ -489,13 +534,13 @@ const styles = StyleSheet.create({
     heroTitle: {
         fontSize: 28,
         fontWeight: '700',
-        color: '#111827',
+        color: colors.text.primary,
         marginBottom: 8,
         textAlign: 'center',
     },
     heroSubtitle: {
         fontSize: 15,
-        color: '#6B7280',
+        color: colors.text.secondary,
         textAlign: 'center',
         lineHeight: 22,
         paddingHorizontal: 16,
@@ -515,7 +560,7 @@ const styles = StyleSheet.create({
         width: 24,
         height: 24,
         borderRadius: 12,
-        backgroundColor: '#fff',
+        backgroundColor: colors.white,
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 10,
@@ -526,18 +571,18 @@ const styles = StyleSheet.create({
     },
     infoCardText: {
         fontSize: 12,
-        color: '#1F2937',
+        color: colors.text.primary,
         lineHeight: 16,
     },
     infoCardTextSecondary: {
         fontSize: 12,
-        color: '#6B7280',
+        color: colors.text.secondary,
         lineHeight: 16,
         marginTop: 4,
     },
     // Amount Input Card
     inputCard: {
-        backgroundColor: '#fff',
+        backgroundColor: colors.white,
         borderRadius: 20,
         padding: 20,
         marginBottom: 24,
@@ -550,23 +595,23 @@ const styles = StyleSheet.create({
     inputLabel: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#111827',
+        color: colors.text.primary,
         marginBottom: 16,
     },
     amountInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#F9FAFB',
+        backgroundColor: colors.neutral,
         borderRadius: 16,
         paddingHorizontal: 16,
         paddingVertical: 16,
         borderWidth: 2,
-        borderColor: '#E5E7EB',
+        borderColor: colors.border,
     },
     currencySymbol: {
         fontSize: 24,
         fontWeight: '700',
-        color: '#6B7280',
+        color: colors.text.secondary,
         marginRight: 8,
     },
     usdcLogo: {
@@ -579,13 +624,13 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 32,
         fontWeight: '700',
-        color: '#111827',
+        color: colors.text.primary,
         padding: 0,
     },
     currencyBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#fff',
+        backgroundColor: colors.white,
         borderRadius: 12,
         paddingHorizontal: 12,
         paddingVertical: 8,
@@ -594,7 +639,7 @@ const styles = StyleSheet.create({
     currencyCodeText: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#111827',
+        color: colors.text.primary,
     },
     conversionHint: {
         flexDirection: 'row',
@@ -605,7 +650,7 @@ const styles = StyleSheet.create({
     },
     conversionText: {
         fontSize: 13,
-        color: '#F59E0B',
+        color: colors.offRampIcon,
         fontWeight: '600',
     },
 
@@ -623,18 +668,18 @@ const styles = StyleSheet.create({
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: '#FEF3C7', // Amber-100
+        backgroundColor: colors.warningLight, // Amber-100
         alignItems: 'center',
         justifyContent: 'center',
     },
     featureText: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#6B7280',
+        color: colors.text.secondary,
     },
     // CTA Button
     ctaButton: {
-        backgroundColor: '#F59E0B',
+        backgroundColor: colors.offRampIcon,
         borderRadius: 16,
         paddingVertical: 18,
         paddingHorizontal: 24,
@@ -642,20 +687,20 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        shadowColor: '#F59E0B',
+        shadowColor: colors.offRampIcon,
         shadowOpacity: 0.3,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 4 },
         elevation: 4,
     },
     ctaButtonDisabled: {
-        backgroundColor: '#D1D5DB',
+        backgroundColor: colors.borderMedium,
         shadowOpacity: 0,
     },
     ctaButtonText: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#fff',
+        color: colors.white,
     },
     // Powered by Guardarian
     poweredByContainer: {
@@ -665,17 +710,17 @@ const styles = StyleSheet.create({
     },
     poweredByLabel: {
         fontSize: 11,
-        color: '#9CA3AF',
+        color: colors.text.light,
         fontWeight: '500',
         textAlign: 'center',
     },
     guardarianLogoContainer: {
-        backgroundColor: '#fff',
+        backgroundColor: colors.white,
         paddingHorizontal: 20,
         paddingVertical: 14,
         borderRadius: 12,
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: colors.border,
         shadowColor: '#000',
         shadowOpacity: 0.04,
         shadowRadius: 8,
@@ -687,7 +732,7 @@ const styles = StyleSheet.create({
     },
     legalText: {
         fontSize: 9,
-        color: '#9CA3AF',
+        color: colors.text.light,
         textAlign: 'center',
         lineHeight: 13,
         paddingHorizontal: 16,
@@ -698,7 +743,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: '#D1FAE5',
+        backgroundColor: colors.primaryLight,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 24,
@@ -706,28 +751,28 @@ const styles = StyleSheet.create({
     successTitle: {
         fontSize: 24,
         fontWeight: '700',
-        color: '#111827',
+        color: colors.text.primary,
         textAlign: 'center',
         marginBottom: 8,
     },
     successSubtitle: {
         fontSize: 16,
-        color: '#4B5563',
+        color: colors.text.secondary,
         textAlign: 'center',
         marginBottom: 24,
     },
     addressCard: {
-        backgroundColor: '#fff',
+        backgroundColor: colors.white,
         borderRadius: 16,
         padding: 20,
         marginBottom: 24,
         borderWidth: 1,
-        borderColor: '#E5E7EB',
+        borderColor: colors.border,
     },
     addressLabel: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#6B7280',
+        color: colors.text.secondary,
         marginBottom: 8,
         textTransform: 'uppercase',
     },
@@ -735,32 +780,32 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: '#F9FAFB',
+        backgroundColor: colors.neutral,
         padding: 12,
         borderRadius: 8,
     },
     addressText: {
         fontSize: 14,
-        color: '#111827',
+        color: colors.text.primary,
         flex: 1,
         fontFamily: technicalFontFamily,
     },
     memoContainer: {
         marginTop: 16,
         borderTopWidth: 1,
-        borderTopColor: '#E5E7EB',
+        borderTopColor: colors.border,
         paddingTop: 16,
     },
     memoLabel: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#6B7280',
+        color: colors.text.secondary,
         marginBottom: 4,
     },
     memoText: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#111827',
+        color: colors.text.primary,
     },
     warningCard: {
         flexDirection: 'row',
@@ -785,7 +830,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#F3F4F6',
+        backgroundColor: colors.neutralDark,
         paddingVertical: 10,
         paddingHorizontal: 16,
         borderRadius: 20,
@@ -794,7 +839,7 @@ const styles = StyleSheet.create({
     },
     supportButtonText: {
         fontSize: 14,
-        color: '#4B5563',
+        color: colors.text.secondary,
         fontWeight: '600',
     },
 });

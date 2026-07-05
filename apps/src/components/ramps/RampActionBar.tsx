@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../../config/theme';
 
 type Props = {
   primaryLabel: string;
@@ -38,11 +39,11 @@ export const RampActionBar = ({
         disabled={primaryDisabled || primaryLoading}
       >
         {primaryLoading ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color={colors.white} />
         ) : (
           <>
             {primaryIconName ? (
-              <Icon name={primaryIconName} size={18} color="#ffffff" style={styles.primaryButtonIcon} />
+              <Icon name={primaryIconName} size={18} color={colors.white} style={styles.primaryButtonIcon} />
             ) : null}
             <Text style={styles.primaryButtonText}>{primaryLabel}</Text>
           </>
@@ -64,12 +65,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 24,
     paddingHorizontal: 6,
     paddingTop: 10,
     paddingBottom: Platform.OS === 'ios' ? 6 : 10,
-    shadowColor: '#10b981',
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.10,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: -4 },
@@ -82,13 +83,13 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 4,
-    backgroundColor: '#10B981',
+    backgroundColor: colors.primaryDark,
     borderRadius: 16,
     paddingVertical: 17,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#10B981',
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.30,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
@@ -103,7 +104,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#ffffff',
+    color: colors.white,
     letterSpacing: 0.2,
   },
   ghostButton: {
@@ -113,7 +114,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#d1fae5',
+    borderColor: colors.primaryLight,
     backgroundColor: '#f0fdf4',
   },
   ghostButtonText: {

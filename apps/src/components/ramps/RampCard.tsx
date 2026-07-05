@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
+import { colors } from '../../config/theme';
 
 type Props = {
   children: React.ReactNode;
@@ -12,7 +13,7 @@ export const RampCard = ({ children, style }: Props) => {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 22,
     padding: 22,
     marginHorizontal: 22,

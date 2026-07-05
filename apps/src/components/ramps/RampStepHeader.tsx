@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { colors } from '../../config/theme';
 
 type Props = {
   number: number;
@@ -16,9 +17,9 @@ export const RampStepHeader = ({
   title,
   meta,
   accentColor = '#047857',
-  accentBackground = '#d1fae5',
-  titleColor = '#1f2937',
-  metaColor = '#6b7280',
+  accentBackground = colors.primaryLight,
+  titleColor = colors.text.primary,
+  metaColor = colors.text.secondary,
 }: Props) => {
   return (
     <View style={styles.wrapper}>
@@ -48,7 +49,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
     marginBottom: 2,
   },
   left: {

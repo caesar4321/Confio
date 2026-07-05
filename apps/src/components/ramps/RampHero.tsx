@@ -7,8 +7,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 
-import { Gradient } from '../common/Gradient';
+import { colors } from '../../config/theme';
 
 type Props = {
   eyebrow: string;
@@ -16,72 +17,61 @@ type Props = {
   subtitle: string;
   onBack: () => void;
   compact?: boolean;
+  /** Top gradient stop — defaults to the brand field (primary → primaryDark). */
   fromColor?: string;
+  /** Bottom gradient stop. */
   toColor?: string;
 };
 
+/**
+ * Shared hero for the ramp flows (TopUp/Sell/History/Instructions) — the
+ * app-wide brand field: vertical gradient + cropped coin ring. Padding lives
+ * on heroInner because Yoga insets absolute children by parent padding.
+ */
 export const RampHero = ({
   eyebrow,
   title,
   subtitle,
   onBack,
   compact = false,
-  fromColor = '#10b981',
-  toColor = '#6ee7b7',
+  fromColor = colors.primary,
+  toColor = colors.primaryDark,
 }: Props) => {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.heroWrapper}>
-      <Gradient fromColor={fromColor} toColor={toColor} style={styles.heroGradient}>
-        {/* Decorative circles for depth */}
-        <View style={styles.decorCircleLarge} />
-        <View style={styles.decorCircleSmall} />
-        <View style={[styles.heroPadding, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-            <Icon name="arrow-left" size={20} color="#ffffff" />
-          </TouchableOpacity>
-          <Text style={styles.eyebrow}>{eyebrow}</Text>
-          <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
-        </View>
-      </Gradient>
+      <Svg style={StyleSheet.absoluteFill}>
+        <Defs>
+          <SvgLinearGradient id="rampHeroField" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={fromColor} />
+            <Stop offset="1" stopColor={toColor} />
+          </SvgLinearGradient>
+        </Defs>
+        <Rect width="100%" height="100%" fill="url(#rampHeroField)" />
+        <Circle cx="105%" cy="30%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+      </Svg>
+      <View style={[styles.heroInner, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
+          <Icon name="arrow-left" size={20} color={colors.white} />
+        </TouchableOpacity>
+        <Text style={styles.eyebrow}>{eyebrow}</Text>
+        <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   heroWrapper: {
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    backgroundColor: colors.primary,
     overflow: 'hidden',
     marginBottom: 20,
   },
-  heroGradient: {
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-  },
-  decorCircleLarge: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    top: -60,
-    right: -50,
-  },
-  decorCircleSmall: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    bottom: -20,
-    right: 60,
-  },
-  heroPadding: {
+  heroInner: {
     paddingHorizontal: 24,
-    paddingBottom: 32,
+    paddingBottom: 28,
   },
   backButton: {
     width: 40,
@@ -99,13 +89,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
-    color: 'rgba(255,255,255,0.6)',
+    color: 'rgba(255,255,255,0.7)',
     marginBottom: 8,
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#ffffff',
+    color: colors.white,
     marginBottom: 10,
     lineHeight: 34,
   },
@@ -116,7 +106,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     lineHeight: 22,
-    color: 'rgba(255,255,255,0.72)',
+    color: 'rgba(255,255,255,0.8)',
     maxWidth: '88%',
   },
 });
