@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
@@ -165,10 +166,23 @@ export const AhorrosScreen = () => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+        {/* Brand field: emerald gradient + coin ring, padding on headerInner
+            (Yoga insets absolute children by parent padding). */}
         <View style={styles.header}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="ahorrosField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#ahorrosField)" />
+            <Circle cx="105%" cy="28%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.headerInner}>
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-              <Icon name="arrow-left" size={24} color="#fff" />
+              <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Ahorros e Inversiones</Text>
             <View style={styles.headerIconBtn} />
@@ -191,13 +205,14 @@ export const AhorrosScreen = () => {
             {hasAnything ? (
               tickerParts.length > 0 && (
                 <View style={styles.heroTickerRow}>
-                  <Icon name="trending-up" size={14} color="#fff" />
+                  <Icon name="trending-up" size={14} color={colors.white} />
                   <Text style={styles.heroTicker}>{tickerParts.join('  ·  ')}</Text>
                 </View>
               )
             ) : (
               <Text style={styles.heroEmptyHint}>Tu dinero puede crecer mientras duerme</Text>
             )}
+          </View>
           </View>
         </View>
       </SafeAreaView>
@@ -259,7 +274,7 @@ export const AhorrosScreen = () => {
           <View style={styles.ctaRow}>
             {savings.enabled && (
               <TouchableOpacity style={styles.ctaPrimary} onPress={() => setAhorrarSheet(true)} activeOpacity={0.85}>
-                <Icon name="arrow-down-circle" size={18} color="#fff" />
+                <Icon name="arrow-down-circle" size={18} color={colors.white} />
                 <Text style={styles.ctaPrimaryText}>Ahorrar</Text>
               </TouchableOpacity>
             )}
@@ -288,18 +303,14 @@ export const AhorrosScreen = () => {
         {/* ── Inversión: Acciones de EE.UU. (Ondo Stocks) ─────────────────── */}
         {stocks.enabled && (
           <>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Inversión</Text>
-              {/* TODO(gm): market status from the GM API (open/closed/paused) */}
-              <View style={styles.marketChip}>
-                <View style={styles.marketDot} />
-                <Text style={styles.marketChipText}>Mercado abierto</Text>
-              </View>
-            </View>
+            {/* TODO(gm): market-status chip (open/closed/paused) once the GM
+                API exposes it — a hardcoded "Mercado abierto" on a Sunday
+                reads as broken, so nothing shows until it's real. */}
+            <Text style={styles.sectionTitle}>Inversión</Text>
             <View style={styles.card}>
               <View style={styles.productRow}>
                 <View style={[styles.productLogoWrap, styles.stocksLogoWrap]}>
-                  <Icon name="bar-chart-2" size={22} color="#fff" />
+                  <Icon name="bar-chart-2" size={22} color={colors.white} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.productName}>Acciones de EE.UU.</Text>
@@ -476,18 +487,19 @@ export const AhorrosScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 },
+  header: { backgroundColor: colors.primary, overflow: 'hidden' },
+  headerInner: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
 
   hero: { alignItems: 'center', marginTop: 16 },
-  heroLabel: { fontSize: 13, color: '#fff', opacity: 0.85 },
-  heroAmount: { fontSize: 40, fontWeight: 'bold', color: '#fff', marginTop: 4 },
-  heroSplit: { fontSize: 13, color: '#fff', opacity: 0.9, marginTop: 6, fontWeight: '600' },
+  heroLabel: { fontSize: 13, color: colors.white, opacity: 0.85 },
+  heroAmount: { fontSize: 40, fontWeight: 'bold', color: colors.white, marginTop: 4 },
+  heroSplit: { fontSize: 13, color: colors.white, opacity: 0.9, marginTop: 6, fontWeight: '600' },
   heroTickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
-  heroTicker: { fontSize: 13, color: '#fff', opacity: 0.9 },
-  heroEmptyHint: { fontSize: 13, color: '#fff', opacity: 0.85, marginTop: 8 },
+  heroTicker: { fontSize: 13, color: colors.white, opacity: 0.9 },
+  heroEmptyHint: { fontSize: 13, color: colors.white, opacity: 0.85, marginTop: 8 },
 
   scrollContent: { padding: 16, paddingBottom: 40 },
 
@@ -503,22 +515,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  marketChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginBottom: 10,
-  },
-  marketDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#10B981' },
-  marketChipText: { fontSize: 11, fontWeight: '600', color: colors.text.secondary },
 
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: 16,
     marginBottom: 16,
   },
@@ -536,7 +538,7 @@ const styles = StyleSheet.create({
   productSymbol: { fontSize: 13, color: colors.text.secondary, marginTop: 1 },
   productValue: { fontSize: 17, fontWeight: '700', color: colors.text.primary },
   productDayChange: { fontSize: 12, fontWeight: '600', color: colors.primaryDark, marginTop: 1 },
-  dayChangeNegative: { color: '#DC2626' },
+  dayChangeNegative: { color: colors.error.icon },
 
   ratePill: {
     backgroundColor: colors.primaryLight,
@@ -573,7 +575,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 13,
   },
-  ctaPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  ctaPrimaryText: { color: colors.white, fontSize: 15, fontWeight: '700' },
   ctaSecondary: {
     flex: 1,
     alignItems: 'center',
@@ -608,14 +610,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   tickerItem: { alignItems: 'center', width: 56 },
-  tickerCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tickerCircleText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   tickerName: { fontSize: 10, color: colors.text.secondary, marginTop: 5 },
   stocksEmptyHint: {
     fontSize: 12,
@@ -641,7 +635,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tickerCircleSmallText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  tickerCircleSmallText: { color: colors.white, fontSize: 9, fontWeight: '800' },
   positionTicker: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
   positionName: { fontSize: 11, color: colors.text.secondary },
   positionValue: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
@@ -649,8 +643,10 @@ const styles = StyleSheet.create({
 
   movementsEmpty: {
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: 20,
     marginBottom: 16,
     gap: 8,
@@ -684,8 +680,10 @@ const styles = StyleSheet.create({
   eduCard: {
     flexDirection: 'row',
     gap: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: 14,
     marginBottom: 10,
   },
