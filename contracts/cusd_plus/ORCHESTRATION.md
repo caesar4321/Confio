@@ -140,6 +140,15 @@ batched scanner (one eth_getLogs per 30s over the whole watch set):
    registered bsc_address whenever to_currency=USDT on a BSC network;
    client payout addresses are refused on this rail). Any future provider
    follows the same rule: the server injects the registered address.
+2b. **Future ETH/Tron rails** (Julian, 2026-07-05): when they ship, the
+   deposit flow offers the TWO-WORLD destination choice mirroring
+   Recargar — "para usar" lands USDC-Algorand → auto-swap → cUSD,
+   "para ahorrar" lands USDT-BSC → auto-mint → cUSD+ (one Allbridge
+   destination parameter switches them; both landings reuse existing
+   machinery). Only the savings destination is geo-gated. The demand
+   probes are therefore destination-neutral and visible in ALL regions —
+   a Venezuelan user's Tron→cUSD demand signal counts too.
+
 3. **External deposit** (Julian, 2026-07-04): crypto-native users and
    no-Koywe countries onramp by sending USDT (BEP-20) straight to their
    address — WITHOUT this rail they would be forced through USDC-ALG and

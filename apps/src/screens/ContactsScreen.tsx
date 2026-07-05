@@ -1515,7 +1515,11 @@ export const ContactsScreen = () => {
                 setShowReceiveSelection(false);
                 navigation.navigate('ReceiveSavings');
               },
-            },
+            }] : []),
+            // Demand probes stay VISIBLE everywhere: they measure rail-level
+            // demand, destination-neutral. When a rail ships it offers the
+            // two-world choice (usar → cUSD / ahorrar → cUSD+) mirroring
+            // Recargar; only the savings destination is geo-gated then.
             {
               icon: 'clock',
               title: 'USDC · USDT (Ethereum)',
@@ -1529,7 +1533,6 @@ export const ContactsScreen = () => {
               subtitle: 'Red Tron (TRC-20) · aún no disponible · tócalo y te avisamos',
               onPress: () => handleReceiveRailInterest('usdt_tron', 'USDT (Tron)'),
             },
-            ] : []),
           ]}
         />
         <RouteSheet
