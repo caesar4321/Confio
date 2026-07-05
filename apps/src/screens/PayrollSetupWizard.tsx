@@ -528,11 +528,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -2 },
-    elevation: 4,
   },
   selectionCountText: {
     fontSize: 14,

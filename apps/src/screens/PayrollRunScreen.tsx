@@ -13,6 +13,7 @@ import { APP_LAYOUT } from '../config/layout';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
+import { EmptyState } from '../components/EmptyState';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -41,13 +42,27 @@ export const PayrollRunScreen = () => {
 
   const selectedSchedule = SCHEDULE_OPTIONS.find(s => s.key === schedule);
 
+  // Running total — typing amounts without seeing the sum invites mistakes.
+  const { totalAmount, payeeCount } = useMemo(() => {
+    let total = 0;
+    let count = 0;
+    recipients.forEach((r: any) => {
+      const parsed = parseFloat((amounts[r.id] || '').replace(',', '.'));
+      if (isFinite(parsed) && parsed > 0) {
+        total += parsed;
+        count += 1;
+      }
+    });
+    return { totalAmount: total, payeeCount: count };
+  }, [recipients, amounts]);
+
   const handleAmountChange = (id: string, value: string) => {
     setAmounts((prev) => ({ ...prev, [id]: value }));
   };
 
   const handleSubmit = async () => {
     if (!recipients.length) {
-      Alert.alert('Sin destinatarios', 'Agrega destinatarios de nómina primero.');
+      setBanner({ variant: 'error', message: 'Agrega destinatarios de nómina primero.' });
       return;
     }
 
@@ -64,7 +79,7 @@ export const PayrollRunScreen = () => {
       .filter((i) => i.netAmount !== null);
 
     if (!items.length) {
-      Alert.alert('Ingresa montos', 'Agrega al menos un monto para pagar.');
+      setBanner({ variant: 'error', message: 'Ingresa al menos un monto para pagar.' });
       return;
     }
 
@@ -194,6 +209,15 @@ export const PayrollRunScreen = () => {
 
       {/* Recipients List */}
       <Text style={[styles.label, { marginTop: 16 }]}>Destinatarios</Text>
+      {!loading && recipients.length === 0 && (
+        <EmptyState
+          icon="users"
+          title="Sin destinatarios"
+          subtitle="Agrega a las personas que recibirán la nómina."
+          actionLabel="Agregar destinatarios"
+          onAction={() => navigation.navigate('PayrollRecipientsManage')}
+        />
+      )}
       <FlatList
         data={recipients}
         keyExtractor={(item: any) => item.id}
@@ -226,6 +250,15 @@ export const PayrollRunScreen = () => {
           );
         }}
       />
+
+      {payeeCount > 0 && (
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>
+            Total · {payeeCount} {payeeCount === 1 ? 'persona' : 'personas'}
+          </Text>
+          <Text style={styles.totalValue}>{totalAmount.toFixed(2)} cUSD</Text>
+        </View>
+      )}
 
       <Button
         title={schedule === 'now' ? 'Crear nómina' : 'Programar nómina'}
@@ -313,6 +346,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  totalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
+  totalValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primaryDark,
   },
   recipientRow: {
     flexDirection: 'row',

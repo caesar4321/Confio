@@ -33,6 +33,8 @@ import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
+import { InlineBanner } from '../components/common/InlineBanner';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollTopUp'>;
 
@@ -45,6 +47,7 @@ const PayrollTopUpScreen = () => {
   const [processing, setProcessing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
 
   const { data: vaultData, loading: vaultLoading, refetch: refetchVault } = useQuery(GET_PAYROLL_VAULT_BALANCE, {
     fetchPolicy: 'cache-and-network',
@@ -84,11 +87,11 @@ const PayrollTopUpScreen = () => {
     if (processing) return;
     const parsed = parseFloat((amount || '').replace(',', '.'));
     if (!isFinite(parsed) || parsed <= 0) {
-      Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
+      setBanner({ variant: 'error', message: 'Ingresa un monto mayor a 0.' });
       return;
     }
     if (availableBalance && parsed > availableBalance) {
-      Alert.alert('Saldo insuficiente', 'El monto supera el saldo disponible de la cuenta de negocio.');
+      setBanner({ variant: 'error', message: 'El monto supera el saldo disponible de la cuenta de negocio.' });
       return;
     }
 
@@ -221,7 +224,7 @@ const PayrollTopUpScreen = () => {
     if (processing) return;
     const parsed = parseFloat((withdrawAmount || '').replace(',', '.'));
     if (!isFinite(parsed) || parsed <= 0) {
-      Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
+      setBanner({ variant: 'error', message: 'Ingresa un monto mayor a 0.' });
       return;
     }
     if (vaultBalance && parsed > vaultBalance) {
@@ -331,17 +334,27 @@ const PayrollTopUpScreen = () => {
           }
         >
 
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>Saldo en bóveda</Text>
-            <View style={styles.rowBetween}>
-              <Text style={styles.balanceValue}>{vaultLoading ? '...' : `${vaultBalance?.toFixed?.(2) || '0.00'} cUSD`}</Text>
-            </View>
-            <Text style={styles.cardHint}>Los fondos se guardan en el contrato de nómina y se usan para pagar a tus empleados.</Text>
-          </View>
+          {banner && (
+            <InlineBanner
+              message={banner.message}
+              variant={banner.variant}
+              onDismiss={() => setBanner(null)}
+              style={{ marginHorizontal: 16, marginTop: 12, marginBottom: 0 }}
+            />
+          )}
 
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>Saldo disponible en la cuenta de negocio</Text>
-            <Text style={styles.balanceValue}>{balanceLoading ? '...' : `${availableBalance.toFixed(2)} cUSD`}</Text>
+          {/* Vault hero — same brand-field card as the payroll hub */}
+          <View style={styles.vaultHero}>
+            <BrandFieldBackground id="payrollTopUpField" ringCy="25%" ringR={70} ringWidth={18} />
+            <View style={styles.vaultHeroInner}>
+              <Text style={styles.vaultHeroLabel}>BÓVEDA DE NÓMINA</Text>
+              <Text style={styles.vaultHeroBalance}>
+                {vaultLoading ? '...' : `${vaultBalance?.toFixed?.(2) || '0.00'} cUSD`}
+              </Text>
+              <Text style={styles.vaultHeroHint}>
+                Disponible en tu cuenta de negocio: {balanceLoading ? '...' : `${availableBalance.toFixed(2)} cUSD`}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.card}>
@@ -357,6 +370,16 @@ const PayrollTopUpScreen = () => {
                 onChangeText={setAmount}
                 returnKeyType="done"
               />
+              {availableBalance > 0 && (
+                <TouchableOpacity
+                  style={styles.maxChip}
+                  onPress={() => setAmount(availableBalance.toFixed(2))}
+                  accessibilityRole="button"
+                  accessibilityLabel="Usar todo el saldo disponible"
+                >
+                  <Text style={styles.maxChipText}>MAX</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <Text style={styles.cardHint}>Moveremos este monto desde la cuenta de negocio hacia la bóveda de nómina.</Text>
           </View>
@@ -392,6 +415,16 @@ const PayrollTopUpScreen = () => {
                 onChangeText={setWithdrawAmount}
                 returnKeyType="done"
               />
+              {vaultBalance > 0 && (
+                <TouchableOpacity
+                  style={styles.maxChip}
+                  onPress={() => setWithdrawAmount(Number(vaultBalance).toFixed(2))}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retirar todo el saldo de la bóveda"
+                >
+                  <Text style={styles.maxChipText}>MAX</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <Button
               title="Retirar de bóveda"
@@ -414,6 +447,46 @@ const PayrollTopUpScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.white },
+  vaultHero: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  vaultHeroInner: {
+    padding: 16,
+  },
+  vaultHeroLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: colors.primaryLight,
+    marginBottom: 6,
+  },
+  vaultHeroBalance: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  vaultHeroHint: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 8,
+  },
+  maxChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: colors.primarySoft,
+    marginLeft: 8,
+  },
+  maxChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.primaryDark,
+    letterSpacing: 0.5,
+  },
   card: {
     marginHorizontal: 16,
     marginTop: 12,
@@ -431,22 +504,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginBottom: 6,
   },
-  balanceValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textFlat,
-  },
   cardHint: {
     marginTop: 6,
     color: colors.muted,
     fontSize: 12,
-  },
-  rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  refreshButton: {
   },
   inputRow: {
     flexDirection: 'row',

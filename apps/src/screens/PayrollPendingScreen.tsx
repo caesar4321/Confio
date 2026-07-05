@@ -326,11 +326,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderLeftWidth: 4,
     borderLeftColor: colors.primary,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
   },
   cardDisabled: { opacity: 0.7 },
   row: {
