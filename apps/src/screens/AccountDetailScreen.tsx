@@ -973,27 +973,27 @@ export const AccountDetailScreen = () => {
   const getTransactionIcon = (transaction: Transaction) => {
     switch (transaction.type) {
       case 'received':
-        return <Icon name="arrow-down" size={20} color="#10B981" />;
+        return <Icon name="arrow-down" size={20} color={colors.primaryDark} />;
       case 'sent':
-        return <Icon name="arrow-up" size={20} color="#EF4444" />;
+        return <Icon name="arrow-up" size={20} color={colors.danger} />;
       case 'exchange':
-        return <Icon name="refresh-cw" size={20} color="#3B82F6" />;
+        return <Icon name="refresh-cw" size={20} color={colors.accent} />;
       case 'conversion':
         return <Icon name="repeat" size={20} color="#34D399" />;
       case 'ramp':
         return <Icon name="repeat" size={20} color="#0EA5E9" />;
       case 'payment':
-        return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
+        return <Icon name="shopping-bag" size={20} color={colors.secondary} />;
       case 'reward':
-        return <Icon name="gift" size={20} color="#F59E0B" />;
+        return <Icon name="gift" size={20} color={colors.offRampIcon} />;
       case 'presale':
         return <Icon name="lock" size={20} color="#6366F1" />;
       case 'payroll':
-        return <Icon name="briefcase" size={20} color="#10B981" />;
+        return <Icon name="briefcase" size={20} color={colors.primaryDark} />;
       case 'humanitarian':
         return <Icon name="heart" size={20} color="#E11D48" />;
       default:
-        return <Icon name="arrow-up" size={20} color="#6B7280" />;
+        return <Icon name="arrow-up" size={20} color={colors.text.secondary} />;
     }
   };
 
@@ -1499,18 +1499,18 @@ export const AccountDetailScreen = () => {
           {/* Show external wallet indicator for sends to addresses without phone */}
           {transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser && (
             <Text style={styles.externalWalletNote}>
-              <Icon name="external-link" size={12} color="#3B82F6" /> Wallet externa
+              <Icon name="external-link" size={12} color={colors.accent} /> Wallet externa
             </Text>
           )}
           {/* Show external wallet indicator for deposits from external wallets */}
           {transaction.isExternalDeposit && (
             <Text style={styles.externalWalletNote}>
-              <Icon name="download" size={12} color="#10B981" /> Depósito externo
+              <Icon name="download" size={12} color={colors.primaryDark} /> Depósito externo
             </Text>
           )}
           {isRewardTransaction && (
             <Text style={styles.rewardNote}>
-              <Icon name="gift" size={12} color="#F59E0B" /> Recompensa por referidos
+              <Icon name="gift" size={12} color={colors.offRampIcon} /> Recompensa por referidos
             </Text>
           )}
           {isPresaleTransaction && (
@@ -1677,7 +1677,7 @@ export const AccountDetailScreen = () => {
                 accessibilityRole="button"
                 accessibilityLabel="Cerrar"
               >
-                <Icon name="x" size={24} color="#6b7280" />
+                <Icon name="x" size={24} color={colors.text.secondary} />
               </TouchableOpacity>
             </View>
             
@@ -1691,7 +1691,7 @@ export const AccountDetailScreen = () => {
                     value={exchangeAmount}
                     onChangeText={handleExchangeAmountChange}
                     placeholder="0.00"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={colors.text.light}
                     keyboardType="numeric"
                     autoFocus={true}
                     returnKeyType="done"
@@ -1705,7 +1705,7 @@ export const AccountDetailScreen = () => {
                   style={styles.exchangeDirectionButton}
                   onPress={toggleConversionDirection}
                 >
-                  <Icon name="refresh-cw" size={16} color="#3b82f6" />
+                  <Icon name="refresh-cw" size={16} color={colors.accent} />
                   <Text style={styles.exchangeDirectionText}>Cambiar dirección</Text>
                 </TouchableOpacity>
               </View>
@@ -1738,7 +1738,7 @@ export const AccountDetailScreen = () => {
                 disabled={!exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion}
               >
                 {isProcessingConversion ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
+                  <ActivityIndicator size="small" color={colors.white} />
                 ) : (
                   <Text style={styles.exchangeConfirmButtonText}>
                     Convertir {exchangeAmount || '0'} {conversionDirection === 'usdc_to_cusd' ? 'USDC' : 'cUSD'}
@@ -1861,7 +1861,7 @@ export const AccountDetailScreen = () => {
               <Icon
                 name={showBalance ? 'eye' : 'eye-off'}
                 size={20}
-                color="#ffffff"
+                color={colors.white}
                 style={styles.eyeIcon}
               />
             </TouchableOpacity>
@@ -1878,7 +1878,7 @@ export const AccountDetailScreen = () => {
               </Text>
             </View>
             <View style={styles.lockedStatusRow}>
-              <Icon name="unlock" size={14} color="#ffffff" style={{ opacity: 0.5 }} />
+              <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
               <Text style={styles.lockedStatusText}>
                 Disponible: ${formatBalanceDisplay(confioLive)} $CONFIO
               </Text>
@@ -1900,7 +1900,7 @@ export const AccountDetailScreen = () => {
                 setCopyBanner(true);
               }
             }} accessibilityRole="button" accessibilityLabel="Copiar dirección">
-              <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
+              <Icon name="copy" size={16} color={colors.white} style={styles.copyIcon} />
             </TouchableOpacity>
           </View>
         )}
@@ -1923,7 +1923,7 @@ export const AccountDetailScreen = () => {
           // Employee welcome message
           <View style={styles.employeeMessageContainer}>
             <View style={styles.employeeMessageIcon}>
-              <Icon name="briefcase" size={32} color="#7c3aed" />
+              <Icon name="briefcase" size={32} color={colors.secondaryDark} />
             </View>
             <Text style={styles.employeeMessageTitle}>
               Eres parte de {activeAccount?.business?.name}
@@ -1960,7 +1960,7 @@ export const AccountDetailScreen = () => {
                   alignItems: 'center',
                   marginBottom: 8,
                 }}>
-                  <Icon name="send" size={22} color="#ffffff" />
+                  <Icon name="send" size={22} color={colors.white} />
                 </View>
                 <Text style={styles.actionButtonText}>Enviar</Text>
               </TouchableOpacity>
@@ -1987,7 +1987,7 @@ export const AccountDetailScreen = () => {
                   alignItems: 'center',
                   marginBottom: 8,
                 }}>
-                  <Icon name="download" size={22} color="#ffffff" />
+                  <Icon name="download" size={22} color={colors.white} />
                 </View>
                 <Text style={styles.actionButtonText}>Recibir</Text>
               </TouchableOpacity>
@@ -2015,7 +2015,7 @@ export const AccountDetailScreen = () => {
                   alignItems: 'center',
                   marginBottom: 8,
                 }}>
-                  <Icon name="shopping-bag" size={22} color="#ffffff" />
+                  <Icon name="shopping-bag" size={22} color={colors.white} />
                 </View>
                 <Text style={styles.actionButtonText}>Pagar</Text>
               </TouchableOpacity>
@@ -2039,7 +2039,7 @@ export const AccountDetailScreen = () => {
                   alignItems: 'center',
                   marginBottom: 8,
                 }}>
-                  <Icon name="dollar-sign" size={22} color="#ffffff" />
+                  <Icon name="dollar-sign" size={22} color={colors.white} />
                 </View>
                 <Text style={styles.actionButtonText}>Recargar</Text>
               </TouchableOpacity>
@@ -2155,7 +2155,7 @@ export const AccountDetailScreen = () => {
                     accessibilityRole="button"
                     accessibilityLabel="Ayuda sobre USDC"
                   >
-                    <Icon name="help-circle" size={18} color="#6b7280" />
+                    <Icon name="help-circle" size={18} color={colors.text.secondary} />
                   </TouchableOpacity>
                 </View>
 
@@ -2184,7 +2184,7 @@ export const AccountDetailScreen = () => {
                   </View>
 
                   <View style={styles.exchangeRateInfo}>
-                    <Icon name="info" size={14} color="#3b82f6" />
+                    <Icon name="info" size={14} color={colors.accent} />
                     <Text style={styles.exchangeRateText}>
                       1 USDC = 1 cUSD • Sin comisión
                     </Text>
@@ -2192,12 +2192,12 @@ export const AccountDetailScreen = () => {
 
                   <View style={styles.usdcActions}>
                     <TouchableOpacity
-                      style={[styles.usdcActionButton, { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
+                      style={[styles.usdcActionButton, { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: colors.offRampIcon }]}
                       onPress={() => navigation.navigate('Sell')}
                     >
                       <MCIcon name="bank" size={14} color="#92400E" style={{ marginRight: 8 }} />
                       <View style={styles.actionTextContainer}>
-                        <Text style={[styles.usdcActionButtonText, { color: '#92400E' }]}>Retirar</Text>
+                        <Text style={[styles.usdcActionButtonText, { color: colors.warning.text }]}>Retirar</Text>
                         <Text style={[styles.usdcActionSubtext, { color: '#B45309' }]}>A tu banco</Text>
                       </View>
                     </TouchableOpacity>
@@ -2211,7 +2211,7 @@ export const AccountDetailScreen = () => {
                       >
                         <Icon name="refresh-cw" size={16} color="#fff" style={{ marginRight: 8 }} />
                         <View style={styles.actionTextContainer}>
-                          <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
+                          <Text style={[styles.usdcActionButtonText, { color: colors.white }]}>
                             Convertir
                           </Text>
                           <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
@@ -2228,7 +2228,7 @@ export const AccountDetailScreen = () => {
                       accessibilityRole="button"
                       accessibilityLabel="Más opciones de USDC"
                     >
-                      <Icon name="more-horizontal" size={20} color="#6b7280" />
+                      <Icon name="more-horizontal" size={20} color={colors.text.secondary} />
                     </TouchableOpacity>
                   </View>
 
@@ -2264,7 +2264,7 @@ export const AccountDetailScreen = () => {
                   >
                     <Icon name="info" size={16} color="#fff" style={{ marginRight: 8 }} />
                     <View style={styles.actionTextContainer}>
-                      <Text style={[styles.confioPresaleButtonText, { color: '#ffffff' }]}>
+                      <Text style={[styles.confioPresaleButtonText, { color: colors.white }]}>
                         Ver Detalles
                       </Text>
                       <Text style={[styles.confioPresaleSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
@@ -2325,11 +2325,11 @@ export const AccountDetailScreen = () => {
                     }
                   ]}
                 >
-                  <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+                  <Icon name="search" size={18} color={colors.text.light} style={styles.searchIcon} />
                   <TextInput
                     style={styles.searchInput}
                     placeholder="Buscar transacciones..."
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={colors.text.light}
                     value={searchQuery}
                     onChangeText={setSearchQuery}
                     autoCapitalize="none"
@@ -2337,7 +2337,7 @@ export const AccountDetailScreen = () => {
                   />
                   {searchQuery.length > 0 && (
                     <TouchableOpacity onPress={() => setSearchQuery('')} accessibilityRole="button" accessibilityLabel="Limpiar búsqueda">
-                      <Icon name="x" size={18} color="#9ca3af" />
+                      <Icon name="x" size={18} color={colors.text.light} />
                     </TouchableOpacity>
                   )}
                 </Animated.View>
@@ -2364,7 +2364,7 @@ export const AccountDetailScreen = () => {
             <View style={styles.helpModalHeader}>
               <Text style={styles.helpModalTitle}>¿Qué es la Gestión Avanzada?</Text>
               <TouchableOpacity onPress={() => setShowHelpModal(false)} accessibilityRole="button" accessibilityLabel="Cerrar ayuda">
-                <Icon name="x" size={24} color="#6b7280" />
+                <Icon name="x" size={24} color={colors.text.secondary} />
               </TouchableOpacity>
             </View>
 
@@ -2375,7 +2375,7 @@ export const AccountDetailScreen = () => {
               bounces={true}
             >
               <View style={styles.helpSection}>
-                <Icon name="info" size={20} color="#3b82f6" style={styles.helpIcon} />
+                <Icon name="info" size={20} color={colors.accent} style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
                   <Text style={styles.helpSectionTitle}>USDC en red de Algorand</Text>
                   <Text style={styles.helpSectionText}>
@@ -2386,7 +2386,7 @@ export const AccountDetailScreen = () => {
               </View>
 
               <View style={styles.helpSection}>
-                <Icon name="shield" size={20} color="#10b981" style={styles.helpIcon} />
+                <Icon name="shield" size={20} color={colors.primaryDark} style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
                   <Text style={styles.helpSectionTitle}>¿Por qué es seguro?</Text>
                   <Text style={styles.helpSectionText}>
@@ -2398,7 +2398,7 @@ export const AccountDetailScreen = () => {
               </View>
 
               <View style={styles.helpSection}>
-                <Icon name="users" size={20} color="#8b5cf6" style={styles.helpIcon} />
+                <Icon name="users" size={20} color={colors.secondary} style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
                   <Text style={styles.helpSectionTitle}>¿Para quién es?</Text>
                   <Text style={styles.helpSectionText}>
@@ -2409,7 +2409,7 @@ export const AccountDetailScreen = () => {
               </View>
 
               <View style={styles.helpSection}>
-                <Icon name="zap" size={20} color="#f59e0b" style={styles.helpIcon} />
+                <Icon name="zap" size={20} color={colors.offRampIcon} style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
                   <Text style={styles.helpSectionTitle}>Beneficios</Text>
                   <Text style={styles.helpSectionText}>
@@ -2459,7 +2459,7 @@ export const AccountDetailScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Depositar USDC"
             >
-              <Icon name="download" size={20} color="#1f2937" />
+              <Icon name="download" size={20} color={colors.text.primary} />
               <Text style={styles.moreOptionsItemText}>Depositar USDC</Text>
             </TouchableOpacity>
 
@@ -2473,7 +2473,7 @@ export const AccountDetailScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Retirar USDC a Algorand"
             >
-              <Icon name="arrow-up-circle" size={20} color="#1f2937" />
+              <Icon name="arrow-up-circle" size={20} color={colors.text.primary} />
               <Text style={styles.moreOptionsItemText}>Retirar USDC a Algorand</Text>
             </TouchableOpacity>
 
@@ -2486,7 +2486,7 @@ export const AccountDetailScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Ver historial de conversiones"
             >
-              <Icon name="clock" size={20} color="#1f2937" />
+              <Icon name="clock" size={20} color={colors.text.primary} />
               <Text style={styles.moreOptionsItemText}>Historial de conversiones</Text>
             </TouchableOpacity>
 
@@ -2548,7 +2548,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -2567,7 +2567,7 @@ const styles = StyleSheet.create({
   balanceText: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: colors.white,
     marginRight: 8,
   },
   eyeIcon: {
@@ -2575,7 +2575,7 @@ const styles = StyleSheet.create({
   },
   balanceDescription: {
     fontSize: 14,
-    color: '#ffffff',
+    color: colors.white,
     opacity: 0.8,
     marginBottom: 4,
   },
@@ -2593,12 +2593,12 @@ const styles = StyleSheet.create({
   },
   lockedStatusText: {
     fontSize: 13,
-    color: '#ffffff',
+    color: colors.white,
     opacity: 0.9,
   },
   lockedStatusDescription: {
     fontSize: 11,
-    color: '#ffffff',
+    color: colors.white,
     opacity: 0.7,
     marginTop: 4,
     textAlign: 'center',
@@ -2610,7 +2610,7 @@ const styles = StyleSheet.create({
   },
   addressText: {
     fontSize: 12,
-    color: '#ffffff',
+    color: colors.white,
     opacity: 0.7,
     marginRight: 4,
   },
@@ -2623,7 +2623,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   employeeMessageContainer: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
@@ -2643,7 +2643,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -2651,18 +2651,18 @@ const styles = StyleSheet.create({
   employeeMessageTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 8,
   },
   employeeMessageText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 20,
   },
   actionButtons: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
@@ -2695,7 +2695,7 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
     textAlign: 'center',
   },
   usdcSection: {
@@ -2711,17 +2711,17 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   helpButton: {
     padding: 4,
   },
   usdcCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -2758,17 +2758,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -2,
     right: -2,
-    backgroundColor: '#3b82f6',
+    backgroundColor: colors.accent,
     borderRadius: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderWidth: 2,
-    borderColor: '#ffffff',
+    borderColor: colors.white,
   },
   usdcBadgeText: {
     fontSize: 10,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: colors.white,
   },
   usdcTextContainer: {
     flex: 1,
@@ -2776,12 +2776,12 @@ const styles = StyleSheet.create({
   usdcName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 2,
   },
   usdcDescription: {
     fontSize: 13,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   usdcBalance: {
     alignItems: 'flex-end',
@@ -2789,11 +2789,11 @@ const styles = StyleSheet.create({
   usdcBalanceText: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   usdcSymbol: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   exchangeRateInfo: {
     flexDirection: 'row',
@@ -2806,7 +2806,7 @@ const styles = StyleSheet.create({
   },
   exchangeRateText: {
     fontSize: 12,
-    color: '#3b82f6',
+    color: colors.accent,
     marginLeft: 6,
     fontWeight: '500',
   },
@@ -2816,7 +2816,7 @@ const styles = StyleSheet.create({
   usdcActionButton: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 10,
@@ -2828,7 +2828,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   usdcMoreButton: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     width: 44,
     height: 44,
     borderRadius: 10,
@@ -2841,16 +2841,16 @@ const styles = StyleSheet.create({
   usdcActionButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   usdcActionSubtext: {
     fontSize: 11,
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginTop: 1,
   },
   usdcDisclaimer: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     marginTop: 8,
   },
@@ -2868,14 +2868,14 @@ const styles = StyleSheet.create({
   transactionsTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   transactionsFilters: {
     flexDirection: 'row',
   },
   filterButton: {
     padding: 8,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 8,
     marginLeft: 8,
     position: 'relative',
@@ -2893,16 +2893,16 @@ const styles = StyleSheet.create({
   transactionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 16,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: colors.neutralDark,
   },
   invitedTransactionItem: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#ef4444',
+    backgroundColor: colors.error.background,
+    borderColor: colors.danger,
   },
   transactionIconContainer: {
     width: 40,
@@ -2925,7 +2925,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   lastWordBadgeGroup: {
     flexDirection: 'row',
@@ -2936,7 +2936,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2945,20 +2945,20 @@ const styles = StyleSheet.create({
   },
   transactionDate: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   transactionSubtitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   originalName: {
-    color: '#D1D5DB',
+    color: colors.borderMedium,
     fontSize: 11,
     fontStyle: 'italic',
   },
   invitationNote: {
     fontSize: 12,
-    color: '#dc2626',
+    color: colors.error.icon,
     marginTop: 2,
     fontWeight: 'bold',
   },
@@ -2988,10 +2988,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   positiveAmount: {
-    color: '#10b981',
+    color: colors.primaryDark,
   },
   negativeAmount: {
-    color: '#ef4444',
+    color: colors.danger,
   },
   transactionStatus: {
     flexDirection: 'row',
@@ -3002,24 +3002,24 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   statusTextCompleted: {
-    color: '#10b981', // green
+    color: colors.primaryDark, // green
   },
   statusTextPending: {
-    color: '#f59e0b', // amber
+    color: colors.offRampIcon, // amber
   },
   statusTextFailed: {
-    color: '#ef4444', // red
+    color: colors.danger, // red
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
   },
-  statusDotCompleted: { backgroundColor: '#10b981' },
-  statusDotPending: { backgroundColor: '#f59e0b' },
-  statusDotFailed: { backgroundColor: '#ef4444' },
+  statusDotCompleted: { backgroundColor: colors.primaryDark },
+  statusDotPending: { backgroundColor: colors.offRampIcon },
+  statusDotFailed: { backgroundColor: colors.danger },
   viewMoreButton: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 24,
@@ -3027,12 +3027,12 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
   },
   viewMoreButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   modalOverlay: {
     flex: 1,
@@ -3048,7 +3048,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     width: '100%',
     maxWidth: 400,
@@ -3063,7 +3063,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   exchangeContainer: {
     marginBottom: 24,
@@ -3081,7 +3081,7 @@ const styles = StyleSheet.create({
   },
   exchangeInputLabel: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   exchangeInput: {
     flexDirection: 'row',
@@ -3091,7 +3091,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   currencyBadge: {
     flexDirection: 'row',
@@ -3107,7 +3107,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   currencyIconText: {
-    color: '#ffffff',
+    color: colors.white,
     fontWeight: 'bold',
     fontSize: 12,
   },
@@ -3120,7 +3120,7 @@ const styles = StyleSheet.create({
   currencyText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   exchangeArrow: {
     width: 40,
@@ -3152,12 +3152,12 @@ const styles = StyleSheet.create({
   },
   feeLabel: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   feeValue: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   feeValueContainer: {
     flexDirection: 'row',
@@ -3171,23 +3171,23 @@ const styles = StyleSheet.create({
   },
   feeValueNote: {
     fontSize: 11,
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginLeft: 4,
   },
   feeDivider: {
     height: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
     marginBottom: 12,
   },
   feeTotalLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   feeTotalValue: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   exchangeButton: {
     backgroundColor: colors.primary,
@@ -3199,7 +3199,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   exchangeButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -3210,7 +3210,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   emptyTransactionsContainer: {
@@ -3221,14 +3221,14 @@ const styles = StyleSheet.create({
   emptyTransactionsText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginTop: 16,
     marginBottom: 8,
     textAlign: 'center',
   },
   emptyTransactionsSubtext: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 20,
     maxWidth: 280,
@@ -3236,13 +3236,13 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
   },
   searchIcon: {
     marginRight: 8,
@@ -3250,13 +3250,13 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: '#1f2937',
+    color: colors.text.primary,
     padding: 0,
   },
   sectionHeader: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginTop: 8,
     marginBottom: 8,
     marginHorizontal: 16,
@@ -3266,7 +3266,7 @@ const styles = StyleSheet.create({
   emptyActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primary,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 24,
@@ -3278,19 +3278,19 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   emptyActionButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 8,
   },
   filterButtonActive: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
   },
   // Help Modal Styles
   helpModalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 20,
     maxWidth: 380,
     width: '90%',
@@ -3313,12 +3313,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   helpModalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   helpModalBody: {
     flex: 1,
@@ -3342,12 +3342,12 @@ const styles = StyleSheet.create({
   helpSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   helpSectionText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
   helpModalButton: {
@@ -3360,13 +3360,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   helpModalButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '600',
   },
   // More Options Modal Styles
   moreOptionsModalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: Platform.OS === 'ios' ? 34 : 20,
@@ -3385,7 +3385,7 @@ const styles = StyleSheet.create({
   moreOptionsHandle: {
     width: 40,
     height: 4,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
     borderRadius: 2,
     alignSelf: 'center',
     marginTop: 12,
@@ -3394,7 +3394,7 @@ const styles = StyleSheet.create({
   moreOptionsTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     paddingHorizontal: 20,
     marginBottom: 16,
   },
@@ -3404,11 +3404,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   moreOptionsItemText: {
     fontSize: 16,
-    color: '#1f2937',
+    color: colors.text.primary,
     marginLeft: 16,
   },
   moreOptionsCancelItem: {
@@ -3418,13 +3418,13 @@ const styles = StyleSheet.create({
   },
   moreOptionsCancelText: {
     fontSize: 16,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     fontWeight: '500',
   },
   // Exchange Modal Styles
   exchangeModalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 20,
     margin: 20,
     maxWidth: 400,
@@ -3448,12 +3448,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   exchangeModalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   exchangeModalBody: {
     padding: 20,
@@ -3464,13 +3464,13 @@ const styles = StyleSheet.create({
   exchangeLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginBottom: 8,
   },
   exchangeModalInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -3480,13 +3480,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     padding: 0,
   },
   exchangeCurrency: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginLeft: 8,
   },
   exchangeDirectionButton: {
@@ -3497,12 +3497,12 @@ const styles = StyleSheet.create({
   },
   exchangeDirectionText: {
     fontSize: 14,
-    color: '#3b82f6',
+    color: colors.accent,
     marginLeft: 6,
     fontWeight: '500',
   },
   exchangeInfo: {
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
@@ -3515,12 +3515,12 @@ const styles = StyleSheet.create({
   },
   exchangeInfoLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   exchangeInfoValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   exchangeConfirmButton: {
     backgroundColor: colors.accent,
@@ -3532,7 +3532,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   exchangeConfirmButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -3555,11 +3555,11 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   confioPresaleCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -3583,16 +3583,16 @@ const styles = StyleSheet.create({
   confioPresaleTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   confioPresaleDescription: {
     fontSize: 13,
-    color: '#6b7280',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   confioPresaleButton: {
-    backgroundColor: '#8b5cf6',
+    backgroundColor: colors.secondary,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -3602,7 +3602,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     ...Platform.select({
       ios: {
-        shadowColor: '#8b5cf6',
+        shadowColor: colors.secondary,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.3,
         shadowRadius: 4,

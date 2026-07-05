@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 
 export interface TransactionFilters {
   types: {
@@ -51,8 +52,8 @@ interface TransactionFilterModalProps {
 }
 
 const defaultTheme = {
-  primary: '#34D399',
-  secondary: '#8B5CF6',
+  primary: colors.primary,
+  secondary: colors.secondary,
 };
 
 export const TransactionFilterModal = ({
@@ -165,7 +166,7 @@ export const TransactionFilterModal = ({
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Filtrar transacciones</Text>
             <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar">
-              <Icon name="x" size={24} color="#6B7280" />
+              <Icon name="x" size={24} color={colors.text.secondary} />
             </TouchableOpacity>
           </View>
 
@@ -181,7 +182,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('sent')}
                 >
-                  <Icon name="arrow-up" size={16} color={filters.types.sent ? theme.primary : '#6B7280'} />
+                  <Icon name="arrow-up" size={16} color={filters.types.sent ? theme.primary : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.sent && { color: theme.primary }]}>
                     Enviado
                   </Text>
@@ -193,7 +194,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('received')}
                 >
-                  <Icon name="arrow-down" size={16} color={filters.types.received ? theme.primary : '#6B7280'} />
+                  <Icon name="arrow-down" size={16} color={filters.types.received ? theme.primary : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.received && { color: theme.primary }]}>
                     Recibido
                   </Text>
@@ -205,7 +206,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('payment')}
                 >
-                  <Icon name="shopping-bag" size={16} color={filters.types.payment ? theme.primary : '#6B7280'} />
+                  <Icon name="shopping-bag" size={16} color={filters.types.payment ? theme.primary : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.payment && { color: theme.primary }]}>
                     Pago
                   </Text>
@@ -217,7 +218,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('exchange')}
                 >
-                  <Icon name="refresh-cw" size={16} color={filters.types.exchange ? theme.primary : '#6B7280'} />
+                  <Icon name="refresh-cw" size={16} color={filters.types.exchange ? theme.primary : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.exchange && { color: theme.primary }]}>
                     Intercambio
                   </Text>
@@ -229,7 +230,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('conversion')}
                 >
-                  <Icon name="repeat" size={16} color={filters.types.conversion ? theme.primary : '#6B7280'} />
+                  <Icon name="repeat" size={16} color={filters.types.conversion ? theme.primary : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.conversion && { color: theme.primary }]}>
                     Conversión
                   </Text>
@@ -241,8 +242,8 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('reward')}
                 >
-                  <Icon name="gift" size={16} color={filters.types.reward ? '#F59E0B' : '#6B7280'} />
-                  <Text style={[styles.filterChipText, filters.types.reward && { color: '#F59E0B' }]}>
+                  <Icon name="gift" size={16} color={filters.types.reward ? colors.offRampIcon : colors.text.secondary} />
+                  <Text style={[styles.filterChipText, filters.types.reward && { color: colors.offRampIcon }]}>
                     Recompensa
                   </Text>
                 </TouchableOpacity>
@@ -253,7 +254,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('presale')}
                 >
-                  <Icon name="lock" size={16} color={filters.types.presale ? '#6366F1' : '#6B7280'} />
+                  <Icon name="lock" size={16} color={filters.types.presale ? '#6366F1' : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.presale && { color: '#6366F1' }]}>
                     Preventa
                   </Text>
@@ -261,12 +262,12 @@ export const TransactionFilterModal = ({
                 <TouchableOpacity
                   style={[
                     styles.filterChip,
-                    filters.types.payroll && { backgroundColor: '#10B981' + '20', borderColor: '#10B981' }
+                    filters.types.payroll && { backgroundColor: colors.primaryDark + '20', borderColor: colors.primaryDark }
                   ]}
                   onPress={() => toggleType('payroll')}
                 >
-                  <Icon name="briefcase" size={16} color={filters.types.payroll ? '#10B981' : '#6B7280'} />
-                  <Text style={[styles.filterChipText, filters.types.payroll && { color: '#10B981' }]}>
+                  <Icon name="briefcase" size={16} color={filters.types.payroll ? colors.primaryDark : colors.text.secondary} />
+                  <Text style={[styles.filterChipText, filters.types.payroll && { color: colors.primaryDark }]}>
                     Nómina
                   </Text>
                 </TouchableOpacity>
@@ -277,7 +278,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('ramp')}
                 >
-                  <Icon name="download-cloud" size={16} color={filters.types.ramp ? '#0EA5E9' : '#6B7280'} />
+                  <Icon name="download-cloud" size={16} color={filters.types.ramp ? '#0EA5E9' : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.ramp && { color: '#0EA5E9' }]}>
                     Recarga/retiro
                   </Text>
@@ -289,7 +290,7 @@ export const TransactionFilterModal = ({
                   ]}
                   onPress={() => toggleType('humanitarian')}
                 >
-                  <Icon name="heart" size={16} color={filters.types.humanitarian ? '#E11D48' : '#6B7280'} />
+                  <Icon name="heart" size={16} color={filters.types.humanitarian ? '#E11D48' : colors.text.secondary} />
                   <Text style={[styles.filterChipText, filters.types.humanitarian && { color: '#E11D48' }]}>
                     Ayuda humanitaria
                   </Text>
@@ -326,11 +327,11 @@ export const TransactionFilterModal = ({
                 <TouchableOpacity
                   style={[
                     styles.filterChip,
-                    filters.currencies.USDC && { backgroundColor: '#3B82F6' + '20', borderColor: '#3B82F6' }
+                    filters.currencies.USDC && { backgroundColor: colors.accent + '20', borderColor: colors.accent }
                   ]}
                   onPress={() => toggleCurrency('USDC')}
                 >
-                  <Text style={[styles.filterChipText, filters.currencies.USDC && { color: '#3B82F6' }]}>
+                  <Text style={[styles.filterChipText, filters.currencies.USDC && { color: colors.accent }]}>
                     USDC
                   </Text>
                 </TouchableOpacity>
@@ -344,24 +345,24 @@ export const TransactionFilterModal = ({
                 <TouchableOpacity
                   style={[
                     styles.filterChip,
-                    filters.status.completed && { backgroundColor: '#10B981' + '20', borderColor: '#10B981' }
+                    filters.status.completed && { backgroundColor: colors.primaryDark + '20', borderColor: colors.primaryDark }
                   ]}
                   onPress={() => toggleStatus('completed')}
                 >
-                  <Icon name="check-circle" size={16} color={filters.status.completed ? '#10B981' : '#6B7280'} />
-                  <Text style={[styles.filterChipText, filters.status.completed && { color: '#10B981' }]}>
+                  <Icon name="check-circle" size={16} color={filters.status.completed ? colors.primaryDark : colors.text.secondary} />
+                  <Text style={[styles.filterChipText, filters.status.completed && { color: colors.primaryDark }]}>
                     Completado
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.filterChip,
-                    filters.status.pending && { backgroundColor: '#F59E0B' + '20', borderColor: '#F59E0B' }
+                    filters.status.pending && { backgroundColor: colors.offRampIcon + '20', borderColor: colors.offRampIcon }
                   ]}
                   onPress={() => toggleStatus('pending')}
                 >
-                  <Icon name="clock" size={16} color={filters.status.pending ? '#F59E0B' : '#6B7280'} />
-                  <Text style={[styles.filterChipText, filters.status.pending && { color: '#F59E0B' }]}>
+                  <Icon name="clock" size={16} color={filters.status.pending ? colors.offRampIcon : colors.text.secondary} />
+                  <Text style={[styles.filterChipText, filters.status.pending && { color: colors.offRampIcon }]}>
                     Pendiente
                   </Text>
                 </TouchableOpacity>
@@ -438,7 +439,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 24,
@@ -466,7 +467,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   filterSections: {
     paddingHorizontal: 24,
@@ -477,7 +478,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 12,
   },
   filterOptions: {
@@ -492,15 +493,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
+    borderColor: colors.border,
+    backgroundColor: colors.neutral,
     marginBottom: 8,
     marginRight: 8,
   },
   filterChipText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginLeft: 6,
   },
   modalFooter: {
@@ -508,12 +509,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: colors.border,
     gap: 12,
   },
   resetButton: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -521,7 +522,7 @@ const styles = StyleSheet.create({
   resetButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   applyButton: {
     flex: 2,
@@ -532,6 +533,6 @@ const styles = StyleSheet.create({
   applyButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#ffffff',
+    color: colors.white,
   },
 });
