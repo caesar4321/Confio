@@ -742,6 +742,31 @@ export const ProfileScreen = () => {
           </View>
         </View>
 
+        {/* Community & Support */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Icon name="message-circle" size={20} color="#6B7280" />
+              <Text style={styles.cardTitle}>Comunidad y soporte</Text>
+            </View>
+          </View>
+          <View style={styles.cardOptions}>
+            <TouchableOpacity
+              style={styles.cardOption}
+              onPress={handleTelegramPress}
+              accessibilityRole="link"
+              accessibilityLabel="Abrir el grupo de Telegram de Confío"
+            >
+              <Icon name="send" size={18} color="#6B7280" />
+              <View style={styles.biometricTextContainer}>
+                <Text style={styles.biometricTitle}>Grupo de Telegram</Text>
+                <Text style={styles.biometricStatusText}>Comunidad oficial · t.me/confio4world</Text>
+              </View>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Follow the Founder Section */}
         <View style={styles.founderSection}>
           <View style={styles.founderHeader}>
@@ -822,31 +847,6 @@ export const ProfileScreen = () => {
             <Text style={styles.founderDescription}>
               Descubre por qué un coreano confía en América Latina
             </Text>
-          </View>
-        </View>
-
-        {/* Community & Support */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleRow}>
-              <Icon name="message-circle" size={20} color="#6B7280" />
-              <Text style={styles.cardTitle}>Comunidad y soporte</Text>
-            </View>
-          </View>
-          <View style={styles.cardOptions}>
-            <TouchableOpacity
-              style={styles.cardOption}
-              onPress={handleTelegramPress}
-              accessibilityRole="link"
-              accessibilityLabel="Abrir el grupo de Telegram de Confío"
-            >
-              <Icon name="send" size={18} color="#6B7280" />
-              <View style={styles.biometricTextContainer}>
-                <Text style={styles.biometricTitle}>Grupo de Telegram</Text>
-                <Text style={styles.biometricStatusText}>Comunidad oficial · t.me/confio4world</Text>
-              </View>
-              <Icon name="chevron-right" size={16} color="#9CA3AF" />
-            </TouchableOpacity>
           </View>
         </View>
 
