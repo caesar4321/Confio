@@ -118,31 +118,41 @@ vault backing invariant holds through trades.
 
 ## Open questions (blockers before implementation)
 
-> **Investigation 2026-07-05** (docs.ondo.finance + BSC on-chain reads):
-> several items below resolved — see per-item status.
+> **Investigation 2026-07-05** (docs.ondo.finance + BSC on-chain reads),
+> **superseded on 2026-07-06 by Ondo first-party reply**: the Instant
+> Manager goes LIVE ON BNB ~end of week of 2026-07-06, deposit currency
+> **USDT only on BNB** (USDC on ETH), single atomic transaction, $1
+> minimum for instant mint/redeem, gated on Primary Purchaser approval.
+> The public docs were simply behind reality — the original architecture
+> hypothesis (USDT ↔ USDY on BSC) is CONFIRMED.
 
-1. **Instant Manager ABI on BNB** — **RESOLVED: there is no IM on BNB
-   today.** `USDY_InstantManager` exists only on Ethereum
+1. **Instant Manager ABI on BNB** — **CONFIRMED SHIPPING (Ondo,
+   2026-07-06): live on BNB "beginning end of this week", USDT deposit,
+   one atomic tx.** Reference interface from Ethereum
    (`0xa42613C243b67BF6194Ac327795b926B4b491f15`):
    `subscribe(depositToken, depositAmount, minimumRwaReceived)` selector
    `0x22d4a175`, `redeem(rwaAmount, receivingToken, minimumReceived)`
-   selector `0xd8780161` — deposit/receive token is **USDC**; USDT appears
-   nowhere in the integration guide. Callers must be whitelisted in
-   OndoIDRegistry. `_imSubscribe`/`_imRedeem` cannot be wired on BNB until
-   Ondo ships an IM there (→ Michael Q#1).
+   selector `0xd8780161`. REMAINING: the BNB IM contract address + verify
+   the ABI matches the ETH deployment (watch the addresses page /
+   BscScan; then fill `IOndoInstantManager` and run the testnet
+   integration test from the deploy checklist).
 2. **USDY flavor on BSC** — **CONFIRMED accumulating, 18 decimals**
    (on-chain read of `0x608593d17a2decbbc4399e4185be4922f97ed32e`,
-   "Ondo U.S. Dollar Yield"). **BUT the deployment is dormant**: total
-   supply 3.39 USDY, and BNB is absent from the official USDY chain list
-   (ETH, Mantle, Solana, Sui, Aptos, Noble, Arbitrum, Stellar, Plume,
-   Sei). Looks like a pre-launch endpoint — ask Ondo if/when it goes live.
-3. **RWADynamicOracle deployment on BSC** — none documented (only the GM
-   `SyntheticSharesOracle` for stocks). Folded into the BNB-USDY-launch
-   question above.
+   "Ondo U.S. Dollar Yield"). The 3.39-token supply read on 2026-07-05
+   was the pre-launch state of the deployment Ondo is now activating.
+3. **RWADynamicOracle deployment on BSC** — still the open technical
+   question: `accrue()` needs the USDY price on BNB. Ondo pointed Solana
+   integrators at PYTH; ask whether BNB gets a RWADynamicOracle alongside
+   the IM (the IM itself needs one to price mints) and which source is
+   canonical for partners. (→ ask Daniel/Michael with the IM address.)
 4. **USDT-BSC decimals** — 18 on BSC (unlike Ethereum's 6); constants assume
    1e18 everywhere. Verify against the canonical BSC-USD contract.
 5. **OndoIDRegistry whitelisting** — the vault address must be whitelisted as
-   a Primary Purchaser contract (Option 1 KYB, in progress). Redeeming to
+   a Primary Purchaser contract (Option 1 KYB, in progress — Ondo's
+   2026-07-06 reply: "Once approved as a PP, you'll be good to mint and
+   redeem"; Daniel Marcus is the onboarding contact, read-only API key
+   available meanwhile). Confirm the PP whitelist covers a CONTRACT
+   caller (the vault proxy address), not just EOAs. Redeeming to
    arbitrary `to` addresses may also require registry checks — confirm
    whether USDY transfers out of the vault to non-whitelisted addresses are
    allowed, or whether `redeem`'s raw-USDY path must be treasury-only.
