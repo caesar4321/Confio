@@ -1,0 +1,52 @@
+{
+ "ALG": {
+  "chainId": 15,
+  "bridgeId": "3361283339",
+  "bridgeAddress": "KB2YJBRULWSHID77HLX4XKATV7CR56AQD7UCDXJQOXGA2BIXTD7JLKGRRU",
+  "paddingUtilId": "3361271116",
+  "tokens": [
+   {
+    "symbol": "USDC",
+    "decimals": 6,
+    "feeShare": "0.0015",
+    "tokenAddress": "31566704",
+    "poolInfo": {
+     "aValue": "20",
+     "dValue": "81763340",
+     "tokenBalance": "41392966",
+     "vUsdBalance": "40370530"
+    }
+   }
+  ]
+ },
+ "BSC": {
+  "chainId": 2,
+  "bridgeAddress": "0x3C4FA639c8D7E65c603145adaD8bD12F2358312f",
+  "tokens": [
+   {
+    "symbol": "USDT",
+    "decimals": 18,
+    "feeShare": "0.0015",
+    "tokenAddress": "0x55d398326f99059fF775485246999027B3197955",
+    "poolInfo": {
+     "aValue": "20",
+     "dValue": "1608743272",
+     "tokenBalance": "861192037",
+     "vUsdBalance": "747649429"
+    }
+   },
+   {
+    "symbol": "USDC",
+    "decimals": 18,
+    "feeShare": "0.003",
+    "tokenAddress": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "poolInfo": {
+     "aValue": "20",
+     "dValue": "124507338",
+     "tokenBalance": "63322731",
+     "vUsdBalance": "61185055"
+    }
+   }
+  ]
+ }
+}

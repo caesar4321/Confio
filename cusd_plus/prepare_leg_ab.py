@@ -20,6 +20,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from . import allbridge_math
+
 logger = logging.getLogger(__name__)
 
 TOKEN_INFO_URL = 'https://core.api.allbridgecoreapi.net/token-info'
@@ -33,16 +35,24 @@ SWAP_AND_BRIDGE_SELECTOR_METHOD = Method(
 )
 
 
-def _bridge_wiring():
+def _token_info():
+    """One token-info fetch shared by wiring AND the rule-8 re-quote.
+    30s TTL: wiring is static, but pool balances must be fresh enough
+    to price the route at signing time."""
+    data = cache.get('cusd_plus_token_info')
+    if data is None:
+        data = requests.get(TOKEN_INFO_URL, timeout=15).json()
+        cache.set('cusd_plus_token_info', data, 30)
+    return data
+
+
+def _bridge_wiring(data=None):
     """Server-side Allbridge wiring — NEVER trust client-supplied ids."""
-    wiring = cache.get('cusd_plus_bridge_wiring')
-    if wiring:
-        return wiring
-    data = requests.get(TOKEN_INFO_URL, timeout=15).json()
+    data = data or _token_info()
     alg, bsc = data['ALG'], data['BSC']
     usdc = next(t for t in alg['tokens'] if t['symbol'] == 'USDC')
     usdt = next(t for t in bsc['tokens'] if t['symbol'] == 'USDT')
-    wiring = {
+    return {
         'bridge_app_id': int(alg['bridgeId']),
         'bridge_address': alg['bridgeAddress'],
         'padding_app_id': int(alg['paddingUtilId']),
@@ -50,8 +60,6 @@ def _bridge_wiring():
         'usdc_asset_id': int(usdc['tokenAddress']),
         'usdt_bsc': usdt['tokenAddress'].lower(),
     }
-    cache.set('cusd_plus_bridge_wiring', wiring, 300)
-    return wiring
 
 
 def _no_rekey_close(txn) -> bool:
@@ -132,12 +140,44 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
     except Exception:
         return {'success': False, 'error': 'tail_decode_failed'}
 
-    wiring = _bridge_wiring()
+    info = _token_info()
+    wiring = _bridge_wiring(info)
     cusd_micro = int(amount * 1_000_000)
     err = verify_tail(tail, user_address, bsc_address, cusd_micro, wiring)
     if err:
         logger.warning('leg-AB tail rejected for account %s: %s', account.id, err)
         return {'success': False, 'error': err}
+
+    # rule 8: independent server re-quote right before signing. The client
+    # quotes for UX; the SPONSOR prices the route itself — a stale or
+    # hostile client quote can never commit the user to a bad fill.
+    # Allbridge has no on-chain end-to-end minReceive (the destination leg
+    # executes later), so this check is the last enforcement point.
+    src = allbridge_math.Side.from_token_info(
+        next(t for t in info['ALG']['tokens'] if t['symbol'] == 'USDC'))
+    dst = allbridge_math.Side.from_token_info(
+        next(t for t in info['BSC']['tokens'] if t['symbol'] == 'USDT'))
+    bridge_receive_usd = allbridge_math.quote_receive_usd(amount, src, dst)
+    fee_bps = int(getattr(settings, 'CUSD_PLUS_CONVERT_FEE_BPS', 0))
+    receive_usd = bridge_receive_usd * (1 - Decimal(fee_bps) / 10_000)
+    quoted_cost_bps = allbridge_math.cost_bps(amount, receive_usd)
+    # Client partial fills target the threshold exactly; the grace margin
+    # absorbs pool drift between the client's quote and this check without
+    # weakening the guard materially.
+    threshold_bps = Decimal(int(getattr(settings, 'CUSD_PLUS_SPREAD_THRESHOLD_BPS', 50))
+                            + int(getattr(settings, 'CUSD_PLUS_SPREAD_GRACE_BPS', 10)))
+    if quoted_cost_bps > threshold_bps:
+        max_fill = allbridge_math.max_fill_under_threshold_usd(
+            amount, threshold_bps - fee_bps, src, dst)
+        logger.warning(
+            'leg-AB spread rejected for account %s: %.1fbps > %sbps (max fill $%s)',
+            account.id, quoted_cost_bps, threshold_bps, max_fill)
+        return {
+            'success': False,
+            'error': 'spread_above_threshold',
+            'cost_bps': float(round(quoted_cost_bps, 1)),
+            'max_fill_usd': str(max_fill),
+        }
 
     builder = CUSDTransactionBuilder()
     algod_client = get_algod_client()
@@ -192,7 +232,7 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
         actor_display_name=account.display_name or '',
         direction='to_savings',
         amount_usd=amount,
-        quoted_receive_usd=amount,  # refined by client Advance; bridge floor enforces
+        quoted_receive_usd=receive_usd.quantize(Decimal('0.000001')),  # rule-8 server quote
         user_algo_address=user_address,
         user_bsc_address=bsc_address,
     )

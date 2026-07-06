@@ -64,7 +64,13 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                     tail=list(content.get("tail") or []),
                 )
                 if not pack.get("success"):
-                    await self.send_json({"type": "error", "message": pack.get("error", "prepare_savings_failed")})
+                    err = {"type": "error", "message": pack.get("error", "prepare_savings_failed")}
+                    # rule-8 spread rejections carry the server quote so the
+                    # client can re-offer an honest partial fill
+                    for k in ("cost_bps", "max_fill_usd"):
+                        if k in pack:
+                            err[k] = pack[k]
+                    await self.send_json(err)
                 else:
                     await self.send_json({"type": "prepare_savings_ready", "pack": pack})
             except Exception as e:

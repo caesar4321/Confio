@@ -1,0 +1,82 @@
+[
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "500000",
+  "receive_units": "499250000000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "1000000",
+  "receive_units": "999498500000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "100000000",
+  "receive_units": "99980803500000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "999990000",
+  "receive_units": "999225909500000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "5000000000",
+  "receive_units": "4983386690500000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "10000000000",
+  "receive_units": "9932061527000000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "25000000000",
+  "receive_units": "24405039447000000000000"
+ },
+ {
+  "direction": "alg_to_bsc",
+  "send_units": "100000000000",
+  "receive_units": "40200783237500000000000"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "500000000000000000",
+  "receive_units": "497253"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "1000000000000000000",
+  "receive_units": "993507"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "100000000000000000000",
+  "receive_units": "99408663"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "999990000000000000000",
+  "receive_units": "993518483"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "5000000000000000000000",
+  "receive_units": "4955126145"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "10000000000000000000000",
+  "receive_units": "9876961301"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "25000000000000000000000",
+  "receive_units": "24306155995"
+ },
+ {
+  "direction": "bsc_to_alg",
+  "send_units": "100000000000000000000000",
+  "receive_units": "41123781660"
+ }
+]

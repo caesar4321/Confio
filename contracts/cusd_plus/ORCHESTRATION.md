@@ -211,6 +211,19 @@ py-algosdk and check):
 6. Rate limit per account (e.g. 3 prepares/min) + amount ≤ per-tx cap.
 7. On success: create CusdPlusConversion (CREATED) server-side and return
    conversion_id in the pack so client Advance calls bind to it.
+8. **Independent server re-quote (implemented 2026-07-06):** the sponsor
+   prices the route itself right before signing — Python port of the pool
+   math (cusd_plus/allbridge_math.py, cross-validated integer-exact
+   against the client's TS port on frozen vectors). Allbridge has no
+   on-chain end-to-end minReceive (the destination leg executes later),
+   so this is the last enforcement point. Reject when total cost >
+   CUSD_PLUS_SPREAD_THRESHOLD_BPS (50) + CUSD_PLUS_SPREAD_GRACE_BPS (10;
+   absorbs pool drift between the client's quote and prepare — client
+   partial fills target the threshold exactly, so zero grace would
+   spuriously reject honest boundary fills). The rejection payload
+   carries the server-computed cost_bps and max_fill_usd so the client
+   re-offers an honest partial fill. quoted_receive_usd on the
+   conversion row records the rule-8 quote, not the client's.
 
 **ORDERING ADDENDUM (2026-07-04, found during client assembly):** resource
 population must happen SERVER-SIDE, after composing the full group and

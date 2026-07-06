@@ -118,14 +118,27 @@ vault backing invariant holds through trades.
 
 ## Open questions (blockers before implementation)
 
-1. **Instant Manager ABI on BNB** — `IOndoInstantManager` here is
-   provisional. Confirm exact `subscribe`/`redeem` signatures, USDT deposit
-   support, and the IM contract address (asked in the pending Michael email).
-   Only `_imSubscribe`/`_imRedeem` bodies should need changes.
-2. **USDY flavor on BSC** — assumed accumulating (Ethereum-style USDY, not
-   rebasing rUSDY) and 18 decimals. Verify.
-3. **RWADynamicOracle deployment on BSC** — address + confirm `getPrice()`
-   1e18 semantics match the Ethereum deployment (`0xA0219AA5...`).
+> **Investigation 2026-07-05** (docs.ondo.finance + BSC on-chain reads):
+> several items below resolved — see per-item status.
+
+1. **Instant Manager ABI on BNB** — **RESOLVED: there is no IM on BNB
+   today.** `USDY_InstantManager` exists only on Ethereum
+   (`0xa42613C243b67BF6194Ac327795b926B4b491f15`):
+   `subscribe(depositToken, depositAmount, minimumRwaReceived)` selector
+   `0x22d4a175`, `redeem(rwaAmount, receivingToken, minimumReceived)`
+   selector `0xd8780161` — deposit/receive token is **USDC**; USDT appears
+   nowhere in the integration guide. Callers must be whitelisted in
+   OndoIDRegistry. `_imSubscribe`/`_imRedeem` cannot be wired on BNB until
+   Ondo ships an IM there (→ Michael Q#1).
+2. **USDY flavor on BSC** — **CONFIRMED accumulating, 18 decimals**
+   (on-chain read of `0x608593d17a2decbbc4399e4185be4922f97ed32e`,
+   "Ondo U.S. Dollar Yield"). **BUT the deployment is dormant**: total
+   supply 3.39 USDY, and BNB is absent from the official USDY chain list
+   (ETH, Mantle, Solana, Sui, Aptos, Noble, Arbitrum, Stellar, Plume,
+   Sei). Looks like a pre-launch endpoint — ask Ondo if/when it goes live.
+3. **RWADynamicOracle deployment on BSC** — none documented (only the GM
+   `SyntheticSharesOracle` for stocks). Folded into the BNB-USDY-launch
+   question above.
 4. **USDT-BSC decimals** — 18 on BSC (unlike Ethereum's 6); constants assume
    1e18 everywhere. Verify against the canonical BSC-USD contract.
 5. **OndoIDRegistry whitelisting** — the vault address must be whitelisted as
@@ -138,10 +151,27 @@ vault backing invariant holds through trades.
    user's own BSC address is msg.sender for mint/redeem (Confío only
    sponsors gas), so restricting callers would break the architecture.
 
-7. **GM settlement on BNB** — official settle contract ABI + attestation
-   format (pattern C), and whether payment is USDT or USDY on BNB (if
-   USDY-direct, the router skips the redeemToUsdt hop — cheaper). Also the
-   partner fee schedule, which decides `stockFeeBps`.
+7. **GM settlement on BNB** — **MOSTLY RESOLVED.** Contract:
+   `GMTokenManager 0x91f8Aff3738825e8eB16FC6f6b1A7A4647bDB299` (BNB).
+   Payment: official docs state **"We accept USDC on Ethereum, and USDT on
+   BNB Chain"** — our USDT-BSC rail is exactly the right token. Settlement
+   runs through **USDon** (`0x1f8955E640Cbd9abc3C3Bb408c9E2E1f5F20DfE6`,
+   ~39.7M supply, "permissionless ERC20 stablecoin representing USD held in
+   Ondo's brokerage account" — a settlement dollar, NOT yield-bearing);
+   non-USDon deposit tokens are swapped to USDon zero-slippage inside the
+   call. ABI: `mintWithAttestation(quote, signature, depositToken,
+   depositTokenAmount)` / `redeemWithAttestation(quote, signature,
+   receiveToken, minimumReceiveAmount)` with EIP-712 quotes signed by
+   Ondo's attestation service; the caller must be **whitelisted and its
+   stored `userID` must match the quote** (per-user onboarding — the real
+   partnership blocker for a non-custodial router); `attestationId` replay
+   protection, `minimumDepositUSD`, per-user/per-token rate limits.
+   `_gmBuy/_gmSell` need attestation params added. Still open: partner fee
+   schedule (embedded in quote spread), which decides `stockFeeBps`, and
+   how distribution partners bulk-onboard users. A `GMTokenLimitOrder`
+   contract also exists on BNB (future feature). Eligibility: prohibited =
+   US/Canada/Cuba + sanctions; Brazil restricted to Qualified Investors —
+   matches our existing geofence (US/CA/BR + sanctions) exactly.
 
 ## Deployment checklist (when ungated)
 
