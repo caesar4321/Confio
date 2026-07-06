@@ -623,17 +623,34 @@ export const ContactsScreen = () => {
   };
 
   // Demand probe (Julian, 2026-07-04): rails we do NOT support yet stay
-  // visible in the sheet. A tap IS the demand signal — logged to analytics
-  // before the user reads anything — and the alert routes real urgency to
-  // support. Zero backend, real numbers on which rail to build next.
+  // visible in the sheet. Two-stage signal (2026-07-06): a bare tap is
+  // cheap curiosity, so real demand is the CONFIRMED stage — the user
+  // explicitly asks to be notified. Same whitelisted event, `stage`
+  // property separates the funnel levels; tap→confirm ratio comes free.
   const handleReceiveRailInterest = (rail: string, label: string) => {
     setShowReceiveSelection(false);
     // House funnel (FunnelEvent table, admin-visible) + Firebase dual-emit.
-    AnalyticsService.logFunnelEvent('receive_rail_interest', { rail });
+    AnalyticsService.logFunnelEvent('receive_rail_interest', { rail, stage: 'tap' });
     Alert.alert(
       label,
-      'Aún no está disponible. Anotamos tu interés — y si lo necesitas pronto, ' +
-        'escríbenos al soporte y te avisamos primero.',
+      'Aún no está disponible. ¿Quieres que te avisemos cuando lo esté?',
+      [
+        { text: 'Solo miraba', style: 'cancel' },
+        {
+          text: 'Sí, avísame',
+          onPress: () => {
+            AnalyticsService.logFunnelEvent('receive_rail_interest', {
+              rail,
+              stage: 'confirmed',
+            });
+            Alert.alert(
+              '¡Anotado!',
+              'Te avisamos apenas esté listo. Si lo necesitas pronto, ' +
+                'escríbenos al soporte y te damos prioridad.',
+            );
+          },
+        },
+      ],
     );
   };
 
