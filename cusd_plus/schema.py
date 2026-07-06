@@ -115,7 +115,9 @@ class Query(graphene.ObjectType):
         # paused=True until the conversion rails ship — the client treats the
         # kill switch as authoritative, so no build can convert prematurely.
         return CusdPlusConvertParamsType(
-            spread_threshold_bps=getattr(settings, 'CUSD_PLUS_SPREAD_THRESHOLD_BPS', 50),
+            # 100bps ceiling: guard stops catastrophes, not conversions —
+            # within 1% the user sees the quoted cost and decides
+            spread_threshold_bps=getattr(settings, 'CUSD_PLUS_SPREAD_THRESHOLD_BPS', 100),
             confio_fee_bps=getattr(settings, 'CUSD_PLUS_CONVERT_FEE_BPS', 0),
             min_amount_usd=getattr(settings, 'CUSD_PLUS_MIN_CONVERT_USD', 1.0),
             paused=getattr(settings, 'CUSD_PLUS_CONVERSIONS_PAUSED', True),

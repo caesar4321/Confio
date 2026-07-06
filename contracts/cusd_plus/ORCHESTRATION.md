@@ -217,7 +217,11 @@ py-algosdk and check):
    against the client's TS port on frozen vectors). Allbridge has no
    on-chain end-to-end minReceive (the destination leg executes later),
    so this is the last enforcement point. Reject when total cost >
-   CUSD_PLUS_SPREAD_THRESHOLD_BPS (50) + CUSD_PLUS_SPREAD_GRACE_BPS (10;
+   CUSD_PLUS_SPREAD_THRESHOLD_BPS (100 — the guard stops catastrophes,
+   not conversions: within 1% the user sees the quoted cost on the
+   convert screen and decides; a symmetric 1% also keeps the Retirar
+   direction open under normal pool imbalance, where a tight symmetric
+   threshold structurally blocked exits) + CUSD_PLUS_SPREAD_GRACE_BPS (10;
    absorbs pool drift between the client's quote and prepare — client
    partial fills target the threshold exactly, so zero grace would
    spuriously reject honest boundary fills). The rejection payload

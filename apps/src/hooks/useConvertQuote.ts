@@ -26,7 +26,10 @@ const GET_CONVERT_PARAMS = gql`
 `;
 
 const DEFAULTS = {
-  spreadThresholdPct: 0.5,
+  // 1% ceiling: the guard stops catastrophes, not conversions — within it
+  // the user sees the quoted cost and decides (offline fallback only;
+  // the live value comes from cusdPlusConvertParams)
+  spreadThresholdPct: 1.0,
   confioFeeBps: 0, // open pricing decision — server-config, never hardcoded copy
   minAmountUsd: 1,
   paused: false,

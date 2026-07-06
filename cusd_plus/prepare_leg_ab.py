@@ -164,7 +164,9 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
     # Client partial fills target the threshold exactly; the grace margin
     # absorbs pool drift between the client's quote and this check without
     # weakening the guard materially.
-    threshold_bps = Decimal(int(getattr(settings, 'CUSD_PLUS_SPREAD_THRESHOLD_BPS', 50))
+    # 100bps ceiling (2026-07-06): the guard stops catastrophes, not
+    # conversions — within 1% the user sees the quoted cost and decides.
+    threshold_bps = Decimal(int(getattr(settings, 'CUSD_PLUS_SPREAD_THRESHOLD_BPS', 100))
                             + int(getattr(settings, 'CUSD_PLUS_SPREAD_GRACE_BPS', 10)))
     if quoted_cost_bps > threshold_bps:
         max_fill = allbridge_math.max_fill_under_threshold_usd(
