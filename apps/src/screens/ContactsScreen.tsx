@@ -1522,6 +1522,16 @@ export const ContactsScreen = () => {
             // two-world choice (usar → cUSD / ahorrar → cUSD+) mirroring
             // Recargar; only the savings destination is geo-gated then.
             {
+              // Takenos/Meru migration corridor hypothesis (2026-07-06):
+              // Meru balances live on Polygon, so this probe sizes the
+              // "move your USD account to Confío" demand specifically.
+              icon: 'clock',
+              title: 'USDC · USDT (Polygon)',
+              subtitle: 'Red Polygon · aún no disponible · tócalo y te avisamos',
+              onPress: () =>
+                handleReceiveRailInterest('polygon', 'USDC / USDT (Polygon)'),
+            },
+            {
               icon: 'clock',
               title: 'USDC · USDT (Ethereum)',
               subtitle: 'Red Ethereum (ERC-20) · aún no disponible · tócalo y te avisamos',
