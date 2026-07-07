@@ -1,8 +1,28 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
+import { gql, useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyTestimonials.module.css';
 import { useLanguage } from '../../contexts/LanguageContext';
+
+// Live traction numbers — same definitions the admin dashboard uses
+// (Koywe grey-box on-chain deposited volume; presale raised). Server
+// caches 10 min; the fallbacks below are a snapshot (July 2026) so the
+// section never renders empty.
+const LANDING_STATS = gql`
+  query LandingStats {
+    landingStats {
+      depositedVolumeUsd
+      presaleRaisedUsd
+    }
+  }
+`;
+
+const fmtUsd = (n, decimals = 0) =>
+  '$' + Number(n).toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
 
 const FriendlyTestimonials = () => {
   const [ref, inView] = useInView({
@@ -33,10 +53,19 @@ const FriendlyTestimonials = () => {
     }
   ];
 
+  const { data: statsData } = useQuery(LANDING_STATS, { fetchPolicy: 'cache-and-network' });
+  const live = statsData?.landingStats;
+
   const stats = [
-    { number: '6500+', label: t('Usuarios activos de la app', 'Active app users', '앱 활성 사용자') },
-    { number: '100+', label: t('Número de depósitos de USDC', 'Number of USDC deposits', 'USDC 입금 건수') },
-    { number: '21+', label: t('Países (LATAM, EEUU, España)', 'Countries (LATAM, USA, Spain)', '국가 (라틴 아메리카, 미국, 스페인)') },
+    { number: '7000+', label: t('Usuarios activos de la app', 'Active app users', '앱 활성 사용자') },
+    {
+      number: live?.depositedVolumeUsd != null ? fmtUsd(live.depositedVolumeUsd) : '$52,642',
+      label: t('Volumen depositado on-chain', 'On-chain deposited volume', '온체인 입금 총액')
+    },
+    {
+      number: live?.presaleRaisedUsd != null ? fmtUsd(live.presaleRaisedUsd, 2) : '$3,597.71',
+      label: t('Recaudado en preventa $CONFIO', 'Raised in $CONFIO presale', '$CONFIO 프리세일 모금액')
+    },
     { number: t('Gratis', 'Free', '무료'), label: t('Para usuarios normales', 'For regular users', '일반 사용자를 위해') }
   ];
 
