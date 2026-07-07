@@ -13,9 +13,9 @@ const FriendlyFeatures = () => {
 
   const features = [
     {
-      icon: '🚀',
-      title: t('Acceso Temprano', 'Early Access', '얼리 액세스'),
-      description: t('Sé de los primeros 10,000 usuarios en probar nuestra beta exclusiva', 'Be among the first 10,000 users to try our exclusive beta', '독점 베타를 시도하는 첫 10,000명의 사용자가 되세요')
+      icon: '🔓',
+      title: t('Código Abierto', 'Open Source', '오픈 소스'),
+      description: t('Todo nuestro código es público y verificable. La confianza se gana con pruebas.', 'All our code is public and verifiable. Trust is earned with proof.', '모든 코드가 공개되어 검증 가능합니다. 신뢰는 증거로 얻는 것입니다.')
     },
     {
       icon: '💰',
@@ -53,7 +53,7 @@ const FriendlyFeatures = () => {
           transition={{ duration: 0.6 }}
           className={styles.header}
         >
-          <span className={styles.badge}>🎯 {t('BETA EXCLUSIVA', 'EXCLUSIVE BETA', '독점 베타')}</span>
+          <span className={styles.badge}>{t('POR QUÉ CONFÍO', 'WHY CONFÍO', '왜 CONFÍO인가')}</span>
           <h2 className={styles.title}>
             {t('Todo lo que necesitas,', 'Everything you need,', '필요한 모든 것,')}
             <span className={styles.highlight}> {t('nada que no', 'nothing you don\'t', '불필요한 것은 없음')}</span>

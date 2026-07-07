@@ -5,7 +5,7 @@
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 0 2rem;
 }
@@ -17,8 +17,8 @@
 
 .badge {
   display: inline-block;
-  background: linear-gradient(135deg, #e9d5ff, #ddd6fe);
-  color: #7c3aed;
+  background: #ecfdf5;
+  color: #10b981;
   padding: 8px 20px;
   border-radius: 100px;
   font-size: 0.875rem;
@@ -30,20 +30,17 @@
 .title {
   font-size: clamp(2rem, 4vw, 3rem);
   font-weight: 700;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 1rem;
 }
 
 .highlight {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #10b981;
 }
 
 .subtitle {
   font-size: 1.25rem;
-  color: #64748b;
+  color: #6b7280;
   max-width: 600px;
   margin: 0 auto;
 }
@@ -60,7 +57,7 @@
   top: 0;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(180deg, #34d399 0%, #8b5cf6 100%);
+  background: #d1fae5;
   transform: translateX(-50%);
 }
 
@@ -115,7 +112,7 @@
   display: inline-block;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #64748b;
+  color: #6b7280;
   background: #f3f4f6;
   padding: 4px 12px;
   border-radius: 100px;
@@ -123,12 +120,12 @@
 }
 
 .timelineQuarter.active {
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  background: #10b981;
   color: white;
 }
 
 /* Mirrors the in-app roadmap grammar: completed = calm green check,
-   active = violet (the current chapter), upcoming = gray. */
+   active = emerald (the current chapter), upcoming = gray. */
 .timelineQuarter.completed {
   background: #d1fae5;
   color: #047857;
@@ -137,13 +134,13 @@
 .timelineTitle {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 8px;
 }
 
 .timelineDescription {
   font-size: 1rem;
-  color: #64748b;
+  color: #6b7280;
   line-height: 1.5;
 }
 
@@ -163,9 +160,9 @@
 .timelineDot.activeDot {
   width: 20px;
   height: 20px;
-  border-color: #8b5cf6;
-  background: #8b5cf6;
-  box-shadow: 0 0 0 8px rgba(139, 92, 246, 0.2);
+  border-color: #34d399;
+  background: #10b981;
+  box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.2);
 }
 
 .timelineDot.completedDot {
@@ -178,16 +175,16 @@
   padding: 30px;
   background: white;
   border-radius: 16px;
-  border: 2px solid #e2e8f0;
+  border: 2px solid #e5e7eb;
 }
 
 .footerText {
   font-size: 1.1rem;
-  color: #475569;
+  color: #6b7280;
 }
 
 .footerText strong {
-  color: #1e293b;
+  color: #1f2937;
 }
 
 @media (max-width: 768px) {

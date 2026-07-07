@@ -20,7 +20,7 @@ const FriendlyFeeStructure = () => {
           transition={{ duration: 0.6 }}
           className={styles.header}
         >
-          <span className={styles.badge}>💰 {t('TRANSPARENCIA TOTAL', 'TOTAL TRANSPARENCY', '완전한 투명성')}</span>
+          <span className={styles.badge}>{t('TRANSPARENCIA TOTAL', 'TOTAL TRANSPARENCY', '완전한 투명성')}</span>
           <h2 className={styles.title}>
             {t('Tarifas', 'Fees', '수수료')} <span className={styles.highlight}>{t('Justas y Claras', 'Fair and Clear', '공정하고 투명한')}</span>
           </h2>
@@ -37,7 +37,7 @@ const FriendlyFeeStructure = () => {
             className={styles.card}
           >
             <div className={styles.cardHeader}>
-              <span className={styles.userType}>👤 {t('Usuario Personal', 'Personal User', '개인 사용자')}</span>
+              <span className={styles.userType}>{t('Usuario Personal', 'Personal User', '개인 사용자')}</span>
               <div className={styles.price}>
                 <span className={styles.priceAmount}>{t('GRATIS', 'FREE', '무료')}</span>
                 <span className={styles.pricePeriod}>{t('Para siempre', 'Forever', '영원히')}</span>
@@ -46,11 +46,11 @@ const FriendlyFeeStructure = () => {
             <div className={styles.cardBody}>
               <h3 className={styles.cardTitle}>{t('Perfecto para ti y tu familia', 'Perfect for you and your family', '당신과 가족에게 완벽함')}</h3>
               <ul className={styles.features}>
-                <li>✅ {t('Envía y recibe dólares digitales', 'Send and receive digital dollars', '디지털 달러 보내고 받기')}</li>
-                <li>✅ {t('Intercambio P2P ilimitado', 'Unlimited P2P exchange', '무제한 P2P 교환')}</li>
-                <li>✅ {t('Transferencias instantáneas', 'Instant transfers', '즉시 송금')}</li>
+                <li>✅ {t('Envía y recibe dólares digitales al instante', 'Send and receive digital dollars instantly', '디지털 달러를 즉시 보내고 받기')}</li>
+                <li>✅ {t('Paga en comercios con QR', 'Pay at businesses with QR', 'QR로 상점에서 결제')}</li>
+                <li>✅ {t('Ahorra con rendimiento diario (cUSD+)', 'Save with daily yield (cUSD+)', '매일 수익이 쌓이는 저축 (cUSD+)')}</li>
+                <li>✅ {t('Invierte en acciones de EE.UU.', 'Invest in U.S. stocks', '미국 주식에 투자')}</li>
                 <li>✅ {t('Sin comisiones ocultas', 'No hidden fees', '숨겨진 수수료 없음')}</li>
-                <li>✅ {t('Sin límite de transacciones', 'No transaction limits', '거래 한도 없음')}</li>
               </ul>
               <div className={styles.freeHighlight}>
                 <span className={styles.highlightIcon}>🎉</span>
@@ -66,7 +66,7 @@ const FriendlyFeeStructure = () => {
             className={`${styles.card} ${styles.businessCard}`}
           >
             <div className={styles.cardHeader}>
-              <span className={styles.userType}>🏢 {t('Usuario Business', 'Business User', '비즈니스 사용자')}</span>
+              <span className={styles.userType}>{t('Usuario Business', 'Business User', '비즈니스 사용자')}</span>
               <div className={styles.price}>
                 <span className={styles.priceAmount}>0.9%</span>
                 <span className={styles.pricePeriod}>{t('Por transacción', 'Per transaction', '거래당')}</span>
@@ -76,9 +76,9 @@ const FriendlyFeeStructure = () => {
               <h3 className={styles.cardTitle}>{t('Ideal para tu negocio', 'Ideal for your business', '당신의 비즈니스에 이상적')}</h3>
               <ul className={styles.features}>
                 <li>✅ {t('Todo lo del plan personal', 'Everything in personal plan', '개인 플랜의 모든 것')}</li>
-                <li>✅ {t('Recibe pagos de clientes', 'Receive customer payments', '고객 결제 수령')}</li>
-                <li>✅ {t('Dashboard de analytics', 'Analytics dashboard', '분석 대시보드')}</li>
-                <li>✅ {t('Múltiples empleados', 'Multiple employees', '다수 직원')}</li>
+                <li>✅ {t('Recibe pagos de clientes con QR', 'Receive customer payments with QR', 'QR로 고객 결제 수령')}</li>
+                <li>✅ {t('Nómina para tus empleados', 'Payroll for your employees', '직원 급여(페이롤) 지급')}</li>
+                <li>✅ {t('Empleados con roles (cajero, gerente)', 'Employees with roles (cashier, manager)', '역할별 직원 관리 (캐셔, 매니저)')}</li>
                 <li>✅ {t('Soporte prioritario', 'Priority support', '우선 지원')}</li>
               </ul>
               <div className={styles.comparison}>

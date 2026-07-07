@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyHowItWorks.module.css';
-import confioAppMockup from '../../images/ConfioApp.png';
+import confioAhorrosDemo from '../../images/ConfioAhorrosDemo.jpeg';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyHowItWorks = () => {
@@ -17,27 +17,21 @@ const FriendlyHowItWorks = () => {
       number: '1',
       title: t('Regístrate con Google o Apple', 'Sign up with Google or Apple', '구글 또는 애플로 가입'),
       description: t('Un solo click y ya tienes tu cuenta. Sin formularios largos.', 'One click and you have your account. No long forms.', '한 번의 클릭으로 계정 생성. 긴 양식 없음.'),
-      icon: '📱',
-      color: '#34d399'
     },
     {
       number: '2',
       title: t('Compra tus dólares', 'Buy your dollars', '달러 구매'),
       description: t('Paga con tu método preferido y recibe dólares digitales al instante.', 'Pay with your preferred method and receive digital dollars instantly.', '선호하는 방법으로 결제하고 즉시 디지털 달러 받기.'),
-      icon: '💵',
-      color: '#f59e0b'
     },
     {
       number: '3',
       title: t('¡Usa tus dólares!', 'Use your dollars!', '달러 사용하기!'),
       description: t('Envía a familia y amigos solo con números de teléfono, paga en tiendas locales, todo gratis.', 'Send to family and friends with just phone numbers, pay at local stores, all for free.', '전화번호만으로 가족과 친구에게 보내고, 현지 상점에서 결제, 모두 무료.'),
-      icon: '🎉',
-      color: '#3b82f6'
     }
   ];
 
   return (
-    <section className={styles.howItWorks} ref={ref}>
+    <section className={styles.howItWorks} ref={ref} id="asi-funciona">
       <div className={styles.container}>
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -45,7 +39,7 @@ const FriendlyHowItWorks = () => {
           transition={{ duration: 0.6 }}
           className={styles.header}
         >
-          <span className={styles.badge}>⚡ {t('BETA: PROCESO SIMPLIFICADO', 'BETA: SIMPLIFIED PROCESS', '베타: 간소화된 프로세스')}</span>
+          <span className={styles.badge}>{t('ASÍ FUNCIONA', 'HOW IT WORKS', '작동 방식')}</span>
           <h2 className={styles.title}>
             {t('Empieza a usar Confío en', 'Start using Confío in', 'Confío 사용 시작')}
             <span className={styles.highlight}> {t('minutos', 'minutes', '분 만에')}</span>
@@ -70,11 +64,10 @@ const FriendlyHowItWorks = () => {
                 transition={{ duration: 0.5, delay: 0.1 * index }}
                 className={styles.step}
               >
-                <div className={styles.stepNumber} style={{ background: step.color }}>
+                <div className={styles.stepNumber}>
                   {step.number}
                 </div>
                 <div className={styles.stepContent}>
-                  <div className={styles.stepIcon}>{step.icon}</div>
                   <h3 className={styles.stepTitle}>{step.title}</h3>
                   <p className={styles.stepDescription}>{step.description}</p>
                 </div>
@@ -88,18 +81,20 @@ const FriendlyHowItWorks = () => {
             transition={{ duration: 0.6, delay: 0.3 }}
             className={styles.mockupContainer}
           >
-            <img 
-              src={confioAppMockup} 
-              alt="Confío App" 
-              className={styles.mockup}
-            />
-            <div className={styles.floatingFeature}>
-              <span>⚡</span>
-              <span>Transferencias instantáneas</span>
-            </div>
-            <div className={styles.floatingFeature2}>
-              <span>🔒</span>
-              <span>100% Seguro</span>
+            <div className={styles.phoneFrame}>
+              <img
+                src={confioAhorrosDemo}
+                alt={t(
+                  'App Confío — Ahorros e Inversiones (pantalla real)',
+                  'Confío app — Savings & Investments (real screen)',
+                  'Confío 앱 — 저축 및 투자 (실제 화면)'
+                )}
+                className={styles.mockup}
+                width={640}
+                height={1422}
+                loading="lazy"
+                decoding="async"
+              />
             </div>
           </motion.div>
         </div>

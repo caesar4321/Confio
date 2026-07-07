@@ -4,7 +4,7 @@
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 0 2rem;
 }
@@ -16,33 +16,30 @@
 
 .badge {
   display: inline-block;
-  background: linear-gradient(135deg, #fef3c7, #fde68a);
-  color: #d97706;
+  background: #ecfdf5;
+  color: #10b981;
   padding: 8px 20px;
   border-radius: 100px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: 1px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   margin-bottom: 1rem;
 }
 
 .title {
   font-size: clamp(2rem, 4vw, 3rem);
   font-weight: 700;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 1rem;
 }
 
 .highlight {
-  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #10b981;
 }
 
 .subtitle {
   font-size: 1.25rem;
-  color: #64748b;
+  color: #6b7280;
   max-width: 600px;
   margin: 0 auto;
 }
@@ -55,10 +52,10 @@
 }
 
 .featureCard {
-  background: #f8fafc;
+  background: #f9fafb;
   padding: 30px;
   border-radius: 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e5e7eb;
   transition: all 0.3s ease;
 }
 
@@ -69,39 +66,47 @@
   border-color: #34d399;
 }
 
+/* App-style quick-action chip (mirrors the app's home actions) */
 .featureIcon {
-  font-size: 2.5rem;
+  font-size: 1.3rem;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ecfdf5;
+  border-radius: 16px;
   margin-bottom: 1rem;
 }
 
 .featureTitle {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 0.5rem;
 }
 
 .featureDescription {
   font-size: 1rem;
-  color: #64748b;
+  color: #6b7280;
   line-height: 1.6;
 }
 
 .cta {
   text-align: center;
   padding: 40px;
-  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  background: #ecfdf5;
   border-radius: 24px;
 }
 
 .ctaText {
   font-size: 1.25rem;
-  color: #475569;
+  color: #6b7280;
   margin-bottom: 1.5rem;
 }
 
 .ctaButton {
-  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  background: #10b981;
   color: white;
   border: none;
   padding: 16px 40px;

@@ -25,6 +25,7 @@ const FriendlyAssets = () => {
         { label: t('Respaldado por', 'Backed by', '지원'), value: '100% USDC' },
         { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Medio de pago y ahorro dentro del ecosistema Confío.', 'Payment and savings rail inside the Confío ecosystem.', 'Confío 생태계에서 결제 및 저축 수단으로 사용됩니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Estable (1:1 con USDC)', 'Stable (1:1 with USDC)', '안정적 (USDC와 1:1)') },
+        { label: t('Red', 'Network', '네트워크'), value: 'Algorand' },
         {
           label: t('ID del Activo', 'Asset ID', '자산 ID'),
           value: (
@@ -51,7 +52,7 @@ const FriendlyAssets = () => {
       logo: cUSDPlusLogo,
       name: 'Confío Dollar+',
       symbol: '$cUSD+',
-      color: '#7c3aed',
+      color: '#10b981',
       comingSoon: t('Próximamente', 'Coming soon', '출시 예정'),
       details: [
         { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Tu ahorro en dólares que crece cada día, respaldado por USDY de Ondo Finance.', 'Your dollar savings growing every day, backed by Ondo Finance\'s USDY.', '매일 성장하는 달러 저축으로, Ondo Finance의 USDY로 담보됩니다.') },
@@ -76,6 +77,7 @@ const FriendlyAssets = () => {
         { label: t('Respaldado por', 'Backed by', '지원'), value: t('Confianza y participación de la comunidad Confío.', 'Trust and participation from the Confío community.', 'Confío 커뮤니티의 신뢰와 참여.') },
         { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Refleja la participación y beneficios dentro de Confío.', 'Reflects engagement and benefits inside Confío.', 'Confío 내 참여와 혜택을 반영합니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Variable', 'Variable', '변동') },
+        { label: t('Red', 'Network', '네트워크'), value: 'Algorand' },
         {
           label: t('ID del Activo', 'Asset ID', '자산 ID'),
           value: (
@@ -101,7 +103,7 @@ const FriendlyAssets = () => {
   ];
 
   return (
-    <section className={styles.assets} ref={ref}>
+    <section className={styles.assets} ref={ref} id="activos">
       <div className={styles.container}>
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -109,9 +111,9 @@ const FriendlyAssets = () => {
           transition={{ duration: 0.6 }}
           className={styles.header}
         >
-          <span className={styles.badge}>💎 {t('NUESTROS ACTIVOS', 'OUR ASSETS', '우리의 자산')}</span>
+          <span className={styles.badge}>{t('NUESTROS ACTIVOS', 'OUR ASSETS', '우리의 자산')}</span>
           <h2 className={styles.title}>
-            <span className={styles.highlight}>Confío Dollar($cUSD)</span>, <span className={styles.highlight2}>Confío($CONFIO)</span> {t('y tu ahorro', 'and your savings', '그리고 당신의 저축')} <span className={styles.highlight2}>Confío Dollar+($cUSD+)</span>
+            <span className={styles.highlight}>Confío Dollar($cUSD)</span>, <span className={styles.highlight2}>Confío($CONFIO)</span> {t('y tu ahorro', 'and your savings', '그리고 당신의 저축')} <span className={styles.highlight}>Confío Dollar+($cUSD+)</span>
           </h2>
           <p className={styles.subtitle}>
             {t('Dos monedas y un instrumento de ahorro, unidos por la misma misión', 'Two currencies and one savings instrument, united by the same mission', '두 개의 통화와 하나의 저축 상품, 같은 사명으로 하나됨')}
@@ -141,8 +143,8 @@ const FriendlyAssets = () => {
                         borderRadius: 100,
                         fontSize: '0.75rem',
                         fontWeight: 700,
-                        color: '#7c3aed',
-                        background: 'rgba(124, 58, 237, 0.1)',
+                        color: '#10b981',
+                        background: '#ecfdf5',
                       }}
                     >
                       {asset.comingSoon}

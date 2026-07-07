@@ -53,7 +53,7 @@ const FriendlyFooter = () => {
         
         <div className={styles.bottom}>
           <p className={styles.copyright}>
-            © 2025 Confío. {t('Todos los derechos reservados', 'All rights reserved', '모든 권리 보유')}
+            © {new Date().getFullYear()} Confío. {t('Todos los derechos reservados', 'All rights reserved', '모든 권리 보유')}
           </p>
         </div>
       </div>

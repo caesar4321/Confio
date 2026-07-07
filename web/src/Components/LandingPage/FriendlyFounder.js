@@ -36,16 +36,14 @@ const FriendlyFounder = () => {
               className={styles.founderImage}
             />
             <div className={styles.imageBadge}>
-              <span>🚀</span>
               <span>Fundador & CEO</span>
             </div>
           </div>
 
           <div className={styles.textContent}>
-            <span className={styles.badge}>🌐 {t('VISIONARIO DE FINTECH LATAM', 'LATAM FINTECH VISIONARY', '라틴 아메리카 핀테크 비전가')}</span>
+            <span className={styles.badge}>{t('VISIONARIO DE FINTECH LATAM', 'LATAM FINTECH VISIONARY', '라틴 아메리카 핀테크 비전가')}</span>
             <h2 className={styles.title}>
               {t('Hola, soy Julian Moon', 'Hi, I\'m Julian Moon', '안녕하세요, 줄리안 문입니다')}
-              <span className={styles.highlight}> 🌙</span>
             </h2>
             
             <div className={styles.story}>

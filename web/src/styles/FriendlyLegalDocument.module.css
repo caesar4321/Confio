@@ -1,6 +1,6 @@
 .legalPage {
   min-height: 100vh;
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  background: #f9fafb;
 }
 
 .header {
@@ -40,10 +40,7 @@
 .confioLogo {
   font-size: 1.5rem;
   font-weight: 800;
-  background: linear-gradient(135deg, #10b981, #34d399);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #1f2937; /* wordmark: single color, never tinted (DESIGN.md brand law) */
 }
 
 .container {
@@ -90,7 +87,7 @@
 }
 
 .backButton {
-  background: linear-gradient(135deg, #10b981, #34d399);
+  background: #10b981;
   color: white;
   border: none;
   padding: 0.75rem 2rem;
@@ -164,7 +161,7 @@
   content: '';
   width: 4px;
   height: 24px;
-  background: linear-gradient(135deg, #10b981, #34d399);
+  background: #10b981;
   border-radius: 2px;
 }
 

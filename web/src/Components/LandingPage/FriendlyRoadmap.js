@@ -70,7 +70,7 @@ const FriendlyRoadmap = () => {
           transition={{ duration: 0.6 }}
           className={styles.header}
         >
-          <span className={styles.badge}>📍 {t('NUESTRO CAMINO', 'OUR PATH', '우리의 길')}</span>
+          <span className={styles.badge}>{t('NUESTRO CAMINO', 'OUR PATH', '우리의 길')}</span>
           <h2 className={styles.title}>
             Roadmap <span className={styles.highlight}>2025-2026</span>
           </h2>

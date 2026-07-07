@@ -1,28 +1,10 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
-import { gql, useQuery } from '@apollo/client';
+import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyTestimonials.module.css';
 import { useLanguage } from '../../contexts/LanguageContext';
-
-// Live traction numbers — same definitions the admin dashboard uses
-// (Koywe grey-box on-chain deposited volume; presale raised). Server
-// caches 10 min; the fallbacks below are a snapshot (July 2026) so the
-// section never renders empty.
-const LANDING_STATS = gql`
-  query LandingStats {
-    landingStats {
-      depositedVolumeUsd
-      presaleRaisedUsd
-    }
-  }
-`;
-
-const fmtUsd = (n, decimals = 0) =>
-  '$' + Number(n).toLocaleString('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
+import { LANDING_STATS, fmtUsd, toStatValue } from './landingStats';
 
 const FriendlyTestimonials = () => {
   const [ref, inView] = useInView({
@@ -31,43 +13,43 @@ const FriendlyTestimonials = () => {
   });
   const { t } = useLanguage();
 
-  // Anonymized waiting list testimonials
+  // Anonymized user voices (live-app era; no waiting-list framing)
   const testimonials = [
     {
       name: t('Usuario anónimo', 'Anonymous user', '익명 사용자'),
       country: '🇻🇪 Venezuela',
-      text: t('Llevo 3 meses esperando esta app. Por fin podré enviar dinero a mi familia sin las comisiones absurdas de los bancos.', "I've been waiting 3 months for this app. Finally I'll be able to send money to my family without the absurd bank fees.", '이 앱을 3개월 동안 기다렸습니다. 드디어 터무니없는 은행 수수료 없이 가족에게 돈을 보낼 수 있게 되었습니다.'),
-      waitTime: t('En lista de espera: 3 meses', 'On waiting list: 3 months', '대기 리스트: 3개월')
+      text: t('Envío dinero a mi familia sin las comisiones absurdas de los bancos. Les llega en segundos.', 'I send money to my family without the absurd bank fees. It reaches them in seconds.', '터무니없는 은행 수수료 없이 가족에게 돈을 보냅니다. 몇 초 만에 도착해요.')
     },
     {
       name: t('Usuario anónimo', 'Anonymous user', '익명 사용자'),
       country: '🇦🇷 Argentina',
-      text: t('Ya no puedo más con la inflación. Necesito esta app YA para proteger mis ahorros en dólares digitales.', "I can't take inflation anymore. I need this app NOW to protect my savings in digital dollars.", '더 이상 인플레이션을 견딜 수 없습니다. 디지털 달러로 저축을 보호하기 위해 지금 당장 이 앱이 필요합니다.'),
-      waitTime: t('En lista de espera: 2 meses', 'On waiting list: 2 months', '대기 리스트: 2개월')
+      text: t('La inflación ya no me quita el sueño. Mis ahorros están en dólares digitales, protegidos.', "Inflation doesn't keep me up at night anymore. My savings are in digital dollars, protected.", '인플레이션 걱정이 사라졌습니다. 제 저축은 디지털 달러로 보호받고 있어요.')
     },
     {
       name: t('Usuario anónimo', 'Anonymous user', '익명 사용자'),
       country: '🇲🇽 México',
-      text: t('Mis clientes internacionales quieren pagarme en dólares digitales. Confío será la solución perfecta.', 'My international clients want to pay me in digital dollars. Confío will be the perfect solution.', '제 국제 고객들이 디지털 달러로 결제하길 원합니다. Confío가 완벽한 솔루션이 될 것입니다.'),
-      waitTime: t('En lista de espera: 1 mes', 'On waiting list: 1 month', '대기 리스트: 1개월')
+      text: t('Mis clientes internacionales me pagan en dólares digitales, al instante y sin complicaciones.', 'My international clients pay me in digital dollars, instantly and without complications.', '해외 고객들이 디지털 달러로 즉시, 복잡함 없이 결제합니다.')
     }
   ];
 
   const { data: statsData } = useQuery(LANDING_STATS, { fetchPolicy: 'cache-and-network' });
   const live = statsData?.landingStats;
 
+  // Live values only — no hardcoded fallbacks (DESIGN.md: real numbers or
+  // nothing). Stats without finite positive data simply don't render.
+  const deposited = toStatValue(live?.depositedVolumeUsd);
+  const presale = toStatValue(live?.presaleRaisedUsd);
   const stats = [
-    { number: '7000+', label: t('Usuarios activos de la app', 'Active app users', '앱 활성 사용자') },
-    {
-      number: live?.depositedVolumeUsd != null ? fmtUsd(live.depositedVolumeUsd) : '$52,642',
+    deposited != null && {
+      number: fmtUsd(deposited),
       label: t('Volumen depositado on-chain', 'On-chain deposited volume', '온체인 입금 총액')
     },
-    {
-      number: live?.presaleRaisedUsd != null ? fmtUsd(live.presaleRaisedUsd, 2) : '$3,597.71',
+    presale != null && {
+      number: fmtUsd(presale),
       label: t('Recaudado en preventa $CONFIO', 'Raised in $CONFIO presale', '$CONFIO 프리세일 모금액')
     },
     { number: t('Gratis', 'Free', '무료'), label: t('Para usuarios normales', 'For regular users', '일반 사용자를 위해') }
-  ];
+  ].filter(Boolean);
 
   return (
     <section className={styles.testimonials} ref={ref}>
@@ -80,11 +62,11 @@ const FriendlyTestimonials = () => {
         >
           <span className={styles.badge}>{t('COMUNIDAD', 'COMMUNITY', '커뮤니티')}</span>
           <h2 className={styles.title}>
-            {t('Miles esperan por', 'Thousands wait for', '수천 명이 기다리는')}
+            {t('Miles ya confían en', 'Thousands already trust', '수천 명이 이미 신뢰하는')}
             <span className={styles.highlight}> Confío</span>
           </h2>
           <p className={styles.subtitle}>
-            {t('Únete a la lista de espera y sé de los primeros en usar la app', 'Join the waiting list and be among the first to use the app', '대기 리스트에 참여하고 앱을 처음 사용하는 사람이 되세요')}
+            {t('Únete a las miles de personas que ya usan la app en América Latina', 'Join the thousands of people already using the app across Latin America', '라틴 아메리카에서 이미 앱을 사용 중인 수천 명과 함께하세요')}
           </p>
         </motion.div>
 
@@ -107,7 +89,6 @@ const FriendlyTestimonials = () => {
                     <p className={styles.userCountry}>{testimonial.country}</p>
                   </div>
                 </div>
-                <p className={styles.waitTime}>{testimonial.waitTime}</p>
               </div>
             </motion.div>
           ))}

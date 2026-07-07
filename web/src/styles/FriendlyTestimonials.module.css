@@ -4,7 +4,7 @@
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 0 2rem;
 }
@@ -16,7 +16,7 @@
 
 .badge {
   display: inline-block;
-  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  background: #ecfdf5;
   color: #065f46;
   padding: 8px 20px;
   border-radius: 100px;
@@ -29,20 +29,17 @@
 .title {
   font-size: clamp(2rem, 4vw, 3rem);
   font-weight: 700;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 1rem;
 }
 
 .highlight {
-  background: linear-gradient(135deg, #34d399, #10b981);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #10b981;
 }
 
 .subtitle {
   font-size: 1.25rem;
-  color: #64748b;
+  color: #6b7280;
 }
 
 .testimonialsGrid {
@@ -69,7 +66,7 @@
 
 .testimonialText {
   font-size: 1.1rem;
-  color: #475569;
+  color: #6b7280;
   line-height: 1.7;
   margin-bottom: 20px;
 }
@@ -99,20 +96,15 @@
 
 .userName {
   font-weight: 600;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 2px;
 }
 
 .userCountry {
   font-size: 0.9rem;
-  color: #64748b;
+  color: #6b7280;
 }
 
-.waitTime {
-  font-size: 0.85rem;
-  color: #8b5cf6;
-  font-weight: 600;
-}
 
 .statsSection {
   display: grid;
@@ -131,40 +123,37 @@
 .statNumber {
   font-size: 2.5rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #34d399, #10b981);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #10b981;
   margin-bottom: 8px;
 }
 
 .statLabel {
-  color: #64748b;
+  color: #6b7280;
   font-size: 1rem;
 }
 
 .waitlistCta {
   text-align: center;
   padding: 60px;
-  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  background: #ecfdf5;
   border-radius: 24px;
 }
 
 .waitlistTitle {
   font-size: 2rem;
   font-weight: 700;
-  color: #1e293b;
+  color: #1f2937;
   margin-bottom: 12px;
 }
 
 .waitlistText {
   font-size: 1.2rem;
-  color: #475569;
+  color: #6b7280;
   margin-bottom: 30px;
 }
 
 .waitlistButton {
-  background: linear-gradient(135deg, #34d399, #10b981);
+  background: #10b981;
   color: white;
   border: none;
   padding: 16px 40px;
