@@ -1,49 +1,41 @@
+/* Language switcher — lives inside the header (static, not floating). */
+
 .languageSwitcher {
-  position: fixed;
-  top: 20px;
-  right: 20px;
   display: flex;
-  gap: 8px;
-  background: white;
-  padding: 4px;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  z-index: 9999;
-  border: 2px solid #e2e8f0;
+  gap: 2px;
+  background: var(--bg-tertiary);
+  padding: 3px;
+  border-radius: 999px;
 }
 
 .langButton {
-  padding: 8px 16px;
+  padding: 9px 14px;
   border: none;
   background: transparent;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #64748b;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 4px;
 }
 
 .langButton:hover {
-  background: #f8fafc;
+  color: var(--text-primary);
 }
 
 .langButton.active {
-  background: linear-gradient(135deg, #34d399, #10b981);
-  color: white;
+  background: white;
+  color: var(--primary-green-dark);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
 }
 
-@media (max-width: 768px) {
-  .languageSwitcher {
-    top: 10px;
-    right: 10px;
-  }
-  
+@media (max-width: 480px) {
   .langButton {
-    padding: 6px 12px;
-    font-size: 0.85rem;
+    padding: 8px 11px;
+    font-size: 0.75rem;
   }
 }

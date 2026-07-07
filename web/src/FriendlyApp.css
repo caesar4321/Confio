@@ -1,29 +1,35 @@
-/* Friendly Fintech App Styles - Like MercadoPago/Nubank */
+/* Confío web — «Radicalmente Normal» design system. See DESIGN.md (repo root). */
 
-/* Import Poppins Font */
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+/* Fonts (Bricolage Grotesque + Instrument Sans) load from public/index.html
+   — single loading path, discovered by the preload scanner. */
 
-/* CSS Variables for Friendly Theme */
+/* CSS Variables — tokens 1:1 with apps/src/config/theme.ts */
 :root {
+  /* Typography */
+  --font-display: 'Bricolage Grotesque', 'Instrument Sans', sans-serif;
+  --font-body: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+
   /* Primary Colors - Matching the App */
   --primary-green: #34d399;
   --primary-green-dark: #10b981;
-  --primary-purple: #8b5cf6;
+  --primary-green-deep: #064e3b;
+  --primary-purple: #8b5cf6; /* ONLY beside $CONFIO content (DESIGN.md law) */
   --primary-purple-dark: #7c3aed;
-  
+
   /* Background Colors */
   --bg-primary: #ffffff;
   --bg-secondary: #f9fafb;
   --bg-tertiary: #f3f4f6;
-  --bg-light-blue: #e0f2fe;
+  --bg-light-blue: #dbeafe;
   --bg-light-green: #d1fae5;
-  --bg-light-purple: #f3e8ff;
-  
+  --bg-mint: #ecfdf5;
+  --bg-light-purple: #ede9fe;
+
   /* Text Colors */
-  --text-primary: #1e293b;
-  --text-secondary: #475569;
-  --text-tertiary: #64748b;
-  --text-muted: #94a3b8;
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af; /* DESIGN.md tertiary */
+  --text-muted: #9ca3af;
   
   /* Border Colors */
   --border-light: #e5e7eb;
@@ -72,10 +78,14 @@ html {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Anchored sections must clear the sticky header on nav clicks */
+section[id] {
+  scroll-margin-top: 76px;
+}
+
 body {
-  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 
-    'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  background-color: var(--bg-secondary);
+  font-family: var(--font-body);
+  background-color: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.6;
   overflow-x: hidden;
@@ -83,24 +93,28 @@ body {
 
 /* Typography */
 h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
   color: var(--text-primary);
 }
 
 h1 {
-  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-size: clamp(2.6rem, 5.4vw, 4.3rem);
   font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
 }
 
 h2 {
-  font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 700;
+  font-size: clamp(1.8rem, 3.6vw, 2.7rem);
+  font-weight: 800;
 }
 
 h3 {
-  font-size: clamp(1.5rem, 3vw, 2rem);
-  font-weight: 600;
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  font-weight: 700;
 }
 
 h4 {
@@ -153,47 +167,47 @@ a:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 24px;
-  border-radius: var(--radius-md);
-  font-weight: 600;
+  padding: 14px 28px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-body);
+  font-weight: 700;
   font-size: 1rem;
   cursor: pointer;
-  transition: all var(--transition-base);
+  transition: all var(--transition-fast);
   border: none;
   gap: 8px;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary-green) 0%, var(--primary-green-dark) 100%);
+  background: var(--primary-green-dark);
   color: white;
-  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(16, 185, 129, 0.4);
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.35);
 }
 
 .btn-secondary {
   background: var(--bg-primary);
   color: var(--text-primary);
-  border: 2px solid var(--border-light);
+  border: 1px solid var(--border-light);
 }
 
 .btn-secondary:hover {
-  background: var(--bg-secondary);
-  border-color: var(--border-default);
+  border-color: var(--primary-green-dark);
+  color: var(--primary-green-dark);
 }
 
+/* Violet button: ONLY for $CONFIO token contexts (DESIGN.md law) */
 .btn-purple {
-  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-dark) 100%);
+  background: var(--primary-purple);
   color: white;
-  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.3);
 }
 
 .btn-purple:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 10px 24px rgba(139, 92, 246, 0.35);
 }
 
 /* Badges */
@@ -337,12 +351,8 @@ select:focus {
   outline-offset: 2px;
 }
 
-/* Responsive Typography */
+/* Responsive layout (no font shrink: DESIGN.md 16px mobile floor) */
 @media (max-width: 768px) {
-  html {
-    font-size: 14px;
-  }
-  
   .container {
     padding: 0 var(--spacing-md);
   }
@@ -408,15 +418,15 @@ select:focus {
   opacity: 1;
 }
 
-/* Smooth Gradient Backgrounds */
+/* Flat surface helpers (gradients removed — DESIGN.md) */
 .gradient-green {
-  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  background: var(--bg-mint);
 }
 
 .gradient-blue {
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  background: var(--bg-light-blue);
 }
 
 .gradient-purple {
-  background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
+  background: var(--bg-light-purple);
 }

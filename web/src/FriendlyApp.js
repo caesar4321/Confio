@@ -5,7 +5,7 @@ import client from './apollo/client';
 import { LanguageProvider } from './contexts/LanguageContext';
 
 // Friendly Fintech Components
-import LanguageSwitcher from './Components/LandingPage/LanguageSwitcher';
+import FriendlyHeader from './Components/LandingPage/FriendlyHeader';
 import FriendlyHeroSection from './Components/LandingPage/FriendlyHeroSection';
 import FriendlyFeatures from './Components/LandingPage/FriendlyFeatures';
 import FriendlyHowItWorks from './Components/LandingPage/FriendlyHowItWorks';
@@ -48,11 +48,7 @@ function FriendlyApp() {
       metaThemeColor.content = '#34d399'; // Friendly green
     }
 
-    // Add friendly font
-    const link = document.createElement('link');
-    link.href = 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap';
-    link.rel = 'stylesheet';
-    document.head.appendChild(link);
+    // Fonts load from public/index.html (single path — see DESIGN.md).
   }, []);
 
   const backendOrigin = (() => {
@@ -88,7 +84,7 @@ function FriendlyApp() {
             <Routes>
               <Route path="/" element={
                 <>
-                  <LanguageSwitcher />
+                  <FriendlyHeader />
                   <main>
                     <FriendlyHeroSection />
                     <FriendlyFeatures />

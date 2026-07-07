@@ -12,21 +12,21 @@ const LanguageSwitcher = () => {
         onClick={() => setLanguage('es')}
         aria-label="Español"
       >
-        🇪🇸 ES
+        ES
       </button>
       <button
         className={`${styles.langButton} ${language === 'en' ? styles.active : ''}`}
         onClick={() => setLanguage('en')}
         aria-label="English"
       >
-        🇺🇸 EN
+        EN
       </button>
       <button
         className={`${styles.langButton} ${language === 'ko' ? styles.active : ''}`}
         onClick={() => setLanguage('ko')}
         aria-label="한국어"
       >
-        🇰🇷 KO
+        KO
       </button>
     </div>
   );
