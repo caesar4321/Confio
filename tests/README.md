@@ -2,6 +2,8 @@
 
 This directory contains integration tests and utility scripts for the Confío project, focusing on Algorand blockchain functionality.
 
+> **Web frontend tests** live with the code, not here: the marketing site's Jest suite (React Testing Library) is colocated in `web/src/` (e.g. `web/src/Components/LandingPage/*.test.js`), with jsdom shims for `matchMedia` and `IntersectionObserver` in `web/src/setupTests.js`. Run with `cd web && yarn test`.
+
 ## Directory Structure
 
 ```

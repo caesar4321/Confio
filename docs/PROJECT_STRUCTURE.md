@@ -4,8 +4,9 @@ This is a **monolithic repository** containing the full Confío stack.
 
 ```bash
 /Confio/
+├── DESIGN.md          # Website design system («Radicalmente Normal») — source of truth for web/ visuals
 ├── web/               # React-based web application (Terms, Privacy, Landing)
-│   ├── src/           # React source code
+│   ├── src/           # React source code (+ Jest tests for landing components)
 │   └── public/        # Static files
 │
 ├── apps/              # React Native mobile application (iOS + Android)
