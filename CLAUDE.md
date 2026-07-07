@@ -136,6 +136,12 @@ def create():
 
 Always reference the project structure and conventions described in README.md when making changes.
 
+## Design System
+Always read DESIGN.md before making any visual or UI decisions on the website (`web/`).
+All font choices, colors, spacing, and aesthetic direction are defined there.
+Do not deviate without explicit user approval.
+In QA mode, flag any code that doesn't match DESIGN.md.
+
 ## gstack
 
 - Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools directly.

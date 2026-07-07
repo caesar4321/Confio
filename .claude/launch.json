@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-landing",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-s", "web/build", "-l", "4173"],
+      "port": 4173
+    },
+    {
+      "name": "web-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd web && BROWSER=none PORT=3000 npm start"],
+      "port": 3000
+    }
+  ]
+}
