@@ -10,7 +10,7 @@ const facebookIcon = process.env.PUBLIC_URL + '/images/Facebook.png';
 const telegramIcon = process.env.PUBLIC_URL + '/images/Telegram.png';
 const linkedInIcon = process.env.PUBLIC_URL + '/images/LinkedIn.png';
 const youtubeIcon = process.env.PUBLIC_URL + '/images/YouTube.png';
-const whatsappIcon = process.env.PUBLIC_URL + '/images/WhatsApp.svg';
+import whatsappIcon from '../../images/WhatsApp.svg';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyFounder = () => {
