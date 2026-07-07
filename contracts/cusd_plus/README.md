@@ -187,7 +187,23 @@ vault backing invariant holds through trades.
 
 - [x] Foundry scaffold + OZ pin; compile, fuzz the invariant
       (`backingRatioBps() ≥ 10000` under arbitrary op sequences) — done
-      2026-07-04; deepen with stateful invariant handlers before deploy
+      2026-07-04
+- [x] Stateful invariant suite (2026-07-06,
+      test/CusdPlusVault.invariant.t.sol): multi-actor handler with
+      `fail_on_revert` — proves LIVENESS (entitled redemptions can never
+      revert), pPlus monotonicity, and full-exit solvency via
+      afterInvariant(); 48 runs × 96 depth, 0 reverts
+- [x] Differential mirror (2026-07-06, test/mirror/mirror_accrual.py +
+      CusdPlusVault.differential.t.sol): independent Python port of the
+      accrual/share math; 418 mixed ops across 3 frozen sequences
+      (incl. oracle-guard trips + resets) replayed on-contract with EXACT
+      state equality after every step — the rounding-direction net
+- [x] Adversarial suite (2026-07-06,
+      test/CusdPlusVault.adversarial.t.sol): ERC4626-style first-depositor
+      inflation shown structurally dead (pPlus is oracle-driven, never
+      balance-derived — donations land in surplus, not the share price);
+      donation-exactness; redeem floor bounded to 1 USDY-wei; 60-round
+      marathon with full exit stays solvent
 - [ ] Fill IM interface from official ABI; integration test on BSC testnet
       against real IM + oracle
 - [ ] External review of `accrue()` math (WAD/BPS rounding)
