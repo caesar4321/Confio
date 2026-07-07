@@ -15,6 +15,7 @@ import {
   FlatList,
   StatusBar,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -35,7 +36,7 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 export const AccionesListScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
-  const { session, stocks } = useGmMarket();
+  const { session, stocks, loading } = useGmMarket();
   const { savings, stocks: myStocks } = useAhorrosPortfolio();
   const [search, setSearch] = useState('');
 
@@ -183,10 +184,19 @@ export const AccionesListScreen = () => {
           </View>
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Icon name="search" size={36} color={colors.text.light} />
-            <Text style={styles.emptyText}>No encontramos "{search}"</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={styles.emptyText}>Cargando precios…</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Icon name="search" size={36} color={colors.text.light} />
+              <Text style={styles.emptyText}>
+                {search ? `No encontramos "${search}"` : 'No pudimos cargar los precios. Desliza para reintentar.'}
+              </Text>
+            </View>
+          )
         }
         ListFooterComponent={
           <View>

@@ -53,6 +53,57 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     gm_trade_fee_bps = graphene.Int(description="Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative")
 
 
+# ── Ondo Stocks (GM) market data — server proxy of api.gm.ondo.finance ──
+# Display data only (chain-first): execution prices come from attestation
+# quotes at trade time; nothing money-touching reads these fields.
+
+class GmAssetType(graphene.ObjectType):
+    symbol = graphene.String(description="GM token symbol, e.g. TSLAon — the on-chain/trading id")
+    ticker = graphene.String(description="Underlying ticker, e.g. TSLA — the display id")
+    name = graphene.String()
+    price_usd = graphene.Float()
+    day_change_pct = graphene.Float()
+    off_hours = graphene.Boolean(description="Tradable on weekends/holidays (per-asset, per Ondo)")
+    sparkline24h = graphene.List(graphene.Float, description="Downsampled 24h price series for charts")
+
+
+class GmMarketType(graphene.ObjectType):
+    session = graphene.String(description="core | extended | off-hours | closed")
+    assets = graphene.List(graphene.NonNull(GmAssetType))
+
+
+class GmCandleType(graphene.ObjectType):
+    timestamp = graphene.Float(description="ms epoch")
+    open = graphene.Float()
+    high = graphene.Float()
+    low = graphene.Float()
+    close = graphene.Float()
+
+
+_NAME_NOISE = (
+    ' Common Stock', ' Class A', ' Class B', ' Class C', ', Inc.', ' Inc.',
+    ' Corporation', ' Corp.', ' Holdings', ' Ltd.', ' PLC', ' N.V.', ' S.A.',
+)
+
+
+def _display_name(raw: str) -> str:
+    name = raw or ''
+    for noise in _NAME_NOISE:
+        name = name.replace(noise, '')
+    return name.strip(' ,')
+
+
+def _sparkline(history: list, points: int = 24) -> list:
+    if not history:
+        return []
+    step = max(1, len(history) // points)
+    series = [float(h['price']) for h in history[::step]]
+    last = float(history[-1]['price'])
+    if not series or series[-1] != last:
+        series.append(last)
+    return series
+
+
 class Query(graphene.ObjectType):
     cusd_plus_summary = graphene.Field(CusdPlusSummaryType)
     cusd_plus_movements = graphene.List(
@@ -64,6 +115,67 @@ class Query(graphene.ObjectType):
     cusd_plus_conversions_in_flight = graphene.List(
         graphene.NonNull(lambda: CusdPlusConversionType),
     )
+    gm_market = graphene.Field(GmMarketType)
+    gm_ohlc = graphene.List(
+        graphene.NonNull(GmCandleType),
+        symbol=graphene.String(required=True),
+        range=graphene.String(default_value='3M', description="1D | 1M | 3M | 6M | 1Y | MAX"),
+    )
+
+    def resolve_gm_market(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        from . import gm_api
+        try:
+            market = gm_api.all_market()
+            session = gm_api.session_from_status(gm_api.market_status())
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('gm_market upstream failed')
+            return None  # client keeps its last cache; never a fake price
+        assets = []
+        for item in market:
+            pm = item.get('primaryMarket') or {}
+            um = item.get('underlyingMarket') or {}
+            if not pm.get('symbol') or pm.get('price') is None:
+                continue
+            assets.append(GmAssetType(
+                symbol=pm['symbol'],
+                ticker=um.get('ticker') or pm['symbol'].removesuffix('on'),
+                name=_display_name(um.get('name') or um.get('ticker') or ''),
+                price_usd=float(pm['price']),
+                day_change_pct=float(pm.get('priceChangePct24h') or 0),
+                off_hours='offhours' in (pm.get('tradableSessions') or []),
+                sparkline24h=_sparkline(pm.get('priceHistory24h') or []),
+            ))
+        return GmMarketType(session=session, assets=assets)
+
+    def resolve_gm_ohlc(self, info, symbol, range='3M'):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return []
+        from . import gm_api
+        if range not in gm_api.OHLC_RANGES:
+            return []
+        # symbol comes from our own gmMarket payload, but sanitize anyway
+        symbol = ''.join(c for c in symbol if c.isalnum())[:24]
+        try:
+            candles = gm_api.ohlc(symbol, range)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('gm_ohlc upstream failed')
+            return []
+        return [
+            GmCandleType(
+                timestamp=float(c['timestamp']),
+                open=float(c['open']),
+                high=float(c['high']),
+                low=float(c['low']),
+                close=float(c['close']),
+            )
+            for c in candles
+        ]
 
     def resolve_cusd_plus_summary(self, info):
         from django.conf import settings

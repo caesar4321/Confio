@@ -1,9 +1,10 @@
 // Stock detail — price, sparkline, and the buy/sell entry.
 //
-// The chart uses react-native-svg (house rule: no linear-gradient lib) with
-// stub OHLC data until the GM API proxy lands. Buying draws from cUSD+
-// (sweep model) — the funding line under the CTAs says so explicitly, and
-// the total-return note explains why there is no dividends tab.
+// The chart uses react-native-svg (house rule: no linear-gradient lib) and
+// renders the REAL 24h series from the GM proxy (gmMarket.sparkline24h);
+// gmOhlc is available server-side for a future range-selector chart. Buying
+// draws from cUSD+ (sweep model) — the funding line under the CTAs says so
+// explicitly, and the total-return note explains why there is no dividends tab.
 
 import React, { useMemo } from 'react';
 import {
@@ -46,7 +47,12 @@ export const StockDetailScreen = () => {
 
   const points = useMemo(() => {
     if (!stock) return '';
-    const series = sparklineFor(stock.ticker);
+    // Real 24h series from the GM proxy; deterministic fallback only when
+    // the asset ships without history (cosmetic, never a price display).
+    const series =
+      stock.sparkline24h && stock.sparkline24h.length >= 2
+        ? stock.sparkline24h
+        : sparklineFor(stock.ticker);
     const min = Math.min(...series);
     const max = Math.max(...series);
     const span = max - min || 1;
