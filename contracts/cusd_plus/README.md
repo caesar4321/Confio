@@ -126,36 +126,34 @@ vault backing invariant holds through trades.
 > The public docs were simply behind reality — the original architecture
 > hypothesis (USDT ↔ USDY on BSC) is CONFIRMED.
 
-1. **Instant Manager ABI on BNB** — **CONFIRMED SHIPPING (Ondo,
-   2026-07-06): live on BNB "beginning end of this week", USDT deposit,
-   one atomic tx.** Reference interface from Ethereum
-   (`0xa42613C243b67BF6194Ac327795b926B4b491f15`):
+1. **Instant Manager ABI on BNB** — **RESOLVED (Daniel, 2026-07-07 +
+   on-chain verification).** BNB IM:
+   `0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2` (deployed, 12,351 bytes;
+   `rwaToken()` == the BSC USDY below). ABI == Ethereum's minus the rUSDY
+   surface (rUSDY doesn't exist on BNB; we never used it):
    `subscribe(depositToken, depositAmount, minimumRwaReceived)` selector
    `0x22d4a175`, `redeem(rwaAmount, receivingToken, minimumReceived)`
-   selector `0xd8780161`. REMAINING: the BNB IM contract address + verify
-   the ABI matches the ETH deployment (watch the addresses page /
-   BscScan; then fill `IOndoInstantManager` and run the testnet
-   integration test from the deploy checklist).
+   selector `0xd8780161` — both selectors re-derived and matched. Deposit
+   token on BNB is USDT (Binance-Peg BSC-USD
+   `0x55d398326f99059fF775485246999027B3197955`). `IOndoInstantManager`
+   is now the official interface; `_imSubscribe/_imRedeem` wired
+   (2026-07-07), 33/33 tests green.
 2. **USDY flavor on BSC** — **CONFIRMED accumulating, 18 decimals**
    (on-chain read of `0x608593d17a2decbbc4399e4185be4922f97ed32e`,
-   "Ondo U.S. Dollar Yield"). The 3.39-token supply read on 2026-07-05
-   was the pre-launch state of the deployment Ondo is now activating.
-3. **RWADynamicOracle deployment on BSC** — still the open technical
-   question: `accrue()` needs the USDY price on BNB. Ondo pointed Solana
-   integrators at PYTH; ask whether BNB gets a RWADynamicOracle alongside
-   the IM (the IM itself needs one to price mints) and which source is
-   canonical for partners. (→ ask Daniel/Michael with the IM address.)
-4. **USDT-BSC decimals** — 18 on BSC (unlike Ethereum's 6); constants assume
-   1e18 everywhere. Verify against the canonical BSC-USD contract.
-5. **OndoIDRegistry whitelisting** — the vault address must be whitelisted as
-   a Primary Purchaser contract (Option 1 KYB, in progress — Ondo's
-   2026-07-06 reply: "Once approved as a PP, you'll be good to mint and
-   redeem"; Daniel Marcus is the onboarding contact, read-only API key
-   available meanwhile). Confirm the PP whitelist covers a CONTRACT
-   caller (the vault proxy address), not just EOAs. Redeeming to
-   arbitrary `to` addresses may also require registry checks — confirm
-   whether USDY transfers out of the vault to non-whitelisted addresses are
-   allowed, or whether `redeem`'s raw-USDY path must be treasury-only.
+   "Ondo U.S. Dollar Yield"), and confirmed as the IM's `rwaToken()`.
+3. **USDY price oracle on BSC** — **RESOLVED:**
+   `0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7` (from Daniel).
+   `getPrice()` verified on-chain 2026-07-07: 1.13863392 × 1e18 — 1e18
+   semantics match our `IRWADynamicOracle`.
+4. **USDT-BSC decimals** — **RESOLVED: 18**, verified on-chain against
+   canonical BSC-USD `0x55d398...7955`. Constants assume 1e18 — correct.
+5. **OndoIDRegistry whitelisting** — **PARTIALLY RESOLVED (Daniel,
+   2026-07-07): contracts CAN be whitelisted, and USDY transfers from the
+   vault to non-whitelisted user addresses ARE permitted — whitelisting
+   gates mint/redeem only.** So `redeem`'s raw-USDY path needs no
+   registry checks on recipients. REMAINING: complete PP onboarding and
+   whitelist the vault PROXY address (read-only API key already issued —
+   1Password link expires 7 days from 2026-07-07).
 6. ~~Relayer authz~~ — **RESOLVED: permissionless, like cusd.py.** The
    conversion flow is user-driven end to end (see ORCHESTRATION.md): the
    user's own BSC address is msg.sender for mint/redeem (Confío only
@@ -204,8 +202,13 @@ vault backing invariant holds through trades.
       balance-derived — donations land in surplus, not the share price);
       donation-exactness; redeem floor bounded to 1 USDY-wei; 60-round
       marathon with full exit stays solvent
-- [ ] Fill IM interface from official ABI; integration test on BSC testnet
-      against real IM + oracle
+- [x] Fill IM interface from official ABI (2026-07-07: BNB IM
+      `0x9bA36008...`, oracle `0x8aaa843b...`, selectors verified,
+      mocks updated, 33/33 green)
+- [ ] BSC MAINNET-FORK integration test against the real IM + oracle +
+      USDY (contracts are live — fork test replaces the testnet plan;
+      mint/redeem paths need a whitelisted caller, so full E2E lands
+      after PP approval, but wiring/oracle/view paths fork-test today)
 - [ ] External review of `accrue()` math (WAD/BPS rounding)
 - [ ] Deploy implementation + ERC1967 proxy; `initialize(treasury multisig)`;
       `CONFIO_YIELD_SHARE_BPS = 1500`; storage-layout checks in CI for every

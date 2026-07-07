@@ -33,18 +33,26 @@ contract MockInstantManager is IOndoInstantManager {
         oracle = _oracle;
     }
 
-    function subscribe(uint256 depositAmount, uint256 minimumRwaReceived) external {
+    function subscribe(address depositToken, uint256 depositAmount, uint256 minimumRwaReceived)
+        external
+        returns (uint256 rwaAmountOut)
+    {
+        require(depositToken == address(usdt), "im: unsupported deposit token");
         usdt.transferFrom(msg.sender, address(this), depositAmount);
-        uint256 usdyOut = (depositAmount * 1e18) / oracle.price();
-        require(usdyOut >= minimumRwaReceived, "im slippage");
-        usdy.transfer(msg.sender, usdyOut);
+        rwaAmountOut = (depositAmount * 1e18) / oracle.price();
+        require(rwaAmountOut >= minimumRwaReceived, "im slippage");
+        usdy.transfer(msg.sender, rwaAmountOut);
     }
 
-    function redeem(uint256 rwaAmount, uint256 minimumTokenReceived) external {
+    function redeem(uint256 rwaAmount, address receivingToken, uint256 minimumTokenReceived)
+        external
+        returns (uint256 receiveTokenAmount)
+    {
+        require(receivingToken == address(usdt), "im: unsupported receive token");
         usdy.transferFrom(msg.sender, address(this), rwaAmount);
-        uint256 usdtOut = (rwaAmount * oracle.price()) / 1e18;
-        require(usdtOut >= minimumTokenReceived, "im slippage");
-        usdt.transfer(msg.sender, usdtOut);
+        receiveTokenAmount = (rwaAmount * oracle.price()) / 1e18;
+        require(receiveTokenAmount >= minimumTokenReceived, "im slippage");
+        usdt.transfer(msg.sender, receiveTokenAmount);
     }
 }
 

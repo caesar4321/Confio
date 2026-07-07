@@ -55,14 +55,17 @@ pragma solidity ^0.8.24;
  * constructor re-wires IM/oracle — exactly the escape hatch needed if Ondo
  * migrates its BNB contracts.
  *
- * OPEN ITEMS before this leaves draft (tracked in README.md):
- *  - IOndoInstantManager signatures are PROVISIONAL: align with the official
- *    ABI from Ondo onboarding (BNB IM + USDT deposit support pending
- *    Michael's confirmation). All IM touchpoints are isolated in
- *    _imSubscribe/_imRedeem so only those two bodies change.
- *  - USDY on BSC assumed ACCUMULATING (like Ethereum USDY, not rUSDY
- *    rebasing) and 18 decimals; USDT on BSC is 18 decimals (unlike ETH).
- *  - RWADynamicOracle address on BSC from onboarding docs.
+ * WIRING (all confirmed by Ondo 2026-07-07 + on-chain reads; README.md):
+ *  - USDY_InstantManager (BNB): 0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2
+ *    (rwaToken() == USDY below; deposit/receive token is USDT on BNB)
+ *  - USDY (BNB, accumulating, 18dp): 0x608593d17a2decbbc4399e4185be4922f97ed32e
+ *  - USDY Price Oracle (BNB): 0x8aaa843b848c2E3c83956Bc09aFBE4D9Dcf297b7
+ *    (getPrice() 1e18 semantics verified on-chain: 1.13863392 on 07-07)
+ *  - USDT (Binance-Peg BSC-USD, 18dp): 0x55d398326f99059fF775485246999027B3197955
+ *  REMAINING before deploy: Primary Purchaser whitelisting of the vault
+ *  proxy address (contract whitelisting confirmed possible; USDY transfers
+ *  out of the vault to non-whitelisted users confirmed permitted —
+ *  whitelisting gates mint/redeem only).
  */
 
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -80,12 +83,22 @@ interface IRWADynamicOracle {
     function getPrice() external view returns (uint256);
 }
 
-/// PROVISIONAL — replace with the official Instant Manager ABI at onboarding.
+/// OFFICIAL Instant Manager ABI — verified 2026-07-07 against the BNB
+/// deployment (0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2, rwaToken() ==
+/// USDY 0x608593d1...) and Ondo's integration guide (selectors 0x22d4a175 /
+/// 0xd8780161). Per Ondo (Daniel, 2026-07-07): the BNB contract matches the
+/// Ethereum one exactly except the rUSDY surface (absent on BNB — we never
+/// used it), and the deposit/receive stablecoin on BNB is USDT
+/// (0x55d398326f99059fF775485246999027B3197955).
 interface IOndoInstantManager {
-    /// deposit stablecoin -> receive USDY at oracle price (no spread).
-    function subscribe(uint256 depositAmount, uint256 minimumRwaReceived) external;
+    /// deposit stablecoin -> receive USDY at oracle price.
+    function subscribe(address depositToken, uint256 depositAmount, uint256 minimumRwaReceived)
+        external
+        returns (uint256 rwaAmountOut);
     /// burn USDY -> receive stablecoin at oracle price.
-    function redeem(uint256 rwaAmount, uint256 minimumTokenReceived) external;
+    function redeem(uint256 rwaAmount, address receivingToken, uint256 minimumTokenReceived)
+        external
+        returns (uint256 receiveTokenAmount);
 }
 
 contract CusdPlusVault is
@@ -383,12 +396,13 @@ contract CusdPlusVault is
         require(USDY.balanceOf(address(this)) >= usdyOwed(p), "backing violated");
     }
 
-    /// PROVISIONAL IM plumbing — the ONLY two bodies that change when the
-    /// official BNB Instant Manager ABI lands.
+    /// IM plumbing against the official ABI. We measure the balance DELTA
+    /// rather than trusting the return value — defense in depth against any
+    /// future IM upgrade changing return semantics.
     function _imSubscribe(uint256 usdtIn, uint256 minUsdyOut) internal returns (uint256 usdyOut) {
         uint256 before = USDY.balanceOf(address(this));
         USDT.forceApprove(address(INSTANT_MANAGER), usdtIn);
-        INSTANT_MANAGER.subscribe(usdtIn, minUsdyOut);
+        INSTANT_MANAGER.subscribe(address(USDT), usdtIn, minUsdyOut);
         usdyOut = USDY.balanceOf(address(this)) - before;
         require(usdyOut >= minUsdyOut, "im: insufficient out");
     }
@@ -396,7 +410,7 @@ contract CusdPlusVault is
     function _imRedeem(uint256 usdyIn, uint256 minUsdtOut) internal returns (uint256 usdtOut) {
         uint256 before = USDT.balanceOf(address(this));
         USDY.forceApprove(address(INSTANT_MANAGER), usdyIn);
-        INSTANT_MANAGER.redeem(usdyIn, minUsdtOut);
+        INSTANT_MANAGER.redeem(usdyIn, address(USDT), minUsdtOut);
         usdtOut = USDT.balanceOf(address(this)) - before;
         require(usdtOut >= minUsdtOut, "im: insufficient out");
     }
