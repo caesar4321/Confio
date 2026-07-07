@@ -152,7 +152,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
                   <div className={styles.avatar}>👩</div>
                   <div className={styles.avatar}>👨</div>
                   <div className={styles.avatar}>👩</div>
-                  <div className={styles.avatarMore}>+6000</div>
+                  <div className={styles.avatarMore}>+7000</div>
                 </div>
                 <div className={styles.testimonialText}>
                   <p>
@@ -193,7 +193,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
 
                   <div className={styles.floatingStats}>
                     <span className={styles.statsIcon}>📈</span>
-                    <span>{t('120 de Venezuela ya esperando', '120 from Venezuela already waiting')}</span>
+                    <span>{t('Más de 7.000 usuarios en LATAM', 'Over 7,000 users across LATAM')}</span>
                   </div>
                 </>
               )}

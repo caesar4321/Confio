@@ -123,8 +123,15 @@
 }
 
 .timelineQuarter.active {
-  background: linear-gradient(135deg, #34d399, #10b981);
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
   color: white;
+}
+
+/* Mirrors the in-app roadmap grammar: completed = calm green check,
+   active = violet (the current chapter), upcoming = gray. */
+.timelineQuarter.completed {
+  background: #d1fae5;
+  color: #047857;
 }
 
 .timelineTitle {
@@ -156,9 +163,14 @@
 .timelineDot.activeDot {
   width: 20px;
   height: 20px;
+  border-color: #8b5cf6;
+  background: #8b5cf6;
+  box-shadow: 0 0 0 8px rgba(139, 92, 246, 0.2);
+}
+
+.timelineDot.completedDot {
   border-color: #34d399;
   background: #34d399;
-  box-shadow: 0 0 0 8px rgba(52, 211, 153, 0.2);
 }
 
 .footer {

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyAssets.module.css';
 import cUSDLogo from '../../images/cUSD.png';
+import cUSDPlusLogo from '../../images/cUSDPlus.png';
 import confioLogo from '../../images/CONFIO.png';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -44,6 +45,25 @@ const FriendlyAssets = () => {
       highlight: {
         icon: '🛡',
         text: t('Confío Dollar($cUSD) está respaldado 100% por USDC, el dólar digital más confiable del mundo.', 'Confío Dollar($cUSD) is 100% backed by USDC, the world\'s most reliable digital dollar.', 'Confío Dollar($cUSD)는 세계에서 가장 신뢰할 수 있는 디지털 달러인 USDC로 100% 지원됩니다.')
+      }
+    },
+    {
+      logo: cUSDPlusLogo,
+      name: 'Confío Dollar+',
+      symbol: '$cUSD+',
+      color: '#7c3aed',
+      comingSoon: t('Próximamente', 'Coming soon', '출시 예정'),
+      details: [
+        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Tu ahorro en dólares que crece cada día, respaldado por USDY de Ondo Finance.', 'Your dollar savings growing every day, backed by Ondo Finance\'s USDY.', '매일 성장하는 달러 저축으로, Ondo Finance의 USDY로 담보됩니다.') },
+        { label: t('Respaldado por', 'Backed by', '지원'), value: t('100% USDY (bonos del Tesoro de EE.UU. tokenizados)', '100% USDY (tokenized U.S. Treasury bonds)', '100% USDY (토큰화된 미국 국채)') },
+        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Ahorro con rendimiento dentro de Confío.', 'Yield-bearing savings inside Confío.', 'Confío 안의 수익형 저축입니다.') },
+        { label: t('Valor', 'Value', '가치'), value: t('Acumulativo — crece con el rendimiento', 'Accumulating — grows with the yield', '누적형 — 수익과 함께 성장') },
+        { label: t('Red', 'Network', '네트워크'), value: 'BNB Smart Chain' },
+        { label: t('Estado', 'Status', '상태'), value: t('En preparación con Ondo Finance', 'In preparation with Ondo Finance', 'Ondo Finance와 준비 중') }
+      ],
+      highlight: {
+        icon: '🌱',
+        text: t('Confío Dollar+($cUSD+) llega pronto: ahorro respaldado por bonos del Tesoro de EE.UU., con reservas verificables en cadena.', 'Confío Dollar+($cUSD+) is coming soon: savings backed by U.S. Treasury bonds, with on-chain verifiable reserves.', 'Confío Dollar+($cUSD+)가 곧 출시됩니다: 미국 국채로 담보된 저축, 체인에서 검증 가능한 준비금.')
       }
     },
     {
@@ -89,12 +109,12 @@ const FriendlyAssets = () => {
           transition={{ duration: 0.6 }}
           className={styles.header}
         >
-          <span className={styles.badge}>💎 {t('NUESTRAS MONEDAS', 'OUR CURRENCIES', '우리의 통화')}</span>
+          <span className={styles.badge}>💎 {t('NUESTROS ACTIVOS', 'OUR ASSETS', '우리의 자산')}</span>
           <h2 className={styles.title}>
-            {t('Nuestras monedas: ', 'Our currencies: ', '우리의 통화: ')}<span className={styles.highlight}>Confío Dollar($cUSD)</span> {t('y', 'and', '그리고')} <span className={styles.highlight2}>Confío($CONFIO)</span>
+            <span className={styles.highlight}>Confío Dollar($cUSD)</span>, <span className={styles.highlight2}>Confío($CONFIO)</span> {t('y tu ahorro', 'and your savings', '그리고 당신의 저축')} <span className={styles.highlight2}>Confío Dollar+($cUSD+)</span>
           </h2>
           <p className={styles.subtitle}>
-            {t('Dos monedas digitales con propósitos diferentes, unidas por la misma misión', 'Two digital currencies with different purposes, united by the same mission', '다른 목적을 가진 두 개의 디지털 통화, 같은 사명으로 하나됨')}
+            {t('Dos monedas y un instrumento de ahorro, unidos por la misma misión', 'Two currencies and one savings instrument, united by the same mission', '두 개의 통화와 하나의 저축 상품, 같은 사명으로 하나됨')}
           </p>
         </motion.div>
 
@@ -112,6 +132,22 @@ const FriendlyAssets = () => {
                 <img src={asset.logo} alt={asset.name} className={styles.assetLogo} />
                 <div className={styles.assetTitle}>
                   <h3 className={styles.assetName}>{asset.name}({asset.symbol})</h3>
+                  {asset.comingSoon && (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        marginTop: 4,
+                        padding: '2px 10px',
+                        borderRadius: 100,
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        color: '#7c3aed',
+                        background: 'rgba(124, 58, 237, 0.1)',
+                      }}
+                    >
+                      {asset.comingSoon}
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -21,7 +21,7 @@ const FriendlyRoadmap = () => {
         '베네수엘라 사용자를 위한 전체 P2P 거래소 공식 출시는 창업자 줄리안의 베네수엘라 입국 거부로 지연되었습니다. 첫 번째 핵심 시장을 아르헨티나로 전환하고 있습니다.'
       ),
       icon: '🇻🇪',
-      status: 'active'
+      status: 'completed'
     },
     {
       quarter: 'Q1 2026',
@@ -32,21 +32,25 @@ const FriendlyRoadmap = () => {
         '사용자가 선호하는 은행이나 핀테크 앱에서 자동으로 달러 잔액을 충전할 수 있도록 온램프 파트너와 통합하고, 첫 공식 $CONFIO 사전 판매를 진행합니다.'
       ),
       icon: '🚀',
-      status: 'upcoming'
+      status: 'completed'
     },
     {
       quarter: 'Q2 2026',
       title: t('Lanzamiento en Argentina', 'Launch in Argentina', '아르헨티나 출시'),
       description: t('Apertura para usuarios argentinos con métodos de pago locales', 'Opening for Argentine users with local payment methods', '현지 결제 방법으로 아르헨티나 사용자를 위한 오픈'),
       icon: '🇦🇷',
-      status: 'upcoming'
+      status: 'completed'
     },
     {
       quarter: 'Q3 2026',
-      title: t('Segunda Preventa $CONFIO', 'Second $CONFIO Presale', '두 번째 $CONFIO 사전 판매'),
-      description: t('Crecimiento en Argentina y segunda ronda de preventa', 'Growth in Argentina and second presale round', '아르헨티나 성장 및 두 번째 사전 판매 라운드'),
-      icon: '💎',
-      status: 'upcoming'
+      title: t('Alianza con Ondo Finance', 'Ondo Finance partnership', 'Ondo Finance 파트너십'),
+      description: t(
+        'Ahorro con rendimiento (Confío Dollar+) y acciones de EE.UU. dentro de Confío, de la mano de Ondo Finance.',
+        'Yield-bearing savings (Confío Dollar+) and U.S. stocks inside Confío, together with Ondo Finance.',
+        '수익형 저축(Confío Dollar+)과 미국 주식을 Ondo Finance와 함께 Confío 안에서 제공합니다.'
+      ),
+      icon: '🤝',
+      status: 'active'
     },
     {
       quarter: 'Q4 2026',
@@ -87,14 +91,14 @@ const FriendlyRoadmap = () => {
               <div className={styles.timelineContent}>
                 <div className={styles.timelineIcon}>{item.icon}</div>
                 <div className={styles.timelineCard}>
-                  <span className={`${styles.timelineQuarter} ${item.status === 'active' ? styles.active : ''}`}>
-                    {item.quarter}
+                  <span className={`${styles.timelineQuarter} ${item.status === 'active' ? styles.active : ''} ${item.status === 'completed' ? styles.completed : ''}`}>
+                    {item.status === 'completed' ? '✓ ' : ''}{item.quarter}
                   </span>
                   <h3 className={styles.timelineTitle}>{item.title}</h3>
                   <p className={styles.timelineDescription}>{item.description}</p>
                 </div>
               </div>
-              <div className={`${styles.timelineDot} ${item.status === 'active' ? styles.activeDot : ''}`} />
+              <div className={`${styles.timelineDot} ${item.status === 'active' ? styles.activeDot : ''} ${item.status === 'completed' ? styles.completedDot : ''}`} />
             </motion.div>
           ))}
           <div className={styles.timelineLine} />
