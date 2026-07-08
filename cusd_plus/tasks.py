@@ -267,3 +267,60 @@ def abandon_stale_quotes():
     updated = stale.update(status='ABANDONED', updated_at=timezone.now())
     if updated:
         logger.info('abandoned %d stale cusd+ conversion quotes', updated)
+
+
+@shared_task(name='cusd_plus.mirror_gm_logos')
+def mirror_gm_logos():
+    """Mirror stock logos into OUR S3 so the app never hotlinks a third
+    party (privacy: user IPs stay off financialmodelingprep.com; and no
+    dependency on an SLA-less CDN). Idempotent — only fetches tickers whose
+    key is missing — so the weekly run costs a handful of requests once the
+    universe is backfilled. TickerLogo's initial-circle fallback makes any
+    residual gap cosmetic."""
+    import boto3
+
+    bucket = getattr(settings, 'AWS_PUBLICATIONS_BUCKET', None)
+    if not bucket:
+        return {'error': 'AWS_PUBLICATIONS_BUCKET not configured'}
+    prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/')
+
+    from . import gm_api
+    tickers = sorted({
+        (item.get('underlyingMarket') or {}).get('ticker')
+        for item in gm_api.all_market()
+    } - {None, ''})
+
+    s3 = boto3.client('s3', region_name=getattr(settings, 'AWS_S3_REGION', 'eu-central-2'))
+    existing: set[str] = set()
+    try:
+        for page in s3.get_paginator('list_objects_v2').paginate(Bucket=bucket, Prefix=prefix):
+            existing.update(o['Key'] for o in page.get('Contents', []))
+    except Exception:  # noqa: BLE001 — no ListBucket perm → treat all as missing
+        logger.warning('gm logo mirror: list failed, falling back to blind puts')
+
+    mirrored = skipped = failed = 0
+    for ticker in tickers:
+        key = f'{prefix}{ticker}.png'
+        if key in existing:
+            skipped += 1
+            continue
+        try:
+            resp = requests.get(
+                f'https://financialmodelingprep.com/image-stock/{ticker}.png',
+                timeout=10,
+            )
+            if resp.status_code == 200 and resp.content and \
+                    'image' in resp.headers.get('Content-Type', ''):
+                s3.put_object(
+                    Bucket=bucket, Key=key, Body=resp.content,
+                    ContentType='image/png',
+                    CacheControl='public, max-age=604800',
+                )
+                mirrored += 1
+            else:
+                failed += 1
+        except Exception:  # noqa: BLE001 — one bad logo never stops the sweep
+            failed += 1
+    result = {'tickers': len(tickers), 'mirrored': mirrored, 'skipped': skipped, 'failed': failed}
+    logger.info('gm logo mirror: %s', result)
+    return result

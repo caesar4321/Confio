@@ -65,6 +65,7 @@ class GmAssetType(graphene.ObjectType):
     day_change_pct = graphene.Float()
     off_hours = graphene.Boolean(description="Tradable on weekends/holidays (per-asset, per Ondo)")
     sparkline24h = graphene.List(graphene.Float, description="Downsampled 24h price series for charts")
+    logo_url = graphene.String(description="Served from OUR S3 mirror — the app never hotlinks third parties")
 
 
 class GmMarketType(graphene.ObjectType):
@@ -134,22 +135,35 @@ class Query(graphene.ObjectType):
             import logging
             logging.getLogger(__name__).exception('gm_market upstream failed')
             return None  # client keeps its last cache; never a fake price
-        assets = []
+        from django.conf import settings
+        from security.s3_utils import public_s3_url
+        logos_bucket = getattr(settings, 'AWS_PUBLICATIONS_BUCKET', None)
+        logos_prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/')
+
+        ranked = []  # (market cap, asset) — famous names first
         for item in market:
             pm = item.get('primaryMarket') or {}
             um = item.get('underlyingMarket') or {}
             if not pm.get('symbol') or pm.get('price') is None:
                 continue
-            assets.append(GmAssetType(
+            ticker = um.get('ticker') or pm['symbol'].removesuffix('on')
+            asset = GmAssetType(
                 symbol=pm['symbol'],
-                ticker=um.get('ticker') or pm['symbol'].removesuffix('on'),
+                ticker=ticker,
                 name=_display_name(um.get('name') or um.get('ticker') or ''),
                 price_usd=float(pm['price']),
                 day_change_pct=float(pm.get('priceChangePct24h') or 0),
                 off_hours='offhours' in (pm.get('tradableSessions') or []),
                 sparkline24h=_sparkline(pm.get('priceHistory24h') or []),
-            ))
-        return GmMarketType(session=session, assets=assets)
+                logo_url=public_s3_url(f'{logos_prefix}{ticker}.png', bucket=logos_bucket)
+                if logos_bucket else None,
+            )
+            ranked.append((float(um.get('marketCap') or 0), asset))
+        # Discovery order = market cap descending: with 438 assets the list
+        # must open on household names (AAPL, NVDA, SPY…), not alphabet soup.
+        # The client still floats the user's HELD positions above everything.
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        return GmMarketType(session=session, assets=[a for _, a in ranked])
 
     def resolve_gm_ohlc(self, info, symbol, range='3M'):
         user = getattr(info.context, 'user', None)

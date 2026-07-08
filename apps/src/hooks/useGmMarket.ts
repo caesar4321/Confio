@@ -55,6 +55,7 @@ const GM_MARKET = gql`
         dayChangePct
         offHours
         sparkline24h
+        logoUrl
       }
     }
   }
@@ -82,8 +83,10 @@ const colorFor = (ticker: string): string => {
   return `hsl(${seed}, 55%, 42%)`;
 };
 
-// Logo CDN keyed by underlying ticker; TickerLogo falls back to the initial
-// circle when an image 404s, so a missing logo is cosmetic only.
+// Transitional fallback only (old server payloads without logoUrl): the
+// server now sends logos from OUR S3 mirror so user devices never hotlink
+// third parties. TickerLogo falls back to the initial circle on 404 either
+// way, so a missing logo is cosmetic only.
 const logoFor = (ticker: string) =>
   `https://financialmodelingprep.com/image-stock/${ticker}.png`;
 
@@ -103,7 +106,7 @@ export const useGmMarket = () => {
       priceUsd: a.priceUsd,
       dayChangePct: a.dayChangePct,
       color: colorFor(a.ticker),
-      logoUrl: logoFor(a.ticker),
+      logoUrl: a.logoUrl || logoFor(a.ticker),
       offHours: !!a.offHours,
       sparkline24h: a.sparkline24h || [],
     }));
