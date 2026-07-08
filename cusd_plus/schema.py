@@ -138,7 +138,9 @@ class Query(graphene.ObjectType):
         from django.conf import settings
         from security.s3_utils import public_s3_url
         logos_bucket = getattr(settings, 'AWS_PUBLICATIONS_BUCKET', None)
-        logos_prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/')
+        # v2 = card-safe set (white-glyph logos baked onto dark chips);
+        # bumping the prefix also cache-busts devices that cached v1 URLs
+        logos_prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/v2/')
 
         ranked = []  # (market cap, asset) — famous names first
         for item in market:
