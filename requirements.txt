@@ -36,4 +36,3 @@ django-cors-headers==4.3.1
 qrcode==8.2
 pycountry==26.2.16
 git+https://github.com/tinymanorg/tinyman-py-sdk.git@v2.1.1#egg=tinyman-py-sdk
-Pillow

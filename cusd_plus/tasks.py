@@ -269,53 +269,6 @@ def abandon_stale_quotes():
         logger.info('abandoned %d stale cusd+ conversion quotes', updated)
 
 
-def _ticker_chip_rgb(ticker: str) -> tuple:
-    """Mirrors the client's colorFor (useGmMarket.ts): hsl(seed, 55%, 42%) —
-    the SAME per-ticker palette TickerLogo uses for initial-circle fallbacks,
-    so baked chips and fallback circles share one visual language."""
-    import colorsys
-
-    seed = 0
-    for ch in ticker:
-        seed = (seed * 31 + ord(ch)) % 359
-    r, g, b = colorsys.hls_to_rgb(seed / 360, 0.42, 0.55)
-    return int(r * 255), int(g * 255), int(b * 255), 255
-
-
-def _card_safe_logo(png_bytes: bytes, ticker: str) -> bytes:
-    """FMP serves SOME logos as white glyphs on transparency (dark-UI
-    variants) — invisible silhouettes on Confío's white cards (53 of the
-    first 420, incl. AMZN/NKE/V/MELI). Detect them (transparent canvas +
-    mostly-light opaque pixels) and bake a per-ticker colored rounded chip
-    behind the glyph; everything else passes through untouched."""
-    import io
-
-    from PIL import Image, ImageDraw
-
-    im = Image.open(io.BytesIO(png_bytes)).convert('RGBA')
-    px = im.getdata()
-    opaque = [(r, g, b) for r, g, b, a in px if a > 128]
-    opaque_ratio = len(opaque) / len(px) if len(px) else 0
-    light_ratio = (
-        sum(1 for r, g, b in opaque if 0.299 * r + 0.587 * g + 0.114 * b > 210)
-        / len(opaque) if opaque else 0
-    )
-    if not (opaque_ratio < 0.95 and light_ratio > 0.45):
-        return png_bytes
-
-    side = max(im.size)
-    canvas = Image.new('RGBA', (side, side), (0, 0, 0, 0))
-    ImageDraw.Draw(canvas).rounded_rectangle(
-        [0, 0, side - 1, side - 1], radius=int(side * 0.22), fill=_ticker_chip_rgb(ticker),
-    )
-    glyph = im.copy()
-    glyph.thumbnail((int(side * 0.76), int(side * 0.76)), Image.LANCZOS)
-    canvas.alpha_composite(glyph, ((side - glyph.width) // 2, (side - glyph.height) // 2))
-    out = io.BytesIO()
-    canvas.save(out, format='PNG')
-    return out.getvalue()
-
-
 @shared_task(name='cusd_plus.mirror_gm_logos')
 def mirror_gm_logos():
     """Mirror stock logos into OUR S3 so the app never hotlinks a third
@@ -329,7 +282,7 @@ def mirror_gm_logos():
     bucket = getattr(settings, 'AWS_PUBLICATIONS_BUCKET', None)
     if not bucket:
         return {'error': 'AWS_PUBLICATIONS_BUCKET not configured'}
-    prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/v3/')
+    prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/')
 
     from . import gm_api
     tickers = sorted({
@@ -359,7 +312,7 @@ def mirror_gm_logos():
             if resp.status_code == 200 and resp.content and \
                     'image' in resp.headers.get('Content-Type', ''):
                 s3.put_object(
-                    Bucket=bucket, Key=key, Body=_card_safe_logo(resp.content, ticker),
+                    Bucket=bucket, Key=key, Body=resp.content,
                     ContentType='image/png',
                     CacheControl='public, max-age=604800',
                 )

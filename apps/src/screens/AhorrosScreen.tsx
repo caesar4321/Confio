@@ -72,8 +72,21 @@ export const AhorrosScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
   const portfolio = useAhorrosPortfolio();
-  const { stocks: gmStocks } = useGmMarket();
+  const { stocks: gmStocks, session: gmSession } = useGmMarket();
   const featuredTickers = gmStocks.slice(0, 5);
+  // Universe size from the live list (438 today → "400+"), honest fallback
+  // while loading; session label mirrors AccionesListScreen's grammar.
+  const gmUniverseLabel = gmStocks.length >= 100
+    ? `${Math.floor(gmStocks.length / 100) * 100}+`
+    : '400+';
+  const gmSessionLabel =
+    gmSession === 'core'
+      ? 'Mercado abierto'
+      : gmSession === 'extended'
+        ? 'Sesión extendida'
+        : gmSession === 'off-hours'
+          ? 'Fin de semana · activos seleccionados'
+          : 'Mercado cerrado';
   const { savings, stocks, movements } = portfolio;
 
   const { data: balancesData } = useQuery(GET_MY_BALANCES, {
@@ -294,9 +307,6 @@ export const AhorrosScreen = () => {
         {/* ── Inversión: Acciones de EE.UU. (Ondo Stocks) ─────────────────── */}
         {stocks.enabled && (
           <>
-            {/* TODO(gm): market-status chip (open/closed/paused) once the GM
-                API exposes it — a hardcoded "Mercado abierto" on a Sunday
-                reads as broken, so nothing shows until it's real. */}
             <Text style={styles.sectionTitle}>Inversión</Text>
             <View style={styles.card}>
               <View style={styles.productRow}>
@@ -305,7 +315,20 @@ export const AhorrosScreen = () => {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.productName}>Acciones de EE.UU.</Text>
-                  <Text style={styles.productSymbol}>Tesla, NVIDIA, Apple y 200+ más</Text>
+                  <Text style={styles.productSymbol}>
+                    Tesla, NVIDIA, Apple y {gmUniverseLabel} más
+                  </Text>
+                  {/* Live session from the GM status API — a hardcoded
+                      "Mercado abierto" on a Sunday reads as broken. */}
+                  <View style={styles.marketStatusRow}>
+                    <View
+                      style={[
+                        styles.marketStatusDot,
+                        gmSession === 'closed' && styles.marketStatusDotClosed,
+                      ]}
+                    />
+                    <Text style={styles.marketStatusText}>{gmSessionLabel}</Text>
+                  </View>
                 </View>
                 {hasStocks && (
                   <View style={{ alignItems: 'flex-end' }}>
@@ -520,13 +543,17 @@ const styles = StyleSheet.create({
   productLogoWrap: { width: 44, height: 44 },
   stocksLogoWrap: {
     borderRadius: 22,
-    backgroundColor: '#1D4ED8',
+    backgroundColor: colors.secondaryDark,
     alignItems: 'center',
     justifyContent: 'center',
   },
   productLogo: { width: 44, height: 44, borderRadius: 22 },
   productName: { fontSize: 17, fontWeight: '700', color: colors.text.primary },
   productSymbol: { fontSize: 13, color: colors.text.secondary, marginTop: 1 },
+  marketStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  marketStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primaryDark },
+  marketStatusDotClosed: { backgroundColor: colors.text.light },
+  marketStatusText: { fontSize: 11, fontWeight: '600', color: colors.text.secondary },
   productValue: { fontSize: 17, fontWeight: '700', color: colors.text.primary },
   productDayChange: { fontSize: 12, fontWeight: '600', color: colors.primaryDark, marginTop: 1 },
   dayChangeNegative: { color: colors.error.icon },
@@ -622,7 +649,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#1D4ED8',
+    backgroundColor: colors.secondaryDark,
     alignItems: 'center',
     justifyContent: 'center',
   },
