@@ -138,9 +138,10 @@ class Query(graphene.ObjectType):
         from django.conf import settings
         from security.s3_utils import public_s3_url
         logos_bucket = getattr(settings, 'AWS_PUBLICATIONS_BUCKET', None)
-        # v2 = card-safe set (white-glyph logos baked onto dark chips);
-        # bumping the prefix also cache-busts devices that cached v1 URLs
-        logos_prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/v2/')
+        # v3 = card-safe set: white-glyph logos sit on per-ticker colored
+        # chips using the SAME hash palette as TickerLogo's initial-circle
+        # fallback (no off-palette fills). Prefix bumps double as cache-busts.
+        logos_prefix = getattr(settings, 'GM_LOGOS_S3_PREFIX', 'stock-logos/v3/')
 
         ranked = []  # (market cap, asset) — famous names first
         for item in market:
