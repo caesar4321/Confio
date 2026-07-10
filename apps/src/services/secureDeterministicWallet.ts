@@ -273,6 +273,40 @@ export function getDerivedEvmWallet(): DerivedEvmWallet | null {
   return lastDerivedEvmWallet;
 }
 
+/**
+ * Derive the EVM (BSC) wallet WITH its private key for the ACTIVE account,
+ * on demand — the signing-time analogue of algorandService.signTransactionBytes.
+ * Same master secret + account context → the same user.bsc key on any device.
+ * Never derives from a stale cache; the secret never leaves this module.
+ *
+ * Throws if no master secret exists (the user must have completed sign-in);
+ * we never generate one here (allowGenerate: false).
+ */
+export async function getActiveEvmWallet(): Promise<DerivedEvmWallet> {
+  const { oauthStorage } = await import('./oauthStorageService');
+  const oauth = await oauthStorage.getOAuthSubject();
+  if (!oauth?.subject || !oauth?.provider) {
+    throw new Error('Missing OAuth subject/provider for EVM signing');
+  }
+
+  const { AuthService } = await import('./authService');
+  const ctx = await AuthService.getInstance().getActiveAccountContext();
+
+  const masterSecret = await getOrCreateMasterSecret(oauth.subject, undefined, {
+    allowGenerate: false,
+    provider: oauth.provider as 'google' | 'apple',
+  });
+
+  const opts = {
+    accountType: ctx.type === 'business' ? 'business' : 'personal',
+    accountIndex: ctx.index,
+    businessId: ctx.businessId,
+  } as const;
+  const wallet = deriveEvmKeyFromMasterSecret(masterSecret, opts);
+  cacheAndPersistEvmWallet(evmAccountKey(opts), wallet);
+  return wallet;
+}
+
 // The ADDRESS (never key material) also persists in the keychain, PER
 // ACCOUNT, so cold starts can display it: the fast wallet paths
 // reconstruct from the cached ALGORAND seed, which by domain-separation

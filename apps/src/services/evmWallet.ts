@@ -231,3 +231,85 @@ export const bscBnbBalance = async (address: string): Promise<bigint> =>
 
 export const bscSendRawTransaction = async (rawTx: string): Promise<string> =>
   rpcCall('eth_sendRawTransaction', [rawTx]);
+
+export const bscEstimateGas = async (
+  from: string, to: string, data: string, valueWei = 0n,
+): Promise<bigint> =>
+  BigInt(await rpcCall('eth_estimateGas', [{
+    from, to, data: data || undefined,
+    value: valueWei ? '0x' + valueWei.toString(16) : undefined,
+  }]));
+
+export interface BscReceipt {
+  status: string; // '0x1' success, '0x0' revert
+  transactionHash: string;
+  blockNumber: string;
+}
+
+/** Poll for a receipt; throws on revert or timeout. ~2s cadence. */
+export const bscWaitForReceipt = async (
+  txHash: string, tries = 60,
+): Promise<BscReceipt> => {
+  for (let i = 0; i < tries; i++) {
+    const rec = (await rpcCall('eth_getTransactionReceipt', [txHash])) as BscReceipt | null;
+    if (rec) {
+      if (rec.status !== '0x1') throw new Error(`bsc tx reverted: ${txHash}`);
+      return rec;
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error(`bsc tx timeout: ${txHash}`);
+};
+
+// ── Minimal ABI encoding (address + uint256 args only) ──────────────────
+// A full ABI lib would bloat the bundle; our calls take only static
+// 32-byte-word args, so hand-encoding is exact and dependency-free.
+
+const pad32 = (hexNoPrefix: string): string => hexNoPrefix.toLowerCase().padStart(64, '0');
+
+export const selector = (signature: string): string =>
+  '0x' + bytesToHex(keccak_256(utf8ToBytes(signature))).slice(0, 8);
+
+export const encodeAddress = (addr: string): string => pad32(addr.replace(/^0x/, ''));
+export const encodeUint = (v: bigint): string => pad32(v.toString(16));
+
+/** encodeCall('subscribeAndMint(uint256,uint256,address)', [amt, min, addr-as-uint-or-address]) */
+export const encodeCall = (
+  signature: string,
+  args: Array<{ type: 'uint' | 'address'; value: bigint | string }>,
+): string => {
+  const body = args
+    .map((a) => (a.type === 'address' ? encodeAddress(a.value as string) : encodeUint(a.value as bigint)))
+    .join('');
+  return selector(signature) + body;
+};
+
+/**
+ * Sign + broadcast a state-changing call, waiting for the receipt.
+ * gasLimit is estimated ×1.3 unless provided. The signer's key must control
+ * `from`. Returns the mined receipt (throws on revert/timeout).
+ */
+export const sendCall = async (params: {
+  from: string;
+  privKeyHex: string;
+  to: string;
+  data: string;
+  valueWei?: bigint;
+  gasLimit?: bigint;
+}): Promise<BscReceipt> => {
+  const { from, privKeyHex, to, data } = params;
+  const valueWei = params.valueWei ?? 0n;
+  const nonce = await bscGetNonce(from);
+  // Floor at 0.1 gwei; ×1.2 headroom so a small bump doesn't underprice.
+  let gasPriceWei = await bscGasPrice();
+  if (gasPriceWei < 100_000_000n) gasPriceWei = 100_000_000n;
+  gasPriceWei = (gasPriceWei * 12n) / 10n;
+  const gasLimit =
+    params.gasLimit ?? ((await bscEstimateGas(from, to, data, valueWei)) * 13n) / 10n;
+  const signed = signLegacyTransaction(
+    { nonce, gasPriceWei, gasLimit, to, valueWei, data, chainId: BSC_NETWORK.chainId },
+    privKeyHex,
+  );
+  const hash = await bscSendRawTransaction(signed.rawTx);
+  return bscWaitForReceipt(hash);
+};
