@@ -1091,16 +1091,16 @@ class KoyweClient:
         low = Decimal('0')
 
         for _ in range(6):
-            quote = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=high)
-            if quote and Decimal(str(quote.get('amountOut') or '0')) >= target_amount:
+            quote, exceeds_max = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=high)
+            if exceeds_max or (quote and Decimal(str(quote.get('amountOut') or '0')) >= target_amount):
                 break
             high *= Decimal('2')
 
         for _ in range(16):
             midpoint = (low + high) / Decimal('2')
-            quote = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=midpoint)
+            quote, exceeds_max = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=midpoint)
             amount_out = Decimal(str(quote.get('amountOut') or '0')) if quote else Decimal('0')
-            if amount_out >= target_amount:
+            if exceeds_max or amount_out >= target_amount:
                 high = midpoint
             else:
                 low = midpoint
@@ -1133,13 +1133,24 @@ class KoyweClient:
         except requests.RequestException as exc:
             raise KoyweError(f'Koywe bank-info request failed for {country_code}: {exc}') from exc
 
-    def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> dict[str, Any] | None:
+    def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> tuple[dict[str, Any] | None, bool]:
+        """Preview quote tolerant of Koywe's min/max amount rejections.
+
+        Returns (quote, exceeds_max): quote is None when Koywe rejected the
+        amount; exceeds_max is True when the rejection was for exceeding the
+        pair maximum, so bracketing callers can treat the probe as an upper
+        bound instead of aborting the whole limits fetch.
+        """
         try:
-            return self.create_preview_quote(symbol_in=symbol_in, symbol_out=symbol_out, amount=amount)
+            return self.create_preview_quote(symbol_in=symbol_in, symbol_out=symbol_out, amount=amount), False
         except KoyweMinimumAmountError:
-            return None
+            return None, False
+        except KoyweMaximumAmountError:
+            return None, True
         except KoyweError as exc:
             message = str(exc).lower()
             if 'less than the minimun available' in message or 'less than the minimum available' in message:
-                return None
+                return None, False
+            if 'exceeds the maximun available' in message or 'exceeds the maximum available' in message:
+                return None, True
             raise
