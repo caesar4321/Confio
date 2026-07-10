@@ -87,8 +87,13 @@ export const ConvertAhorroScreen = () => {
   const dailyEstimate = (quote.receiveUsd * savings.netApyPct) / 100 / 365;
 
   const onConfirm = () => {
-    // TODO(cusd+): biometric confirm → build atomic tx → submit → track the
-    // BRIDGING state machine. This stub simulates the happy path only.
+    // Conversion (cUSD→cUSD+) needs the Allbridge burn+bridge group, whose
+    // server-side resource population is the last open piece
+    // (prepare_leg_ab.py §6 TODO). Until it lands this screen stays behind
+    // the server kill switch (quote.paused), so onConfirm is never reachable
+    // in production; the direct USDT rail (ReceiveSavings → leg C via
+    // savingsLegC) is the live mint path. Stub simulates the happy path for
+    // review builds only.
     setPhase('processing');
     setTimeout(() => setPhase('success'), 1600);
   };

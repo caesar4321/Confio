@@ -51,6 +51,7 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     min_amount_usd = graphene.Float()
     paused = graphene.Boolean(description="Kill switch: pause all conversions regardless of cost")
     gm_trade_fee_bps = graphene.Int(description="Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative")
+    vault_address = graphene.String(description="cUSD+ vault (proxy) on BSC — client targets this for leg C (subscribeAndMint/redeem)")
 
 
 # ── Ondo Stocks (GM) market data — server proxy of api.gm.ondo.finance ──
@@ -288,6 +289,7 @@ class Query(graphene.ObjectType):
             # Launch config, set together with router.setStockFeeBps once
             # Ondo's GM fee schedule is known — open pricing decision.
             gm_trade_fee_bps=getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 0),
+            vault_address=getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', None),
         )
 
 

@@ -21,6 +21,7 @@ const GET_CONVERT_PARAMS = gql`
       confioFeeBps
       minAmountUsd
       paused
+      vaultAddress
     }
   }
 `;

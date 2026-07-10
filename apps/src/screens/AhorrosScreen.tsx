@@ -41,6 +41,7 @@ import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { TickerLogo } from '../components/TickerLogo';
 import { MovementRow } from '../components/MovementRow';
 import { useGmMarket } from '../hooks/useGmMarket';
+import { useSavingsResume } from '../hooks/useSavingsResume';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
@@ -72,6 +73,9 @@ export const AhorrosScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
   const portfolio = useAhorrosPortfolio();
+  // Finish any pending cUSD+ mints (leg C) on mount + every re-foreground —
+  // the savings sibling of the USDC→cUSD auto-swap resume contract.
+  useSavingsResume();
   const { stocks: gmStocks, session: gmSession } = useGmMarket();
   const featuredTickers = gmStocks.slice(0, 5);
   // Universe size from the live list (438 today → "400+"), honest fallback
