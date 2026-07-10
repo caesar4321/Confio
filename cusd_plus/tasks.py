@@ -214,44 +214,92 @@ def allbridge_diagnose(conversion_internal_id: str) -> dict:
     return {'status_code': res.status_code, 'body': res.json() if res.ok else res.text}
 
 
+def _gas_dust_target_wei() -> int:
+    """BNB a user address needs for its next leg (approve + subscribeAndMint).
+
+    Sized to ONE action, not a batch: the 21k dust-tx overhead is ~$0.001,
+    so re-dusting on demand beats parking idle BNB in the user's wallet.
+    Gas-price aware with a spike buffer so a rising market still clears the
+    action; capped so a gas spike can never over-drain the sponsor.
+    """
+    action_gas = int(getattr(settings, 'CUSD_PLUS_GAS_ACTION_BUDGET', 700_000))  # ~645k measured + margin
+    spike_mult = int(getattr(settings, 'CUSD_PLUS_GAS_DUST_SPIKE_MULT', 3))
+    try:
+        gas_price = int(_rpc('eth_gasPrice', []), 16)
+    except Exception:  # noqa: BLE001
+        gas_price = 1_000_000_000  # 1 gwei fallback
+    gas_price = max(gas_price, int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))  # ≥0.1 gwei
+    target = action_gas * gas_price * spike_mult
+    cap = int(getattr(settings, 'CUSD_PLUS_GAS_DUST_MAX_WEI', 5_000_000_000_000_000))  # 0.005 BNB hard cap
+    return min(target, cap)
+
+
 @shared_task(name='cusd_plus.check_gas_dust')
 def check_gas_dust(conversion_internal_id: str):
-    """Ensure user.bsc holds enough BNB for its next leg (approve + mint).
-    Sponsorship, not custody — mirrors Algorand fee pooling in spirit.
+    """Top up user.bsc with just enough BNB for its next leg (approve +
+    subscribeAndMint). Sponsorship, not custody — BSC has no protocol-level
+    fee delegation (unlike Algorand group fee pooling), so the fee must sit
+    at the signer's own address; we pre-fund the shortfall and no more. The
+    BNB lands at the USER's address and the user signs their own tx.
 
-    The BALANCE check is live; the SEND requires an EVM signer in the
-    backend (eth-account) plus the relayer key in SSM — both land with the
-    BSC deploy. Gated off by default so this can ship dark.
+    Trigger point (DEST_ARRIVED) already means a verified conversion is
+    imminent, so this can't be farmed for free BNB. Gated off by default so
+    it ships dark until the savings rail is live.
     """
+    from django.core.cache import cache
     from .models import CusdPlusConversion
 
     try:
         conv = CusdPlusConversion.objects.get(internal_id=conversion_internal_id)
     except CusdPlusConversion.DoesNotExist:
         return
-
     if not conv.user_bsc_address:
         return
+
     try:
         balance_wei = int(_rpc('eth_getBalance', [conv.user_bsc_address, 'latest']), 16)
     except Exception as exc:  # noqa: BLE001
         logger.warning('gas dust balance check failed for %s: %s', conv.internal_id, exc)
         return
 
-    needed_wei = int(getattr(settings, 'CUSD_PLUS_GAS_DUST_WEI', 300_000_000_000_000))  # 0.0003 BNB
+    needed_wei = _gas_dust_target_wei()
     if balance_wei >= needed_wei:
-        return
+        return  # already funded — most repeat users skip dusting entirely
+    shortfall = needed_wei - balance_wei
 
     if not getattr(settings, 'CUSD_PLUS_GAS_DUST_ENABLED', False):
-        logger.info(
-            'gas dust needed for %s (%s wei short) but sender disabled',
-            conv.internal_id, needed_wei - balance_wei,
-        )
+        logger.info('gas dust needed for %s (%s wei short) but sender disabled',
+                    conv.internal_id, shortfall)
         return
-    # TODO(cusd+ deploy): send (needed - balance) BNB from the relayer key
-    # (SSM: /confio/cusd_plus/relayer-key) via eth-account signed legacy tx;
-    # record spend in sponsorship accounting.
-    logger.error('gas dust send not implemented yet (conversion %s)', conv.internal_id)
+
+    # Rate limit per address: one dust per few minutes defeats spray attacks.
+    rl_key = f'cusd_plus_gasdust_{conv.user_bsc_address.lower()}'
+    if cache.get(rl_key):
+        logger.info('gas dust rate-limited for %s', conv.user_bsc_address)
+        return
+
+    try:
+        from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
+        signer = get_bsc_sponsor_signer_from_settings()
+        sender = signer.address
+        nonce = int(_rpc('eth_getTransactionCount', [sender, 'pending']), 16)
+        gas_price = max(int(_rpc('eth_gasPrice', []), 16),
+                        int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
+        sponsor_balance = int(_rpc('eth_getBalance', [sender, 'latest']), 16)
+        if sponsor_balance < shortfall + 21_000 * gas_price:
+            logger.error('sponsor BNB too low for gas dust (have %s, need %s) — refill needed',
+                         sponsor_balance, shortfall)
+            return
+        raw, txh = signer.sign_transaction({
+            'chainId': settings.BSC_CHAIN_ID, 'nonce': nonce, 'gasPrice': gas_price,
+            'gas': 21000, 'to': conv.user_bsc_address, 'value': shortfall, 'data': b'',
+        })
+        sent = _rpc('eth_sendRawTransaction', [raw])
+        cache.set(rl_key, 1, 180)  # 3-min cooldown per address
+        logger.info('gas dust sent %s wei to %s for %s: %s',
+                    shortfall, conv.user_bsc_address, conv.internal_id, sent)
+    except Exception as exc:  # noqa: BLE001 — dusting must never crash the scanner
+        logger.exception('gas dust send failed for %s: %s', conv.internal_id, exc)
 
 
 @shared_task(name='cusd_plus.abandon_stale_quotes')
