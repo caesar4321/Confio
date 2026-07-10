@@ -237,8 +237,13 @@ simulates inside the full [prefix + tail] group. prepare_leg_ab therefore:
 compose → algod simulate (allow-unnamed-resources, empty sigs) → apply
 resources to the three tail app-calls (pair-aware placement; port of
 populateDepositResources from allbridgeAlgorand.ts) → gid → sponsor-sign.
-The client sends an UNPOPULATED tail and stays thin. TODO in
-prepare_leg_ab.py marks where this lands.
+The client sends an UNPOPULATED tail and stays thin. **RESOLVED
+2026-07-10:** `_populate_deposit_resources` in prepare_leg_ab.py is the
+Python port (simulate → `_distribute_units` pair-aware placement → rebuild
+the tail app-calls), running before gid so the sponsor signs final bytes;
+the burn (index 2) is never a slot. Placement invariants unit-tested;
+the live simulate exercises on the first real conversion (behind the
+paused kill switch until launch).
 
 Client then: sign user txns → submit group → advanceCusdPlusConversion
 (SRC_COMMITTED, group txid) → resume machinery (§2) takes over.
