@@ -22,10 +22,23 @@ import {
 
 const RPC = process.env.RPC_URL || 'https://data-seed-prebsc-1-s1.bnbchain.org:8545';
 const CHAIN = BigInt(process.env.CHAIN_ID || '97');
-const A = JSON.parse(readFileSync('/private/tmp/claude-501/-Users-julian-Confio/3fe9a834-4954-44c2-a6b8-efad5dc01081/scratchpad/testnet-addresses.json', 'utf8'));
+const A = JSON.parse(readFileSync(
+  process.env.ADDRESSES_FILE
+    || new URL('../../contracts/cusd_plus/.rehearsal/testnet-addresses.json', import.meta.url).pathname,
+  'utf8',
+));
+// Deployer is DETERMINISTIC (fill(43) master secret via the app's own V2
+// derivation) so the throwaway key can always be recomputed from code — the
+// original random testnet deployer (0x4eb4…F9e6) was lost with its tmp file,
+// stranding its faucet tBNB. Env override still wins for anvil runs.
 const DEP = process.env.DEPLOYER_KEY
   ? { privKeyHex: process.env.DEPLOYER_KEY.replace('0x', ''), address: process.env.DEPLOYER_ADDR! }
-  : JSON.parse(readFileSync('/private/tmp/claude-501/-Users-julian-Confio/3fe9a834-4954-44c2-a6b8-efad5dc01081/scratchpad/testnet-deployer.json', 'utf8'));
+  : (() => {
+      const d = deriveEvmKeyFromMasterSecret(new Uint8Array(32).fill(43), {
+        accountType: 'personal', accountIndex: 0,
+      });
+      return { privKeyHex: d.privKeyHex, address: d.address };
+    })();
 
 const erc20 = new Interface([
   'function mint(address,uint256)', 'function approve(address,uint256)',

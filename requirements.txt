@@ -37,3 +37,6 @@ qrcode==8.2
 pycountry==26.2.16
 git+https://github.com/tinymanorg/tinyman-py-sdk.git@v2.1.1#egg=tinyman-py-sdk
 Pillow
+# BSC sponsor hot wallet (native KMS secp256k1 signing, blockchain/evm_kms_signer.py)
+eth-account>=0.11,<0.14
+eth-hash[pycryptodome]
