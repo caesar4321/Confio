@@ -20,6 +20,7 @@ import {
   BscReceipt,
 } from './evmWallet';
 import { getActiveEvmWallet } from './secureDeterministicWallet';
+import { installBscServerTransport } from './bscServerRpc';
 
 // USDT (Binance-Peg BSC-USD) is fixed on BSC mainnet; the vault address is
 // deployment-specific and comes from the server.
@@ -44,16 +45,11 @@ export interface SubscribeResult {
   recipient: string;
 }
 
+// Reads ride the same server relay as everything else (transport installed
+// below); never a direct fetch to a public node from the app.
 const ethCall = async (to: string, data: string): Promise<string> => {
-  const { BSC_NETWORK } = await import('./evmWallet');
-  const r = await fetch(BSC_NETWORK.rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
-  });
-  const j = await r.json();
-  if (j.error) throw new Error(`bsc eth_call: ${j.error.message}`);
-  return j.result;
+  const { bscEthCall } = await import('./evmWallet');
+  return bscEthCall(to, data);
 };
 
 const currentAllowance = async (
@@ -74,6 +70,7 @@ const currentAllowance = async (
 export const subscribeUsdtToSavings = async (
   params: SubscribeParams,
 ): Promise<SubscribeResult> => {
+  installBscServerTransport(); // client signs, SERVER injects (cUSD parity)
   const wallet = params.wallet ?? (await getActiveEvmWallet());
   const from = wallet.address;
   const { vaultAddress, usdtWei } = params;
@@ -120,6 +117,7 @@ export const redeemSavingsToUsdt = async (params: {
   minUsdtOut?: bigint;
   wallet?: DerivedEvmWallet;
 }): Promise<{ redeemTx: string; recipient: string }> => {
+  installBscServerTransport(); // client signs, SERVER injects (cUSD parity)
   const wallet = params.wallet ?? (await getActiveEvmWallet());
   const from = wallet.address;
   const rec = await sendCall({

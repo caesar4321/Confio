@@ -207,8 +207,24 @@ export function signLegacyTransaction(tx: LegacyTxParams, privKeyHex: string): S
 }
 
 // ── Thin JSON-RPC helpers (nonce / gas / broadcast / balances) ──────────
+//
+// TRANSPORT: the APP routes every call through the Django relay (cUSD
+// parity — client signs, server injects; user IPs never touch public BSC
+// nodes). Scripts/tests keep the direct fetch default. bscServerRpc.ts
+// installs the app transport at first savings use.
 
-const rpcCall = async (method: string, params: unknown[]): Promise<any> => {
+export interface BscTransport {
+  read: (method: string, params: unknown[]) => Promise<any>;
+  submit: (rawTx: string) => Promise<string>; // returns tx hash
+}
+
+let transport: BscTransport | null = null;
+
+export const setBscTransport = (t: BscTransport | null): void => {
+  transport = t;
+};
+
+const directFetch = async (method: string, params: unknown[]): Promise<any> => {
   const res = await fetch(BSC_NETWORK.rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -220,6 +236,9 @@ const rpcCall = async (method: string, params: unknown[]): Promise<any> => {
   return json.result;
 };
 
+const rpcCall = async (method: string, params: unknown[]): Promise<any> =>
+  transport ? transport.read(method, params) : directFetch(method, params);
+
 export const bscGetNonce = async (address: string): Promise<bigint> =>
   BigInt(await rpcCall('eth_getTransactionCount', [address, 'pending']));
 
@@ -230,7 +249,10 @@ export const bscBnbBalance = async (address: string): Promise<bigint> =>
   BigInt(await rpcCall('eth_getBalance', [address, 'latest']));
 
 export const bscSendRawTransaction = async (rawTx: string): Promise<string> =>
-  rpcCall('eth_sendRawTransaction', [rawTx]);
+  transport ? transport.submit(rawTx) : directFetch('eth_sendRawTransaction', [rawTx]);
+
+export const bscEthCall = async (to: string, data: string): Promise<string> =>
+  rpcCall('eth_call', [{ to, data }, 'latest']);
 
 export const bscEstimateGas = async (
   from: string, to: string, data: string, valueWei = 0n,

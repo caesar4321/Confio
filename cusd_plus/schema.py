@@ -122,6 +122,33 @@ class Query(graphene.ObjectType):
         symbol=graphene.String(required=True),
         range=graphene.String(default_value='3M', description="1D | 1M | 3M | 6M | 1Y | MAX"),
     )
+    bsc_rpc = graphene.Field(
+        lambda: BscRpcResult,
+        method=graphene.String(required=True),
+        params=graphene.String(required=True, description="JSON-encoded params array"),
+        description="Read-only BSC RPC proxy (allowlisted methods) — keeps user IPs off public nodes",
+    )
+
+    def resolve_bsc_rpc(self, info, method, params):
+        import json as _json
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return BscRpcResult(error='auth_required')
+        if method not in BSC_READ_METHODS:
+            return BscRpcResult(error='method_not_allowed')
+        if _bsc_rate_limited(user.id, 'read', 120):
+            return BscRpcResult(error='rate_limited')
+        try:
+            parsed = _json.loads(params)
+            if not isinstance(parsed, list) or len(_json.dumps(parsed)) > 50_000:
+                return BscRpcResult(error='bad_params')
+        except Exception:
+            return BscRpcResult(error='bad_params')
+        from .tasks import _rpc
+        try:
+            return BscRpcResult(result=_json.dumps(_rpc(method, parsed)))
+        except Exception as exc:  # noqa: BLE001
+            return BscRpcResult(error=str(exc)[:200])
 
     def resolve_gm_market(self, info):
         user = getattr(info.context, 'user', None)
@@ -429,6 +456,91 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
         return AdvanceCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
 
 
+# ── BSC relay: client signs, SERVER injects (cUSD parity) ───────────────
+# The RN client never talks to a public BSC RPC: reads go through bscRpc
+# (allowlisted methods) and signed transactions through SubmitBscTransaction
+# (decoded + destination-allowlisted). User IPs stay off third-party nodes,
+# the server sees submissions the moment they happen, and retry/gas-bump
+# logic can live in one place. Custody unchanged: the server only relays
+# bytes the user already signed.
+
+BSC_READ_METHODS = {
+    'eth_getTransactionCount', 'eth_gasPrice', 'eth_estimateGas',
+    'eth_call', 'eth_getBalance', 'eth_getTransactionReceipt',
+    'eth_blockNumber', 'eth_chainId',
+}
+
+
+def _bsc_rate_limited(user_id, kind: str, per_minute: int) -> bool:
+    from django.core.cache import cache
+    key = f'bsc_relay_{kind}_{user_id}'
+    count = cache.get(key, 0)
+    if count >= per_minute:
+        return True
+    cache.set(key, count + 1, 60)
+    return False
+
+
+class BscRpcResult(graphene.ObjectType):
+    result = graphene.String(description="JSON-encoded RPC result")
+    error = graphene.String()
+
+
+class SubmitBscTransaction(graphene.Mutation):
+    """Relay a CLIENT-SIGNED BSC transaction to the node (the EVM analogue
+    of submitSponsoredGroup). Decodes the raw tx and only relays legacy
+    EIP-155 txns on our chain whose `to` is an allowlisted Confío-flow
+    contract — the relay can't be used as an open broadcast proxy."""
+    class Arguments:
+        raw_tx = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    tx_hash = graphene.String()
+    error = graphene.String()
+
+    def mutate(self, info, raw_tx):
+        from django.conf import settings
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return SubmitBscTransaction(success=False, error='auth_required')
+        if _bsc_rate_limited(user.id, 'submit', 10):
+            return SubmitBscTransaction(success=False, error='rate_limited')
+
+        raw = (raw_tx or '').strip()
+        if not raw.startswith('0x') or len(raw) > 100_000:
+            return SubmitBscTransaction(success=False, error='bad_raw_tx')
+
+        # Decode: legacy tx = rlp[nonce, gasPrice, gas, to, value, data, v, r, s]
+        try:
+            import rlp
+            fields = rlp.decode(bytes.fromhex(raw[2:]))
+            if len(fields) != 9:
+                return SubmitBscTransaction(success=False, error='not_legacy_tx')
+            to_addr = '0x' + fields[3].hex().lower()
+            v = int.from_bytes(fields[6], 'big')
+            chain_id = (v - 35) // 2
+        except Exception:
+            return SubmitBscTransaction(success=False, error='undecodable_tx')
+
+        if chain_id != int(getattr(settings, 'BSC_CHAIN_ID', 56)):
+            return SubmitBscTransaction(success=False, error='wrong_chain')
+        allowed = {
+            (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower(),
+            '0x55d398326f99059ff775485246999027b3197955',  # USDT (approve leg)
+        }
+        allowed |= {a.lower() for a in getattr(settings, 'BSC_RELAY_EXTRA_ALLOWED', [])}
+        if to_addr not in allowed:
+            return SubmitBscTransaction(success=False, error='destination_not_allowed')
+
+        from .tasks import _rpc
+        try:
+            tx_hash = _rpc('eth_sendRawTransaction', [raw])
+            return SubmitBscTransaction(success=True, tx_hash=tx_hash)
+        except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
+            return SubmitBscTransaction(success=False, error=str(exc)[:200])
+
+
 class Mutation(graphene.ObjectType):
     start_cusd_plus_conversion = StartCusdPlusConversion.Field()
     advance_cusd_plus_conversion = AdvanceCusdPlusConversion.Field()
+    submit_bsc_transaction = SubmitBscTransaction.Field()
