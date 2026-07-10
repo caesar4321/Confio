@@ -39,7 +39,11 @@ onboarding. No funds, no risk, until then.
 
 ### Remaining checklist
 
-- [ ] BscScan verify impl + proxy (constructor args below)
+- [x] Verified on **Sourcify** (exact_match, both impl + proxy) 2026-07-10 —
+      decentralized source verification, bytecode matched exactly. For the
+      BscScan green-check DISPLAY, re-run `forge verify-contract … --chain-id
+      56 --etherscan-api-key <KEY>` (one free Etherscan V2 key covers BSC),
+      or paste the standard-JSON manually. Constructor args below.
 - [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
 - [ ] $1 live E2E once whitelisted
 - [ ] Router deploy (separate) once GM attestation ABI is wired
