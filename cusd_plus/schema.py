@@ -198,15 +198,22 @@ class Query(graphene.ObjectType):
     def resolve_cusd_plus_summary(self, info):
         from django.conf import settings
         from .eligibility import is_ondo_eligible
+        from . import vault
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return None
         eligible = is_ondo_eligible(user)
-        # TODO(cusd+): position from the vault ledger for the JWT account;
-        # net_apy_pct from the USDY oracle rate x (1 - CONFIO_YIELD_SHARE).
+        # Real position: shares × pPlus, read live from the deployed vault
+        # for the JWT account's bsc_address (0 until PP whitelisting + a
+        # first mint; the ledger for earned_today/month lands with leg C).
+        bsc_address = _active_bsc_address(info)
+        balance_usd = vault.position_usd(bsc_address) if bsc_address else 0.0
         return CusdPlusSummaryType(
-            balance_usd=0.0,
-            net_apy_pct=0.0,
+            balance_usd=balance_usd,
+            # net_apy_pct SERVER-config until oracle-rate derivation lands
+            # (design rule: never hardcoded in client copy — this is the
+            # sanctioned server source). 0.0 keeps copy honest pre-launch.
+            net_apy_pct=getattr(settings, 'CUSD_PLUS_NET_APY_PCT', 0.0),
             earned_today_usd=0.0,
             earned_month_usd=0.0,
             savings_enabled=eligible,
@@ -296,6 +303,25 @@ def _actor_filter(info):
     if jwt_context['account_type'] == 'business' and jwt_context.get('business_id'):
         return {'actor_business_id': jwt_context['business_id'], 'actor_type': 'business'}
     return {'actor_user': info.context.user, 'actor_type': 'user'}
+
+
+def _active_bsc_address(info):
+    """Resolve the JWT account's bsc_address (never a client-supplied id)."""
+    from users.jwt_context import get_jwt_business_context_with_validation
+    from users.models import Account
+    ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+    if not ctx:
+        return None
+    idx = ctx.get('account_index', 0)
+    if ctx['account_type'] == 'business' and ctx.get('business_id'):
+        acc = Account.objects.filter(
+            business_id=ctx['business_id'], account_type='business', account_index=idx,
+        ).first()
+    else:
+        acc = Account.objects.filter(
+            user=info.context.user, account_type='personal', account_index=idx,
+        ).first()
+    return (acc.bsc_address or None) if acc else None
 
 
 class StartCusdPlusConversion(graphene.Mutation):
