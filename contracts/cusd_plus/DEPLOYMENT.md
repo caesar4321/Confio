@@ -42,9 +42,18 @@ onboarding. No funds, no risk, until then.
 - [x] **Verified on BscScan + Sourcify** (exact_match, both impl + proxy)
       2026-07-10. Source is public and bytecode-matched on both explorers.
       Constructor args below (for reference / re-verification).
+- [ ] **UUPS upgrade to the guard-gated impl** (commit `0a049edf`) via the
+      3-of-5 Safe BEFORE whitelisting/deposits. The live impl
+      (`0xB0C2...0823`) lets the owner call `resetOracleBaseline()` on a
+      healthy oracle, skipping holders' 85% of pending sub-2% growth into
+      collectable surplus (HIGH, 2026-07-13 review). Harmless while supply
+      is zero; must NOT survive into `lockUpgrades()`.
 - [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
 - [ ] $1 live E2E once whitelisted
-- [ ] Router deploy (separate) once GM attestation ABI is wired
+- [ ] Router deploy (separate) once GM attestation ABI is wired — deploy
+      only from `d78315a8`+ (pre-fix `sellToSavings` forwarded the shares
+      floor as the IM's `minUsdyOut`, bricking every sell with honest
+      slippage params)
 - [ ] `lockUpgrades()` at the proven-stable milestone (NOT yet — keep
       UUPS flexibility during IM integration)
 
