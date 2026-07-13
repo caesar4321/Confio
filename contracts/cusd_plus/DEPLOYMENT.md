@@ -30,9 +30,8 @@ pending sub-2% growth into collectable surplus. Executed at zero supply.
 - Post-upgrade verified live: impl slot = v2; owner/pPlus/supply/backing
   unchanged; `resetOracleBaseline()` from the Safe reverts
   `guard not tripped` (eth_call); non-owner still rejected.
-- impl v2 source: Sourcify exact_match (creation + runtime) 2026-07-13.
-  BscScan API verification pending an API key — source is public via
-  Sourcify meanwhile.
+- impl v2 source: Sourcify exact_match (creation + runtime) + BscScan
+  verified, proxy re-linked to impl v2, 2026-07-13.
 
 ### On-chain wiring (immutables, verified live 2026-07-07 + fork rehearsal)
 
@@ -62,8 +61,10 @@ onboarding. No funds, no risk, until then.
       Constructor args below (for reference / re-verification).
 - [x] **UUPS upgrade to the guard-gated impl** (commit `0a049edf`) — DONE
       2026-07-13, impl v2 `0x578f…201e` (see upgrade record above).
-- [ ] BscScan verify impl v2 (needs an Etherscan/BscScan API key; Sourcify
-      exact_match already done)
+- [x] BscScan verify impl v2 — DONE 2026-07-13 (Sourcify exact_match +
+      BscScan source verified; proxy re-linked to impl v2 via
+      verifyproxycontract). Etherscan v2 key lives in git-crypted `.env`
+      as `ETHERSCAN_API_KEY`.
 - [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
 - [ ] $1 live E2E once whitelisted
 - [ ] Router deploy (separate) once GM attestation ABI is wired — deploy
