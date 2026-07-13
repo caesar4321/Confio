@@ -23,7 +23,7 @@ import { useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SHARE_LINKS } from '../config/shareLinks';
-import { countries, Country, getCountryByIso } from '../utils/countries';
+import { Country, filterCountries, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNumberFormat } from '../utils/numberFormatting';
@@ -97,10 +97,7 @@ const CountryPickerModal = ({
 }) => {
   const [q, setQ] = useState('');
   const data = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    const base = query
-      ? countries.filter((c) => String(c[0]).toLowerCase().includes(query))
-      : countries;
+    const base = filterCountries(q);
     // Countries that already have listings float to the top so users land on
     // real content instead of wandering into empty countries. Stable sort
     // keeps the alphabetical order within each group.

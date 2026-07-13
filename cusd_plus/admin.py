@@ -3,11 +3,11 @@ from django.contrib import admin, messages
 
 class CusdPlusConversionAdmin(admin.ModelAdmin):
     list_display = (
-        'internal_id', 'actor_display_name', 'direction', 'amount_usd',
+        'internal_id', 'actor_display_name', 'direction', 'source', 'amount_usd',
         'status', 'created_at', 'src_committed_at', 'dest_arrived_at',
         'completed_at',
     )
-    list_filter = ('status', 'direction', 'actor_type')
+    list_filter = ('status', 'direction', 'source', 'actor_type')
     search_fields = (
         'internal_id', 'src_tx_id', 'dest_tx_hash', 'bridge_arrival_tx',
         'actor_display_name', 'user_bsc_address', 'user_algo_address',

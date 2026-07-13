@@ -65,7 +65,19 @@ class CusdPlusConversion(models.Model):
     )
     actor_display_name = models.CharField(max_length=255, blank=True)
 
+    # How the row was born. 'convert' rows start at CREATED from a user
+    # quote; chain-observed inflows (external USDT sends, ramp deliveries)
+    # are born directly at DEST_ARRIVED — the funds are already at the
+    # user's address, so only leg C (mint) remains. Keeps inflow accounting
+    # honest: a conversion moves existing Confío money, the others are NEW.
+    SOURCES = [
+        ('convert', 'In-app conversion (user-quoted)'),
+        ('external_deposit', 'External USDT-BSC deposit'),
+        ('ramp', 'Ramp (Koywe) delivery'),
+    ]
+
     direction = models.CharField(max_length=15, choices=DIRECTIONS)
+    source = models.CharField(max_length=20, choices=SOURCES, default='convert')
     amount_usd = models.DecimalField(max_digits=19, decimal_places=6)
     quoted_cost_pct = models.DecimalField(
         max_digits=8, decimal_places=4, default=Decimal('0'),

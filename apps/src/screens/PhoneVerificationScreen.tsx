@@ -20,7 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import Feather from 'react-native-vector-icons/Feather';
 import TelegramLogo from '../assets/svg/TelegramLogo.svg';
-import { countries, Country } from '../utils/countries';
+import { Country, filterCountries } from '../utils/countries';
 import { useMutation } from '@apollo/client';
 import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER, INITIATE_SMS_VERIFICATION, VERIFY_SMS_CODE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +43,19 @@ const PhoneVerificationScreen = () => {
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
+  const [countrySearch, setCountrySearch] = useState('');
+  const filteredCountries = React.useMemo(() => filterCountries(countrySearch), [countrySearch]);
+  const countryListRef = useRef<FlatList<Country>>(null);
+
+  const handleCountrySearchChange = (text: string) => {
+    setCountrySearch(text);
+    countryListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  };
+
+  const handleOpenCountryModal = () => {
+    setCountrySearch('');
+    openCountryModal();
+  };
   const [verificationMethod, setVerificationMethod] = useState<'telegram' | 'sms' | null>(null);
   const [verificationCode, setVerificationCode] = useState<string[]>(['', '', '', '', '', '']);
   const [currentScreen, setCurrentScreen] = useState<'phone' | 'method' | 'code'>('phone');
@@ -343,7 +356,7 @@ const PhoneVerificationScreen = () => {
         <Text style={styles.label}>País</Text>
         <TouchableOpacity
           style={styles.countrySelector}
-          onPress={openCountryModal}
+          onPress={handleOpenCountryModal}
           activeOpacity={0.8}
         >
           <View style={styles.countrySelectorContent}>
@@ -575,22 +588,54 @@ const PhoneVerificationScreen = () => {
         animationType="slide"
         onRequestClose={closeCountryModal}
       >
-        <View style={styles.modalContainer}>
+        {/* The screen-level KeyboardAvoidingView doesn't reach in here:
+            Modal renders in its own native window, so it needs its own.
+            Android relies on windowSoftInputMode="adjustResize" instead. */}
+        <KeyboardAvoidingView
+          style={styles.modalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Selecciona un país</Text>
-              <TouchableOpacity onPress={closeCountryModal}>
+              <TouchableOpacity onPress={closeCountryModal} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Feather name="x" size={24} color={colors.dark} />
               </TouchableOpacity>
             </View>
+            <View style={styles.searchContainer}>
+              <Feather name="search" size={18} color={colors.grayText} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar país o código"
+                placeholderTextColor={colors.grayText}
+                value={countrySearch}
+                onChangeText={handleCountrySearchChange}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+              />
+              {countrySearch.length > 0 && (
+                <TouchableOpacity onPress={() => handleCountrySearchChange('')} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
+                  <Feather name="x-circle" size={18} color={colors.grayText} />
+                </TouchableOpacity>
+              )}
+            </View>
             <FlatList
-              data={countries}
+              ref={countryListRef}
+              data={filteredCountries}
               renderItem={renderCountryItem}
               keyExtractor={(item) => item[2]}
               style={styles.countryList}
+              keyboardShouldPersistTaps="handled"
+              initialNumToRender={20}
+              maxToRenderPerBatch={10}
+              windowSize={21}
+              ListEmptyComponent={
+                <Text style={styles.emptyListText}>No encontramos ese país</Text>
+              }
             />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -830,7 +875,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    // Fixed height keeps the sheet stable while the search filters the
+    // list; flexShrink lets it compress when the keyboard eats the space
+    // (RN's default flexShrink of 0 would clip the header off-screen).
+    height: '80%',
+    flexShrink: 1,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -845,8 +894,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text.primary,
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: colors.text.primary,
+  },
   countryList: {
-    maxHeight: 400,
+    flex: 1,
+  },
+  emptyListText: {
+    textAlign: 'center',
+    color: colors.text.secondary,
+    fontSize: 14,
+    paddingVertical: 32,
   },
   countryItem: {
     flexDirection: 'row',

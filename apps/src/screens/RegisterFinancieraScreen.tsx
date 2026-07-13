@@ -20,7 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
-import { countries, Country, getCountryByIso } from '../utils/countries';
+import { Country, filterCountries, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Header as AppHeader } from '../navigation/Header';
@@ -54,9 +54,7 @@ const CountryPickerModal = ({
 }) => {
   const [q, setQ] = useState('');
   const data = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return countries;
-    return countries.filter((c) => String(c[0]).toLowerCase().includes(query));
+    return filterCountries(q);
   }, [q]);
 
   return (

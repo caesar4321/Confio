@@ -3,6 +3,7 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
+from ramps.koywe import COUNTRY_METHODS
 from ramps.koywe_client import KoyweClient, KoyweError
 from ramps.koywe_sync import sync_koywe_ramp_transaction_from_order
 from ramps.models import KoyweBankInfo, RampTransaction
@@ -12,6 +13,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 KOYWE_SUPPORTED_COUNTRIES = ['COL', 'PER', 'BOL', 'ARG', 'MEX', 'CHL', 'BRA']
+
+
+@shared_task(name='ramps.refresh_koywe_ramp_limits')
+def refresh_koywe_ramp_limits():
+    """
+    Pre-warm the Koywe dynamic ramp limits cache for every supported country.
+
+    The off-ramp limits need several preview quotes to estimate, so computing
+    them inline made rampAvailability (Recargar/Retiro screens) slow on cache
+    misses. This runs hourly via celery beat; the cache TTL is 12h so limits
+    survive Koywe outages but requests always hit a warm cache.
+    """
+    client = KoyweClient()
+    refreshed = []
+    for country_code, config in COUNTRY_METHODS.items():
+        if not config['methods']:
+            continue
+        fiat = config['fiat_currency']
+        try:
+            client.get_dynamic_ramp_limits(fiat_symbol=fiat, force_refresh=True)
+            refreshed.append(fiat)
+        except KoyweError as exc:
+            logger.warning('Koywe ramp limits refresh failed for %s (%s): %s', country_code, fiat, exc)
+        except Exception:
+            logger.exception('Unexpected error refreshing Koywe ramp limits for %s (%s)', country_code, fiat)
+    return f'Refreshed Koywe ramp limits for {", ".join(refreshed) or "no currencies"}'
 
 
 @shared_task

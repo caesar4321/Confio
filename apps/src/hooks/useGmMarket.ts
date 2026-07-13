@@ -61,6 +61,33 @@ const GM_MARKET = gql`
   }
 `;
 
+// Per-symbol candles for the range-selector chart (server proxy of Ondo's
+// OHLC endpoint, 300s cache). Only the close series is consumed — the
+// detail chart is a line, not a candlestick.
+export type GmRange = '1D' | '1M' | '3M' | '6M' | '1Y' | 'MAX';
+export const GM_RANGES: GmRange[] = ['1D', '1M', '3M', '6M', '1Y', 'MAX'];
+
+const GM_OHLC = gql`
+  query GmOhlc($symbol: String!, $range: String) {
+    gmOhlc(symbol: $symbol, range: $range) {
+      timestamp
+      close
+    }
+  }
+`;
+
+export const useGmOhlc = (symbol: string | undefined, range: GmRange) => {
+  const { data, loading } = useQuery(GM_OHLC, {
+    variables: { symbol, range },
+    skip: !symbol,
+    fetchPolicy: 'cache-and-network',
+  });
+  return useMemo(() => {
+    const closes: number[] = (data?.gmOhlc ?? []).map((c: any) => c.close);
+    return { closes, loading: loading && closes.length === 0 };
+  }, [data, loading]);
+};
+
 // Deterministic fallback sparkline so charts render when the 24h series is
 // missing for an asset (never used as a price display).
 export const sparklineFor = (ticker: string, points = 24): number[] => {

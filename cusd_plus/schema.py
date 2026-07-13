@@ -24,6 +24,7 @@ class CusdPlusSummaryType(graphene.ObjectType):
     """Savings position for the active account (JWT context)."""
     balance_usd = graphene.Float(description="USD value of the position; share counts are never exposed")
     net_apy_pct = graphene.Float(description="Oracle gross minus Confío share; floats daily")
+    gross_apy_pct = graphene.Float(description="USDY gross APY before Confío's share — for the transparency split (gross / fee / net)")
     earned_today_usd = graphene.Float()
     earned_month_usd = graphene.Float()
     savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo) by phone country; gates ENTRY only — exits are never gated")
@@ -82,6 +83,18 @@ class GmCandleType(graphene.ObjectType):
     close = graphene.Float()
 
 
+class GmHoldingType(graphene.ObjectType):
+    """One tokenized-stock position of the JWT account. Units are fine to
+    expose for stocks (market convention) — the never-expose-share-counts
+    rule is specific to cUSD+ (decision A)."""
+    symbol = graphene.String(description="GM token symbol, e.g. TSLAon")
+    ticker = graphene.String()
+    name = graphene.String()
+    units = graphene.Float()
+    value_usd = graphene.Float(description="units × cached GM display price — display only, never settlement")
+    day_change_pct = graphene.Float()
+
+
 _NAME_NOISE = (
     ' Common Stock', ' Class A', ' Class B', ' Class C', ', Inc.', ' Inc.',
     ' Corporation', ' Corp.', ' Holdings', ' Ltd.', ' PLC', ' N.V.', ' S.A.',
@@ -118,6 +131,10 @@ class Query(graphene.ObjectType):
         graphene.NonNull(lambda: CusdPlusConversionType),
     )
     gm_market = graphene.Field(GmMarketType)
+    gm_holdings = graphene.List(
+        graphene.NonNull(GmHoldingType),
+        description="The JWT account's tokenized-stock positions (Multicall3 universe scan — chain is the registry)",
+    )
     gm_ohlc = graphene.List(
         graphene.NonNull(GmCandleType),
         symbol=graphene.String(required=True),
@@ -197,6 +214,55 @@ class Query(graphene.ObjectType):
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return GmMarketType(session=session, assets=[a for _, a in ranked])
 
+    def resolve_gm_holdings(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return []
+        account = _active_account(info)
+        if account is None or not account.bsc_address:
+            return []
+        from . import gm_api
+        from .gm_holdings import holdings_units
+        units_by_symbol = holdings_units(account.bsc_address)
+        if units_by_symbol is None:
+            # Scan failed with no last-known — unknown is NOT an empty
+            # portfolio; same contract as gmMarket: client keeps its cache.
+            return None
+        if not units_by_symbol:
+            return []
+        try:
+            market = gm_api.all_market()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('gm_holdings market fetch failed')
+            return None
+        by_symbol = {
+            (item.get('primaryMarket') or {}).get('symbol'): item
+            for item in market
+        }
+        holdings = []
+        for symbol, units in units_by_symbol.items():
+            item = by_symbol.get(symbol)
+            pm = (item or {}).get('primaryMarket') or {}
+            if pm.get('price') is None:
+                # No live price (halt/delist edge) — surfacing a made-up value
+                # is worse than a brief gap; ops sees the log.
+                import logging
+                logging.getLogger(__name__).warning('gm_holdings: no live price for %s', symbol)
+                continue
+            um = (item or {}).get('underlyingMarket') or {}
+            ticker = um.get('ticker') or symbol.removesuffix('on')
+            holdings.append(GmHoldingType(
+                symbol=symbol,
+                ticker=ticker,
+                name=_display_name(um.get('name') or ticker),
+                units=units,
+                value_usd=units * float(pm['price']),
+                day_change_pct=float(pm.get('priceChangePct24h') or 0),
+            ))
+        holdings.sort(key=lambda h: h.value_usd, reverse=True)
+        return holdings
+
     def resolve_gm_ohlc(self, info, symbol, range='3M'):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
@@ -236,12 +302,15 @@ class Query(graphene.ObjectType):
         # first mint; the ledger for earned_today/month lands with leg C).
         bsc_address = _active_bsc_address(info)
         balance_usd = vault.position_usd(bsc_address) if bsc_address else 0.0
+        # SERVER-DERIVED live: the oracle's on-chain daily rate compounded
+        # over a year (gross) and at the vault's kept share (net) — floats
+        # with US Treasuries, never hardcoded. Falls back to last-known,
+        # then CUSD_PLUS_NET_APY_PCT (default 0.0) if the chain is out.
+        gross_apy, net_apy = vault.apy_split()
         return CusdPlusSummaryType(
             balance_usd=balance_usd,
-            # net_apy_pct SERVER-config until oracle-rate derivation lands
-            # (design rule: never hardcoded in client copy — this is the
-            # sanctioned server source). 0.0 keeps copy honest pre-launch.
-            net_apy_pct=getattr(settings, 'CUSD_PLUS_NET_APY_PCT', 0.0),
+            net_apy_pct=net_apy,
+            gross_apy_pct=gross_apy,
             earned_today_usd=0.0,
             earned_month_usd=0.0,
             savings_enabled=eligible,
@@ -334,8 +403,8 @@ def _actor_filter(info):
     return {'actor_user': info.context.user, 'actor_type': 'user'}
 
 
-def _active_bsc_address(info):
-    """Resolve the JWT account's bsc_address (never a client-supplied id)."""
+def _active_account(info):
+    """Resolve the JWT account row (never a client-supplied id)."""
     from users.jwt_context import get_jwt_business_context_with_validation
     from users.models import Account
     ctx = get_jwt_business_context_with_validation(info, required_permission=None)
@@ -343,13 +412,17 @@ def _active_bsc_address(info):
         return None
     idx = ctx.get('account_index', 0)
     if ctx['account_type'] == 'business' and ctx.get('business_id'):
-        acc = Account.objects.filter(
+        return Account.objects.filter(
             business_id=ctx['business_id'], account_type='business', account_index=idx,
         ).first()
-    else:
-        acc = Account.objects.filter(
-            user=info.context.user, account_type='personal', account_index=idx,
-        ).first()
+    return Account.objects.filter(
+        user=info.context.user, account_type='personal', account_index=idx,
+    ).first()
+
+
+def _active_bsc_address(info):
+    """Resolve the JWT account's bsc_address (never a client-supplied id)."""
+    acc = _active_account(info)
     return (acc.bsc_address or None) if acc else None
 
 
@@ -454,6 +527,10 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
             conv.dest_tx_hash = tx_ref or conv.dest_tx_hash
             conv.completed_at = now
             update += ['dest_tx_hash', 'completed_at']
+            # Balance just changed on chain — drop the fresh-read cache so
+            # the next summary shows the new position, not a 30s-old one.
+            from . import vault
+            vault.invalidate_position(conv.user_bsc_address)
         conv.save(update_fields=update)
         return AdvanceCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
 

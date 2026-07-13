@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "django",
+      "runtimeExecutable": "make",
+      "runtimeArgs": ["runserver"],
+      "port": 8000
+    },
+    {
       "name": "web-landing",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-s", "web/build", "-l", "4173"],

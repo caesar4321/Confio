@@ -13,6 +13,7 @@ as a support diagnostic for genuinely stuck rows only.
 """
 import logging
 from datetime import timedelta
+from decimal import ROUND_DOWN, Decimal
 
 import requests
 from celery import shared_task
@@ -48,23 +49,32 @@ def _address_topic(address: str) -> str:
 def monitor_bridge_arrivals():
     """BSC USDT inbound scanner — the BNB sibling of blockchain.scan_inbound_deposits.
 
-    ONE batched eth_getLogs per run (topics accept an ADDRESS ARRAY, so cost
-    does not grow with the watch set) over a global cursor, then classify
-    each arrival at a watched user.bsc address:
+    ONE pipeline for every USDT arrival at a user address (the Algorand
+    USDC scanner's shape), with attribution hooks — not separate routes:
 
-      1. in-flight conversion for that address  -> bridge arrival (leg B done)
-      2. TODO(ramps): pending Koywe order with destination=cusd_plus
-         -> ramp delivery (watch-set source joins when the ramp param ships)
-      3. TODO(external deposits — Julian, 2026-07-04): anything else is an
-         EXTERNAL USDT-BSC deposit. These must become first-class: the
-         crypto-native/no-Koywe onramp is "send USDT (BEP-20) to your
-         address, it becomes savings" — WITHOUT this, those users would be
-         forced through USDC-ALG + the thin Allbridge pool for no reason.
-         Needs: user.bsc registration on Account (savings activation),
-         deposit record + notification, auto-mint prompt on foreground
-         (the auto-swap pattern, gas-dusted). Until then unmatched arrivals
-         are logged for visibility.
+      - Arrival matching an in-flight to_savings conversion (>= 90% of the
+        quote) -> bridge arrival: advance the saga (leg B done), dust gas.
+      - Any other arrival at a REGISTERED savings address (an Account with
+        bsc_address set) -> a CusdPlusConversion row born at DEST_ARRIVED
+        (source='external_deposit', or 'ramp' when a pending Koywe order
+        targets the address), gas-dusted, deposit notification. The client's
+        foreground resume (savingsLegC) mints it exactly like a conversion:
+        "send USDT (BEP-20) to your address, it becomes savings" — the
+        crypto-native onramp, no USDC-ALG detour through the thin pool.
+        Ramp rows skip the notification: order comms stay with koywe_sync.
 
+    Guard rails:
+      - Arrivals under $CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD (default $1) are
+        logged, never recorded — strangers can send dust to any address and
+        must not be able to spam rows or notifications.
+      - A below-floor arrival at an address with an in-flight conversion is
+        logged only: minting it could consume USDT that a delayed bridge
+        delivery still needs. Support resolves those by hand.
+
+    Batched eth_getLogs per address chunk (topics accept an ADDRESS ARRAY,
+    so cost grows with users/800, not users) over a global cursor with a
+    rewind margin; idempotency comes from monotonic status transitions and
+    the src_tx_id dedupe on deposit rows.
     STUCK is judged by chain silence only — never by a vendor API.
     """
     from django.core.cache import cache
@@ -76,23 +86,23 @@ def monitor_bridge_arrivals():
         status__in=('SRC_COMMITTED', 'STUCK'),
         is_deleted=False,
     ).exclude(user_bsc_address='')[:500])
+    conv_watch = {c.user_bsc_address.lower(): c for c in conversions}
 
-    # Watch set: in-flight conversions + pending savings-rail Koywe orders
-    # (source 2 — Koywe delivers USDT-BSC to the user's own address);
-    # registered savings addresses join with external deposits (source 3).
-    watch = {c.user_bsc_address.lower(): c for c in conversions}
+    registered = _registered_bsc_addresses()  # addr -> account_id
+
+    ramp_addrs: set[str] = set()
     try:
         from ramps.models import RampTransaction
-        ramp_addrs = RampTransaction.objects.filter(
+        ramp_addrs = {a.lower() for a in RampTransaction.objects.filter(
             destination='cusd_plus',
             direction='on_ramp',
             status__in=('PENDING', 'PROCESSING'),
-        ).exclude(actor_address='').values_list('actor_address', flat=True)[:300]
-        for addr in ramp_addrs:
-            watch.setdefault(addr.lower(), None)  # None = ramp-only address
+        ).exclude(actor_address='').values_list('actor_address', flat=True)[:300]}
     except Exception:  # noqa: BLE001
         logger.exception('ramp watch-set union failed')
-    if not watch:
+
+    watch_all = set(conv_watch) | set(registered) | ramp_addrs
+    if not watch_all:
         return  # idle: zero RPC calls
 
     try:
@@ -101,54 +111,69 @@ def monitor_bridge_arrivals():
         logger.warning('bsc blockNumber failed: %s', exc)
         return
 
-    # Global cursor with a rewind margin (the Algorand scanner pattern);
-    # idempotency comes from monotonic status transitions.
     rewind = int(getattr(settings, 'CUSD_PLUS_BSC_SCAN_REWIND_BLOCKS', 100))
     from_block = cache.get('cusd_plus_bsc_scan_cursor') or max(latest_block - 1200, 0)
     from_block = max(int(from_block) - rewind, 0)
 
-    try:
-        logs = _rpc('eth_getLogs', [{
-            'fromBlock': hex(from_block),
-            'toBlock': hex(latest_block),
-            'address': USDT_BSC,
-            # ONE call for the whole watch set: topic2 as an OR-array
-            'topics': [TRANSFER_TOPIC, None, [_address_topic(a) for a in watch]],
-        }])
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('bsc getLogs failed: %s', exc)
-        return
+    logs: list[dict] = []
+    addrs = sorted(watch_all)
+    for i in range(0, len(addrs), 800):
+        try:
+            logs += _rpc('eth_getLogs', [{
+                'fromBlock': hex(from_block),
+                'toBlock': hex(latest_block),
+                'address': USDT_BSC,
+                'topics': [TRANSFER_TOPIC, None,
+                           [_address_topic(a) for a in addrs[i:i + 800]]],
+            }])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('bsc getLogs failed: %s', exc)
+            return  # cursor untouched — next run rescans the window
     cache.set('cusd_plus_bsc_scan_cursor', latest_block, None)
 
+    now = timezone.now()
+    min_deposit = Decimal(str(getattr(settings, 'CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD', 1)))
     arrived: dict[str, dict] = {}
     for log in logs:
-        to_addr = '0x' + log['topics'][2][-40:]
-        key = to_addr.lower()
-        if key not in watch:
+        key = ('0x' + log['topics'][2][-40:]).lower()
+        raw_units = int(log['data'], 16)
+        conv = conv_watch.get(key)
+        if conv is not None:
+            floor_units = int(float(conv.quoted_receive_usd) * 0.9 * 1e18)
+            if raw_units >= floor_units:
+                arrived[key] = log
+            else:
+                logger.info(
+                    'below-floor USDT arrival at conversion address %s (%s) — left for support',
+                    key, log['transactionHash'],
+                )
             continue
-        conv = watch[key]
-        if conv is None:
-            # Ramp-only address: Koywe delivery observed on-chain. Order
-            # status stays koywe_sync's job; this is chain-side visibility
-            # (and later the auto-mint trigger for source 3).
+        account_id = registered.get(key)
+        if account_id is None:
             logger.info(
-                'USDT arrival at savings ramp address %s (%s)',
-                to_addr, log['transactionHash'],
+                'USDT arrival at unregistered watched address %s (%s)',
+                key, log['transactionHash'],
             )
             continue
-        floor_units = int(float(conv.quoted_receive_usd) * 0.9 * 1e18)
-        if int(log['data'], 16) >= floor_units:
-            arrived[key] = log
-        else:
+        amount_usd = (Decimal(raw_units) / Decimal(10 ** 18)).quantize(
+            Decimal('0.000001'), rounding=ROUND_DOWN)
+        if amount_usd < min_deposit:
             logger.info(
-                'unmatched USDT arrival at watched address %s (%s) — external deposit path not built yet',
-                to_addr, log['transactionHash'],
+                'dust USDT arrival at %s (%s USDT, %s) — below deposit minimum',
+                key, amount_usd, log['transactionHash'],
             )
+            continue
+        _record_inbound_deposit(
+            account_id=account_id,
+            to_addr=key,
+            amount_usd=amount_usd,
+            tx_ref=f"{log['transactionHash']}:{int(log.get('logIndex', '0x0'), 16)}",
+            tx_hash=log['transactionHash'],
+            source='ramp' if key in ramp_addrs else 'external_deposit',
+            now=now,
+        )
 
-    now = timezone.now()
-    for addr, conv in watch.items():
-        if conv is None:
-            continue
+    for addr, conv in conv_watch.items():
         log = arrived.get(addr)
         if log:
             conv.status = 'DEST_ARRIVED'
@@ -175,6 +200,102 @@ def monitor_bridge_arrivals():
                 'Support diagnostic: allbridge_diagnose("%s")',
                 conv.internal_id, timeout, conv.src_tx_id, conv.internal_id,
             )
+
+
+def _registered_bsc_addresses() -> dict:
+    """addr(lower) -> account_id for every savings-activated account.
+    Having a bsc_address IS the registration — the address only exists once
+    the user activates the savings rail. Cached briefly: the scanner runs
+    every minute, the set changes rarely."""
+    from django.core.cache import cache
+    from users.models import Account
+
+    cached = cache.get('cusd_plus_bsc_registered_v1')
+    if cached is not None:
+        return cached
+    addr_map = {
+        row['bsc_address'].lower(): row['id']
+        for row in Account.objects.filter(deleted_at__isnull=True)
+        .exclude(bsc_address__isnull=True).exclude(bsc_address='')
+        .values('id', 'bsc_address')
+    }
+    cache.set('cusd_plus_bsc_registered_v1', addr_map, 600)
+    return addr_map
+
+
+def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, source, now):
+    """A chain-observed USDT inflow becomes a conversion row born at
+    DEST_ARRIVED: the funds are already at the user's address, so only leg C
+    (mint) remains — the existing foreground resume and gas dusting finish
+    it with zero client changes. amount_usd is the EXACT floored arrival:
+    the client mints exactly this, so recording more than arrived would
+    revert the mint.
+
+    Idempotent by (address, bridge_arrival_tx), which BOTH row kinds set:
+    the cursor rewind makes rescans routine, and a bridge delivery re-seen
+    after its conversion advanced out of the watch set must not be reborn
+    as an external deposit. (Known trade-off: a single tx carrying multiple
+    Transfers to the same address records only the first — wallet sends are
+    one transfer per tx, and the rest stays visible on chain for support.)"""
+    from users.models import Account
+    from .models import CusdPlusConversion
+
+    if CusdPlusConversion.objects.filter(
+        user_bsc_address=to_addr, bridge_arrival_tx=tx_hash, is_deleted=False,
+    ).exists():
+        return
+    account = Account.objects.filter(id=account_id).select_related('user', 'business').first()
+    if account is None:
+        return
+    is_business = account.account_type == 'business'
+    conv = CusdPlusConversion.objects.create(
+        actor_user=None if is_business else account.user,
+        actor_business=account.business if is_business else None,
+        actor_type='business' if is_business else 'user',
+        actor_display_name=account.display_name,
+        direction='to_savings',
+        source=source,
+        amount_usd=amount_usd,
+        quoted_receive_usd=amount_usd,  # already delivered — nothing left to quote
+        quoted_cost_pct=0,
+        user_bsc_address=to_addr,
+        src_tx_id=tx_ref,
+        bridge_arrival_tx=tx_hash,
+        status='DEST_ARRIVED',
+        dest_arrived_at=now,
+    )
+    logger.info(
+        'inbound USDT deposit %s (%s): %s USDT at %s (%s)',
+        conv.internal_id, source, amount_usd, to_addr, tx_hash,
+    )
+    check_gas_dust.delay(str(conv.internal_id))
+
+    if source == 'ramp':
+        return  # order comms belong to the ramp flow (koywe_sync)
+    try:
+        from notifications import utils as notif_utils
+        from notifications.models import NotificationType as NotifType
+        notif_utils.create_notification(
+            user=account.user,
+            account=account,
+            business=account.business if is_business else None,
+            notification_type=NotifType.SEND_FROM_EXTERNAL,
+            title='Depósito recibido',
+            message=f'Recibiste ${amount_usd:.2f} (USDT). Se sumará automáticamente a tu ahorro.',
+            data={
+                'transaction_type': 'deposit',
+                'currency': 'USDT',
+                'network': 'BSC',
+                'amount': str(amount_usd),
+                'tx_hash': tx_hash,
+                'conversion_id': str(conv.internal_id),
+                'pending_auto_mint': True,
+            },
+            related_object_type='CusdPlusConversion',
+            related_object_id=str(conv.internal_id),
+        )
+    except Exception:  # noqa: BLE001 — comms failure must not lose the deposit
+        logger.exception('deposit notification failed for %s', conv.internal_id)
 
 
 def mark_retirar_arrival(algo_address: str, txid: str) -> bool:
@@ -278,6 +399,17 @@ def check_gas_dust(conversion_internal_id: str):
         logger.info('gas dust rate-limited for %s', conv.user_bsc_address)
         return
 
+    # Daily cap per address: external deposits let anyone mint a dust
+    # trigger by sending themselves $1 USDT, so cycling (receive dust, move
+    # the BNB out, deposit again) must stop paying after a few rounds.
+    # Legit users are unaffected — BNB stays put, so repeat actions skip
+    # dusting entirely; a capped row just waits for the next day's resume.
+    day_key = f'cusd_plus_gasdust_day_{conv.user_bsc_address.lower()}'
+    day_count = cache.get(day_key, 0)
+    if day_count >= int(getattr(settings, 'CUSD_PLUS_GAS_DUST_MAX_PER_DAY', 5)):
+        logger.warning('gas dust daily cap hit for %s (%s)', conv.user_bsc_address, conv.internal_id)
+        return
+
     try:
         from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
         signer = get_bsc_sponsor_signer_from_settings()
@@ -296,6 +428,7 @@ def check_gas_dust(conversion_internal_id: str):
         })
         sent = _rpc('eth_sendRawTransaction', [raw])
         cache.set(rl_key, 1, 180)  # 3-min cooldown per address
+        cache.set(day_key, day_count + 1, 24 * 3600)
         logger.info('gas dust sent %s wei to %s for %s: %s',
                     shortfall, conv.user_bsc_address, conv.internal_id, sent)
     except Exception as exc:  # noqa: BLE001 — dusting must never crash the scanner

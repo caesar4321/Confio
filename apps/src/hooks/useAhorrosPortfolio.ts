@@ -1,38 +1,53 @@
 // Single wiring point for the Ahorros e Inversiones portfolio.
 //
-// Neither the cUSD+ backend nor the Ondo Stocks backend exists yet. Every
-// number the hub (and the HomeScreen entry row) renders flows through this
-// hook so screens ship now and wire later without layout changes.
+// LIVE since 2026-07-10: cusdPlusSummary reads the real vault position
+// (shares × pPlus server-side, cached with a last-known fallback) and
+// gmHoldings returns the account's tokenized-stock positions (server-side
+// Multicall3 scan of the GM universe — the chain is the registry — priced
+// from the cached GM market payload).
+// Movements stay an empty state until the cusdPlusMovements ledger lands.
 //
-// When the backend lands, replace the memoized stub with the GraphQL seam
-// already mounted server-side (cusd_plus/schema.py): cusdPlusSummary,
-// cusdPlusMovements(limit, offset), cusdPlusQuote(amountUsd, direction).
 // Notes:
-// - savings.netApyPct MUST be server-derived (USDY oracle gross × 0.85) —
+// - savings.netApyPct is SERVER-derived LIVE from Ondo's on-chain oracle:
+//   the USDY daily rate compounded at the vault's kept share (85%) —
 //   rates float with US Treasuries and are never hardcoded in copy.
-// - stocks.enabled becomes a remote flag (decision 2dcfada5: dark until the
-//   demand signal), geofenced US/CA/BR + sanctions per Ondo partner terms.
+// - stocks.enabled is a remote flag (decision 2dcfada5: dark until the
+//   demand signal), geofenced per Ondo partner terms.
 
 import { useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
 
-// Issuer geo-eligibility (Ondo) — LIVE server flags, unlike the number stubs
-// below. savingsEnabled gates ENTRY surfaces only (Ahorrar CTA, Convert);
-// exits (Retirar) are never gated. Computed server-side from the user's
-// phone country (cusd_plus/eligibility.py); the deposit mutation enforces
-// it independently, so this flag is UX, not security.
-const GET_AHORRO_ELIGIBILITY = gql`
-  query AhorroEligibility {
+// Flags gate surfaces (savingsEnabled gates ENTRY only — Ahorrar CTA,
+// Convert; exits are never gated. The deposit mutation enforces
+// eligibility independently, so flags are UX, not security). Numbers are
+// the real position: vault balance + stock holdings.
+const GET_AHORRO_PORTFOLIO = gql`
+  query AhorroPortfolio {
     cusdPlusSummary {
       savingsEnabled
       stocksEnabled
+      balanceUsd
+      netApyPct
+      earnedTodayUsd
+      earnedMonthUsd
+    }
+    gmHoldings {
+      symbol
+      ticker
+      name
+      units
+      valueUsd
+      dayChangePct
     }
   }
 `;
 
 export interface StockPosition {
+  /** GM token symbol (TSLAon) — the trading/on-chain id */
+  symbol: string;
   ticker: string;
   name: string;
+  units: number;
   valueUsd: number;
   dayChangePct: number;
 }
@@ -76,35 +91,53 @@ export interface AhorrosPortfolio {
 }
 
 export const useAhorrosPortfolio = (): AhorrosPortfolio => {
-  const { data: flagsData } = useQuery(GET_AHORRO_ELIGIBILITY, {
+  const { data } = useQuery(GET_AHORRO_PORTFOLIO, {
     fetchPolicy: 'cache-and-network',
+    pollInterval: 60_000, // matches the server-side GM cache TTL
   });
+  const summary = data?.cusdPlusSummary;
   // Fail-open before the server answers (most users are eligible LATAM —
   // avoids flash-hiding the hub); authoritative once it does. The server
   // rejects ineligible deposits regardless of what the UI shows.
-  const savingsEnabled: boolean = flagsData?.cusdPlusSummary?.savingsEnabled ?? true;
+  const savingsEnabled: boolean = summary?.savingsEnabled ?? true;
   // Stocks (Ondo GM): server flag = geo-eligible AND CUSD_PLUS_STOCKS_ENABLED.
   // Fail-closed before the answer — an investment surface appearing beats
   // one being yanked away from a blocked user.
-  const stocksEnabled: boolean = flagsData?.cusdPlusSummary?.stocksEnabled ?? false;
+  const stocksEnabled: boolean = summary?.stocksEnabled ?? false;
 
   return useMemo(() => {
-    // Balances/movements are launch-day empty states until the cUSD+ vault
-    // ledger lands server-side (cusdPlusSummary/cusdPlusMovements stubs).
     const savings = {
       enabled: savingsEnabled,
-      balanceUsd: 0,
-      netApyPct: 3.0,
-      earnedTodayUsd: 0,
-      earnedMonthUsd: 0,
+      balanceUsd: summary?.balanceUsd ?? 0,
+      // Server-derived; 0 until the oracle-rate derivation (or config) is
+      // set — an honest 0% beats a hardcoded 3% (locked design rule).
+      netApyPct: summary?.netApyPct ?? 0,
+      earnedTodayUsd: summary?.earnedTodayUsd ?? 0,
+      earnedMonthUsd: summary?.earnedMonthUsd ?? 0,
     };
-    const positions: StockPosition[] = [];
+    // gmHoldings is null on GM upstream failure (never a fake price) —
+    // Apollo keeps the last good payload cached across brief hiccups.
+    const positions: StockPosition[] = (data?.gmHoldings ?? []).map((h: any) => ({
+      symbol: h.symbol,
+      ticker: h.ticker,
+      name: h.name,
+      units: h.units,
+      valueUsd: h.valueUsd,
+      dayChangePct: h.dayChangePct,
+    }));
     const stocks = {
       enabled: stocksEnabled,
       totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
-      earnedTodayUsd: 0,
+      // Day P&L implied by each position's 24h change:
+      // value_now − value_now / (1 + pct/100), summed.
+      earnedTodayUsd: positions.reduce(
+        (sum, p) => sum + (p.valueUsd * p.dayChangePct) / (100 + p.dayChangePct || 1),
+        0,
+      ),
       positions,
     };
+    // Movements stay a launch-day empty state until the cusdPlusMovements
+    // ledger lands server-side (resolver is still a stub returning []).
     const movements: AhorroMovement[] = [];
     return {
       savings,
@@ -114,5 +147,5 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio => {
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
     };
-  }, [savingsEnabled, stocksEnabled]);
+  }, [data, savingsEnabled, stocksEnabled, summary]);
 };

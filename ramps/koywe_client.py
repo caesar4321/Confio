@@ -2,7 +2,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import Any
 from urllib.parse import quote
 
@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_CURRENCIES_CACHE_KEY = 'koywe:token-currencies'
 _TOKEN_CURRENCIES_CACHE_TTL = 60 * 15
-_RAMP_LIMITS_CACHE_TTL = 60 * 10
+# Long TTL on purpose: an hourly celery-beat task (ramps.refresh_koywe_ramp_limits)
+# re-warms these entries, so requests should never compute limits inline. The
+# TTL is only the survival window if beat or Koywe is down.
+_RAMP_LIMITS_CACHE_TTL = 60 * 60 * 12
 _ACCOUNT_PROFILE_SYNC_CACHE_TTL = 60 * 60 * 24
 
 _MINIMUM_AMOUNT_PATTERN = re.compile(
@@ -31,6 +34,15 @@ _MAXIMUM_AMOUNT_PATTERN = re.compile(
     r'(?P<actual>[\d.,]+)\s*>\s*(?P<maximum>[\d.,]+)',
     re.IGNORECASE,
 )
+
+
+def _parse_amount(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value).replace(',', ''))
+    except Exception:
+        return None
 
 
 class KoyweError(Exception):
@@ -237,13 +249,14 @@ class KoyweClient:
         cache.set(_TOKEN_CURRENCIES_CACHE_KEY, data, timeout=_TOKEN_CURRENCIES_CACHE_TTL)
         return data
 
-    def get_dynamic_ramp_limits(self, *, fiat_symbol: str, crypto_symbol: str | None = None) -> dict[str, Decimal]:
+    def get_dynamic_ramp_limits(self, *, fiat_symbol: str, crypto_symbol: str | None = None, force_refresh: bool = False) -> dict[str, Decimal]:
         normalized_fiat = (fiat_symbol or '').strip().upper()
         normalized_crypto = (crypto_symbol or self.crypto_symbol or '').strip()
         cache_key = f'koywe:ramp-limits:{normalized_fiat}:{normalized_crypto.replace(" ", "_")}'
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
+        if not force_refresh:
+            cached = cache.get(cache_key)
+            if cached:
+                return cached
 
         pair_limits = self._get_pair_limits(
             fiat_symbol=normalized_fiat,
@@ -1072,6 +1085,14 @@ class KoyweClient:
         return candidates
 
     def _estimate_crypto_amount_for_fiat_output(self, *, crypto_symbol: str, fiat_symbol: str, target_amount: Decimal) -> Decimal:
+        """Crypto amount whose quote lands on target_amount of fiat output.
+
+        Quotes are affine in the amount (proportional rate minus a flat
+        fee), so a rate-seeded, fee-corrected refinement converges in 2-3
+        probes. Kept to <=6 quote calls: this runs inline on cache misses
+        and the old bracket+bisection version cost ~20 calls per estimate,
+        which made the ramp screens take >10s to load.
+        """
         if target_amount <= 0:
             return Decimal('0')
 
@@ -1085,27 +1106,60 @@ class KoyweClient:
         if sample_amount_in <= 0 or sample_amount_out <= 0:
             raise KoyweError(f'Unable to estimate Koywe off-ramp limits for {fiat_symbol}')
 
+        # Quotes are affine in the amount: out = rate * x - fee, with a flat
+        # fee that dominates at small sizes (0.07 USDC can quote a NEGATIVE
+        # fiat output). The fee estimate is refined from every probe, so the
+        # next probe lands on the boundary directly instead of bisecting.
         effective_rate = sample_amount_out / sample_amount_in
-        high = (target_amount / effective_rate) * Decimal('1.25')
-        high = max(high, Decimal('1'))
-        low = Decimal('0')
+        fee_fiat = Decimal('0')
+        # Koywe validates the fiat OUTPUT against the pair minimum; its
+        # rejections carry that floor, which can bind harder than our target.
+        target_out = target_amount
+        amount = max((target_out / effective_rate) * Decimal('1.005'), Decimal('0.01'))
+        # Smallest amount seen that reaches the target, and largest accepted
+        # amount that falls short (the boundary from below when Koywe rejects
+        # everything at or above the target, as happens at the pair max).
+        best_at_least: Decimal | None = None
+        best_below: Decimal | None = None
 
         for _ in range(6):
-            quote, exceeds_max = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=high)
-            if exceeds_max or (quote and Decimal(str(quote.get('amountOut') or '0')) >= target_amount):
+            quote, rejection = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=amount)
+            if isinstance(rejection, KoyweMaximumAmountError):
+                amount *= Decimal('0.995')
+                continue
+            if isinstance(rejection, KoyweMinimumAmountError):
+                floor = _parse_amount(rejection.minimum)
+                actual_out = _parse_amount(rejection.actual)
+                if floor is not None:
+                    target_out = max(target_out, floor)
+                if actual_out is not None:
+                    fee_fiat = effective_rate * amount - actual_out
+                if floor is None and actual_out is None:
+                    amount *= Decimal('4')
+                else:
+                    amount = ((target_out + fee_fiat) / effective_rate) * Decimal('1.01')
+                continue
+            if quote is None:
+                amount *= Decimal('4')
+                continue
+            amount_out = Decimal(str(quote.get('amountOut') or '0'))
+            if amount_out <= 0:
                 break
-            high *= Decimal('2')
+            fee_fiat = effective_rate * amount - amount_out
+            if amount_out >= target_out:
+                if best_at_least is None or amount < best_at_least:
+                    best_at_least = amount
+                if amount_out <= target_out * Decimal('1.02'):
+                    break
+            elif best_below is None or amount > best_below:
+                best_below = amount
+            amount = ((target_out + fee_fiat) / effective_rate) * Decimal('1.005')
 
-        for _ in range(16):
-            midpoint = (low + high) / Decimal('2')
-            quote, exceeds_max = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=midpoint)
-            amount_out = Decimal(str(quote.get('amountOut') or '0')) if quote else Decimal('0')
-            if exceeds_max or amount_out >= target_amount:
-                high = midpoint
-            else:
-                low = midpoint
-
-        return high.quantize(Decimal('0.01'))
+        if best_at_least is not None:
+            return best_at_least.quantize(Decimal('0.01'), rounding=ROUND_UP)
+        if best_below is not None:
+            return best_below.quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+        raise KoyweError(f'Unable to estimate Koywe off-ramp limits for {fiat_symbol}')
 
     def register_webhook(self, *, url: str, secret: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {'url': url}
@@ -1133,24 +1187,22 @@ class KoyweClient:
         except requests.RequestException as exc:
             raise KoyweError(f'Koywe bank-info request failed for {country_code}: {exc}') from exc
 
-    def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> tuple[dict[str, Any] | None, bool]:
+    def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> tuple[dict[str, Any] | None, KoyweError | None]:
         """Preview quote tolerant of Koywe's min/max amount rejections.
 
-        Returns (quote, exceeds_max): quote is None when Koywe rejected the
-        amount; exceeds_max is True when the rejection was for exceeding the
-        pair maximum, so bracketing callers can treat the probe as an upper
-        bound instead of aborting the whole limits fetch.
+        Returns (quote, rejection): quote is None when Koywe rejected the
+        amount, with rejection set to the min/max error so callers can react
+        to the boundary (its actual/minimum fields are in fiat-OUTPUT units)
+        instead of aborting the whole limits fetch. Other errors still raise.
         """
         try:
-            return self.create_preview_quote(symbol_in=symbol_in, symbol_out=symbol_out, amount=amount), False
-        except KoyweMinimumAmountError:
-            return None, False
-        except KoyweMaximumAmountError:
-            return None, True
+            return self.create_preview_quote(symbol_in=symbol_in, symbol_out=symbol_out, amount=amount), None
+        except (KoyweMinimumAmountError, KoyweMaximumAmountError) as exc:
+            return None, exc
         except KoyweError as exc:
             message = str(exc).lower()
             if 'less than the minimun available' in message or 'less than the minimum available' in message:
-                return None, False
+                return None, KoyweMinimumAmountError(str(exc))
             if 'exceeds the maximun available' in message or 'exceeds the maximum available' in message:
-                return None, True
+                return None, KoyweMaximumAmountError(str(exc))
             raise

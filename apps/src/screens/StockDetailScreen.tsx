@@ -1,12 +1,12 @@
-// Stock detail — price, sparkline, and the buy/sell entry.
+// Stock detail — price, range-selector chart, and the buy/sell entry.
 //
 // The chart uses react-native-svg (house rule: no linear-gradient lib) and
-// renders the REAL 24h series from the GM proxy (gmMarket.sparkline24h);
-// gmOhlc is available server-side for a future range-selector chart. Buying
+// renders REAL series only: gmOhlc closes for the selected range (1D–MAX),
+// with gmMarket.sparkline24h standing in on 1D until candles arrive. Buying
 // draws from cUSD+ (sweep model) — the funding line under the CTAs says so
 // explicitly, and the total-return note explains why there is no dividends tab.
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,13 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useGmMarket, sparklineFor } from '../hooks/useGmMarket';
+import {
+  useGmMarket,
+  useGmOhlc,
+  sparklineFor,
+  GM_RANGES,
+  GmRange,
+} from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
@@ -45,14 +51,24 @@ export const StockDetailScreen = () => {
   const stock = byTicker(route.params.ticker);
   const position = stockHoldings.positions.find((p) => p.ticker === route.params.ticker);
 
+  const [range, setRange] = useState<GmRange>('1D');
+  const { closes } = useGmOhlc(stock?.symbol, range);
+
+  // Range chart from gmOhlc closes. On 1D the market sparkline stands in
+  // until candles arrive (same real data source, coarser); deterministic
+  // fallback only when the asset ships without any history (cosmetic,
+  // never a price display).
+  const series = useMemo(() => {
+    if (!stock) return [];
+    if (closes.length >= 2) return closes;
+    if (range !== '1D') return [];
+    return stock.sparkline24h && stock.sparkline24h.length >= 2
+      ? stock.sparkline24h
+      : sparklineFor(stock.ticker);
+  }, [stock, closes, range]);
+
   const points = useMemo(() => {
-    if (!stock) return '';
-    // Real 24h series from the GM proxy; deterministic fallback only when
-    // the asset ships without history (cosmetic, never a price display).
-    const series =
-      stock.sparkline24h && stock.sparkline24h.length >= 2
-        ? stock.sparkline24h
-        : sparklineFor(stock.ticker);
+    if (series.length < 2) return '';
     const min = Math.min(...series);
     const max = Math.max(...series);
     const span = max - min || 1;
@@ -63,7 +79,7 @@ export const StockDetailScreen = () => {
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(' ');
-  }, [stock]);
+  }, [series]);
 
   if (!stock) {
     return (
@@ -77,6 +93,9 @@ export const StockDetailScreen = () => {
   }
 
   const up = stock.dayChangePct >= 0;
+  // The stroke follows the SELECTED range (a green 1Y over a red day would
+  // lie); the "hoy" line above stays the 24h change by market convention.
+  const chartUp = series.length >= 2 ? series[series.length - 1] >= series[0] : up;
   const tradability = tradabilityFor(stock);
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -109,12 +128,26 @@ export const StockDetailScreen = () => {
               <Polyline
                 points={points}
                 fill="none"
-                stroke={up ? '#059669' : '#DC2626'}
+                stroke={chartUp ? '#059669' : '#DC2626'}
                 strokeWidth="2.5"
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
             </Svg>
+          </View>
+          <View style={styles.rangeRow}>
+            {GM_RANGES.map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.rangePill, range === r && styles.rangePillActive]}
+                onPress={() => setRange(r)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>
+                  {r === 'MAX' ? 'Máx' : r}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
           <View style={styles.marketRow}>
             <View
@@ -230,6 +263,16 @@ const styles = StyleSheet.create({
   change: { fontSize: 14, fontWeight: '700', color: colors.primaryDark, marginTop: 3 },
   changeDown: { color: '#DC2626' },
   chartWrap: { marginTop: 14 },
+  rangeRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  rangePill: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  rangePillActive: { backgroundColor: colors.primaryLight },
+  rangeText: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
+  rangeTextActive: { color: colors.primaryDark },
   marketRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
   marketDot: { width: 7, height: 7, borderRadius: 4 },
   marketText: { fontSize: 12, color: colors.text.secondary },

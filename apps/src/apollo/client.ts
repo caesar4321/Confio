@@ -385,6 +385,18 @@ export const apolloClient = new ApolloClient({
   link: from([authLink, errorLink, httpLink]),
   cache: new InMemoryCache({
     typePolicies: {
+      // cusdPlusSummary is an id-less singleton queried with DIFFERENT field
+      // subsets (portfolio hub vs the APY split card). Without merge, the
+      // smaller result REPLACES the cached object, the hub loses
+      // stocksEnabled/netApyPct/balanceUsd, and renders 0% with the GM
+      // section fail-closed hidden.
+      Query: {
+        fields: {
+          cusdPlusSummary: {
+            merge: true,
+          },
+        },
+      },
       MessageInboxType: {
         keyFields: false,
       },

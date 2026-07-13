@@ -29,6 +29,13 @@ app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
     'schedule': crontab(hour=3, minute=30),
 })
 
+# Keep Koywe ramp limits warm so rampAvailability never computes them inline
+# (the off-ramp estimate needs several sequential preview quotes).
+app.conf.beat_schedule.setdefault('ramps-refresh-koywe-limits', {
+    'task': 'ramps.refresh_koywe_ramp_limits',
+    'schedule': crontab(minute=7),
+})
+
 # Ensure DB connections are properly managed around every Celery task
 try:
     from celery import signals

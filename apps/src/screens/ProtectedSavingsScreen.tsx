@@ -12,15 +12,28 @@ import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@apollo/client';
+import { gql, useQuery } from '@apollo/client';
 import { colors } from '../config/theme';
 import { useCurrency } from '../hooks/useCurrency';
+import { useNumberFormat } from '../utils/numberFormatting';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
 import cUSDLogo from '../assets/png/cUSD.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
+
+// Live yield split (design law: no hardcoded rates in copy). Both sides are
+// SERVER-derived from Ondo's on-chain oracle; when the rate isn't live yet
+// (pre-launch honest 0%) the split falls back to example copy, labeled so.
+const GET_APY_SPLIT = gql`
+  query CusdPlusApySplit {
+    cusdPlusSummary {
+      grossApyPct
+      netApyPct
+    }
+  }
+`;
 
 const formatWhole = (n: number | null | undefined, sep: string) => {
   if (n == null) return '—';
@@ -49,6 +62,16 @@ export const ProtectedSavingsScreen = () => {
   // 0 is the honest present-tense value until the reserve exists.
   const usdyReserve = (s as any)?.usdyReserve ?? 0;
   const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);
+
+  const { formatNumber } = useNumberFormat();
+  const { data: apyData } = useQuery(GET_APY_SPLIT, {
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
+  });
+  const grossApy = apyData?.cusdPlusSummary?.grossApyPct ?? 0;
+  const netApy = apyData?.cusdPlusSummary?.netApyPct ?? 0;
+  const apyLive = grossApy > 0 && netApy > 0;
+  const pct = (v: number) => `~${formatNumber(v, { maximumFractionDigits: 1 })}%`;
 
   const openUrl = (url?: string | null) => {
     if (!url) return;
@@ -210,24 +233,33 @@ export const ProtectedSavingsScreen = () => {
             de EE.UU.
           </Text>
 
+          {/* Rates are LIVE from the server (Ondo's on-chain oracle) when
+              available; the static example only stands in pre-launch, and
+              says so in the title. */}
           <View style={styles.splitCard}>
-            <Text style={styles.splitTitle}>Cómo funciona cUSD+ (ejemplo)</Text>
+            <Text style={styles.splitTitle}>
+              {apyLive ? 'Cómo funciona cUSD+ (hoy)' : 'Cómo funciona cUSD+ (ejemplo)'}
+            </Text>
             <View style={styles.splitRow}>
               <View style={[styles.splitDot, { backgroundColor: colors.text.light }]} />
               <Text style={styles.splitLabel}>Rendimiento de los bonos del Tesoro</Text>
-              <Text style={styles.splitValue}>~3.5%</Text>
+              <Text style={styles.splitValue}>{apyLive ? pct(grossApy) : '~3.5%'}</Text>
             </View>
             <View style={styles.splitRow}>
               <View style={[styles.splitDot, { backgroundColor: colors.violet }]} />
               <Text style={styles.splitLabel}>Comisión Confío (15% del rendimiento)</Text>
-              <Text style={styles.splitValue}>~0.5%</Text>
+              <Text style={styles.splitValue}>
+                {apyLive ? pct(grossApy - netApy) : '~0.5%'}
+              </Text>
             </View>
             <View style={styles.splitRow}>
               <View style={[styles.splitDot, { backgroundColor: colors.primary }]} />
               <Text style={[styles.splitLabel, styles.splitLabelStrong]}>
                 Para ti, todos los días
               </Text>
-              <Text style={[styles.splitValue, styles.splitValueStrong]}>~3%</Text>
+              <Text style={[styles.splitValue, styles.splitValueStrong]}>
+                {apyLive ? pct(netApy) : '~3%'}
+              </Text>
             </View>
           </View>
 
