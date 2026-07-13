@@ -21,17 +21,20 @@ _TOKEN_CURRENCIES_CACHE_TTL = 60 * 15
 _RAMP_LIMITS_CACHE_TTL = 60 * 60 * 12
 _ACCOUNT_PROFILE_SYNC_CACHE_TTL = 60 * 60 * 24
 
+# The separator before <actual> is lazy so a leading minus sign lands in the
+# capture: quote outputs go NEGATIVE when the flat fee exceeds the amount
+# (e.g. 'less than the minimun available for ARS. -2962.91 < 100').
 _MINIMUM_AMOUNT_PATTERN = re.compile(
     r'(?:less than|below|under|is below|is less than|does not reach)\s+the\s+(?:minimun|minimum)'
-    r'(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*'
-    r'(?P<actual>[\d.,]+)\s*<\s*(?P<minimum>[\d.,]+)',
+    r'(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*?'
+    r'(?P<actual>-?[\d.,]+)\s*<\s*(?P<minimum>-?[\d.,]+)',
     re.IGNORECASE,
 )
 
 _MAXIMUM_AMOUNT_PATTERN = re.compile(
     r'(?:exceeds|exceed|greater than|more than|bigger than|higher than|above|over|surpasses)'
-    r'\s+the\s+(?:maximun|maximum)(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*'
-    r'(?P<actual>[\d.,]+)\s*>\s*(?P<maximum>[\d.,]+)',
+    r'\s+the\s+(?:maximun|maximum)(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*?'
+    r'(?P<actual>-?[\d.,]+)\s*>\s*(?P<maximum>-?[\d.,]+)',
     re.IGNORECASE,
 )
 
@@ -271,11 +274,13 @@ class KoyweClient:
             crypto_symbol=normalized_crypto,
             fiat_symbol=normalized_fiat,
             target_amount=fiat_min,
+            bias='at_least',
         )
         off_ramp_max = self._estimate_crypto_amount_for_fiat_output(
             crypto_symbol=normalized_crypto,
             fiat_symbol=normalized_fiat,
             target_amount=fiat_max,
+            bias='at_most',
         )
         result = {
             'on_ramp_min_amount': fiat_min,
@@ -1084,14 +1089,21 @@ class KoyweClient:
             candidates.append('USDT')
         return candidates
 
-    def _estimate_crypto_amount_for_fiat_output(self, *, crypto_symbol: str, fiat_symbol: str, target_amount: Decimal) -> Decimal:
+    def _estimate_crypto_amount_for_fiat_output(self, *, crypto_symbol: str, fiat_symbol: str, target_amount: Decimal, bias: str = 'at_least') -> Decimal:
         """Crypto amount whose quote lands on target_amount of fiat output.
 
-        Quotes are affine in the amount (proportional rate minus a flat
-        fee), so a rate-seeded, fee-corrected refinement converges in 2-3
-        probes. Kept to <=6 quote calls: this runs inline on cache misses
-        and the old bracket+bisection version cost ~20 calls per estimate,
-        which made the ramp screens take >10s to load.
+        bias='at_least' returns an amount whose output covers the target
+        (fiat minimums); bias='at_most' stays at or under it (fiat maximums,
+        where Koywe rejects anything past the boundary).
+
+        Quotes are affine in the amount: out = rate * x - fee, with a flat
+        fee that dominates at small sizes (0.07 USDC can quote a NEGATIVE
+        fiat output). Every probe — including rejected ones, whose error
+        message carries the real output — feeds a secant model that lands
+        the next probe on the boundary directly, instead of bisecting.
+        Kept to <=7 quote calls: this runs inline on cache misses and the
+        old bracket+bisection version cost ~20 calls per estimate, which
+        made the ramp screens take >10s to load.
         """
         if target_amount <= 0:
             return Decimal('0')
@@ -1106,16 +1118,25 @@ class KoyweClient:
         if sample_amount_in <= 0 or sample_amount_out <= 0:
             raise KoyweError(f'Unable to estimate Koywe off-ramp limits for {fiat_symbol}')
 
-        # Quotes are affine in the amount: out = rate * x - fee, with a flat
-        # fee that dominates at small sizes (0.07 USDC can quote a NEGATIVE
-        # fiat output). The fee estimate is refined from every probe, so the
-        # next probe lands on the boundary directly instead of bisecting.
-        effective_rate = sample_amount_out / sample_amount_in
-        fee_fiat = Decimal('0')
+        points: list[tuple[Decimal, Decimal]] = [(sample_amount_in, sample_amount_out)]
+        margin = Decimal('1.001') if bias == 'at_least' else Decimal('0.999')
+
+        def next_amount(target_out: Decimal) -> Decimal:
+            slope = sample_amount_out / sample_amount_in
+            fee = Decimal('0')
+            if len(points) >= 2:
+                (x1, y1), (x2, y2) = points[-2], points[-1]
+                if x2 != x1:
+                    candidate = (y2 - y1) / (x2 - x1)
+                    if candidate > 0:
+                        slope = candidate
+                        fee = slope * x2 - y2
+            return max(((target_out + fee) / slope) * margin, Decimal('0.01'))
+
         # Koywe validates the fiat OUTPUT against the pair minimum; its
         # rejections carry that floor, which can bind harder than our target.
         target_out = target_amount
-        amount = max((target_out / effective_rate) * Decimal('1.005'), Decimal('0.01'))
+        amount = next_amount(target_out)
         # Smallest amount seen that reaches the target, and largest accepted
         # amount that falls short (the boundary from below when Koywe rejects
         # everything at or above the target, as happens at the pair max).
@@ -1124,37 +1145,40 @@ class KoyweClient:
 
         for _ in range(6):
             quote, rejection = self._safe_preview_quote(symbol_in=crypto_symbol, symbol_out=fiat_symbol, amount=amount)
-            if isinstance(rejection, KoyweMaximumAmountError):
-                amount *= Decimal('0.995')
-                continue
-            if isinstance(rejection, KoyweMinimumAmountError):
-                floor = _parse_amount(rejection.minimum)
-                actual_out = _parse_amount(rejection.actual)
-                if floor is not None:
-                    target_out = max(target_out, floor)
+            if rejection is not None:
+                actual_out = _parse_amount(getattr(rejection, 'actual', None))
                 if actual_out is not None:
-                    fee_fiat = effective_rate * amount - actual_out
-                if floor is None and actual_out is None:
-                    amount *= Decimal('4')
-                else:
-                    amount = ((target_out + fee_fiat) / effective_rate) * Decimal('1.01')
-                continue
-            if quote is None:
-                amount *= Decimal('4')
+                    points.append((amount, actual_out))
+                if isinstance(rejection, KoyweMinimumAmountError):
+                    floor = _parse_amount(rejection.minimum)
+                    if floor is not None:
+                        target_out = max(target_out, floor)
+                    if actual_out is None and floor is None:
+                        amount *= Decimal('4')
+                        continue
+                elif actual_out is None:
+                    amount *= Decimal('0.995')
+                    continue
+                amount = next_amount(target_out)
                 continue
             amount_out = Decimal(str(quote.get('amountOut') or '0'))
             if amount_out <= 0:
                 break
-            fee_fiat = effective_rate * amount - amount_out
+            points.append((amount, amount_out))
             if amount_out >= target_out:
                 if best_at_least is None or amount < best_at_least:
                     best_at_least = amount
                 if amount_out <= target_out * Decimal('1.02'):
                     break
-            elif best_below is None or amount > best_below:
-                best_below = amount
-            amount = ((target_out + fee_fiat) / effective_rate) * Decimal('1.005')
+            else:
+                if best_below is None or amount > best_below:
+                    best_below = amount
+                if bias == 'at_most' and amount_out >= target_out * Decimal('0.98'):
+                    break
+            amount = next_amount(target_out)
 
+        if bias == 'at_most' and best_below is not None:
+            return best_below.quantize(Decimal('0.01'), rounding=ROUND_DOWN)
         if best_at_least is not None:
             return best_at_least.quantize(Decimal('0.01'), rounding=ROUND_UP)
         if best_below is not None:

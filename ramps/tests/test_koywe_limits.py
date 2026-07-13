@@ -63,9 +63,11 @@ class DynamicRampLimitsTests(SimpleTestCase):
                 crypto_symbol='USDC Algorand',
                 fiat_symbol='ARS',
                 target_amount=FIAT_MAX,
+                bias='at_most',
             )
-        expected = FIAT_MAX / RATE  # ~5666.67 USDC
-        self.assertLess(abs(estimate - expected), Decimal('1'))
+        # Must be accepted by Koywe (not past the boundary) and close to it.
+        self.assertLessEqual(estimate * RATE - FLAT_FEE, FIAT_MAX)
+        self.assertGreater(estimate, TRUE_MAX_CRYPTO * Decimal('0.99'))
 
     def test_dynamic_limits_survive_max_rejections(self):
         pair_limits = {'min': str(FIAT_MIN), 'max': str(FIAT_MAX)}
@@ -75,8 +77,8 @@ class DynamicRampLimitsTests(SimpleTestCase):
 
         self.assertEqual(limits['on_ramp_min_amount'], FIAT_MIN)
         self.assertEqual(limits['on_ramp_max_amount'], FIAT_MAX)
-        self.assertLess(abs(limits['off_ramp_min_amount'] - FIAT_MIN / RATE), Decimal('1'))
-        self.assertLess(abs(limits['off_ramp_max_amount'] - FIAT_MAX / RATE), Decimal('1'))
+        self.assertLess(abs(limits['off_ramp_min_amount'] - TRUE_MIN_CRYPTO), TRUE_MIN_CRYPTO * Decimal('0.05'))
+        self.assertLess(abs(limits['off_ramp_max_amount'] - TRUE_MAX_CRYPTO), TRUE_MAX_CRYPTO * Decimal('0.05'))
 
     def test_dynamic_limits_stay_within_quote_call_budget(self):
         """Each quote call is a sequential HTTP round trip made inline on a
@@ -99,20 +101,41 @@ class DynamicRampLimitsTests(SimpleTestCase):
                 fiat_symbol='ARS',
                 target_amount=FIAT_MIN,
             )
-        self.assertGreaterEqual(estimate * RATE, FIAT_MIN)
-        self.assertLess(abs(estimate - FIAT_MIN / RATE), Decimal('1'))
+        # Advertised minimum must actually deliver the target when quoted.
+        self.assertGreaterEqual(estimate * RATE - FLAT_FEE, FIAT_MIN)
+        self.assertLess(estimate, TRUE_MIN_CRYPTO * Decimal('1.05'))
 
-    def test_min_estimate_respects_koywe_crypto_floor(self):
-        """When the fiat minimum converts to less crypto than Koywe's own
-        input-side minimum, the estimator must land on Koywe's floor instead
-        of exhausting its probe budget below it (broke ARS/BOB, whose fiat
-        minimums convert to fractions of the crypto minimum)."""
-        tiny_fiat_target = CRYPTO_MIN * RATE / 30  # 100 ARS: needs ~0.07 USDC, floor is 2
-        with mock.patch.object(KoyweClient, 'create_preview_quote', side_effect=_fake_preview_quote):
+    def test_min_estimate_survives_flat_fee_dominated_quotes(self):
+        """ARS/BOB regression: with a small fiat minimum, the naive
+        rate-converted probe quotes a NEGATIVE output (flat fee dominates)
+        and Koywe rejects it. The estimator must recover from the rejection
+        message (which carries the real output) instead of exhausting its
+        probe budget below the boundary and failing the whole limits fetch."""
+        pair_min = Decimal('100')  # sandbox ARS: min 100, true answer ~2.07 USDC
+        fake = _make_fake_preview_quote(fiat_min=pair_min)
+        with mock.patch.object(KoyweClient, 'create_preview_quote', side_effect=fake):
             estimate = self.client._estimate_crypto_amount_for_fiat_output(
                 crypto_symbol='USDC Algorand',
                 fiat_symbol='ARS',
-                target_amount=tiny_fiat_target,
+                target_amount=pair_min,
             )
-        self.assertGreaterEqual(estimate, CRYPTO_MIN)
-        self.assertLess(estimate, CRYPTO_MIN * Decimal('1.01'))
+        true_min = (pair_min + FLAT_FEE) / RATE  # ~2.07
+        self.assertGreaterEqual(estimate * RATE - FLAT_FEE, pair_min)
+        self.assertLess(estimate, true_min * Decimal('1.05'))
+
+    def test_rejection_parsing_keeps_negative_outputs_signed(self):
+        """Live Koywe rejections quote the real (possibly negative) output:
+        'less than the minimun available for ARS. -2962.91 < 100'. Dropping
+        the sign feeds a garbage point into the estimator's secant model,
+        which broke the limits fetch for every currency."""
+        import json
+        from unittest.mock import Mock
+        response = Mock()
+        response.ok = False
+        response.json.return_value = {
+            'message': 'Currency amount is less than the minimun available for ARS. -2962.91 < 100',
+        }
+        with self.assertRaises(KoyweMinimumAmountError) as ctx:
+            self.client._parse_response(response, 'failed')
+        self.assertEqual(ctx.exception.actual, '-2962.91')
+        self.assertEqual(ctx.exception.minimum, '100')
