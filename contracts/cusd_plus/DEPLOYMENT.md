@@ -1,20 +1,38 @@
 # cUSD+ deployment record — BSC mainnet
 
-## CusdPlusVault — deployed 2026-07-10
+## CusdPlusVault — deployed 2026-07-10, upgraded 2026-07-13
 
 | Role | Address |
 | --- | --- |
 | **Vault (ERC1967 proxy)** | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
-| Implementation | `0xB0C2122047a69C8Ee336ce75fd61050a06630823` |
+| Implementation (current, guard-gated reset) | `0x578fd4d235acF608979b63BBB28bD2292E7e201e` |
+| Implementation (v1, superseded 07-13) | `0xB0C2122047a69C8Ee336ce75fd61050a06630823` |
 | Owner + treasury | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
 | Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
 
 Deploy txns (BscScan):
-- impl:  `0x44be3e14bd3d6886a929dff6664fa2901c300e817741c6930deaa9519f970a27`
-- proxy: `0x79326b3b7f124abe97b6d83cc7d5666dd1cce0c8f10a66a178726c74b7e1c58a`
+- impl v1: `0x44be3e14bd3d6886a929dff6664fa2901c300e817741c6930deaa9519f970a27`
+- proxy:   `0x79326b3b7f124abe97b6d83cc7d5666dd1cce0c8f10a66a178726c74b7e1c58a`
 
 Deployed via `manage.py deploy_cusd_plus_vault --broadcast --yes-mainnet`
 (KMS-signed creation txns — no extractable deployer key). Cost ≈ 0.0032 BNB.
+
+### UUPS upgrade 2026-07-13 — guard-gated resetOracleBaseline (commit `0a049edf`)
+
+Closes the HIGH finding from the 2026-07-13 review: v1 let the owner call
+`resetOracleBaseline()` on a healthy oracle, skipping holders' 85% of
+pending sub-2% growth into collectable surplus. Executed at zero supply.
+
+- impl v2 deploy: `0xdf8da12c04fb1f407db0856cc5564a21f5fc75621e36efc124569a06cd6bd3ec`
+  (`manage.py deploy_cusd_plus_vault --impl-only --broadcast --yes-mainnet`)
+- Safe `upgradeToAndCall(0x578f…201e, "")`, nonce 1, signers 1/3/5:
+  `0xe9eeaf6f6b84f78e8d06fa0c8f1fdd2de2a5772e396394149579761cb05e5ff5`
+- Post-upgrade verified live: impl slot = v2; owner/pPlus/supply/backing
+  unchanged; `resetOracleBaseline()` from the Safe reverts
+  `guard not tripped` (eth_call); non-owner still rejected.
+- impl v2 source: Sourcify exact_match (creation + runtime) 2026-07-13.
+  BscScan API verification pending an API key — source is public via
+  Sourcify meanwhile.
 
 ### On-chain wiring (immutables, verified live 2026-07-07 + fork rehearsal)
 
@@ -42,12 +60,10 @@ onboarding. No funds, no risk, until then.
 - [x] **Verified on BscScan + Sourcify** (exact_match, both impl + proxy)
       2026-07-10. Source is public and bytecode-matched on both explorers.
       Constructor args below (for reference / re-verification).
-- [ ] **UUPS upgrade to the guard-gated impl** (commit `0a049edf`) via the
-      3-of-5 Safe BEFORE whitelisting/deposits. The live impl
-      (`0xB0C2...0823`) lets the owner call `resetOracleBaseline()` on a
-      healthy oracle, skipping holders' 85% of pending sub-2% growth into
-      collectable surplus (HIGH, 2026-07-13 review). Harmless while supply
-      is zero; must NOT survive into `lockUpgrades()`.
+- [x] **UUPS upgrade to the guard-gated impl** (commit `0a049edf`) — DONE
+      2026-07-13, impl v2 `0x578f…201e` (see upgrade record above).
+- [ ] BscScan verify impl v2 (needs an Etherscan/BscScan API key; Sourcify
+      exact_match already done)
 - [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
 - [ ] $1 live E2E once whitelisted
 - [ ] Router deploy (separate) once GM attestation ABI is wired — deploy
