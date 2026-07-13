@@ -225,7 +225,11 @@ contract CusdPlusVault is
     /// After investigating an oracle fault, the owner re-baselines WITHOUT
     /// granting holders the anomalous jump (yield during the frozen window is
     /// forfeited to surplus — conservative by design).
+    /// ONLY callable while the guard is tripped: on a healthy oracle a reset
+    /// would skip pending sub-2% growth past accrue(), silently converting
+    /// the holders' share into owner-collectable surplus.
     function resetOracleBaseline() external onlyOwner {
+        require(oracleGuardTripped, "guard not tripped");
         uint256 p = ORACLE.getPrice();
         emit OracleBaselineReset(lastOraclePrice, p);
         lastOraclePrice = p;

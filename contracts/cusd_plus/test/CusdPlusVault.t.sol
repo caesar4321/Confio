@@ -244,6 +244,33 @@ contract CusdPlusVaultTest is Test {
         assertTrue(vault.oracleGuardTripped());
     }
 
+    /// Regression (2026-07-13 review): reset is incident response ONLY.
+    /// Without the tripped-guard gate, the owner could re-baseline past
+    /// healthy sub-2% growth before anyone accrues, silently converting
+    /// the holders' 85% into owner-collectable surplus.
+    function test_reset_requiresTrippedGuard_cannotSkipHealthyYield() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+
+        // Ordinary +1% USDY appreciation, not yet accrued: reset must revert.
+        oracle.setPrice(1.01e18);
+        vm.prank(treasury);
+        vm.expectRevert(bytes("guard not tripped"));
+        vault.resetOracleBaseline();
+
+        // The growth is still the holders' to claim — anyone can accrue.
+        vault.accrue();
+        assertEq(vault.pPlus(), WAD + (0.01e18 * 8500) / 10_000, "holders keep 85%");
+
+        // A genuinely tripped guard still allows the incident path.
+        oracle.setPrice(1.05e18); // ~+4% from 1.01: fault
+        vault.accrue();
+        assertTrue(vault.oracleGuardTripped());
+        vm.prank(treasury);
+        vault.resetOracleBaseline();
+        assertFalse(vault.oracleGuardTripped());
+    }
+
     // ── Freeze (cusd.py parity) ──────────────────────────────────────
 
     function test_freeze_blocks_everything_detains_not_confiscates() public {

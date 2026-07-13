@@ -23,7 +23,8 @@ Mirrored semantics (MUST track CusdPlusVault.sol exactly):
   owed(p):     ceil(totalSupply*pPlus/p)  = (ts*pPlus + p - 1)//p
   surplus(p):  max(bal - owed(p), 0)
   collect(x):  accrue first; require x <= surplus; bal -= x
-  reset:       last = current price; guard untripped (no accrual granted)
+  reset:       require guard tripped; last = current price; guard
+               untripped (no accrual granted)
 
 Regenerate with:  python3 test/mirror/mirror_accrual.py
 """
@@ -90,6 +91,9 @@ class VaultMirror:
         self.bal -= amount
 
     def reset_baseline(self):
+        # Contract requires a tripped guard: reset is incident response,
+        # never a way to skip healthy growth past accrue().
+        assert self.tripped, "guard not tripped"
         self.last = self.price
         self.tripped = False
 
