@@ -150,6 +150,10 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
 
     /// Sell `stockAmount` of `stockToken`; proceeds (minus fee) re-enter the
     /// caller's savings and keep earning.
+    /// minSharesOut floors the cUSD+ minted to the caller. It is enforced
+    /// HERE, not forwarded as the vault's minUsdyOut — shares and USDY are
+    /// different units (shares = usdyOut * p / pPlus), and a shares floor
+    /// already bounds the dollar value of the whole subscribe leg.
     function sellToSavings(
         address stockToken,
         uint256 stockAmount,
@@ -167,7 +171,8 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
         uint256 reinvest = usdt - fee;
 
         USDT.forceApprove(address(VAULT), reinvest);
-        sharesOut = VAULT.subscribeAndMint(reinvest, minSharesOut, msg.sender);
+        sharesOut = VAULT.subscribeAndMint(reinvest, 0, msg.sender);
+        require(sharesOut >= minSharesOut, "insufficient shares out");
 
         emit StockSold(msg.sender, stockToken, stockAmount, usdt, fee, sharesOut);
     }

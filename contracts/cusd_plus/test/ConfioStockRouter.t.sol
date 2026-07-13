@@ -122,6 +122,43 @@ contract ConfioStockRouterTest is Test {
         assertGe(vault.backingRatioBps(), 10_000, "vault invariant holds through trades");
     }
 
+    /// Regression: minSharesOut used to be forwarded as the vault's
+    /// minUsdyOut. With USDY above par (p > pPlus, always true live) an
+    /// honest shares floor exceeds the achievable USDY out, so every sell
+    /// reverted "im slippage". The floor must be enforced on shares, here.
+    function test_sell_sharesFloor_enforced_whenUsdyAbovePar() public {
+        vm.prank(user);
+        uint256 stockOut = router.buyWithSavings(address(tsla), 600e18, 0, 0, "");
+
+        // USDY appreciates 1.9% (inside the 2% oracle jump guard)
+        oracle.setPrice(1.019e18);
+
+        // Mirror the contract's integer math to derive the exact shares the
+        // sell should mint, then demand exactly that as the floor.
+        uint256 proceeds = (stockOut * 300e18) / 1e18;
+        uint256 reinvest = proceeds - (proceeds * 30) / 10_000;
+        uint256 p = 1.019e18;
+        uint256 pPlusAfter = 1e18 + (0.019e18 * 8500) / 10_000; // accrues in-tx
+        uint256 usdyOut = (reinvest * 1e18) / p;
+        uint256 expectedShares = (usdyOut * p) / pPlusAfter;
+        assertGt(expectedShares, usdyOut, "scenario needs shares > USDY units");
+
+        vm.prank(user);
+        uint256 sharesOut =
+            router.sellToSavings(address(tsla), stockOut, 0, expectedShares, "");
+        assertEq(sharesOut, expectedShares, "tight shares floor satisfied");
+        assertEq(vault.pPlus(), pPlusAfter, "accrual math mirrored correctly");
+    }
+
+    function test_sell_sharesFloor_reverts_whenUnmet() public {
+        vm.prank(user);
+        uint256 stockOut = router.buyWithSavings(address(tsla), 600e18, 0, 0, "");
+
+        vm.prank(user);
+        vm.expectRevert(bytes("insufficient shares out"));
+        router.sellToSavings(address(tsla), stockOut, 0, type(uint256).max, "");
+    }
+
     function test_fee_capped_and_eventful() public {
         vm.prank(treasury);
         vm.expectRevert(bytes("fee above hard cap"));
