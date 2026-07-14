@@ -128,7 +128,6 @@ class DynamicRampLimitsTests(SimpleTestCase):
         'less than the minimun available for ARS. -2962.91 < 100'. Dropping
         the sign feeds a garbage point into the estimator's secant model,
         which broke the limits fetch for every currency."""
-        import json
         from unittest.mock import Mock
         response = Mock()
         response.ok = False
@@ -139,3 +138,35 @@ class DynamicRampLimitsTests(SimpleTestCase):
             self.client._parse_response(response, 'failed')
         self.assertEqual(ctx.exception.actual, '-2962.91')
         self.assertEqual(ctx.exception.minimum, '100')
+
+    def test_rejection_parsing_handles_hyphenated_currency_min(self):
+        """Koywe's Peru-USD fiat is 'USD-PE'; the currency capture must accept
+        hyphenated symbols or the whole match fails and the min/max fields the
+        estimator relies on come back unparsed. Message verified against the
+        production API on 2026-07-13."""
+        from unittest.mock import Mock
+        response = Mock()
+        response.ok = False
+        response.json.return_value = {
+            'message': 'Currency amount is less than the minimun available for USD-PE. 49 < 50',
+        }
+        with self.assertRaises(KoyweMinimumAmountError) as ctx:
+            self.client._parse_response(response, 'failed')
+        self.assertEqual(ctx.exception.currency, 'USD-PE')
+        self.assertEqual(ctx.exception.actual, '49')
+        self.assertEqual(ctx.exception.minimum, '50')
+
+    def test_rejection_parsing_handles_hyphenated_currency_max(self):
+        """Max-side counterpart: 'exceeds the maximun available for USD-PE.
+        8001 > 8000' (verified against the production API on 2026-07-13)."""
+        from unittest.mock import Mock
+        response = Mock()
+        response.ok = False
+        response.json.return_value = {
+            'message': 'Currency amount exceeds the maximun available for USD-PE. 8001 > 8000',
+        }
+        with self.assertRaises(KoyweMaximumAmountError) as ctx:
+            self.client._parse_response(response, 'failed')
+        self.assertEqual(ctx.exception.currency, 'USD-PE')
+        self.assertEqual(ctx.exception.actual, '8001')
+        self.assertEqual(ctx.exception.maximum, '8000')

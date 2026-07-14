@@ -24,16 +24,18 @@ _ACCOUNT_PROFILE_SYNC_CACHE_TTL = 60 * 60 * 24
 # The separator before <actual> is lazy so a leading minus sign lands in the
 # capture: quote outputs go NEGATIVE when the flat fee exceeds the amount
 # (e.g. 'less than the minimun available for ARS. -2962.91 < 100').
+# Currency symbols can be hyphenated country variants ('USD-PE' is Koywe's
+# Peru-USD fiat), not just ISO 4217 codes.
 _MINIMUM_AMOUNT_PATTERN = re.compile(
     r'(?:less than|below|under|is below|is less than|does not reach)\s+the\s+(?:minimun|minimum)'
-    r'(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*?'
+    r'(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}(?:-[A-Z]{2,3})?))?[\.\s:-]*?'
     r'(?P<actual>-?[\d.,]+)\s*<\s*(?P<minimum>-?[\d.,]+)',
     re.IGNORECASE,
 )
 
 _MAXIMUM_AMOUNT_PATTERN = re.compile(
     r'(?:exceeds|exceed|greater than|more than|bigger than|higher than|above|over|surpasses)'
-    r'\s+the\s+(?:maximun|maximum)(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*?'
+    r'\s+the\s+(?:maximun|maximum)(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}(?:-[A-Z]{2,3})?))?[\.\s:-]*?'
     r'(?P<actual>-?[\d.,]+)\s*>\s*(?P<maximum>-?[\d.,]+)',
     re.IGNORECASE,
 )
