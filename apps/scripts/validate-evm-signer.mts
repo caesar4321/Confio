@@ -7,23 +7,21 @@
 // case (value transfer, zero-value contract call with data).
 
 import { Wallet, computeAddress, Transaction } from 'ethers';
+import { sha256 } from '@noble/hashes/sha256';
+import { utf8ToBytes } from '@noble/hashes/utils';
 import {
-  deriveDeterministicEvmKey,
+  deriveEvmKeyFromMasterSecret,
   signLegacyTransaction,
   toChecksumAddress,
 } from '../src/services/evmWallet';
 
-// 1) Derivation determinism + address correctness
-const opts = {
-  clientSalt: 'test-client-salt-abc123',
-  derivationPepper: 'test-pepper-xyz',
-  provider: 'google' as const,
-  accountType: 'personal' as const,
-  accountIndex: 0,
-};
-const w1 = deriveDeterministicEvmKey(opts);
-const w2 = deriveDeterministicEvmKey({ ...opts });
-const wBiz = deriveDeterministicEvmKey({ ...opts, accountType: 'business' as const, businessId: '42' });
+// 1) Derivation determinism + address correctness (V2 master-secret only —
+// legacy V1 wallets have no EVM sibling by design)
+const masterSecret = sha256(utf8ToBytes('test-master-secret-abc123'));
+const opts = { accountType: 'personal', accountIndex: 0 };
+const w1 = deriveEvmKeyFromMasterSecret(masterSecret, opts);
+const w2 = deriveEvmKeyFromMasterSecret(masterSecret, { ...opts });
+const wBiz = deriveEvmKeyFromMasterSecret(masterSecret, { ...opts, accountType: 'business', businessId: '42' });
 console.log('deterministic:', w1.address === w2.address);
 console.log('domain-separated:', w1.address !== wBiz.address);
 const ethersAddr = computeAddress('0x' + w1.privKeyHex);

@@ -24,7 +24,7 @@ import { REPORT_BACKUP_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
-import { deriveDeterministicEvmKey, deriveEvmKeyFromMasterSecret, DerivedEvmWallet } from './evmWallet';
+import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet } from './evmWallet';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
@@ -398,14 +398,10 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // Generate ed25519 keypair for Algorand
   const keyPair = nacl.sign.keyPair.fromSeed(seed32);
 
-  // Savings-chain sibling: same inputs, evm/v1 domain. Cheap (one HKDF +
-  // one secp256k1 point) and keeps both addresses in lockstep everywhere
-  // the Algorand key is derived.
-  try {
-    cacheAndPersistEvmWallet(evmAccountKey(opts), deriveDeterministicEvmKey(opts));
-  } catch (e) {
-    console.warn('[Derive] EVM sibling derivation failed (non-fatal):', e);
-  }
+  // NO savings-chain sibling here: legacy V1 (OAuth-salt) wallets have no
+  // BSC address by design — V1 users never could deposit on BSC, and
+  // registering a V1-derived address would only conflict with the V2 one
+  // they get after master-secret migration.
 
   // Encode Algorand address from public key (runtime require to avoid RN issues)
   const algosdk = require('algosdk');

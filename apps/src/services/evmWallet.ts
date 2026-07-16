@@ -1,10 +1,11 @@
 // EVM (BSC) wallet — the savings-chain sibling of the Algorand wallet.
 //
-// Same non-custodial derivation pipeline as deriveDeterministicAlgorandKey
-// (secureDeterministicWallet.ts): identical IKM (OAuth clientSalt) and HKDF
-// extract salt (derivationPepper); ONLY the info string differs, using the
-// pre-planned domain 'confio/evm/v1' (derivationSpec.ts). Same inputs on any
+// V2 (master-secret) ONLY: derived with the same HKDF family as
+// deriveWalletV2, EVM domain in the info string. Same master secret on any
 // device → the same user.bsc address, no new secrets, no server custody.
+// Legacy V1 (OAuth-salt) wallets deliberately have NO EVM sibling — V1
+// users never could deposit on BSC, so deriving one would only register a
+// confusing address; they get one when V2 migration grants a master secret.
 //
 // Signing: BSC legacy type-0 transactions with EIP-155 replay protection
 // (universally accepted on BNB chain). Pure functions — no network in the
@@ -20,8 +21,6 @@ import { sha256 } from '@noble/hashes/sha256';
 import { keccak_256 } from '@noble/hashes/sha3';
 import { utf8ToBytes, bytesToHex, hexToBytes, concatBytes } from '@noble/hashes/utils';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
-import type { DeriveWalletOptions } from './secureDeterministicWallet';
 
 // ── Network config ──────────────────────────────────────────────────────
 // TODO(cusd+): serve from backend config (mirrors how Algorand network
@@ -38,36 +37,11 @@ export interface DerivedEvmWallet {
 
 // ── Derivation ──────────────────────────────────────────────────────────
 
-export function deriveDeterministicEvmKey(opts: DeriveWalletOptions): DerivedEvmWallet {
-  const { clientSalt, derivationPepper, provider, accountType, accountIndex, businessId } = opts;
-
-  // Byte-identical IKM/extract construction to the Algorand path — the
-  // domain separation lives entirely in the info string.
-  const ikm = sha256(utf8ToBytes(`${CONFIO_DERIVATION_SPEC.root}|${clientSalt}`));
-  const extractSalt = sha256(
-    utf8ToBytes(`${CONFIO_DERIVATION_SPEC.extract}|${derivationPepper}`),
-  );
-
-  // secp256k1 keys must be in (0, n); HKDF output is invalid with
-  // probability ~2^-128. Loop with a counter-suffixed info for completeness.
-  for (let counter = 0; ; counter++) {
-    const info = utf8ToBytes(
-      `${CONFIO_DERIVATION_SPEC.evmInfoPrefix}|${provider}|${accountType}|${accountIndex}|${businessId ?? ''}` +
-        (counter > 0 ? `|retry${counter}` : ''),
-    );
-    const candidate = hkdf(sha256, ikm, extractSalt, info, 32);
-    if (isValidPrivKey(candidate)) {
-      return {
-        address: privKeyToAddress(candidate),
-        privKeyHex: bytesToHex(candidate),
-      };
-    }
-  }
-}
-
 /** V2 (master-secret) sibling: same HKDF family as deriveWalletV2, with the
  * EVM domain in the info string. Deterministic per master secret + account;
- * recoverable wherever the master secret is (keychain + Drive backup). */
+ * recoverable wherever the master secret is (keychain + Drive backup).
+ * secp256k1 keys must be in (0, n); HKDF output is invalid with probability
+ * ~2^-128 — loop with a counter-suffixed info for completeness. */
 export function deriveEvmKeyFromMasterSecret(
   clientSecret: Uint8Array,
   opts: { accountType: string; accountIndex: number; businessId?: string },
