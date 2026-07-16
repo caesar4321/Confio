@@ -22,16 +22,38 @@ import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
 
 // Best-effort, SELF-HEALING registration of the BSC (savings chain)
-// address. Sign-in fires it, but a one-shot attempt can be lost (e.g. the
-// sign-in predated the server deploy), so savings surfaces call
-// ensureBscAddressRegistered() on mount too. A success marker (keyed by
-// address) makes retries free; failures leave no marker and retry later.
+// address. Fires at sign-in, on every authenticated app open
+// (completeAuthenticatedEntry), after account switches, and from savings
+// surfaces — so existing accounts converge in the background instead of
+// waiting for a savings screen. A success marker (keyed by address) makes
+// retries free; failures leave no marker and retry later.
 // Never blocks sign-in or rendering.
 export async function ensureBscAddressRegistered(addressOverride?: string) {
   try {
     const Keychain = await import('react-native-keychain');
-    const { getDerivedEvmWallet } = await import('./secureDeterministicWallet');
-    const address = addressOverride ?? getDerivedEvmWallet()?.address;
+    const { getEvmAddressForDisplay, getActiveEvmWallet, evmAccountKey } =
+      await import('./secureDeterministicWallet');
+    // Resolve BY ACTIVE ACCOUNT: the mutation writes to the JWT-context
+    // account, so the unkeyed "last derived" wallet slot could register a
+    // personal address onto a business account (or vice versa) after a
+    // switch — and the server refuses corrections (immutability guard).
+    let address = addressOverride ?? null;
+    if (!address) {
+      const ctx = await AuthService.getInstance().getActiveAccountContext();
+      const acctKey = evmAccountKey({
+        accountType: ctx.type === 'business' ? 'business' : 'personal',
+        accountIndex: ctx.index ?? 0,
+        businessId: ctx.businessId,
+      });
+      address = await getEvmAddressForDisplay(acctKey);
+      if (!address) {
+        // First open after the savings update: nothing persisted yet, so
+        // derive the sibling from the master secret (V2 only). Legacy V1
+        // wallets throw here and register NOTHING by design — they have no
+        // BSC address until master-secret migration makes them V2.
+        address = (await getActiveEvmWallet()).address;
+      }
+    }
     if (!address) return;
     const markerService = `confio_bsc_registered_v1_${address.toLowerCase()}`;
     const marker = await Keychain.getGenericPassword({ service: markerService }).catch(() => null);
@@ -2256,6 +2278,17 @@ export class AuthService {
           } catch (e) {
             console.warn('AuthService - Could not enrich account context with businessId from token payload:', e);
           }
+
+          // Background-register the switched-to account's BSC (savings)
+          // address under the fresh JWT. Employees can't derive the owner's
+          // business key, so only owners attempt (mirrors the opt-in check).
+          try {
+            const payload = data.switchAccountToken.payload || {};
+            const isOwner = !payload.is_employee || payload.employee_role === 'owner';
+            if (isOwner) {
+              void ensureBscAddressRegistered().catch(() => {});
+            }
+          } catch { }
         }
       } catch (error) {
         console.error('Error getting new JWT token for account switch:', error);

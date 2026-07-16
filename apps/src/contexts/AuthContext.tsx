@@ -727,7 +727,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     // Handle auto opt-in after successful auth
     await ensureAssetOptIns();
 
-
+    // Background self-heal: register the BSC (savings chain) address for
+    // accounts whose sign-in predated the savings deploy. Runs on both fresh
+    // login and cold-start resume; marker-gated and never blocks entry.
+    import('../services/authService').then(({ ensureBscAddressRegistered }) => {
+      void ensureBscAddressRegistered();
+    }).catch(() => { });
 
     // On iOS, Implicitly Report Safety (iCloud Keychain is auto-synced)
     if (Platform.OS === 'ios') {

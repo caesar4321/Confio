@@ -3284,6 +3284,15 @@ class UpdateAccountBscAddress(graphene.Mutation):
             account = Account.objects.filter(
                 business_id=business_id, account_type='business'
             ).order_by('account_index').first()
+            # Only the owner derives the business key from their master
+            # secret; an employee's client would derive (and register) an
+            # address the owner does not control, and the immutability
+            # guard would then refuse the owner's correction forever.
+            if account and account.user_id != user.id:
+                return UpdateAccountBscAddress(
+                    success=False,
+                    error="Solo el dueño del negocio puede registrar la dirección BSC.",
+                )
         else:
             account = Account.objects.filter(
                 user=user, account_type=account_type, account_index=account_index
