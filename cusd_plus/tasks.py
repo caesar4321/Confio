@@ -540,3 +540,98 @@ def mirror_gm_logos():
     result = {'tickers': len(tickers), 'mirrored': mirrored, 'skipped': skipped, 'failed': failed}
     logger.info('gm logo mirror: %s', result)
     return result
+
+
+# ── Accrual keeper ──────────────────────────────────────────────────────
+# The vault accrues lazily (accrue() runs inside every mint/redeem), which
+# is enough while there's traffic — but a long-idle vault accumulates
+# oracle growth, and once the gap exceeds MAX_ACCRUAL_JUMP_BPS the next
+# interaction trips the jump guard: accrual freezes until the Safe calls
+# resetOracleBaseline(), and the frozen-window yield becomes surplus
+# instead of holder yield. A periodic keeper poke makes that impossible.
+
+# Mirrors the contract's MAX_ACCRUAL_JUMP_BPS (a compile-time constant,
+# CusdPlusVault.sol) — sending accrue() past this bound would trip the
+# guard on-chain, so the keeper alerts and holds instead.
+MAX_ACCRUAL_JUMP_BPS = 200
+
+SEL_ACCRUE = '0xf8ba4cff'            # accrue()
+SEL_LAST_ORACLE_PRICE = '0x349f7173' # lastOraclePrice()
+SEL_GUARD_TRIPPED = '0x49e7362a'     # oracleGuardTripped()
+SEL_GET_PRICE = '0x98d5fdca'         # getPrice() — Ondo RWADynamicOracle
+
+
+def _call_uint(to: str, data: str) -> int:
+    res = _rpc('eth_call', [{'to': to, 'data': data}, 'latest'])
+    return int(res, 16) if res and res != '0x' else 0
+
+
+@shared_task(name='cusd_plus.accrue_vault')
+def accrue_vault():
+    """Keeper poke for CusdPlusVault.accrue() (permissionless), signed by
+    the BSC sponsor via KMS. Reads first, sends only when the oracle has
+    actually stepped since the last accrual — the oracle moves once per
+    UTC day, so this lands ~1 cheap tx/day and is a pure no-op otherwise.
+
+    Never sends into a fault: a tripped guard or a jump past the contract
+    bound is logged loudly and left for the Safe (resetOracleBaseline),
+    since the keeper tripping the guard itself would just convert the
+    pending yield into surplus with no human in the loop."""
+    from .vault import oracle_address, vault_address
+
+    vault = vault_address()
+    oracle = oracle_address()
+    if not vault or not oracle:
+        return {'skipped': 'unconfigured'}
+    if not getattr(settings, 'CUSD_PLUS_ACCRUE_ENABLED', True):
+        return {'skipped': 'disabled'}
+
+    try:
+        if _call_uint(vault, SEL_GUARD_TRIPPED):
+            logger.error('cUSD+ accrue keeper: oracle guard is TRIPPED — '
+                         'accrual frozen until the Safe calls resetOracleBaseline()')
+            return {'skipped': 'guard_tripped'}
+        last = _call_uint(vault, SEL_LAST_ORACLE_PRICE)
+        p = _call_uint(oracle, SEL_GET_PRICE)
+    except Exception as exc:  # noqa: BLE001 — read failure: retry next run
+        logger.warning('cUSD+ accrue keeper: chain read failed: %s', exc)
+        return {'skipped': 'read_failed'}
+
+    if not last or not p:
+        logger.warning('cUSD+ accrue keeper: zero read (last=%s p=%s)', last, p)
+        return {'skipped': 'zero_read'}
+    if p == last:
+        return {'skipped': 'no_step'}  # oracle hasn't stepped yet — free no-op
+    if p < last or ((p - last) * 10_000) // last > MAX_ACCRUAL_JUMP_BPS:
+        logger.error('cUSD+ accrue keeper: oracle move would trip the jump '
+                     'guard (last=%s new=%s) — holding for investigation', last, p)
+        return {'skipped': 'would_trip_guard', 'last': last, 'price': p}
+
+    try:
+        from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
+        signer = get_bsc_sponsor_signer_from_settings()
+    except Exception as exc:  # noqa: BLE001 — signing dark ≠ task failure
+        logger.info('cUSD+ accrue keeper: signer unavailable (%s)', exc)
+        return {'skipped': 'signer_unavailable'}
+
+    try:
+        sender = signer.address
+        nonce = int(_rpc('eth_getTransactionCount', [sender, 'pending']), 16)
+        gas_price = max(int(_rpc('eth_gasPrice', []), 16),
+                        int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
+        # accrue() is a couple of sstores plus the oracle's range walk;
+        # generous limit, unused gas is not charged.
+        gas_limit = int(getattr(settings, 'CUSD_PLUS_ACCRUE_GAS_LIMIT', 300_000))
+        if int(_rpc('eth_getBalance', [sender, 'latest']), 16) < gas_limit * gas_price:
+            logger.error('cUSD+ accrue keeper: sponsor BNB too low — refill needed')
+            return {'skipped': 'sponsor_low'}
+        raw, txh = signer.sign_transaction({
+            'chainId': settings.BSC_CHAIN_ID, 'nonce': nonce, 'gasPrice': gas_price,
+            'gas': gas_limit, 'to': vault, 'value': 0, 'data': SEL_ACCRUE,
+        })
+        sent = _rpc('eth_sendRawTransaction', [raw])
+        logger.info('cUSD+ accrue sent (oracle %s → %s): %s', last, p, sent)
+        return {'sent': sent, 'last': last, 'price': p}
+    except Exception as exc:  # noqa: BLE001 — next scheduled run retries
+        logger.exception('cUSD+ accrue keeper send failed: %s', exc)
+        return {'skipped': 'send_failed'}
