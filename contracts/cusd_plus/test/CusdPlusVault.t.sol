@@ -540,6 +540,32 @@ contract CusdPlusVaultTest is Test {
         vault.redeemToUsdt(100e18, 0, user); // vault fully functional again
     }
 
+    /// The worst oracle failure — a garbage-huge read — must TRIP, not
+    /// panic: plain `(p - last) * BPS` would overflow-revert accrue(), the
+    /// only path that persists a trip, leaving the guard unable to record
+    /// exactly the fault it exists for. mulDiv keeps the check computable.
+    function test_hugeOracleRead_trips_notPanics() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+
+        oracle.setPrice(type(uint256).max);
+        vault.accrue(); // must trip, not overflow-panic
+        assertTrue(vault.oracleGuardTripped());
+        assertEq(vault.guardedOraclePrice(), type(uint256).max);
+
+        // value paths refuse cleanly at the flagged state
+        vm.prank(user);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.redeemToUsdt(100e18, 0, user);
+
+        // recovery: feed fixed -> fault verdict -> fully functional
+        oracle.setPrice(1e18);
+        vm.prank(treasury);
+        vault.rebaselineAfterVerifiedOracleFault(1e18, 1e18, keccak256("e"));
+        vm.prank(user);
+        vault.redeemToUsdt(100e18, 0, user);
+    }
+
     function test_freeze_zeroAddress_rejected() public {
         // frozen[0] would brick every mint (from=0) and burn (to=0)
         vm.prank(treasury);

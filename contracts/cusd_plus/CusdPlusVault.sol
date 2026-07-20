@@ -82,6 +82,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// Ondo's dynamic oracle: deterministic accreting USD price for USDY, 1e18.
@@ -243,30 +244,49 @@ contract CusdPlusVault is
         // USDY's oracle curve is monotonically increasing by construction; a
         // zero, lower, or wildly higher read is a fault. Freeze, don't
         // revert — accrue() itself is also a standalone keeper poke and must
-        // stay callable; the value paths check the flag right after
-        // accruing. (`p == 0` is caught by `p < last` on any healthy
-        // baseline; the explicit zero checks also cover a corrupted/zero
-        // baseline, where the jump division would otherwise panic — the
-        // short-circuit order below is load-bearing.)
-        if (p == 0 || last == 0 || p < last || ((p - last) * BPS) / last > MAX_ACCRUAL_JUMP_BPS) {
-            oracleGuardTripped = true;
-            guardedOraclePrice = p; // forensic: what tripped us (accrue is a
-            // no-op while tripped, so this is never overwritten mid-incident)
-            emit OracleJumpGuard(last, p);
+        // stay callable (it is the only path that PERSISTS a trip); the
+        // value paths check the flag right after accruing. `p == 0` is
+        // caught by `p < last` on any healthy baseline; the explicit zero
+        // checks also cover a corrupted/zero baseline. mulDiv (512-bit
+        // intermediate) keeps the jump math itself unrevertable: a
+        // garbage-huge read is the exact fault this guard exists for, and
+        // plain `(p - last) * BPS` would panic on it — making the worst
+        // oracle failure the one the guard could never record.
+        if (p == 0 || last == 0 || p < last) {
+            _tripOracleGuard(last, p);
             return;
         }
         if (p == last) return;
+        if (Math.mulDiv(p - last, BPS, last) > MAX_ACCRUAL_JUMP_BPS) {
+            _tripOracleGuard(last, p);
+            return;
+        }
         _applyGrowth(p);
+    }
+
+    function _tripOracleGuard(uint256 last, uint256 observed) internal {
+        oracleGuardTripped = true;
+        guardedOraclePrice = observed; // forensic: what tripped us (accrue
+        // is a no-op while tripped, so never overwritten mid-incident)
+        emit OracleJumpGuard(last, observed);
     }
 
     /// Shared 85/15 growth application (accrue() and the accept path MUST
     /// price growth identically — one code path, no drift possible).
     /// growthWad = p/last − 1, in WAD; holders keep (1 − share) of it.
+    /// mulDiv floors exactly like the plain expressions did (identical
+    /// results in-range; 512-bit intermediates out of it), so the Python
+    /// mirror's arbitrary-precision math still matches to the wei.
+    /// The requires restate this function's own invariants — every caller
+    /// already guarantees them today; they exist to catch a future caller
+    /// that doesn't.
     function _applyGrowth(uint256 newPrice) internal {
         uint256 last = lastOraclePrice;
-        uint256 growthWad = ((newPrice - last) * WAD) / last;
-        uint256 keptWad = (growthWad * (BPS - CONFIO_YIELD_SHARE_BPS)) / BPS;
-        pPlus = (pPlus * (WAD + keptWad)) / WAD;
+        require(last > 0, "invalid baseline");
+        require(newPrice >= last, "price decreased");
+        uint256 growthWad = Math.mulDiv(newPrice - last, WAD, last);
+        uint256 keptWad = Math.mulDiv(growthWad, BPS - CONFIO_YIELD_SHARE_BPS, BPS);
+        pPlus = Math.mulDiv(pPlus, WAD + keptWad, WAD);
         lastOraclePrice = newPrice;
         emit Accrued(newPrice, pPlus);
     }
@@ -522,7 +542,8 @@ contract CusdPlusVault is
 
     /// USDY the holders are collectively owed at oracle price `p`.
     function usdyOwed(uint256 p) public view returns (uint256) {
-        return (totalSupply() * pPlus + (p - 1)) / p; // ceil — owe generously
+        require(p > 0, "invalid oracle price"); // clear error over panic
+        return Math.mulDiv(totalSupply(), pPlus, p, Math.Rounding.Ceil); // owe generously
     }
 
     /// Withdrawable surplus at oracle price `p` (0 if somehow underwater).
