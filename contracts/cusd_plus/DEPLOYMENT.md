@@ -1,11 +1,13 @@
 # cUSD+ deployment record — BSC mainnet
 
-## CusdPlusVault — deployed 2026-07-10, upgraded 2026-07-13
+## CusdPlusVault — deployed 2026-07-10, upgraded 2026-07-13 (v2) and 2026-07-20 (v4)
 
 | Role | Address |
 | --- | --- |
 | **Vault (ERC1967 proxy)** | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
-| Implementation (current, guard-gated reset) | `0x578fd4d235acF608979b63BBB28bD2292E7e201e` |
+| Implementation (current, v4 — review-cycle hardened) | `0x1c12685ca9ceb8785171b3834BacDd5C881a4F5A` |
+| Implementation (v3, ORPHAN — deployed, never attached) | `0x563B6FB5418101057809B457587e28A7aF8171E2` |
+| Implementation (v2, superseded 07-20) | `0x578fd4d235acF608979b63BBB28bD2292E7e201e` |
 | Implementation (v1, superseded 07-13) | `0xB0C2122047a69C8Ee336ce75fd61050a06630823` |
 | Owner + treasury | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
 | Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
@@ -32,6 +34,36 @@ pending sub-2% growth into collectable surplus. Executed at zero supply.
   `guard not tripped` (eth_call); non-owner still rejected.
 - impl v2 source: Sourcify exact_match (creation + runtime) + BscScan
   verified, proxy re-linked to impl v2, 2026-07-13.
+
+### UUPS upgrade 2026-07-20 — v4, the 8-round review-cycle build (commit `fbd3085f`)
+
+Everything from the July external review cycle (ChatGPT + Claude + Codex),
+executed at zero supply:
+- raw-USDY paths owner-only, recipients hardcoded to the Safe (PP reps
+  are a code invariant); holder exit = redeemToUsdt only
+- tripped guard halts ALL value paths; evidence-tagged verdict pair
+  (accept = 85/15 preserved / rebaseline = fault) with [min,max] TOCTOU
+  pins + guardedOraclePrice forensics (slot 4)
+- lockUpgrades REMOVED (Ondo-dependency foot-gun); deprecated
+  upgradesLocked byte reserved at slot 2.1; layout pinned in CI
+- zero/huge oracle-read defenses (Math.mulDiv guard math); value paths
+  price at the guard-validated snapshot, never a re-read
+- zero-address freeze blocked; zero-recipient redeemToUsdt blocked
+
+Execution:
+- fork rehearsal vs LIVE proxy state PASSED first
+  (test/UpgradeRehearsal.fork.t.sol — state survival, removed surface,
+  verdict gating, live-oracle accrual, PP gate)
+- impl v4 deploy: `0x098d3756a335da23b091b12a3f8ab20142f199912ef782e5ad2fef1aa91f951e`
+- Safe `upgradeToAndCall(0x1c12…4F5A, "")`, nonce 2, signers 1/3/5:
+  `0x458f796bba1dc6f80feaab8f4ad949b9c61c863cc4f7b8645e82be72564183f7`
+- post-upgrade verified live: impl slot = v4; owner/pPlus/baseline/
+  supply/backing intact; guardedOraclePrice = 0; resetOracleBaseline /
+  lockUpgrades / upgradesLocked selectors gone; verdicts revert
+  "guard not tripped"; redeem onlyOwner; collectFees(0) rejected;
+  accrue() simulates clean against the live oracle
+- source: Sourcify exact_match (creation + runtime) + BscScan verified,
+  proxy re-linked to v4, 2026-07-20
 
 ### On-chain wiring (immutables, verified live 2026-07-07 + fork rehearsal)
 
