@@ -96,7 +96,7 @@ contract VaultHandler is Test {
         vault.depositAndMint(amount, treasury);
         uint256 bal = vault.balanceOf(treasury);
         uint256 minShares = _minRedeemableShares();
-        if (bal >= minShares) vault.redeem(bal, treasury);
+        if (bal >= minShares) vault.redeem(bal);
         vm.stopPrank();
         _afterOp();
     }
@@ -134,9 +134,15 @@ contract VaultHandler is Test {
     }
 
     /// Oracle moves but nobody calls accrue() — the next mint/redeem must
-    /// pick it up internally (lazy accrual path).
+    /// pick it up internally (lazy accrual path). Cumulative staged drift is
+    /// kept under the 2% jump guard: past ~1.5% pending we settle first,
+    /// else consecutive drifts would trip the guard and (correctly) revert
+    /// every value op, failing the liveness suite by design rather than bug.
     function driftWithoutAccrue(uint256 drip) external {
         drip = bound(drip, 1, 30);
+        uint256 last = vault.lastOraclePrice();
+        uint256 pending = ((oracle.price() - last) * 10_000) / last;
+        if (pending > 150) vault.accrue();
         oracle.setPrice((oracle.price() * (10_000 + drip)) / 10_000);
         _afterOp();
     }
@@ -147,7 +153,7 @@ contract VaultHandler is Test {
         if (surplus == 0) return;
         amount = bound(amount, 1, surplus);
         vm.prank(treasury);
-        vault.collectFees(treasury, amount);
+        vault.collectFees(amount);
         collectedFees += amount;
         _afterOp();
     }

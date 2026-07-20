@@ -18,11 +18,14 @@ Mirrored semantics (MUST track CusdPlusVault.sol exactly):
                else growth = (p-last)*WAD//last
                     kept   = growth*(BPS-1500)//BPS
                     pPlus  = pPlus*(WAD+kept)//WAD ; last = p
-  mint:        accrue first; shares = usdyIn*p//pPlus (floor, require > 0)
-  redeem:      accrue first; usdyOut = shares*pPlus//p (floor, require > 0)
+  mint:        accrue first; require guard NOT tripped;
+               shares = usdyIn*p//pPlus (floor, require > 0)
+  redeem:      accrue first; require guard NOT tripped;
+               usdyOut = shares*pPlus//p (floor, require > 0)
   owed(p):     ceil(totalSupply*pPlus/p)  = (ts*pPlus + p - 1)//p
   surplus(p):  max(bal - owed(p), 0)
-  collect(x):  accrue first; require x <= surplus; bal -= x
+  collect(x):  accrue first; require guard NOT tripped;
+               require x <= surplus; bal -= x
   reset:       require guard tripped; last = current price; guard
                untripped (no accrual granted)
 
@@ -64,6 +67,8 @@ class VaultMirror:
 
     def mint(self, usdy_in):
         self.accrue()
+        # Contract reverts every value exchange while the guard is tripped.
+        assert not self.tripped, "oracle guard tripped"
         shares = usdy_in * self.price // self.p_plus
         assert shares > 0, "dust mint in generator"
         self.total_supply += shares
@@ -72,6 +77,7 @@ class VaultMirror:
 
     def redeem(self, shares):
         self.accrue()
+        assert not self.tripped, "oracle guard tripped"
         usdy_out = shares * self.p_plus // self.price
         assert usdy_out > 0, "dust redeem in generator"
         self.total_supply -= shares
@@ -87,6 +93,7 @@ class VaultMirror:
 
     def collect(self, amount):
         self.accrue()
+        assert not self.tripped, "oracle guard tripped"
         assert amount <= self.surplus()
         self.bal -= amount
 
@@ -105,6 +112,21 @@ class VaultMirror:
             "totalSupply": str(self.total_supply),
             "vaultUsdy": str(self.bal),
         }
+
+
+def _would_be_tripped(m: VaultMirror) -> bool:
+    """True if the guard is already tripped OR the next accrue() would trip
+    it (a setPriceOnly step may have staged an anomalous price).
+
+    Vectors must contain NO value op in either state: on-chain such a call
+    reverts (rolling back the in-call trip), while this Python model has no
+    rollback — emitting one would fork the two state machines."""
+    if m.tripped:
+        return True
+    p, last = m.price, m.last
+    if p == last:
+        return False
+    return p < last or (p - last) * BPS // last > MAX_JUMP_BPS
 
 
 def min_redeemable_shares(m: VaultMirror) -> int:
@@ -144,7 +166,7 @@ def generate(seed: int, steps_n: int):
         elif roll < 0.42 and m.tripped:
             m.reset_baseline()
             emit("resetBaseline", 0)
-        elif roll < 0.72:
+        elif roll < 0.72 and not _would_be_tripped(m):
             # mint with awkward amounts, incl. 1-wei and prime-ish values
             usdy_in = rng.choice([
                 1,
@@ -158,7 +180,7 @@ def generate(seed: int, steps_n: int):
             ret = m.mint(usdy_in)
             holder_shares += ret
             emit("mint", usdy_in, ret)
-        elif roll < 0.92 and holder_shares > 0:
+        elif roll < 0.92 and holder_shares > 0 and not _would_be_tripped(m):
             lo = min_redeemable_shares(m)
             if holder_shares < lo:
                 continue
@@ -169,6 +191,8 @@ def generate(seed: int, steps_n: int):
         else:
             # collect() accrues first (contract semantics), which can shrink
             # surplus when price drifted un-accrued — bound on a lookahead.
+            if _would_be_tripped(m):
+                continue
             import copy
             look = copy.deepcopy(m)
             look.accrue()

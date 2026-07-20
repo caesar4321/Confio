@@ -143,7 +143,7 @@ contract CusdPlusVaultTest is Test {
         vm.startPrank(treasury);
         usdt.approve(address(vault), type(uint256).max);
         uint256 shares = vault.subscribeAndMint(1000e18, 990e18, treasury);
-        uint256 usdyOut = vault.redeem(shares, treasury);
+        uint256 usdyOut = vault.redeem(shares);
         vm.stopPrank();
         assertEq(vault.totalSupply(), 0);
         assertApproxEqAbs(usdyOut, 1000e18, 2, "floor rounding only");
@@ -154,7 +154,7 @@ contract CusdPlusVaultTest is Test {
         vm.startPrank(user);
         uint256 shares = vault.subscribeAndMint(1000e18, 990e18, user);
         vm.expectRevert(); // OwnableUnauthorizedAccount
-        vault.redeem(shares, user);
+        vault.redeem(shares);
         vm.stopPrank();
         // the holder's exit still works, and pays USDT — never USDY
         vm.prank(user);
@@ -204,11 +204,11 @@ contract CusdPlusVaultTest is Test {
         // more than surplus: rejected
         vm.prank(treasury);
         vm.expectRevert(bytes("exceeds surplus"));
-        vault.collectFees(treasury, surplus + 1);
+        vault.collectFees(surplus + 1);
 
         // exact surplus: fine, and backing still >= 100%
         vm.prank(treasury);
-        vault.collectFees(treasury, surplus);
+        vault.collectFees(surplus);
         assertEq(usdy.balanceOf(treasury), surplus);
         assertTrue(_backed());
     }
@@ -245,25 +245,77 @@ contract CusdPlusVaultTest is Test {
 
     // ── Oracle jump guard ────────────────────────────────────────────
 
-    function test_jumpGuard_freezes_not_bricks() public {
+    /// A tripped guard means the live price is suspect — every value
+    /// exchange halts. EVM nuance: a value path that DETECTS the anomaly
+    /// reverts, which rolls the trip flag back with everything else, so
+    /// value paths block-but-record-nothing; only a standalone accrue()
+    /// (the daily keeper) persists the trip. Both branches tested here.
+    function test_jumpGuard_halts_valuePaths_untilReset() public {
         vm.prank(user);
         vault.subscribeAndMint(1000e18, 990e18, user);
         uint256 pBefore = vault.pPlus();
 
         oracle.setPrice(1.03e18); // +3% in one step: fault
+
+        // Value path BEFORE any keeper run: blocks at the bad price, but
+        // the revert also rolls back the flag — nothing persisted.
+        vm.prank(user);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.subscribeAndMint(100e18, 0, user);
+        assertFalse(vault.oracleGuardTripped(), "revert rolled the flag back");
+
+        // The keeper's standalone accrue() is what persists the trip.
         vault.accrue();
-        assertTrue(vault.oracleGuardTripped());
+        assertTrue(vault.oracleGuardTripped(), "keeper persisted the trip");
         assertEq(vault.pPlus(), pBefore, "no accrual on faulty read");
 
-        // mints/redeems keep working at the frozen price
+        // every value path is halted while tripped
         vm.prank(user);
-        vault.subscribeAndMint(100e18, 90e18, user);
-        assertTrue(_backed());
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.subscribeAndMint(100e18, 0, user);
+        vm.prank(user);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.redeemToUsdt(100e18, 0, user);
+        usdy.mint(treasury, 1e18);
+        vm.startPrank(treasury);
+        usdy.approve(address(vault), type(uint256).max);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.depositAndMint(1e18, treasury);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.redeem(1e18);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.collectFees(1);
+        vm.stopPrank();
 
+        // reset reopens everything
         vm.prank(treasury);
         vault.resetOracleBaseline();
         assertFalse(vault.oracleGuardTripped());
         assertEq(vault.pPlus(), pBefore, "frozen-window yield goes to surplus");
+        vm.prank(user);
+        vault.subscribeAndMint(100e18, 0, user);
+        assertTrue(_backed());
+    }
+
+    /// The other keeper-timing branch: a transient glitch that NO keeper
+    /// observes self-heals. Value paths block during the glitch (recording
+    /// nothing), and once the oracle recovers they simply work again — no
+    /// trip persisted, no reset, no forfeited yield.
+    function test_jumpGuard_transientGlitch_selfHeals() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+
+        uint256 healthy = oracle.price();
+        oracle.setPrice(0.5e18); // glitch: absurd low read
+        vm.prank(user);
+        vm.expectRevert(bytes("oracle guard tripped"));
+        vault.redeemToUsdt(100e18, 0, user);
+        assertFalse(vault.oracleGuardTripped(), "glitch not persisted");
+
+        oracle.setPrice(healthy); // oracle recovers before any keeper run
+        vm.prank(user);
+        vault.redeemToUsdt(100e18, 0, user); // works, no intervention
+        assertTrue(_backed());
     }
 
     function test_decreasingOracle_trips_guard() public {
@@ -342,8 +394,14 @@ contract CusdPlusVaultTest is Test {
     function test_pause_blocks_mint_redeem_not_transfers() public {
         vm.prank(user);
         vault.subscribeAndMint(1000e18, 990e18, user);
-        vm.prank(treasury);
+        // treasury holds shares from before the pause (emergency scenario:
+        // Safe acquired holders' shares to make them whole off-rail)
+        usdy.mint(treasury, 10e18);
+        vm.startPrank(treasury);
+        usdy.approve(address(vault), type(uint256).max);
+        uint256 shares = vault.depositAndMint(10e18, treasury);
         vault.pause();
+        vm.stopPrank();
 
         vm.prank(user);
         vm.expectRevert();
@@ -351,9 +409,17 @@ contract CusdPlusVaultTest is Test {
         vm.prank(user);
         vm.expectRevert();
         vault.redeemToUsdt(1e18, 0, user);
-        vm.prank(treasury);
-        vm.expectRevert(); // pause gates even the owner's raw exit
-        vault.redeem(1e18, treasury);
+
+        // Owner EXITS are not pause-gated (like collectFees/sweep): pause
+        // protects holders, and the emergency playbook is exactly
+        // pause-the-users-then-treasury-liquidates. Owner MINTING during
+        // pause has no such need — depositAndMint stays gated.
+        vm.startPrank(treasury);
+        vm.expectRevert();
+        vault.depositAndMint(1e18, treasury);
+        uint256 usdyOut = vault.redeem(shares);
+        vm.stopPrank();
+        assertApproxEqAbs(usdyOut, 10e18, 2, "treasury raw exit during pause");
 
         // soft transfer policy: plain transfers unaffected by pause
         vm.prank(user);
@@ -427,7 +493,7 @@ contract CusdPlusVaultTest is Test {
                 uint256 s = vault.surplusUsdy(oracle.price());
                 if (s > 0) {
                     vm.prank(treasury);
-                    try vault.collectFees(treasury, s) {} catch {}
+                    try vault.collectFees(s) {} catch {}
                 }
             } else {
                 uint256 bal = vault.balanceOf(user);

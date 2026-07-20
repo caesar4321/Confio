@@ -85,7 +85,7 @@ contract CusdPlusVaultDifferentialTest is Test {
                 );
             } else if (opH == keccak256("redeem")) {
                 vm.prank(treasury);
-                uint256 usdyOut = vault.redeem(arg, treasury);
+                uint256 usdyOut = vault.redeem(arg);
                 assertEq(
                     usdyOut,
                     vm.parseJsonUint(json, string.concat(k, ".ret")),
@@ -93,7 +93,7 @@ contract CusdPlusVaultDifferentialTest is Test {
                 );
             } else if (opH == keccak256("collect")) {
                 vm.prank(treasury);
-                vault.collectFees(treasury, arg);
+                vault.collectFees(arg);
             } else {
                 revert(string.concat("unknown op: ", op));
             }

@@ -89,7 +89,7 @@ contract CusdPlusVaultAdversarialTest is Test {
         uint256 surplus = vault.surplusUsdy(oracle.price());
         assertEq(surplus, 1_000_000e18, "donation became surplus");
         vm.prank(treasury);
-        vault.collectFees(treasury, surplus);
+        vault.collectFees(surplus);
         assertEq(usdy.balanceOf(treasury), 1_000_000e18);
     }
 
@@ -131,7 +131,7 @@ contract CusdPlusVaultAdversarialTest is Test {
         uint256 p = oracle.price();
         uint256 pPlus = vault.pPlus();
         vm.prank(treasury);
-        uint256 usdyOut = vault.redeem(shares, treasury);
+        uint256 usdyOut = vault.redeem(shares);
 
         // exact entitlement in USDY terms: shares * pPlus / p
         uint256 exactFloor = (shares * pPlus) / p;
@@ -178,7 +178,7 @@ contract CusdPlusVaultAdversarialTest is Test {
                 uint256 s = vault.surplusUsdy(oracle.price());
                 if (s > 0) {
                     vm.prank(treasury);
-                    vault.collectFees(treasury, s);
+                    vault.collectFees(s);
                 }
             }
         }

@@ -63,9 +63,11 @@ pragma solidity ^0.8.24;
  *    (getPrice() 1e18 semantics verified on-chain: 1.13863392 on 07-07)
  *  - USDT (Binance-Peg BSC-USD, 18dp): 0x55d398326f99059fF775485246999027B3197955
  *  REMAINING before deploy: Primary Purchaser whitelisting of the vault
- *  proxy address (contract whitelisting confirmed possible; USDY transfers
- *  out of the vault to non-whitelisted users confirmed permitted —
- *  whitelisting gates mint/redeem only).
+ *  proxy address (contract whitelisting confirmed possible). USDY transfers
+ *  to non-whitelisted addresses are TECHNICALLY unrestricted (whitelisting
+ *  gates IM mint/redeem only) but PP-representation-restricted: this vault
+ *  therefore releases raw USDY only to its owner Safe (redeem/collectFees),
+ *  never to holders — the restriction is a code invariant, not policy.
  */
 
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -132,8 +134,18 @@ contract CusdPlusVault is
     uint256 public pPlus;
     /// Oracle price at the last completed accrual.
     uint256 public lastOraclePrice;
-    /// Set when the jump guard trips; accrual stays frozen (mints/redeems
-    /// keep working at the frozen pPlus) until resetOracleBaseline().
+    /// Set when the jump guard trips. While tripped, accrual is frozen AND
+    /// every value-exchanging path (mint/redeem/collect) reverts: a tripped
+    /// guard means the current oracle read is suspect, and exchanging assets
+    /// at a suspect price is exactly what the guard exists to prevent. The
+    /// owner investigates and resetOracleBaseline() reopens the vault.
+    /// PERSISTENCE NUANCE: a value path that detects the anomaly reverts,
+    /// and the revert rolls back the flag and event along with everything
+    /// else — value paths BLOCK at a bad price but record nothing. Only a
+    /// standalone accrue() (the daily keeper cron) persists the trip; that
+    /// keeper is part of the guard's state machine, not just hygiene. A
+    /// transient glitch the keeper never observes self-heals: once the
+    /// oracle recovers, value paths simply work again, no reset needed.
     bool public oracleGuardTripped;
 
     /// One-way switch: once true, _authorizeUpgrade reverts forever. The
@@ -208,7 +220,8 @@ contract CusdPlusVault is
         if (p == last || oracleGuardTripped) return;
         // USDY's oracle curve is monotonically increasing by construction; a
         // lower or wildly higher read is a fault. Freeze, don't revert —
-        // reverting here would brick mints and redeems.
+        // accrue() itself is also a standalone keeper poke and must stay
+        // callable; the value paths check the flag right after accruing.
         if (p < last || ((p - last) * BPS) / last > MAX_ACCRUAL_JUMP_BPS) {
             oracleGuardTripped = true;
             emit OracleJumpGuard(last, p);
@@ -253,6 +266,10 @@ contract CusdPlusVault is
     {
         require(usdtIn > 0, "zero in");
         accrue();
+        // AFTER accrue(), so a staged anomaly is caught in this same call.
+        // The revert rolls the trip flag back with everything else — see
+        // oracleGuardTripped: blocking is here, persistence is the keeper's.
+        require(!oracleGuardTripped, "oracle guard tripped");
         USDT.safeTransferFrom(msg.sender, address(this), usdtIn);
         uint256 usdyOut = _imSubscribe(usdtIn, minUsdyOut);
         sharesOut = _mintAgainstUsdy(usdyOut, recipient);
@@ -273,6 +290,7 @@ contract CusdPlusVault is
     {
         require(usdyIn > 0, "zero in");
         accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
         USDY.safeTransferFrom(msg.sender, address(this), usdyIn);
         sharesOut = _mintAgainstUsdy(usdyIn, recipient);
     }
@@ -297,21 +315,25 @@ contract CusdPlusVault is
     /// to cUSD+ holders"), regardless of what the UI exposes. Emergency
     /// liquidity during an IM outage is a treasury operation: the Safe
     /// acquires the shares, redeems raw, and makes holders whole off-rail.
-    function redeem(uint256 shares, address to)
+    /// Raw USDY goes ONLY to the owner Safe itself — "USDY stays within
+    /// Duende-controlled addresses" is a code invariant, not policy. Not
+    /// pause-gated (like collectFees/sweep): pause protects holders, and
+    /// the emergency playbook is exactly pause-then-treasury-operates.
+    function redeem(uint256 shares)
         external
         onlyOwner
         nonReentrant
-        whenNotPaused
         returns (uint256 usdyOut)
     {
         accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
         uint256 p = ORACLE.getPrice();
         usdyOut = (shares * pPlus) / p; // floor favors backing
         require(usdyOut > 0, "dust");
         _burn(msg.sender, shares);
-        USDY.safeTransfer(to, usdyOut);
+        USDY.safeTransfer(msg.sender, usdyOut);
         _assertFullyBacked(p);
-        emit Redeemed(msg.sender, to, shares, usdyOut, pPlus);
+        emit Redeemed(msg.sender, msg.sender, shares, usdyOut, pPlus);
     }
 
     /// Burn shares → IM redeem → USDT to `to` (the direct off-ramp rail:
@@ -323,6 +345,7 @@ contract CusdPlusVault is
         returns (uint256 usdtOut)
     {
         accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
         uint256 p = ORACLE.getPrice();
         uint256 usdyOut = (shares * pPlus) / p;
         require(usdyOut > 0, "dust");
@@ -337,14 +360,19 @@ contract CusdPlusVault is
 
     /// Withdraw ONLY the surplus above 100% backing (cusd.py's rule that the
     /// reserve is untouchable, expressed as an inequality instead of 1:1).
-    function collectFees(address to, uint256 usdyAmount) external onlyOwner nonReentrant {
+    /// Guard-gated too: a spuriously HIGH oracle read deflates usdyOwed and
+    /// inflates "surplus" — collecting at a suspect price could take real
+    /// backing. Recipient is ALWAYS the owner Safe (same invariant as
+    /// redeem: USDY leaves the vault only toward Duende-controlled keys).
+    function collectFees(uint256 usdyAmount) external onlyOwner nonReentrant {
         accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
         uint256 p = ORACLE.getPrice();
         uint256 surplus = surplusUsdy(p);
         require(usdyAmount <= surplus, "exceeds surplus");
-        USDY.safeTransfer(to, usdyAmount);
+        USDY.safeTransfer(msg.sender, usdyAmount);
         _assertFullyBacked(p);
-        emit FeesCollected(to, usdyAmount, surplus);
+        emit FeesCollected(msg.sender, usdyAmount, surplus);
     }
 
     /// Rescue tokens sent by mistake. USDY is the backing and is NEVER

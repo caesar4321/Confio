@@ -87,9 +87,11 @@ Two footnotes:
 ## Defensive details
 
 - **Oracle jump guard**: USDY's RWADynamicOracle is a deterministic accreting
-  curve; a decreasing or > 2%-per-step read is a fault. Accrual freezes
-  (mints/redeems keep working at the frozen `pPlus`) until the owner
-  investigates and `resetOracleBaseline()`. Yield during a frozen window goes
+  curve; a decreasing or > 2%-per-step read is a fault. While tripped, accrual
+  freezes AND every value-exchanging path (mint/redeem/collect) reverts — a
+  tripped guard means the live price is suspect, and pricing an exchange with
+  a suspect read is what the guard exists to prevent. The owner investigates
+  and `resetOracleBaseline()` reopens. Yield during a frozen window goes
   to surplus, not holders — conservative on purpose.
 - **Rounding always favors backing**: mints and redeems floor; `usdyOwed`
   ceils.
