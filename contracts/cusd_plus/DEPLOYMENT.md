@@ -65,6 +65,12 @@ onboarding. No funds, no risk, until then.
       BscScan source verified; proxy re-linked to impl v2 via
       verifyproxycontract). Etherscan v2 key lives in git-crypted `.env`
       as `ETHERSCAN_API_KEY`.
+- [ ] **Storage-layout diff before EVERY upgrade**: `forge inspect
+      CusdPlusVault storageLayout` vs the live impl's layout. Pinned in CI
+      by `test_storageLayout_pinnedToLiveProxy` (raw-slot asserts: 0 pPlus,
+      1 lastOraclePrice, 2.0 oracleGuardTripped, 2.1 deprecated
+      upgradesLocked byte — reserved, 3 frozen, 4 guardedOraclePrice;
+      append at 5+).
 - [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
 - [ ] $1 live E2E once whitelisted
 - [ ] Router deploy (separate) once GM attestation ABI is wired — deploy

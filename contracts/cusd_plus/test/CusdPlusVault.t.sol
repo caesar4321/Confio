@@ -504,7 +504,39 @@ contract CusdPlusVaultTest is Test {
         vault.transfer(user2, 1e18);
     }
 
+    function test_freeze_zeroAddress_rejected() public {
+        // frozen[0] would brick every mint (from=0) and burn (to=0)
+        vm.prank(treasury);
+        vm.expectRevert(bytes("cannot freeze zero"));
+        vault.freezeAddress(address(0));
+    }
+
     // ── Upgradeability posture ───────────────────────────────────────
+
+    /// CI pin of the UUPS storage layout: these raw slots are the LIVE
+    /// proxy's layout and may NEVER move. slot2 offset1 is the deprecated
+    /// upgradesLocked byte (reserved); new variables append at slot 5+.
+    function test_storageLayout_pinnedToLiveProxy() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(0)))),
+            vault.pPlus(), "slot0: pPlus");
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(1)))),
+            vault.lastOraclePrice(), "slot1: lastOraclePrice");
+
+        oracle.setPrice(1.03e18);
+        vault.accrue(); // trips the guard, records the price
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(2)))) & 0xff,
+            1, "slot2 offset0: oracleGuardTripped");
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(4)))),
+            1.03e18, "slot4: guardedOraclePrice");
+
+        vm.prank(treasury);
+        vault.freezeAddress(user);
+        assertEq(uint256(vm.load(address(vault), keccak256(abi.encode(user, uint256(3))))),
+            1, "slot3: frozen mapping base");
+    }
+
 
     /// No lockUpgrades exists BY DESIGN: the vault depends for life on
     /// Ondo-controlled oracle/IM contracts that may migrate — permanent

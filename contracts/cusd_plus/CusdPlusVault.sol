@@ -151,6 +151,13 @@ contract CusdPlusVault is
     /// oracle recovers, value paths simply work again, no reset needed.
     bool public oracleGuardTripped;
 
+    /// Deprecated storage retained EXCLUSIVELY for UUPS layout parity with
+    /// the live proxy (slot 2, offset 1 — packed after oracleGuardTripped).
+    /// Was `upgradesLocked`; never consulted again (permanent upgrade
+    /// locking was removed as a foot-gun, see header) and reserved so no
+    /// future bool can pack into the stale byte.
+    bool private __deprecatedUpgradesLocked;
+
     /// Per-address freeze (cusd.py freeze_address parity). Frozen addresses
     /// cannot transfer, receive, mint or redeem. Yield keeps accruing to
     /// their shares — freeze detains funds, it does not confiscate them.
@@ -328,8 +335,9 @@ contract CusdPlusVault is
     }
 
     // ═════════════════════════ Mint paths ═══════════════════════════════
-    // There is deliberately NO other mint in this contract. Both paths take
-    // custody of the USDY inside the same transaction that mints — the EVM
+    // There is deliberately NO unbacked mint path in this contract. Every
+    // mint — including the owner-only treasury rail — takes custody of the
+    // corresponding USDY inside the same transaction that mints — the EVM
     // translation of cusd.py verifying the USDC axfer inside the atomic
     // group. (Solidity's guarantee is even simpler: one tx, one revert scope.)
 
@@ -467,6 +475,9 @@ contract CusdPlusVault is
 
     function freezeAddress(address target) external onlyOwner {
         require(target != address(this), "cannot freeze vault");
+        // frozen[0] would brick every mint (from=0) and burn (to=0) via
+        // _update — pause() is the intentional full-stop, not this.
+        require(target != address(0), "cannot freeze zero");
         frozen[target] = true;
         emit AddressFrozen(target);
     }
