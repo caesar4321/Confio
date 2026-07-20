@@ -287,9 +287,9 @@ contract CusdPlusVaultTest is Test {
         vault.collectFees(1);
         vm.stopPrank();
 
-        // reset reopens everything
+        // a fault verdict reopens everything, window forfeited to surplus
         vm.prank(treasury);
-        vault.resetOracleBaseline();
+        vault.rebaselineAfterVerifiedOracleFault(keccak256("incident-2026-07-13"));
         assertFalse(vault.oracleGuardTripped());
         assertEq(vault.pPlus(), pBefore, "frozen-window yield goes to surplus");
         vm.prank(user);
@@ -332,23 +332,79 @@ contract CusdPlusVaultTest is Test {
         vm.prank(user);
         vault.subscribeAndMint(1000e18, 990e18, user);
 
-        // Ordinary +1% USDY appreciation, not yet accrued: reset must revert.
+        // Ordinary +1% USDY appreciation, not yet accrued: BOTH verdicts
+        // must revert — neither may skip healthy growth past accrue().
         oracle.setPrice(1.01e18);
-        vm.prank(treasury);
+        vm.startPrank(treasury);
         vm.expectRevert(bytes("guard not tripped"));
-        vault.resetOracleBaseline();
+        vault.rebaselineAfterVerifiedOracleFault(keccak256("e"));
+        vm.expectRevert(bytes("guard not tripped"));
+        vault.acceptVerifiedOracleGrowth(keccak256("e"));
+        vm.stopPrank();
 
         // The growth is still the holders' to claim — anyone can accrue.
         vault.accrue();
         assertEq(vault.pPlus(), WAD + (0.01e18 * 8500) / 10_000, "holders keep 85%");
 
-        // A genuinely tripped guard still allows the incident path.
+        // A genuinely tripped guard allows the fault verdict.
         oracle.setPrice(1.05e18); // ~+4% from 1.01: fault
         vault.accrue();
         assertTrue(vault.oracleGuardTripped());
         vm.prank(treasury);
-        vault.resetOracleBaseline();
+        vault.rebaselineAfterVerifiedOracleFault(keccak256("incident"));
         assertFalse(vault.oracleGuardTripped());
+    }
+
+    /// The accept verdict: a verified-legitimate jump (e.g. long keeper gap)
+    /// preserves holder economics EXACTLY as if accrue() had kept up —
+    /// fairness does not depend on keeper uptime.
+    function test_acceptVerifiedGrowth_preserves8515() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+
+        oracle.setPrice(1.03e18); // +3%: real accumulation past the guard
+        vault.accrue();
+        assertTrue(vault.oracleGuardTripped());
+        uint256 pBefore = vault.pPlus();
+
+        vm.prank(treasury);
+        vault.acceptVerifiedOracleGrowth(keccak256("ondo-notice-hash"));
+        assertFalse(vault.oracleGuardTripped());
+        // same math as accrue: pPlus grows by 85% of the full 3%
+        assertEq(vault.pPlus(), (pBefore * (WAD + (0.03e18 * 8500) / 10_000)) / WAD);
+        assertEq(vault.lastOraclePrice(), 1.03e18);
+        assertTrue(_backed());
+    }
+
+    function test_verdicts_require_evidence_and_direction() public {
+        oracle.setPrice(0.9e18); // drop: trips
+        vault.accrue();
+        assertTrue(vault.oracleGuardTripped());
+
+        vm.startPrank(treasury);
+        vm.expectRevert(bytes("missing evidence"));
+        vault.acceptVerifiedOracleGrowth(bytes32(0));
+        vm.expectRevert(bytes("missing evidence"));
+        vault.rebaselineAfterVerifiedOracleFault(bytes32(0));
+        // a DROP can never be accepted as growth
+        vm.expectRevert(bytes("not positive growth"));
+        vault.acceptVerifiedOracleGrowth(keccak256("e"));
+        // but a verified fault can rebaseline downward (pPlus untouched)
+        uint256 pBefore = vault.pPlus();
+        vault.rebaselineAfterVerifiedOracleFault(keccak256("e"));
+        vm.stopPrank();
+        assertEq(vault.pPlus(), pBefore);
+        assertEq(vault.lastOraclePrice(), 0.9e18);
+
+        // non-owner can render no verdict
+        oracle.setPrice(0.8e18);
+        vault.accrue();
+        vm.startPrank(user);
+        vm.expectRevert();
+        vault.acceptVerifiedOracleGrowth(keccak256("e"));
+        vm.expectRevert();
+        vault.rebaselineAfterVerifiedOracleFault(keccak256("e"));
+        vm.stopPrank();
     }
 
     // ── Freeze (cusd.py parity) ──────────────────────────────────────

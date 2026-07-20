@@ -87,12 +87,22 @@ Two footnotes:
 ## Defensive details
 
 - **Oracle jump guard**: USDY's RWADynamicOracle is a deterministic accreting
-  curve; a decreasing or > 2%-per-step read is a fault. While tripped, accrual
+  curve; a decreasing or > 2%-per-step read is suspect. While tripped, accrual
   freezes AND every value-exchanging path (mint/redeem/collect) reverts — a
   tripped guard means the live price is suspect, and pricing an exchange with
-  a suspect read is what the guard exists to prevent. The owner investigates
-  and `resetOracleBaseline()` reopens. Yield during a frozen window goes
-  to surplus, not holders — conservative on purpose.
+  a suspect read is what the guard exists to prevent. The threshold is a FIXED
+  2% deliberately (no time-proportional widening: a long quiet gap is when
+  monitoring was weakest, exactly the wrong moment to auto-trust a big move).
+  The owner resolves with an evidence-tagged verdict:
+  `acceptVerifiedOracleGrowth(evidenceHash)` for verified real appreciation
+  (holders keep their 85% — fairness does not depend on keeper uptime), or
+  `rebaselineAfterVerifiedOracleFault(evidenceHash)` for a verified oracle
+  fault (window forfeited to surplus). Both emit the evidence hash on-chain;
+  the incentive asymmetry (rebaseline pays Confío 100%) is documented in the
+  contract and answerable from the public incident record. The daily keeper's
+  `accrue()` is part of this state machine: value paths that detect an anomaly
+  revert (rolling back the trip flag), so only the keeper durably records a
+  trip; a transient glitch no keeper observes self-heals.
 - **Rounding always favors backing**: mints and redeems floor; `usdyOwed`
   ceils.
 - **`sweep` can rescue anything except USDY** — the backing is not sweepable,

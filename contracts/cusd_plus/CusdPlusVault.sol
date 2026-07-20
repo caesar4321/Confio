@@ -138,7 +138,9 @@ contract CusdPlusVault is
     /// every value-exchanging path (mint/redeem/collect) reverts: a tripped
     /// guard means the current oracle read is suspect, and exchanging assets
     /// at a suspect price is exactly what the guard exists to prevent. The
-    /// owner investigates and resetOracleBaseline() reopens the vault.
+    /// owner investigates and resolves with a verdict: accept (verified
+    /// growth, 85/15 preserved) or rebaseline (verified fault, window to
+    /// surplus) — see the two functions below accrue().
     /// PERSISTENCE NUANCE: a value path that detects the anomaly reverts,
     /// and the revert rolls back the flag and event along with everything
     /// else — value paths BLOCK at a bad price but record nothing. Only a
@@ -160,7 +162,8 @@ contract CusdPlusVault is
     // ── Events ──────────────────────────────────────────────────────────
     event Accrued(uint256 oraclePrice, uint256 newPPlus);
     event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
-    event OracleBaselineReset(uint256 oldPrice, uint256 newPrice);
+    event OracleGrowthAccepted(uint256 oldPrice, uint256 newPrice, bytes32 indexed evidenceHash);
+    event OracleFaultRebaselined(uint256 oldPrice, uint256 newPrice, bytes32 indexed evidenceHash);
     event Minted(address indexed recipient, uint256 shares, uint256 usdyIn, uint256 pPlusAt);
     event Redeemed(address indexed holder, address indexed to, uint256 shares, uint256 usdyOut, uint256 pPlusAt);
     event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
@@ -227,24 +230,70 @@ contract CusdPlusVault is
             emit OracleJumpGuard(last, p);
             return;
         }
-        // growthWad = p/last − 1, in WAD; keep (1 − share) of it.
-        uint256 growthWad = ((p - last) * WAD) / last;
-        uint256 keptWad = (growthWad * (BPS - CONFIO_YIELD_SHARE_BPS)) / BPS;
-        pPlus = (pPlus * (WAD + keptWad)) / WAD;
-        lastOraclePrice = p;
-        emit Accrued(p, pPlus);
+        _applyGrowth(p);
     }
 
-    /// After investigating an oracle fault, the owner re-baselines WITHOUT
-    /// granting holders the anomalous jump (yield during the frozen window is
-    /// forfeited to surplus — conservative by design).
-    /// ONLY callable while the guard is tripped: on a healthy oracle a reset
-    /// would skip pending sub-2% growth past accrue(), silently converting
-    /// the holders' share into owner-collectable surplus.
-    function resetOracleBaseline() external onlyOwner {
+    /// Shared 85/15 growth application (accrue() and the accept path MUST
+    /// price growth identically — one code path, no drift possible).
+    /// growthWad = p/last − 1, in WAD; holders keep (1 − share) of it.
+    function _applyGrowth(uint256 newPrice) internal {
+        uint256 last = lastOraclePrice;
+        uint256 growthWad = ((newPrice - last) * WAD) / last;
+        uint256 keptWad = (growthWad * (BPS - CONFIO_YIELD_SHARE_BPS)) / BPS;
+        pPlus = (pPlus * (WAD + keptWad)) / WAD;
+        lastOraclePrice = newPrice;
+        emit Accrued(newPrice, pPlus);
+    }
+
+    // A tripped guard has exactly two resolutions, and the owner's verdict
+    // decides who the frozen window's growth belongs to:
+    //   accept     -> genuine USDY appreciation -> holders get their 85%
+    //   rebaseline -> oracle fault              -> window forfeited to surplus
+    // GOVERNANCE ASYMMETRY, stated openly: rebaseline routes 100% of the
+    // window to Confío's surplus, accept only 15% — the owner has a financial
+    // incentive to prefer rebaseline. That is why BOTH verdicts demand a
+    // nonzero evidenceHash committing to a public incident record (Ondo
+    // notice, oracle txns, transparency-page entry), emitted on-chain for
+    // auditors to check the verdict against the evidence.
+    // Both verdicts require a tripped guard: on a healthy oracle either
+    // would skip pending sub-2% growth past accrue(), silently converting
+    // the holders' share into owner-collectable surplus.
+
+    /// Verdict A — the guard-tripping move was VERIFIED as legitimate USDY
+    /// appreciation (e.g. a long keeper gap letting real yield accumulate
+    /// past 2%, or an Ondo-published range adjustment). Holder economics are
+    /// preserved: the whole verified move goes through the ordinary 85/15
+    /// split, exactly as if accrue() had kept up. Upward moves only — a
+    /// price DROP is never "growth" and has no legitimate-accrual reading.
+    function acceptVerifiedOracleGrowth(bytes32 evidenceHash) external onlyOwner {
         require(oracleGuardTripped, "guard not tripped");
+        require(evidenceHash != bytes32(0), "missing evidence");
         uint256 p = ORACLE.getPrice();
-        emit OracleBaselineReset(lastOraclePrice, p);
+        uint256 oldPrice = lastOraclePrice;
+        require(p >= oldPrice, "not positive growth");
+        oracleGuardTripped = false;
+        _applyGrowth(p);
+        emit OracleGrowthAccepted(oldPrice, p, evidenceHash);
+    }
+
+    /// Verdict B — the guard-tripping observation was VERIFIED as an oracle
+    /// or reporting FAULT. Adopts the CURRENT oracle read as the new
+    /// baseline WITHOUT granting the window to holders (it becomes surplus).
+    /// MUST NOT be called merely because accept would allocate yield to
+    /// holders — the fault must be demonstrated by the referenced evidence.
+    /// CAUTION: this trusts the CURRENT read as corrected. If the oracle is
+    /// STILL faulty, calling this bakes the faulty value in as baseline —
+    /// wait for the fixed feed before resolving.
+    /// A price DROP resolved here does not shrink pPlus: if the drop was a
+    /// real loss the vault may be underwater and _assertFullyBacked will
+    /// halt mint/redeem — loss handling is a separate treasury decision
+    /// (recapitalize via USDY transfer, or a governed haircut), deliberately
+    /// not automated here.
+    function rebaselineAfterVerifiedOracleFault(bytes32 evidenceHash) external onlyOwner {
+        require(oracleGuardTripped, "guard not tripped");
+        require(evidenceHash != bytes32(0), "missing evidence");
+        uint256 p = ORACLE.getPrice();
+        emit OracleFaultRebaselined(lastOraclePrice, p, evidenceHash);
         lastOraclePrice = p;
         oracleGuardTripped = false;
     }

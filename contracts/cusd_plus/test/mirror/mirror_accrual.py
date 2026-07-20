@@ -26,8 +26,11 @@ Mirrored semantics (MUST track CusdPlusVault.sol exactly):
   surplus(p):  max(bal - owed(p), 0)
   collect(x):  accrue first; require guard NOT tripped;
                require x <= surplus; bal -= x
-  reset:       require guard tripped; last = current price; guard
-               untripped (no accrual granted)
+  rebaseline:  require guard tripped; last = current price; guard
+               untripped (no accrual granted — verified-fault verdict)
+  accept:      require guard tripped and price >= last; apply the ordinary
+               85/15 growth from last to price; guard untripped
+               (verified-growth verdict — same math as accrue)
 
 Regenerate with:  python3 test/mirror/mirror_accrual.py
 """
@@ -60,10 +63,7 @@ class VaultMirror:
         if p < last or (p - last) * BPS // last > MAX_JUMP_BPS:
             self.tripped = True
             return
-        growth = (p - last) * WAD // last
-        kept = growth * (BPS - SHARE_BPS) // BPS
-        self.p_plus = self.p_plus * (WAD + kept) // WAD
-        self.last = p
+        self._apply_growth()
 
     def mint(self, usdy_in):
         self.accrue()
@@ -97,12 +97,26 @@ class VaultMirror:
         assert amount <= self.surplus()
         self.bal -= amount
 
-    def reset_baseline(self):
-        # Contract requires a tripped guard: reset is incident response,
-        # never a way to skip healthy growth past accrue().
+    def _apply_growth(self):
+        growth = (self.price - self.last) * WAD // self.last
+        kept = growth * (BPS - SHARE_BPS) // BPS
+        self.p_plus = self.p_plus * (WAD + kept) // WAD
+        self.last = self.price
+
+    def rebaseline(self):
+        # Verified-fault verdict: adopt price as baseline, window to surplus.
+        # Contract requires a tripped guard (never skips healthy growth).
         assert self.tripped, "guard not tripped"
         self.last = self.price
         self.tripped = False
+
+    def accept_growth(self):
+        # Verified-growth verdict: holders keep 85% exactly as if accrue()
+        # had kept up. Same math path as accrue by construction.
+        assert self.tripped, "guard not tripped"
+        assert self.price >= self.last, "not positive growth"
+        self.tripped = False
+        self._apply_growth()
 
     def state(self):
         return {
@@ -164,8 +178,12 @@ def generate(seed: int, steps_n: int):
             assert m.tripped
             emit("setPriceAccrue", m.price)
         elif roll < 0.42 and m.tripped:
-            m.reset_baseline()
-            emit("resetBaseline", 0)
+            if rng.random() < 0.5:
+                m.accept_growth()
+                emit("acceptGrowth", 0)
+            else:
+                m.rebaseline()
+                emit("rebaseline", 0)
         elif roll < 0.72 and not _would_be_tripped(m):
             # mint with awkward amounts, incl. 1-wei and prime-ish values
             usdy_in = rng.choice([

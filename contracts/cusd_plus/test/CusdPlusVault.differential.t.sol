@@ -71,9 +71,12 @@ contract CusdPlusVaultDifferentialTest is Test {
                 vault.accrue();
             } else if (opH == keccak256("setPriceOnly")) {
                 oracle.setPrice(arg);
-            } else if (opH == keccak256("resetBaseline")) {
+            } else if (opH == keccak256("rebaseline")) {
                 vm.prank(treasury);
-                vault.resetOracleBaseline();
+                vault.rebaselineAfterVerifiedOracleFault(keccak256("mirror-fault-evidence"));
+            } else if (opH == keccak256("acceptGrowth")) {
+                vm.prank(treasury);
+                vault.acceptVerifiedOracleGrowth(keccak256("mirror-growth-evidence"));
             } else if (opH == keccak256("mint")) {
                 usdy.mint(treasury, arg);
                 vm.prank(treasury);
