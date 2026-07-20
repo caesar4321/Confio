@@ -12,8 +12,10 @@ pragma solidity ^0.8.24;
  *   mint only inside an atomic group       mint only inside a function that
  *   whose USDC axfer the contract          pulls/receives the USDY collateral
  *   verifies at a fixed index              in the SAME transaction
- *   ASA manager locked to zero             no owner/admin mint function
- *                                          exists anywhere in the bytecode
+ *   ASA manager locked to zero             no unbacked admin mint exists;
+ *                                          every mint (incl. the owner-only
+ *                                          treasury rail) atomically
+ *                                          receives full USDY backing
  *   clawback = app (contract controls      vault holds the USDY; shares are
  *   reserve movements)                     burned to release it
  *   1 cUSD : 1 USDC, fixed                 Σ cUSD+ value ≤ vault USDY value,
@@ -40,7 +42,8 @@ pragma solidity ^0.8.24;
  * address and strand every honest holder. Surgical per-address freeze is how
  * the pool protects itself.
  *
- * UPGRADEABILITY: UUPS, owner-gated, PERMANENTLY. This vault depends for
+ * UPGRADEABILITY: UUPS, with upgrade authority intentionally retained for
+ * the vault's full lifetime (owner-gated). This vault depends for
  * its entire life on external Ondo-controlled infrastructure — the USDY
  * oracle and the Instant Manager — wired as implementation immutables, and
  * Ondo retains contractual discretion to migrate or deprecate those
@@ -126,8 +129,9 @@ contract CusdPlusVault is
     uint256 private constant WAD = 1e18;
 
     /// Oracle sanity guard: a single accrual step moving more than this many
-    /// bps freezes accrual (skip + event) until the owner re-baselines. USDY
-    /// accretes a few bps/day; a 2% jump is a fault, not yield.
+    /// bps trips the guard. USDY accretes a few bps/day; a >2% move is not
+    /// accepted automatically as yield — it awaits an evidence-backed owner
+    /// verdict (accept = real growth, 85/15; rebaseline = fault).
     uint256 public constant MAX_ACCRUAL_JUMP_BPS = 200;
 
     // ── Accrual state ───────────────────────────────────────────────────
@@ -152,10 +156,15 @@ contract CusdPlusVault is
     bool public oracleGuardTripped;
 
     /// Deprecated storage retained EXCLUSIVELY for UUPS layout parity with
-    /// the live proxy (slot 2, offset 1 — packed after oracleGuardTripped).
-    /// Was `upgradesLocked`; never consulted again (permanent upgrade
-    /// locking was removed as a foot-gun, see header) and reserved so no
-    /// future bool can pack into the stale byte.
+    /// the previously deployed implementation. Must remain immediately
+    /// after oracleGuardTripped and must never be reused. Was
+    /// `upgradesLocked` (permanent upgrade locking removed as a foot-gun,
+    /// see header); reserving it stops any future bool from packing into
+    /// the stale byte. Slot 2 offset 1 per `forge inspect storageLayout`
+    /// (OZ v5 parents use ERC-7201 namespaced storage, so this contract's
+    /// own variables start at slot 0) — layout table frozen in
+    /// DEPLOYMENT.md, raw slots pinned in CI by
+    /// test_storageLayout_pinnedToLiveProxy.
     bool private __deprecatedUpgradesLocked;
 
     /// Per-address freeze (cusd.py freeze_address parity). Frozen addresses

@@ -66,11 +66,22 @@ onboarding. No funds, no risk, until then.
       verifyproxycontract). Etherscan v2 key lives in git-crypted `.env`
       as `ETHERSCAN_API_KEY`.
 - [ ] **Storage-layout diff before EVERY upgrade**: `forge inspect
-      CusdPlusVault storageLayout` vs the live impl's layout. Pinned in CI
-      by `test_storageLayout_pinnedToLiveProxy` (raw-slot asserts: 0 pPlus,
-      1 lastOraclePrice, 2.0 oracleGuardTripped, 2.1 deprecated
-      upgradesLocked byte — reserved, 3 frozen, 4 guardedOraclePrice;
-      append at 5+).
+      CusdPlusVault storageLayout` vs the table below. Pinned in CI by
+      `test_storageLayout_pinnedToLiveProxy` (raw vm.load asserts).
+
+      Canonical layout (compiler-verified; contract-own vars start at
+      slot 0 — OZ v5 parents are ERC-7201 namespaced):
+
+      | Slot.Off | v2 (live 0xB0C2→0x578f lineage) | v4 candidate |
+      | --- | --- | --- |
+      | 0.0 | pPlus | pPlus |
+      | 1.0 | lastOraclePrice | lastOraclePrice |
+      | 2.0 | oracleGuardTripped | oracleGuardTripped |
+      | 2.1 | upgradesLocked (false on-chain) | __deprecatedUpgradesLocked (reserved, never reuse) |
+      | 3.0 | frozen (mapping base) | frozen (mapping base) |
+      | 4.0 | — | guardedOraclePrice (appended) |
+
+      New variables append at slot 5+, never between existing ones.
 - [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
 - [ ] $1 live E2E once whitelisted
 - [ ] Router deploy (separate) once GM attestation ABI is wired — deploy
