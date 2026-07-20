@@ -148,12 +148,18 @@ vault backing invariant holds through trades.
 4. **USDT-BSC decimals** — **RESOLVED: 18**, verified on-chain against
    canonical BSC-USD `0x55d398...7955`. Constants assume 1e18 — correct.
 5. **OndoIDRegistry whitelisting** — **PARTIALLY RESOLVED (Daniel,
-   2026-07-07): contracts CAN be whitelisted, and USDY transfers from the
-   vault to non-whitelisted user addresses ARE permitted — whitelisting
-   gates mint/redeem only.** So `redeem`'s raw-USDY path needs no
-   registry checks on recipients. REMAINING: complete PP onboarding and
-   whitelist the vault PROXY address (read-only API key already issued —
-   1Password link expires 7 days from 2026-07-07).
+   2026-07-07): contracts CAN be whitelisted; whitelisting gates
+   mint/redeem only, so token-level USDY transfers to non-whitelisted
+   addresses are not blocked.** NOTE (2026-07-13): technically permitted
+   ≠ legally permitted — the PP representations state USDY is never
+   transferred to cUSD+ holders, so `redeem`/`depositAndMint` are
+   owner-gated (raw USDY moves only vault↔IM↔treasury Safe; the sole
+   holder exit is `redeemToUsdt`). External framing discipline: the
+   vault (Duende) is the Purchaser that subscribes for USDY and issues
+   cUSD+ — never "users mint/redeem USDY through our contract".
+   REMAINING: complete PP onboarding and whitelist the vault PROXY
+   address (read-only API key already issued — 1Password link expires
+   7 days from 2026-07-07).
 6. ~~Relayer authz~~ — **RESOLVED: permissionless, like cusd.py.** The
    conversion flow is user-driven end to end (see ORCHESTRATION.md): the
    user's own BSC address is msg.sender for mint/redeem (Confío only

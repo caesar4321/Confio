@@ -56,12 +56,15 @@ contract CusdPlusVaultAdversarialTest is Test {
     /// ERC4626-style inflation: tiny first deposit + huge donation is
     /// supposed to make the victim's shares round to ~zero value. Here the
     /// share price ignores balances entirely, so the victim is untouched
-    /// and the "attack" gifts Confío the donation.
+    /// and the "attack" gifts Confío the donation. (depositAndMint is now
+    /// owner-only, so the attacker's tiny first deposit goes through the
+    /// public USDT rail — the donation vector is unchanged.)
     function test_firstDepositorInflationIsStructurallyDead() public {
-        usdy.mint(attacker, 1_000_000e18 + 1);
+        usdy.mint(attacker, 1_000_000e18);
+        usdt.mint(attacker, 1);
 
         vm.prank(attacker);
-        vault.depositAndMint(1, attacker); // 1 wei first deposit
+        vault.subscribeAndMint(1, 0, attacker); // 1 wei first deposit
         vm.prank(attacker);
         usdy.transfer(address(vault), 1_000_000e18); // donation
 
@@ -74,12 +77,12 @@ contract CusdPlusVaultAdversarialTest is Test {
 
         // Victim exits whole — attacker gained nothing from them.
         vm.prank(victim);
-        uint256 victimOut = vault.redeem(victimShares, victim);
+        uint256 victimOut = vault.redeemToUsdt(victimShares, 0, victim);
         assertEq(victimOut, 1_000e18, "victim exits whole");
 
         // Attacker's own exit returns exactly the 1 wei entitlement.
         vm.prank(attacker);
-        uint256 attackerOut = vault.redeem(1, attacker);
+        uint256 attackerOut = vault.redeemToUsdt(1, 0, attacker);
         assertEq(attackerOut, 1, "attacker gets 1 wei back");
 
         // The donation is Confío surplus, withdrawable by treasury only.
@@ -108,23 +111,27 @@ contract CusdPlusVaultAdversarialTest is Test {
 
     /// Rounding direction under redemption: floor may shave at most one
     /// USDY-wei of value versus the exact entitlement, never more, and
-    /// never in the holder's favor.
+    /// never in the holder's favor. (Raw redeem is owner-only now, so the
+    /// treasury exercises it — the formula under test is caller-agnostic
+    /// and shared with redeemToUsdt.)
     function test_redeemRoundingBoundedToOneWei() public {
         // Awkward numbers: prices/pPlus far from round WADs.
         oracle.setPrice(1.013370000000000001e18);
         vault.accrue();
         uint256 usdtIn = 333_333_333_333_333_333_337;
-        usdt.mint(victim, usdtIn);
-        vm.prank(victim);
-        uint256 shares = vault.subscribeAndMint(usdtIn, 0, victim);
+        usdt.mint(treasury, usdtIn);
+        vm.startPrank(treasury);
+        usdt.approve(address(vault), type(uint256).max);
+        uint256 shares = vault.subscribeAndMint(usdtIn, 0, treasury);
+        vm.stopPrank();
 
         oracle.setPrice(1.027272727272727273e18);
         vault.accrue();
 
         uint256 p = oracle.price();
         uint256 pPlus = vault.pPlus();
-        vm.prank(victim);
-        uint256 usdyOut = vault.redeem(shares, victim);
+        vm.prank(treasury);
+        uint256 usdyOut = vault.redeem(shares, treasury);
 
         // exact entitlement in USDY terms: shares * pPlus / p
         uint256 exactFloor = (shares * pPlus) / p;
@@ -164,7 +171,7 @@ contract CusdPlusVaultAdversarialTest is Test {
                 uint256 bal = vault.balanceOf(w);
                 if (bal > 2) {
                     vm.prank(w);
-                    vault.redeem(bal / 2, w);
+                    vault.redeemToUsdt(bal / 2, 0, w);
                 }
             }
             if (round % 10 == 5) {
@@ -182,7 +189,7 @@ contract CusdPlusVaultAdversarialTest is Test {
             uint256 bal = vault.balanceOf(users[i]);
             if (bal == 0 || (bal * vault.pPlus()) / p == 0) continue;
             vm.prank(users[i]);
-            vault.redeem(bal, users[i]);
+            vault.redeemToUsdt(bal, 0, users[i]);
         }
         assertGe(vault.backingRatioBps(), 10_000, "solvent after full exit");
         assertLe(

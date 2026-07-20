@@ -114,24 +114,52 @@ contract CusdPlusVaultTest is Test {
         assertTrue(_backed());
     }
 
-    function test_depositAndMint_directUsdy() public {
-        usdy.mint(user, 500e18);
-        vm.startPrank(user);
+    // Raw-USDY paths are owner-only (PP representations: USDY never
+    // touches holder wallets; the sole holder exit is redeemToUsdt).
+
+    function test_depositAndMint_directUsdy_ownerOnly() public {
+        usdy.mint(treasury, 500e18);
+        vm.startPrank(treasury);
         usdy.approve(address(vault), type(uint256).max);
-        uint256 shares = vault.depositAndMint(500e18, user);
+        uint256 shares = vault.depositAndMint(500e18, treasury);
         vm.stopPrank();
         assertEq(shares, 500e18);
         assertTrue(_backed());
     }
 
-    function test_redeem_roundTrip() public {
+    function test_depositAndMint_rejects_nonOwner() public {
+        usdy.mint(user, 500e18);
         vm.startPrank(user);
-        uint256 shares = vault.subscribeAndMint(1000e18, 990e18, user);
-        uint256 usdyOut = vault.redeem(shares, user);
+        usdy.approve(address(vault), type(uint256).max);
+        vm.expectRevert(); // OwnableUnauthorizedAccount
+        vault.depositAndMint(500e18, user);
+        vm.stopPrank();
+    }
+
+    function test_redeem_roundTrip_ownerOnly() public {
+        // treasury acquires shares (subscribe like any depositor), then
+        // exercises the raw-USDY exit that only it may use
+        usdt.mint(treasury, 1000e18);
+        vm.startPrank(treasury);
+        usdt.approve(address(vault), type(uint256).max);
+        uint256 shares = vault.subscribeAndMint(1000e18, 990e18, treasury);
+        uint256 usdyOut = vault.redeem(shares, treasury);
         vm.stopPrank();
         assertEq(vault.totalSupply(), 0);
         assertApproxEqAbs(usdyOut, 1000e18, 2, "floor rounding only");
-        assertEq(usdy.balanceOf(user), usdyOut);
+        assertEq(usdy.balanceOf(treasury), usdyOut);
+    }
+
+    function test_redeem_rejects_holder() public {
+        vm.startPrank(user);
+        uint256 shares = vault.subscribeAndMint(1000e18, 990e18, user);
+        vm.expectRevert(); // OwnableUnauthorizedAccount
+        vault.redeem(shares, user);
+        vm.stopPrank();
+        // the holder's exit still works, and pays USDT — never USDY
+        vm.prank(user);
+        vault.redeemToUsdt(shares, 999e18, user);
+        assertEq(usdy.balanceOf(user), 0, "no raw USDY ever reaches a holder");
     }
 
     function test_redeemToUsdt() public {
@@ -286,7 +314,7 @@ contract CusdPlusVaultTest is Test {
 
         vm.prank(user);
         vm.expectRevert(bytes("address frozen"));
-        vault.redeem(1e18, user);
+        vault.redeemToUsdt(1e18, 0, user);
 
         vm.prank(user);
         vm.expectRevert(bytes("address frozen"));
@@ -322,7 +350,10 @@ contract CusdPlusVaultTest is Test {
         vault.subscribeAndMint(1e18, 0, user);
         vm.prank(user);
         vm.expectRevert();
-        vault.redeem(1e18, user);
+        vault.redeemToUsdt(1e18, 0, user);
+        vm.prank(treasury);
+        vm.expectRevert(); // pause gates even the owner's raw exit
+        vault.redeem(1e18, treasury);
 
         // soft transfer policy: plain transfers unaffected by pause
         vm.prank(user);
@@ -386,7 +417,7 @@ contract CusdPlusVaultTest is Test {
                 uint256 bal = vault.balanceOf(user);
                 if (bal > 0) {
                     vm.prank(user);
-                    try vault.redeem((amt % bal) + 1 > bal ? bal : (amt % bal) + 1, user) {} catch {}
+                    try vault.redeemToUsdt((amt % bal) + 1 > bal ? bal : (amt % bal) + 1, 0, user) {} catch {}
                 }
             } else if (op == 2) {
                 // yield drips a few bps

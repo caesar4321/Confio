@@ -258,10 +258,15 @@ contract CusdPlusVault is
         sharesOut = _mintAgainstUsdy(usdyOut, recipient);
     }
 
-    /// Secondary rail: caller already holds USDY (treasury bridge leg,
-    /// secondary-market acquisition during IM outages).
+    /// Secondary rail: owner (treasury Safe) already holds USDY (bridge
+    /// leg, secondary-market acquisition during IM outages).
+    /// ONLY the owner: raw USDY never touches user wallets in either
+    /// direction — Duende is Ondo's sole onboarded Purchaser, and the PP
+    /// representations state USDY stays within Duende-controlled
+    /// infrastructure. Users enter via subscribeAndMint (USDT).
     function depositAndMint(uint256 usdyIn, address recipient)
         external
+        onlyOwner
         nonReentrant
         whenNotPaused
         returns (uint256 sharesOut)
@@ -284,9 +289,17 @@ contract CusdPlusVault is
 
     // ═════════════════════════ Redeem paths ═════════════════════════════
 
-    /// Burn shares, receive raw USDY (treasury/off-ramp plumbing).
+    /// Burn shares, receive raw USDY — owner (treasury Safe) ONLY.
+    /// Holders exit exclusively via redeemToUsdt (USDY moves vault↔IM,
+    /// never to a holder wallet). A public raw-USDY exit would be an
+    /// on-chain direct claim to the underlying — contradicting the PP
+    /// representations ("USDY is not transferred, resold, or distributed
+    /// to cUSD+ holders"), regardless of what the UI exposes. Emergency
+    /// liquidity during an IM outage is a treasury operation: the Safe
+    /// acquires the shares, redeems raw, and makes holders whole off-rail.
     function redeem(uint256 shares, address to)
         external
+        onlyOwner
         nonReentrant
         whenNotPaused
         returns (uint256 usdyOut)

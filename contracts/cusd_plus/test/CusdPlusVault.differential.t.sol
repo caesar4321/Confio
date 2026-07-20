@@ -22,8 +22,10 @@ import {CusdPlusVault} from "../CusdPlusVault.sol";
 import {MockToken, MockOracle, MockInstantManager} from "./CusdPlusVault.t.sol";
 
 contract CusdPlusVaultDifferentialTest is Test {
+    // Raw depositAndMint/redeem are owner-gated (PP representations), so
+    // the replay drives them as the treasury — the share/accrual math the
+    // mirror checks is caller-agnostic.
     address treasury = makeAddr("treasury");
-    address holder = makeAddr("holder");
 
     string json;
 
@@ -49,7 +51,7 @@ contract CusdPlusVaultDifferentialTest is Test {
             address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
         );
         vault = CusdPlusVault(address(proxy));
-        vm.prank(holder);
+        vm.prank(treasury);
         usdy.approve(address(vault), type(uint256).max);
     }
 
@@ -73,17 +75,17 @@ contract CusdPlusVaultDifferentialTest is Test {
                 vm.prank(treasury);
                 vault.resetOracleBaseline();
             } else if (opH == keccak256("mint")) {
-                usdy.mint(holder, arg);
-                vm.prank(holder);
-                uint256 shares = vault.depositAndMint(arg, holder);
+                usdy.mint(treasury, arg);
+                vm.prank(treasury);
+                uint256 shares = vault.depositAndMint(arg, treasury);
                 assertEq(
                     shares,
                     vm.parseJsonUint(json, string.concat(k, ".ret")),
                     _at(seq, i, "sharesOut")
                 );
             } else if (opH == keccak256("redeem")) {
-                vm.prank(holder);
-                uint256 usdyOut = vault.redeem(arg, holder);
+                vm.prank(treasury);
+                uint256 usdyOut = vault.redeem(arg, treasury);
                 assertEq(
                     usdyOut,
                     vm.parseJsonUint(json, string.concat(k, ".ret")),

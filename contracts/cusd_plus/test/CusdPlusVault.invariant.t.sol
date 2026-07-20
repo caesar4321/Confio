@@ -57,6 +57,10 @@ contract VaultHandler is Test {
             usdy.approve(address(vault), type(uint256).max);
             vm.stopPrank();
         }
+        vm.startPrank(_treasury);
+        usdt.approve(address(vault), type(uint256).max);
+        usdy.approve(address(vault), type(uint256).max);
+        vm.stopPrank();
         lastSeenPPlus = vault.pPlus();
     }
 
@@ -71,25 +75,29 @@ contract VaultHandler is Test {
         _afterOp();
     }
 
+    /// Owner-gated USDY entry (treasury bridge leg): the Safe deposits raw
+    /// USDY and an ordinary holder receives the shares.
     function depositUsdy(uint256 actorSeed, uint256 amount) external {
         address a = actors[actorSeed % 3];
         amount = bound(amount, 1e18, 100_000e18);
-        usdy.mint(a, amount);
-        vm.prank(a);
+        usdy.mint(treasury, amount);
+        vm.prank(treasury);
         vault.depositAndMint(amount, a);
         _afterOp();
     }
 
-    /// Partial redeem to raw USDY. Bounded above the dust floor so the call
-    /// must succeed — this is the liveness assertion.
-    function redeemPartial(uint256 actorSeed, uint256 shares) external {
-        address a = actors[actorSeed % 3];
-        uint256 bal = vault.balanceOf(a);
+    /// Owner-gated raw-USDY exit: the treasury cycles its own shares out.
+    /// Bounded above the dust floor so the call must succeed — raw-redeem
+    /// liveness for the one caller allowed to use it.
+    function treasuryRawRedeem(uint256 amount) external {
+        amount = bound(amount, 1e18, 100_000e18);
+        usdy.mint(treasury, amount);
+        vm.startPrank(treasury);
+        vault.depositAndMint(amount, treasury);
+        uint256 bal = vault.balanceOf(treasury);
         uint256 minShares = _minRedeemableShares();
-        if (bal < minShares) return; // nothing entitled beyond dust
-        shares = bound(shares, minShares, bal);
-        vm.prank(a);
-        vault.redeem(shares, a);
+        if (bal >= minShares) vault.redeem(bal, treasury);
+        vm.stopPrank();
         _afterOp();
     }
 
@@ -224,7 +232,8 @@ contract CusdPlusVaultInvariantTest is Test {
         );
     }
 
-    /// I3: after any op sequence, EVERY holder can exit fully, and the vault
+    /// I3: after any op sequence, EVERY holder can exit fully (via the
+    /// holder exit, redeemToUsdt — raw redeem is owner-only), and the vault
     /// stays solvent to the last share. Only surplus + sub-wei dust remain.
     function afterInvariant() public {
         uint256 p = oracle.price();
@@ -234,7 +243,7 @@ contract CusdPlusVaultInvariantTest is Test {
             if (bal == 0) continue;
             if ((bal * vault.pPlus()) / p == 0) continue; // < 1 USDY-wei of value
             vm.prank(a);
-            vault.redeem(bal, a); // MUST NOT revert — liveness at full size
+            vault.redeemToUsdt(bal, 0, a); // MUST NOT revert — liveness at full size
         }
         assertGe(vault.backingRatioBps(), 10_000, "I3: insolvent at exit");
         // Whatever supply remains is dust worth < 1 USDY-wei per holder.
