@@ -56,6 +56,26 @@ contract MockInstantManager is IOndoInstantManager {
     }
 }
 
+/// Adversarial oracle returning DIFFERENT values across reads in one tx,
+/// keyed off vault state (accrue() mutates lastOraclePrice between the
+/// guard's validated read and any later re-read — so a second getPrice()
+/// call is distinguishable and can lie).
+contract TwoFacedOracle is IRWADynamicOracle {
+    CusdPlusVault public vault;
+    uint256 public honest;
+    uint256 public evil;
+
+    function arm(CusdPlusVault v, uint256 h, uint256 e) external {
+        vault = v; honest = h; evil = e;
+    }
+
+    function getPrice() external view returns (uint256) {
+        if (address(vault) == address(0)) return 1e18; // genesis read
+        // pre-accrue state -> play honest; post-accrue -> lie
+        return vault.lastOraclePrice() < honest ? honest : evil;
+    }
+}
+
 contract BrickedVault is CusdPlusVault {
     constructor(address a, address b, address c, address d, uint256 e)
         CusdPlusVault(a, b, c, d, e) {}
@@ -564,6 +584,35 @@ contract CusdPlusVaultTest is Test {
         vault.rebaselineAfterVerifiedOracleFault(1e18, 1e18, keccak256("e"));
         vm.prank(user);
         vault.redeemToUsdt(100e18, 0, user);
+    }
+
+    /// Snapshot regression: value paths must price at the guard-validated
+    /// read (lastOraclePrice post-accrue), never a fresh getPrice(). A
+    /// state-keyed oracle validates read #1 then lies on read #2 — with a
+    /// re-read, the mint would execute ~99x over-priced AND pass
+    /// _assertFullyBacked (same lying p on both sides).
+    function test_valuePaths_price_at_validated_snapshot() public {
+        TwoFacedOracle liar = new TwoFacedOracle();
+        CusdPlusVault impl2 = new CusdPlusVault(
+            address(usdy), address(usdt), address(im), address(liar), 1500
+        );
+        CusdPlusVault v = CusdPlusVault(address(new ERC1967Proxy(
+            address(impl2), abi.encodeCall(CusdPlusVault.initialize, (treasury))
+        ))); // genesis baseline: 1e18
+        liar.arm(v, 1.01e18, 100e18);
+
+        usdy.mint(treasury, 100e18);
+        vm.startPrank(treasury);
+        usdy.approve(address(v), type(uint256).max);
+        uint256 shares = v.depositAndMint(100e18, treasury);
+        vm.stopPrank();
+
+        // accrue validated 1.01e18 (pPlus -> 1.0085e18); the mint MUST use
+        // exactly that snapshot, not the lying second read (100e18).
+        uint256 pPlusAfter = 1.0085e18;
+        uint256 expected = (100e18 * uint256(1.01e18)) / pPlusAfter;
+        assertEq(shares, expected, "priced at validated snapshot");
+        assertLt(shares, 101e18, "not priced at the lying read");
     }
 
     function test_freeze_zeroAddress_rejected() public {

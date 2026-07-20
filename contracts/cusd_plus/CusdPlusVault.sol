@@ -399,9 +399,13 @@ contract CusdPlusVault is
         // The revert rolls the trip flag back with everything else — see
         // oracleGuardTripped: blocking is here, persistence is the keeper's.
         require(!oracleGuardTripped, "oracle guard tripped");
+        // Post-accrue, lastOraclePrice IS the guard-validated read. Snapshot
+        // it: re-reading the oracle after the external IM calls would price
+        // the mint at an UNVALIDATED value — the exact gap the guard closes.
+        uint256 p = lastOraclePrice;
         USDT.safeTransferFrom(msg.sender, address(this), usdtIn);
         uint256 usdyOut = _imSubscribe(usdtIn, minUsdyOut);
-        sharesOut = _mintAgainstUsdy(usdyOut, recipient);
+        sharesOut = _mintAgainstUsdy(usdyOut, recipient, p);
     }
 
     /// Secondary rail: owner (treasury Safe) already holds USDY (bridge
@@ -420,17 +424,23 @@ contract CusdPlusVault is
         require(usdyIn > 0, "zero in");
         accrue();
         require(!oracleGuardTripped, "oracle guard tripped");
+        uint256 p = lastOraclePrice; // guard-validated snapshot
         USDY.safeTransferFrom(msg.sender, address(this), usdyIn);
-        sharesOut = _mintAgainstUsdy(usdyIn, recipient);
+        sharesOut = _mintAgainstUsdy(usdyIn, recipient, p);
     }
 
-    function _mintAgainstUsdy(uint256 usdyIn, address recipient) internal returns (uint256 sharesOut) {
-        uint256 p = ORACLE.getPrice();
+    /// `validatedPrice` is the caller's post-accrue lastOraclePrice
+    /// snapshot — never a fresh oracle read (see subscribeAndMint). A zero
+    /// recipient is rejected by OZ's _mint (ERC20InvalidReceiver).
+    function _mintAgainstUsdy(uint256 usdyIn, address recipient, uint256 validatedPrice)
+        internal
+        returns (uint256 sharesOut)
+    {
         // shares = USD value in / share price; floor rounding favors backing.
-        sharesOut = (usdyIn * p) / pPlus;
+        sharesOut = Math.mulDiv(usdyIn, validatedPrice, pPlus);
         require(sharesOut > 0, "dust");
         _mint(recipient, sharesOut);
-        _assertFullyBacked(p);
+        _assertFullyBacked(validatedPrice);
         emit Minted(recipient, sharesOut, usdyIn, pPlus);
     }
 
@@ -456,8 +466,8 @@ contract CusdPlusVault is
     {
         accrue();
         require(!oracleGuardTripped, "oracle guard tripped");
-        uint256 p = ORACLE.getPrice();
-        usdyOut = (shares * pPlus) / p; // floor favors backing
+        uint256 p = lastOraclePrice; // guard-validated snapshot
+        usdyOut = Math.mulDiv(shares, pPlus, p); // floor favors backing
         require(usdyOut > 0, "dust");
         _burn(msg.sender, shares);
         USDY.safeTransfer(msg.sender, usdyOut);
@@ -473,10 +483,11 @@ contract CusdPlusVault is
         whenNotPaused
         returns (uint256 usdtOut)
     {
+        require(to != address(0), "zero recipient"); // don't burn USDT to 0
         accrue();
         require(!oracleGuardTripped, "oracle guard tripped");
-        uint256 p = ORACLE.getPrice();
-        uint256 usdyOut = (shares * pPlus) / p;
+        uint256 p = lastOraclePrice; // guard-validated snapshot
+        uint256 usdyOut = Math.mulDiv(shares, pPlus, p);
         require(usdyOut > 0, "dust");
         _burn(msg.sender, shares);
         usdtOut = _imRedeem(usdyOut, minUsdtOut);
@@ -494,9 +505,10 @@ contract CusdPlusVault is
     /// backing. Recipient is ALWAYS the owner Safe (same invariant as
     /// redeem: USDY leaves the vault only toward Duende-controlled keys).
     function collectFees(uint256 usdyAmount) external onlyOwner nonReentrant {
+        require(usdyAmount > 0, "zero amount");
         accrue();
         require(!oracleGuardTripped, "oracle guard tripped");
-        uint256 p = ORACLE.getPrice();
+        uint256 p = lastOraclePrice; // guard-validated snapshot
         uint256 surplus = surplusUsdy(p);
         require(usdyAmount <= surplus, "exceeds surplus");
         USDY.safeTransfer(msg.sender, usdyAmount);
@@ -555,15 +567,15 @@ contract CusdPlusVault is
 
     /// Σ cUSD+ USD value (what the app shows as "cUSD+ en circulación").
     function totalOwedUsd() external view returns (uint256) {
-        return (totalSupply() * pPlus) / WAD;
+        return Math.mulDiv(totalSupply(), pPlus, WAD);
     }
 
     /// Backing ratio in bps (10_000 = exactly 100%). Public invariant:
     /// this must never read below 10_000.
     function backingRatioBps() external view returns (uint256) {
-        uint256 owed = usdyOwed(ORACLE.getPrice());
+        uint256 owed = usdyOwed(ORACLE.getPrice()); // usdyOwed rejects p == 0
         if (owed == 0) return BPS;
-        return (USDY.balanceOf(address(this)) * BPS) / owed;
+        return Math.mulDiv(USDY.balanceOf(address(this)), BPS, owed);
     }
 
     // ═════════════════════════ Internals ════════════════════════════════
