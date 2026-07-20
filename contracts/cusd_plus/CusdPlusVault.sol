@@ -144,8 +144,9 @@ contract CusdPlusVault is
     /// guard means the current oracle read is suspect, and exchanging assets
     /// at a suspect price is exactly what the guard exists to prevent. The
     /// owner investigates and resolves with a verdict: accept (verified
-    /// growth, 85/15 preserved) or rebaseline (verified fault, window to
-    /// surplus) — see the two functions below accrue().
+    /// growth, 85/15 preserved) or rebaseline (verified fault, no holder
+    /// accrual for the skipped window) — see the two functions below
+    /// accrue().
     /// PERSISTENCE NUANCE: a value path that detects the anomaly reverts,
     /// and the revert rolls back the flag and event along with everything
     /// else — value paths BLOCK at a bad price but record nothing. Only a
@@ -215,7 +216,12 @@ contract CusdPlusVault is
         __Ownable2Step_init();
         __Pausable_init();
         pPlus = WAD; // $1.00 at genesis
-        lastOraclePrice = ORACLE.getPrice();
+        uint256 p = ORACLE.getPrice();
+        // A zero read at genesis is miswiring, not a market state — refuse
+        // to initialize on it (a 0 baseline would divide-by-zero every
+        // later usdyOwed/accrue).
+        require(p > 0, "invalid oracle price");
+        lastOraclePrice = p;
     }
 
     /// cusd.py's update(): Assert(sender == admin) — here onlyOwner.
@@ -233,18 +239,23 @@ contract CusdPlusVault is
     function accrue() public {
         uint256 p = ORACLE.getPrice();
         uint256 last = lastOraclePrice;
-        if (p == last || oracleGuardTripped) return;
+        if (oracleGuardTripped) return;
         // USDY's oracle curve is monotonically increasing by construction; a
-        // lower or wildly higher read is a fault. Freeze, don't revert —
-        // accrue() itself is also a standalone keeper poke and must stay
-        // callable; the value paths check the flag right after accruing.
-        if (p < last || ((p - last) * BPS) / last > MAX_ACCRUAL_JUMP_BPS) {
+        // zero, lower, or wildly higher read is a fault. Freeze, don't
+        // revert — accrue() itself is also a standalone keeper poke and must
+        // stay callable; the value paths check the flag right after
+        // accruing. (`p == 0` is caught by `p < last` on any healthy
+        // baseline; the explicit zero checks also cover a corrupted/zero
+        // baseline, where the jump division would otherwise panic — the
+        // short-circuit order below is load-bearing.)
+        if (p == 0 || last == 0 || p < last || ((p - last) * BPS) / last > MAX_ACCRUAL_JUMP_BPS) {
             oracleGuardTripped = true;
             guardedOraclePrice = p; // forensic: what tripped us (accrue is a
             // no-op while tripped, so this is never overwritten mid-incident)
             emit OracleJumpGuard(last, p);
             return;
         }
+        if (p == last) return;
         _applyGrowth(p);
     }
 
@@ -334,6 +345,9 @@ contract CusdPlusVault is
         require(evidenceHash != bytes32(0), "missing evidence");
         require(minCorrectedPrice <= maxCorrectedPrice, "invalid range");
         uint256 p = ORACLE.getPrice();
+        // The range pin does not exclude zero (callers may pass min = 0);
+        // a 0 baseline would divide-by-zero every later accrue/usdyOwed.
+        require(p > 0, "invalid corrected price");
         require(p >= minCorrectedPrice, "below corrected range");
         require(p <= maxCorrectedPrice, "above corrected range");
         uint256 guarded = guardedOraclePrice;

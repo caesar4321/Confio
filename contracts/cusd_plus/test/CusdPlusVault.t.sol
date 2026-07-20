@@ -504,6 +504,42 @@ contract CusdPlusVaultTest is Test {
         vault.transfer(user2, 1e18);
     }
 
+    // ── Oracle zero-price defense ────────────────────────────────────
+
+    function test_initialize_rejects_zeroOraclePrice() public {
+        oracle.setPrice(0);
+        CusdPlusVault impl2 = new CusdPlusVault(
+            address(usdy), address(usdt), address(im), address(oracle), 1500
+        );
+        vm.expectRevert(bytes("invalid oracle price"));
+        new ERC1967Proxy(
+            address(impl2), abi.encodeCall(CusdPlusVault.initialize, (treasury))
+        );
+    }
+
+    function test_zeroOracleRead_trips_notPanics() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+
+        oracle.setPrice(0); // dead/miswired feed
+        vault.accrue(); // must trip, not panic
+        assertTrue(vault.oracleGuardTripped());
+        assertEq(vault.guardedOraclePrice(), 0, "zero read recorded");
+
+        // a zero baseline can never be adopted, even inside a 0-min range
+        vm.prank(treasury);
+        vm.expectRevert(bytes("invalid corrected price"));
+        vault.rebaselineAfterVerifiedOracleFault(0, type(uint256).max, keccak256("e"));
+
+        // feed recovers -> fault verdict resolves normally
+        oracle.setPrice(1e18);
+        vm.prank(treasury);
+        vault.rebaselineAfterVerifiedOracleFault(1e18, 1e18, keccak256("e"));
+        assertFalse(vault.oracleGuardTripped());
+        vm.prank(user);
+        vault.redeemToUsdt(100e18, 0, user); // vault fully functional again
+    }
+
     function test_freeze_zeroAddress_rejected() public {
         // frozen[0] would brick every mint (from=0) and burn (to=0)
         vm.prank(treasury);

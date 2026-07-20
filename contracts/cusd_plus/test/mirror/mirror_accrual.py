@@ -13,8 +13,8 @@ inequalities. Two independently written implementations agreeing to the wei
 is the cheapest strong evidence the math is what we think it is.
 
 Mirrored semantics (MUST track CusdPlusVault.sol exactly):
-  accrue(p):   no-op if p == last or guard tripped;
-               trip guard if p < last or (p-last)*BPS//last > 200;
+  accrue(p):   no-op if guard tripped; trip guard if p == 0 or last == 0
+               or p < last or (p-last)*BPS//last > 200; no-op if p == last;
                else growth = (p-last)*WAD//last
                     kept   = growth*(BPS-1500)//BPS
                     pPlus  = pPlus*(WAD+kept)//WAD ; last = p
@@ -58,10 +58,12 @@ class VaultMirror:
 
     def accrue(self):
         p, last = self.price, self.last
-        if p == last or self.tripped:
+        if self.tripped:
             return
-        if p < last or (p - last) * BPS // last > MAX_JUMP_BPS:
+        if p == 0 or last == 0 or p < last or (p - last) * BPS // last > MAX_JUMP_BPS:
             self.tripped = True
+            return
+        if p == last:
             return
         self._apply_growth()
 
@@ -138,6 +140,8 @@ def _would_be_tripped(m: VaultMirror) -> bool:
     if m.tripped:
         return True
     p, last = m.price, m.last
+    if p == 0 or last == 0:
+        return True
     if p == last:
         return False
     return p < last or (p - last) * BPS // last > MAX_JUMP_BPS
