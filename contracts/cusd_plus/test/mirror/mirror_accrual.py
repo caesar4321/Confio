@@ -28,7 +28,7 @@ Mirrored semantics (MUST track CusdPlusVault.sol exactly):
                require x <= surplus; bal -= x
   rebaseline:  require guard tripped; last = current price; guard
                untripped (no accrual granted — verified-fault verdict)
-  accept:      require guard tripped and price >= last; apply the ordinary
+  accept:      require guard tripped and price > last; apply the ordinary
                85/15 growth from last to price; guard untripped
                (verified-growth verdict — same math as accrue)
 
@@ -114,7 +114,7 @@ class VaultMirror:
         # Verified-growth verdict: holders keep 85% exactly as if accrue()
         # had kept up. Same math path as accrue by construction.
         assert self.tripped, "guard not tripped"
-        assert self.price >= self.last, "not positive growth"
+        assert self.price > self.last, "no positive growth"
         self.tripped = False
         self._apply_growth()
 

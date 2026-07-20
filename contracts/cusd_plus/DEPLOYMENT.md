@@ -71,8 +71,10 @@ onboarding. No funds, no risk, until then.
       only from `d78315a8`+ (pre-fix `sellToSavings` forwarded the shares
       floor as the IM's `minUsdyOut`, bricking every sell with honest
       slippage params)
-- [ ] `lockUpgrades()` at the proven-stable milestone (NOT yet — keep
-      UUPS flexibility during IM integration)
+- [x] ~~`lockUpgrades()` at the proven-stable milestone~~ — REMOVED from
+      the contract 2026-07-20 (foot-gun: permanent Ondo oracle/IM
+      dependency means a locked vault + Ondo migration = stranded funds;
+      trust control is the timelocked Safe owner, not immutability)
 
 ### Verification constructor args (ABI-encoded, no 0x)
 

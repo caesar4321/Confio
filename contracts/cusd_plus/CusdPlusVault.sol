@@ -40,20 +40,21 @@ pragma solidity ^0.8.24;
  * address and strand every honest holder. Surgical per-address freeze is how
  * the pool protects itself.
  *
- * UPGRADEABILITY: UUPS, owner-gated, WITH AN IRREVERSIBLE LOCK — mirroring
- * what cusd.py actually ships: its @app.update allows admin updates during
- * maturation ("Once ... verified stable in production: Change this to return
- * Reject() and compile!"), and cUSD has in fact been updated several times.
- * Early vault versions integrate a not-yet-final Instant Manager ABI;
- * day-one immutability would strand funds behind the first bug. The honest
- * promise instead: upgradeable by the treasury multisig while maturing (put
- * a timelock on the owner before scale), then lockUpgrades() — a one-way,
- * publicly verifiable switch, cleaner than cUSD's recompile-to-Reject —
- * makes the vault permanently immutable. There is no delete/selfdestruct
- * (parity with cusd.py's permanent Reject on delete). Wiring addresses are
- * implementation immutables: an upgrade deploys a new implementation whose
- * constructor re-wires IM/oracle — exactly the escape hatch needed if Ondo
- * migrates its BNB contracts.
+ * UPGRADEABILITY: UUPS, owner-gated, PERMANENTLY. This vault depends for
+ * its entire life on external Ondo-controlled infrastructure — the USDY
+ * oracle and the Instant Manager — wired as implementation immutables, and
+ * Ondo retains contractual discretion to migrate or deprecate those
+ * contracts. Irreversible immutability would therefore be a self-destruct
+ * timer: locked vault + Ondo migration = getPrice() dead = every value path
+ * reverts = holder funds stranded forever. There is deliberately NO
+ * lockUpgrades() switch (an earlier draft had one; removed as a
+ * foot-gun — a future operator misreading old docs could have bricked the
+ * vault). Trust minimization for THIS vault is a treasury multisig with a
+ * timelock before scale, public upgrade notices, and auditable
+ * implementation changes — not immutability. An upgrade deploys a new
+ * implementation whose constructor re-wires IM/oracle: exactly the escape
+ * hatch an Ondo migration requires. No delete/selfdestruct exists (parity
+ * with cusd.py's permanent Reject on delete).
  *
  * WIRING (all confirmed by Ondo 2026-07-07 + on-chain reads; README.md):
  *  - USDY_InstantManager (BNB): 0x9bA360087075A4Cef548eeD71Eed197bf4cFA4E2
@@ -150,24 +151,26 @@ contract CusdPlusVault is
     /// oracle recovers, value paths simply work again, no reset needed.
     bool public oracleGuardTripped;
 
-    /// One-way switch: once true, _authorizeUpgrade reverts forever. The
-    /// on-chain equivalent of recompiling cusd.py's update() to Reject().
-    bool public upgradesLocked;
-
     /// Per-address freeze (cusd.py freeze_address parity). Frozen addresses
     /// cannot transfer, receive, mint or redeem. Yield keeps accruing to
     /// their shares — freeze detains funds, it does not confiscate them.
     mapping(address => bool) public frozen;
 
+    /// The oracle read that tripped the guard (0 when untripped). Forensic
+    /// record for the resolution verdict: lastOraclePrice = last healthy
+    /// baseline, guardedOraclePrice = what tripped, live read = what a
+    /// verdict would apply. APPENDED after `frozen` — layout above must
+    /// stay byte-identical to the live proxy's.
+    uint256 public guardedOraclePrice;
+
     // ── Events ──────────────────────────────────────────────────────────
     event Accrued(uint256 oraclePrice, uint256 newPPlus);
     event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
-    event OracleGrowthAccepted(uint256 oldPrice, uint256 newPrice, bytes32 indexed evidenceHash);
-    event OracleFaultRebaselined(uint256 oldPrice, uint256 newPrice, bytes32 indexed evidenceHash);
+    event OracleGrowthAccepted(uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash);
+    event OracleFaultRebaselined(uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash);
     event Minted(address indexed recipient, uint256 shares, uint256 usdyIn, uint256 pPlusAt);
     event Redeemed(address indexed holder, address indexed to, uint256 shares, uint256 usdyOut, uint256 pPlusAt);
     event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
-    event UpgradesLockedForever();
     event AddressFrozen(address indexed target);
     event AddressUnfrozen(address indexed target);
 
@@ -199,18 +202,12 @@ contract CusdPlusVault is
         lastOraclePrice = ORACLE.getPrice();
     }
 
-    /// cusd.py's update(): Assert(sender == admin) — here onlyOwner, plus the
-    /// one-way lock. After lockUpgrades() this vault is permanently immutable.
-    function _authorizeUpgrade(address) internal view override onlyOwner {
-        require(!upgradesLocked, "upgrades locked forever");
-    }
-
-    /// Irreversible. Call when the vault has proven itself in production —
-    /// the same milestone cusd.py marks with "change update() to Reject()".
-    function lockUpgrades() external onlyOwner {
-        upgradesLocked = true;
-        emit UpgradesLockedForever();
-    }
+    /// cusd.py's update(): Assert(sender == admin) — here onlyOwner.
+    /// Upgrade authority must remain available for the vault's lifetime:
+    /// the Ondo oracle/IM dependency can migrate out from under us, and an
+    /// unupgradeable vault would strand holder funds (see header). Guard the
+    /// OWNER (timelocked multisig before scale), not the upgrade path.
+    function _authorizeUpgrade(address) internal view override onlyOwner {}
 
     // ═════════════════════════ Accrual ══════════════════════════════════
     /// Lazy compounding on every interaction (Compound-style): pPlus grows by
@@ -227,6 +224,8 @@ contract CusdPlusVault is
         // callable; the value paths check the flag right after accruing.
         if (p < last || ((p - last) * BPS) / last > MAX_ACCRUAL_JUMP_BPS) {
             oracleGuardTripped = true;
+            guardedOraclePrice = p; // forensic: what tripped us (accrue is a
+            // no-op while tripped, so this is never overwritten mid-incident)
             emit OracleJumpGuard(last, p);
             return;
         }
@@ -248,9 +247,12 @@ contract CusdPlusVault is
     // A tripped guard has exactly two resolutions, and the owner's verdict
     // decides who the frozen window's growth belongs to:
     //   accept     -> genuine USDY appreciation -> holders get their 85%
-    //   rebaseline -> oracle fault              -> window forfeited to surplus
-    // GOVERNANCE ASYMMETRY, stated openly: rebaseline routes 100% of the
-    // window to Confío's surplus, accept only 15% — the owner has a financial
+    //   rebaseline -> verified oracle fault -> no holder accrual for the
+    //                 skipped window (an upward-fault window lands in
+    //                 surplus; a downward rebaseline may instead reveal
+    //                 undercollateralization needing separate loss handling)
+    // GOVERNANCE ASYMMETRY, stated openly: rebaseline credits holders
+    // nothing while accept credits them 85% — the owner has a financial
     // incentive to prefer rebaseline. That is why BOTH verdicts demand a
     // nonzero evidenceHash committing to a public incident record (Ondo
     // notice, oracle txns, transparency-page entry), emitted on-chain for
@@ -258,44 +260,71 @@ contract CusdPlusVault is
     // Both verdicts require a tripped guard: on a healthy oracle either
     // would skip pending sub-2% growth past accrue(), silently converting
     // the holders' share into owner-collectable surplus.
+    // TOCTOU PIN: verdicts execute at the live oracle read, but the evidence
+    // was collected against a specific value — and multisig signatures take
+    // hours. Each verdict therefore pins execution to the price range the
+    // evidence document commits to: drift outside [min,max] while signing
+    // reverts instead of applying an unverified value. The range lives IN
+    // the evidence document, binding parameters to evidence.
 
     /// Verdict A — the guard-tripping move was VERIFIED as legitimate USDY
     /// appreciation (e.g. a long keeper gap letting real yield accumulate
     /// past 2%, or an Ondo-published range adjustment). Holder economics are
     /// preserved: the whole verified move goes through the ordinary 85/15
     /// split, exactly as if accrue() had kept up. Upward moves only — a
-    /// price DROP is never "growth" and has no legitimate-accrual reading.
-    function acceptVerifiedOracleGrowth(bytes32 evidenceHash) external onlyOwner {
+    /// price DROP is never "growth"; equality is no growth either (a glitch
+    /// that returned exactly to baseline resolves via rebaseline).
+    function acceptVerifiedOracleGrowth(
+        uint256 minVerifiedPrice,
+        uint256 maxVerifiedPrice,
+        bytes32 evidenceHash
+    ) external onlyOwner {
         require(oracleGuardTripped, "guard not tripped");
         require(evidenceHash != bytes32(0), "missing evidence");
+        require(minVerifiedPrice <= maxVerifiedPrice, "invalid range");
         uint256 p = ORACLE.getPrice();
         uint256 oldPrice = lastOraclePrice;
-        require(p >= oldPrice, "not positive growth");
+        require(p > oldPrice, "no positive growth");
+        require(p >= minVerifiedPrice, "below verified range");
+        require(p <= maxVerifiedPrice, "above verified range");
+        uint256 guarded = guardedOraclePrice;
         oracleGuardTripped = false;
+        guardedOraclePrice = 0;
         _applyGrowth(p);
-        emit OracleGrowthAccepted(oldPrice, p, evidenceHash);
+        emit OracleGrowthAccepted(oldPrice, guarded, p, evidenceHash);
     }
 
     /// Verdict B — the guard-tripping observation was VERIFIED as an oracle
-    /// or reporting FAULT. Adopts the CURRENT oracle read as the new
-    /// baseline WITHOUT granting the window to holders (it becomes surplus).
+    /// or reporting FAULT. Adopts the CURRENT oracle read (pinned to the
+    /// evidence's corrected range — keep it NARROW) as the new baseline
+    /// WITHOUT crediting holders for the skipped window.
     /// MUST NOT be called merely because accept would allocate yield to
     /// holders — the fault must be demonstrated by the referenced evidence.
-    /// CAUTION: this trusts the CURRENT read as corrected. If the oracle is
-    /// STILL faulty, calling this bakes the faulty value in as baseline —
-    /// wait for the fixed feed before resolving.
+    /// The range pin is the main defense against resolving while the feed
+    /// is STILL faulty (which would bake the faulty value in as baseline);
+    /// verify the feed is fixed before signing, and the pin catches it
+    /// moving again afterward.
     /// A price DROP resolved here does not shrink pPlus: if the drop was a
     /// real loss the vault may be underwater and _assertFullyBacked will
     /// halt mint/redeem — loss handling is a separate treasury decision
     /// (recapitalize via USDY transfer, or a governed haircut), deliberately
     /// not automated here.
-    function rebaselineAfterVerifiedOracleFault(bytes32 evidenceHash) external onlyOwner {
+    function rebaselineAfterVerifiedOracleFault(
+        uint256 minCorrectedPrice,
+        uint256 maxCorrectedPrice,
+        bytes32 evidenceHash
+    ) external onlyOwner {
         require(oracleGuardTripped, "guard not tripped");
         require(evidenceHash != bytes32(0), "missing evidence");
+        require(minCorrectedPrice <= maxCorrectedPrice, "invalid range");
         uint256 p = ORACLE.getPrice();
-        emit OracleFaultRebaselined(lastOraclePrice, p, evidenceHash);
+        require(p >= minCorrectedPrice, "below corrected range");
+        require(p <= maxCorrectedPrice, "above corrected range");
+        uint256 guarded = guardedOraclePrice;
+        emit OracleFaultRebaselined(lastOraclePrice, guarded, p, evidenceHash);
         lastOraclePrice = p;
         oracleGuardTripped = false;
+        guardedOraclePrice = 0;
     }
 
     // ═════════════════════════ Mint paths ═══════════════════════════════

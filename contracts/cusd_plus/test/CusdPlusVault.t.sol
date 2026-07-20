@@ -289,7 +289,7 @@ contract CusdPlusVaultTest is Test {
 
         // a fault verdict reopens everything, window forfeited to surplus
         vm.prank(treasury);
-        vault.rebaselineAfterVerifiedOracleFault(keccak256("incident-2026-07-13"));
+        vault.rebaselineAfterVerifiedOracleFault(1.02e18, 1.04e18, keccak256("incident-2026-07-13"));
         assertFalse(vault.oracleGuardTripped());
         assertEq(vault.pPlus(), pBefore, "frozen-window yield goes to surplus");
         vm.prank(user);
@@ -337,9 +337,9 @@ contract CusdPlusVaultTest is Test {
         oracle.setPrice(1.01e18);
         vm.startPrank(treasury);
         vm.expectRevert(bytes("guard not tripped"));
-        vault.rebaselineAfterVerifiedOracleFault(keccak256("e"));
+        vault.rebaselineAfterVerifiedOracleFault(0, type(uint256).max, keccak256("e"));
         vm.expectRevert(bytes("guard not tripped"));
-        vault.acceptVerifiedOracleGrowth(keccak256("e"));
+        vault.acceptVerifiedOracleGrowth(0, type(uint256).max, keccak256("e"));
         vm.stopPrank();
 
         // The growth is still the holders' to claim — anyone can accrue.
@@ -351,8 +351,9 @@ contract CusdPlusVaultTest is Test {
         vault.accrue();
         assertTrue(vault.oracleGuardTripped());
         vm.prank(treasury);
-        vault.rebaselineAfterVerifiedOracleFault(keccak256("incident"));
+        vault.rebaselineAfterVerifiedOracleFault(1.04e18, 1.06e18, keccak256("incident"));
         assertFalse(vault.oracleGuardTripped());
+        assertEq(vault.guardedOraclePrice(), 0, "forensic record cleared");
     }
 
     /// The accept verdict: a verified-legitimate jump (e.g. long keeper gap)
@@ -367,8 +368,9 @@ contract CusdPlusVaultTest is Test {
         assertTrue(vault.oracleGuardTripped());
         uint256 pBefore = vault.pPlus();
 
+        assertEq(vault.guardedOraclePrice(), 1.03e18, "trip price recorded");
         vm.prank(treasury);
-        vault.acceptVerifiedOracleGrowth(keccak256("ondo-notice-hash"));
+        vault.acceptVerifiedOracleGrowth(1.03e18, 1.03e18, keccak256("ondo-notice-hash"));
         assertFalse(vault.oracleGuardTripped());
         // same math as accrue: pPlus grows by 85% of the full 3%
         assertEq(vault.pPlus(), (pBefore * (WAD + (0.03e18 * 8500) / 10_000)) / WAD);
@@ -383,27 +385,47 @@ contract CusdPlusVaultTest is Test {
 
         vm.startPrank(treasury);
         vm.expectRevert(bytes("missing evidence"));
-        vault.acceptVerifiedOracleGrowth(bytes32(0));
+        vault.acceptVerifiedOracleGrowth(0, type(uint256).max, bytes32(0));
         vm.expectRevert(bytes("missing evidence"));
-        vault.rebaselineAfterVerifiedOracleFault(bytes32(0));
+        vault.rebaselineAfterVerifiedOracleFault(0, type(uint256).max, bytes32(0));
         // a DROP can never be accepted as growth
-        vm.expectRevert(bytes("not positive growth"));
-        vault.acceptVerifiedOracleGrowth(keccak256("e"));
-        // but a verified fault can rebaseline downward (pPlus untouched)
+        vm.expectRevert(bytes("no positive growth"));
+        vault.acceptVerifiedOracleGrowth(0, type(uint256).max, keccak256("e"));
+        // TOCTOU pin: live read outside the evidence's range reverts
+        vm.expectRevert(bytes("above corrected range"));
+        vault.rebaselineAfterVerifiedOracleFault(0.5e18, 0.8e18, keccak256("e"));
+        vm.expectRevert(bytes("below corrected range"));
+        vault.rebaselineAfterVerifiedOracleFault(0.95e18, 1e18, keccak256("e"));
+        vm.expectRevert(bytes("invalid range"));
+        vault.rebaselineAfterVerifiedOracleFault(1e18, 0.9e18, keccak256("e"));
+        // a verified fault can rebaseline downward (pPlus untouched)
         uint256 pBefore = vault.pPlus();
-        vault.rebaselineAfterVerifiedOracleFault(keccak256("e"));
+        vault.rebaselineAfterVerifiedOracleFault(0.89e18, 0.91e18, keccak256("e"));
         vm.stopPrank();
         assertEq(vault.pPlus(), pBefore);
         assertEq(vault.lastOraclePrice(), 0.9e18);
+
+        // equality is not growth: guard re-trips on a further drop, oracle
+        // returns exactly to baseline -> accept refuses, rebaseline clears
+        oracle.setPrice(0.8e18);
+        vault.accrue();
+        assertTrue(vault.oracleGuardTripped());
+        oracle.setPrice(0.9e18); // back to exactly the current baseline
+        vm.startPrank(treasury);
+        vm.expectRevert(bytes("no positive growth"));
+        vault.acceptVerifiedOracleGrowth(0, type(uint256).max, keccak256("e"));
+        vault.rebaselineAfterVerifiedOracleFault(0.9e18, 0.9e18, keccak256("e"));
+        vm.stopPrank();
+        assertFalse(vault.oracleGuardTripped());
 
         // non-owner can render no verdict
         oracle.setPrice(0.8e18);
         vault.accrue();
         vm.startPrank(user);
         vm.expectRevert();
-        vault.acceptVerifiedOracleGrowth(keccak256("e"));
+        vault.acceptVerifiedOracleGrowth(0, type(uint256).max, keccak256("e"));
         vm.expectRevert();
-        vault.rebaselineAfterVerifiedOracleFault(keccak256("e"));
+        vault.rebaselineAfterVerifiedOracleFault(0, type(uint256).max, keccak256("e"));
         vm.stopPrank();
     }
 
@@ -484,7 +506,10 @@ contract CusdPlusVaultTest is Test {
 
     // ── Upgradeability posture ───────────────────────────────────────
 
-    function test_upgrade_then_lock_forever() public {
+    /// No lockUpgrades exists BY DESIGN: the vault depends for life on
+    /// Ondo-controlled oracle/IM contracts that may migrate — permanent
+    /// immutability would be a self-destruct timer (see contract header).
+    function test_upgrade_ownerGated_noLockExists() public {
         BrickedVault impl2 = new BrickedVault(
             address(usdy), address(usdt), address(im), address(oracle), 1500
         );
@@ -494,17 +519,11 @@ contract CusdPlusVaultTest is Test {
         vm.expectRevert();
         vault.upgradeToAndCall(address(impl2), "");
 
-        // owner can (maturation phase)
+        // owner can — and this authority is permanent (Ondo-migration
+        // escape hatch); the trust control is WHO owns, not whether
         vm.prank(treasury);
         vault.upgradeToAndCall(address(impl2), "");
         assertEq(BrickedVault(address(vault)).marker(), 42);
-
-        // one-way lock
-        vm.prank(treasury);
-        vault.lockUpgrades();
-        vm.prank(treasury);
-        vm.expectRevert(bytes("upgrades locked forever"));
-        vault.upgradeToAndCall(address(impl2), "");
     }
 
     // ── Sweep ────────────────────────────────────────────────────────

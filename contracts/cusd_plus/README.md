@@ -5,7 +5,7 @@ Solidity port of the trust architecture proven in [`contracts/cusd/cusd.py`](../
 
 **Status: COMPILED + TESTED** (build ungated by founder decision,
 2026-07-04). Foundry scaffold in this directory: solc 0.8.26, OZ 5.6.1
-(via npm; `npm install && npm run setup:forge-std`), 17 tests green
+(via npm; `npm install && npm run setup:forge-std`), 43 tests green
 including a fuzz over random op sequences asserting
 `backingRatioBps() ≥ 10000`. Mocks stand in for USDY/USDT/IM/oracle until
 Ondo onboarding answers land — the Solidity surface those answers touch is
@@ -24,7 +24,7 @@ ReentrancyGuardUpgradeable; the vault uses ReentrancyGuardTransient
 | Sponsored group (user never pays fees)                | Relayer/treasury is `msg.sender`; `recipient` gets the shares (user never needs BNB) |
 | `pause`/`unpause` (admin)                             | OZ `Pausable` gating mint/redeem paths                     |
 | `freeze_address`/`unfreeze_address` (ASA freeze bit)  | `freezeAddress`/`unfreezeAddress` + `_update` hook: frozen addresses cannot transfer, receive, mint or redeem; yield still accrues (detain, not confiscate) |
-| `@app.update`: admin updates allowed during maturation, "change to Reject() when stable" (and cUSD **has** been updated several times in production) | UUPS upgrade gated to owner + irreversible `lockUpgrades()` — the recompile-to-Reject milestone as a one-way on-chain switch |
+| `@app.update`: admin updates allowed during maturation, "change to Reject() when stable" (and cUSD **has** been updated several times in production) | UUPS upgrade gated to owner, PERMANENTLY — no lock switch exists. Unlike cUSD, this vault depends for life on Ondo-controlled oracle/IM contracts that may migrate; irreversible immutability would be a self-destruct timer. Trust control = timelocked multisig owner |
 | `@app.delete`: permanently `Reject()`                 | No selfdestruct/delete path exists                         |
 | Explicit state init in `@app.create` (the empty-bytes lesson) | All proxy state set in `initialize()`: `pPlus = 1e18`, `lastOraclePrice` from a live oracle read; implementation locks itself with `_disableInitializers()` |
 
@@ -59,9 +59,14 @@ The vault mirrors the real cUSD lifecycle, not the idealized one:
    timelock before scale). Early versions integrate a not-yet-final Instant
    Manager ABI — a bug escape hatch is a user protection here, not a rug
    vector, and it's the same authority users already accept on cUSD.
-2. **Lock**: `lockUpgrades()` is a one-way switch; after it, upgrades are
-   impossible forever and publicly verifiable as such — strictly better than
-   cUSD's "recompile update() to Reject()" which itself requires an update.
+2. **No lock, ever — by design.** An earlier draft had an irreversible
+   `lockUpgrades()`; it was REMOVED as a foot-gun. This vault depends
+   permanently on Ondo-controlled infrastructure (oracle + Instant
+   Manager) that Ondo has contractual discretion to migrate or deprecate.
+   A locked vault after an Ondo migration = `getPrice()` dead = every
+   value path reverts = holder funds stranded forever. Trust minimization
+   here is a timelocked multisig owner, public upgrade notices, and
+   auditable implementation changes — not immutability.
 
 Wiring (USDY/USDT/IM/oracle) lives in implementation immutables, so an
 upgrade can re-wire if Ondo migrates its BNB contracts — the concrete
@@ -77,10 +82,12 @@ the whole elapsed window in one step, so mints/redeems always settle at the
 live oracle price with no keeper required for correctness.
 
 Two footnotes:
-- **Optional keeper, recommended**: a daily cron calling `accrue()` keeps
-  the jump-guard window small (a >1-year dead period could make a legitimate
-  catch-up trip the 2% guard) and keeps server-side netApy/earnedToday
-  displays fresh. Hygiene, not correctness.
+- **Keeper, required for the guard's bookkeeping**: a daily cron calling
+  `accrue()` keeps the jump-guard window small, keeps server-side
+  netApy/earnedToday fresh, AND is the only path that durably records a
+  guard trip (value paths revert on detection, rolling the flag back).
+  Value-path safety never depends on it — anomalies are blocked either
+  way — but incident visibility does.
 - **If BNB has no RWADynamicOracle deployment** (open question 3), the
   design regresses to a pushed-price model — confirm early in onboarding.
 
@@ -94,15 +101,21 @@ Two footnotes:
   2% deliberately (no time-proportional widening: a long quiet gap is when
   monitoring was weakest, exactly the wrong moment to auto-trust a big move).
   The owner resolves with an evidence-tagged verdict:
-  `acceptVerifiedOracleGrowth(evidenceHash)` for verified real appreciation
-  (holders keep their 85% — fairness does not depend on keeper uptime), or
-  `rebaselineAfterVerifiedOracleFault(evidenceHash)` for a verified oracle
-  fault (window forfeited to surplus). Both emit the evidence hash on-chain;
-  the incentive asymmetry (rebaseline pays Confío 100%) is documented in the
-  contract and answerable from the public incident record. The daily keeper's
-  `accrue()` is part of this state machine: value paths that detect an anomaly
-  revert (rolling back the trip flag), so only the keeper durably records a
-  trip; a transient glitch no keeper observes self-heals.
+  `acceptVerifiedOracleGrowth(min, max, evidenceHash)` for verified real
+  appreciation (holders keep their 85% — fairness does not depend on keeper
+  uptime), or `rebaselineAfterVerifiedOracleFault(min, max, evidenceHash)`
+  for a verified oracle fault (no holder accrual for the skipped window; a
+  downward rebaseline may instead reveal undercollateralization needing
+  separate loss handling). The [min,max] range pins execution to the price
+  the evidence verified — oracle drift while multisig signatures collect
+  reverts instead of applying an unverified value (TOCTOU pin). Trip-time
+  forensics persist in `guardedOraclePrice` and both resolution events
+  carry (old, guarded, resolved, evidenceHash). The incentive asymmetry
+  (rebaseline credits holders nothing, accept credits 85%) is documented in
+  the contract and answerable from the public incident record. The daily
+  keeper's `accrue()` is part of this state machine: value paths that
+  detect an anomaly revert (rolling back the trip flag), so only the keeper
+  durably records a trip; a transient glitch no keeper observes self-heals.
 - **Rounding always favors backing**: mints and redeems floor; `usdyOwed`
   ceils.
 - **`sweep` can rescue anything except USDY** — the backing is not sweepable,
@@ -231,8 +244,9 @@ vault backing invariant holds through trades.
 - [ ] Deploy implementation + ERC1967 proxy; `initialize(treasury multisig)`;
       `CONFIO_YIELD_SHARE_BPS = 1500`; storage-layout checks in CI for every
       subsequent upgrade
-- [ ] Timelock on the owner before scale; `lockUpgrades()` at the proven-
-      stable milestone (public announcement)
+- [ ] Timelock on the owner before scale (covers upgrades AND the oracle
+      verdict functions — rebaseline especially, per the incentive
+      asymmetry). No upgrade lock exists by design; see UPGRADEABILITY.
 - [ ] Daily keeper cron calling `accrue()` (guard hygiene + fresh display
       data; not required for correctness)
 - [ ] Whitelist vault in OndoIDRegistry (Ondo onboarding)
