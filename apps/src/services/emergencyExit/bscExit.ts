@@ -28,7 +28,6 @@ import {
   setBscTransport,
   DerivedEvmWallet,
 } from '../evmWallet';
-import { USDT_BSC } from '../cusdPlusVault';
 import { CHAIN_ENDPOINTS } from './chainClock';
 import type { KVStore } from './reachability';
 
@@ -36,7 +35,11 @@ import type { KVStore } from './reachability';
 // bundle") — in an outage the config query that normally serves the vault
 // address is dead. Verified against config/settings.py default AND
 // contracts/cusd_plus/DEPLOYMENT.md (ERC1967 proxy) on 2026-07-22.
+// USDT is defined here rather than imported from cusdPlusVault so this
+// module stays free of react-native imports — the disaster drill drives
+// it from Node against mainnet (same value as cusdPlusVault.USDT_BSC).
 export const BUNDLED_VAULT_ADDRESS = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1';
+const USDT_BSC = '0x55d398326f99059fF775485246999027B3197955';
 
 // ── Direct failover transport ───────────────────────────────────────────
 
