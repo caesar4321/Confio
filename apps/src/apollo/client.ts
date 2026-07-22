@@ -67,6 +67,21 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' }, // no Authorization
     body: JSON.stringify(body),
   } as any);
+  if (res.status === 403) {
+    // Raw fetch bypasses the error link; catch the security middleware's
+    // ban response here too (it 403s token refresh like everything else).
+    const text = await res.text();
+    import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
+      if (looksLikeBanResponse(403, text)) {
+        const { emergencyStore } = await import('../services/emergencyExit/store');
+        if (await markBanSignal(emergencyStore)) {
+          const { navigate } = await import('../navigation/RootNavigation');
+          navigate('BlockedAccount');
+        }
+      }
+    }).catch(() => {});
+    throw new Error('Failed to refresh token');
+  }
   const json = await res.json();
   const newAccess = json?.data?.refreshToken?.token;
   if (!newAccess) throw new Error('Failed to refresh token');
@@ -209,7 +224,13 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
         if (looksLikeBanResponse(403, typeof bodyText === 'string' ? bodyText : networkError.message)) {
           const { emergencyStore } = await import('../services/emergencyExit/store');
-          await markBanSignal(emergencyStore);
+          const newlyMarked = await markBanSignal(emergencyStore);
+          if (newlyMarked) {
+            // Announcement first (BlockedAccountScreen), exit as its CTA —
+            // a banned user's normal UI is unusable, so we take them there.
+            const { navigate } = await import('../navigation/RootNavigation');
+            navigate('BlockedAccount');
+          }
         }
       }).catch(() => {});
     } else if ((networkError as any).statusCode === 404) {

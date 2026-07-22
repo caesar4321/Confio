@@ -22,10 +22,23 @@ const BAN_KEY = 'confio_emergency_ban_signal_v1';
 
 let memory: boolean | null = null; // null = not yet loaded
 
-export const markBanSignal = async (store: KVStore): Promise<void> => {
-  if (memory === true) return;
+// Transition subscribers (false→true only): the app navigates to the
+// blocked screen from here, so services never import navigation.
+type BanListener = () => void;
+const listeners = new Set<BanListener>();
+export const onBanSignal = (cb: BanListener): (() => void) => {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+};
+
+/** Returns true only on the false→true transition, so callers can react
+ * (navigate, log) exactly once per ban episode. */
+export const markBanSignal = async (store: KVStore): Promise<boolean> => {
+  if (memory === true) return false;
   memory = true;
   await store.set(BAN_KEY, '1');
+  listeners.forEach((cb) => { try { cb(); } catch { /* listener's problem */ } });
+  return true;
 };
 
 export const clearBanSignal = async (store: KVStore): Promise<void> => {

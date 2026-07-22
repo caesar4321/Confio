@@ -40,6 +40,7 @@ import RampHistoryScreen from '../screens/RampHistoryScreen';
 
 import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { EmergencyExitScreen } from '../screens/EmergencyExitScreen';
+import { BlockedAccountScreen } from '../screens/BlockedAccountScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { FriendDetailScreen } from '../screens/FriendDetailScreen';
 import { EmployeeDetailScreen } from '../screens/EmployeeDetailScreen';
@@ -413,6 +414,11 @@ export const MainNavigator = () => {
           name="EmergencyExit"
           component={EmergencyExitScreen}
           options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="BlockedAccount"
+          component={BlockedAccountScreen}
+          options={{ headerShown: false, gestureEnabled: false }}
         />
         <Stack.Screen
           name="SendToFriend"

@@ -150,3 +150,34 @@ describe('looksLikeBanResponse', () => {
     expect(looksLikeBanResponse(500, 'suspended')).toBe(false);
   });
 });
+
+describe('banSignal transitions', () => {
+  const memStore = () => {
+    const m = new Map<string, string>();
+    return {
+      get: async (k: string) => m.get(k) ?? null,
+      set: async (k: string, v: string) => { m.set(k, v); },
+      del: async (k: string) => { m.delete(k); },
+    };
+  };
+
+  it('marks once per episode, notifies subscribers on the transition only', async () => {
+    jest.isolateModules(() => {}); // reset module-level memory via fresh require
+    const sig = require('../emergencyExit/banSignal');
+    const store = memStore();
+    await sig.clearBanSignal(store); // known state
+    let notified = 0;
+    const off = sig.onBanSignal(() => { notified += 1; });
+
+    expect(await sig.markBanSignal(store)).toBe(true);   // transition
+    expect(await sig.markBanSignal(store)).toBe(false);  // already banned
+    expect(notified).toBe(1);
+    expect(await sig.isBanSignaled(store)).toBe(true);
+
+    await sig.clearBanSignal(store);
+    expect(await sig.isBanSignaled(store)).toBe(false);
+    expect(await sig.markBanSignal(store)).toBe(true);   // new episode
+    expect(notified).toBe(2);
+    off();
+  });
+});

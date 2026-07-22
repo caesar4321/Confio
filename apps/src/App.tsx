@@ -121,6 +121,16 @@ const AppContent: React.FC = () => {
           linking={linking as any}
           onReady={() => {
             console.log('[App] NavigationContainer ready, wiring deep link handler');
+            // Cold-start ban check: a banned user's flag survives restarts
+            // (every request they make keeps 403ing), so route them to the
+            // announcement screen instead of a wall of failing queries.
+            import('./services/emergencyExit/banSignal').then(async ({ isBanSignaled }) => {
+              const { emergencyStore } = await import('./services/emergencyExit/store');
+              if (await isBanSignaled(emergencyStore)) {
+                const { navigate } = await import('./navigation/RootNavigation');
+                navigate('BlockedAccount');
+              }
+            }).catch(() => {});
             deepLinkHandler.setNavigation(navigationRef as NavigationContainerRef<any>);
             deepLinkHandler.checkDeferredLinks().catch(error => {
               console.error('[App] Failed to process deferred deep link on navigation ready:', error);

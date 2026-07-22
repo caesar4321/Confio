@@ -220,6 +220,7 @@ export type MainStackParamList = {
     prefilledAmount?: string;
   };
   EmergencyExit: undefined;
+  BlockedAccount: undefined;
   SendToFriend: {
     friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
     tokenType?: 'cusd' | 'confio';
