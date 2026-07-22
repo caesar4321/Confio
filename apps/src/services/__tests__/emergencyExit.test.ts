@@ -136,3 +136,17 @@ describe('planAlgorandExit', () => {
     });
   });
 });
+
+describe('looksLikeBanResponse', () => {
+  const { looksLikeBanResponse } = require('../emergencyExit/banSignal');
+
+  it('matches the security middleware signature exactly', () => {
+    expect(looksLikeBanResponse(403, 'Your account has been suspended. Please contact support.')).toBe(true);
+  });
+
+  it('ignores bare 403s (proxies, WAFs) and non-403 suspensions', () => {
+    expect(looksLikeBanResponse(403, 'Access denied.')).toBe(false);
+    expect(looksLikeBanResponse(403, undefined)).toBe(false);
+    expect(looksLikeBanResponse(500, 'suspended')).toBe(false);
+  });
+});

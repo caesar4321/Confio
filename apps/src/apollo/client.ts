@@ -1,4 +1,4 @@
-import { ApolloClient, InMemoryCache, createHttpLink, from, FetchResult } from '@apollo/client';
+import { ApolloClient, InMemoryCache, createHttpLink, from, FetchResult, ApolloLink } from '@apollo/client';
 import { onError, ErrorResponse } from '@apollo/client/link/error';
 import { setContext } from '@apollo/client/link/context';
 import * as Keychain from 'react-native-keychain';
@@ -104,6 +104,19 @@ function sanitizeHeaders(headers: Record<string, unknown> = {}): Record<string, 
   return sanitized;
 }
 
+// Un-ban detection: any successful GraphQL round-trip proves the security
+// middleware let us through, so a previously flagged ban is over. The
+// banSignal module's in-memory mirror makes the repeated calls free.
+const banClearLink = new ApolloLink((operation, forward) =>
+  forward(operation).map((result) => {
+    import('../services/emergencyExit/banSignal').then(async ({ clearBanSignal }) => {
+      const { emergencyStore } = await import('../services/emergencyExit/store');
+      await clearBanSignal(emergencyStore);
+    }).catch(() => {});
+    return result;
+  }),
+);
+
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
@@ -188,6 +201,17 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       console.error('[401 Unauthorized]: Authentication required');
     } else if ((networkError as any).statusCode === 403) {
       console.error('[403 Forbidden]: Access denied');
+      // Security-middleware ban signature (403 + suspension text): flag it
+      // so the emergency exit skips the cooloff — a banned user facing a
+      // 24h wait would be a de-facto freeze. Fire-and-forget; can only
+      // accelerate the exit, never delay anything.
+      const bodyText = (networkError as any).bodyText ?? (networkError as any).result;
+      import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
+        if (looksLikeBanResponse(403, typeof bodyText === 'string' ? bodyText : networkError.message)) {
+          const { emergencyStore } = await import('../services/emergencyExit/store');
+          await markBanSignal(emergencyStore);
+        }
+      }).catch(() => {});
     } else if ((networkError as any).statusCode === 404) {
       console.error('[404 Not Found]: The requested resource was not found');
     } else if ((networkError as any).statusCode === 500) {
@@ -382,7 +406,7 @@ const authLink = setContext(async (operation, previousContext) => {
 });
 
 export const apolloClient = new ApolloClient({
-  link: from([authLink, errorLink, httpLink]),
+  link: from([authLink, errorLink, banClearLink, httpLink]),
   cache: new InMemoryCache({
     typePolicies: {
       // cusdPlusSummary is an id-less singleton queried with DIFFERENT field

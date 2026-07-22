@@ -142,6 +142,14 @@ export const evaluateEmergencyState = async (
   graphqlUrl: string,
   opts: { banned?: boolean } = {},
 ): Promise<ReachabilityResult & { chainNowSec: number | null }> => {
+  // Ban signal: set by the Apollo error link when the security middleware
+  // 403s an authenticated request, cleared by any later GraphQL success.
+  // Server-originated but safe to trust — it can only accelerate the exit.
+  let banned = opts.banned;
+  if (banned === undefined) {
+    const { isBanSignaled } = await import('./banSignal');
+    banned = await isBanSignaled(store);
+  }
   const confioOk = await probeConfio(graphqlUrl);
   let chainNowSec: number | null = null;
   let chainOk = false;
@@ -155,7 +163,7 @@ export const evaluateEmergencyState = async (
   const prevRaw = await store.get(OUTAGE_KEY);
   const prevOutageStartSec = prevRaw ? parseInt(prevRaw, 10) || null : null;
 
-  const result = classifyReachability({ confioOk, chainOk, prevOutageStartSec, chainNowSec, banned: opts.banned });
+  const result = classifyReachability({ confioOk, chainOk, prevOutageStartSec, chainNowSec, banned });
 
   if (result.outageStartSec === null) {
     if (prevOutageStartSec !== null) await store.del(OUTAGE_KEY);

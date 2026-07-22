@@ -152,26 +152,34 @@ sponsor money. The two policies are fully orthogonal.
   prevent this transfer" copy (a prior AI discussion cited these; they do
   not exist here — do not cite them).
 
-## Ban work package (ships WITH the backend ban feature — none exists yet)
+## Ban work package
 
-The emergency screen is the ban flow's DESTINATION, not its announcement.
-When the backend grows a ban capability, this package ships together:
+CORRECTION 2026-07-22: the backend ban system EXISTS (an earlier claim
+here that none existed came from a too-narrow grep). `security.UserBan`
+(temporary/permanent/trading/withdrawal types) is enforced by
+SecurityMiddleware: EVERY authenticated request from a banned user gets a
+plain-text 403 «Your account has been suspended…» before any resolver
+runs. Two consequences:
 
-1. **BlockedAccountScreen first**: what happened, reason category, appeal
-   path/support contact — and the regulatory sentence lives here ("we
-   blocked your account; we cannot block your funds"). If the ban locks
-   the app's normal UI, the user cannot navigate Perfil → Seguridad, so
-   the exit CTA («Retirar mi dinero») must live ON this screen.
-2. **Banned signal plumbing**: app-level ban-response detection persists a
-   local flag in emergencyStore; evaluateEmergencyState reads it (the
-   `banned` input already exists). Trusting this server-originated signal
-   is safe by construction: the flag can only ACCELERATE the exit
-   (immediate, skips cooloff), never delay it. A later normal
-   authenticated response clears it (un-ban).
-3. **Sponsored mode**: ban ⇒ server alive ⇒ fee-free sponsor-group
-   execution instead of Direct-mode user gas.
-4. If the ban rejects authentication itself, the blocked screen must also
-   be reachable from the auth-failure path.
+- **Sponsored mode for banned users is impossible** under the current
+  middleware — they cannot reach GraphQL at all. Direct mode (user gas)
+  is their only path, which the shipped v1 already is. A fee-free ban
+  exit would require the backend to exempt specific endpoints.
+- The middleware ignores the granular ban types (a withdrawal-only ban
+  blocks everything) — backend inconsistency noted for a separate fix.
+
+State of the package:
+
+1. **Banned signal plumbing — SHIPPED**: the Apollo error link matches
+   the middleware's exact signature (403 + suspension text; bare 403s
+   from proxies don't count) and persists a local flag; any later
+   successful GraphQL round-trip clears it (un-ban). The emergency state
+   machine reads the flag ⇒ banned = immediate, no cooloff. Safe to
+   trust by construction: the signal can only ACCELERATE the exit.
+2. **BlockedAccountScreen — PENDING**: the announcement surface (reason,
+   appeal path, «we cannot block your funds») with the exit CTA on it —
+   mandatory because a banned user's app UI may be unusable, making
+   Perfil → Seguridad unreachable. Includes auth-failure reachability.
 
 ## Open items
 
