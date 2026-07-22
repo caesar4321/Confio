@@ -22,16 +22,27 @@
 // Net result: the exit moves ZERO native ALGO, so it cannot interact
 // with the farming detector at all.
 //
-// TODO(phase 2, redeem-first): compose the non-sponsored cUSD burn group
-// ([cUSD axfer → app, burn_for_collateral call]) so cUSD exits as USDC.
-// Until then cUSD transfers raw and the screen shows the redemption-tool
-// warning (design doc §3 fallback).
+// Redeem-first: cUSD exits as USDC via the non-sponsored burn group
+// ([cUSD axfer → app, burn_for_collateral app call]) — "permissionless ≠
+// accessible": no external wallet can compose this group, so we do it
+// BEFORE the assets leave. Falls back to a raw cUSD transfer (degraded,
+// screen warns) when the burn is impossible (below MIN_BURN, missing
+// opt-ins) or reverts (paused/frozen).
 //
 // Resumable: completed steps record their txid in the injected KV store;
 // re-runs skip them and re-read live balances before every remaining step.
 
 import { CHAIN_ENDPOINTS } from './chainClock';
 import type { KVStore } from './reachability';
+
+// Bundled mainnet wiring (design doc: chain wiring ships in the app
+// bundle — the config queries that normally serve it are dead in an
+// outage). Verified against .env.mainnet 2026-07-22.
+export const CUSD_APP_ID = 3198259271;
+export const CUSD_ASSET_ID = 3198259450;
+export const USDC_ASSET_ID = 31566704;
+// Contract's MIN_BURN (cusd.py): burns below 1 cUSD revert.
+const MIN_BURN_MICRO = 1_000_000n;
 
 // ── Public algod REST with failover ─────────────────────────────────────
 
@@ -73,7 +84,9 @@ export const fetchAlgoAccount = async (address: string): Promise<AlgoAccountStat
 
 // ── Plan (pure — jest-covered) ──────────────────────────────────────────
 
-export type AlgoExitStep = { kind: 'assetTransfer'; assetId: number; amountMicro: bigint };
+export type AlgoExitStep =
+  | { kind: 'assetTransfer'; assetId: number; amountMicro: bigint }
+  | { kind: 'burnCusd'; amountMicro: bigint };
 
 export interface AlgoExitPlan {
   steps: AlgoExitStep[];
@@ -89,8 +102,25 @@ export const planAlgorandExit = (
   const steps: AlgoExitStep[] = [];
   const destMissingOptIns: number[] = [];
 
+  // Redeem-first: burn cUSD → USDC when every prerequisite holds. The
+  // burn's USDC lands at the OWN address, so it requires the destination
+  // to accept USDC — otherwise burning would just strand a different
+  // asset, and the raw-cUSD path is strictly better.
+  const cusd = account.assets.find((a) => a.id === CUSD_ASSET_ID);
+  const selfHoldsUsdc = account.assets.some((a) => a.id === USDC_ASSET_ID);
+  const burnable =
+    !!cusd &&
+    cusd.amountMicro >= MIN_BURN_MICRO &&
+    selfHoldsUsdc &&
+    destSet.has(USDC_ASSET_ID) &&
+    account.appLocalStateIds.includes(CUSD_APP_ID);
+  if (burnable) steps.push({ kind: 'burnCusd', amountMicro: cusd!.amountMicro });
+
   for (const a of account.assets) {
-    if (a.amountMicro === 0n) continue;
+    if (burnable && a.id === CUSD_ASSET_ID) continue; // burned, not transferred
+    // USDC must be planned even at zero pre-balance: the burn's output
+    // arrives before this step's live re-read.
+    if (a.amountMicro === 0n && !(burnable && a.id === USDC_ASSET_ID)) continue;
     if (!destSet.has(a.id)) {
       destMissingOptIns.push(a.id);
       continue; // blocked until the destination opts in — never burn value
@@ -108,7 +138,8 @@ export type AlgoSigner = (txnBytes: Uint8Array) => Promise<Uint8Array>;
 const ckKey = (accountKey: string, dest: string) =>
   `confio_emergency_algo_ck_v1_${accountKey}_${dest}`;
 
-const stepId = (s: AlgoExitStep): string => `${s.kind}_${s.assetId}`;
+const stepId = (s: AlgoExitStep): string =>
+  s.kind === 'burnCusd' ? s.kind : `${s.kind}_${s.assetId}`;
 
 const suggestedParams = async (sdk: any) => {
   const p = await algod('/v2/transactions/params');
@@ -156,7 +187,38 @@ export interface AlgoExitResult {
   completed: string[];
   txids: Record<string, string>;
   destMissingOptIns: number[];
+  /** Steps that ran in fallback form (burn reverted → raw cUSD transfer). */
+  degraded: string[];
 }
+
+/** Non-sponsored burn group: [cUSD axfer → app, burn_for_collateral call].
+ * Mirrors the proven server builder's app-call shape (foreign assets
+ * [USDC, cUSD], user in accounts, 4×min fee — contract asserts ≥3× for
+ * the inner clawback + USDC payout). Returns the group's first txid. */
+const submitBurnGroup = async (
+  sdk: any, address: string, amountMicro: bigint, sign: AlgoSigner,
+): Promise<string> => {
+  const sp = await suggestedParams(sdk);
+  const appAddress = sdk.getApplicationAddress(CUSD_APP_ID);
+  const axfer = sdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+    sender: address, receiver: appAddress, assetIndex: CUSD_ASSET_ID,
+    amount: amountMicro, suggestedParams: sp,
+  });
+  const method = new sdk.ABIMethod({ name: 'burn_for_collateral', args: [], returns: { type: 'void' } });
+  const appCall = sdk.makeApplicationNoOpTxnFromObject({
+    sender: address, appIndex: CUSD_APP_ID,
+    appArgs: [method.getSelector()],
+    foreignAssets: [USDC_ASSET_ID, CUSD_ASSET_ID],
+    accounts: [address],
+    suggestedParams: { ...sp, fee: sp.minFee * 4n },
+  });
+  sdk.assignGroupID([axfer, appCall]);
+  const signed: Uint8Array[] = [await sign(axfer.toByte()), await sign(appCall.toByte())];
+  const blob = new Uint8Array(signed[0].length + signed[1].length);
+  blob.set(signed[0], 0);
+  blob.set(signed[1], signed[0].length);
+  return submitAndConfirm(blob);
+};
 
 export const executeAlgorandExit = async (params: {
   address: string;
@@ -181,26 +243,48 @@ export const executeAlgorandExit = async (params: {
   const raw = await store.get(key);
   const ck: Record<string, string> = raw ? JSON.parse(raw) : {};
   const completed: string[] = [];
+  const degraded: string[] = [];
+  const record = async (id: string, txid: string) => {
+    ck[id] = txid;
+    await store.set(key, JSON.stringify(ck));
+    completed.push(id);
+  };
 
   for (const step of plan.steps) {
     const id = stepId(step);
     if (ck[id]) continue;
 
-    const sp = await suggestedParams(sdk);
-    // Live re-read: the plan's amount may be stale after a resume.
+    // Live re-read: the plan's amounts may be stale after a resume.
     const live = await fetchAlgoAccount(address);
+
+    if (step.kind === 'burnCusd') {
+      const bal = live.assets.find((a) => a.id === CUSD_ASSET_ID)?.amountMicro ?? 0n;
+      if (bal < MIN_BURN_MICRO) { await record(id, 'skipped_below_min'); continue; }
+      try {
+        await record(id, await submitBurnGroup(sdk, address, bal, sign));
+      } catch (e) {
+        // Burn reverted (paused contract, frozen address, drained
+        // reserves): degrade to a raw cUSD transfer when the destination
+        // accepts it, so value still MOVES; surface for the screen.
+        if (!destOpted.includes(CUSD_ASSET_ID)) throw e;
+        const sp = await suggestedParams(sdk);
+        const txn = sdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+          sender: address, receiver: dest, assetIndex: CUSD_ASSET_ID, amount: bal, suggestedParams: sp,
+        });
+        await record(id, await submitAndConfirm(await sign(txn.toByte())));
+        degraded.push(id);
+      }
+      continue;
+    }
+
     const bal = live.assets.find((a) => a.id === step.assetId)?.amountMicro ?? 0n;
-    if (bal === 0n) { ck[id] = 'skipped_zero'; await store.set(key, JSON.stringify(ck)); continue; }
+    if (bal === 0n) { await record(id, 'skipped_zero'); continue; }
+    const sp = await suggestedParams(sdk);
     const txn = sdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
       sender: address, receiver: dest, assetIndex: step.assetId, amount: bal, suggestedParams: sp,
     });
-
-    const signed = await sign(txn.toByte());
-    const txid = await submitAndConfirm(signed);
-    ck[id] = txid;
-    await store.set(key, JSON.stringify(ck));
-    completed.push(id);
+    await record(id, await submitAndConfirm(await sign(txn.toByte())));
   }
 
-  return { completed, txids: ck, destMissingOptIns: plan.destMissingOptIns };
+  return { completed, txids: ck, destMissingOptIns: plan.destMissingOptIns, degraded };
 };

@@ -150,13 +150,20 @@ export const EmergencyExitScreen: React.FC = () => {
     if (!ok) return;
     setAlgRunning(true); setAlgError(null);
     try {
-      setAlgResult(await executeAlgorandExit({
+      const result = await executeAlgorandExit({
         address: algorandAddress,
         dest: algDest.trim(),
         sign: (b) => algorandService.signTransactionBytes(b),
         accountKey,
         store: emergencyStore,
-      }));
+      });
+      setAlgResult(result);
+      if (result.degraded.length) {
+        Alert.alert(
+          'Atención',
+          'Tus cUSD no pudieron canjearse por USDC y se enviaron tal cual. Para canjearlos por dólares necesitarás una herramienta externa de canje.',
+        );
+      }
     } catch (e: any) {
       setAlgError(e?.message || String(e));
     } finally {

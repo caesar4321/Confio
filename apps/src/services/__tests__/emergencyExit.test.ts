@@ -6,7 +6,9 @@ import {
   classifyReachability,
   OUTAGE_IMMEDIATE_SECONDS,
 } from '../emergencyExit/reachability';
-import { planAlgorandExit, AlgoAccountState } from '../emergencyExit/algorandExit';
+import {
+  planAlgorandExit, AlgoAccountState, CUSD_APP_ID, CUSD_ASSET_ID, USDC_ASSET_ID,
+} from '../emergencyExit/algorandExit';
 
 const T0 = 1_800_000_000;
 
@@ -90,5 +92,47 @@ describe('planAlgorandExit', () => {
     // primitives; they must be unrepresentable in the plan for any input.
     const plan = planAlgorandExit(account, [CUSD, CONFIO, USDC]);
     expect(new Set(plan.steps.map((s) => s.kind))).toEqual(new Set(['assetTransfer']));
+  });
+
+  describe('redeem-first cUSD burn', () => {
+    const withCusd = (cusdMicro: bigint, opts: { selfUsdc?: boolean; app?: boolean } = {}): AlgoAccountState => ({
+      address: 'SELF',
+      amountMicro: 1_500_000n,
+      minBalanceMicro: 400_000n,
+      assets: [
+        { id: CUSD_ASSET_ID, amountMicro: cusdMicro },
+        ...(opts.selfUsdc === false ? [] : [{ id: USDC_ASSET_ID, amountMicro: 0n }]),
+      ],
+      appLocalStateIds: opts.app === false ? [] : [CUSD_APP_ID],
+    });
+
+    it('burns when every prerequisite holds, then moves the USDC output', () => {
+      const plan = planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID, USDC_ASSET_ID]);
+      expect(plan.steps).toEqual([
+        { kind: 'burnCusd', amountMicro: 5_000_000n },
+        // zero pre-balance USDC is still planned: the burn output arrives
+        // before this step's live re-read.
+        { kind: 'assetTransfer', assetId: USDC_ASSET_ID, amountMicro: 0n },
+      ]);
+    });
+
+    it('falls back to raw cUSD transfer when the destination rejects USDC', () => {
+      const plan = planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID]);
+      expect(plan.steps).toEqual([
+        { kind: 'assetTransfer', assetId: CUSD_ASSET_ID, amountMicro: 5_000_000n },
+      ]);
+    });
+
+    it('falls back below the contract MIN_BURN', () => {
+      const plan = planAlgorandExit(withCusd(900_000n), [CUSD_ASSET_ID, USDC_ASSET_ID]);
+      expect(plan.steps.map((s) => s.kind)).toEqual(['assetTransfer']);
+    });
+
+    it('falls back when self lacks the USDC opt-in or the app opt-in', () => {
+      for (const acct of [withCusd(5_000_000n, { selfUsdc: false }), withCusd(5_000_000n, { app: false })]) {
+        const plan = planAlgorandExit(acct, [CUSD_ASSET_ID, USDC_ASSET_ID]);
+        expect(plan.steps.find((s) => s.kind === 'burnCusd')).toBeUndefined();
+      }
+    });
   });
 });
