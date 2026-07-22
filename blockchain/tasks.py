@@ -468,29 +468,23 @@ def scan_inbound_deposits():
             sponsor_sender = sponsor_address and sender == sponsor_address
 
             if confio_sender and not sponsor_sender:
-                # Internal transfer
-                # Fix: Check if this is a P2P withdrawal (USDC) that lacks a SendTransaction.
-                # If so, we MUST process it as a deposit so the recipient gets notified.
-                is_usdc = (xaid == USDC_ID)
-                has_send_tx = False
-                
-                if is_usdc:
-                    # Check if a SendTransaction exists for this hash
-                    # If it exists, the notifications are handled by scan_outbound_confirmations
-                    has_send_tx = SendTransaction.objects.filter(transaction_hash=txid).exists()
-
-                if is_usdc and not has_send_tx:
-                    # Allow it to proceed (User A -> User B via Withdrawal)
+                # Internal transfer. Skip ONLY when the server already knows
+                # about it (a SendTransaction exists — scan_outbound_confirmations
+                # owns those notifications). Server-less sends between Confío
+                # addresses have NO SendTransaction — P2P USDC withdrawals and
+                # the EMERGENCY EXIT (any asset: cUSD, CONFIO, USDC) — and the
+                # recipient would otherwise never be notified. Mirrors the ALGO
+                # payment sweep below, which already applies this rule.
+                has_send_tx = SendTransaction.objects.filter(transaction_hash=txid).exists()
+                if has_send_tx:
                     logger.info(
-                        f"[IndexerScan] detecting P2P withdrawal (internal USDC): {txid} from {sender} to {to_addr}. Processing as deposit."
-                    )
-                else:
-                    # Standard skip for other assets or if SendTransaction exists
-                    logger.info(
-                        f"[IndexerScan] skip internal tx: sender={sender} to={to_addr} sponsor={sponsor_address} is_usdc={is_usdc} has_send={has_send_tx}"
+                        f"[IndexerScan] skip internal tx (SendTransaction exists): sender={sender} to={to_addr} asset={xaid}"
                     )
                     skipped += 1
                     return
+                logger.info(
+                    f"[IndexerScan] internal tx without SendTransaction (withdrawal/emergency exit): {txid} asset={xaid} from {sender} to {to_addr}. Processing as deposit."
+                )
             elif sponsor_sender:
                 logger.info(
                     f"[IndexerScan] sponsor deposit: sender={sender} to={to_addr}"
@@ -628,7 +622,7 @@ def scan_inbound_deposits():
                         'receiver': to_addr,
                         'txid': txid,
                         'round': cround,
-                        'sender_name': 'Billetera Externa',
+                        'sender_name': resolve_sender_name(sender),
                         'transaction_type': 'received'
                     }
                     
