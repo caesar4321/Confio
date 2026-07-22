@@ -152,6 +152,27 @@ sponsor money. The two policies are fully orthogonal.
   prevent this transfer" copy (a prior AI discussion cited these; they do
   not exist here — do not cite them).
 
+## Ban work package (ships WITH the backend ban feature — none exists yet)
+
+The emergency screen is the ban flow's DESTINATION, not its announcement.
+When the backend grows a ban capability, this package ships together:
+
+1. **BlockedAccountScreen first**: what happened, reason category, appeal
+   path/support contact — and the regulatory sentence lives here ("we
+   blocked your account; we cannot block your funds"). If the ban locks
+   the app's normal UI, the user cannot navigate Perfil → Seguridad, so
+   the exit CTA («Retirar mi dinero») must live ON this screen.
+2. **Banned signal plumbing**: app-level ban-response detection persists a
+   local flag in emergencyStore; evaluateEmergencyState reads it (the
+   `banned` input already exists). Trusting this server-originated signal
+   is safe by construction: the flag can only ACCELERATE the exit
+   (immediate, skips cooloff), never delay it. A later normal
+   authenticated response clears it (un-ban).
+3. **Sponsored mode**: ban ⇒ server alive ⇒ fee-free sponsor-group
+   execution instead of Direct-mode user gas.
+4. If the ban rejects authentication itself, the blocked screen must also
+   be reachable from the auth-failure path.
+
 ## Open items
 
 - Disaster drill before any marketing use: real device, Confío domain
