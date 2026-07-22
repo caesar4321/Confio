@@ -16,8 +16,12 @@
 #   with ported pool math; cusdPlusConvertParams supplies threshold/fee/kill
 #   switch. `paused` maps to the amber state in ConvertAhorroScreen.
 
+import logging
+
 import graphene
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class CusdPlusSummaryType(graphene.ObjectType):
@@ -53,6 +57,14 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     paused = graphene.Boolean(description="Kill switch: pause all conversions regardless of cost")
     gm_trade_fee_bps = graphene.Int(description="Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative")
     vault_address = graphene.String(description="cUSD+ vault (proxy) on BSC — client targets this for leg C (subscribeAndMint/redeem)")
+    # BNB auto-convert (mis-deposited BNB → USDT, the BSC mirror of the
+    # ALGO→USDC auto-swap). Wei values travel as strings: they overflow
+    # GraphQL Int and Float loses integer precision.
+    bnb_auto_convert_enabled = graphene.Boolean(description="Master gate for the client-signed BNB→USDT auto-convert")
+    pancake_router = graphene.String(description="PancakeSwap V2 router the swap targets (also relay-allowlisted, selector-guarded)")
+    bnb_auto_convert_min_swap_wei = graphene.String(description="Skip swaps smaller than this (wei, as string)")
+    bnb_auto_convert_keep_wei = graphene.String(description="BNB to leave at the address (live gas-dust target, wei as string)")
+    bnb_auto_convert_slippage_bps = graphene.Int(description="Slippage floor applied to the getAmountsOut quote")
 
 
 # ── Ondo Stocks (GM) market data — server proxy of api.gm.ondo.finance ──
@@ -346,6 +358,10 @@ class Query(graphene.ObjectType):
         if not user or not user.is_authenticated:
             return None
         from django.conf import settings
+        # Live dust target (gas-price aware, RPC-failure safe internally):
+        # the auto-convert leaves this much BNB behind so the user's next
+        # savings leg doesn't immediately need re-dusting.
+        from .tasks import _gas_dust_target_wei as _live_gas_dust_target_wei
         # paused=True until the conversion rails ship — the client treats the
         # kill switch as authoritative, so no build can convert prematurely.
         return CusdPlusConvertParamsType(
@@ -359,6 +375,13 @@ class Query(graphene.ObjectType):
             # Ondo's GM fee schedule is known — open pricing decision.
             gm_trade_fee_bps=getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 0),
             vault_address=getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', None),
+            bnb_auto_convert_enabled=getattr(settings, 'CUSD_PLUS_BNB_AUTOCONVERT_ENABLED', False),
+            pancake_router=getattr(settings, 'CUSD_PLUS_PANCAKE_ROUTER', None),
+            bnb_auto_convert_min_swap_wei=str(getattr(
+                settings, 'CUSD_PLUS_BNB_AUTOCONVERT_MIN_SWAP_WEI', 3_000_000_000_000_000)),
+            bnb_auto_convert_keep_wei=str(_live_gas_dust_target_wei()),
+            bnb_auto_convert_slippage_bps=getattr(
+                settings, 'CUSD_PLUS_BNB_AUTOCONVERT_SLIPPAGE_BPS', 100),
         )
 
 
@@ -608,18 +631,139 @@ class SubmitBscTransaction(graphene.Mutation):
             '0x55d398326f99059ff775485246999027b3197955',  # USDT (approve leg)
         }
         allowed |= {a.lower() for a in getattr(settings, 'BSC_RELAY_EXTRA_ALLOWED', [])}
-        if to_addr not in allowed:
+
+        # PancakeSwap router: relayable ONLY for the BNB→USDT auto-convert
+        # (swapExactETHForTokens), never as a general swap venue — a selector
+        # guard, unlike the destination-only checks above, because the router
+        # exposes arbitrary token swaps we don't want this relay to carry.
+        router = (getattr(settings, 'CUSD_PLUS_PANCAKE_ROUTER', '') or '').lower()
+        SWAP_EXACT_ETH_FOR_TOKENS = '7ff36ab5'  # swapExactETHForTokens(uint256,address[],address,uint256)
+        is_autoconvert = False
+        if router and to_addr == router:
+            if not getattr(settings, 'CUSD_PLUS_BNB_AUTOCONVERT_ENABLED', False):
+                return SubmitBscTransaction(success=False, error='destination_not_allowed')
+            data_hex = fields[5].hex()
+            if not data_hex.startswith(SWAP_EXACT_ETH_FOR_TOKENS):
+                return SubmitBscTransaction(success=False, error='selector_not_allowed')
+            is_autoconvert = True
+        elif to_addr not in allowed:
             return SubmitBscTransaction(success=False, error='destination_not_allowed')
 
         from .tasks import _rpc
         try:
             tx_hash = _rpc('eth_sendRawTransaction', [raw])
+            if is_autoconvert:
+                # Ledger row = this outbound BNB is a Confío-recorded convert.
+                # Outbound native transfers absent from this table are dust
+                # extraction and disqualify the user from further subsidies.
+                from .models import BnbAutoConvert
+                try:
+                    BnbAutoConvert.objects.create(
+                        user=user,
+                        value_wei=str(int.from_bytes(fields[4], 'big')),
+                        tx_hash=tx_hash or '',
+                    )
+                except Exception:  # noqa: BLE001 — ledger write must not fail the relay
+                    logger.exception('BnbAutoConvert ledger write failed for %s', tx_hash)
             return SubmitBscTransaction(success=True, tx_hash=tx_hash)
         except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
             return SubmitBscTransaction(success=False, error=str(exc)[:200])
+
+
+class RegisterBscUsdtArrival(graphene.Mutation):
+    """Foreground fast-path for monitor_bridge_arrivals: record a specific
+    tx's USDT arrival NOW instead of waiting for the next beat scan.
+
+    The BNB auto-convert calls this right after its swap receipt so the
+    whole BNB→USDT→cUSD+ chain finishes in ONE foreground session (the
+    Algorand auto-swap's one-shot UX, minus EVM's missing atomicity):
+    swap → this mutation → resumeSavingsMints picks up the fresh row.
+
+    Grants no new capability: it parses the SAME chain truth with the SAME
+    guards (registered addresses, deposit floor, in-flight protection) into
+    the SAME idempotent recorder the beat scanner uses — only sooner. If it
+    fails, the beat scan records the arrival minutes later as before.
+    """
+    class Arguments:
+        tx_hash = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    recorded = graphene.Boolean()
+    error = graphene.String()
+
+    def mutate(self, info, tx_hash):
+        import re
+        from decimal import Decimal, ROUND_DOWN
+
+        from django.conf import settings
+
+        from .models import CusdPlusConversion
+        from .tasks import (
+            _rpc, _registered_bsc_addresses, _record_inbound_deposit,
+            USDT_BSC, TRANSFER_TOPIC,
+        )
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return RegisterBscUsdtArrival(success=False, error='auth_required')
+        if _bsc_rate_limited(user.id, 'register_arrival', 6):
+            return RegisterBscUsdtArrival(success=False, error='rate_limited')
+        if not re.fullmatch(r'0x[0-9a-fA-F]{64}', (tx_hash or '').strip()):
+            return RegisterBscUsdtArrival(success=False, error='bad_tx_hash')
+        tx_hash = tx_hash.strip().lower()
+
+        try:
+            receipt = _rpc('eth_getTransactionReceipt', [tx_hash])
+        except Exception as exc:  # noqa: BLE001
+            return RegisterBscUsdtArrival(success=False, error=str(exc)[:200])
+        if not receipt:
+            return RegisterBscUsdtArrival(success=False, error='not_mined')
+        if receipt.get('status') != '0x1':
+            return RegisterBscUsdtArrival(success=False, error='tx_reverted')
+
+        registered = _registered_bsc_addresses()
+        # Mirror the beat scanner's in-flight protection: while a bridge
+        # delivery is awaited at an address, foreground recording could
+        # consume USDT a delayed delivery still needs — leave to the beat.
+        awaited = set(CusdPlusConversion.objects.filter(
+            direction='to_savings',
+            status__in=('SRC_COMMITTED', 'STUCK'),
+            is_deleted=False,
+        ).exclude(user_bsc_address='').values_list('user_bsc_address', flat=True))
+        awaited = {a.lower() for a in awaited}
+
+        min_deposit = Decimal(str(getattr(settings, 'CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD', 1)))
+        now = timezone.now()
+        recorded = False
+        for log in receipt.get('logs', []):
+            if (log.get('address') or '').lower() != USDT_BSC.lower():
+                continue
+            topics = log.get('topics') or []
+            if len(topics) < 3 or topics[0] != TRANSFER_TOPIC:
+                continue
+            to_addr = ('0x' + topics[2][-40:]).lower()
+            account_id = registered.get(to_addr)
+            if account_id is None or to_addr in awaited:
+                continue
+            amount_usd = (Decimal(int(log['data'], 16)) / Decimal(10 ** 18)).quantize(
+                Decimal('0.000001'), rounding=ROUND_DOWN)
+            if amount_usd < min_deposit:
+                continue
+            _record_inbound_deposit(
+                account_id=account_id,
+                to_addr=to_addr,
+                amount_usd=amount_usd,
+                tx_ref=f"{tx_hash}:{int(log.get('logIndex', '0x0'), 16)}",
+                tx_hash=tx_hash,
+                source='external_deposit',
+                now=now,
+            )
+            recorded = True
+        return RegisterBscUsdtArrival(success=True, recorded=recorded)
 
 
 class Mutation(graphene.ObjectType):
     start_cusd_plus_conversion = StartCusdPlusConversion.Field()
     advance_cusd_plus_conversion = AdvanceCusdPlusConversion.Field()
     submit_bsc_transaction = SubmitBscTransaction.Field()
+    register_bsc_usdt_arrival = RegisterBscUsdtArrival.Field()

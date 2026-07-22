@@ -122,3 +122,4 @@ service-account.json
 confio.tar.gz
 .kms-local/
 .gstack/
+.rehearsal_key_bsc

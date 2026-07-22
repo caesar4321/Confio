@@ -36,3 +36,19 @@ class CusdPlusConversionAdmin(admin.ModelAdmin):
                     request, f'{conv.internal_id}: diagnose failed — {exc}',
                     level=messages.WARNING,
                 )
+
+
+class BnbAutoConvertAdmin(admin.ModelAdmin):
+    """Read-only ledger view: rows are written by the relay, never by hand.
+    Support uses this to answer "why did subsidies stop for this user" —
+    outbound BNB txs missing from here are the farming signal."""
+    list_display = ('user', 'value_wei', 'tx_hash', 'created_at')
+    search_fields = ('tx_hash', 'user__username', 'user__email')
+    readonly_fields = ('user', 'value_wei', 'tx_hash', 'created_at')
+    ordering = ('-created_at',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

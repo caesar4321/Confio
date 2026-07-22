@@ -62,6 +62,7 @@ import { ReferralInputModal } from '../components/ReferralInputModal';
 import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { useAutoSwap } from '../hooks/useAutoSwap';
+import { useBnbAutoConvert } from '../hooks/useBnbAutoConvert';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
@@ -203,6 +204,10 @@ export const HomeScreen = () => {
   const ahorrosPortfolio = useAhorrosPortfolio();
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrerMutation] = useMutation(SET_REFERRER);
+
+  // BSC mirror of the auto-swap: sweep mis-deposited BNB → USDT (silent,
+  // server-gated; no-op until CUSD_PLUS_BNB_AUTOCONVERT_ENABLED flips on).
+  useBnbAutoConvert(isAuthenticated);
 
   // Use the auto-swap hook for both ALGO and USDC detection
   const { swapModalAsset, walletRecoveryRequired, dismissWalletRecovery } = useAutoSwap({
