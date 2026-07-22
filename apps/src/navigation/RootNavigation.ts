@@ -64,3 +64,18 @@ export function reset(state: any) {
     navigationRef.reset(state);
   }
 }
+
+/**
+ * Navigate as soon as the container is ready. The ban 403 can fire during
+ * the very first HomeScreen queries — before or right as the
+ * NavigationContainer mounts — so a plain navigate() would be dropped.
+ * Polls briefly for readiness, then navigates once.
+ */
+export function navigateWhenReady(name: string, params?: any, tries = 40) {
+  if (navigationRef.isReady()) {
+    navigate(name, params);
+    return;
+  }
+  if (tries <= 0) return;
+  setTimeout(() => navigateWhenReady(name, params, tries - 1), 150);
+}

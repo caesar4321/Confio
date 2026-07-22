@@ -75,8 +75,8 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
       if (looksLikeBanResponse(403, text)) {
         const { emergencyStore } = await import('../services/emergencyExit/store');
         if (await markBanSignal(emergencyStore)) {
-          const { navigate } = await import('../navigation/RootNavigation');
-          navigate('BlockedAccount');
+          const { navigateWhenReady } = await import('../navigation/RootNavigation');
+          navigateWhenReady('BlockedAccount');
         }
       }
     }).catch(() => {});
@@ -119,15 +119,22 @@ function sanitizeHeaders(headers: Record<string, unknown> = {}): Record<string, 
   return sanitized;
 }
 
-// Un-ban detection: any successful GraphQL round-trip proves the security
-// middleware let us through, so a previously flagged ban is over. The
-// banSignal module's in-memory mirror makes the repeated calls free.
+// Un-ban detection: a successful AUTHENTICATED round-trip proves the
+// security middleware let us through, so a previously flagged ban is over.
+// Whitelisted public operations (refreshToken, legalDocument) are exempt:
+// they pass the middleware ANONYMOUSLY even for a banned user, so their
+// 200s would otherwise race the 403s of real queries and flip the ban
+// flag on and off — the cause of the "stuck loading, no blocked screen"
+// bug. Only clear on operations that actually carry auth.
+const BAN_EXEMPT_OPS = new Set(['refreshToken', 'legalDocument']);
 const banClearLink = new ApolloLink((operation, forward) =>
   forward(operation).map((result) => {
-    import('../services/emergencyExit/banSignal').then(async ({ clearBanSignal }) => {
-      const { emergencyStore } = await import('../services/emergencyExit/store');
-      await clearBanSignal(emergencyStore);
-    }).catch(() => {});
+    if (!BAN_EXEMPT_OPS.has(operation.operationName || '')) {
+      import('../services/emergencyExit/banSignal').then(async ({ clearBanSignal }) => {
+        const { emergencyStore } = await import('../services/emergencyExit/store');
+        await clearBanSignal(emergencyStore);
+      }).catch(() => {});
+    }
     return result;
   }),
 );
@@ -200,40 +207,50 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     }
   }
   if (networkError) {
+    const ne = networkError as any;
     console.error('[Network error]:', {
       message: networkError.message,
       name: networkError.name,
       stack: networkError.stack,
-      statusCode: (networkError as any).statusCode,
+      statusCode: ne.statusCode,
       operation: operation.operationName,
       variables: operation.variables
     });
 
-    // Handle specific network error codes
-    if ((networkError as any).statusCode === 400) {
-      console.error('[400 Bad Request]: The server could not understand the request');
-    } else if ((networkError as any).statusCode === 401) {
-      console.error('[401 Unauthorized]: Authentication required');
-    } else if ((networkError as any).statusCode === 403) {
-      console.error('[403 Forbidden]: Access denied');
-      // Security-middleware ban signature (403 + suspension text): flag it
-      // so the emergency exit skips the cooloff — a banned user facing a
-      // 24h wait would be a de-facto freeze. Fire-and-forget; can only
-      // accelerate the exit, never delay anything.
-      const bodyText = (networkError as any).bodyText ?? (networkError as any).result;
-      import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
-        if (looksLikeBanResponse(403, typeof bodyText === 'string' ? bodyText : networkError.message)) {
-          const { emergencyStore } = await import('../services/emergencyExit/store');
-          const newlyMarked = await markBanSignal(emergencyStore);
-          if (newlyMarked) {
-            // Announcement first (BlockedAccountScreen), exit as its CTA —
-            // a banned user's normal UI is unusable, so we take them there.
-            const { navigate } = await import('../navigation/RootNavigation');
-            navigate('BlockedAccount');
-          }
+    // Ban detection is status-code-INDEPENDENT: the security middleware
+    // returns a text/html 403, which Apollo surfaces as a ServerParseError
+    // whose statusCode/bodyText live in different places than a JSON
+    // ServerError's. So we scan every place the suspension text could land
+    // — bodyText (ServerParseError), stringified result (ServerError),
+    // and the message — for the middleware's exact phrase, at any 403.
+    const banBody = [
+      typeof ne.bodyText === 'string' ? ne.bodyText : '',
+      typeof ne.result === 'string' ? ne.result : (ne.result ? JSON.stringify(ne.result) : ''),
+      networkError.message || '',
+    ].join(' ');
+    if (banBody.toLowerCase().includes('suspended')) {
+      import('../services/emergencyExit/banSignal').then(async ({ markBanSignal }) => {
+        const { emergencyStore } = await import('../services/emergencyExit/store');
+        const newlyMarked = await markBanSignal(emergencyStore);
+        if (newlyMarked) {
+          // Announcement first (BlockedAccountScreen), exit as its CTA — a
+          // banned user's normal UI is unusable, so we take them there.
+          // navigateWhenReady survives being called before the container
+          // mounts (the 403 can fire during initial HomeScreen queries).
+          const { navigateWhenReady } = await import('../navigation/RootNavigation');
+          navigateWhenReady('BlockedAccount');
         }
       }).catch(() => {});
-    } else if ((networkError as any).statusCode === 404) {
+    }
+
+    // Handle specific network error codes
+    if (ne.statusCode === 400) {
+      console.error('[400 Bad Request]: The server could not understand the request');
+    } else if (ne.statusCode === 401) {
+      console.error('[401 Unauthorized]: Authentication required');
+    } else if (ne.statusCode === 403) {
+      console.error('[403 Forbidden]: Access denied');
+    } else if (ne.statusCode === 404) {
       console.error('[404 Not Found]: The requested resource was not found');
     } else if ((networkError as any).statusCode === 500) {
       console.error('[500 Internal Server Error]: Server error occurred');
