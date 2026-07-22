@@ -97,6 +97,19 @@ const fmtRemaining = (sec: number): string => {
 
 const truncAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a);
 
+// Redeem-first is the promise — when cUSD ships raw instead, say WHY, or
+// the recipient's "why did cUSD arrive instead of dollars?" lands on support.
+const CUSD_FALLBACK_COPY: Record<string, string> = {
+  below_min_burn:
+    'Tus cUSD se enviaron tal cual: eran menos de 1 cUSD, el mínimo del contrato para canjearlos por USDC.',
+  dest_missing_usdc:
+    'Tus cUSD se enviaron tal cual: tu billetera de destino no acepta USDC (canjearlos habría dejado USDC varado aquí).',
+  self_missing_usdc:
+    'Tus cUSD se enviaron tal cual: esta cuenta no tiene activado USDC.',
+  not_opted_into_app:
+    'Tus cUSD se enviaron tal cual: esta cuenta no está registrada en el contrato de canje.',
+};
+
 type EmState = (ReachabilityResult & { chainNowSec: number | null }) | null;
 
 export const EmergencyExitScreen: React.FC = () => {
@@ -964,6 +977,14 @@ export const EmergencyExitScreen: React.FC = () => {
                 <Icon name="send" size={16} color={colors.white} />
                 <Text style={styles.execBtnText}>Mis dólares (Algorand)</Text>
               </TouchableOpacity>
+              {!!algResult?.cusdFallbackReason && !!CUSD_FALLBACK_COPY[algResult.cusdFallbackReason] && (
+                <View style={styles.chainWarnRow}>
+                  <Icon name="info" size={13} color={colors.text.secondary} />
+                  <Text style={[styles.chainWarnText, { color: colors.text.secondary }]}>
+                    {CUSD_FALLBACK_COPY[algResult.cusdFallbackReason]}
+                  </Text>
+                </View>
+              )}
               {!!algResult?.destMissingOptIns.length && (
                 <View style={styles.chainWarnRow}>
                   <Icon name="pause-circle" size={13} color={colors.warning.text} />

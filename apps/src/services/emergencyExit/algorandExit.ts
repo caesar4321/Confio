@@ -88,10 +88,20 @@ export type AlgoExitStep =
   | { kind: 'assetTransfer'; assetId: number; amountMicro: bigint }
   | { kind: 'burnCusd'; amountMicro: bigint };
 
+/** Why cUSD is being TRANSFERRED RAW instead of redeemed to USDC — users
+ * legitimately ask "why did cUSD arrive instead of dollars?". */
+export type CusdFallbackReason =
+  | 'below_min_burn'        // contract minimum: 1 cUSD
+  | 'dest_missing_usdc'     // burning would strand USDC at the source
+  | 'self_missing_usdc'     // source lacks the USDC ASA opt-in
+  | 'not_opted_into_app';   // source lacks the cUSD app local state
+
 export interface AlgoExitPlan {
   steps: AlgoExitStep[];
   /** Assets the destination has not opted into — their steps are blocked. */
   destMissingOptIns: number[];
+  /** Set when funded cUSD goes out raw rather than redeemed. */
+  cusdFallbackReason?: CusdFallbackReason;
 }
 
 export const planAlgorandExit = (
@@ -116,6 +126,15 @@ export const planAlgorandExit = (
     account.appLocalStateIds.includes(CUSD_APP_ID);
   if (burnable) steps.push({ kind: 'burnCusd', amountMicro: cusd!.amountMicro });
 
+  let cusdFallbackReason: CusdFallbackReason | undefined;
+  if (!burnable && cusd && cusd.amountMicro > 0n) {
+    cusdFallbackReason =
+      cusd.amountMicro < MIN_BURN_MICRO ? 'below_min_burn'
+      : !selfHoldsUsdc ? 'self_missing_usdc'
+      : !destSet.has(USDC_ASSET_ID) ? 'dest_missing_usdc'
+      : 'not_opted_into_app';
+  }
+
   for (const a of account.assets) {
     if (burnable && a.id === CUSD_ASSET_ID) continue; // burned, not transferred
     // USDC must be planned even at zero pre-balance: the burn's output
@@ -128,7 +147,7 @@ export const planAlgorandExit = (
     steps.push({ kind: 'assetTransfer', assetId: a.id, amountMicro: a.amountMicro });
   }
 
-  return { steps, destMissingOptIns };
+  return { steps, destMissingOptIns, cusdFallbackReason };
 };
 
 // ── Execution ───────────────────────────────────────────────────────────
@@ -189,6 +208,8 @@ export interface AlgoExitResult {
   destMissingOptIns: number[];
   /** Steps that ran in fallback form (burn reverted → raw cUSD transfer). */
   degraded: string[];
+  /** Why cUSD went out raw when the PLAN already ruled out the redeem. */
+  cusdFallbackReason?: CusdFallbackReason;
 }
 
 /** Non-sponsored burn group: [cUSD axfer → app, burn_for_collateral call].
@@ -286,5 +307,8 @@ export const executeAlgorandExit = async (params: {
     await record(id, await submitAndConfirm(await sign(txn.toByte())));
   }
 
-  return { completed, txids: ck, destMissingOptIns: plan.destMissingOptIns, degraded };
+  return {
+    completed, txids: ck, destMissingOptIns: plan.destMissingOptIns, degraded,
+    cusdFallbackReason: plan.cusdFallbackReason,
+  };
 };

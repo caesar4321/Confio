@@ -134,6 +134,21 @@ describe('planAlgorandExit', () => {
         expect(plan.steps.find((s) => s.kind === 'burnCusd')).toBeUndefined();
       }
     });
+
+    it('names WHY cUSD ships raw — the recipient will ask', () => {
+      // The 2026-07-22 drill: 0.008 cUSD dust went out raw with no explanation.
+      expect(planAlgorandExit(withCusd(8_172n), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
+        .toBe('below_min_burn');
+      expect(planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID]).cusdFallbackReason)
+        .toBe('dest_missing_usdc');
+      expect(planAlgorandExit(withCusd(5_000_000n, { selfUsdc: false }), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
+        .toBe('self_missing_usdc');
+      expect(planAlgorandExit(withCusd(5_000_000n, { app: false }), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
+        .toBe('not_opted_into_app');
+      // The happy burn path carries no reason at all.
+      expect(planAlgorandExit(withCusd(5_000_000n), [CUSD_ASSET_ID, USDC_ASSET_ID]).cusdFallbackReason)
+        .toBeUndefined();
+    });
   });
 });
 
