@@ -230,9 +230,12 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       networkError.message || '',
     ].join(' ').toLowerCase();
     if (banBody.includes('suspended') || ne.statusCode === 403) {
+      // Loud, greppable marker so a device log proves this path ran.
+      console.warn('[BanSignal] 403 lockout detected on', operation.operationName, '→ routing to BlockedAccount');
       import('../services/emergencyExit/banSignal').then(async ({ markBanSignal }) => {
         const { emergencyStore } = await import('../services/emergencyExit/store');
         const newlyMarked = await markBanSignal(emergencyStore);
+        console.warn('[BanSignal] markBanSignal newlyMarked =', newlyMarked);
         if (newlyMarked) {
           // Announcement first (BlockedAccountScreen), exit as its CTA — a
           // banned user's normal UI is unusable, so we take them there.
