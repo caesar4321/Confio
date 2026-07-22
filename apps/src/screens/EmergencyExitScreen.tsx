@@ -29,7 +29,8 @@ import QRCode from 'react-native-qrcode-svg';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { colors } from '../config/theme';
 import { API_URL } from '../config/env';
-import { useAccountManager } from '../hooks/useAccountManager';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { AddressScannerModal } from '../components/AddressScannerModal';
 import { evmAccountKey, getEvmAddressForDisplay, getActiveEvmWallet } from '../services/secureDeterministicWallet';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
@@ -78,13 +79,12 @@ type EmState = (ReachabilityResult & { chainNowSec: number | null }) | null;
 
 export const EmergencyExitScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { activeAccount } = useAccountManager();
-
-  const accountKey = useMemo(() => {
-    if (!activeAccount) return '';
-    const type = activeAccount.type === 'business' ? 'business' : 'personal';
-    return `${type}_${activeAccount.business?.id ?? ''}_${activeAccount.index ?? 0}`;
-  }, [activeAccount]);
+  // Account context comes from the KEYCHAIN (AuthService), never from
+  // server-hydrated accounts: a banned user's GetUserAccounts 403s, so
+  // anything depending on activeAccount would silently never render —
+  // exactly what hid the gas card during the first ban drill.
+  const [accountKey, setAccountKey] = useState('');
+  const [algorandAddress, setAlgorandAddress] = useState('');
 
   const [es, setEs] = useState<EmState>(null);
   const [elig, setElig] = useState<ExitEligibility | null>(null);
@@ -97,6 +97,7 @@ export const EmergencyExitScreen: React.FC = () => {
 
   const [algDest, setAlgDest] = useState('');
   const [bscDest, setBscDest] = useState('');
+  const [scanTarget, setScanTarget] = useState<'algo' | 'bsc' | null>(null);
   const [checks, setChecks] = useState<boolean[]>(CHECKLIST.map(() => false));
 
   const [algRunning, setAlgRunning] = useState(false);
@@ -111,7 +112,14 @@ export const EmergencyExitScreen: React.FC = () => {
     try {
       const state = await evaluateEmergencyState(emergencyStore, API_URL);
       setEs(state);
-      if (accountKey) setElig(await getExitEligibility(emergencyStore, accountKey, state));
+      // Immediate states (ban, 24h outage) don't touch the per-account
+      // cooloff key, so don't gate them on the account being loaded — a
+      // banned user's account hydration is best-effort and the exit must
+      // not wait for it. Non-immediate paths still need the real key
+      // (cooloffs are per account).
+      if (accountKey || state.immediate) {
+        setElig(await getExitEligibility(emergencyStore, accountKey || 'no_account', state));
+      }
     } finally {
       setEvaluating(false);
     }
@@ -119,42 +127,53 @@ export const EmergencyExitScreen: React.FC = () => {
 
   useEffect(() => { evaluate(); }, [evaluate]);
 
-  const algorandAddress: string = (activeAccount as any)?.algorandAddress || '';
-
-  // Gas readiness — public-RPC reads (they must work exactly when Confío
-  // doesn't). Each chain's top-up card appears only if it is short.
+  // Resolve addresses from the keychain, then read live gas status from
+  // public RPCs (both must work exactly when Confío doesn't).
   useEffect(() => {
-    if (!activeAccount) return;
-    if (algorandAddress) {
-      fetchAlgoAccount(algorandAddress)
-        .then((a) => {
-          // Fee budget: one min-fee per funded asset + 4× for the burn group.
-          const funded = a.assets.filter((x) => x.amountMicro > 0n).length;
-          const budget = BigInt(funded + 5) * 1000n;
-          const spendable = a.amountMicro - a.minBalanceMicro;
-          setAlgoFeeShortMicro(spendable >= budget ? 0n : budget - spendable);
-        })
-        .catch(() => setAlgoFeeShortMicro(null));
-    }
-    const key = evmAccountKey({
-      accountType: activeAccount.type === 'business' ? 'business' : 'personal',
-      accountIndex: activeAccount.index ?? 0,
-      businessId: activeAccount.business?.id,
-    });
-    getEvmAddressForDisplay(key).then(async (addr) => {
-      setEvmAddress(addr);
-      if (!addr) return;
-      const restore = installEmergencyBscTransport();
+    (async () => {
       try {
-        const plan = await planBscExit(addr, BUNDLED_VAULT_ADDRESS);
-        if (!plan.steps.length) { setBscGasShortWei(0n); return; }
-        const need = await estimateBscExitGasWei(plan);
-        setBscGasShortWei(plan.bnbWei >= need ? 0n : need - plan.bnbWei);
-      } catch { /* card stays hidden; execution re-checks anyway */ } finally {
-        restore();
+        const { AuthService } = await import('../services/authService');
+        const auth = AuthService.getInstance();
+        const ctx = await auth.getActiveAccountContext();
+        setAccountKey(`${ctx.type ?? 'personal'}_${ctx.businessId ?? ''}_${ctx.index ?? 0}`);
+
+        const algoAddr = await auth.getAlgorandAddress().catch(() => '');
+        if (algoAddr) {
+          setAlgorandAddress(algoAddr);
+          fetchAlgoAccount(algoAddr)
+            .then((a) => {
+              // Fee budget: one min-fee per funded asset + 4× for the burn group.
+              const funded = a.assets.filter((x) => x.amountMicro > 0n).length;
+              const budget = BigInt(funded + 5) * 1000n;
+              const spendable = a.amountMicro - a.minBalanceMicro;
+              setAlgoFeeShortMicro(spendable >= budget ? 0n : budget - spendable);
+            })
+            .catch(() => setAlgoFeeShortMicro(null));
+        }
+
+        const key = evmAccountKey({
+          accountType: ctx.type === 'business' ? 'business' : 'personal',
+          accountIndex: ctx.index ?? 0,
+          businessId: ctx.businessId,
+        });
+        const evmAddr = await getEvmAddressForDisplay(key);
+        setEvmAddress(evmAddr);
+        if (evmAddr) {
+          const restore = installEmergencyBscTransport();
+          try {
+            const plan = await planBscExit(evmAddr, BUNDLED_VAULT_ADDRESS);
+            if (!plan.steps.length) { setBscGasShortWei(0n); return; }
+            const need = await estimateBscExitGasWei(plan);
+            setBscGasShortWei(plan.bnbWei >= need ? 0n : need - plan.bnbWei);
+          } catch { /* status shows as unverified; execution re-checks anyway */ } finally {
+            restore();
+          }
+        }
+      } catch (e) {
+        console.warn('[EmergencyExit] address resolution failed', e);
       }
-    });
-  }, [activeAccount, algorandAddress]);
+    })();
+  }, []);
 
   const allChecked = checks.every(Boolean);
   const algDestValid = ALGO_ADDR_RE.test(algDest.trim()) && algDest.trim() !== algorandAddress;
@@ -338,40 +357,68 @@ export const EmergencyExitScreen: React.FC = () => {
     return null;
   };
 
+  const gasStatusLine = (short: bigint | null, fmt: (v: bigint) => string) => {
+    if (short === null) return { icon: 'help-circle', color: colors.text.secondary, text: 'No se pudo verificar — si un envío falla por comisiones, deposita un poco aquí.' };
+    if (short === 0n) return { icon: 'check-circle', color: colors.primaryDark, text: 'Comisiones listas' };
+    return { icon: 'alert-circle', color: colors.warning.text, text: `Falta ≈ ${fmt(short)}` };
+  };
+
+  // ALWAYS visible: these addresses are the user's lifeline in Direct
+  // mode. Hiding them when balances look sufficient proved too clever —
+  // and under a ban the reads can fail entirely, which must not make the
+  // addresses vanish.
   const renderGasCards = () => {
-    const showAlgo = algoFeeShortMicro !== null && algoFeeShortMicro > 0n;
-    const showBsc = bscGasShortWei !== null && bscGasShortWei > 0n;
-    if (!showAlgo && !showBsc) return null;
+    const algo = gasStatusLine(algoFeeShortMicro, (v) => `${(Number(v) / 1e6).toFixed(3)} ALGO`);
+    const bsc = gasStatusLine(bscGasShortWei, (v) => `${(Number(v) / 1e18).toFixed(5)} BNB`);
     return (
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Te falta un poco para las comisiones</Text>
+        <Text style={styles.cardTitle}>Comisiones de red</Text>
         <Text style={styles.bodyText}>
-          Sin los servidores de Confío, cada red cobra su pequeña comisión desde
-          tu propia dirección. Envía lo que falta y vuelve aquí:
+          Sin los servidores de Confío, cada red cobra su pequeña comisión
+          desde tu propia dirección. Estas son TUS direcciones:
         </Text>
-        {showAlgo && (
+        {!!algorandAddress && (
           <View style={styles.gasRow}>
             <QRCode value={algorandAddress} size={92} />
             <View style={styles.gasInfo}>
-              <Text style={styles.gasChain}>Red Algorand</Text>
-              <Text style={styles.gasAmount}>
-                Falta ≈ {(Number(algoFeeShortMicro) / 1e6).toFixed(3)} ALGO
-              </Text>
+              <Text style={styles.gasChain}>Red Algorand (ALGO)</Text>
+              <View style={styles.gasStatusRow}>
+                <Icon name={algo.icon} size={13} color={algo.color} />
+                <Text style={[styles.gasAmount, { color: algo.color }]}>{algo.text}</Text>
+              </View>
               <Text style={styles.addrText} selectable>{algorandAddress}</Text>
+              <TouchableOpacity
+                style={styles.copyBtn}
+                onPress={() => Clipboard.setString(algorandAddress)}
+              >
+                <Icon name="copy" size={12} color={colors.primaryDark} />
+                <Text style={styles.copyBtnText}>Copiar</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
-        {showBsc && !!evmAddress && (
+        {!!evmAddress && (
           <View style={styles.gasRow}>
             <QRCode value={evmAddress} size={92} />
             <View style={styles.gasInfo}>
-              <Text style={styles.gasChain}>Red BNB Smart Chain</Text>
-              <Text style={styles.gasAmount}>
-                Falta ≈ {(Number(bscGasShortWei) / 1e18).toFixed(5)} BNB
-              </Text>
+              <Text style={styles.gasChain}>Red BNB Smart Chain (BNB)</Text>
+              <View style={styles.gasStatusRow}>
+                <Icon name={bsc.icon} size={13} color={bsc.color} />
+                <Text style={[styles.gasAmount, { color: bsc.color }]}>{bsc.text}</Text>
+              </View>
               <Text style={styles.addrText} selectable>{evmAddress}</Text>
+              <TouchableOpacity
+                style={styles.copyBtn}
+                onPress={() => Clipboard.setString(evmAddress)}
+              >
+                <Icon name="copy" size={12} color={colors.primaryDark} />
+                <Text style={styles.copyBtnText}>Copiar</Text>
+              </TouchableOpacity>
             </View>
           </View>
+        )}
+        {!algorandAddress && !evmAddress && (
+          <Text style={styles.bodyText}>Cargando tus direcciones…</Text>
         )}
       </View>
     );
@@ -488,19 +535,55 @@ export const EmergencyExitScreen: React.FC = () => {
                 <Text style={styles.cardTitle}>¿A dónde va tu dinero?</Text>
               </View>
               <Text style={styles.inputLabel}>Billetera Algorand (Pera)</Text>
-              <TextInput
-                style={[styles.input, !!algDest && !algDestValid && styles.inputBad]}
-                value={algDest} onChangeText={setAlgDest} autoCapitalize="characters"
-                autoCorrect={false} placeholder="Dirección de 58 caracteres"
-                placeholderTextColor={colors.text.light}
-              />
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={[styles.input, styles.inputFlex, !!algDest && !algDestValid && styles.inputBad]}
+                  value={algDest} onChangeText={setAlgDest} autoCapitalize="characters"
+                  autoCorrect={false} placeholder="Dirección de 58 caracteres"
+                  placeholderTextColor={colors.text.light}
+                />
+                <TouchableOpacity
+                  style={styles.pasteBtn}
+                  onPress={async () => {
+                    try { const t = await Clipboard.getString(); if (t) setAlgDest(t.trim()); } catch {}
+                  }}
+                  accessibilityLabel="Pegar dirección Algorand"
+                >
+                  <Icon name="clipboard" size={15} color={colors.primaryDark} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.pasteBtn}
+                  onPress={() => setScanTarget('algo')}
+                  accessibilityLabel="Escanear dirección Algorand"
+                >
+                  <Icon name="camera" size={15} color={colors.primaryDark} />
+                </TouchableOpacity>
+              </View>
               <Text style={styles.inputLabel}>Billetera BNB Smart Chain (MetaMask)</Text>
-              <TextInput
-                style={[styles.input, !!bscDest && !bscDestValid && styles.inputBad]}
-                value={bscDest} onChangeText={setBscDest} autoCapitalize="none"
-                autoCorrect={false} placeholder="0x…"
-                placeholderTextColor={colors.text.light}
-              />
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={[styles.input, styles.inputFlex, !!bscDest && !bscDestValid && styles.inputBad]}
+                  value={bscDest} onChangeText={setBscDest} autoCapitalize="none"
+                  autoCorrect={false} placeholder="0x…"
+                  placeholderTextColor={colors.text.light}
+                />
+                <TouchableOpacity
+                  style={styles.pasteBtn}
+                  onPress={async () => {
+                    try { const t = await Clipboard.getString(); if (t) setBscDest(t.trim()); } catch {}
+                  }}
+                  accessibilityLabel="Pegar dirección BNB Smart Chain"
+                >
+                  <Icon name="clipboard" size={15} color={colors.primaryDark} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.pasteBtn}
+                  onPress={() => setScanTarget('bsc')}
+                  accessibilityLabel="Escanear dirección BNB Smart Chain"
+                >
+                  <Icon name="camera" size={15} color={colors.primaryDark} />
+                </TouchableOpacity>
+              </View>
               <View style={styles.chainWarnRow}>
                 <Icon name="alert-triangle" size={13} color={colors.warning.text} />
                 <Text style={styles.chainWarnText}>
@@ -543,8 +626,8 @@ export const EmergencyExitScreen: React.FC = () => {
               </View>
 
               <TouchableOpacity
-                style={[styles.execBtn, (!eligible || !allChecked || !algDestValid || algRunning || offline) && styles.execBtnDisabled]}
-                disabled={!eligible || !allChecked || !algDestValid || algRunning || offline}
+                style={[styles.execBtn, (!eligible || !allChecked || !algDestValid || !algorandAddress || algRunning || offline) && styles.execBtnDisabled]}
+                disabled={!eligible || !allChecked || !algDestValid || !algorandAddress || algRunning || offline}
                 onPress={runAlgorand}
               >
                 <Icon name="send" size={16} color={colors.white} />
@@ -584,6 +667,16 @@ export const EmergencyExitScreen: React.FC = () => {
           </>
         )}
       </ScrollView>
+
+      <AddressScannerModal
+        visible={scanTarget !== null}
+        onClose={() => setScanTarget(null)}
+        onScanned={(addr: string) => {
+          if (scanTarget === 'algo') setAlgDest(addr.trim());
+          if (scanTarget === 'bsc') setBscDest(addr.trim());
+          setScanTarget(null);
+        }}
+      />
     </View>
   );
 };
@@ -631,9 +724,18 @@ const styles = StyleSheet.create({
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginTop: 10 },
   howText: { flex: 1, fontSize: 13.5, lineHeight: 20, color: colors.text.secondary },
   gasRow: { flexDirection: 'row', gap: 14, alignItems: 'center', marginTop: 14 },
-  gasInfo: { flex: 1, gap: 2 },
+  gasInfo: { flex: 1, gap: 3 },
   gasChain: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
-  gasAmount: { fontSize: 14, fontWeight: '600', color: colors.primaryDark },
+  gasStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  gasAmount: { fontSize: 13, fontWeight: '600' },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingVertical: 3 },
+  copyBtnText: { fontSize: 12, fontWeight: '600', color: colors.primaryDark },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  inputFlex: { flex: 1 },
+  pasteBtn: {
+    width: 40, height: 40, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white,
+  },
   addrText: { fontSize: 10, color: colors.text.secondary },
   inputLabel: { fontSize: 13, fontWeight: '600', color: colors.text.primary, marginTop: 12, marginBottom: 5 },
   input: {
