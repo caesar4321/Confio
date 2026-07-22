@@ -217,18 +217,19 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       variables: operation.variables
     });
 
-    // Ban detection is status-code-INDEPENDENT: the security middleware
-    // returns a text/html 403, which Apollo surfaces as a ServerParseError
-    // whose statusCode/bodyText live in different places than a JSON
-    // ServerError's. So we scan every place the suspension text could land
-    // — bodyText (ServerParseError), stringified result (ServerError),
-    // and the message — for the middleware's exact phrase, at any 403.
+    // Ban detection. Real-device ground truth (2026-07-22): the middleware's
+    // text/html 403 surfaces as an Apollo ServerError with statusCode 403;
+    // the body may or may not be reachable via .result/.bodyText depending
+    // on the parse path. So: prefer the "suspended" text when present, but
+    // FALL BACK to statusCode 403 itself — in this app every GraphQL 403
+    // originates from SecurityMiddleware (ban or IP block), never a resolver,
+    // so a 403 is a reliable "you're locked out, here's your exit" signal.
     const banBody = [
       typeof ne.bodyText === 'string' ? ne.bodyText : '',
       typeof ne.result === 'string' ? ne.result : (ne.result ? JSON.stringify(ne.result) : ''),
       networkError.message || '',
-    ].join(' ');
-    if (banBody.toLowerCase().includes('suspended')) {
+    ].join(' ').toLowerCase();
+    if (banBody.includes('suspended') || ne.statusCode === 403) {
       import('../services/emergencyExit/banSignal').then(async ({ markBanSignal }) => {
         const { emergencyStore } = await import('../services/emergencyExit/store');
         const newlyMarked = await markBanSignal(emergencyStore);
