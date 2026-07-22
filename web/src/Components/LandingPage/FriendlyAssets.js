@@ -60,6 +60,22 @@ const FriendlyAssets = () => {
         { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Ahorro con rendimiento dentro de Confío.', 'Yield-bearing savings inside Confío.', 'Confío 안의 수익형 저축입니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Acumulativo — crece con el rendimiento', 'Accumulating — grows with the yield', '누적형 — 수익과 함께 성장') },
         { label: t('Red', 'Network', '네트워크'), value: 'BNB Smart Chain' },
+        {
+          label: t('Contrato', 'Contract', '컨트랙트'),
+          value: (
+            <a href="https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              0x3C29…3Ed1
+            </a>
+          )
+        },
+        {
+          label: t('Explorador', 'Explorer', '탐색기'),
+          value: (
+            <a href="https://bscscan.com/token/0x3C29417eb4314155e63d4C7D4507852b87763Ed1" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              {t('Ver en BscScan', 'View on BscScan', 'BscScan에서 보기')}
+            </a>
+          )
+        },
         { label: t('Estado', 'Status', '상태'), value: t('En preparación con Ondo Finance', 'In preparation with Ondo Finance', 'Ondo Finance와 준비 중') }
       ],
       highlight: {
