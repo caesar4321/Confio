@@ -219,6 +219,7 @@ export type MainStackParamList = {
     prefilledAddress?: string;
     prefilledAmount?: string;
   };
+  EmergencyExit: undefined;
   SendToFriend: {
     friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
     tokenType?: 'cusd' | 'confio';

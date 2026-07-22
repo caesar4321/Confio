@@ -757,6 +757,21 @@ export const ProfileScreen = () => {
               </View>
               <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>
+
+            {/* Emergency exit — ALWAYS present, by design: its existence is
+                never server-gated (docs/plans/salida-de-emergencia-design.md).
+                Low-key here; outage/ban states surface it prominently. */}
+            <TouchableOpacity
+              style={styles.cardOption}
+              onPress={() => navigation.navigate('EmergencyExit' as never)}
+            >
+              <Icon name="life-buoy" size={18} color={colors.text.secondary} />
+              <View style={styles.biometricTextContainer}>
+                <Text style={styles.biometricTitle}>Salida de emergencia</Text>
+                <Text style={styles.biometricStatusText}>Mueve tu dinero sin Confío</Text>
+              </View>
+              <Icon name="chevron-right" size={16} color={colors.text.light} />
+            </TouchableOpacity>
           </View>
         </View>
 

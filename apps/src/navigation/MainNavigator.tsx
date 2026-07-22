@@ -39,6 +39,7 @@ import RampHistoryScreen from '../screens/RampHistoryScreen';
 // ... existing imports ...
 
 import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
+import { EmergencyExitScreen } from '../screens/EmergencyExitScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { FriendDetailScreen } from '../screens/FriendDetailScreen';
 import { EmployeeDetailScreen } from '../screens/EmployeeDetailScreen';
@@ -406,6 +407,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="SendWithAddress"
           component={SendWithAddressScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="EmergencyExit"
+          component={EmergencyExitScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen
