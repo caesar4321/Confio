@@ -73,9 +73,17 @@ export function reset(state: any) {
  */
 export function navigateWhenReady(name: string, params?: any, tries = 40) {
   if (navigationRef.isReady()) {
-    navigate(name, params);
+    try {
+      (navigationRef as any).navigate(name, params);
+      console.warn('[BanSignal] navigateWhenReady dispatched navigate →', name);
+    } catch (e) {
+      console.warn('[BanSignal] navigateWhenReady navigate THREW for', name, e);
+    }
     return;
   }
-  if (tries <= 0) return;
+  if (tries <= 0) {
+    console.warn('[BanSignal] navigateWhenReady gave up (never ready) for', name);
+    return;
+  }
   setTimeout(() => navigateWhenReady(name, params, tries - 1), 150);
 }

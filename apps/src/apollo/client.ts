@@ -232,19 +232,22 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     if (banBody.includes('suspended') || ne.statusCode === 403) {
       // Loud, greppable marker so a device log proves this path ran.
       console.warn('[BanSignal] 403 lockout detected on', operation.operationName, '→ routing to BlockedAccount');
-      import('../services/emergencyExit/banSignal').then(async ({ markBanSignal }) => {
-        const { emergencyStore } = await import('../services/emergencyExit/store');
-        const newlyMarked = await markBanSignal(emergencyStore);
-        console.warn('[BanSignal] markBanSignal newlyMarked =', newlyMarked);
-        if (newlyMarked) {
-          // Announcement first (BlockedAccountScreen), exit as its CTA — a
-          // banned user's normal UI is unusable, so we take them there.
-          // navigateWhenReady survives being called before the container
-          // mounts (the 403 can fire during initial HomeScreen queries).
-          const { navigateWhenReady } = await import('../navigation/RootNavigation');
-          navigateWhenReady('BlockedAccount');
-        }
-      }).catch(() => {});
+      // Route IMMEDIATELY and INDEPENDENTLY of keychain persistence. The
+      // old code gated navigate() on markBanSignal() succeeding, so any
+      // throw in the keychain write (or its import chain) was swallowed by
+      // .catch and the user never left HomeScreen. navigate is idempotent,
+      // so firing it on every 403 is harmless.
+      import('../navigation/RootNavigation')
+        .then(({ navigateWhenReady }) => navigateWhenReady('BlockedAccount'))
+        .catch((e) => console.warn('[BanSignal] nav import failed', e));
+      // Persist the flag best-effort (cold-start routing) — decoupled.
+      import('../services/emergencyExit/banSignal')
+        .then(async ({ markBanSignal }) => {
+          const { emergencyStore } = await import('../services/emergencyExit/store');
+          const newlyMarked = await markBanSignal(emergencyStore);
+          console.warn('[BanSignal] markBanSignal newlyMarked =', newlyMarked);
+        })
+        .catch((e) => console.warn('[BanSignal] mark failed', e));
     }
 
     // Handle specific network error codes
