@@ -70,9 +70,16 @@ Exportar claves).
    addresses; Algorand ASA opt-in check with clear warning.
 2. **Social-engineering gate**: "¿Alguien te pidió enviar tu dinero a esta
    dirección?" checklist (alone / no call / no screen share / nobody asked
-   — financiera, staff, family). Abort on any yes. Stop if screen capture
-   is *detected* (iOS `isCaptured`, Android FLAG_SECURE) — detection-based,
-   not claimed-total prevention.
+   — financiera, staff, family). Abort on any yes.
+   **No capture-abort on this screen (decision 2026-07-22)**: nothing
+   secret renders here, and a voice-guided scam needs no screen view, so
+   aborting on capture only ever punishes legitimate users (casting,
+   accessibility, recording) at the worst possible moment. Instead:
+   Android sets FLAG_SECURE (remote-support viewers — the AnyDesk scam
+   pattern — see black, passively, with zero abort false-positives); iOS
+   shows a non-blocking warning banner when `isCaptured` is true. Hard
+   capture BLOCKING belongs to the Exportar claves screen, where actual
+   secrets render.
 3. **User assets — redeem-to-base-asset FIRST, raw transfer as fallback.**
    "Permissionless" is not "accessible": an external Pera user cannot
    compose the `[cUSD axfer, app call]` burn group, and a MetaMask user
