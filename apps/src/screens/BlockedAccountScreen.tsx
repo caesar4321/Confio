@@ -48,7 +48,13 @@ export const BlockedAccountScreen: React.FC = () => {
       await apolloClient.query({ query: PING, fetchPolicy: 'network-only' }).catch(() => {});
       // Success cleared the flag (banClearLink); a 403 re-marked it.
       if (!(await isBanSignaled(emergencyStore))) {
-        navigation.reset({ index: 0, routes: [{ name: 'BottomTabs' }] });
+        // This screen lives in BOTH stacks: from Main reset to the tabs,
+        // from the auth stack send the now-unbanned user back to sign-in.
+        const routeNames: string[] = navigation.getState()?.routeNames ?? [];
+        navigation.reset({
+          index: 0,
+          routes: [{ name: routeNames.includes('BottomTabs') ? 'BottomTabs' : 'Login' }],
+        });
       }
     } finally {
       setRetrying(false);

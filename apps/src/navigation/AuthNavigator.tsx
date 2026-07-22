@@ -6,6 +6,8 @@ import BackupCompletionScreen from '../screens/BackupCompletionScreen';
 import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import LegalDocumentScreen from '../screens/LegalDocumentScreen';
 import { BiometricSetupScreen } from '../screens/BiometricSetupScreen';
+import { BlockedAccountScreen } from '../screens/BlockedAccountScreen';
+import { EmergencyExitScreen } from '../screens/EmergencyExitScreen';
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
@@ -24,6 +26,16 @@ export const AuthNavigator = () => {
       <Stack.Screen 
         name="LegalDocument" 
         component={LegalDocumentScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="BlockedAccount"
+        component={BlockedAccountScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="EmergencyExit"
+        component={EmergencyExitScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
