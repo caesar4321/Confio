@@ -190,6 +190,17 @@ export const requestExitCooloff = async (
 export const cancelExitCooloff = async (store: KVStore, accountKey: string): Promise<void> =>
   store.del(cooloffKey(accountKey));
 
+/** DEV-ONLY QA helper: backdate the pending cooloff so stage 2 renders
+ * without waiting a day. No-op in release builds — the guard is inside
+ * so a stray call site can never ship the bypass. */
+export const devElapseCooloff = async (store: KVStore, accountKey: string): Promise<void> => {
+  // eslint-disable-next-line no-undef
+  if (typeof __DEV__ === 'undefined' || !__DEV__) return;
+  const raw = await store.get(cooloffKey(accountKey));
+  if (!raw) return;
+  await store.set(cooloffKey(accountKey), String(parseInt(raw, 10) - NORMAL_COOLOFF_SECONDS - 60));
+};
+
 export const getExitEligibility = async (
   store: KVStore,
   accountKey: string,

@@ -36,7 +36,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { emergencyStore } from '../services/emergencyExit/store';
 import {
   evaluateEmergencyState, getExitEligibility, requestExitCooloff, cancelExitCooloff,
-  ReachabilityResult, ExitEligibility, NORMAL_COOLOFF_SECONDS,
+  devElapseCooloff, ReachabilityResult, ExitEligibility, NORMAL_COOLOFF_SECONDS,
 } from '../services/emergencyExit/reachability';
 import {
   executeAlgorandExit, fetchAlgoAccount, AlgoExitResult,
@@ -263,6 +263,13 @@ export const EmergencyExitScreen: React.FC = () => {
           tone: 'neutral' as const,
         };
       default:
+        if (elig?.reason === 'cooloff_pending') {
+          return {
+            label: 'Todo funciona con normalidad',
+            sub: 'Tu salida está en espera de seguridad. Puedes cancelarla en cualquier momento — y tu dinero sigue disponible con los envíos normales.',
+            tone: 'ok' as const,
+          };
+        }
         return {
           label: 'Todo funciona con normalidad',
           sub: 'Esta salida existe para emergencias: mueve todo tu dinero a otra billetera sin pedirnos permiso. Hoy también puedes usar los envíos normales.',
@@ -317,6 +324,14 @@ export const EmergencyExitScreen: React.FC = () => {
           <TouchableOpacity style={styles.ghostBtn} onPress={cancelCooloff}>
             <Text style={styles.ghostBtnText}>Cancelar la salida</Text>
           </TouchableOpacity>
+          {__DEV__ && (
+            <TouchableOpacity
+              style={styles.ghostBtn}
+              onPress={async () => { await devElapseCooloff(emergencyStore, accountKey); await evaluate(); }}
+            >
+              <Text style={[styles.ghostBtnText, { color: colors.text.light }]}>(dev) saltar espera</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
@@ -450,9 +465,9 @@ export const EmergencyExitScreen: React.FC = () => {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Cómo funciona</Text>
               {[
-                ['clock', 'Espera de seguridad de 24 horas (solo cuando Confío funciona; en una emergencia real es inmediata).'],
                 ['map-pin', 'Eliges la billetera de destino — una que sea tuya.'],
                 ['send', 'Tu dinero sale como USDC y USDT, directo por la blockchain.'],
+                ['zap', 'En una emergencia real (Confío inaccesible por más de 24 horas), no hay espera: la salida es inmediata.'],
               ].map(([icon, text], i) => (
                 <View key={i} style={styles.howRow}>
                   <Icon name={icon as string} size={16} color={colors.primaryDark} />
