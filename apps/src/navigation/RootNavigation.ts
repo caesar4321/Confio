@@ -87,3 +87,25 @@ export function navigateWhenReady(name: string, params?: any, tries = 40) {
   }
   setTimeout(() => navigateWhenReady(name, params, tries - 1), 150);
 }
+
+// Screens where a banned user is already where they belong. Firing the ban
+// navigation while one of these is focused is NOT idempotent: from
+// EmergencyExit, navigate('BlockedAccount') pops back to the announcement,
+// yanking the user out of their own withdrawal mid-flow — every background
+// poll's 403 (GetUserAccounts, notification count) did exactly that.
+const BAN_SURFACE = new Set(['BlockedAccount', 'EmergencyExit']);
+
+/**
+ * The 403 handlers' entry point: unconditional per-403 (never gated on the
+ * keychain flag persisting), but screen-aware — a no-op while the user is
+ * already on the ban surface.
+ */
+export function routeToBlockedAccount(tries = 40) {
+  if (navigationRef.isReady()) {
+    const current = (navigationRef as any).getCurrentRoute?.()?.name;
+    if (current && BAN_SURFACE.has(current)) {
+      return; // already announced (or mid-exit) — don't yank
+    }
+  }
+  navigateWhenReady('BlockedAccount', undefined, tries);
+}

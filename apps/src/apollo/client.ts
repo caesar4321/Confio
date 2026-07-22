@@ -8,6 +8,9 @@ import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
 import { AccountManager } from '../utils/accountManager';
 import appCheckService from '../services/appCheckService';
+// RN-free module — safe to import statically (heavier emergencyExit modules
+// like the keychain store stay behind dynamic imports).
+import { successProvesUnbanned } from '../services/emergencyExit/banSignal';
 
 // Extract constants to avoid circular dependency
 export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
@@ -73,11 +76,12 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
     const text = await res.text();
     import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
       if (looksLikeBanResponse(403, text)) {
+        // Same decoupling as the error link: route first (screen-aware, so
+        // it never yanks a user already on the ban surface), persist after.
+        const { routeToBlockedAccount } = await import('../navigation/RootNavigation');
+        routeToBlockedAccount();
         const { emergencyStore } = await import('../services/emergencyExit/store');
-        if (await markBanSignal(emergencyStore)) {
-          const { navigateWhenReady } = await import('../navigation/RootNavigation');
-          navigateWhenReady('BlockedAccount');
-        }
+        await markBanSignal(emergencyStore);
       }
     }).catch(() => {});
     throw new Error('Failed to refresh token');
@@ -121,15 +125,15 @@ function sanitizeHeaders(headers: Record<string, unknown> = {}): Record<string, 
 
 // Un-ban detection: a successful AUTHENTICATED round-trip proves the
 // security middleware let us through, so a previously flagged ban is over.
-// Whitelisted public operations (refreshToken, legalDocument) are exempt:
-// they pass the middleware ANONYMOUSLY even for a banned user, so their
-// 200s would otherwise race the 403s of real queries and flip the ban
-// flag on and off — the cause of the "stuck loading, no blocked screen"
-// bug. Only clear on operations that actually carry auth.
-const BAN_EXEMPT_OPS = new Set(['refreshToken', 'legalDocument']);
+// "Authenticated" is read off the request's own headers (this link sits
+// downstream of authLink, so the operation context already carries what
+// authLink attached) — see successProvesUnbanned for why anonymous 200s
+// must never clear: each false clear re-armed the once-per-episode ban
+// navigation and the next 403 yanked the user from EmergencyExit back to
+// BlockedAccount.
 const banClearLink = new ApolloLink((operation, forward) =>
   forward(operation).map((result) => {
-    if (!BAN_EXEMPT_OPS.has(operation.operationName || '')) {
+    if (successProvesUnbanned(operation.getContext().headers)) {
       import('../services/emergencyExit/banSignal').then(async ({ clearBanSignal }) => {
         const { emergencyStore } = await import('../services/emergencyExit/store');
         await clearBanSignal(emergencyStore);
@@ -235,10 +239,12 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       // Route IMMEDIATELY and INDEPENDENTLY of keychain persistence. The
       // old code gated navigate() on markBanSignal() succeeding, so any
       // throw in the keychain write (or its import chain) was swallowed by
-      // .catch and the user never left HomeScreen. navigate is idempotent,
-      // so firing it on every 403 is harmless.
+      // .catch and the user never left HomeScreen. Per-403 firing is fine
+      // ONLY through routeToBlockedAccount: a bare navigate is not
+      // idempotent from EmergencyExit (it pops back to the announcement,
+      // so every background poll's 403 yanked the user out of their exit).
       import('../navigation/RootNavigation')
-        .then(({ navigateWhenReady }) => navigateWhenReady('BlockedAccount'))
+        .then(({ routeToBlockedAccount }) => routeToBlockedAccount())
         .catch((e) => console.warn('[BanSignal] nav import failed', e));
       // Persist the flag best-effort (cold-start routing) — decoupled.
       import('../services/emergencyExit/banSignal')

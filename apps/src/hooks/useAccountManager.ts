@@ -270,6 +270,19 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       // If we have a business profile available, include it too so the menu shows both entries.
       if (converted.length > 0) {
         setAccounts(converted);
+        // Mirror the roster for the emergency exit: the server is the only
+        // enumerator of businesses, and the exit needs the list exactly
+        // when the server can't answer (ban/outage). Fire-and-forget.
+        import('../services/emergencyExit/accountRoster').then(async ({ saveAccountRoster }) => {
+          const { emergencyStore } = await import('../services/emergencyExit/store');
+          await saveAccountRoster(emergencyStore, converted.map(a => ({
+            type: a.type,
+            index: a.index,
+            businessId: a.business?.id,
+            name: a.name,
+            isEmployee: !!a.isEmployee,
+          })));
+        }).catch(() => { });
         try {
           await ensureActiveAccountFrom(converted);
         } catch { }
@@ -312,6 +325,38 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       }
     } catch (error) {
       console.error('Error refreshing accounts from server:', error);
+      // Server unreachable OR banned (403s are network errors, so they
+      // THROW before the placeholder branch above runs). The emergency
+      // exit needs a LOCAL account + address regardless of the server, so
+      // ensure one from the active context — never clobbering an already
+      // hydrated activeAccount on a transient failure.
+      try {
+        const ctx = await authService.getActiveAccountContext();
+        const name = ctx.type === 'business'
+          ? (profileData?.businessProfile?.name || 'Negocio')
+          : (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal');
+        const addr = await authService.getAlgorandAddress({ type: ctx.type, index: ctx.index, businessId: ctx.businessId });
+        const fallback: StoredAccount = {
+          id: ctx.type === 'business' && ctx.businessId ? `business_${ctx.businessId}_${ctx.index}` : `personal_${ctx.index}`,
+          name,
+          type: ctx.type,
+          index: ctx.index,
+          phone: ctx.type === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          category: profileData?.businessProfile?.category,
+          avatar: (name || 'N').charAt(0).toUpperCase(),
+          algorandAddress: addr ?? '',
+          createdAt: new Date().toISOString(),
+          isActive: true,
+          business: ctx.type === 'business' && ctx.businessId ? {
+            id: ctx.businessId,
+            name,
+            category: profileData?.businessProfile?.category,
+            createdAt: new Date().toISOString(),
+          } : undefined,
+        } as StoredAccount;
+        setAccounts(prev => (prev.length > 0 ? prev : [fallback]));
+        setActiveAccount(prev => prev ?? fallback);
+      } catch { }
     }
   }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber, dedupeById, ensureActiveAccountFrom]);
 

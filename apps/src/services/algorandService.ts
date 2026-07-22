@@ -187,7 +187,13 @@ class AlgorandService {
     await this.storeAddress(address);
   }
 
-  async signTransactionBytes(txnBytes: Uint8Array): Promise<Uint8Array> {
+  async signTransactionBytes(
+    txnBytes: Uint8Array,
+    // Emergency-exit sweep signs for NON-active accounts too; wallet
+    // derivation is local (master secret + context), so an explicit
+    // context is all it takes. Default: the active account, as before.
+    ctxOverride?: { type: 'personal' | 'business'; index: number; businessId?: string },
+  ): Promise<Uint8Array> {
     // Sign a transaction using deterministic wallet derived from JWT + account context
     try {
       await this.ensureInitialized();
@@ -216,10 +222,10 @@ class AlgorandService {
       const provider: 'google' | 'apple' = oauthData.provider;
       const sub: string = oauthData.subject;
 
-      // Get active account context (type/index/businessId)
+      // Get account context (type/index/businessId) — override wins
       const { AuthService } = await import('./authService');
       const authService = AuthService.getInstance();
-      const accountContext = await authService.getActiveAccountContext();
+      const accountContext = ctxOverride ?? await authService.getActiveAccountContext();
       const expectedSender = getUnsignedSender();
 
       const restoreWalletForActiveContext = async () => {

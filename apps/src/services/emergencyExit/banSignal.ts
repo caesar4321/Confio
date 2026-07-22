@@ -56,3 +56,12 @@ export const isBanSignaled = async (store: KVStore): Promise<boolean> => {
  * Both must match — bare 403s can come from proxies/WAFs. */
 export const looksLikeBanResponse = (statusCode?: number, bodyText?: string): boolean =>
   statusCode === 403 && !!bodyText && bodyText.toLowerCase().includes('suspended');
+
+/** A success may clear the ban ONLY if its request carried auth — the sole
+ * proof the security middleware evaluated this user and let them through.
+ * Anonymous operations (RefreshToken, GetLegalDocument, …) pass the
+ * middleware even while banned, so their 200s prove nothing. Decided from
+ * the request headers, never from operation names — a name list rotted
+ * silently (Apollo's operationName is the definition name, not the field). */
+export const successProvesUnbanned = (headers?: Record<string, unknown>): boolean =>
+  !!(headers && (headers.Authorization || headers.authorization));

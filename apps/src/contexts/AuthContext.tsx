@@ -743,6 +743,24 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
     try { signalAuthReady(); } catch { }
     prefetchUserAccounts(`post-${source}`);
+    // Banned users get the announcement, not Home — same stomp guard as the
+    // cold-start path in checkAuthState (isAuthenticated stays true so
+    // account hydration still runs; only the visible route differs).
+    try {
+      const { isBanSignaled } = await import('../services/emergencyExit/banSignal');
+      const { emergencyStore } = await import('../services/emergencyExit/store');
+      if (await isBanSignaled(emergencyStore)) {
+        setTimeout(() => {
+          try {
+            navigationRef.current?.reset({
+              index: 0,
+              routes: [{ name: 'Main', params: { screen: 'BlockedAccount' } }],
+            });
+          } catch { }
+        }, 0);
+        return;
+      }
+    } catch { }
     navigateToScreen('Main');
   };
 
@@ -1021,6 +1039,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             lastBiometricSuccessRef.current = Date.now();
 
             let requiresBackupCompletion = false;
+            let banned403 = false;
             try {
               const meStart = Date.now();
               const { data } = await apolloClient.query({
@@ -1038,6 +1057,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               } : null);
               requiresBackupCompletion = !!me?.requiresBackupCompletion;
             } catch (profileErr) {
+              // A 403 here is the security middleware's ban/lockout — the
+              // error link marks the flag in parallel, but that write races
+              // this flow, so read the status directly.
+              banned403 = (profileErr as any)?.networkError?.statusCode === 403;
             }
 
             if (requiresBackupCompletion) {
@@ -1045,6 +1068,41 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               resetAuthStack('BackupCompletion');
               setIsLoading(false);
               return;
+            }
+
+            // Banned users never reach Home: the Main reset below would
+            // stomp the BlockedAccount route the 403 handler navigated to,
+            // stranding them on a HomeScreen whose every query 403s
+            // (infinite loading). Instead reset Main to ONLY the
+            // announcement. isAuthenticated stays TRUE — a banned user is
+            // identified (that's how the middleware bans them), and account
+            // hydration (useAccountManager) is gated on it; without it the
+            // exit screen has no account/address and renders no actions.
+            {
+              let banSignaled = false;
+              if (!banned403) {
+                try {
+                  const { isBanSignaled } = await import('../services/emergencyExit/banSignal');
+                  const { emergencyStore } = await import('../services/emergencyExit/store');
+                  banSignaled = await isBanSignaled(emergencyStore);
+                } catch { }
+              }
+              if (banned403 || banSignaled) {
+                setIsAuthenticated(true);
+                // Token state is final (every alignment call 403s) — unblock
+                // waitForAuthReady dependents now.
+                try { signalAuthReady(); } catch { }
+                setIsLoading(false);
+                setTimeout(() => {
+                  try {
+                    navigationRef.current?.reset({
+                      index: 0,
+                      routes: [{ name: 'Main', params: { screen: 'BlockedAccount' } }],
+                    });
+                  } catch { }
+                }, 0);
+                return;
+              }
             }
 
             // Mark authenticated and go to Main immediately to avoid splash hanging

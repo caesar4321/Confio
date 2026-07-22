@@ -9,18 +9,21 @@
 //
 // UI is a STAGED flow, not a wall of forms: the screen's job is calm in
 // the worst moment (the outage state is the narrative's proof moment).
-// Stage 1 status/wait → stage 2 destination+checklist → stage 3 progress.
-// Gas top-up cards appear only when a chain is actually short.
+// Stage 1 is the wait/status surface; once eligible, a 4-step WIZARD
+// (one decision per screen, internal step state — never separate routes:
+// this screen lives in BOTH stacks and shares selection/dest/check state):
+// Paso 1 cuenta+comisiones (with a beginner intro to gas/ALGO/BNB) →
+// Paso 2 destino → Paso 3 checklist → Paso 4 resumen+ejecución.
 //
 // Execution is Direct mode always (user gas, public RPCs): it works in
 // every server state. A fee-free Sponsored mode for the explicit-ban case
 // layers on when the backend ships a ban signal. The exit moves USER
 // ASSETS ONLY — no close-outs, no native sweeps (engine invariants).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, Alert, StatusBar,
+  ActivityIndicator, Alert, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -28,13 +31,16 @@ import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { colors } from '../config/theme';
-import { API_URL } from '../config/env';
+import { API_URL, CONFIO_ASSET_ID } from '../config/env';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { AddressScannerModal } from '../components/AddressScannerModal';
 import { evmAccountKey, getEvmAddressForDisplay, getActiveEvmWallet } from '../services/secureDeterministicWallet';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { emergencyStore } from '../services/emergencyExit/store';
+import {
+  RosterAccount, rosterAccountKey, getAccountRoster, exitableAccounts,
+} from '../services/emergencyExit/accountRoster';
 import {
   evaluateEmergencyState, getExitEligibility, requestExitCooloff, cancelExitCooloff,
   devElapseCooloff, ReachabilityResult, ExitEligibility, NORMAL_COOLOFF_SECONDS,
@@ -51,6 +57,14 @@ import {
 const ALGO_ADDR_RE = /^[A-Z2-7]{58}$/;
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
+// Wizard step headers — the ONE decision each screen asks for.
+const WIZARD_STEPS = [
+  { title: 'Tu cuenta y las comisiones', sub: 'Elige qué cuenta retiras y revisa que cada red tenga para su comisión.' },
+  { title: '¿A dónde va tu dinero?', sub: 'Una billetera que sea tuya, en la red correcta.' },
+  { title: 'Confirma que estás a salvo', sub: 'Cuatro confirmaciones. Tómate tu tiempo.' },
+  { title: 'Revisa y mueve tu dinero', sub: 'Último paso — cada envío se firma con tu biometría.' },
+];
+
 const CHECKLIST = [
   'Estoy solo/a. Nadie me está mirando ni guiándome.',
   'No estoy en una llamada ni compartiendo pantalla.',
@@ -59,15 +73,21 @@ const CHECKLIST = [
 ];
 
 // Human names for engine step ids — raw ids are for support, not users.
+// The exit sweeps EVERY funded ASA (the engine iterates account.assets),
+// so name the known ones; unknown ids keep the raw fallback.
+const ASSET_NAMES: Record<number, string> = {
+  [CUSD_ASSET_ID]: 'cUSD',
+  [USDC_ASSET_ID]: 'USDC',
+  [CONFIO_ASSET_ID]: 'CONFIO',
+};
+const assetName = (id: number): string => ASSET_NAMES[id] ?? `activo ${id}`;
 const STEP_NAMES: Record<string, string> = {
   burnCusd: 'Canjear cUSD por USDC',
-  [`assetTransfer_${CUSD_ASSET_ID}`]: 'Enviar cUSD',
-  [`assetTransfer_${USDC_ASSET_ID}`]: 'Enviar USDC',
   redeemCusdPlus: 'Canjear tu ahorro por USDT',
   transferUsdt: 'Enviar USDT',
 };
 const stepName = (id: string): string =>
-  STEP_NAMES[id] ?? (id.startsWith('assetTransfer_') ? `Enviar activo ${id.split('_')[1]}` : id);
+  STEP_NAMES[id] ?? (id.startsWith('assetTransfer_') ? `Enviar ${assetName(Number(id.split('_')[1]))}` : id);
 
 const fmtRemaining = (sec: number): string => {
   const h = Math.floor(sec / 3600);
@@ -75,14 +95,21 @@ const fmtRemaining = (sec: number): string => {
   return h > 0 ? `${h} h ${m} min` : `${m} min`;
 };
 
+const truncAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a);
+
 type EmState = (ReachabilityResult & { chainNowSec: number | null }) | null;
 
 export const EmergencyExitScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  // Account context comes from the KEYCHAIN (AuthService), never from
-  // server-hydrated accounts: a banned user's GetUserAccounts 403s, so
-  // anything depending on activeAccount would silently never render —
-  // exactly what hid the gas card during the first ban drill.
+  // Account context comes from the KEYCHAIN (AuthService) and the local
+  // roster mirror (accountRoster), never from server-hydrated accounts: a
+  // banned user's GetUserAccounts 403s, so anything depending on
+  // activeAccount would silently never render — exactly what hid the gas
+  // card during the first ban drill. The roster lets the user sweep EVERY
+  // owned account (personal + businesses), one at a time; V2 derivation
+  // makes each context's keys fully local.
+  const [roster, setRoster] = useState<RosterAccount[]>([]);
+  const [selCtx, setSelCtx] = useState<RosterAccount | null>(null);
   const [accountKey, setAccountKey] = useState('');
   const [algorandAddress, setAlgorandAddress] = useState('');
 
@@ -94,10 +121,24 @@ export const EmergencyExitScreen: React.FC = () => {
   // Gas shortfalls, null = still reading. Cards render only when short.
   const [algoFeeShortMicro, setAlgoFeeShortMicro] = useState<bigint | null>(null);
   const [bscGasShortWei, setBscGasShortWei] = useState<bigint | null>(null);
+  // What the SOURCE account actually holds (funded ASA ids) — drives the
+  // proactive destination opt-in check on the destino step.
+  const [srcFundedAssetIds, setSrcFundedAssetIds] = useState<number[]>([]);
+  // Destination opt-in preflight: which required ASAs the dest is missing.
+  type DestOptIns =
+    | { kind: 'checking' }
+    | { kind: 'ok' }
+    | { kind: 'missing'; assets: number[] }
+    | { kind: 'unfunded' }   // address not on chain yet (no ALGO)
+    | { kind: 'unknown' };   // RPC unreachable — execution still guards
+  const [destOptIns, setDestOptIns] = useState<DestOptIns | null>(null);
 
   const [algDest, setAlgDest] = useState('');
   const [bscDest, setBscDest] = useState('');
   const [scanTarget, setScanTarget] = useState<'algo' | 'bsc' | null>(null);
+  // ONE QR at a time, on demand: two codes side by side scan ambiguously
+  // (the camera grabs whichever decodes first — wrong-chain top-ups).
+  const [qrModal, setQrModal] = useState<{ chain: string; address: string } | null>(null);
   const [checks, setChecks] = useState<boolean[]>(CHECKLIST.map(() => false));
 
   const [algRunning, setAlgRunning] = useState(false);
@@ -106,6 +147,15 @@ export const EmergencyExitScreen: React.FC = () => {
   const [bscResult, setBscResult] = useState<BscExitResult | null>(null);
   const [algError, setAlgError] = useState<string | null>(null);
   const [bscError, setBscError] = useState<string | null>(null);
+
+  // Wizard step within the eligible flow (0..3). Internal state, not
+  // routes — one decision per screen without any navigation plumbing.
+  const [wStep, setWStep] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const goToStep = (s: number) => {
+    setWStep(s);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
 
   const evaluate = useCallback(async () => {
     setEvaluating(true);
@@ -127,44 +177,83 @@ export const EmergencyExitScreen: React.FC = () => {
 
   useEffect(() => { evaluate(); }, [evaluate]);
 
-  // Resolve addresses from the keychain, then read live gas status from
-  // public RPCs (both must work exactly when Confío doesn't).
+  // Load the exitable-account roster (local mirror) and select the active
+  // context — or personal, when the active context is an employee business
+  // this device can't exit.
   useEffect(() => {
     (async () => {
       try {
         const { AuthService } = await import('../services/authService');
-        const auth = AuthService.getInstance();
-        const ctx = await auth.getActiveAccountContext();
-        setAccountKey(`${ctx.type ?? 'personal'}_${ctx.businessId ?? ''}_${ctx.index ?? 0}`);
+        const ctx = await AuthService.getInstance().getActiveAccountContext();
+        const list = exitableAccounts(await getAccountRoster(emergencyStore));
+        setRoster(list);
+        const activeKey = rosterAccountKey({ type: ctx.type ?? 'personal', businessId: ctx.businessId, index: ctx.index ?? 0 });
+        setSelCtx(list.find((a) => rosterAccountKey(a) === activeKey) ?? list[0]);
+      } catch (e) {
+        console.warn('[EmergencyExit] roster load failed', e);
+        setSelCtx({ type: 'personal', index: 0, name: 'Personal' });
+      }
+    })();
+  }, []);
 
-        const algoAddr = await auth.getAlgorandAddress().catch(() => '');
+  // Resolve the SELECTED account's addresses (local V2 derivation, with the
+  // per-account stored addresses as legacy fallback), then read live gas
+  // status from public RPCs (all must work exactly when Confío doesn't).
+  useEffect(() => {
+    if (!selCtx) return;
+    let stale = false;
+    (async () => {
+      setAccountKey(rosterAccountKey(selCtx));
+      setAlgorandAddress('');
+      setEvmAddress(null);
+      setAlgoFeeShortMicro(null);
+      setBscGasShortWei(null);
+      setSrcFundedAssetIds([]);
+      setDestOptIns(null);
+      // Results/errors belong to the previously selected account.
+      setAlgResult(null); setBscResult(null); setAlgError(null); setBscError(null);
+      try {
+        const ctx = { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } as const;
+        const { deriveAddressesForContext } = await import('../services/secureDeterministicWallet');
+        const derived = await deriveAddressesForContext(ctx);
+
+        let algoAddr = derived.algorand;
+        if (!algoAddr) {
+          const { AuthService } = await import('../services/authService');
+          algoAddr = await AuthService.getInstance().getAlgorandAddress(ctx as any).catch(() => '');
+        }
+        if (stale) return;
         if (algoAddr) {
           setAlgorandAddress(algoAddr);
           fetchAlgoAccount(algoAddr)
             .then((a) => {
+              const fundedAssets = a.assets.filter((x) => x.amountMicro > 0n);
+              if (!stale) setSrcFundedAssetIds(fundedAssets.map((x) => x.id));
               // Fee budget: one min-fee per funded asset + 4× for the burn group.
-              const funded = a.assets.filter((x) => x.amountMicro > 0n).length;
-              const budget = BigInt(funded + 5) * 1000n;
+              const budget = BigInt(fundedAssets.length + 5) * 1000n;
               const spendable = a.amountMicro - a.minBalanceMicro;
-              setAlgoFeeShortMicro(spendable >= budget ? 0n : budget - spendable);
+              if (!stale) setAlgoFeeShortMicro(spendable >= budget ? 0n : budget - spendable);
             })
-            .catch(() => setAlgoFeeShortMicro(null));
+            .catch(() => { if (!stale) setAlgoFeeShortMicro(null); });
         }
 
-        const key = evmAccountKey({
-          accountType: ctx.type === 'business' ? 'business' : 'personal',
-          accountIndex: ctx.index ?? 0,
-          businessId: ctx.businessId,
-        });
-        const evmAddr = await getEvmAddressForDisplay(key);
+        let evmAddr = derived.evm;
+        if (!evmAddr) {
+          evmAddr = await getEvmAddressForDisplay(evmAccountKey({
+            accountType: selCtx.type,
+            accountIndex: selCtx.index,
+            businessId: selCtx.businessId,
+          }));
+        }
+        if (stale) return;
         setEvmAddress(evmAddr);
         if (evmAddr) {
           const restore = installEmergencyBscTransport();
           try {
             const plan = await planBscExit(evmAddr, BUNDLED_VAULT_ADDRESS);
-            if (!plan.steps.length) { setBscGasShortWei(0n); return; }
+            if (!plan.steps.length) { if (!stale) setBscGasShortWei(0n); return; }
             const need = await estimateBscExitGasWei(plan);
-            setBscGasShortWei(plan.bnbWei >= need ? 0n : need - plan.bnbWei);
+            if (!stale) setBscGasShortWei(plan.bnbWei >= need ? 0n : need - plan.bnbWei);
           } catch { /* status shows as unverified; execution re-checks anyway */ } finally {
             restore();
           }
@@ -173,15 +262,57 @@ export const EmergencyExitScreen: React.FC = () => {
         console.warn('[EmergencyExit] address resolution failed', e);
       }
     })();
-  }, []);
+    return () => { stale = true; };
+  }, [selCtx]);
 
   const allChecked = checks.every(Boolean);
   const algDestValid = ALGO_ADDR_RE.test(algDest.trim()) && algDest.trim() !== algorandAddress;
+
+  // Proactive destination opt-in preflight (public algod, no server): the
+  // moment a valid Algorand destination is typed, tell the user which of
+  // THEIR assets that wallet doesn't accept yet — before execution, not
+  // after. Execution keeps its own guard (never sends unaccepted assets).
+  useEffect(() => {
+    const dest = algDest.trim();
+    if (!ALGO_ADDR_RE.test(dest) || dest === algorandAddress) {
+      setDestOptIns(null);
+      return;
+    }
+    let stale = false;
+    setDestOptIns({ kind: 'checking' });
+    const t = setTimeout(async () => {
+      try {
+        const destAcct = await fetchAlgoAccount(dest);
+        if (stale) return;
+        const destOpted = new Set(destAcct.assets.map((a) => a.id));
+        // Required: everything the source holds; plus USDC when cUSD is
+        // funded (the redeem-first path outputs USDC to send onward).
+        const required = new Set(srcFundedAssetIds);
+        if (required.has(CUSD_ASSET_ID)) required.add(USDC_ASSET_ID);
+        const missing = [...required].filter((id) => !destOpted.has(id));
+        setDestOptIns(missing.length ? { kind: 'missing', assets: missing } : { kind: 'ok' });
+      } catch (e: any) {
+        if (stale) return;
+        // algod embeds the HTTP status in the error message: 404 ⇒ the
+        // address has never been funded (not on chain yet).
+        setDestOptIns(String(e?.message ?? '').includes('http 404')
+          ? { kind: 'unfunded' }
+          : { kind: 'unknown' });
+      }
+    }, 600);
+    return () => { stale = true; clearTimeout(t); };
+  }, [algDest, algorandAddress, srcFundedAssetIds]);
   const bscDestValid =
     EVM_ADDR_RE.test(bscDest.trim()) &&
     bscDest.trim().toLowerCase() !== (evmAddress ?? '').toLowerCase();
   const eligible = !!elig?.eligible;
   const offline = es?.state === 'offline';
+  // Destination gate: at least one chain filled, and nothing invalid left
+  // behind (a half-typed address must block, not silently be skipped).
+  const destsOk =
+    (algDestValid || bscDestValid) &&
+    (!algDest.trim() || algDestValid) &&
+    (!bscDest.trim() || bscDestValid);
 
   const startCooloff = async () => {
     const ok = await biometricAuthService.authenticate(
@@ -205,7 +336,10 @@ export const EmergencyExitScreen: React.FC = () => {
       const result = await executeAlgorandExit({
         address: algorandAddress,
         dest: algDest.trim(),
-        sign: (b) => algorandService.signTransactionBytes(b),
+        sign: (b) => algorandService.signTransactionBytes(
+          b,
+          selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined,
+        ),
         accountKey,
         store: emergencyStore,
       });
@@ -228,7 +362,9 @@ export const EmergencyExitScreen: React.FC = () => {
     if (!ok) return;
     setBscRunning(true); setBscError(null);
     try {
-      const wallet = await getActiveEvmWallet();
+      const wallet = await getActiveEvmWallet(
+        selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined,
+      );
       const result = await executeBscExit({
         wallet,
         dest: bscDest.trim(),
@@ -357,6 +493,65 @@ export const EmergencyExitScreen: React.FC = () => {
     return null;
   };
 
+  // Destination opt-in preflight UI (Algorand only — EVM needs no opt-ins).
+  const renderDestOptIns = () => {
+    if (!destOptIns) return null;
+    if (destOptIns.kind === 'checking') {
+      return (
+        <View style={styles.chainWarnRow}>
+          <ActivityIndicator size="small" color={colors.text.secondary} />
+          <Text style={[styles.chainWarnText, { color: colors.text.secondary }]}>
+            Verificando qué activos acepta esta billetera…
+          </Text>
+        </View>
+      );
+    }
+    if (destOptIns.kind === 'ok') {
+      return (
+        <View style={styles.chainWarnRow}>
+          <Icon name="check-circle" size={13} color={colors.primaryDark} />
+          <Text style={[styles.chainWarnText, { color: colors.primaryDark }]}>
+            Esta billetera acepta todos tus activos.
+          </Text>
+        </View>
+      );
+    }
+    if (destOptIns.kind === 'missing') {
+      return (
+        <View style={styles.scamBox}>
+          <Icon name="alert-triangle" size={15} color={colors.warning.text} />
+          <Text style={styles.scamBoxText}>
+            Esta billetera aún no acepta: {destOptIns.assets.map(assetName).join(', ')}.
+            {'\n'}En Pera: toca «+» en Activos, busca cada uno y actívalo
+            (opt-in). Lo que no acepte quedará bloqueado — no se pierde,
+            puedes reintentar después de activarlo.
+          </Text>
+        </View>
+      );
+    }
+    if (destOptIns.kind === 'unfunded') {
+      return (
+        <View style={styles.scamBox}>
+          <Icon name="alert-triangle" size={15} color={colors.warning.text} />
+          <Text style={styles.scamBoxText}>
+            Esta dirección aún no está activada en Algorand (no tiene ALGO).
+            Deposita un poco de ALGO allí y activa (opt-in) tus activos antes
+            de continuar.
+          </Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.chainWarnRow}>
+        <Icon name="help-circle" size={13} color={colors.text.secondary} />
+        <Text style={[styles.chainWarnText, { color: colors.text.secondary }]}>
+          No se pudo verificar esta billetera — si no acepta algún activo, la
+          salida lo bloqueará por sí sola (nada se pierde).
+        </Text>
+      </View>
+    );
+  };
+
   const gasStatusLine = (short: bigint | null, fmt: (v: bigint) => string) => {
     if (short === null) return { icon: 'help-circle', color: colors.text.secondary, text: 'No se pudo verificar — si un envío falla por comisiones, deposita un poco aquí.' };
     if (short === 0n) return { icon: 'check-circle', color: colors.primaryDark, text: 'Comisiones listas' };
@@ -366,7 +561,37 @@ export const EmergencyExitScreen: React.FC = () => {
   // ALWAYS visible: these addresses are the user's lifeline in Direct
   // mode. Hiding them when balances look sufficient proved too clever —
   // and under a ban the reads can fail entirely, which must not make the
-  // addresses vanish.
+  // addresses vanish. But QRs render ONE at a time, in a modal: two codes
+  // side by side scan ambiguously, and a wrong-chain top-up is lost money.
+  const renderChainGasRow = (
+    chain: string,
+    address: string,
+    status: { icon: string; color: string; text: string },
+  ) => (
+    <View style={styles.gasChainBlock}>
+      {/* Chain name and status stacked — side by side they fight for width
+          and the status shatters into a one-word-per-line column. */}
+      <Text style={styles.gasChain}>{chain}</Text>
+      <View style={styles.gasStatusRow}>
+        <Icon name={status.icon} size={14} color={status.color} style={{ marginTop: 2 }} />
+        <Text style={[styles.gasAmount, { color: status.color }]}>{status.text}</Text>
+      </View>
+      <View style={styles.addrRow}>
+        <Text style={[styles.addrText, { flex: 1, fontSize: 12 }]} numberOfLines={1}>
+          {truncAddr(address)}
+        </Text>
+        <TouchableOpacity style={styles.copyBtn} onPress={() => Clipboard.setString(address)}>
+          <Icon name="copy" size={12} color={colors.primaryDark} />
+          <Text style={styles.copyBtnText}>Copiar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.copyBtn} onPress={() => setQrModal({ chain, address })}>
+          <Icon name="grid" size={12} color={colors.primaryDark} />
+          <Text style={styles.copyBtnText}>QR</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   const renderGasCards = () => {
     const algo = gasStatusLine(algoFeeShortMicro, (v) => `${(Number(v) / 1e6).toFixed(3)} ALGO`);
     const bsc = gasStatusLine(bscGasShortWei, (v) => `${(Number(v) / 1e18).toFixed(5)} BNB`);
@@ -374,49 +599,17 @@ export const EmergencyExitScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Comisiones de red</Text>
         <Text style={styles.bodyText}>
-          Sin los servidores de Confío, cada red cobra su pequeña comisión
-          desde tu propia dirección. Estas son TUS direcciones:
+          Cada red de blockchain cobra una pequeña comisión por enviar — como
+          una estampilla postal. Y cada red la cobra en su propia moneda:
+          ALGO en la red Algorand, BNB en BNB Smart Chain.
         </Text>
-        {!!algorandAddress && (
-          <View style={styles.gasRow}>
-            <QRCode value={algorandAddress} size={92} />
-            <View style={styles.gasInfo}>
-              <Text style={styles.gasChain}>Red Algorand (ALGO)</Text>
-              <View style={styles.gasStatusRow}>
-                <Icon name={algo.icon} size={13} color={algo.color} />
-                <Text style={[styles.gasAmount, { color: algo.color }]}>{algo.text}</Text>
-              </View>
-              <Text style={styles.addrText} selectable>{algorandAddress}</Text>
-              <TouchableOpacity
-                style={styles.copyBtn}
-                onPress={() => Clipboard.setString(algorandAddress)}
-              >
-                <Icon name="copy" size={12} color={colors.primaryDark} />
-                <Text style={styles.copyBtnText}>Copiar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-        {!!evmAddress && (
-          <View style={styles.gasRow}>
-            <QRCode value={evmAddress} size={92} />
-            <View style={styles.gasInfo}>
-              <Text style={styles.gasChain}>Red BNB Smart Chain (BNB)</Text>
-              <View style={styles.gasStatusRow}>
-                <Icon name={bsc.icon} size={13} color={bsc.color} />
-                <Text style={[styles.gasAmount, { color: bsc.color }]}>{bsc.text}</Text>
-              </View>
-              <Text style={styles.addrText} selectable>{evmAddress}</Text>
-              <TouchableOpacity
-                style={styles.copyBtn}
-                onPress={() => Clipboard.setString(evmAddress)}
-              >
-                <Icon name="copy" size={12} color={colors.primaryDark} />
-                <Text style={styles.copyBtnText}>Copiar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+        <Text style={styles.bodyText}>
+          Normalmente Confío paga esas comisiones por ti. Sin nuestros
+          servidores, salen de TUS direcciones. Si a una red le falta,
+          deposita esa moneda aquí:
+        </Text>
+        {!!algorandAddress && renderChainGasRow('Red Algorand (ALGO)', algorandAddress, algo)}
+        {!!evmAddress && renderChainGasRow('Red BNB Smart Chain (BNB)', evmAddress, bsc)}
         {!algorandAddress && !evmAddress && (
           <Text style={styles.bodyText}>Cargando tus direcciones…</Text>
         )}
@@ -428,6 +621,7 @@ export const EmergencyExitScreen: React.FC = () => {
     result: { txids: Record<string, string>; degraded?: string[] } | null,
     error: string | null,
     running: boolean,
+    explorerUrl: (tx: string) => string,
   ) => {
     if (!result && !error && !running) return null;
     return (
@@ -435,8 +629,8 @@ export const EmergencyExitScreen: React.FC = () => {
         {result && Object.entries(result.txids).map(([step, tx]) => {
           const skipped = tx.startsWith('skipped');
           const deg = result.degraded?.includes(step);
-          return (
-            <View key={step} style={styles.progressRow}>
+          const row = (
+            <>
               <Icon
                 name={skipped ? 'minus-circle' : deg ? 'alert-circle' : 'check-circle'}
                 size={15}
@@ -445,7 +639,21 @@ export const EmergencyExitScreen: React.FC = () => {
               <Text style={[styles.progressText, skipped && styles.progressSkipped]}>
                 {stepName(step)}{skipped ? ' — sin saldo' : deg ? ' — enviado sin canjear' : ''}
               </Text>
-            </View>
+              {!skipped && <Icon name="external-link" size={14} color={colors.primaryDark} />}
+            </>
+          );
+          // Every real send is verifiable on a public explorer — the whole
+          // point of the exit is that the user doesn't have to trust us.
+          return skipped ? (
+            <View key={step} style={styles.progressRow}>{row}</View>
+          ) : (
+            <TouchableOpacity
+              key={step}
+              style={styles.progressRow}
+              onPress={() => Linking.openURL(explorerUrl(tx)).catch(() => {})}
+            >
+              {row}
+            </TouchableOpacity>
           );
         })}
         {running && (
@@ -474,7 +682,14 @@ export const EmergencyExitScreen: React.FC = () => {
           <BrandFieldBackground id="emergencyField" ringCy="30%" />
           <View style={styles.headerInner}>
             <View style={styles.headerTopRow}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
+              <TouchableOpacity
+                onPress={() => {
+                  // Inside the wizard, ← walks the steps before leaving.
+                  if (eligible && wStep > 0) goToStep(wStep - 1);
+                  else navigation.goBack();
+                }}
+                style={styles.headerIconBtn}
+              >
                 <Icon name="arrow-left" size={24} color={colors.white} />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Salida de emergencia</Text>
@@ -496,7 +711,16 @@ export const EmergencyExitScreen: React.FC = () => {
         </View>
       </SafeAreaView>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* The permanent promise, verbatim in every state */}
         <View style={styles.promiseRow}>
           <Icon name="anchor" size={14} color={colors.primaryDark} />
@@ -504,6 +728,40 @@ export const EmergencyExitScreen: React.FC = () => {
             Confío no puede aprobar, rechazar ni bloquear esta operación.
           </Text>
         </View>
+
+        {/* Account sweep: one account at a time, every OWNED account listed
+            (local roster mirror — works without the server). Employee
+            businesses are excluded: their keys are the owner's. Shown while
+            waiting (cooloffs are per account) and on wizard Paso 1. */}
+        {roster.length > 1 && (stage === 1 || wStep === 0) && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>¿Qué cuenta retiras?</Text>
+            <Text style={styles.bodyText}>
+              La salida mueve una cuenta a la vez — cada cuenta tiene sus
+              propias direcciones. Repite el proceso para cada una.
+            </Text>
+            <View style={styles.acctChipsRow}>
+              {roster.map((a) => {
+                const k = rosterAccountKey(a);
+                const sel = selCtx ? rosterAccountKey(selCtx) === k : false;
+                return (
+                  <TouchableOpacity
+                    key={k}
+                    style={[styles.acctChip, sel && styles.acctChipSel]}
+                    onPress={() => setSelCtx(a)}
+                  >
+                    <Icon
+                      name={a.type === 'personal' ? 'user' : 'briefcase'}
+                      size={13}
+                      color={sel ? colors.white : colors.primaryDark}
+                    />
+                    <Text style={[styles.acctChipText, sel && styles.acctChipTextSel]}>{a.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {stage === 1 && (
           <>
@@ -527,13 +785,40 @@ export const EmergencyExitScreen: React.FC = () => {
 
         {stage === 2 && (
           <>
-            {renderGasCards()}
-
-            <View style={styles.card}>
-              <View style={styles.stepHeader}>
-                <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>1</Text></View>
-                <Text style={styles.cardTitle}>¿A dónde va tu dinero?</Text>
+            {/* Wizard hero: segmented progress + the step's single question. */}
+            <View style={styles.stepHero}>
+              <View style={styles.progressTrack}>
+                {[0, 1, 2, 3].map((i) => (
+                  <View key={i} style={[styles.progressSeg, i <= wStep && styles.progressSegDone]} />
+                ))}
               </View>
+              <Text style={styles.stepKicker}>{`PASO ${wStep + 1} DE 4`}</Text>
+              <Text style={styles.stepTitle}>{WIZARD_STEPS[wStep].title}</Text>
+              <Text style={styles.stepSub}>{WIZARD_STEPS[wStep].sub}</Text>
+            </View>
+
+            {/* ── Paso 1: cuenta + comisiones (beginner-friendly) ───────── */}
+            {wStep === 0 && (
+              <>
+                {renderGasCards()}
+                <TouchableOpacity
+                  style={[styles.primaryBtn, !algorandAddress && !evmAddress && styles.execBtnDisabled]}
+                  disabled={!algorandAddress && !evmAddress}
+                  onPress={() => goToStep(1)}
+                >
+                  <Text style={styles.primaryBtnText}>Continuar</Text>
+                  <Icon name="arrow-right" size={16} color={colors.white} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* ── Paso 2: destino ───────────────────────────────────────── */}
+            {wStep === 1 && (
+              <>
+            <View style={styles.card}>
+              <Text style={styles.bodyText}>
+                Puedes llenar una sola red y volver luego por la otra.
+              </Text>
               <Text style={styles.inputLabel}>Billetera Algorand (Pera)</Text>
               <View style={styles.inputRow}>
                 <TextInput
@@ -559,6 +844,7 @@ export const EmergencyExitScreen: React.FC = () => {
                   <Icon name="camera" size={15} color={colors.primaryDark} />
                 </TouchableOpacity>
               </View>
+              {renderDestOptIns()}
               <Text style={styles.inputLabel}>Billetera BNB Smart Chain (MetaMask)</Text>
               <View style={styles.inputRow}>
                 <TextInput
@@ -584,6 +870,14 @@ export const EmergencyExitScreen: React.FC = () => {
                   <Icon name="camera" size={15} color={colors.primaryDark} />
                 </TouchableOpacity>
               </View>
+              {bscDestValid && (
+                <View style={styles.chainWarnRow}>
+                  <Icon name="check-circle" size={13} color={colors.primaryDark} />
+                  <Text style={[styles.chainWarnText, { color: colors.primaryDark }]}>
+                    En BNB Smart Chain no hay que activar nada — el USDT llega directo.
+                  </Text>
+                </View>
+              )}
               <View style={styles.chainWarnRow}>
                 <Icon name="alert-triangle" size={13} color={colors.warning.text} />
                 <Text style={styles.chainWarnText}>
@@ -592,19 +886,28 @@ export const EmergencyExitScreen: React.FC = () => {
                 </Text>
               </View>
             </View>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, !destsOk && styles.execBtnDisabled]}
+                  disabled={!destsOk}
+                  onPress={() => goToStep(2)}
+                >
+                  <Text style={styles.primaryBtnText}>Continuar</Text>
+                  <Icon name="arrow-right" size={16} color={colors.white} />
+                </TouchableOpacity>
+              </>
+            )}
 
+            {/* ── Paso 3: confirmación anti-estafa ──────────────────────── */}
+            {wStep === 2 && (
+              <>
             <View style={styles.card}>
-              <View style={styles.stepHeader}>
-                <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>2</Text></View>
-                <Text style={styles.cardTitle}>Confirma que estás a salvo</Text>
-              </View>
               {CHECKLIST.map((item, i) => (
                 <TouchableOpacity
                   key={i} style={styles.checkRow}
                   onPress={() => setChecks((c) => c.map((v, j) => (j === i ? !v : v)))}
                 >
                   <Icon
-                    name={checks[i] ? 'check-square' : 'square'} size={20}
+                    name={checks[i] ? 'check-square' : 'square'} size={22}
                     color={checks[i] ? colors.primaryDark : colors.text.light}
                   />
                   <Text style={styles.checkText}>{item}</Text>
@@ -618,13 +921,41 @@ export const EmergencyExitScreen: React.FC = () => {
                 </Text>
               </View>
             </View>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, !allChecked && styles.execBtnDisabled]}
+                  disabled={!allChecked}
+                  onPress={() => goToStep(3)}
+                >
+                  <Text style={styles.primaryBtnText}>Continuar</Text>
+                  <Icon name="arrow-right" size={16} color={colors.white} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* ── Paso 4: resumen + ejecución ───────────────────────────── */}
+            {wStep === 3 && (
+              <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Resumen</Text>
+              <View style={styles.summaryRow}>
+                <Icon name={selCtx?.type === 'personal' ? 'user' : 'briefcase'} size={14} color={colors.text.secondary} />
+                <Text style={styles.summaryText}>Cuenta: {selCtx?.name ?? 'Personal'}</Text>
+              </View>
+              {algDestValid && (
+                <View style={styles.summaryRow}>
+                  <Icon name="send" size={14} color={colors.text.secondary} />
+                  <Text style={styles.summaryText}>Dólares (Algorand) → {truncAddr(algDest.trim())}</Text>
+                </View>
+              )}
+              {bscDestValid && (
+                <View style={styles.summaryRow}>
+                  <Icon name="send" size={14} color={colors.text.secondary} />
+                  <Text style={styles.summaryText}>Ahorro (BNB Smart Chain) → {truncAddr(bscDest.trim())}</Text>
+                </View>
+              )}
+            </View>
 
             <View style={styles.card}>
-              <View style={styles.stepHeader}>
-                <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>3</Text></View>
-                <Text style={styles.cardTitle}>Mover mi dinero</Text>
-              </View>
-
               <TouchableOpacity
                 style={[styles.execBtn, (!eligible || !allChecked || !algDestValid || !algorandAddress || algRunning || offline) && styles.execBtnDisabled]}
                 disabled={!eligible || !allChecked || !algDestValid || !algorandAddress || algRunning || offline}
@@ -637,13 +968,15 @@ export const EmergencyExitScreen: React.FC = () => {
                 <View style={styles.chainWarnRow}>
                   <Icon name="pause-circle" size={13} color={colors.warning.text} />
                   <Text style={styles.chainWarnText}>
-                    Tu billetera de destino aún no acepta los activos{' '}
-                    {algResult.destMissingOptIns.join(', ')}. Actívalos allí
-                    (opt-in) y reintenta — nunca enviaremos a donde no los acepten.
+                    Tu billetera de destino aún no acepta{' '}
+                    {algResult.destMissingOptIns.map(assetName).join(', ')}.
+                    Actívalos allí (opt-in) y reintenta — nunca enviaremos a
+                    donde no los acepten.
                   </Text>
                 </View>
               )}
-              {renderProgress(algResult, algError, algRunning)}
+              {renderProgress(algResult, algError, algRunning,
+                (tx) => `https://explorer.perawallet.app/tx/${tx}/`)}
 
               <TouchableOpacity
                 style={[styles.execBtn, (!eligible || !allChecked || !bscDestValid || bscRunning || offline) && styles.execBtnDisabled]}
@@ -653,8 +986,16 @@ export const EmergencyExitScreen: React.FC = () => {
                 <Icon name="send" size={16} color={colors.white} />
                 <Text style={styles.execBtnText}>Mi ahorro (BNB Smart Chain)</Text>
               </TouchableOpacity>
-              {renderProgress(bscResult, bscError, bscRunning)}
+              {renderProgress(bscResult, bscError, bscRunning,
+                (tx) => `https://bscscan.com/tx/${tx}`)}
             </View>
+
+            {anyResult && roster.length > 1 && (
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => goToStep(0)}>
+                <Icon name="repeat" size={16} color={colors.white} />
+                <Text style={styles.primaryBtnText}>Retirar otra cuenta</Text>
+              </TouchableOpacity>
+            )}
 
             <View style={styles.futureRow}>
               <Icon name="corner-down-right" size={14} color={colors.text.secondary} />
@@ -664,9 +1005,12 @@ export const EmergencyExitScreen: React.FC = () => {
                 actualízalos.
               </Text>
             </View>
+              </>
+            )}
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <AddressScannerModal
         visible={scanTarget !== null}
@@ -677,6 +1021,39 @@ export const EmergencyExitScreen: React.FC = () => {
           setScanTarget(null);
         }}
       />
+
+      {/* One large QR at a time — the only scannable-by-design state. */}
+      <Modal
+        visible={!!qrModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setQrModal(null)}
+      >
+        <View style={styles.qrModalBackdrop}>
+          <View style={styles.qrModalCard}>
+            <Text style={styles.cardTitle}>{qrModal?.chain}</Text>
+            <Text style={[styles.bodyText, { textAlign: 'center' }]}>
+              Envía SOLO por esta red a esta dirección.
+            </Text>
+            <View style={styles.qrModalQr}>
+              {!!qrModal && <QRCode value={qrModal.address} size={240} />}
+            </View>
+            <Text style={[styles.addrText, styles.qrModalAddr]} selectable>
+              {qrModal?.address}
+            </Text>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => { if (qrModal) Clipboard.setString(qrModal.address); }}
+            >
+              <Icon name="copy" size={16} color={colors.white} />
+              <Text style={styles.primaryBtnText}>Copiar dirección</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.ghostBtn} onPress={() => setQrModal(null)}>
+              <Text style={styles.qrModalClose}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -699,15 +1076,17 @@ const styles = StyleSheet.create({
     fontSize: 13, lineHeight: 19, color: colors.white, opacity: 0.92,
     textAlign: 'center', marginTop: 6,
   },
-  scroll: { padding: 16, paddingBottom: 48 },
+  scroll: { padding: 20, paddingBottom: 56 },
   promiseRow: {
     flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center',
     marginBottom: 14, paddingHorizontal: 8,
   },
   promiseText: { fontSize: 12.5, fontWeight: '600', color: colors.primaryDark, flexShrink: 1 },
   card: {
-    backgroundColor: colors.white, borderRadius: 16, borderWidth: 1,
-    borderColor: colors.border ?? '#E5E7EB', padding: 16, marginBottom: 12,
+    backgroundColor: colors.white, borderRadius: 20, borderWidth: 1,
+    borderColor: '#EDF1F4', padding: 20, marginBottom: 14,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 }, elevation: 2,
   },
   stepHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   stepBadge: {
@@ -715,66 +1094,101 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   stepBadgeText: { color: colors.white, fontWeight: '700', fontSize: 13 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
-  bodyText: { fontSize: 13.5, lineHeight: 20, color: colors.text.secondary, marginTop: 4 },
+  cardTitle: { fontSize: 16.5, fontWeight: '700', color: colors.text.primary },
+  bodyText: { fontSize: 14.5, lineHeight: 21, color: colors.text.secondary, marginTop: 4 },
   countdownText: {
     fontSize: 34, fontWeight: 'bold', color: colors.text.primary,
     textAlign: 'center', marginTop: 10,
   },
+  acctChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  acctChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderWidth: 1.5, borderColor: colors.primaryDark, borderRadius: 22,
+    paddingVertical: 10, paddingHorizontal: 16,
+  },
+  acctChipSel: { backgroundColor: colors.primaryDark },
+  acctChipText: { fontSize: 14, fontWeight: '600', color: colors.primaryDark },
+  acctChipTextSel: { color: colors.white },
+  stepHero: { marginBottom: 18, paddingHorizontal: 2 },
+  progressTrack: { flexDirection: 'row', gap: 6, marginBottom: 16 },
+  progressSeg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.border ?? '#E5E7EB' },
+  progressSegDone: { backgroundColor: colors.primaryDark },
+  stepKicker: {
+    fontSize: 11.5, fontWeight: '700', color: colors.text.secondary,
+    letterSpacing: 1.2, marginBottom: 4,
+  },
+  stepTitle: { fontSize: 21, fontWeight: 'bold', color: colors.text.primary },
+  stepSub: { fontSize: 14.5, lineHeight: 20, color: colors.text.secondary, marginTop: 5 },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  summaryText: { fontSize: 14.5, color: colors.text.primary, fontWeight: '600', flexShrink: 1 },
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginTop: 10 },
   howText: { flex: 1, fontSize: 13.5, lineHeight: 20, color: colors.text.secondary },
-  gasRow: { flexDirection: 'row', gap: 14, alignItems: 'center', marginTop: 14 },
-  gasInfo: { flex: 1, gap: 3 },
-  gasChain: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
-  gasStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  gasAmount: { fontSize: 13, fontWeight: '600' },
-  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingVertical: 3 },
-  copyBtnText: { fontSize: 12, fontWeight: '600', color: colors.primaryDark },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gasChainBlock: {
+    marginTop: 12, padding: 14, gap: 8,
+    backgroundColor: colors.neutral, borderRadius: 14,
+  },
+  gasChain: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  gasStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  gasAmount: { flex: 1, fontSize: 13.5, lineHeight: 19, fontWeight: '600' },
+  addrRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
+  copyBtnText: { fontSize: 13, fontWeight: '600', color: colors.primaryDark },
+  qrModalBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center', padding: 24,
+  },
+  qrModalCard: {
+    backgroundColor: colors.white, borderRadius: 20, padding: 20,
+    alignItems: 'stretch', width: '100%', maxWidth: 340,
+  },
+  qrModalQr: { alignSelf: 'center', marginVertical: 16, padding: 10, backgroundColor: colors.white },
+  qrModalAddr: { textAlign: 'center', fontSize: 11 },
+  qrModalClose: { fontSize: 14, fontWeight: '600', color: colors.text.secondary },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inputFlex: { flex: 1 },
   pasteBtn: {
-    width: 40, height: 40, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
+    width: 46, height: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white,
   },
   addrText: { fontSize: 10, color: colors.text.secondary },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: colors.text.primary, marginTop: 12, marginBottom: 5 },
+  inputLabel: { fontSize: 13.5, fontWeight: '600', color: colors.text.primary, marginTop: 16, marginBottom: 7 },
   input: {
-    borderWidth: 1, borderColor: colors.border ?? '#E5E7EB', borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 11, fontSize: 13, color: colors.text.primary,
+    borderWidth: 1, borderColor: colors.border ?? '#E5E7EB', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 14, fontSize: 15, color: colors.text.primary,
     backgroundColor: colors.neutral,
   },
   inputBad: { borderColor: colors.error.text },
-  chainWarnRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 10 },
-  chainWarnText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.warning.text },
-  checkRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 8 },
-  checkText: { flex: 1, fontSize: 13.5, lineHeight: 20, color: colors.text.primary },
+  chainWarnRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 12 },
+  chainWarnText: { flex: 1, fontSize: 12.5, lineHeight: 18, color: colors.warning.text },
+  checkRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start', paddingVertical: 10 },
+  checkText: { flex: 1, fontSize: 15, lineHeight: 22, color: colors.text.primary },
   scamBox: {
-    flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 10,
-    backgroundColor: colors.warning?.background ?? '#FEF3C7', borderRadius: 10, padding: 10,
+    flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 12,
+    backgroundColor: colors.warning?.background ?? '#FEF3C7', borderRadius: 12, padding: 12,
   },
-  scamBoxText: { flex: 1, fontSize: 12.5, lineHeight: 18, fontWeight: '600', color: colors.warning.text },
+  scamBoxText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '600', color: colors.warning.text },
   primaryBtn: {
-    flexDirection: 'row', gap: 8, backgroundColor: colors.primaryDark, borderRadius: 10,
-    paddingVertical: 13, alignItems: 'center', justifyContent: 'center', marginTop: 14,
+    flexDirection: 'row', gap: 8, backgroundColor: colors.primaryDark, borderRadius: 14,
+    paddingVertical: 16, alignItems: 'center', justifyContent: 'center', marginTop: 18,
   },
-  primaryBtnText: { color: colors.white, fontWeight: '700', fontSize: 14.5 },
-  ghostBtn: { alignSelf: 'center', marginTop: 10, paddingVertical: 6, paddingHorizontal: 16 },
+  primaryBtnText: { color: colors.white, fontWeight: '700', fontSize: 16 },
+  ghostBtn: { alignSelf: 'center', marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
   ghostBtnText: { color: colors.error.text, fontWeight: '700', fontSize: 14 },
   execBtn: {
-    flexDirection: 'row', gap: 8, backgroundColor: colors.primaryDark, borderRadius: 10,
-    paddingVertical: 13, alignItems: 'center', justifyContent: 'center', marginTop: 10,
+    flexDirection: 'row', gap: 8, backgroundColor: colors.primaryDark, borderRadius: 12,
+    paddingVertical: 15, alignItems: 'center', justifyContent: 'center', marginTop: 12,
   },
   execBtnDisabled: { opacity: 0.35 },
-  execBtnText: { color: colors.white, fontWeight: '700', fontSize: 14 },
+  execBtnText: { color: colors.white, fontWeight: '700', fontSize: 15 },
   progressBox: {
     marginTop: 10, backgroundColor: colors.neutral,
     borderRadius: 10, padding: 12, gap: 8,
   },
   progressRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  progressText: { flex: 1, fontSize: 13, lineHeight: 18, color: colors.text.primary },
+  progressText: { flex: 1, fontSize: 14, lineHeight: 19, color: colors.text.primary },
   progressSkipped: { color: colors.text.light },
-  futureRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingHorizontal: 6, marginTop: 2 },
-  futureText: { flex: 1, fontSize: 12, lineHeight: 18, color: colors.text.secondary },
+  futureRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingHorizontal: 6, marginTop: 6 },
+  futureText: { flex: 1, fontSize: 12.5, lineHeight: 18, color: colors.text.secondary },
 });
 
 export default EmergencyExitScreen;

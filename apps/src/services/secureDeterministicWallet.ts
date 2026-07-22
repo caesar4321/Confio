@@ -282,15 +282,20 @@ export function getDerivedEvmWallet(): DerivedEvmWallet | null {
  * Throws if no master secret exists (the user must have completed sign-in);
  * we never generate one here (allowGenerate: false).
  */
-export async function getActiveEvmWallet(): Promise<DerivedEvmWallet> {
+export async function getActiveEvmWallet(
+  ctxOverride?: { type: 'personal' | 'business'; index: number; businessId?: string },
+): Promise<DerivedEvmWallet> {
   const { oauthStorage } = await import('./oauthStorageService');
   const oauth = await oauthStorage.getOAuthSubject();
   if (!oauth?.subject || !oauth?.provider) {
     throw new Error('Missing OAuth subject/provider for EVM signing');
   }
 
-  const { AuthService } = await import('./authService');
-  const ctx = await AuthService.getInstance().getActiveAccountContext();
+  let ctx = ctxOverride;
+  if (!ctx) {
+    const { AuthService } = await import('./authService');
+    ctx = await AuthService.getInstance().getActiveAccountContext();
+  }
 
   const masterSecret = await getOrCreateMasterSecret(oauth.subject, undefined, {
     allowGenerate: false,
@@ -303,8 +308,51 @@ export async function getActiveEvmWallet(): Promise<DerivedEvmWallet> {
     businessId: ctx.businessId,
   } as const;
   const wallet = deriveEvmKeyFromMasterSecret(masterSecret, opts);
-  cacheAndPersistEvmWallet(evmAccountKey(opts), wallet);
+  if (ctxOverride) {
+    // Emergency-exit sweep of a non-active account: persist the address
+    // per-account but do NOT clobber the "last derived" slot the ramp and
+    // vault flows read for the ACTIVE account.
+    evmAddressMemory[evmAccountKey(opts)] = wallet.address;
+    Keychain.setGenericPassword('evm_address', wallet.address, {
+      service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${evmAccountKey(opts)}`,
+    }).catch(() => {});
+  } else {
+    cacheAndPersistEvmWallet(evmAccountKey(opts), wallet);
+  }
   return wallet;
+}
+
+/**
+ * ADDRESSES ONLY (never keys) for an arbitrary account context, derived
+ * fully locally from the V2 master secret — the emergency exit uses this
+ * to sweep every owned account while the server can't answer (ban/outage).
+ * Returns nulls when no V2 master secret exists (legacy V1 session):
+ * callers fall back to the per-account stored addresses.
+ */
+export async function deriveAddressesForContext(
+  ctx: { type: 'personal' | 'business'; index: number; businessId?: string },
+): Promise<{ algorand: string | null; evm: string | null }> {
+  try {
+    const { oauthStorage } = await import('./oauthStorageService');
+    const oauth = await oauthStorage.getOAuthSubject();
+    if (!oauth?.subject || !oauth?.provider) return { algorand: null, evm: null };
+    const masterSecret = await getOrCreateMasterSecret(oauth.subject, undefined, {
+      allowGenerate: false,
+      provider: oauth.provider as 'google' | 'apple',
+    });
+    if (!masterSecret) return { algorand: null, evm: null };
+    const opts = {
+      accountType: ctx.type === 'business' ? 'business' : 'personal',
+      accountIndex: ctx.index,
+      businessId: ctx.businessId,
+    } as const;
+    return {
+      algorand: deriveWalletV2(masterSecret, opts).address,
+      evm: deriveEvmKeyFromMasterSecret(masterSecret, opts).address,
+    };
+  } catch {
+    return { algorand: null, evm: null };
+  }
 }
 
 // The ADDRESS (never key material) also persists in the keychain, PER

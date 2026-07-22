@@ -151,6 +151,71 @@ describe('looksLikeBanResponse', () => {
   });
 });
 
+describe('successProvesUnbanned', () => {
+  const { successProvesUnbanned } = require('../emergencyExit/banSignal');
+
+  it('only an auth-carrying request can un-ban', () => {
+    expect(successProvesUnbanned({ Authorization: 'JWT abc' })).toBe(true);
+    expect(successProvesUnbanned({ authorization: 'JWT abc' })).toBe(true);
+  });
+
+  it('anonymous successes (RefreshToken, GetLegalDocument, probes) never clear', () => {
+    // Regression: a name-based exempt list missed Apollo's definition-name
+    // casing, so anonymous RefreshToken 200s cleared the flag and the next
+    // 403 re-navigated — bouncing users off EmergencyExitScreen.
+    expect(successProvesUnbanned({})).toBe(false);
+    expect(successProvesUnbanned(undefined)).toBe(false);
+    expect(successProvesUnbanned({ 'Content-Type': 'application/json' })).toBe(false);
+  });
+});
+
+describe('accountRoster', () => {
+  const { saveAccountRoster, getAccountRoster, exitableAccounts, rosterAccountKey } = require('../emergencyExit/accountRoster');
+  const memStore = () => {
+    const m = new Map<string, string>();
+    return {
+      get: async (k: string) => m.get(k) ?? null,
+      set: async (k: string, v: string) => { m.set(k, v); },
+      del: async (k: string) => { m.delete(k); },
+    };
+  };
+
+  it('round-trips the roster through the store', async () => {
+    const store = memStore();
+    expect(await getAccountRoster(store)).toBeNull();
+    const roster = [
+      { type: 'personal', index: 0, name: 'Julián' },
+      { type: 'business', index: 0, businessId: '42', name: 'Arepas SA' },
+    ];
+    await saveAccountRoster(store, roster);
+    expect(await getAccountRoster(store)).toEqual(roster);
+  });
+
+  it('exitableAccounts drops employee businesses — their keys are the OWNER\'s', () => {
+    const out = exitableAccounts([
+      { type: 'business', index: 0, businessId: '7', name: 'Mía' },
+      { type: 'business', index: 0, businessId: '9', name: 'Ajena', isEmployee: true },
+      { type: 'personal', index: 0, name: 'Yo' },
+    ]);
+    expect(out.map((a: any) => a.businessId ?? 'personal')).toEqual(['personal', '7']);
+  });
+
+  it('always injects personal (fresh device, roster never synced) and dedupes', () => {
+    const out = exitableAccounts([
+      { type: 'business', index: 0, businessId: '7', name: 'Mía' },
+      { type: 'business', index: 0, businessId: '7', name: 'Mía (dup)' },
+    ]);
+    expect(out[0].type).toBe('personal');
+    expect(out).toHaveLength(2);
+    expect(exitableAccounts(null)).toEqual([{ type: 'personal', index: 0, name: 'Personal' }]);
+  });
+
+  it('rosterAccountKey matches the exit screen / cooloff grammar', () => {
+    expect(rosterAccountKey({ type: 'personal', index: 0 })).toBe('personal__0');
+    expect(rosterAccountKey({ type: 'business', businessId: '42', index: 0 })).toBe('business_42_0');
+  });
+});
+
 describe('banSignal transitions', () => {
   const memStore = () => {
     const m = new Map<string, string>();
