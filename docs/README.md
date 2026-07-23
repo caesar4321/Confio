@@ -7,6 +7,12 @@ operational documentation for the Confío repository.
 
 - [English whitepaper](whitepaper/README.md) - Confío’s global product and
   strategy reference.
+- [$CONFIO tokenomics](tokenomics/README.md) - Authoritative English supply,
+  allocation, vesting, presale, and token-risk reference.
+- [$CONFIO tokenomics — Español](tokenomics/README.es.md) - Convenience
+  translation.
+- [$CONFIO tokenomics — 한국어](tokenomics/README.ko.md) - Convenience
+  translation.
 - [Chain decision note](CHAIN_DECISION_NOTE.md) - Role-based chain selection
   for cUSD, cUSD+, and $CONFIO.
 - [Project structure](PROJECT_STRUCTURE.md) - Repository and service map.
@@ -40,6 +46,7 @@ operational documentation for the Confío repository.
 - Analytical notes belong in [`analysis/`](analysis/).
 - Superseded security documents are explicitly named `*_legacy.md`.
 
-The English whitepaper is the canonical public overview. Product-specific
-contract and deployment documents remain the authority for implementation
-details.
+The English whitepaper is the canonical public product and strategy overview.
+The English tokenomics is the canonical $CONFIO supply and allocation
+reference. Product-specific contract and deployment documents remain the
+authority for implementation details.
