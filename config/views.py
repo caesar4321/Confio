@@ -728,18 +728,46 @@ def guardarian_transaction_proxy(request):
         # Flat email just in case, as some integrations use it
         guardarian_payload['email'] = final_email
 
+    # Customer IP (2026-06 security update): must travel in customer.ip in the
+    # body — never via X-Forwarded-For headers or query params.
+    client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
+        or request.META.get('REMOTE_ADDR')
+    if client_ip:
+        guardarian_payload.setdefault('customer', {})['ip'] = client_ip
+
     logger.info(f'Guardarian transaction request for user {user_id}: '
                 f'amount={amount}, currency={from_currency}, '
                 f'email={bool(user.email)}, address={bool(payout_address)}')
 
+    # Request signing (2026-06 security update): RSA-SHA256 over the exact raw
+    # body bytes, base64, in Partner-Signature. The signed string and the sent
+    # body must be byte-identical, so serialize once and post `data=`, not
+    # `json=` (requests would re-serialize and could reorder/respace).
+    raw_body = json.dumps(guardarian_payload)
+    headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': api_key,
+    }
+    signing_key_pem = getattr(settings, 'GUARDARIAN_SIGNING_KEY', '')
+    if signing_key_pem:
+        try:
+            import base64
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import padding as rsa_padding
+            private_key = serialization.load_pem_private_key(signing_key_pem.encode(), password=None)
+            signature = private_key.sign(raw_body.encode(), rsa_padding.PKCS1v15(), hashes.SHA256())
+            headers['Partner-Signature'] = base64.b64encode(signature).decode()
+        except Exception as e:
+            logger.error('Guardarian request signing failed: %s', e)
+            return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=503)
+    else:
+        logger.warning('GUARDARIAN_SIGNING_KEY not configured - sending unsigned request')
+
     try:
         resp = requests.post(
             f'{base_url.rstrip("/")}/transaction',
-            json=guardarian_payload,
-            headers={
-                'Content-Type': 'application/json',
-                'x-api-key': api_key,
-            },
+            data=raw_body,
+            headers=headers,
             timeout=20,
         )
 
