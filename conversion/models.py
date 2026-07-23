@@ -11,6 +11,9 @@ class Conversion(models.Model):
     CONVERSION_TYPES = [
         ('usdc_to_cusd', 'USDC to cUSD'),
         ('cusd_to_usdc', 'cUSD to USDC'),
+        # Coinbase offramp leg: Tinyman USDC→ALGO + payment to Coinbase's
+        # sell deposit address in one atomic group.
+        ('usdc_to_algo', 'USDC to ALGO'),
     ]
     
     STATUS_CHOICES = [

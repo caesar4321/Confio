@@ -3317,6 +3317,178 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
             logger.error(f'Error preparing auto swap: {str(e)}')
             return cls(success=False, error=str(e))
 
+
+class BuildCoinbaseOfframpTransactionsMutation(graphene.Mutation):
+    """
+    Builds the on-chain leg of the Coinbase offramp (US ACH cash-out):
+    one atomic group of [Tinyman USDC→ALGO fixed-output swap, ALGO payment to
+    Coinbase's sell deposit address].
+
+    The destination address and ALGO amount are read SERVER-SIDE from
+    Coinbase's sell Transaction Status API for this user's partnerUserRef —
+    the client supplies nothing but the trigger. Same response shape as
+    BuildAutoSwapTransactions so the client signs and submits through
+    SubmitAutoSwapTransactions.
+    """
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transactions = graphene.JSONString()
+
+    @classmethod
+    def mutate(cls, root, info):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+
+            account = Account.objects.filter(
+                user=user, account_type='personal', deleted_at__isnull=True,
+            ).first()
+            if not account or not account.algorand_address:
+                return cls(success=False, error='No Algorand address found')
+
+            from decimal import Decimal
+            import base64
+            from algosdk import encoding as algo_encoding
+            from algosdk import transaction as algo_txn
+            from algosdk.transaction import PaymentTxn, calculate_group_id
+            from tinyman.v2.client import TinymanV2MainnetClient, TinymanV2TestnetClient
+            from tinyman.assets import AssetAmount
+            from blockchain.algorand_client import get_algod_client
+            from conversion.models import Conversion
+            from ramps.coinbase_cdp import (
+                CoinbaseCdpError, get_latest_pending_sell, partner_user_ref,
+            )
+            from ramps.models import RampTransaction
+
+            try:
+                sell = get_latest_pending_sell(partner_user_ref(user.id))
+            except CoinbaseCdpError as e:
+                return cls(success=False, error=str(e))
+            if not sell:
+                return cls(success=False, error='no_pending_offramp')
+            if sell['asset'] != 'ALGO':
+                return cls(success=False, error='unsupported_offramp_asset')
+
+            algo_amount = Decimal(sell['sell_amount'])
+            algo_micro = int((algo_amount * Decimal('1000000')).quantize(Decimal('1')))
+            if algo_micro <= 0:
+                return cls(success=False, error='invalid_offramp_amount')
+            to_address = sell['to_address']
+
+            algod_client = get_algod_client()
+            params = algod_client.suggested_params()
+            is_mainnet = getattr(settings, 'ALGORAND_NETWORK', 'testnet') == 'mainnet'
+            tm_client = (TinymanV2MainnetClient if is_mainnet else TinymanV2TestnetClient)(algod_client=algod_client)
+
+            usdc_id = settings.ALGORAND_USDC_ASSET_ID
+            pool = tm_client.fetch_pool(0, usdc_id)
+            algo_asset = tm_client.fetch_asset(0)
+
+            # Fixed OUTPUT: Coinbase expects exactly sell_amount ALGO, so we
+            # solve for the USDC input (slippage inflates the max input).
+            quote = pool.fetch_fixed_output_swap_quote(
+                amount_out=AssetAmount(algo_asset, algo_micro)
+            )
+            usdc_in_micro = quote.amount_in_with_slippage.amount
+            if usdc_in_micro <= 0:
+                return cls(success=False, error='invalid_swap_quote')
+
+            # The user must actually hold that much USDC (cUSD→USDC burn runs first).
+            account_info = algod_client.account_info(account.algorand_address)
+            usdc_balance = 0
+            for a in (account_info.get('assets') or []):
+                if a.get('asset-id') == usdc_id:
+                    usdc_balance = int(a.get('amount', 0))
+            if usdc_balance < usdc_in_micro:
+                # Tell the client exactly how much cUSD it must burn to USDC
+                # first, so it can settle the shortfall and rebuild.
+                return cls(success=False, error='insufficient_usdc', transactions={
+                    'usdc_needed_micro': str(usdc_in_micro),
+                    'usdc_balance_micro': str(usdc_balance),
+                })
+
+            usdc_in_decimal = Decimal(usdc_in_micro) / Decimal('1000000')
+            conversion = Conversion.objects.create(
+                actor_type='user',
+                actor_user=user,
+                actor_display_name=user.username,
+                actor_address=account.algorand_address,
+                conversion_type='usdc_to_algo',
+                from_amount=usdc_in_decimal,
+                to_amount=algo_amount,
+                exchange_rate=(algo_amount / usdc_in_decimal) if usdc_in_decimal > 0 else Decimal('0'),
+                fee_amount=Decimal('0.0'),
+                status='PENDING_SIG',
+            )
+            RampTransaction.objects.create(
+                provider='coinbase',
+                direction='off_ramp',
+                status='PENDING',
+                provider_order_id=sell.get('transaction_id', ''),
+                actor_type='user',
+                actor_user=user,
+                actor_display_name=user.username,
+                actor_address=account.algorand_address,
+                fiat_currency='USD',
+                crypto_currency='ALGO',
+                crypto_amount_estimated=algo_amount,
+                conversion=conversion,
+                metadata={'to_address': to_address, 'usdc_in': str(usdc_in_decimal)},
+            )
+
+            tinyman_group = pool.prepare_swap_transactions_from_quote(
+                quote=quote,
+                user_address=account.algorand_address,
+                suggested_params=params,
+            )
+            tinyman_txns = []
+            for t in list(tinyman_group.transactions):
+                if hasattr(t, 'dictify'):
+                    tinyman_txns.append(algo_txn.Transaction.undictify(t.dictify()))
+                else:
+                    tinyman_txns.append(t)
+
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+            pay_params = algo_txn.SuggestedParams(
+                fee=min_fee, first=params.first, last=params.last,
+                gh=params.gh, gen=params.gen, flat_fee=True,
+            )
+            payout = PaymentTxn(
+                sender=account.algorand_address,
+                sp=pay_params,
+                receiver=to_address,
+                amt=algo_micro,
+                note=b'Confio Coinbase offramp',
+            )
+
+            combined_txns = tinyman_txns + [payout]
+            if len(combined_txns) > 16:
+                conversion.status = 'FAILED'
+                conversion.save(update_fields=['status', 'updated_at'])
+                return cls(success=False, error='atomic_group_too_large')
+            for txn in combined_txns:
+                txn.group = None
+            group_id = calculate_group_id(combined_txns)
+            for txn in combined_txns:
+                txn.group = group_id
+
+            response_data = {
+                'internal_id': conversion.internal_id.hex,
+                'transactions': [algo_encoding.msgpack_encode(txn) for txn in combined_txns],
+                'sponsor_transactions': [],
+                'group_id': base64.b64encode(group_id).decode('utf-8'),
+                'algo_amount': str(algo_amount),
+                'usdc_in': str(usdc_in_decimal),
+                'to_address': to_address,
+            }
+            return cls(success=True, transactions=response_data)
+        except Exception as e:
+            logger.error(f'Error preparing Coinbase offramp: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
 class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
     """
     Submits an auto-swap transaction group to the Algorand network.

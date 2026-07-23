@@ -22,6 +22,7 @@ from .mutations import (
     SubmitBusinessOptInGroupMutation,
     PrepareAtomicMigrationMutation,
     BuildAutoSwapTransactionsMutation,
+    BuildCoinbaseOfframpTransactionsMutation,
     SubmitAutoSwapTransactionsMutation,
     BuildBurnAndSendMutation,
 )
@@ -143,6 +144,7 @@ class Mutation(graphene.ObjectType):
     submit_sponsored_group = SubmitSponsoredGroupMutation.Field()
     prepare_atomic_migration = PrepareAtomicMigrationMutation.Field()
     build_auto_swap_transactions = BuildAutoSwapTransactionsMutation.Field()
+    build_coinbase_offramp_transactions = BuildCoinbaseOfframpTransactionsMutation.Field()
     submit_auto_swap_transactions = SubmitAutoSwapTransactionsMutation.Field()
     build_burn_and_send = BuildBurnAndSendMutation.Field()
     

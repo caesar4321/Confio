@@ -26,7 +26,7 @@ import GuardarianLogo from '../assets/svg/guardarian.svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
-import { gql, useLazyQuery, useQuery } from '@apollo/client';
+import { gql, useLazyQuery, useMutation, useQuery } from '@apollo/client';
 import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
@@ -40,6 +40,11 @@ import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { getVaultShares, redeemSavingsToUsdt } from '../services/cusdPlusVault';
 import { getActiveEvmWallet } from '../services/secureDeterministicWallet';
+import algorandService from '../services/algorandService';
+import {
+  createCoinbaseOfframpSession,
+  getCoinbaseOfframpStatus,
+} from '../services/coinbaseOnrampService';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -51,6 +56,55 @@ const SAVINGS_SELL_PARAMS = gql`
     }
   }
 `;
+
+// Coinbase offramp (US): the server reads the sell's deposit address from
+// Coinbase's status API and builds [USDC→ALGO swap, ALGO payment] atomically;
+// the cUSD→USDC shortfall is settled first through the existing burn branch.
+const BUILD_COINBASE_OFFRAMP = gql`
+  mutation BuildCoinbaseOfframpTransactions {
+    buildCoinbaseOfframpTransactions {
+      success
+      error
+      transactions
+    }
+  }
+`;
+
+const BUILD_AUTO_SWAP_FOR_OFFRAMP = gql`
+  mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
+    buildAutoSwapTransactions(inputAssetType: $inputAssetType, amount: $amount) {
+      success
+      error
+      transactions
+    }
+  }
+`;
+
+const SUBMIT_AUTO_SWAP_FOR_OFFRAMP = gql`
+  mutation SubmitAutoSwapTransactions(
+    $internalId: String!
+    $signedTransactions: [String]!
+    $sponsorTransactions: [String]!
+  ) {
+    submitAutoSwapTransactions(
+      internalId: $internalId
+      signedTransactions: $signedTransactions
+      sponsorTransactions: $sponsorTransactions
+    ) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+const parseSwapPayload = (raw: any): any => {
+  if (!raw) return {};
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return {}; }
+  }
+  return raw;
+};
 
 export const SellScreen = () => {
     const navigation = useNavigation<NavigationProp>();
@@ -69,6 +123,132 @@ export const SellScreen = () => {
     const vaultAddress: string = savingsParamsData?.cusdPlusConvertParams?.vaultAddress || '';
     const [sendingFromSavings, setSendingFromSavings] = useState(false);
     const sellTicker = isSavings ? 'USDT' : 'USDC';
+
+    // Coinbase offramp (US, cUSD rail): sell widget → return → fund the sell.
+    const isUsUser = (userProfile?.phoneCountry || '').toUpperCase() === 'US';
+    const [coinbaseBusy, setCoinbaseBusy] = useState(false);
+    const [coinbasePendingSell, setCoinbasePendingSell] = useState<{ sellAmount: string } | null>(null);
+    const [buildCoinbaseOfframp] = useMutation(BUILD_COINBASE_OFFRAMP);
+    const [buildAutoSwapForOfframp] = useMutation(BUILD_AUTO_SWAP_FOR_OFFRAMP);
+    const [submitAutoSwapForOfframp] = useMutation(SUBMIT_AUTO_SWAP_FOR_OFFRAMP);
+
+    useFocusEffect(
+        React.useCallback(() => {
+            if (!isUsUser || isSavings) return;
+            let active = true;
+            getCoinbaseOfframpStatus()
+                .then((s) => {
+                    if (!active) return;
+                    setCoinbasePendingSell(s.pending && s.sellAmount ? { sellAmount: s.sellAmount } : null);
+                })
+                .catch(() => {});
+            return () => { active = false; };
+        }, [isUsUser, isSavings])
+    );
+
+    // Sign every txn in a build payload with the user's key and submit the group.
+    const signAndSubmitGroup = async (payload: any): Promise<void> => {
+        const { Buffer } = require('buffer');
+        const unsigned: string[] = payload.transactions || [];
+        if (!unsigned.length || !payload.internal_id) {
+            throw new Error('No recibimos las transacciones para firmar.');
+        }
+        const signed = await Promise.all(
+            unsigned.map(async (b64: string) => {
+                const bytes = Uint8Array.from(Buffer.from(b64, 'base64'));
+                const signedBytes = await algorandService.signTransactionBytes(bytes);
+                return Buffer.from(signedBytes).toString('base64');
+            })
+        );
+        const sponsors = (payload.sponsor_transactions || []).map((s: any) =>
+            typeof s === 'string' ? s : JSON.stringify(s)
+        );
+        const res = await submitAutoSwapForOfframp({
+            variables: {
+                internalId: payload.internal_id,
+                signedTransactions: signed,
+                sponsorTransactions: sponsors,
+            },
+        });
+        const d = res.data?.submitAutoSwapTransactions;
+        if (!d?.success) {
+            throw new Error(d?.error || 'No se pudo enviar la transacción.');
+        }
+    };
+
+    const handleStartCoinbaseOfframp = async () => {
+        setCoinbaseBusy(true);
+        try {
+            const parsed = parseFloat(amount);
+            const { url } = await createCoinbaseOfframpSession({
+                amount: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+            });
+            await Linking.openURL(url);
+        } catch (err: any) {
+            Alert.alert('No se pudo abrir Coinbase', err?.message || 'Intenta más tarde.');
+        } finally {
+            setCoinbaseBusy(false);
+        }
+    };
+
+    const handleCompleteCoinbaseOfframp = async () => {
+        if (!coinbasePendingSell) return;
+        const algoAmount = parseFloat(coinbasePendingSell.sellAmount);
+        const authenticated = await requestRampCriticalAuth({
+            amount: Number.isFinite(algoAmount) ? algoAmount : 0,
+            assetLabel: 'ALGO',
+            actionLabel: 'retiro',
+        });
+        if (!authenticated) return;
+        setCoinbaseBusy(true);
+        try {
+            let buildRes = await buildCoinbaseOfframp();
+            let build = buildRes.data?.buildCoinbaseOfframpTransactions;
+
+            if (!build?.success && build?.error === 'insufficient_usdc') {
+                // Settle the shortfall: burn cUSD → USDC (1:1), then rebuild.
+                const info = parseSwapPayload(build.transactions);
+                const needed = BigInt(info.usdc_needed_micro || '0');
+                const have = BigInt(info.usdc_balance_micro || '0');
+                // +0.5% buffer so pool drift between quotes can't strand us,
+                // and never below the burn contract's 1 cUSD minimum.
+                let burnMicro = ((needed - have) * 1005n) / 1000n;
+                if (burnMicro < 1000000n) burnMicro = 1000000n;
+                const burnRes = await buildAutoSwapForOfframp({
+                    variables: { inputAssetType: 'CUSD', amount: burnMicro.toString() },
+                });
+                const burn = burnRes.data?.buildAutoSwapTransactions;
+                if (!burn?.success) {
+                    throw new Error(burn?.error === 'amount_below_minimum'
+                        ? 'Tu saldo cUSD no alcanza para este retiro.'
+                        : burn?.error || 'No se pudo convertir tu cUSD.');
+                }
+                await signAndSubmitGroup(parseSwapPayload(burn.transactions));
+                buildRes = await buildCoinbaseOfframp();
+                build = buildRes.data?.buildCoinbaseOfframpTransactions;
+            }
+
+            if (!build?.success) {
+                if (build?.error === 'no_pending_offramp') {
+                    setCoinbasePendingSell(null);
+                    throw new Error('Tu orden de Coinbase expiró. Crea el retiro de nuevo.');
+                }
+                throw new Error(build?.error || 'No se pudo preparar el retiro.');
+            }
+            await signAndSubmitGroup(parseSwapPayload(build.transactions));
+
+            setCoinbasePendingSell(null);
+            Alert.alert(
+                'Retiro en camino',
+                'Enviamos tus fondos a Coinbase. El depósito a tu banco (ACH) sale en cuanto Coinbase lo confirme.',
+            );
+            navigation.navigate('RampHistory', { initialFilter: 'off_ramp' });
+        } catch (err: any) {
+            Alert.alert('No se pudo completar el retiro', err?.message || 'Intenta de nuevo.');
+        } finally {
+            setCoinbaseBusy(false);
+        }
+    };
 
     // Default to user's local currency if available
     const derivedCurrencyCode = useMemo(() => {
@@ -549,6 +729,36 @@ export const SellScreen = () => {
                     )}
                 </TouchableOpacity>
 
+                {isUsUser && !isSavings && (
+                    <TouchableOpacity
+                        style={styles.coinbaseCard}
+                        onPress={coinbasePendingSell ? handleCompleteCoinbaseOfframp : handleStartCoinbaseOfframp}
+                        disabled={coinbaseBusy}
+                        accessibilityRole="button"
+                        accessibilityLabel="Retirar a tu banco de EE.UU. con Coinbase"
+                    >
+                        {coinbaseBusy ? (
+                            <ActivityIndicator color={colors.primary} />
+                        ) : (
+                            <>
+                                <View style={styles.coinbaseCardText}>
+                                    <Text style={styles.coinbaseCardTitle}>
+                                        {coinbasePendingSell
+                                            ? 'Completa tu retiro de Coinbase'
+                                            : '¿Tienes banco en EE.UU.?'}
+                                    </Text>
+                                    <Text style={styles.coinbaseCardSubtitle}>
+                                        {coinbasePendingSell
+                                            ? `Coinbase espera ${coinbasePendingSell.sellAmount} ALGO. Toca para enviarlos desde tu saldo y recibir el depósito ACH.`
+                                            : 'Retira por Coinbase con depósito ACH directo a tu banco — comisión mucho más baja.'}
+                                    </Text>
+                                </View>
+                                <Icon name="arrow-right" size={20} color={colors.primary} />
+                            </>
+                        )}
+                    </TouchableOpacity>
+                )}
+
                 <TouchableOpacity
                     style={styles.supportButton}
                     onPress={() => Linking.openURL('https://t.me/confio4world')}
@@ -963,6 +1173,32 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         color: '#92400E',
+    },
+    // Coinbase (US ACH) alternative rail
+    coinbaseCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.white,
+        borderRadius: 12,
+        padding: 14,
+        marginTop: 12,
+        borderWidth: 1,
+        borderColor: colors.primary,
+    },
+    coinbaseCardText: {
+        flex: 1,
+        marginRight: 10,
+    },
+    coinbaseCardTitle: {
+        fontSize: 14,
+        fontWeight: '700' as const,
+        color: colors.text.primary,
+        marginBottom: 2,
+    },
+    coinbaseCardSubtitle: {
+        fontSize: 12,
+        color: colors.text.secondary,
+        lineHeight: 16,
     },
     supportButton: {
         marginTop: 24,

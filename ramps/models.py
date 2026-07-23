@@ -115,6 +115,7 @@ class RampTransaction(models.Model):
     PROVIDER_CHOICES = [
         ('guardarian', 'Guardarian'),
         ('koywe', 'Koywe'),
+        ('coinbase', 'Coinbase'),
     ]
 
     DIRECTION_CHOICES = [

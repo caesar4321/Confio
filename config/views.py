@@ -1021,3 +1021,114 @@ def coinbase_onramp_session(request):
 
     logger.info(f'Coinbase Onramp session minted for user {user_id} ({payment_method})')
     return JsonResponse({'url': f'https://pay.coinbase.com/buy/select-asset?{urlencode(params)}'})
+
+
+def _coinbase_authed_user(request):
+    """Shared JWT + App Check gate for the Coinbase proxy endpoints.
+
+    Returns (user, error_response) — exactly one is None.
+    """
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not auth_header.startswith('JWT '):
+        return None, JsonResponse({'error': 'Unauthorized'}, status=401)
+    try:
+        from security.integrity_service import app_check_service
+        ac_result = app_check_service.verify_request_header(request, 'topup_sell', should_enforce=True)
+        if not ac_result.get('success', True):
+            return None, JsonResponse({'error': 'Actualiza la aplicación a la última versión o usa la app oficial para continuar.'}, status=403)
+    except Exception as e:
+        logger.warning(f"Coinbase App Check error: {e}")
+        return None, JsonResponse({'error': 'Security check failed'}, status=403)
+    try:
+        token_payload = jwt_decode(auth_header.split(' ', 1)[1])
+        from users.models import User
+        user = User.objects.get(id=token_payload.get('user_id'))
+        return user, None
+    except Exception:
+        return None, JsonResponse({'error': 'Invalid token'}, status=401)
+
+
+@csrf_exempt
+def coinbase_offramp_session(request):
+    """Mint a Coinbase Offramp (sell) session URL for the US cash-out rail.
+
+    The user confirms the sale + ACH bank inside Coinbase's widget; afterwards
+    the app asks /api/coinbase/offramp-status/ for Coinbase's deposit address
+    and funds it via the atomic USDC→ALGO→payment group
+    (BuildCoinbaseOfframpTransactions). The widget's `addresses` binds the
+    user's OWN registered Algorand address as the source of funds.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    user, err = _coinbase_authed_user(request)
+    if err:
+        return err
+    account = user.accounts.filter(
+        account_type='personal', account_index=0, deleted_at__isnull=True,
+    ).first()
+    if not account or not account.algorand_address:
+        return JsonResponse({'error': 'No Algorand address found'}, status=400)
+
+    try:
+        body = json.loads(request.body or '{}')
+    except ValueError:
+        body = {}
+
+    from ramps.coinbase_cdp import CoinbaseCdpError, create_session_token, partner_user_ref
+    try:
+        session_token = create_session_token(account.algorand_address, ['ALGO'])
+    except CoinbaseCdpError as e:
+        logger.error('Coinbase Offramp session mint failed: %s', e)
+        return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=502)
+
+    from urllib.parse import urlencode
+    params = {
+        'sessionToken': session_token,
+        'partnerUserRef': partner_user_ref(user.id),
+        'redirectUrl': 'https://confio.lat/checkout/success',
+        'defaultAsset': 'ALGO',
+        'defaultNetwork': 'algorand',
+        'defaultCashoutMethod': 'ACH_BANK_ACCOUNT',
+    }
+    try:
+        preset = body.get('amount')
+        if preset and float(preset) > 0:
+            params['presetFiatAmount'] = float(preset)
+    except (TypeError, ValueError):
+        pass
+
+    logger.info(f'Coinbase Offramp session minted for user {user.id}')
+    return JsonResponse({'url': f'https://pay.coinbase.com/v3/sell/input?{urlencode(params)}'})
+
+
+@csrf_exempt
+def coinbase_offramp_status(request):
+    """Report the user's newest Coinbase sell transaction awaiting deposit.
+
+    Exposes only what the client needs to render the confirm sheet
+    (amounts + status); the deposit address itself stays server-side and is
+    re-fetched inside BuildCoinbaseOfframpTransactions when building the group.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    user, err = _coinbase_authed_user(request)
+    if err:
+        return err
+
+    from ramps.coinbase_cdp import CoinbaseCdpError, get_latest_pending_sell, partner_user_ref
+    try:
+        sell = get_latest_pending_sell(partner_user_ref(user.id))
+    except CoinbaseCdpError as e:
+        logger.error('Coinbase Offramp status failed: %s', e)
+        return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=502)
+
+    if not sell:
+        return JsonResponse({'pending': False})
+    return JsonResponse({
+        'pending': True,
+        'sell_amount': sell['sell_amount'],
+        'asset': sell['asset'],
+        'status': sell['status'],
+    })

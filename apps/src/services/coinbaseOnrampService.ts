@@ -60,3 +60,40 @@ export async function createCoinbaseOnrampSession(params: {
   }
   return { url: data.url };
 }
+
+// ── Offramp (US cash-out: cUSD → USDC → ALGO → Coinbase sell → ACH) ────────
+
+const OFFRAMP_SESSION_URL = `${deriveApiBase()}api/coinbase/offramp-session/`;
+const OFFRAMP_STATUS_URL = `${deriveApiBase()}api/coinbase/offramp-status/`;
+
+export async function createCoinbaseOfframpSession(params: {
+  amount?: number;
+}): Promise<{ url: string }> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(OFFRAMP_SESSION_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    body: JSON.stringify({ amount: params.amount }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.url) {
+    throw new Error(data.error || 'No se pudo abrir Coinbase. Intenta más tarde.');
+  }
+  return { url: data.url };
+}
+
+export interface CoinbaseOfframpStatus {
+  pending: boolean;
+  sellAmount?: string; // ALGO the sell expects
+  status?: string;
+}
+
+export async function getCoinbaseOfframpStatus(): Promise<CoinbaseOfframpStatus> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(OFFRAMP_STATUS_URL, { method: 'GET', headers: authHeaders });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'No pudimos consultar tu retiro de Coinbase.');
+  }
+  return { pending: !!data.pending, sellAmount: data.sell_amount, status: data.status };
+}
