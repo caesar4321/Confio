@@ -132,19 +132,29 @@ export const SellScreen = () => {
     const [buildAutoSwapForOfframp] = useMutation(BUILD_AUTO_SWAP_FOR_OFFRAMP);
     const [submitAutoSwapForOfframp] = useMutation(SUBMIT_AUTO_SWAP_FOR_OFFRAMP);
 
-    useFocusEffect(
-        React.useCallback(() => {
-            if (!isUsUser || isSavings) return;
-            let active = true;
-            getCoinbaseOfframpStatus()
-                .then((s) => {
-                    if (!active) return;
-                    setCoinbasePendingSell(s.pending && s.sellAmount ? { sellAmount: s.sellAmount } : null);
-                })
-                .catch(() => {});
-            return () => { active = false; };
-        }, [isUsUser, isSavings])
-    );
+    const refreshCoinbasePendingSell = React.useCallback(() => {
+        if (!isUsUser || isSavings) return;
+        getCoinbaseOfframpStatus()
+            .then((s) => {
+                setCoinbasePendingSell(s.pending && s.sellAmount ? { sellAmount: s.sellAmount } : null);
+            })
+            .catch(() => {});
+    }, [isUsUser, isSavings]);
+
+    // Screen focus covers in-app navigation; returning from the external
+    // Coinbase browser is NOT a navigation event, so also re-check whenever
+    // the app itself comes back to the foreground.
+    useFocusEffect(refreshCoinbasePendingSell);
+    useEffect(() => {
+        if (!isUsUser || isSavings) return;
+        const { AppState } = require('react-native');
+        const sub = AppState.addEventListener('change', (state: string) => {
+            if (state === 'active') {
+                refreshCoinbasePendingSell();
+            }
+        });
+        return () => sub.remove();
+    }, [isUsUser, isSavings, refreshCoinbasePendingSell]);
 
     // Sign every txn in a build payload with the user's key and submit the group.
     const signAndSubmitGroup = async (payload: any): Promise<void> => {
