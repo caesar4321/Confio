@@ -47,7 +47,7 @@ La tokenomics no sustituye la adopción. La relevancia de largo plazo de $CONFIO
 | Autoridad freeze | Ninguna |
 | Autoridad clawback | Ninguna |
 
-[Verificar $CONFIO en Pera Explorer](https://explorer.perawallet.app/asset/3351104258/) o mediante la [API de Algorand Mainnet](https://mainnet-api.algonode.cloud/v2/assets/3351104258).
+[Verificar $CONFIO en Pera Explorer](https://explorer.perawallet.app/asset/3351104258/).
 
 Sin autoridad manager no se pueden cambiar los parámetros ni la oferta. Sin freeze ni clawback, Confío no puede congelar ni recuperar por la fuerza los $CONFIO de una cuenta de usuario. El campo informativo reserve de Algorand no permite acuñar y no cambia la oferta fija.
 
@@ -179,7 +179,7 @@ La asignación está en una aplicación de vesting de Algorand:
 - inicio no activado al 23 de julio de 2026;
 - cantidad reclamada: cero a esa fecha.
 
-[Verificar App ID 3359297921](https://mainnet-api.algonode.cloud/v2/applications/3359297921).
+[Verificar App ID 3359297921 en Pera Explorer](https://explorer.perawallet.app/application/3359297921/).
 
 Vesting no significa venta.
 
@@ -198,7 +198,7 @@ La asignación está en una aplicación de vesting de Algorand:
 - inicio no activado al 23 de julio de 2026;
 - cantidad reclamada: cero a esa fecha.
 
-[Verificar la aplicación de vesting del fundador Julian Moon, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443).
+[Verificar en Pera Explorer la aplicación de vesting del fundador Julian Moon, App ID 3359301443](https://explorer.perawallet.app/application/3359301443/).
 
 Como escala, 36 meses equivalen en promedio a aproximadamente 24,82 millones de tokens vested por mes. El vesting es continuo, no una venta mensual programada, y vested no significa vendido.
 
@@ -295,16 +295,15 @@ Las declaraciones futuras son inciertas y pueden cambiar.
 
 ## 15. Fuentes y verificación
 
-1. [$CONFIO Asset ID 3351104258, Algorand Mainnet](https://mainnet-api.algonode.cloud/v2/assets/3351104258)
-2. [$CONFIO en Pera Explorer](https://explorer.perawallet.app/asset/3351104258/)
-3. [Especificación del token](https://github.com/caesar4321/Confio/blob/main/contracts/confio/CONFIO_TOKEN_SPEC.md)
-4. [Fases agregadas del backend](https://github.com/caesar4321/Confio/blob/main/presale/management/commands/setup_presale.py), [control administrativo de rondas y precios](https://github.com/caesar4321/Confio/blob/main/contracts/presale/admin_presale.py) y [snapshot de precio para recompensas](https://github.com/caesar4321/Confio/blob/main/contracts/rewards/confio_rewards.py)
-5. [Contrato y desbloqueo de preventa](https://github.com/caesar4321/Confio/blob/main/contracts/presale/README.md)
-6. [Lógica de referidos](https://github.com/caesar4321/Confio/blob/main/achievements/services/referral_rewards.py) y [política de identidad](https://github.com/caesar4321/Confio/blob/main/docs/security/REFERRAL_REWARD_IDENTITY_POLICY.md)
-7. [Vesting Co-Builder, App ID 3359297921](https://mainnet-api.algonode.cloud/v2/applications/3359297921)
-8. [Vesting del fundador Julian Moon, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443)
-9. [Restricciones geográficas](https://github.com/caesar4321/Confio/blob/main/docs/legal/GEO_BLOCKING.md)
-10. [Whitepaper global](https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md)
+1. [$CONFIO Asset ID 3351104258 en Pera Explorer](https://explorer.perawallet.app/asset/3351104258/)
+2. [Especificación del token](https://github.com/caesar4321/Confio/blob/main/contracts/confio/CONFIO_TOKEN_SPEC.md)
+3. [Fases agregadas del backend](https://github.com/caesar4321/Confio/blob/main/presale/management/commands/setup_presale.py), [control administrativo de rondas y precios](https://github.com/caesar4321/Confio/blob/main/contracts/presale/admin_presale.py) y [snapshot de precio para recompensas](https://github.com/caesar4321/Confio/blob/main/contracts/rewards/confio_rewards.py)
+4. [Contrato y desbloqueo de preventa](https://github.com/caesar4321/Confio/blob/main/contracts/presale/README.md)
+5. [Lógica de referidos](https://github.com/caesar4321/Confio/blob/main/achievements/services/referral_rewards.py) y [política de identidad](https://github.com/caesar4321/Confio/blob/main/docs/security/REFERRAL_REWARD_IDENTITY_POLICY.md)
+6. [Vesting Co-Builder, App ID 3359297921, en Pera Explorer](https://explorer.perawallet.app/application/3359297921/)
+7. [Vesting del fundador Julian Moon, App ID 3359301443, en Pera Explorer](https://explorer.perawallet.app/application/3359301443/)
+8. [Restricciones geográficas](https://github.com/caesar4321/Confio/blob/main/docs/legal/GEO_BLOCKING.md)
+9. [Whitepaper global](https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md)
 
 ### Procedencia
 

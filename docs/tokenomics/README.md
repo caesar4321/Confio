@@ -70,7 +70,7 @@ Tokenomics cannot replace product adoption. The long-term relevance of $CONFIO d
 | Freeze authority | None |
 | Clawback authority | None |
 
-[Verify $CONFIO on Pera Explorer](https://explorer.perawallet.app/asset/3351104258/) or through the [Algorand Mainnet API](https://mainnet-api.algonode.cloud/v2/assets/3351104258).
+[Verify $CONFIO on Pera Explorer](https://explorer.perawallet.app/asset/3351104258/).
 
 The absence of manager authority means the asset parameters and total supply cannot be changed. The absence of freeze and clawback authorities means Confío cannot freeze or forcibly retrieve $CONFIO held in a user’s Algorand account. Algorand’s reserve metadata field does not create minting power and does not change the fixed supply.
 
@@ -209,7 +209,7 @@ The allocation is held in a dedicated Algorand vesting application:
 - vesting start had not been activated as of 23 July 2026;
 - claimed amount was zero as of that date.
 
-[Verify the co-builder vesting application, App ID 3359297921](https://mainnet-api.algonode.cloud/v2/applications/3359297921).
+[Verify the co-builder vesting application, App ID 3359297921, on Pera Explorer](https://explorer.perawallet.app/application/3359297921/).
 
 The vesting contract controls release timing; it does not imply that vested tokens will be sold.
 
@@ -228,7 +228,7 @@ The allocation is held in a dedicated Algorand vesting application:
 - vesting start had not been activated as of 23 July 2026;
 - claimed amount was zero as of that date.
 
-[Verify Julian Moon’s founder vesting application, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443).
+[Verify Julian Moon’s founder vesting application, App ID 3359301443, on Pera Explorer](https://explorer.perawallet.app/application/3359301443/).
 
 For scale, straight-line vesting over 36 months is economically equivalent to approximately 24.82 million tokens becoming vested per month on average. Vesting is continuous over time, not a scheduled monthly sale, and vested does not mean sold.
 
@@ -340,37 +340,34 @@ Forward-looking statements—including product plans, exchange plans, utilities,
 
 ## 15. Sources and verification
 
-1. Algorand Mainnet, $CONFIO Asset ID 3351104258: fixed supply and current asset parameters.
-   https://mainnet-api.algonode.cloud/v2/assets/3351104258
-
-2. Pera Explorer, $CONFIO.
+1. Pera Explorer, $CONFIO Asset ID 3351104258: fixed supply and current asset parameters.
    https://explorer.perawallet.app/asset/3351104258/
 
-3. Confío public repository, token specification and deployment tooling.
+2. Confío public repository, token specification and deployment tooling.
    https://github.com/caesar4321/Confio/blob/main/contracts/confio/CONFIO_TOKEN_SPEC.md
 
-4. Confío public repository, aggregate backend phases and the manually operated on-chain round and price controls used for presale sub-rounds.
+3. Confío public repository, aggregate backend phases and the manually operated on-chain round and price controls used for presale sub-rounds.
    https://github.com/caesar4321/Confio/blob/main/presale/management/commands/setup_presale.py
    https://github.com/caesar4321/Confio/blob/main/contracts/presale/admin_presale.py
    https://github.com/caesar4321/Confio/blob/main/contracts/rewards/confio_rewards.py
 
-5. Confío public repository, presale contract and irreversible unlock design.
+4. Confío public repository, presale contract and irreversible unlock design.
    https://github.com/caesar4321/Confio/blob/main/contracts/presale/README.md
 
-6. Confío public repository, current referral reward configuration and identity policy.
+5. Confío public repository, current referral reward configuration and identity policy.
    https://github.com/caesar4321/Confio/blob/main/achievements/services/referral_rewards.py
    https://github.com/caesar4321/Confio/blob/main/docs/security/REFERRAL_REWARD_IDENTITY_POLICY.md
 
-7. Algorand Mainnet, Creative Co-Builder vesting App ID 3359297921.
-   https://mainnet-api.algonode.cloud/v2/applications/3359297921
+6. Pera Explorer, Creative Co-Builder vesting App ID 3359297921.
+   https://explorer.perawallet.app/application/3359297921/
 
-8. Algorand Mainnet, Julian Moon founder vesting App ID 3359301443.
-   https://mainnet-api.algonode.cloud/v2/applications/3359301443
+7. Pera Explorer, Julian Moon founder vesting App ID 3359301443.
+   https://explorer.perawallet.app/application/3359301443/
 
-9. Confío public repository, current presale geographic restrictions.
+8. Confío public repository, current presale geographic restrictions.
    https://github.com/caesar4321/Confio/blob/main/docs/legal/GEO_BLOCKING.md
 
-10. Confío global whitepaper, product architecture and chain policy.
+9. Confío global whitepaper, product architecture and chain policy.
     https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md
 
 ### Document provenance
