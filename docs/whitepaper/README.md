@@ -4,7 +4,7 @@
 
 Confío is a fully open-source, non-custodial financial application that turns stablecoin and tokenized-asset rails into a familiar mobile experience for Latin American users.
 
-**Global reference · Version 3.0 · July 2026**<br>
+**Global reference · Version 3.1 · July 2026**<br>
 Julian Moon · Founder & CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -46,7 +46,9 @@ Confío is a fully open-source, non-custodial digital-dollar application for Lat
 
 > **Product Thesis**
 >
-> The winning consumer dollar platform in Latin America will not ask users to become crypto experts. It will combine verifiable on-chain ownership with the clarity, recovery flows, local payment methods, and human support expected from a modern fintech.
+> The winning consumer dollar platform in Latin America will not ask users to become crypto experts. It will combine verifiable on-chain ownership with the clarity, recovery flows, local payment methods, and human support expected from a modern fintech. The contest will be decided not by feature parity but by distribution, trust, and local fit. Confío enters with a founder-led Spanish-language channel of approximately 480,000 people, a years-long public relationship with the region it serves, and effectively zero paid-media spend to date.
+
+As on-chain consumer applications converge around similar combinations of saving, sending, and spending, product availability alone becomes less differentiating. Distribution, trust, and local relevance become the scarce advantages. Confío brings these together through a founder-led Spanish-language audience, an existing verified-user base, country-specific payment rails, and a product designed around the financial behavior of Latin American users rather than a generic global crypto interface. <sup>[15, 16]</sup>
 
 Confío uses a deliberate role-based multi-chain architecture. cUSD remains on Algorand as the payment and transfer rail. cUSD+ operates on BNB Smart Chain as the savings rail, backed by Ondo USDY. The app is responsible for making these different settlement systems feel like one coherent product.
 
@@ -87,8 +89,15 @@ Existing options often force a trade-off. Banks and local fintechs can offer str
 | Exchanges and P2P markets | Deep liquidity and broad stablecoin access, but trading screens, order books, disputes, and counterparty risk create cognitive load. | A dollar-first experience that hides exchange mechanics and presents clear consumer actions. |
 | Custodial dollar apps and neobanks | Strong localized UX, but access can depend on the platform’s custody model and a narrow set of banking or corridor partners. | Local fintech UX combined with user-controlled signing keys and transparently separated provider controls. |
 | Self-custody wallets | Open asset control, but seed phrases, gas tokens, hexadecimal addresses, bridging, and token selection remain visible to users. | Personal-cloud recovery, sponsored network fees, contact-based sending, and product-level abstraction of cUSD and cUSD+. |
+| On-chain consumer finance apps | Increasingly similar bundles of dollar saving, yield, transfers, and spending; many compete for the same crypto-aware users through rewards and cashback. | Founder-led Spanish distribution, community trust, and country-specific products and rails aimed at bringing new Latin American users on-chain. |
 
-### 2.4 The deeper problem: falta de confianza
+### 2.4 Distribution is the competitive frontier
+
+Stablecoin infrastructure is becoming broadly available, and consumer applications are converging on a familiar bundle: hold dollars, earn variable yield, send across borders, and spend through local methods. As these features become easier to reproduce, the contest shifts from access to infrastructure toward the ability to reach users, earn their trust, and match the product to local demand. Industry analysis increasingly describes this as a distribution competition rather than a purely technical one. <sup>[16]</sup>
+
+Confío’s answer is not to outspend competitors on temporary incentives. It is to compound a founder-led Spanish-language channel into a measurable product loop: education leads to installation, phone and identity verification, funding, retained balances, repeat use, referrals, and eventually greater merchant and payroll utility. Phone contacts, interoperable QR, SPEI, PIX, PSE/Nequi, Alias/CVU, and locally appropriate product surfaces are therefore not after-the-fact localization. They are part of the product and distribution system.
+
+### 2.5 The deeper problem: falta de confianza
 
 Beneath currency volatility sits a deeper structural cost: falta de confianza - the absence of trust. People have learned to distrust institutions that can freeze access, change rules, hide spreads, or fail without warning. Confío does not ask users to replace that experience with blind trust in another company. It combines user-controlled keys, open-source software, transparent asset backing, and clearly separated provider controls so that important claims can be verified rather than merely promised.
 
@@ -96,7 +105,7 @@ Beneath currency volatility sits a deeper structural cost: falta de confianza - 
 >
 > Confío’s brand promise is simple: what belongs to the user remains under the user’s control. That promise applies to wallet custody; issuer, asset, compliance, and provider controls remain disclosed rather than hidden.
 
-### 2.5 Who Confío is for
+### 2.6 Who Confío is for
 
 The initial customer is not defined by nationality alone. Confío is designed for ordinary users who think in dollar goals: preserving savings, sending money to family, receiving payment, paying a merchant, or placing a portion of a balance into a transparent dollar savings product. Higher-balance savers are an important early wedge for cUSD+, while the payment product remains designed for broad everyday use.
 
@@ -210,7 +219,7 @@ Security review is continuous rather than treated as a one-time certification. T
 
 Source: Confío internal product and channel analytics, 23 July 2026. Metrics are unaudited. <sup>[14, 15]</sup>
 
-### 7.2 Trust-led distribution
+### 7.2 Distribution is a product capability
 
 > **Trust Is The Distribution Channel**
 >
@@ -218,11 +227,24 @@ Source: Confío internal product and channel analytics, 23 July 2026. Metrics ar
 
 Financial adoption in Latin America often begins with the credibility of the messenger. Confío’s founder-led Spanish-language distribution is therefore not an ornamental marketing asset; it is a direct acquisition and education channel. The operating test is not follower count by itself, but the measurable conversion from a piece of content to verification, deposit, retained balance, and repeat usage. <sup>[15]</sup>
 
+This changes the economics of growth. Confío can explain a new product, answer objections in the audience’s language, observe conversion, and improve the experience without making subsidy-led acquisition the default. The audience is not treated as a vanity metric or a substitute for product-market fit. It is a repeatable path for testing whether trust and education become funded use.
+
+The intended distribution flywheel is:
+
+1. Founder-led content identifies a concrete financial need and explains the product in plain Spanish.
+2. Users enter a familiar mobile onboarding flow and complete phone or identity verification where required.
+3. Local and international rails convert intent into funded cUSD or cUSD+ balances.
+4. Reliable transfers, redemptions, support, and transparent controls build retained trust.
+5. Retained users create referrals, contact-network utility, merchant demand, and evidence for country-by-country expansion.
+
+This is the strategic link between the market thesis and the product: distribution earns the first use, while trustworthy local utility earns retention.
+
 ### 7.3 Country expansion
 
 Confío is moving away from a whitepaper centered on Argentina and Venezuela. The product is regional, while access is local. Each country is enabled only when fiat rails, compliance requirements, customer support, pricing, and liquidity are operationally credible.
 
 - Koywe is live across seven LATAM markets: Alias/CVU in Argentina, SPEI in Mexico, interoperable QR in Peru and Bolivia, bank transfer in Chile, PSE/Nequi in Colombia, and PIX in Brazil. <sup>[13]</sup>
+- The live interoperable QR rails in Peru and Bolivia position Confío inside an everyday payment behavior often overlooked by card-first on-chain applications; QR is part of the current access layer, not a speculative roadmap item. <sup>[13, 16]</sup>
 - Guardarian provides SEPA access in the Eurozone and USD card access through Visa, Mastercard, Apple Pay, and Google Pay. <sup>[13]</sup>
 - Additional providers are named only after contracts and production capabilities are confirmed.
 - Peru and Mexico are important savings markets; Bolivia and Venezuela exhibit different dollar-access needs; Colombia, Chile, Argentina, and Brazil require their own product and regulatory sequencing.
@@ -305,11 +327,13 @@ No blockchain financial product is risk-free. The following table summarizes mat
 | cUSD+ operations | Multi-party Safe governance, public deployment record, and sponsored user transactions. | Expand monitoring, reliability automation, and incident runbooks. |
 | Security | Layered testing, continuous adversarial review, unit, fork, invariant/fuzz, differential, and upgrade testing; public source. | Continuously expand test coverage, threat models, and public upgrade evidence. |
 | Fiat access | Koywe live across seven LATAM markets; Guardarian live for SEPA and card-based access. | Add verified providers and fallback paths as agreements and production capabilities are completed. |
-| Distribution | 8,004 phone-complete users; 177 Didit-verified users; ≈480K founder audience. | Convert distribution into funded users, retained balances, and repeatable country cohorts. |
+| Distribution | 8,004 phone-complete users; 177 Didit-verified users; ≈480K founder audience and effectively zero paid-media spend to date. | Measure and repeat the content-to-funded-user loop, retained balances, referrals, and country-level cohorts without dependence on subsidy-led acquisition. |
 
 ### 12.1 Measurement principles
 
 Confío will distinguish signups, phone-complete users, verified users, funded users, reachable devices, active users, and retained balances. For cUSD+, the primary operating measures will be funded users, TVL, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, and country cohorts.
+
+Distribution will be measured as a funnel rather than a follower count: content reach, profile or store visit, installation, phone completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Confío will also distinguish organic acquisition from paid campaigns and measure performance by content and country so that a large audience is converted into reproducible operating evidence.
 
 ### 12.2 The next proof point
 
@@ -359,6 +383,8 @@ $CONFIO is separate from the backing of cUSD and cUSD+. Nothing in this whitepap
 
 15. Confío internal founder-channel analytics snapshot, 23 July 2026. Audience figure is approximate and changes over time.
 
+16. Benedetto Biondi, “The New Face Of Global Payments: Onchain Consumer Finance Apps,” *Forbes Technology Council*, 6 July 2026. The article argues that consumer finance products are converging on stablecoin rails and that distribution, trust, and fit with local demand will increasingly determine the winners. https://www.forbes.com/councils/forbestechcouncil/2026/07/06/the-new-face-of-global-payments-onchain-consumer-finance-apps/
+
 ### Document provenance
 
-Prepared from the prior English whitepaper, Confío’s uploaded pitch deck and product materials, current Koywe and Guardarian partner records, the public repository and deployment records, official Algorand/BNB Chain/Ondo documentation, and the internal operating metrics explicitly provided for this update.
+Prepared from the prior English whitepaper, Confío’s uploaded pitch deck and product materials, current Koywe and Guardarian partner records, the public repository and deployment records, official Algorand/BNB Chain/Ondo documentation, cited market literature, and the internal operating metrics explicitly provided for this update.
