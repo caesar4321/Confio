@@ -30,7 +30,7 @@ Nothing in this document promises a market price, exchange listing, yield, reven
 5. [Referral and usage rewards](#5-referral-and-usage-rewards)
 6. [Cultural Invitation Fund](#6-cultural-invitation-fund)
 7. [Creative Co-Builder allocation](#7-creative-co-builder-allocation)
-8. [Founder and ecosystem reserve](#8-founder-and-ecosystem-reserve)
+8. [Founder allocation](#8-founder-allocation)
 9. [Unlocks and circulating supply](#9-unlocks-and-circulating-supply)
 10. [Multi-chain policy and supply integrity](#10-multi-chain-policy-and-supply-integrity)
 11. [Utility and value-accrual boundary](#11-utility-and-value-accrual-boundary)
@@ -84,10 +84,10 @@ Users should verify the Asset ID rather than relying only on the name or ticker.
 | Referral and usage rewards | 7,400,000 | 0.74% | Earned and claimed under the active reward rules |
 | Cultural Invitation Fund | 15,000,000 | 1.50% | Planned 90-day linear vesting after the presale/DEX trigger |
 | Creative Co-Builder | 10,000,000 | 1.00% | Locked until the trigger, then linear vesting over 24 months |
-| Founder and ecosystem reserve | 893,600,000 | 89.36% | Locked until the trigger, then linear vesting over 36 months |
+| Founder — Julian Moon | 893,600,000 | 89.36% | Locked until the trigger, then linear vesting over 36 months |
 | **Total** | **1,000,000,000** | **100.00%** | Fixed |
 
-The 10,000,000-token Creative Co-Builder allocation was carved out of the original 903,600,000-token founder-controlled remainder. It did not increase total supply. After that reallocation, the founder and ecosystem reserve is 893,600,000 tokens.
+The 10,000,000-token Creative Co-Builder allocation was carved out of Julian Moon’s original 903,600,000-token founder allocation. It did not increase total supply. After that reallocation, Julian’s founder allocation is 893,600,000 tokens.
 
 The Cultural Invitation Fund is fixed at 15,000,000 tokens in this version. Any future increase would require a clearly disclosed reallocation from an existing category; the total supply cannot be increased.
 
@@ -213,11 +213,13 @@ The allocation is held in a dedicated Algorand vesting application:
 
 The vesting contract controls release timing; it does not imply that vested tokens will be sold.
 
-## 8. Founder and ecosystem reserve
+## 8. Founder allocation
 
-**893,600,000 CONFIO (89.36%)** is allocated to the founder and ecosystem reserve. This is the largest allocation and creates a material concentration risk that holders should evaluate directly.
+**893,600,000 CONFIO (89.36%) belongs to founder Julian Moon.** It is a founder-owned allocation—not a community-governed ecosystem reserve, protocol treasury, or unassigned team pool.
 
-The reserve is intended to support long-term founder alignment, hiring, development, operations, partnerships, and ecosystem growth. Those purposes do not guarantee how any vested amount will be used, transferred, or sold.
+Confío deliberately uses a traditional-startup analogy: the founder began with ownership of the fixed token supply and makes defined portions available through the presale and disclosed community and contributor allocations. Presale participants are purchasing part of that fixed token supply from the founder-led project. This analogy explains the ownership and financing model; **$CONFIO is not company equity**, and purchasing it does not make a holder a shareholder of Confío or an affiliated legal entity.
+
+After vesting, Julian may retain, transfer, or sell his tokens, or use them to fund hiring, development, operations, partnerships, and expansion. Those possible uses do not convert the founder-owned allocation into a separate “ecosystem reserve.”
 
 The allocation is held in a dedicated Algorand vesting application:
 
@@ -226,7 +228,7 @@ The allocation is held in a dedicated Algorand vesting application:
 - vesting start had not been activated as of 23 July 2026;
 - claimed amount was zero as of that date.
 
-[Verify the founder vesting application, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443).
+[Verify Julian Moon’s founder vesting application, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443).
 
 For scale, straight-line vesting over 36 months is economically equivalent to approximately 24.82 million tokens becoming vested per month on average. Vesting is continuous over time, not a scheduled monthly sale, and vested does not mean sold.
 
@@ -312,7 +314,7 @@ No promotional price should substitute for this supply disclosure.
 
 | Risk | Why it matters |
 | --- | --- |
-| Founder concentration | The founder and ecosystem reserve represents 89.36% of supply. Vesting reduces immediate liquidity but does not remove governance, perception, or future selling risk. |
+| Founder concentration | Julian Moon owns an 89.36% founder allocation. Vesting reduces immediate liquidity but does not remove control, perception, or future selling risk. |
 | Presale valuation | Phase prices imply large fully diluted value references before an external market establishes price. |
 | Unlock pressure | Presale claims and later vesting can increase transferable supply substantially. |
 | Utility uncertainty | Product success does not automatically create demand for $CONFIO unless useful token functions are implemented. |
@@ -362,7 +364,7 @@ Forward-looking statements—including product plans, exchange plans, utilities,
 7. Algorand Mainnet, Creative Co-Builder vesting App ID 3359297921.
    https://mainnet-api.algonode.cloud/v2/applications/3359297921
 
-8. Algorand Mainnet, founder and ecosystem reserve vesting App ID 3359301443.
+8. Algorand Mainnet, Julian Moon founder vesting App ID 3359301443.
    https://mainnet-api.algonode.cloud/v2/applications/3359301443
 
 9. Confío public repository, current presale geographic restrictions.

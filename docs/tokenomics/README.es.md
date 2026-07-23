@@ -61,10 +61,10 @@ Los usuarios deben verificar el Asset ID, no solo el nombre o ticker.
 | Recompensas por referidos y uso | 7.400.000 | 0,74% | Ganadas y reclamadas según las reglas activas |
 | Fondo de Invitación Cultural | 15.000.000 | 1,50% | Vesting lineal previsto de 90 días después del disparador preventa/DEX |
 | Co-Builder Creativa | 10.000.000 | 1,00% | Bloqueados hasta el disparador y luego vesting lineal durante 24 meses |
-| Reserva del fundador y ecosistema | 893.600.000 | 89,36% | Bloqueados hasta el disparador y luego vesting lineal durante 36 meses |
+| Fundador — Julian Moon | 893.600.000 | 89,36% | Bloqueados hasta el disparador y luego vesting lineal durante 36 meses |
 | **Total** | **1.000.000.000** | **100,00%** | Fijo |
 
-La asignación de 10.000.000 para la Co-Builder Creativa se separó del remanente original de 903.600.000 controlado por el fundador. No aumentó la oferta. Después de esa reasignación, la reserva del fundador y ecosistema es de 893.600.000.
+La asignación de 10.000.000 para la Co-Builder Creativa se separó de la asignación original de 903.600.000 perteneciente al fundador Julian Moon. No aumentó la oferta. Después de esa reasignación, la asignación del fundador es de 893.600.000.
 
 El Fondo de Invitación Cultural queda fijado en 15.000.000 en esta versión. Cualquier aumento futuro exigiría una reasignación pública desde otra categoría; la oferta total no puede aumentar.
 
@@ -183,11 +183,13 @@ La asignación está en una aplicación de vesting de Algorand:
 
 Vesting no significa venta.
 
-## 8. Reserva del fundador y ecosistema
+## 8. Asignación del fundador
 
-**893.600.000 CONFIO (89,36%)** pertenecen a la reserva del fundador y ecosistema. Es la mayor asignación y crea un riesgo material de concentración.
+**893.600.000 CONFIO (89,36%) pertenecen al fundador Julian Moon.** Es una asignación de propiedad del fundador, no una reserva comunitaria del ecosistema, una tesorería del protocolo ni un fondo de equipo sin asignar.
 
-La reserva está destinada a alineación de largo plazo, contratación, desarrollo, operaciones, alianzas y crecimiento. Estos fines no garantizan cómo se usará, transferirá o venderá una cantidad ya vested.
+Confío utiliza deliberadamente la analogía de una startup tradicional: el fundador comenzó siendo propietario de la oferta fija y pone porciones definidas a disposición mediante la preventa y las asignaciones comunitarias y de colaboradores divulgadas. Los participantes de la preventa compran una parte de esa oferta fija al proyecto liderado por su fundador. Esta analogía explica el modelo de propiedad y financiación; **$CONFIO no es equity de la empresa**, y comprarlo no convierte al holder en accionista de Confío ni de una entidad afiliada.
+
+Después del vesting, Julian puede conservar, transferir o vender sus tokens, o utilizarlos para financiar contratación, desarrollo, operaciones, alianzas y expansión. Estos posibles usos no convierten la asignación del fundador en una “reserva del ecosistema” separada.
 
 La asignación está en una aplicación de vesting de Algorand:
 
@@ -196,7 +198,7 @@ La asignación está en una aplicación de vesting de Algorand:
 - inicio no activado al 23 de julio de 2026;
 - cantidad reclamada: cero a esa fecha.
 
-[Verificar App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443).
+[Verificar la aplicación de vesting del fundador Julian Moon, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443).
 
 Como escala, 36 meses equivalen en promedio a aproximadamente 24,82 millones de tokens vested por mes. El vesting es continuo, no una venta mensual programada, y vested no significa vendido.
 
@@ -267,7 +269,7 @@ Ningún precio promocional sustituye esta divulgación.
 
 | Riesgo | Importancia |
 | --- | --- |
-| Concentración | La reserva representa 89,36%; el vesting reduce liquidez inmediata, no el riesgo futuro. |
+| Concentración del fundador | Julian Moon posee una asignación del fundador de 89,36%. El vesting reduce la liquidez inmediata, no el control, la percepción ni el riesgo de venta futura. |
 | Valoración de preventa | Los precios implican referencias diluidas altas antes de mercado externo. |
 | Desbloqueos | Reclamos y vesting pueden aumentar mucho la oferta transferible. |
 | Utilidad | El éxito del producto no crea automáticamente demanda de $CONFIO. |
@@ -300,7 +302,7 @@ Las declaraciones futuras son inciertas y pueden cambiar.
 5. [Contrato y desbloqueo de preventa](https://github.com/caesar4321/Confio/blob/main/contracts/presale/README.md)
 6. [Lógica de referidos](https://github.com/caesar4321/Confio/blob/main/achievements/services/referral_rewards.py) y [política de identidad](https://github.com/caesar4321/Confio/blob/main/docs/security/REFERRAL_REWARD_IDENTITY_POLICY.md)
 7. [Vesting Co-Builder, App ID 3359297921](https://mainnet-api.algonode.cloud/v2/applications/3359297921)
-8. [Vesting fundador, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443)
+8. [Vesting del fundador Julian Moon, App ID 3359301443](https://mainnet-api.algonode.cloud/v2/applications/3359301443)
 9. [Restricciones geográficas](https://github.com/caesar4321/Confio/blob/main/docs/legal/GEO_BLOCKING.md)
 10. [Whitepaper global](https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md)
 
