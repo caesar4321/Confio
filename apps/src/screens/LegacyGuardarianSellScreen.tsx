@@ -564,7 +564,7 @@ export const SellScreen = () => {
                         <GuardarianLogo width={217} height={24} />
                     </View>
                     <Text style={styles.legalText}>
-                        Guardarian es operado por FinSeven CZ s.r.o., una empresa registrada en la República Checa (código de registro: 22304681), con su dirección en Na Čečeličce 425/4, Smíchov, 15000, Praga, República Checa, registrada como Proveedor de Servicios de Activos Virtuales (VASP).
+                        FINFORTIS, S.A. de C.V. es una entidad jurídica constituida de conformidad con las leyes de El Salvador, con código de registro 2024034841 y domicilio legal en Pasaje 8, Oficina 118, Colonia San Benito, San Salvador, El Salvador.
                     </Text>
                 </View>
 
