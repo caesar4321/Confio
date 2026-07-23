@@ -424,7 +424,7 @@ $CONFIO is separate from the backing of cUSD and cUSD+. Nothing in this whitepap
 
 18. Ondo Finance, “Ondo Stocks” product overview and Global Markets API documentation, accessed July 2026. https://ondo.finance/ondo-stocks and https://docs.ondo.finance/api-reference/quickstart
 
-19. International Monetary Fund, historical documentation of Argentina’s 2001 *corralito*, deposit conversion, and capital controls; and IMF review of the relaxation of most exchange restrictions under the 2025 stabilization program. https://www.elibrary.imf.org/display/book/9781589062245/back-1.xml and https://www.imf.org/es/news/articles/2025/07/31/pr25272-argentina-imf-completes-first-review-of-the-extended-arrangement-under-the-eff
+19. International Monetary Fund Independent Evaluation Office, historical documentation of Argentina’s 2001 partial deposit freeze, capital controls, and forced conversion of dollar-denominated bank assets and liabilities; and IMF review of the relaxation of most exchange restrictions under the 2025 stabilization program. https://www.imf.org/External/NP/ieo/2003/arg/ and https://www.imf.org/es/news/articles/2025/07/31/pr25272-argentina-imf-completes-first-review-of-the-extended-arrangement-under-the-eff
 
 20. International Monetary Fund, “Digital Money and Central Banks Balance Sheet,” Working Paper No. 2022/206: Venezuela as a case of real dollarization in which the dollar functions as a means of payment and store of value. https://www.elibrary.imf.org/view/journals/001/2022/206/article-A001-en.xml
 
@@ -432,7 +432,7 @@ $CONFIO is separate from the backing of cUSD and cUSD+. Nothing in this whitepap
 
 22. Superintendencia de Banca, Seguros y AFP del Perú, *Carpeta de Información del Sistema Financiero*, February 2026, deposits by currency. https://intranet2.sbs.gob.pe/estadistica/financiera/2026/Febrero/SF-2102-fe2026.PDF
 
-23. Banco de México, 2024 monetary aggregates: MXN 732.6 billion in immediately available foreign-currency deposits and MXN 216.8 billion in foreign-currency bank time deposits; and 2025 remittance statistics. https://www.banxico.org.mx/TablasWeb/informe-anual/compilacion-2024/7EF1402E-1443-4070-9C0A-6B352272C3B9.html and https://www.banxico.org.mx/SieInternet/consultarDirectorioInternetAction.do?accion=consultarCuadroAnalitico&idCuadro=CA11&locale=es&sector=1
+23. Banco de México, 2024 monetary aggregates: MXN 732.6 billion in immediately available foreign-currency deposits and MXN 216.8 billion in foreign-currency bank time deposits; and Inter-American Development Bank, 2025 remittance estimate for Mexico of approximately US$62.5 billion. https://www.banxico.org.mx/TablasWeb/informe-anual/compilacion-2024/7EF1402E-1443-4070-9C0A-6B352272C3B9.html and https://publications.iadb.org/publications/english/document/Remittances-to-Latin-America-and-the-Caribbean-in-2025-Adaptations-in-a-Context-of-Uncertainty.pdf
 
 24. Inter-American Development Bank, *Remittances to Latin America and the Caribbean in 2025: Adaptations in a Context of Uncertainty*: 35.7% of South American remittances originated in the United States and 36.2% in Europe, including 19.7 percentage points from Spain; the United States supplied 53.4% of Colombia’s remittance inflows. https://publications.iadb.org/publications/english/document/Remittances-to-Latin-America-and-the-Caribbean-in-2025-Adaptations-in-a-Context-of-Uncertainty.pdf
 
