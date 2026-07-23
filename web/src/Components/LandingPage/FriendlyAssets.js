@@ -192,19 +192,15 @@ const FriendlyAssets = () => {
           transition={{ duration: 0.6, delay: 0.5 }}
           className={styles.documents}
         >
-          <a href={t('https://medium.com/confio4world/la-visión-de-confío-db2416ae3025', 'https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81', 'https://medium.com/confio4world/confío-중남미를-위한-디지털-달러-플랫폼-570adde1dfe3')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.es.md', 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md', 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.ko.md')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📄</span>
             <span>{t('Whitepaper', 'Whitepaper', '백서')}</span>
           </a>
-          <a href="https://medium.com/confio4world/tokenomics-oficial-de-confío-versión-2025-comunidad-latam-152815f9bcc9" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.es.md', 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.md', 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.ko.md')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📘</span>
-            <span>{t('Tokenomics 2025 (ES)', 'Tokenomics 2025 (ES)', '토크노믹스 2025 (ES)')}</span>
+            <span>{t('Tokenomics', 'Tokenomics', '토크노믹스')}</span>
           </a>
-          <a href="https://medium.com/confio4world/confío-official-tokenomics-2025-english-edition-421a310a18fb" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
-            <span className={styles.documentIcon}>📗</span>
-            <span>{t('Tokenomics 2025 (EN)', 'Tokenomics 2025 (EN)', '토크노믹스 2025 (EN)')}</span>
-          </a>
-          <a href={t('https://docs.google.com/presentation/d/157hcgmSUkaDmBzyvo_LJZKTU0s9D7SjW/edit?usp=sharing&ouid=118055710232569593824&rtpof=true&sd=true', 'https://docs.google.com/presentation/d/1HCW8mBXMpYhT2m48xg9141nkaqLmGARo/edit?usp=sharing&ouid=104671499626663887236&rtpof=true&sd=true', 'https://docs.google.com/presentation/d/1HCW8mBXMpYhT2m48xg9141nkaqLmGARo/edit?usp=sharing&ouid=104671499626663887236&rtpof=true&sd=true')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/pitchdeck/CONFIO_Presale_Deck_ES.pdf', 'https://github.com/caesar4321/Confio/blob/main/docs/pitchdeck/CONFIO_Presale_Deck_EN.pdf', 'https://github.com/caesar4321/Confio/blob/main/docs/pitchdeck/CONFIO_Presale_Deck_KO.pdf')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📊</span>
             <span>{t('Presentación de Confío', 'Pitch Deck', '피치덱')}</span>
           </a>
