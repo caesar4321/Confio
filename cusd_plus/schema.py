@@ -588,6 +588,45 @@ class BscRpcResult(graphene.ObjectType):
     error = graphene.String()
 
 
+def _guardarian_savings_deposit_address(user):
+    """Deposit address of the user's newest Guardarian USDT sell still
+    awaiting funds — fetched live from Guardarian's API, never from the
+    client. Used by the relay's redeemToUsdt recipient guard."""
+    try:
+        from datetime import timedelta
+
+        import requests
+        from django.conf import settings
+        from django.utils import timezone
+
+        from usdc_transactions.models import GuardarianTransaction
+
+        tx = GuardarianTransaction.objects.filter(
+            user=user,
+            from_currency__in=['USDT'],
+            status__in=['new', 'waiting', 'waiting_for_deposit', 'waiting_for_customer'],
+            created_at__gte=timezone.now() - timedelta(hours=24),
+        ).order_by('-created_at').first()
+        if not tx:
+            return None
+        api_key = getattr(settings, 'GUARDARIAN_API_KEY', None)
+        base_url = getattr(settings, 'GUARDARIAN_API_URL', 'https://api-payments.guardarian.com/v1')
+        if not api_key:
+            return None
+        resp = requests.get(
+            f'{base_url.rstrip("/")}/transaction/{tx.guardarian_id}',
+            headers={'x-api-key': api_key},
+            timeout=10,
+        )
+        if not resp.ok:
+            return None
+        data = resp.json()
+        return data.get('deposit_address') or (data.get('deposit') or {}).get('address')
+    except Exception:
+        logger.exception('guardarian savings deposit lookup failed')
+        return None
+
+
 class SubmitBscTransaction(graphene.Mutation):
     """Relay a CLIENT-SIGNED BSC transaction to the node (the EVM analogue
     of submitSponsoredGroup). Decodes the raw tx and only relays legacy
@@ -648,6 +687,34 @@ class SubmitBscTransaction(graphene.Mutation):
             is_autoconvert = True
         elif to_addr not in allowed:
             return SubmitBscTransaction(success=False, error='destination_not_allowed')
+
+        # redeemToUsdt recipient guard: the vault pays out to whatever address
+        # sits in calldata, so a tampered client could redirect a redeem the
+        # user is biometrically approving. Relay it only when the recipient is
+        # the signer's own address (self-redeem) or the user's LIVE Guardarian
+        # sell deposit address, re-fetched server-side — mirror of the
+        # Algorand rails where the destination never exists client-side.
+        vault_addr = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+        REDEEM_TO_USDT_SELECTOR = 'f4794519'  # redeemToUsdt(uint256,uint256,address)
+        if vault_addr and to_addr == vault_addr:
+            data_hex = fields[5].hex()
+            if data_hex.startswith(REDEEM_TO_USDT_SELECTOR):
+                if len(data_hex) < 8 + 192:
+                    return SubmitBscTransaction(success=False, error='bad_redeem_calldata')
+                recipient = '0x' + data_hex[8 + 128:8 + 192][-40:].lower()
+                try:
+                    from eth_account import Account as _EthAccount
+                    signer = _EthAccount.recover_transaction(raw).lower()
+                except Exception:
+                    return SubmitBscTransaction(success=False, error='unrecoverable_signer')
+                if recipient != signer:
+                    deposit_address = _guardarian_savings_deposit_address(user)
+                    if not deposit_address or deposit_address.lower() != recipient:
+                        logger.warning(
+                            'redeemToUsdt recipient %s rejected for user %s (signer %s)',
+                            recipient, user.id, signer,
+                        )
+                        return SubmitBscTransaction(success=False, error='redeem_recipient_not_allowed')
 
         from .tasks import _rpc
         try:
