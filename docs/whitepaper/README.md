@@ -58,7 +58,7 @@ Confío uses a deliberate role-based multi-chain architecture. cUSD remains on A
 | cUSD+ | Dollar savings with variable yield exposure, presented as an accumulating balance. | BNB Smart Chain; vault-backed by Ondo USDY and entered/exited through USDT. |
 | $CONFIO | Community, rewards, and future ecosystem utility; separate from backing assets. | Currently Algorand. No BNB migration is assumed by this whitepaper. |
 
-As of 23 July 2026, Confío records 8,004 users who completed phone verification, 177 users verified through Didit, a 61.5% completion rate among users who began the Didit flow, 2,094 push-reachable devices, and 2,092 of those devices used within the last 30 days. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
+As of 23 July 2026, Confío records 8,004 users who completed phone verification and 177 users who completed Didit identity verification by submitting a government-issued identity document and capturing a live selfie for liveness and face-matching checks. The Didit flow has a 61.5% completion rate among users who began it. Confío also records 2,094 push-reachable devices, with 2,092 of those devices used within the last 30 days. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
 
 The BNB Smart Chain vault is deployed and verified, is controlled through multi-party Safe governance, and integrates production USDY, USDT, the Ondo InstantManager, and the USDY price oracle. Confío works with Ondo Finance within its eligibility and compliance framework to provide the cUSD+ savings experience. <sup>[8, 9]</sup>
 
@@ -68,9 +68,24 @@ The BNB Smart Chain vault is deployed and verified, is controlled through multi-
 
 Latin America is not one homogeneous monetary crisis. Some users need protection from local-currency volatility; others need affordable cross-border settlement, a safe place for dollar savings, or a practical way to pay and be paid. What connects these markets is demand for a reliable dollar unit and dissatisfaction with the friction surrounding it.
 
+| Market | Observed dollar need | Product implication |
+| --- | --- | --- |
+| Argentina | Repeated inflation and capital controls, together with the institutional memory of the 2001 *corralito* and forced conversion of dollar deposits, taught households to value access and control as much as nominal yield. Most recent exchange restrictions have eased, but the historical trust deficit remains relevant. <sup>[19]</sup> | A dollar product must make custody boundaries, withdrawal rights, pricing, and rule changes unusually clear. |
+| Venezuela | Extreme inflation pushed the U.S. dollar into both store-of-value and everyday payment functions, creating a highly dollarized but operationally fragmented economy. <sup>[20]</sup> | Dollar access and payment utility are immediate needs, while sanctions, provider availability, and compliance require tighter controls. |
+| Bolivia | The IMF’s 2025 assessment described usable foreign-exchange reserves as close to zero, a widening parallel-rate gap, and severe limits on private-sector access to official-rate dollars. <sup>[21]</sup> | Reliable access, transparent local pricing, and redemption liquidity matter before yield optimization. |
+| Peru | SBS data show that Peru’s regulated financial system already holds foreign-currency deposits measured in tens of billions of dollars. <sup>[22]</sup> | Existing dollar savers form a natural early market for portable, user-controlled savings and cUSD+. |
+| Mexico | Banco de México reported MXN 949.4 billion in immediate and time deposits denominated in foreign currency in 2024, while remittance inflows reached approximately US$62.5 billion in 2025. <sup>[23]</sup> | The opportunity spans higher-balance dollar saving and a very large recurring cross-border money flow, connected locally through SPEI. |
+| Colombia | The United States supplied 53.4% of Colombia’s remittance inflows in 2025, while Colombia hosted approximately 2.8 million Venezuelans. Its remittance scale and Venezuelan diaspora create a distinct Colombia–Venezuela family-transfer opportunity. <sup>[24, 25]</sup> | PSE and Nequi provide local access in Colombia, while cUSD is designed to support compliant dollar transfers and settlement between connected users across the corridor. |
+
+These markets do not share one crisis, but they exhibit a common **dollar reflex**: when confidence, access, or purchasing power is uncertain, people seek dollar exposure through whatever channel is available. Confío’s country strategy starts from the specific reason for that demand rather than treating Latin America as one interchangeable market.
+
+**Origin corridors matter as much as destination markets.** In 2025, the United States supplied 35.7% of remittances received in South America, while Europe supplied 36.2%, including 19.7 percentage points from Spain. Confío therefore treats the United States and Spain as strategically important origin markets, Colombia as both a destination market and a bridge to Venezuelan households, and the rest of Latin America as a network of distinct receiving and circulation markets rather than one generic region. <sup>[24, 25]</sup>
+
+This corridor strategy concerns cUSD transfers, local payment access, and compliant fiat funding and withdrawal. It does not imply that cUSD+, USDY, or Ondo Stocks are available to U.S. persons; savings and investment products follow their own provider terms, jurisdictional restrictions, and eligibility rules.
+
 Stablecoins have moved beyond a niche trading instrument. Chainalysis reports that stablecoins represented more than half of exchange purchases in selected major Latin American fiat markets during the year ending June 2025, while regional crypto adoption grew strongly across retail and institutional segments. <sup>[2]</sup>
 
-Remittances remain economically significant across the region. The World Bank estimated approximately US$162 billion in remittance flows to Latin America and the Caribbean in 2025. Confío does not assume it will replace the entire remittance stack; it focuses on the wallet and settlement experience that begins after a user wants to move value in dollars. <sup>[1]</sup>
+Remittances remain economically significant across the region. The Inter-American Development Bank estimated that remittances to Latin America and the Caribbean reached a record US$173.7 billion in 2025, an increase of 7.3% from 2024. Confío does not assume it will replace the entire remittance stack; it focuses on the consumer wallet, local access, and dollar settlement experience connecting senders and recipients. <sup>[1]</sup>
 
 ### 2.2 The product gap
 
@@ -116,6 +131,7 @@ Confío separates the user experience from the settlement rail. A user sees doll
 | Consumer layer | Confío product layer | Settlement and backing layer |
 | --- | --- | --- |
 | Google/Apple sign-in; phone identity; Spanish-first UX | Wallet creation and recovery; contact-based transfers; balance presentation | Device-generated keys; user-signed blockchain transactions |
+| Government identity document, live selfie, and user-entered residential address where required | Identity and provider-onboarding orchestration with user consent | Didit document, liveness, and face-matching checks; Koywe and Guardarian address and provider-specific compliance checks |
 | Local and international payment methods | Ramp orchestration; quotes, orders, status, and support | Koywe local rails across seven LATAM markets; Guardarian SEPA and USD card access through Visa, Mastercard, Apple Pay, and Google Pay |
 | Pay, send, receive | cUSD | Algorand settlement; USDC-backed issuance design |
 | Save and redeem | cUSD+ | BNB Smart Chain vault; USDY backing; USDT entry and exit |
@@ -126,7 +142,7 @@ Payments and savings should not be forced onto the same rail simply for architec
 
 ### 3.2 Non-custodial does not mean unregulated
 
-Confío distinguishes three layers: the user’s wallet keys, the issuer or vault contracts, and regulated fiat/RWA providers. Confío does not hold a user’s private key. At the same time, cUSD issuance, cUSD+ eligibility, fiat ramps, and underlying assets can have their own compliance controls. Describing the wallet as non-custodial does not erase those separate controls. <sup>[3, 4]</sup>
+Confío distinguishes three layers: the user’s wallet keys, the issuer or vault contracts, and regulated fiat/RWA providers. Confío does not hold a user’s private key. At the same time, cUSD issuance, cUSD+ eligibility, fiat ramps, and underlying assets can have their own Know Your Customer (KYC) identity requirements and Anti-Money Laundering (AML) controls, including sanctions screening and transaction monitoring. Describing the wallet as non-custodial does not erase those separate controls. <sup>[3, 4]</sup>
 
 ## 4. cUSD: the Algorand payment rail
 
@@ -181,6 +197,12 @@ The primary reason is Ondo Finance. Confío did not select BNB Smart Chain first
 
 BNB Smart Chain’s EVM compatibility, USDT liquidity, wallet infrastructure, short block times, and low fees strengthen that product decision and create room for future RWA integrations. They are supporting advantages, not the original cause of the deployment. Chain-wide TVL does not automatically create value for cUSD+, and the BNB deployment does not imply that cUSD payments or $CONFIO should migrate from Algorand. <sup>[8, 12]</sup>
 
+### 5.5 Ondo Stocks (Global Markets)
+
+Confío plans to extend the savings experience to eligible tokenized U.S. stocks and ETFs issued through Ondo Global Markets. The designed flow lets a user purchase from a cUSD+ balance and return sale proceeds directly to cUSD+, where the remaining balance can continue accumulating variable USDY-linked yield. The transaction router is designed as a pass-through rather than a custodian: assets move within the user-authorized transaction and are not held at rest by the router. <sup>[3, 18]</sup>
+
+The launch pricing target is an explicit 0.30% Confío transaction fee on each purchase and each sale. This is not a hidden price markup: the fee is calculated separately and transferred on-chain in USDT. Any cost or spread embedded in the Ondo execution quote, together with any applicable third-party charge, should be shown separately before confirmation. Final launch pricing will be set after the complete Ondo Global Markets commercial and quote-cost schedule is known.
+
 ## 6. Wallet, security, and open-source architecture
 
 ### 6.1 Open by default
@@ -216,8 +238,8 @@ Security review is continuous rather than treated as a one-time certification. T
 | Metric | Current value | Definition / caution |
 | --- | --- | --- |
 | Phone-complete users | 8,004 | Users who completed phone verification; not equivalent to funded users. |
-| Didit-verified users | 177 | Users who completed the Didit identity-verification flow. |
-| KYC completion | 61.5% | Completion among users who started the Didit verification flow. |
+| Didit identity-verified users | 177 | Users who submitted a government-issued identity document and completed a live-selfie liveness and face-matching check through Didit. This does not by itself mean that every fiat or investment provider has approved the user. |
+| Didit identity-verification completion | 61.5% | Completion among users who started that document-and-live-selfie flow; kept separate from provider-specific address, transaction, and product-eligibility checks. |
 | Push-reachable devices | 2,094 | Devices currently reachable through FCM. |
 | Used in last 30 days | 2,092 | Reachable devices recorded as used within 30 days; not labeled as audited MAU. |
 | Founder audience | ≈480,000 | Approximate Spanish-speaking content audience; platform analytics vary over time. |
@@ -252,7 +274,8 @@ Confío is moving away from a whitepaper centered on Argentina and Venezuela. Th
 - The live interoperable QR rails in Peru and Bolivia position Confío inside an everyday payment behavior often overlooked by card-first on-chain applications; QR is part of the current access layer, not a speculative roadmap item. <sup>[13, 16]</sup>
 - Guardarian provides SEPA access in the Eurozone and USD card access through Visa, Mastercard, Apple Pay, and Google Pay. <sup>[13]</sup>
 - Additional providers are named only after contracts and production capabilities are confirmed.
-- Peru and Mexico are important savings markets; Bolivia and Venezuela exhibit different dollar-access needs; Colombia, Chile, Argentina, and Brazil require their own product and regulatory sequencing.
+- Peru and Mexico are important savings markets; Bolivia and Venezuela exhibit different dollar-access needs; Colombia combines a large domestic remittance market with a meaningful Venezuela-linked family-transfer opportunity; and Chile, Argentina, and Brazil require their own product and regulatory sequencing. <sup>[24, 25]</sup>
+- The United States and Spain are strategic origin markets for Latin American remittances. Corridor rollout depends on viable sender funding, recipient access, compliant settlement, local withdrawal or reuse, and support at both ends. <sup>[24]</sup>
 - The app should expose only the modules that are ready and appropriate in each market.
 
 ## 8. Business model
@@ -265,8 +288,9 @@ Confío’s business model aligns revenue with useful financial activity rather 
 | Merchant payments | 0.9% flat Confío platform fee. |
 | Payroll and mass payouts | 0.9% flat Confío platform fee. |
 | cUSD+ yield share | The deployed vault allocates 15% of positive USDY reference-price appreciation to Confío and 85% to the cUSD+ holder reference value. Yield is variable and not guaranteed. |
+| Ondo Stocks transactions | Planned 0.30% explicit Confío fee on each purchase and sale. The fee is separate from any cost or spread contained in the Ondo execution quote and from applicable third-party charges. |
 | Fiat-rail economics | Koywe provider pricing and Guardarian revenue-sharing may apply according to the live quote and the relevant partner agreement. |
-| Future financial products | Potential fees or revenue share from eligible RWA, brokerage, or card partners, subject to separate terms and approvals. |
+| Future financial products | Potential fees or revenue share from other eligible RWA, brokerage, or card partners, subject to separate terms and approvals. |
 
 Network sponsorship is a product cost, not proof that transactions are economically free. Confío sponsors user blockchain network fees to preserve a simple experience, while underlying ramp, liquidity, compliance, and support costs remain real.
 
@@ -292,15 +316,17 @@ If a future representation or migration is pursued, supply integrity is non-nego
 
 ## 10. Compliance and operating model
 
-Confío’s architecture separates software custody from product and provider obligations. A non-custodial wallet can still integrate permissioned assets, identity verification, sanctions screening, fiat providers, and issuer controls. The relevant obligations depend on the product, legal entity, user location, transaction, and partner.
+Confío’s architecture separates software custody from product and provider obligations. A non-custodial wallet can still integrate permissioned assets, identity verification, sanctions screening, fiat providers, and issuer controls. **Know Your Customer (KYC)** refers to the checks used to establish who a user is and, where required, where the user resides. **Anti-Money Laundering (AML)** refers to provider and transaction controls intended to detect or prevent sanctions violations, fraud, money laundering, terrorist financing, and other prohibited activity. The applicable checks depend on the product, legal entity, user location, transaction, and partner.
 
 > **Software-Publisher Architecture**
 >
 > Confío is architected so regulated activities - fiat custody, currency conversion, identity verification, and permissioned-asset access - are performed by the relevant licensed or regulated providers rather than by Confío’s wallet software. This describes the operating design; it is not a claim that Confío has no legal or compliance obligations.
 
-- Didit supports the current identity-verification flow; completion metrics are reported separately from phone verification.
-- Koywe provides live local fiat rails across seven LATAM markets and applies its own service and AML conditions. <sup>[13]</sup>
-- Guardarian provides SEPA and card-based dollar access and applies its own service, eligibility, payment-method, and compliance conditions. <sup>[13]</sup>
+- Didit supports the current identity-verification flow. A user submits a government-issued identity document and captures a live selfie; Didit performs document, liveness, and face-matching checks. Completion metrics are reported separately from phone verification and separately from approval by any fiat or RWA provider.
+- Residential-address information is an additional provider requirement rather than an output inferred from phone verification. For Koywe transactions, Confío asks the user to enter the address directly and, with the user’s consent, submits it to Koywe, which performs the required provider-side verification. <sup>[13]</sup>
+- Koywe provides live local fiat rails across seven LATAM markets and applies its own identity, address, eligibility, sanctions, and transaction controls. <sup>[13]</sup>
+- Guardarian provides SEPA and card-based dollar access. Its onboarding also includes the user’s residential-address information and remains subject to Guardarian’s own identity, address, eligibility, payment-method, sanctions, and transaction controls. <sup>[13]</sup>
+- Neither phone completion nor Didit identity verification alone guarantees that Koywe, Guardarian, Ondo, or another provider will approve a user or transaction.
 - USDY access is limited to eligible non-US participants and exact approved addresses under Ondo’s current framework. <sup>[7, 10]</sup>
 - cUSD issuer controls and cUSD+ contract controls are distinct from possession of a user’s wallet key.
 - Additional countries and rails launch only after the corresponding legal, operational, and provider checks.
@@ -319,7 +345,7 @@ No blockchain financial product is risk-free. The following table summarizes mat
 | Key recovery | Device-generated keys and personal-cloud recovery avoid a central key vault. | Loss of device/cloud access, platform changes, or recovery defects can affect access. |
 | Upgrade governance | Multi-party Safe, public upgrade records, source verification, storage-layout checks. | Authorized signers could make a harmful change or fail to respond during an incident. |
 | Fiat rails | Koywe and Guardarian are live; additional providers are added only after contracts and production capabilities are verified. | Country coverage, payment methods, bank dependencies, pricing, and provider suspensions can change. |
-| Regulatory | Identity checks, provider controls, phased markets, legal review. | Rules differ by jurisdiction and may restrict availability or require product changes. |
+| Regulatory and financial crime | Government-document and live-selfie identity verification; user-provided residential addresses where required; provider-side address verification, sanctions screening, transaction controls, phased markets, and legal review. | Identity verification does not eliminate fraud or illicit-finance risk; providers or authorities may reject, delay, report, or restrict users and transactions, and rules differ by jurisdiction. |
 | Multi-chain UX | The app abstracts chains and separates product roles. | Bridges, conversions, address recovery, and chain-specific failures add complexity. |
 | Metrics and concentration | Definitions and unaudited status are disclosed. | Early usage or TVL may be concentrated and may not predict broad adoption. |
 
@@ -332,11 +358,11 @@ No blockchain financial product is risk-free. The following table summarizes mat
 | cUSD+ operations | Multi-party Safe governance, public deployment record, and sponsored user transactions. | Expand monitoring, reliability automation, and incident runbooks. |
 | Security | Layered testing, continuous adversarial review, unit, fork, invariant/fuzz, differential, and upgrade testing; public source. | Continuously expand test coverage, threat models, and public upgrade evidence. |
 | Fiat access | Koywe live across seven LATAM markets; Guardarian live for SEPA and card-based access. | Add verified providers and fallback paths as agreements and production capabilities are completed. |
-| Distribution | 8,004 phone-complete users; 177 Didit-verified users; ≈480K founder audience and effectively zero paid-media spend to date. | Measure and repeat the content-to-funded-user loop, retained balances, referrals, and country-level cohorts without dependence on subsidy-led acquisition. |
+| Distribution | 8,004 phone-complete users; 177 users who completed Didit government-document and live-selfie identity verification; ≈480K founder audience and effectively zero paid-media spend to date. | Measure and repeat the content-to-funded-user loop, retained balances, referrals, and country-level cohorts without dependence on subsidy-led acquisition. |
 
 ### 12.1 Measurement principles
 
-Confío will distinguish signups, phone-complete users, verified users, funded users, reachable devices, active users, and retained balances. For cUSD+, the primary operating measures will be funded users, TVL, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, and country cohorts.
+Confío will distinguish signups, phone-complete users, verified users, funded users, reachable devices, active users, and retained balances. For cUSD+, the primary operating measures will be funded users, TVL, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, and country cohorts. For remittances, Confío will measure origin and destination, completed volume, repeat-sender behavior, median transfer value, completion time, disclosed total cost, and whether recipients withdraw, retain, transfer, or spend the received balance.
 
 Distribution will be measured as a funnel rather than a follower count: content reach, profile or store visit, installation, phone completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Confío will also distinguish organic acquisition from paid campaigns and measure performance by content and country so that a large audience is converted into reproducible operating evidence.
 
@@ -354,11 +380,13 @@ cUSD and cUSD+ are not bank deposits, are not insured by a deposit-insurance sch
 
 Any cUSD+ yield is variable, depends on the performance and terms of USDY and the vault, and is not guaranteed. USDY access and cUSD+ availability are subject to Ondo eligibility, compliance conditions, provider availability, and applicable law.
 
+Ondo Stocks are tokenized financial products rather than direct Confío-issued shares. Availability, execution, transferability, redemption, economic rights, and geographic eligibility are governed by the relevant Ondo product terms, execution quotes, provider conditions, and applicable law. They are not available to U.S. persons through the contemplated product flow.
+
 $CONFIO is separate from the backing of cUSD and cUSD+. Nothing in this whitepaper changes the terms, allocation, lockups, rights, or disclosures applicable to $CONFIO. Readers should review the definitive product terms, risk disclosures, smart contracts, provider terms, and local law before using any service.
 
 ## Endnotes
 
-1. World Bank, Migration and Development Brief: remittance flows to Latin America and the Caribbean, 2025 estimate (US$162B). https://documents1.worldbank.org/curated/en/099714008132436612/pdf/IDU1a9cf73b51fcad1425a1a0dd1cc8f2f3331ce.pdf
+1. Inter-American Development Bank, “Remittances to Latin America and the Caribbean Ease After 2025 Surge,” 16 June 2026: estimated regional remittances of US$173.7 billion in 2025, up 7.3% from 2024. https://www.iadb.org/en/blog/migration/remittances-latin-america-and-caribbean-ease-after-2025-surge
 
 2. Chainalysis, “Latin America Emerges as Crypto Powerhouse Amid Volatile Growth,” 2 October 2025. https://www.chainalysis.com/blog/latin-america-crypto-adoption-2025/
 
@@ -384,13 +412,29 @@ $CONFIO is separate from the backing of cUSD and cUSD+. Nothing in this whitepap
 
 13. Confío internal partner records, July 2026: Koywe and Guardarian commercial agreements and production integrations in effect across supported markets and payment methods. Commercial terms remain governed by the respective agreements.
 
-14. Confío internal product analytics snapshot, 23 July 2026: phone-complete, Didit verification, KYC completion, and FCM device metrics. Unaudited.
+14. Confío internal product analytics snapshot, 23 July 2026: phone-complete, Didit government-document and live-selfie identity-verification completion, and FCM device metrics. Unaudited. Didit completion is distinct from provider-specific residential-address verification, transaction screening, and product eligibility.
 
 15. Confío internal founder-channel analytics snapshot, 23 July 2026. Audience figure is approximate and changes over time.
 
 16. Benedetto Biondi, “The New Face Of Global Payments: Onchain Consumer Finance Apps,” *Forbes Technology Council*, 6 July 2026. The article argues that consumer finance products are converging on stablecoin rails and that distribution, trust, and fit with local demand will increasingly determine the winners. https://www.forbes.com/councils/forbestechcouncil/2026/07/06/the-new-face-of-global-payments-onchain-consumer-finance-apps/
 
 17. Algorand, official network overview, accessed 23 July 2026: “0 downtime in 7 years (and counting)” and uninterrupted network availability since launch. https://algorand.co/
+
+18. Ondo Finance, “Ondo Stocks” product overview and Global Markets API documentation, accessed July 2026. https://ondo.finance/ondo-stocks and https://docs.ondo.finance/api-reference/quickstart
+
+19. International Monetary Fund, historical documentation of Argentina’s 2001 *corralito*, deposit conversion, and capital controls; and IMF review of the relaxation of most exchange restrictions under the 2025 stabilization program. https://www.elibrary.imf.org/display/book/9781589062245/back-1.xml and https://www.imf.org/es/news/articles/2025/07/31/pr25272-argentina-imf-completes-first-review-of-the-extended-arrangement-under-the-eff
+
+20. International Monetary Fund, “Digital Money and Central Banks Balance Sheet,” Working Paper No. 2022/206: Venezuela as a case of real dollarization in which the dollar functions as a means of payment and store of value. https://www.elibrary.imf.org/view/journals/001/2022/206/article-A001-en.xml
+
+21. International Monetary Fund, “Bolivia: 2025 Article IV Consultation,” Country Report No. 2025/116: foreign-exchange shortage, near-zero usable reserves, and parallel-rate pressure. https://www.imf.org/en/publications/cr/issues/2025/06/02/bolivia-2025-article-iv-consultation-press-release-staff-report-and-statement-by-the-567384
+
+22. Superintendencia de Banca, Seguros y AFP del Perú, *Carpeta de Información del Sistema Financiero*, February 2026, deposits by currency. https://intranet2.sbs.gob.pe/estadistica/financiera/2026/Febrero/SF-2102-fe2026.PDF
+
+23. Banco de México, 2024 monetary aggregates: MXN 732.6 billion in immediately available foreign-currency deposits and MXN 216.8 billion in foreign-currency bank time deposits; and 2025 remittance statistics. https://www.banxico.org.mx/TablasWeb/informe-anual/compilacion-2024/7EF1402E-1443-4070-9C0A-6B352272C3B9.html and https://www.banxico.org.mx/SieInternet/consultarDirectorioInternetAction.do?accion=consultarCuadroAnalitico&idCuadro=CA11&locale=es&sector=1
+
+24. Inter-American Development Bank, *Remittances to Latin America and the Caribbean in 2025: Adaptations in a Context of Uncertainty*: 35.7% of South American remittances originated in the United States and 36.2% in Europe, including 19.7 percentage points from Spain; the United States supplied 53.4% of Colombia’s remittance inflows. https://publications.iadb.org/publications/english/document/Remittances-to-Latin-America-and-the-Caribbean-in-2025-Adaptations-in-a-Context-of-Uncertainty.pdf
+
+25. UNHCR, *Global Report 2025 — Situation Overview: Colombia*: Colombia hosted approximately 2.8 million Venezuelans in 2025. The Colombia–Venezuela family-transfer opportunity described in this document is Confío’s inference from the scale and composition of this population, not a remittance-volume estimate. https://www.unhcr.org/sites/default/files/2026-06/global-report-2025-situation-overview-colombia.pdf
 
 ### Document provenance
 
