@@ -10,6 +10,8 @@ Julian Moon · Founder & CEO<br>
 
 *Lo tuyo, tuyo. · Blockchain inside. Simple as PayPal.*
 
+**Authoritative original:** This English document is the sole authoritative version of the Confío whitepaper. [Español](README.es.md) and [한국어](README.ko.md) are provided as translations for convenience. If a translation differs from the English text, the English text controls.
+
 ## How to read this paper
 
 > **One Product, Purpose-Built Rails**
