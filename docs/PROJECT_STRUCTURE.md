@@ -19,8 +19,9 @@ This is a **monolithic repository** containing the full Confío stack.
 │   └── android/       # Native Android code
 │
 ├── config/            # Django project configuration (Settings, URLs)
-├── contracts/         # Algorand Smart Contracts (PyTeal)
+├── contracts/         # Algorand and EVM smart contracts
 │   ├── cusd/          # cUSD Stablecoin
+│   ├── cusd_plus/     # cUSD+ BNB Smart Chain vault and deployment records
 │   ├── p2p_trade/     # P2P Exchange Contract
 │   ├── payment/       # Payment Processing
 │   ├── payroll/       # Payroll System
@@ -48,8 +49,13 @@ This is a **monolithic repository** containing the full Confío stack.
 ├── achievements/      # User gamification & rewards
 ├── usdc_transactions/ # USDC specific transaction handling
 │
-├── docs/              # Project Documentation
-│   └── security/      # Security, KYC, and reward-control policy docs
-│       └── REFERRAL_REWARD_IDENTITY_POLICY.md # Referral reward, Didit KYC, and duplicate-identity controls
+├── docs/              # Public project documentation
+│   ├── README.md      # Documentation index
+│   ├── whitepaper/
+│   │   └── README.md  # Canonical English product and strategy whitepaper
+│   ├── analysis/      # Partner and product analysis
+│   ├── legal/         # Public legal and market-access policies
+│   ├── plans/         # Active implementation plans
+│   └── security/      # Security, identity, and access-control references
 └── manage.py          # Django entry point
 ```

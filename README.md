@@ -1,7 +1,9 @@
 # Confío: LATAM's Open Wallet for the Dollar Economy
 
-**Confío** is an open-source Web3 wallet and transaction platform designed for Latin America.  
-It enables users to **send, receive, and hold stablecoins** (cUSD (Confío Dollar)) on the **Algorand blockchain**, with zero gas fees and no crypto complexity.
+**Confío** is an open-source digital-dollar wallet and transaction platform
+designed for Latin America. It uses **cUSD on Algorand** for everyday payments
+and **cUSD+ on BNB Smart Chain** for USDY-backed dollar savings, with sponsored
+network fees and no crypto complexity.
 
 Built for real people — not just crypto experts.
 
@@ -9,10 +11,10 @@ Built for real people — not just crypto experts.
 
 ## 🌎 Why Confío?
 
-In countries like Venezuela, Argentina, and beyond, inflation erodes trust in local currencies.  
+In countries like Venezuela, Argentina, and beyond, inflation erodes trust in local currencies.
 Confío helps people access stable dollars, send remittances, and pay each other — simply and safely — using blockchain.
 
-> "Confío" means **"I trust"** in Spanish.  
+> "Confío" means **"I trust"** in Spanish.
 > We open-source everything because **trust must be earned, not assumed**.
 
 ---
@@ -22,6 +24,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 *   **Zero Complexity**: Log in with Google/Apple. No seed phrases to lose.
 *   **Gasless**: We sponsor transaction fees. Users just send money.
 *   **Stable**: cUSD (Confío Dollar) 1:1 backed by USDC.
+*   **Savings**: cUSD+ provides eligible users with variable USDY-backed yield exposure on BNB Smart Chain.
 *   **Accessible**:
     *   **WhatsApp-like Experience**: Send money to any phone contact directly.
     *   **Fiat On/Off Ramps**: Buy/Sell USDC with local payment methods and can convert it to cUSD.
@@ -32,10 +35,10 @@ Confío helps people access stable dollars, send remittances, and pay each other
 ## 🔒 Security Architecture
 
 Confío utilizes a **Cloud-Native Self-Custody** model.
- 
+
  *   **Non-Custodial**: We never store your private keys. You own your funds.
  *   **Device-Generated**: Your key is generated on your device and encrypted in your personal cloud (Google Drive / iCloud). Only you have access.
- *   **Multisig Protection**: Critical smart contracts are governed by a 3-of-5 multisig setup for maximum safety.
+ *   **Governed Contracts**: Critical operations use multi-party approval, including transparent Safe governance for cUSD+.
 
 > 📚 **Deep Dive**: [Account & Authentication Details](docs/security/ACCOUNT_AND_AUTH_DETAILS.md)
 
@@ -45,10 +48,18 @@ Confío utilizes a **Cloud-Native Self-Custody** model.
 
 *   **Mobile App**: React Native (iOS/Android)
 *   **Backend**: Django + GraphQL (Python)
-*   **Blockchain**: Algorand (PyTeal/TEAL Smart Contracts)
+*   **Blockchains**: Algorand (payments) + BNB Smart Chain (cUSD+ savings)
 *   **Infrastructure**: AWS (Zurich, SW) & Cloudflare
 
 > 📂 **File Structure**: [View Project Structure](docs/PROJECT_STRUCTURE.md)
+
+---
+
+## 📚 Documentation
+
+*   **[English Whitepaper](docs/whitepaper/README.md)**: Product thesis, multi-chain architecture, business model, operating metrics, risks, and roadmap.
+*   **[Documentation Index](docs/README.md)**: Technical, security, legal, product, and operational references.
+*   **[Smart Contracts](contracts/README.md)**: Contract packages and product-specific deployment documentation.
 
 ---
 
