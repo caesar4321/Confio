@@ -83,6 +83,28 @@ def list_sell_transactions(ref: str) -> list[dict]:
     return data.get('transactions', []) or []
 
 
+def list_buy_transactions(ref: str) -> list[dict]:
+    """Onramp (buy) transactions for a partnerUserId — requires the buy URL
+    to carry `partnerUserId` so Coinbase attributes the purchase to the ref."""
+    data = _request('GET', f'/onramp/v1/buy/user/{ref}/transactions')
+    return data.get('transactions', []) or []
+
+
+def map_cdp_status(raw_status: str) -> str:
+    """Map a CDP buy/sell status string onto RampTransaction statuses.
+
+    CDP statuses are enum-ish strings (e.g. ONRAMP_TRANSACTION_STATUS_SUCCESS);
+    match on markers so both buy and sell variants map without enumerating."""
+    s = (raw_status or '').upper()
+    if 'SUCCESS' in s or 'COMPLETED' in s:
+        return 'COMPLETED'
+    if any(m in s for m in ('FAILED', 'CANCEL', 'EXPIRED')):
+        return 'FAILED'
+    if 'CREATED' in s or 'PENDING' in s:
+        return 'PENDING'
+    return 'PROCESSING'
+
+
 def _parse_amount(value) -> str | None:
     """CDP amounts arrive either as {'value': '12.3', 'currency': 'ALGO'} or a bare string."""
     if isinstance(value, dict):

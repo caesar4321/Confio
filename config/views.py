@@ -1006,18 +1006,49 @@ def coinbase_onramp_session(request):
         return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=502)
 
     from urllib.parse import urlencode
+    from ramps.coinbase_cdp import partner_user_ref
     params = {
         'sessionToken': session_token,
         'defaultAsset': 'ALGO',
         'defaultNetwork': 'algorand',
         'defaultPaymentMethod': payment_method,
         'fiatCurrency': 'USD',
+        # Attribution key: lets poll_coinbase_ramp_transactions find this
+        # purchase in GET /onramp/v1/buy/user/{ref}/transactions.
+        'partnerUserId': partner_user_ref(user_id),
     }
     try:
         if preset_amount and float(preset_amount) > 0:
             params['presetFiatAmount'] = float(preset_amount)
     except (TypeError, ValueError):
         pass
+
+    # Server-side record for fiat-side reconciliation (Coinbase has no
+    # webhooks — the celery poller adopts the CDP transaction id later).
+    try:
+        from decimal import Decimal, InvalidOperation
+        from ramps.models import RampTransaction
+        fiat_amount = None
+        try:
+            if preset_amount and float(preset_amount) > 0:
+                fiat_amount = Decimal(str(preset_amount))
+        except (TypeError, ValueError, InvalidOperation):
+            pass
+        RampTransaction.objects.create(
+            provider='coinbase',
+            direction='on_ramp',
+            status='PENDING',
+            actor_type='user',
+            actor_user=user,
+            actor_display_name=user.username,
+            actor_address=account.algorand_address,
+            fiat_currency='USD',
+            fiat_amount=fiat_amount,
+            crypto_currency='ALGO',
+            metadata={'payment_method': payment_method},
+        )
+    except Exception as e:
+        logger.warning('Coinbase onramp RampTransaction record failed: %s', e)
 
     logger.info(f'Coinbase Onramp session minted for user {user_id} ({payment_method})')
     return JsonResponse({'url': f'https://pay.coinbase.com/buy/select-asset?{urlencode(params)}'})
@@ -1126,6 +1157,30 @@ def coinbase_offramp_status(request):
 
     if not sell:
         return JsonResponse({'pending': False})
+
+    # Track the sell as soon as Coinbase knows about it (user may confirm the
+    # widget and never return to fund it — the poller still needs a row).
+    try:
+        from decimal import Decimal
+        from ramps.models import RampTransaction
+        if sell.get('transaction_id'):
+            RampTransaction.objects.get_or_create(
+                provider='coinbase',
+                direction='off_ramp',
+                provider_order_id=sell['transaction_id'],
+                defaults={
+                    'status': 'PENDING',
+                    'actor_type': 'user',
+                    'actor_user': user,
+                    'actor_display_name': user.username,
+                    'fiat_currency': 'USD',
+                    'crypto_currency': 'ALGO',
+                    'crypto_amount_estimated': Decimal(sell['sell_amount']),
+                },
+            )
+    except Exception as e:
+        logger.warning('Coinbase offramp RampTransaction record failed: %s', e)
+
     return JsonResponse({
         'pending': True,
         'sell_amount': sell['sell_amount'],

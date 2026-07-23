@@ -3422,21 +3422,27 @@ class BuildCoinbaseOfframpTransactionsMutation(graphene.Mutation):
                 fee_amount=Decimal('0.0'),
                 status='PENDING_SIG',
             )
-            RampTransaction.objects.create(
+            # get_or_create: the client rebuilds after settling a cUSD→USDC
+            # shortfall, and the status endpoint may have created the row
+            # already — one row per CDP sell, never one per build attempt.
+            ramp_row, _ = RampTransaction.objects.get_or_create(
                 provider='coinbase',
                 direction='off_ramp',
-                status='PENDING',
                 provider_order_id=sell.get('transaction_id', ''),
-                actor_type='user',
-                actor_user=user,
-                actor_display_name=user.username,
-                actor_address=account.algorand_address,
-                fiat_currency='USD',
-                crypto_currency='ALGO',
-                crypto_amount_estimated=algo_amount,
-                conversion=conversion,
-                metadata={'to_address': to_address, 'usdc_in': str(usdc_in_decimal)},
+                defaults={
+                    'status': 'PENDING',
+                    'actor_type': 'user',
+                    'actor_user': user,
+                    'actor_display_name': user.username,
+                    'fiat_currency': 'USD',
+                    'crypto_currency': 'ALGO',
+                },
             )
+            ramp_row.actor_address = account.algorand_address
+            ramp_row.crypto_amount_estimated = algo_amount
+            ramp_row.conversion = conversion
+            ramp_row.metadata = {**(ramp_row.metadata or {}), 'to_address': to_address, 'usdc_in': str(usdc_in_decimal)}
+            ramp_row.save(update_fields=['actor_address', 'crypto_amount_estimated', 'conversion', 'metadata', 'updated_at'])
 
             tinyman_group = pool.prepare_swap_transactions_from_quote(
                 quote=quote,
