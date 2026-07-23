@@ -128,18 +128,34 @@ export const SellScreen = () => {
     const isUsUser = (userProfile?.phoneCountry || '').toUpperCase() === 'US';
     const [coinbaseBusy, setCoinbaseBusy] = useState(false);
     const [coinbasePendingSell, setCoinbasePendingSell] = useState<{ sellAmount: string } | null>(null);
+    // Armed BEFORE opening the widget (Guardarian's awaitingGuardarianReturn
+    // pattern): its flip re-runs the focus effect, so the pending check fires
+    // as soon as we're back without needing a navigation event.
+    const [awaitingCoinbaseReturn, setAwaitingCoinbaseReturn] = useState(false);
     const [buildCoinbaseOfframp] = useMutation(BUILD_COINBASE_OFFRAMP);
     const [buildAutoSwapForOfframp] = useMutation(BUILD_AUTO_SWAP_FOR_OFFRAMP);
     const [submitAutoSwapForOfframp] = useMutation(SUBMIT_AUTO_SWAP_FOR_OFFRAMP);
 
+    const coinbaseRetryRef = React.useRef(0);
     const refreshCoinbasePendingSell = React.useCallback(() => {
         if (!isUsUser || isSavings) return;
         getCoinbaseOfframpStatus()
             .then((s) => {
-                setCoinbasePendingSell(s.pending && s.sellAmount ? { sellAmount: s.sellAmount } : null);
+                const pending = s.pending && s.sellAmount ? { sellAmount: s.sellAmount } : null;
+                setCoinbasePendingSell(pending);
+                if (pending) {
+                    setAwaitingCoinbaseReturn(false);
+                    coinbaseRetryRef.current = 0;
+                } else if (awaitingCoinbaseReturn && coinbaseRetryRef.current < 3) {
+                    // Just back from the widget but CDP hasn't surfaced the
+                    // sell yet — brief retries before giving up until the
+                    // next focus/foreground.
+                    coinbaseRetryRef.current += 1;
+                    setTimeout(refreshCoinbasePendingSell, 5000);
+                }
             })
             .catch(() => {});
-    }, [isUsUser, isSavings]);
+    }, [isUsUser, isSavings, awaitingCoinbaseReturn]);
 
     // Screen focus covers in-app navigation; returning from the external
     // Coinbase browser is NOT a navigation event, so also re-check whenever
@@ -193,6 +209,7 @@ export const SellScreen = () => {
             const { url } = await createCoinbaseOfframpSession({
                 amount: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
             });
+            setAwaitingCoinbaseReturn(true);
             await Linking.openURL(url);
         } catch (err: any) {
             Alert.alert('No se pudo abrir Coinbase', err?.message || 'Intenta más tarde.');
