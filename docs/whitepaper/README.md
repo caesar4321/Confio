@@ -134,8 +134,11 @@ cUSD is Confío’s user-facing digital-dollar unit for everyday transfers and p
 
 ### 4.1 Why Algorand remains the home of payments
 
-Algorand provides immediate block finality: once a transaction appears in a block it is final, rather than waiting through a reorganization window. Its transaction-fee design also uses a low minimum fee and is independent of smart-contract computational complexity. Those properties fit retail transfers, QR payments, escrow, and payroll-style atomic flows. <sup>[5, 6]</sup>
+Reliability comes first for a payment rail. Algorand Mainnet has recorded zero protocol downtime since its launch in June 2019 - more than seven years of uninterrupted network availability as of July 2026. For users who depend on Confío to send money, receive payment, or pay a merchant, continuous availability is a first-order product requirement. <sup>[17]</sup>
 
+Algorand also provides immediate block finality: once a transaction appears in a block it is final, rather than waiting through a reorganization window. Its transaction-fee design uses a low minimum fee and is independent of smart-contract computational complexity. Together, uninterrupted protocol operation, instant finality, and predictable low fees fit retail transfers, QR payments, escrow, and payroll-style atomic flows. <sup>[5, 6]</sup>
+
+- Zero protocol downtime since 2019 provides a demonstrated operational record for an always-on consumer payment rail.
 - Contact-based sending and claim flows can be grouped with settlement logic.
 - Sponsored fees let the app present a gasless experience without pretending that network fees do not exist.
 - Fast finality reduces ambiguity at the point of payment.
@@ -384,6 +387,8 @@ $CONFIO is separate from the backing of cUSD and cUSD+. Nothing in this whitepap
 15. Confío internal founder-channel analytics snapshot, 23 July 2026. Audience figure is approximate and changes over time.
 
 16. Benedetto Biondi, “The New Face Of Global Payments: Onchain Consumer Finance Apps,” *Forbes Technology Council*, 6 July 2026. The article argues that consumer finance products are converging on stablecoin rails and that distribution, trust, and fit with local demand will increasingly determine the winners. https://www.forbes.com/councils/forbestechcouncil/2026/07/06/the-new-face-of-global-payments-onchain-consumer-finance-apps/
+
+17. Algorand, official network overview, accessed 23 July 2026: “0 downtime in 7 years (and counting)” and uninterrupted network availability since launch. https://algorand.co/
 
 ### Document provenance
 
