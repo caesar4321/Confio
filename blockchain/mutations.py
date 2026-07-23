@@ -3919,6 +3919,75 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
+class BuildGuardarianOfframpTransactionsMutation(graphene.Mutation):
+    """
+    Server-destination variant of the Guardarian sell send (same trust posture
+    as the Coinbase offramp): finds the user's newest Guardarian SELL still
+    waiting for its crypto deposit, re-fetches the deposit address from
+    Guardarian's API server-side, and delegates to BuildBurnAndSend — the
+    client never supplies (or sees) the destination.
+    """
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transactions = graphene.JSONString()
+
+    @classmethod
+    def mutate(cls, root, info):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+
+            from datetime import timedelta
+            from decimal import Decimal
+            import requests as _requests
+            from django.utils import timezone as _tz
+            from usdc_transactions.models import GuardarianTransaction
+
+            waiting_states = ['new', 'waiting', 'waiting_for_deposit', 'waiting_for_customer']
+            tx = GuardarianTransaction.objects.filter(
+                user=user,
+                from_currency__in=['USDC'],
+                status__in=waiting_states,
+                created_at__gte=_tz.now() - timedelta(hours=24),
+            ).order_by('-created_at').first()
+            if not tx:
+                return cls(success=False, error='no_pending_offramp')
+
+            api_key = getattr(settings, 'GUARDARIAN_API_KEY', None)
+            base_url = getattr(settings, 'GUARDARIAN_API_URL', 'https://api-payments.guardarian.com/v1')
+            if not api_key:
+                return cls(success=False, error='guardarian_not_configured')
+            resp = _requests.get(
+                f'{base_url.rstrip("/")}/transaction/{tx.guardarian_id}',
+                headers={'x-api-key': api_key}, timeout=15,
+            )
+            if not resp.ok:
+                return cls(success=False, error=f'guardarian_http_{resp.status_code}')
+            data = resp.json()
+
+            deposit_address = data.get('deposit_address') or (data.get('deposit') or {}).get('address')
+            expected = data.get('expected_from_amount') or data.get('from_amount') or tx.from_amount
+            if not deposit_address:
+                return cls(success=False, error='no_deposit_address')
+            amount_micro = int((Decimal(str(expected)) * Decimal('1000000')).quantize(Decimal('1')))
+            if amount_micro <= 0:
+                return cls(success=False, error='invalid_offramp_amount')
+
+            return BuildBurnAndSendMutation.mutate(
+                root, info,
+                amount=str(amount_micro),
+                recipient_address=deposit_address,
+                note='Confio Guardarian offramp',
+                ramp_provider='guardarian',
+                provider_order_id=str(tx.guardarian_id),
+            )
+        except Exception as e:
+            logger.error(f'Error preparing Guardarian offramp: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
 class BuildBurnAndSendMutation(graphene.Mutation):
     """
     Builds an atomic 5-txn group: burn cUSD → USDC, then send USDC to recipient.

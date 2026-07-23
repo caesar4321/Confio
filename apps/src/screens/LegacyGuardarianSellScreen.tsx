@@ -85,15 +85,29 @@ const SUBMIT_AUTO_SWAP_FOR_OFFRAMP = gql`
     $internalId: String!
     $signedTransactions: [String]!
     $sponsorTransactions: [String]!
+    $withdrawalId: String
   ) {
     submitAutoSwapTransactions(
       internalId: $internalId
       signedTransactions: $signedTransactions
       sponsorTransactions: $sponsorTransactions
+      withdrawalId: $withdrawalId
     ) {
       success
       error
       txid
+    }
+  }
+`;
+
+// Server-destination Guardarian sell send: the deposit address is re-fetched
+// from Guardarian inside the mutation — never supplied (or editable) here.
+const BUILD_GUARDARIAN_OFFRAMP = gql`
+  mutation BuildGuardarianOfframpTransactions {
+    buildGuardarianOfframpTransactions {
+      success
+      error
+      transactions
     }
   }
 `;
@@ -133,8 +147,10 @@ export const SellScreen = () => {
     // as soon as we're back without needing a navigation event.
     const [awaitingCoinbaseReturn, setAwaitingCoinbaseReturn] = useState(false);
     const [buildCoinbaseOfframp] = useMutation(BUILD_COINBASE_OFFRAMP);
+    const [buildGuardarianOfframp] = useMutation(BUILD_GUARDARIAN_OFFRAMP);
     const [buildAutoSwapForOfframp] = useMutation(BUILD_AUTO_SWAP_FOR_OFFRAMP);
     const [submitAutoSwapForOfframp] = useMutation(SUBMIT_AUTO_SWAP_FOR_OFFRAMP);
+    const [guardarianSendBusy, setGuardarianSendBusy] = useState(false);
 
     const coinbaseRetryRef = React.useRef(0);
     const refreshCoinbasePendingSell = React.useCallback(() => {
@@ -194,6 +210,7 @@ export const SellScreen = () => {
                 internalId: payload.internal_id,
                 signedTransactions: signed,
                 sponsorTransactions: sponsors,
+                withdrawalId: payload.withdrawal_id ? String(payload.withdrawal_id) : undefined,
             },
         });
         const d = res.data?.submitAutoSwapTransactions;
@@ -464,6 +481,45 @@ export const SellScreen = () => {
         Alert.alert('Copiado', 'Dirección copiada al portapapeles');
     };
 
+    // Auto-send for the Guardarian sell (cUSD rail): the server re-fetches the
+    // deposit address and burns cUSD→USDC→sends it in one atomic group; the
+    // user only confirms with biometrics. Mirrors the Coinbase offramp posture.
+    const handleAutoSendToGuardarian = async () => {
+        const parsedAmount = parseFloat(amount);
+        const authenticated = await requestRampCriticalAuth({
+            amount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
+            assetLabel: 'USDC',
+            actionLabel: 'retiro',
+        });
+        if (!authenticated) {
+            return;
+        }
+        setGuardarianSendBusy(true);
+        try {
+            const buildRes = await buildGuardarianOfframp();
+            const build = buildRes.data?.buildGuardarianOfframpTransactions;
+            if (!build?.success) {
+                if (build?.error === 'no_pending_offramp') {
+                    throw new Error('Tu orden de Guardarian expiró o ya se completó. Crea la venta de nuevo.');
+                }
+                if (build?.error === 'requires_app_optin') {
+                    throw new Error('Tu cuenta necesita activarse para cUSD. Abre la app de nuevo e intenta.');
+                }
+                throw new Error(build?.error || 'No se pudo preparar el envío.');
+            }
+            await signAndSubmitGroup(parseSwapPayload(build.transactions));
+            Alert.alert(
+                'Enviado a Guardarian',
+                'Tus fondos van en camino. Guardarian depositará en tu banco al confirmarlos.',
+            );
+            navigation.navigate('RampHistory', { initialFilter: 'off_ramp' });
+        } catch (err: any) {
+            Alert.alert('No se pudo enviar', err?.message || 'Intenta de nuevo.');
+        } finally {
+            setGuardarianSendBusy(false);
+        }
+    };
+
     // Savings sell: burn vault shares and have the vault pay USDT-BSC to
     // Guardarian's deposit address directly (redeemToUsdt recipient arg).
     const handleSendFromSavings = async () => {
@@ -563,7 +619,7 @@ export const SellScreen = () => {
                     <Text style={styles.successSubtitle}>
                         {isSavings
                             ? `Enviaremos ${amount} US$ directo desde tu bóveda de ahorro a la orden de Guardarian:`
-                            : `Para completar la venta, envía exactamente ${amount} USDC a la siguiente dirección:`}
+                            : `Enviaremos ${amount} USDC por ti a la orden de Guardarian:`}
                     </Text>
 
                     <View style={styles.addressCard}>
@@ -587,7 +643,7 @@ export const SellScreen = () => {
                         <Text style={styles.warningText}>
                             {isSavings
                                 ? 'Completa primero tus datos bancarios en Guardarian; luego toca "Enviar desde mi ahorro" y confirmamos el envío por ti.'
-                                : 'Asegúrate de enviar a través de la red Algorand. Enviar por otra red resultará en pérdida de fondos.'}
+                                : 'Completa primero tus datos bancarios en Guardarian; luego toca "Enviar mis fondos" y lo enviamos por ti — sin copiar direcciones.'}
                         </Text>
                     </View>
 
@@ -607,9 +663,19 @@ export const SellScreen = () => {
                             )}
                         </TouchableOpacity>
                     ) : (
-                        <TouchableOpacity style={styles.ctaButton} onPress={handleNavigateToWithdraw}>
-                            <Text style={styles.ctaButtonText}>Ir a Enviar USDC</Text>
-                            <Icon name="arrow-right" size={20} color={colors.white} />
+                        <TouchableOpacity
+                            style={[styles.ctaButton, guardarianSendBusy && styles.ctaButtonDisabled]}
+                            onPress={handleAutoSendToGuardarian}
+                            disabled={guardarianSendBusy}
+                        >
+                            {guardarianSendBusy ? (
+                                <ActivityIndicator color={colors.white} />
+                            ) : (
+                                <>
+                                    <Text style={styles.ctaButtonText}>Enviar mis fondos</Text>
+                                    <Icon name="arrow-right" size={20} color={colors.white} />
+                                </>
+                            )}
                         </TouchableOpacity>
                     )}
                 </ScrollView>
@@ -831,7 +897,9 @@ export const SellScreen = () => {
                         }
                         return;
                     }
-                    navigation.navigate('SendWithAddress' as any, { tokenType: 'usdc' });
+                    // cUSD rail: server re-derives the deposit address and
+                    // sends automatically — no manual SendWithAddress hop.
+                    await handleAutoSendToGuardarian();
                 }}
                 onCancel={async () => {
                     setShowGuardarianReturnModal(false);
