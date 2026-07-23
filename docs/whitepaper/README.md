@@ -175,9 +175,11 @@ The deployed vault encodes a 15% Confío share of positive USDY reference-price 
 
 The vault maintains an internal cUSD+ reference value and checks that USDY backing is sufficient for holder obligations. Oracle movements beyond a configured guard threshold trigger a halt of value-moving paths until a governed verdict is recorded. This reduces the risk that an abnormal oracle observation is silently converted into holder dilution or an unsafe redemption. <sup>[8, 11]</sup>
 
-### 5.4 Why BNB Smart Chain
+### 5.4 Why cUSD+ uses BNB Smart Chain
 
-BNB Smart Chain is EVM-compatible and designed for short block times, fast finality, and low transaction fees. For cUSD+, the main advantage is not that chain-wide TVL automatically creates value. It is the practical availability of EVM tooling, USDT liquidity, RWA integrations, wallet infrastructure, and a broader venue for future savings and market integrations. <sup>[12]</sup>
+The primary reason is Ondo Finance. Confío did not select BNB Smart Chain first and then search for a savings asset. cUSD+ was designed around USDY, and Ondo made the production USDY, InstantManager, oracle, and USDT subscription/redemption stack available on BNB Smart Chain. Keeping the vault on the same network as that infrastructure gives cUSD+ a direct, permissioned path into and out of its underlying asset. <sup>[7, 8, 10]</sup>
+
+BNB Smart Chain’s EVM compatibility, USDT liquidity, wallet infrastructure, short block times, and low fees strengthen that product decision and create room for future RWA integrations. They are supporting advantages, not the original cause of the deployment. Chain-wide TVL does not automatically create value for cUSD+, and the BNB deployment does not imply that cUSD payments or $CONFIO should migrate from Algorand. <sup>[8, 12]</sup>
 
 ## 6. Wallet, security, and open-source architecture
 
