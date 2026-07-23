@@ -19,30 +19,56 @@ import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import GuardarianLogo from '../assets/svg/guardarian.svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
-import { useLazyQuery } from '@apollo/client';
+import { gql, useLazyQuery, useQuery } from '@apollo/client';
 import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { GET_PENDING_RAMP_TRANSACTION } from '../apollo/queries';
 import USDCLogo from '../assets/png/USDC.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
 import { technicalFontFamily } from '../utils/fontFamily';
+import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { requestRampCriticalAuth } from '../utils/rampFlow';
+import { getVaultShares, redeemSavingsToUsdt } from '../services/cusdPlusVault';
+import { getActiveEvmWallet } from '../services/secureDeterministicWallet';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
+// Savings off-ramp needs the vault (proxy) address; served, never hardcoded.
+const SAVINGS_SELL_PARAMS = gql`
+  query GuardarianSavingsSellParams {
+    cusdPlusConvertParams {
+      vaultAddress
+    }
+  }
+`;
+
 export const SellScreen = () => {
     const navigation = useNavigation<NavigationProp>();
+    const route = useRoute<any>();
     const { userProfile } = useAuth() as any;
     const { activeAccount } = useAccount();
     const { selectedCountry, userCountry } = useCountry();
+
+    // cUSD+ savings mode: sell USDT-BSC straight from the savings vault
+    // (redeemToUsdt pays Guardarian's deposit address — no intermediate hop).
+    // Default mode sells USDC-Algorand from the day-to-day balance.
+    const isSavings = route.params?.destination === 'cusd_plus';
+    const { savings } = useAhorrosPortfolio();
+    const savingsBalanceUsd = savings?.balanceUsd ?? 0;
+    const { data: savingsParamsData } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavings });
+    const vaultAddress: string = savingsParamsData?.cusdPlusConvertParams?.vaultAddress || '';
+    const [sendingFromSavings, setSendingFromSavings] = useState(false);
+    const sellTicker = isSavings ? 'USDT' : 'USDC';
 
     // Default to user's local currency if available
     const derivedCurrencyCode = useMemo(() => {
@@ -156,6 +182,13 @@ export const SellScreen = () => {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
             return;
         }
+        if (isSavings && parsedAmount > savingsBalanceUsd) {
+            Alert.alert(
+                'Saldo insuficiente',
+                `Tu ahorro disponible es $${savingsBalanceUsd.toFixed(2)}.`,
+            );
+            return;
+        }
 
         // Show modal instruction first
         setShowPreFlightModal(true);
@@ -169,13 +202,14 @@ export const SellScreen = () => {
 
             const tx = await createGuardarianTransaction({
                 amount: parsedAmount,
-                fromCurrency: 'USDC',
-                // NOTE: Trying without fromNetwork to see if Guardarian auto-detects or uses default
-                // fromNetwork: 'ALGO',
+                fromCurrency: sellTicker,
+                // USDC sells: server defaults the network to ALGO.
+                // Savings sells are USDT and must pin BSC explicitly.
+                fromNetwork: isSavings ? 'BSC' : undefined,
                 toCurrency: currencyCode,
                 email: userProfile?.email,
                 customerCountry: userProfile?.phoneCountry,
-                externalId: `confio-sell-${Date.now()}`,
+                externalId: `confio-${isSavings ? 'ahorro-sell' : 'sell'}-${Date.now()}`,
             });
 
             if (tx.deposit_address) {
@@ -223,6 +257,65 @@ export const SellScreen = () => {
         Alert.alert('Copiado', 'Dirección copiada al portapapeles');
     };
 
+    // Savings sell: burn vault shares and have the vault pay USDT-BSC to
+    // Guardarian's deposit address directly (redeemToUsdt recipient arg).
+    const handleSendFromSavings = async () => {
+        const parsedAmount = parseFloat(amount);
+        if (!depositAddress || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+            return;
+        }
+        if (!vaultAddress) {
+            Alert.alert('Error', 'No pudimos cargar tu bóveda de ahorro. Cierra y vuelve a intentar.');
+            return;
+        }
+        const authenticated = await requestRampCriticalAuth({
+            amount: parsedAmount,
+            assetLabel: 'US$ (ahorro)',
+            actionLabel: 'retiro',
+        });
+        if (!authenticated) {
+            return;
+        }
+        setSendingFromSavings(true);
+        try {
+            const wallet = await getActiveEvmWallet();
+            const shares = await getVaultShares(vaultAddress, wallet.address);
+            if (shares <= 0n) {
+                throw new Error('Tu ahorro no tiene saldo en la bóveda todavía.');
+            }
+            if (!(savingsBalanceUsd > 0)) {
+                throw new Error('No pudimos leer tu saldo de ahorro. Intenta de nuevo.');
+            }
+            // Proportional share slice; a near-full amount redeems everything
+            // so rounding dust never strands in the vault.
+            const sharesToRedeem = parsedAmount >= savingsBalanceUsd - 0.01
+                ? shares
+                : (shares * BigInt(Math.round(parsedAmount * 1e6)))
+                    / BigInt(Math.round(savingsBalanceUsd * 1e6));
+            if (sharesToRedeem <= 0n) {
+                throw new Error('El monto es demasiado pequeño.');
+            }
+            // USDT-BSC is 18 decimals; floor the payout 1% under the quote.
+            const minUsdtOut = BigInt(Math.round(parsedAmount * 0.99 * 1e6)) * 10n ** 12n;
+            await redeemSavingsToUsdt({
+                vaultAddress,
+                shares: sharesToRedeem,
+                minUsdtOut,
+                recipient: depositAddress,
+                wallet,
+            });
+            Alert.alert(
+                'Enviado desde tu ahorro',
+                'Guardarian recibirá tus fondos en unos minutos y depositará en tu banco. Puedes seguir el estado en tu historial.',
+            );
+            navigation.navigate('RampHistory', { initialFilter: 'off_ramp' });
+        } catch (err: any) {
+            Alert.alert('No se pudo enviar', err?.message || 'Intenta de nuevo en unos minutos.');
+        } finally {
+            setSendingFromSavings(false);
+        }
+    };
+
     const handleSendFunds = () => {
         // Navigate to SendWithAddress with prefilled data
         // @ts-ignore
@@ -257,13 +350,19 @@ export const SellScreen = () => {
                         <Icon name="check" size={40} color={colors.primary} />
                     </View>
 
-                    <Text style={styles.successTitle}>Envía tus USDC</Text>
+                    <Text style={styles.successTitle}>
+                        {isSavings ? 'Retira desde tu ahorro' : 'Envía tus USDC'}
+                    </Text>
                     <Text style={styles.successSubtitle}>
-                        Para completar la venta, envía exactamente {amount} USDC a la siguiente dirección:
+                        {isSavings
+                            ? `Enviaremos ${amount} US$ directo desde tu bóveda de ahorro a la orden de Guardarian:`
+                            : `Para completar la venta, envía exactamente ${amount} USDC a la siguiente dirección:`}
                     </Text>
 
                     <View style={styles.addressCard}>
-                        <Text style={styles.addressLabel}>Dirección de depósito (Algorand)</Text>
+                        <Text style={styles.addressLabel}>
+                            {isSavings ? 'Dirección de depósito (BNB Smart Chain)' : 'Dirección de depósito (Algorand)'}
+                        </Text>
                         <TouchableOpacity style={styles.addressContainer} onPress={handleCopyAddress}>
                             <Text style={styles.addressText}>{depositAddress}</Text>
                             <Icon name="copy" size={20} color={colors.accent} />
@@ -279,14 +378,33 @@ export const SellScreen = () => {
                     <View style={styles.warningCard}>
                         <Icon name="alert-triangle" size={20} color={colors.offRampIcon} style={styles.warningIcon} />
                         <Text style={styles.warningText}>
-                            Asegúrate de enviar a través de la red Algorand. Enviar por otra red resultará en pérdida de fondos.
+                            {isSavings
+                                ? 'Completa primero tus datos bancarios en Guardarian; luego toca "Enviar desde mi ahorro" y confirmamos el envío por ti.'
+                                : 'Asegúrate de enviar a través de la red Algorand. Enviar por otra red resultará en pérdida de fondos.'}
                         </Text>
                     </View>
 
-                    <TouchableOpacity style={styles.ctaButton} onPress={handleNavigateToWithdraw}>
-                        <Text style={styles.ctaButtonText}>Ir a Enviar USDC</Text>
-                        <Icon name="arrow-right" size={20} color={colors.white} />
-                    </TouchableOpacity>
+                    {isSavings ? (
+                        <TouchableOpacity
+                            style={[styles.ctaButton, sendingFromSavings && styles.ctaButtonDisabled]}
+                            onPress={handleSendFromSavings}
+                            disabled={sendingFromSavings}
+                        >
+                            {sendingFromSavings ? (
+                                <ActivityIndicator color={colors.white} />
+                            ) : (
+                                <>
+                                    <Text style={styles.ctaButtonText}>Enviar desde mi ahorro</Text>
+                                    <Icon name="arrow-right" size={20} color={colors.white} />
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity style={styles.ctaButton} onPress={handleNavigateToWithdraw}>
+                            <Text style={styles.ctaButtonText}>Ir a Enviar USDC</Text>
+                            <Icon name="arrow-right" size={20} color={colors.white} />
+                        </TouchableOpacity>
+                    )}
                 </ScrollView>
             </View>
         );
@@ -296,7 +414,7 @@ export const SellScreen = () => {
         <View style={styles.container}>
             <Header
                 navigation={navigation as any}
-                title="Vender USDC"
+                title={isSavings ? 'Retirar mi ahorro' : 'Vender USDC'}
                 backgroundColor={colors.primary}
                 isLight
                 showBackButton
@@ -327,10 +445,16 @@ export const SellScreen = () => {
                         <Circle cx="105%" cy="18%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
                     </Svg>
                     <View style={styles.fieldInner}>
-                        <Text style={styles.fieldEyebrow}>VENDER CON GUARDARIAN</Text>
-                        <Text style={styles.fieldTitle}>Vende tus USDC</Text>
+                        <Text style={styles.fieldEyebrow}>
+                            {isSavings ? 'RETIRAR CON GUARDARIAN' : 'VENDER CON GUARDARIAN'}
+                        </Text>
+                        <Text style={styles.fieldTitle}>
+                            {isSavings ? 'Retira tu ahorro a tu banco' : 'Vende tus USDC'}
+                        </Text>
                         <Text style={styles.fieldSubtitle}>
-                            Convierte tus USDC a moneda local y recíbelos directamente en tu cuenta bancaria.
+                            {isSavings
+                                ? 'Directo desde tu ahorro a tu cuenta bancaria, sin conversión intermedia.'
+                                : 'Convierte tus USDC a moneda local y recíbelos directamente en tu cuenta bancaria.'}
                         </Text>
                     </View>
                 </View>
@@ -358,10 +482,12 @@ export const SellScreen = () => {
                 {/* Payout currency selection */}
                 {/* Amount Input Card */}
                 <View style={styles.inputCard}>
-                    <Text style={styles.inputLabel}>¿Cuánto quieres vender?</Text>
+                    <Text style={styles.inputLabel}>
+                        {isSavings ? '¿Cuánto quieres retirar?' : '¿Cuánto quieres vender?'}
+                    </Text>
 
                     <View style={styles.amountInputContainer}>
-                        <Image source={USDCLogo} style={styles.usdcLogo} />
+                        <Image source={isSavings ? cUSDPlusLogo : USDCLogo} style={styles.usdcLogo} />
                         <TextInput
                             style={styles.amountInput}
                             placeholder="0"
@@ -371,13 +497,17 @@ export const SellScreen = () => {
                             onChangeText={setAmount}
                         />
                         <View style={styles.currencyBadge}>
-                            <Text style={styles.currencyCodeText}>USDC</Text>
+                            <Text style={styles.currencyCodeText}>{isSavings ? 'US$' : 'USDC'}</Text>
                         </View>
                     </View>
 
                     <View style={styles.conversionHint}>
                         <Icon name="arrow-down" size={14} color={colors.offRampIcon} />
-                        <Text style={styles.conversionText}>Recibirás moneda local en tu banco</Text>
+                        <Text style={styles.conversionText}>
+                            {isSavings
+                                ? `Disponible en tu ahorro: $${savingsBalanceUsd.toFixed(2)}`
+                                : 'Recibirás moneda local en tu banco'}
+                        </Text>
                     </View>
                 </View>
 
@@ -453,6 +583,17 @@ export const SellScreen = () => {
                 onContinueSend={async () => {
                     setShowGuardarianReturnModal(false);
                     setAwaitingGuardarianReturn(false);
+                    if (isSavings) {
+                        if (depositAddress) {
+                            await handleSendFromSavings();
+                        } else {
+                            Alert.alert(
+                                'Orden pendiente',
+                                'Vuelve a crear el retiro para obtener la dirección de depósito de tu orden.',
+                            );
+                        }
+                        return;
+                    }
                     navigation.navigate('SendWithAddress' as any, { tokenType: 'usdc' });
                 }}
                 onCancel={async () => {

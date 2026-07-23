@@ -106,20 +106,34 @@ export const subscribeUsdtToSavings = async (
   return { approveTx, mintTx: mintRec.transactionHash, recipient: from };
 };
 
+/** Vault share balance (ERC20 balanceOf) for an owner address. */
+export const getVaultShares = async (
+  vaultAddress: string, owner: string,
+): Promise<bigint> => {
+  const res = await ethCall(vaultAddress, encodeCall('balanceOf(address)', [
+    { type: 'address', value: owner },
+  ]));
+  return res && res !== '0x' ? BigInt(res) : 0n;
+};
+
 /**
  * Withdraw from cUSD+ back to USDT-BSC (redeemToUsdt). Burns `shares` and
- * sends USDT to the user. The USD amount is shares × pPlus (server displays
- * the quote); minUsdtOut is the slippage floor.
+ * sends USDT to `recipient` (defaults to the user's own address; the
+ * Guardarian off-ramp passes the sell order's deposit address so the vault
+ * pays the ramp directly — no intermediate hop). The USD amount is
+ * shares × pPlus (server displays the quote); minUsdtOut is the slippage floor.
  */
 export const redeemSavingsToUsdt = async (params: {
   vaultAddress: string;
   shares: bigint;
   minUsdtOut?: bigint;
+  recipient?: string;
   wallet?: DerivedEvmWallet;
 }): Promise<{ redeemTx: string; recipient: string }> => {
   installBscServerTransport(); // client signs, SERVER injects (cUSD parity)
   const wallet = params.wallet ?? (await getActiveEvmWallet());
   const from = wallet.address;
+  const recipient = params.recipient || from;
   const rec = await sendCall({
     from,
     privKeyHex: wallet.privKeyHex,
@@ -127,8 +141,8 @@ export const redeemSavingsToUsdt = async (params: {
     data: encodeCall('redeemToUsdt(uint256,uint256,address)', [
       { type: 'uint', value: params.shares },
       { type: 'uint', value: params.minUsdtOut ?? 0n },
-      { type: 'address', value: from },
+      { type: 'address', value: recipient },
     ]),
   });
-  return { redeemTx: rec.transactionHash, recipient: from };
+  return { redeemTx: rec.transactionHash, recipient };
 };

@@ -164,7 +164,7 @@ export type MainStackParamList = {
     accountAddress?: string;
   };
   TopUp: { destination?: 'cusd' | 'cusd_plus' } | undefined;
-  Sell: undefined;
+  Sell: { destination?: 'cusd' | 'cusd_plus' } | undefined;
   Ahorros: undefined;
   ConvertAhorro: undefined;
   RetirarAhorro: undefined;

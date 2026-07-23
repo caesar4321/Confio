@@ -42,6 +42,9 @@ import { TickerLogo } from '../components/TickerLogo';
 import { MovementRow } from '../components/MovementRow';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { useSavingsResume } from '../hooks/useSavingsResume';
+import { useAuth } from '../contexts/AuthContext';
+import { useCountry } from '../contexts/CountryContext';
+import { isKoyweRoutingEnabledForCountry } from '../config/env';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
@@ -122,6 +125,15 @@ export const AhorrosScreen = () => {
   const [ahorrarSheet, setAhorrarSheet] = useState(false);
   const [retirarSheet, setRetirarSheet] = useState(false);
 
+  // Ramp routing mirrors TopUp/Sell: Koywe countries use the Koywe rail
+  // (bank off-ramp still pending there); everyone else rides Guardarian,
+  // whose savings sell (USDT-BSC) is live.
+  const { userProfile } = useAuth() as any;
+  const { selectedCountry, userCountry } = useCountry();
+  const rampCountryCode =
+    userProfile?.phoneCountry || selectedCountry?.[2] || userCountry?.[2] || 'AR';
+  const isKoyweCountry = isKoyweRoutingEnabledForCountry(rampCountryCode);
+
   // ── Ahorrar sources ─────────────────────────────────────────────────────
   // Bank first: new money onramps DIRECT to the savings chain (no conversion
   // leg at all). Converting existing cUSD is for money already inside — a
@@ -164,6 +176,13 @@ export const AhorrosScreen = () => {
       title: 'A mi banco',
       subtitle: 'Directo desde tu ahorro, sin conversión',
       onPress: () => {
+        if (!isKoyweCountry) {
+          // Guardarian rail: sell USDT-BSC straight from the savings vault
+          // (redeemToUsdt pays the ramp's deposit address directly).
+          setRetirarSheet(false);
+          navigation.navigate('Sell', { destination: 'cusd_plus' });
+          return;
+        }
         // TODO(cusd+): direct off-ramp from the savings chain via Koywe —
         // skips the double hop through cUSD/Algorand.
         Alert.alert('Muy pronto', 'El retiro a tu banco abre en breve.');

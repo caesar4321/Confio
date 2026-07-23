@@ -686,12 +686,16 @@ def guardarian_transaction_proxy(request):
         },
     }
     
-    # Only set from_network for sell transactions (crypto source). Default to ALGO for USDC sells if not provided.
+    # Only set from_network for sell transactions (crypto source). Default to
+    # ALGO for USDC sells and BSC for USDT sells (the cUSD+ savings rail) if
+    # not provided.
     if is_sell_transaction:
         if from_network:
             guardarian_payload['from_network'] = from_network
         elif from_currency.upper() == 'USDC':
             guardarian_payload['from_network'] = 'ALGO'
+        elif from_currency.upper() == 'USDT':
+            guardarian_payload['from_network'] = 'BSC'
     
     # Only set to_network for buy transactions (crypto destination)
     if not is_sell_transaction:
