@@ -200,8 +200,10 @@ def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
     api_key = getattr(settings, 'GEMINI_API_KEY', '')
     if not api_key:
         raise RuntimeError('GEMINI_API_KEY is not configured for canonical promotion.')
-    model = getattr(settings, 'CONFIO_AI_CANONICAL_PROMOTION_MODEL', '') or getattr(
-        settings, 'GEMINI_MODEL', 'gemini-3.5-flash'
+    model = getattr(
+        settings, 'CONFIO_AI_CANONICAL_PROMOTION_MODEL', 'gemini-3.5-flash-lite'
+    ) or getattr(
+        settings, 'GEMINI_MODEL', 'gemini-3.6-flash'
     )
     user_query = '\n'.join(turn.user_text for turn in turns)
     current_memory = render_retrieved_knowledge(

@@ -912,3 +912,112 @@ def guardarian_fiat_currencies(request):
         data = [currency for currency in data if currency.get('ticker') not in ['ARS', 'CRC']]
 
     return JsonResponse(data, safe=False)
+
+
+@csrf_exempt
+def coinbase_onramp_session(request):
+    """Mint a Coinbase Onramp session URL for the US rail.
+
+    Delivers native ALGO to the user's OWN Algorand address (server-priority,
+    never client-supplied); the existing ALGO→USDC→cUSD auto-swap converts the
+    arrival atomically. Onramp cannot land USDC on Algorand directly — its
+    catalog only carries native ALGO there (probed 2026-07-23).
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    key_id = getattr(settings, 'COINBASE_CDP_KEY_ID', '')
+    secret = getattr(settings, 'COINBASE_CDP_SECRET', '')
+    if not key_id or not secret:
+        return JsonResponse({'error': 'Coinbase Onramp not configured'}, status=503)
+
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not auth_header.startswith('JWT '):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    try:
+        from security.integrity_service import app_check_service
+        ac_result = app_check_service.verify_request_header(request, 'topup_sell', should_enforce=True)
+        if not ac_result.get('success', True):
+            return JsonResponse({'error': 'Actualiza la aplicación a la última versión o usa la app oficial para continuar.'}, status=403)
+    except Exception as e:
+        logger.warning(f"Coinbase Onramp App Check error: {e}")
+        return JsonResponse({'error': 'Security check failed'}, status=403)
+
+    try:
+        token_payload = jwt_decode(auth_header.split(' ', 1)[1])
+        user_id = token_payload.get('user_id')
+        from users.models import User
+        user = User.objects.get(id=user_id)
+    except Exception:
+        return JsonResponse({'error': 'Invalid token'}, status=401)
+
+    account = user.accounts.filter(
+        account_type=token_payload.get('account_type', 'personal'),
+        account_index=token_payload.get('account_index', 0),
+        deleted_at__isnull=True,
+    ).first()
+    if not account or not account.algorand_address:
+        return JsonResponse({'error': 'No Algorand address found'}, status=400)
+
+    try:
+        body = json.loads(request.body or '{}')
+    except ValueError:
+        body = {}
+    preset_amount = body.get('amount')
+    payment_method = (body.get('payment_method') or 'ACH_BANK_ACCOUNT').upper()
+    if payment_method not in ('ACH_BANK_ACCOUNT', 'CARD', 'APPLE_PAY', 'FIAT_WALLET'):
+        payment_method = 'ACH_BANK_ACCOUNT'
+
+    import base64
+    import secrets as py_secrets
+    import time as py_time
+    import jwt as py_jwt
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    host = 'api.developer.coinbase.com'
+    path = '/onramp/v1/token'
+    try:
+        priv = Ed25519PrivateKey.from_private_bytes(base64.b64decode(secret)[:32])
+        now = int(py_time.time())
+        cdp_jwt = py_jwt.encode(
+            {
+                'iss': 'cdp', 'sub': key_id, 'nbf': now, 'exp': now + 110,
+                'uris': [f'POST {host}{path}'], 'uri': f'POST {host}{path}',
+            },
+            priv, algorithm='EdDSA',
+            headers={'kid': key_id, 'nonce': py_secrets.token_hex(16)},
+        )
+        resp = requests.post(
+            f'https://{host}{path}',
+            json={
+                'addresses': [{'address': account.algorand_address, 'blockchains': ['algorand']}],
+                'assets': ['ALGO'],
+            },
+            headers={'Authorization': f'Bearer {cdp_jwt}', 'Content-Type': 'application/json'},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        session_token = resp.json().get('token')
+        if not session_token:
+            raise ValueError('empty session token')
+    except Exception as e:
+        logger.error('Coinbase Onramp session mint failed: %s', e)
+        return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=502)
+
+    from urllib.parse import urlencode
+    params = {
+        'sessionToken': session_token,
+        'defaultAsset': 'ALGO',
+        'defaultNetwork': 'algorand',
+        'defaultPaymentMethod': payment_method,
+        'fiatCurrency': 'USD',
+    }
+    try:
+        if preset_amount and float(preset_amount) > 0:
+            params['presetFiatAmount'] = float(preset_amount)
+    except (TypeError, ValueError):
+        pass
+
+    logger.info(f'Coinbase Onramp session minted for user {user_id} ({payment_method})')
+    return JsonResponse({'url': f'https://pay.coinbase.com/buy/select-asset?{urlencode(params)}'})

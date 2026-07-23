@@ -30,6 +30,7 @@ import { useCountry } from '../contexts/CountryContext';
 import { getCurrencyForCountry, getCurrencySymbol } from '../utils/currencyMapping';
 import { countries, getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
+import { createCoinbaseOnrampSession } from '../services/coinbaseOnrampService';
 import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import { useMutation, gql } from '@apollo/client';
@@ -319,6 +320,38 @@ const TopUpScreen = () => {
     setShowPreFlightModal(true);
   };
 
+  // US rail via Coinbase Onramp: ACH (~0.5%) delivers native ALGO to the
+  // user's registered Algorand address (server-injected); the existing
+  // ALGO→USDC→cUSD auto-swap converts the arrival in one atomic group.
+  // cUSD rail only — the savings rail settles on BSC, which Onramp can't reach.
+  const [coinbaseLoading, setCoinbaseLoading] = useState(false);
+  const isUsUser = (userProfile?.phoneCountry || '').toUpperCase() === 'US';
+
+  const handleCoinbaseTopUp = async () => {
+    const backupAllowed = await checkBackupEnforcement('deposit');
+    if (!backupAllowed) {
+      return;
+    }
+    // USDC opt-in is a precondition for the ALGO→USDC leg of the auto-swap.
+    const usdcOptInSuccess = await handleUSDCOptIn();
+    if (!usdcOptInSuccess) {
+      return;
+    }
+    setCoinbaseLoading(true);
+    try {
+      const parsedAmount = parseAmount(amount);
+      const { url } = await createCoinbaseOnrampSession({
+        amount: Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : undefined,
+        paymentMethod: 'ACH_BANK_ACCOUNT',
+      });
+      await Linking.openURL(url);
+    } catch (err: any) {
+      Alert.alert('No se pudo abrir Coinbase', err?.message || 'Intenta de nuevo más tarde.');
+    } finally {
+      setCoinbaseLoading(false);
+    }
+  };
+
   const handleProceedToGuardarian = async () => {
     setShowPreFlightModal(false);
     const walletSafe = await checkBackupEnforcement('deposit');
@@ -509,6 +542,30 @@ const TopUpScreen = () => {
           textStyle={{ fontWeight: '700' }}
         />
 
+        {isUsUser && !isSavingsRail && (
+          <TouchableOpacity
+            style={styles.coinbaseCard}
+            onPress={handleCoinbaseTopUp}
+            disabled={coinbaseLoading}
+            accessibilityRole="button"
+            accessibilityLabel="Recargar con Coinbase por transferencia bancaria"
+          >
+            {coinbaseLoading ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <>
+                <View style={styles.coinbaseCardText}>
+                  <Text style={styles.coinbaseCardTitle}>¿Tienes banco en EE.UU.?</Text>
+                  <Text style={styles.coinbaseCardSubtitle}>
+                    Recarga por Coinbase con transferencia ACH — comisión mucho más baja. Recibes ALGO y lo convertimos automáticamente a cUSD.
+                  </Text>
+                </View>
+                <Icon name="arrow-right" size={20} color={colors.primary} />
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={styles.supportButton}
           onPress={() => Linking.openURL('https://t.me/confio4world')}
@@ -664,6 +721,33 @@ const styles = StyleSheet.create({
   infoCardText: {
     fontSize: 12,
     color: colors.text.primary,
+    lineHeight: 16,
+  },
+
+  // Coinbase (US ACH) alternative rail
+  coinbaseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  coinbaseCardText: {
+    flex: 1,
+    marginRight: 10,
+  },
+  coinbaseCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 2,
+  },
+  coinbaseCardSubtitle: {
+    fontSize: 12,
+    color: colors.text.secondary,
     lineHeight: 16,
   },
 

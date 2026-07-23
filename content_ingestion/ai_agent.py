@@ -1,9 +1,9 @@
 """The tool-use loop behind the Telegram agent.
 
 Primary path: native function-calling. The model emits structured tool calls with
-JSON arguments (no fragile `TOOL ...` text parsing). Default backend is OpenAI's
-Responses API with a cheap model (gpt-4.1-mini) for cost; Claude is available as
-an optional escalation via CONFIO_AI_AGENT_BACKEND=claude.
+JSON arguments (no fragile `TOOL ...` text parsing). The default backend is Gemini
+Flash; explicit provider commands and memory writes can route to their configured
+frontier or write backend.
 
 Each tool keeps its simple `callable(args: str) -> str` interface and is exposed
 with a single string `input` argument; the tool's docstring documents the format.
@@ -72,7 +72,7 @@ def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STE
 _CHAT_COMPLETIONS_BACKENDS = {
     'gemini': {
         'name': 'Gemini', 'key': 'GEMINI_API_KEY', 'model': 'GEMINI_MODEL',
-        'model_default': 'gemini-3.5-flash',
+        'model_default': 'gemini-3.6-flash',
         'base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
     },
     'grok': {

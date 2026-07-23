@@ -87,14 +87,14 @@ println "Loaded ${envProperties.size()} Android env properties"
 android {
     ndkVersion "27.1.12297006"
     // Hardcoded SDK versions to ensure compliance with 16KB page support
-    compileSdk 35
-    buildToolsVersion "35.0.0"
+    compileSdk 36
+    buildToolsVersion "36.0.0"
 
     namespace "com.Confio.Confio"
     defaultConfig {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
-        targetSdkVersion 35
+        targetSdkVersion 36
         versionCode 128
         versionName "4.5.2"
         ndk {

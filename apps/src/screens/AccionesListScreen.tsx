@@ -59,7 +59,13 @@ export const AccionesListScreen = () => {
           (s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
         )
       : stocks;
-    const held = base.filter((s) => (positionByTicker[s.ticker] || 0) > 0);
+    // Held group: MY biggest money first (the hub's ordering), not market
+    // cap; discovery order (market cap) only applies to the unheld rest.
+    const held = base
+      .filter((s) => (positionByTicker[s.ticker] || 0) > 0)
+      .sort(
+        (a, b) => (positionByTicker[b.ticker] || 0) - (positionByTicker[a.ticker] || 0),
+      );
     const rest = base.filter((s) => !((positionByTicker[s.ticker] || 0) > 0));
     return [...held, ...rest];
   }, [search, stocks, positionByTicker]);

@@ -181,7 +181,7 @@ if settings.DEBUG:
 
 # Import the index view
 from .views import index
-from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
+from .views import guardarian_transaction_proxy, guardarian_fiat_currencies, coinbase_onramp_session
 from ramps.views import koywe_webhook
 from security.views import didit_webhook
 from users.funnel_ingest import funnel_ingest
@@ -196,5 +196,6 @@ urlpatterns += [
     path('api/content-ingestion/ai-context/', enqueue_ai_context_commit, name='content_ingestion_ai_context'),
     path('api/guardarian/fiat/', guardarian_fiat_currencies, name='guardarian_fiat_currencies'),
     path('api/guardarian/transaction/', guardarian_transaction_proxy, name='guardarian_transaction_proxy'),
+    path('api/coinbase/onramp-session/', coinbase_onramp_session, name='coinbase_onramp_session'),
     re_path(r'^.*$', index),
 ]
