@@ -1,4 +1,6 @@
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest import mock
 
 from django.test import SimpleTestCase
 
@@ -118,6 +120,93 @@ class KoyweEmailSelectionTests(SimpleTestCase):
         email = ramps_schema._get_koywe_auth_email(user=user, country_code='MX')
 
         self.assertEqual(email, 'duende-mexico@koywe-test.com')
+
+    def test_colombia_uses_real_stored_email_for_test_user(self):
+        user = type('User', (), {
+            'username': 'julianm',
+            'email': 'julian@example.com',
+            'ramp_user_address': SimpleNamespace(auth_email='pse@example.com'),
+        })()
+
+        email = ramps_schema._get_koywe_auth_email(user=user, country_code='CO')
+
+        self.assertEqual(email, 'pse@example.com')
+
+    def test_colombia_ignores_stale_duende_delivery_email(self):
+        user = type('User', (), {
+            'username': 'julianm',
+            'email': 'julian@example.com',
+            'ramp_user_address': SimpleNamespace(
+                auth_email='duende-peru@koywe-test.com',
+            ),
+        })()
+
+        email = ramps_schema._get_koywe_auth_email(user=user, country_code='CO')
+
+        self.assertEqual(email, 'julian@example.com')
+
+    def test_colombia_profile_migration_includes_duende_account(self):
+        user = type('User', (), {
+            'username': 'julianm',
+        })()
+
+        with mock.patch.object(
+            ramps_schema,
+            '_get_koywe_previous_emails',
+            return_value=['old@example.com'],
+        ):
+            emails = ramps_schema._get_koywe_profile_previous_emails(
+                user=user,
+                country_code='CO',
+                document_number='1234567890',
+                selected_email='pse@example.com',
+            )
+
+        self.assertEqual(
+            emails,
+            ['duende-colombia@koywe-test.com', 'old@example.com'],
+        )
+
+    @mock.patch.object(ramps_schema, '_get_latest_personal_verification')
+    @mock.patch.object(ramps_schema, '_build_effective_ramp_address_snapshot')
+    def test_colombia_real_email_keeps_test_identity(
+        self,
+        effective_address_mock,
+        verification_mock,
+    ):
+        verification_mock.return_value = SimpleNamespace(
+            verified_first_name='Real',
+            verified_last_name='Person',
+            document_number='ARG-DOCUMENT',
+            document_type='national_id',
+            verified_date_of_birth=None,
+        )
+        effective_address_mock.return_value = SimpleNamespace(
+            address_street='Calle 1',
+            address_city='Lima',
+            address_neighborhood='',
+            address_state='Lima',
+            address_zip_code='15001',
+            address_country='PER',
+            economic_activity='EMPLOYEE',
+        )
+        user = type('User', (), {
+            'username': 'julianm',
+            'email': 'julian@example.com',
+            'phone_country_code': '+51',
+            'phone_number': '999999999',
+        })()
+
+        profile = ramps_schema._get_koywe_contact_profile(
+            user=user,
+            country_code='CO',
+            email_override='pse@example.com',
+        )
+
+        self.assertEqual(profile['email'], 'pse@example.com')
+        self.assertEqual(profile['documentType'], 'CED_CIU')
+        self.assertEqual(profile['documentNumber'], '1234567890')
+        self.assertEqual(profile['addressCountry'], 'COL')
 
 
 class KoyweAccountProfileTests(SimpleTestCase):

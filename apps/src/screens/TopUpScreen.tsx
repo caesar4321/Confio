@@ -187,7 +187,9 @@ const TopUpScreen = () => {
   const storedRampAuthEmail = String(rampAddressData?.myRampAddress?.authEmail || '').trim().toLowerCase();
   const normalizedSelectedMethodCode = String(selectedMethod?.code || '').trim().toUpperCase();
   const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
-  const hasStoredDeliverableRampEmail = Boolean(storedRampAuthEmail) && !/@privaterelay\.appleid\.com$/i.test(storedRampAuthEmail);
+  const hasStoredDeliverableRampEmail = Boolean(storedRampAuthEmail)
+    && !/@privaterelay\.appleid\.com$/i.test(storedRampAuthEmail)
+    && !/@koywe-test\.com$/i.test(storedRampAuthEmail);
   const requiresRealEmailForPse = countryCode === 'CO' && ['PSE', 'NEQUI', 'BANCOLOMBIA'].includes(normalizedSelectedMethodCode) && isAppleRelayEmail && !hasStoredDeliverableRampEmail;
 
   useEffect(() => {
@@ -683,6 +685,10 @@ const TopUpScreen = () => {
                   }
                   if (/[@]privaterelay\.appleid\.com$/i.test(normalizedEmail)) {
                     setAuthEmailError('Usa un email real, no un Apple private relay.');
+                    return;
+                  }
+                  if (/[@]koywe-test\.com$/i.test(normalizedEmail)) {
+                    setAuthEmailError('Usa un email real donde puedas recibir el código de PSE.');
                     return;
                   }
                   setShowAuthEmailModal(false);

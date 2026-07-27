@@ -981,6 +981,19 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 email_override=auth_email,
             )
+            if (
+                normalized_direction == 'ON_RAMP'
+                and resolved_country_code == 'CO'
+                and str(payment_method_code or '').strip().upper() in {'PSE', 'NEQUI', 'BANCOLOMBIA'}
+                and (
+                    _is_koywe_test_email(koywe_email)
+                    or str(koywe_email).strip().lower().endswith('@privaterelay.appleid.com')
+                )
+            ):
+                return RampOrderType(
+                    success=False,
+                    error='Ingresa un email real donde puedas recibir el código de PSE.',
+                )
             _store_koywe_auth_email(user=user, auth_email=koywe_email)
             external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
             contact_profile = _get_koywe_contact_profile(
@@ -1013,9 +1026,11 @@ class CreateRampOrder(graphene.Mutation):
                 bank_info=bank_info,
                 external_id=external_id,
                 contact_profile=contact_profile,
-                previous_emails=_get_koywe_previous_emails(
+                previous_emails=_get_koywe_profile_previous_emails(
+                    user=user,
                     country_code=resolved_country_code,
                     document_number=contact_profile.get('documentNumber') or '',
+                    selected_email=koywe_email,
                 ),
             )
         except KoyweConfigurationError as exc:
@@ -1706,6 +1721,10 @@ def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, st
     return _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
 
 
+def _is_koywe_test_email(value: str | None) -> bool:
+    return str(value or '').strip().lower().endswith('@koywe-test.com')
+
+
 def _get_koywe_previous_emails(*, country_code: str, document_number: str) -> list[str]:
     """Return emails that may hold an existing Koywe account for this document.
 
@@ -1741,6 +1760,33 @@ def _get_koywe_previous_emails(*, country_code: str, document_number: str) -> li
     return unique
 
 
+def _get_koywe_profile_previous_emails(
+    *,
+    user,
+    country_code: str,
+    document_number: str,
+    selected_email: str,
+) -> list[str]:
+    """Return prior account emails, including the test identity being migrated.
+
+    Colombia's PSE email must be deliverable, so the designated test users
+    authenticate with their real inbox while retaining the country-specific
+    delegated-KYC identity. Koywe may already own that identity under the
+    duende address; include it only for those designated users so updateEmail
+    can migrate the existing profile.
+    """
+    previous_emails = _get_koywe_previous_emails(
+        country_code=country_code,
+        document_number=document_number,
+    )
+    override = _get_koywe_test_account_override(user=user, country_code=country_code)
+    override_email = str((override or {}).get('email') or '').strip().lower()
+    normalized_selected_email = str(selected_email or '').strip().lower()
+    if override_email and override_email != normalized_selected_email:
+        previous_emails.insert(0, override_email)
+    return list(dict.fromkeys(previous_emails))
+
+
 def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None = None) -> str:
     normalized_country_code = str(country_code or '').strip().upper()
     override = _get_koywe_test_account_override(user=user, country_code=normalized_country_code)
@@ -1755,6 +1801,10 @@ def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None
         stored_ramp_email = str(
             getattr(getattr(user, 'ramp_user_address', None), 'auth_email', '') or ''
         ).strip()
+    # duende addresses identify delegated-KYC test profiles, but cannot receive
+    # Colombia PSE messages. Never reuse one as the persisted delivery inbox.
+    if normalized_country_code == 'CO' and _is_koywe_test_email(stored_ramp_email):
+        stored_ramp_email = ''
     country_default_email = (
         stored_ramp_email
         if normalized_country_code == 'CO'
@@ -1774,7 +1824,7 @@ def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None
 
 def _store_koywe_auth_email(*, user, auth_email: str | None) -> None:
     normalized_email = str(auth_email or '').strip().lower()
-    if not user or not normalized_email:
+    if not user or not normalized_email or _is_koywe_test_email(normalized_email):
         return
     try:
         validate_email(normalized_email)
@@ -1883,11 +1933,10 @@ def _is_ramp_address_complete(value) -> bool:
 def _get_koywe_contact_profile(*, user, country_code: str, email_override: str | None = None) -> dict[str, str]:
     verification = _get_latest_personal_verification(user)
     override = _get_koywe_test_account_override(user=user, country_code=country_code)
-    normalized_email_override = str(email_override or '').strip().lower()
-    override_email = str((override or {}).get('email') or '').strip().lower()
-    use_override_identity = bool(override) and (
-        not normalized_email_override or normalized_email_override == override_email
-    )
+    # The order email and delegated-KYC identity are separate concerns. In
+    # Colombia the former must be a real inbox for PSE, while these explicitly
+    # designated test users still use the country-specific test identity.
+    use_override_identity = bool(override)
 
     if use_override_identity:
         first_name = str((override or {}).get('firstName') or '').strip()
@@ -1932,6 +1981,11 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         profile['addressZipCode'] = effective_address.address_zip_code
     if effective_address.address_country:
         profile['addressCountry'] = effective_address.address_country
+    if use_override_identity:
+        profile['addressCountry'] = ISO2_TO_ISO3.get(
+            str(country_code or '').strip().upper(),
+            str(country_code or '').strip().upper(),
+        )
     if effective_address.economic_activity:
         profile['activity'] = effective_address.economic_activity
     return {key: value for key, value in profile.items() if value}

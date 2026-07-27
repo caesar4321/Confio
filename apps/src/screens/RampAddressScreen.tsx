@@ -132,6 +132,7 @@ export const RampAddressScreen: React.FC = () => {
       if (!normalizedAuthEmail) return 'Ingresa un email real para recibir códigos de PSE.';
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedAuthEmail)) return 'Ingresa un email válido.';
       if (/@privaterelay\.appleid\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real, no un Apple private relay.';
+      if (/@koywe-test\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real donde puedas recibir los códigos de PSE.';
     }
     if (!phoneCountryIso) return 'Primero configura el país de tu número de teléfono.';
     return null;
