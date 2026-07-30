@@ -1395,9 +1395,20 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 except Exception:
                     recipient_phone = ''
 
-                # Create or update by unique transaction_hash
+                # Key the row on the AXFER's own txid, not result['tx_id'] —
+                # send_raw_transaction returns the FIRST txid in the group
+                # (the sponsor fee payment), which is not the transfer the
+                # indexer deposit scanner sees, so hash-dedup missed and
+                # friend sends were double-recorded as external deposits.
+                axfer_txid = None
+                try:
+                    from algosdk import transaction as _algo_txn
+                    axfer_txid = _algo_txn.SignedTransaction.undictify(d).transaction.get_txid()
+                except Exception:
+                    pass
+
                 stx, created = SendTransaction.all_objects.update_or_create(
-                    transaction_hash=result['tx_id'],
+                    transaction_hash=axfer_txid or result['tx_id'],
                     defaults={
                         'sender_user': user,
                         'recipient_user': recipient_user,

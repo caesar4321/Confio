@@ -476,6 +476,30 @@ def scan_inbound_deposits():
                 # recipient would otherwise never be notified. Mirrors the ALGO
                 # payment sweep below, which already applies this rule.
                 has_send_tx = SendTransaction.objects.filter(transaction_hash=txid).exists()
+                if not has_send_tx:
+                    # Sponsored groups historically keyed the row on the
+                    # group's FIRST txid (the sponsor fee payment), not the
+                    # AXFER the indexer surfaces — so friend sends were
+                    # double-recorded as external deposits. Match the
+                    # transfer itself (sender/recipient/amount/token in a
+                    # ±30 min window) to cover those rows.
+                    try:
+                        _dec = int(decimals_map.get(xaid, 0))
+                        _amt = _amount_from_base(int(aamt), _dec)
+                        _token = 'USDC' if xaid == USDC_ID else ('CUSD' if xaid == CUSD_ID else 'CONFIO')
+                        _rt = axfer_tx.get('round-time')
+                        if _rt:
+                            from datetime import datetime as _dt, timedelta as _td, timezone as _pytz
+                            _t0 = _dt.fromtimestamp(_rt, tz=_pytz.utc)
+                            has_send_tx = SendTransaction.all_objects.filter(
+                                sender_address=sender,
+                                recipient_address=to_addr,
+                                amount=_amt,
+                                token_type=_token,
+                                created_at__range=(_t0 - _td(minutes=30), _t0 + _td(minutes=30)),
+                            ).exists()
+                    except Exception:
+                        logger.exception('[IndexerScan] group-send fallback dedup failed')
                 if has_send_tx:
                     logger.info(
                         f"[IndexerScan] skip internal tx (SendTransaction exists): sender={sender} to={to_addr} asset={xaid}"
