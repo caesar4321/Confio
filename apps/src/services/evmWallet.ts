@@ -257,6 +257,123 @@ export const bscWaitForReceipt = async (
   throw new Error(`bsc tx timeout: ${txHash}`);
 };
 
+export const bscGetCode = async (address: string): Promise<string> =>
+  rpcCall('eth_getCode', [address, 'latest']);
+
+// ── EIP-7702 authorization signing ──────────────────────────────────────
+// The one-time tuple designating ConfioBatchDelegate at the user's own EOA:
+// sign keccak(0x05 ‖ rlp([chainId, delegate, accountNonce])). The sponsor
+// carries it in a type-4 tx; the account keeps its key and address.
+
+export interface SetCodeAuthorization {
+  chainId: number;
+  address: string; // the delegate contract
+  nonce: string; // the EOA's ACCOUNT nonce at signing (decimal string)
+  yParity: number;
+  r: string; // 0x…
+  s: string; // 0x…
+}
+
+export function signSetCodeAuthorization(
+  delegateAddress: string,
+  accountNonce: bigint,
+  privKeyHex: string,
+  chainId: bigint = BSC_NETWORK.chainId,
+): SetCodeAuthorization {
+  const payload = rlpEncode([
+    bigintToMinimalBytes(chainId),
+    hexToBytes0x(delegateAddress), // raw 20 bytes, NOT minimal-int
+    bigintToMinimalBytes(accountNonce),
+  ]);
+  const digest = keccak_256(concatBytes(Uint8Array.from([0x05]), payload));
+  const sigBytes = secp256k1.sign(digest, hexToBytes(privKeyHex), {
+    prehash: false,
+    lowS: true,
+    format: 'recovered',
+  });
+  const sig = secp256k1.Signature.fromBytes(sigBytes, 'recovered');
+  return {
+    chainId: Number(chainId),
+    address: delegateAddress,
+    nonce: accountNonce.toString(),
+    yParity: sig.recovery ?? 0,
+    r: '0x' + sig.r.toString(16),
+    s: '0x' + sig.s.toString(16),
+  };
+}
+
+// ── EIP-712 batch-intent signing (ConfioBatchDelegate.execute) ──────────
+// Canonical strings shared with ConfioBatchDelegate.sol and
+// cusd_plus/sponsor_7702.py. The three-way parity anchor lives in the forge
+// test test_sharedEip712Vector / Django test_shared_eip712_vector /
+// validate-evm-signer.mts. Never change one alone.
+
+export interface BatchCall {
+  to: string;
+  valueWei: bigint;
+  data: string; // 0x…
+}
+
+const typehash = (s: string): string => bytesToHex(keccak_256(utf8ToBytes(s)));
+
+const DOMAIN_TYPEHASH = typehash(
+  'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)',
+);
+const CALL_TYPEHASH = typehash('Call(address to,uint256 value,bytes data)');
+const EXECUTE_TYPEHASH = typehash(
+  'Execute(Call[] calls,uint256 nonce,uint256 deadline)Call(address to,uint256 value,bytes data)',
+);
+const NAME_HASH = bytesToHex(keccak_256(utf8ToBytes('ConfioBatchDelegate')));
+const VERSION_HASH = bytesToHex(keccak_256(utf8ToBytes('1')));
+
+const keccakHex = (hexNoPrefix: string): string =>
+  bytesToHex(keccak_256(hexNoPrefix ? hexToBytes(hexNoPrefix) : new Uint8Array(0)));
+
+/** EIP-712 digest the EOA signs for execute(calls, nonce, deadline) —
+ * domain binds chainId + the USER'S OWN ADDRESS (verifyingContract). */
+export function hashBatchIntent(
+  calls: BatchCall[],
+  nonce: bigint,
+  deadline: bigint,
+  userAddress: string,
+  chainId: bigint = BSC_NETWORK.chainId,
+): Uint8Array {
+  const callHashes = calls
+    .map((c) =>
+      keccakHex(
+        CALL_TYPEHASH +
+          encodeAddress(c.to) +
+          encodeUint(c.valueWei) +
+          keccakHex(c.data.replace(/^0x/, '')),
+      ),
+    )
+    .join('');
+  const domainSeparator = keccakHex(
+    DOMAIN_TYPEHASH + NAME_HASH + VERSION_HASH + encodeUint(chainId) + encodeAddress(userAddress),
+  );
+  const structHash = keccakHex(
+    EXECUTE_TYPEHASH + keccakHex(callHashes) + encodeUint(nonce) + encodeUint(deadline),
+  );
+  return keccak_256(hexToBytes('1901' + domainSeparator + structHash));
+}
+
+/** 65-byte r‖s‖v signature (v = 27/28, what OZ ECDSA.recover expects). */
+export function signIntentDigest(digest: Uint8Array, privKeyHex: string): string {
+  const sigBytes = secp256k1.sign(digest, hexToBytes(privKeyHex), {
+    prehash: false,
+    lowS: true,
+    format: 'recovered',
+  });
+  const sig = secp256k1.Signature.fromBytes(sigBytes, 'recovered');
+  const v = 27 + (sig.recovery ?? 0);
+  return (
+    '0x' +
+    sig.r.toString(16).padStart(64, '0') +
+    sig.s.toString(16).padStart(64, '0') +
+    v.toString(16).padStart(2, '0')
+  );
+}
+
 // ── Minimal ABI encoding (address + uint256 args only) ──────────────────
 // A full ABI lib would bloat the bundle; our calls take only static
 // 32-byte-word args, so hand-encoding is exact and dependency-free.

@@ -383,6 +383,13 @@ def check_gas_dust(conversion_internal_id: str):
         logger.warning('gas dust balance check failed for %s: %s', conv.internal_id, exc)
         return
 
+    # 7702 sponsorship supersedes dusting: sponsored type-4 batches mean the
+    # user address needs NO BNB. Checked BEFORE the dust gate so ops can keep
+    # CUSD_PLUS_GAS_DUST_ENABLED armed as a one-flag-flip fallback.
+    if getattr(settings, 'CUSD_PLUS_7702_ENABLED', False):
+        logger.info('gas dust skipped for %s: 7702 sponsorship active', conv.internal_id)
+        return
+
     needed_wei = _gas_dust_target_wei()
     if balance_wei >= needed_wei:
         return  # already funded — most repeat users skip dusting entirely
@@ -433,6 +440,49 @@ def check_gas_dust(conversion_internal_id: str):
                     shortfall, conv.user_bsc_address, conv.internal_id, sent)
     except Exception as exc:  # noqa: BLE001 — dusting must never crash the scanner
         logger.exception('gas dust send failed for %s: %s', conv.internal_id, exc)
+
+
+@shared_task(name='cusd_plus.check_sponsored_batch_receipt', bind=True, max_retries=10)
+def check_sponsored_batch_receipt(self, batch_id: int):
+    """Resolve a 7702 SponsoredBatch row to its receipt outcome.
+
+    The dangerous case is NOT a revert — it's the silent no-op: if the
+    authorization's account nonce raced (a legacy tx landed between signing
+    and mining), the delegation never applies, the sponsor's call hits a
+    codeless EOA, and the tx mines with status 0x1 having executed NOTHING.
+    A successful execute() always emits BatchExecuted, so success with zero
+    logs = delegation didn't apply -> noop_failed (client retries with a
+    fresh authorization; support sees it in admin).
+    """
+    from .models import SponsoredBatch
+
+    try:
+        batch = SponsoredBatch.objects.get(id=batch_id)
+    except SponsoredBatch.DoesNotExist:
+        return
+    if batch.status != 'sent':
+        return  # already resolved
+
+    try:
+        receipt = _rpc('eth_getTransactionReceipt', [batch.tx_hash])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('7702 receipt check failed for %s: %s', batch.tx_hash, exc)
+        receipt = None
+    if not receipt:
+        # Not mined yet — back off and retry a few times, then leave 'sent'
+        # for support triage (never guess an outcome the chain hasn't given).
+        raise self.retry(countdown=15)
+
+    if receipt.get('status') != '0x1':
+        batch.status = 'reverted'
+    elif not receipt.get('logs'):
+        batch.status = 'noop_failed'
+        logger.warning('7702 batch %s mined as a NO-OP (delegation not applied) for %s',
+                       batch.tx_hash, batch.user_bsc_address)
+    else:
+        batch.status = 'confirmed'
+    batch.save(update_fields=['status', 'updated_at'])
+    logger.info('7702 batch %s resolved: %s', batch.tx_hash, batch.status)
 
 
 @shared_task(name='cusd_plus.abandon_stale_quotes')

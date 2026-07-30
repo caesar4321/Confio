@@ -33,6 +33,61 @@ const SUBMIT_BSC_TX = gql`
   }
 `;
 
+const SPONSOR_BSC_BATCH = gql`
+  mutation SponsorBscBatch(
+    $calls: [BscCallInput!]!
+    $nonce: String!
+    $deadline: String!
+    $intentSignature: String!
+    $authorization: BscAuthorizationInput
+  ) {
+    sponsorBscBatch(
+      calls: $calls
+      nonce: $nonce
+      deadline: $deadline
+      intentSignature: $intentSignature
+      authorization: $authorization
+    ) {
+      success
+      txHash
+      authorizationRequired
+      error
+    }
+  }
+`;
+
+export interface SponsorBatchResult {
+  success: boolean;
+  txHash?: string;
+  authorizationRequired?: boolean;
+  error?: string;
+}
+
+/** Submit a 7702 sponsored batch (sponsor pays gas; server validates the
+ * user-signed intent + optional authorization and broadcasts). Returns the
+ * server's verdict verbatim — callers handle authorizationRequired retries. */
+export const sponsorBscBatch = async (variables: {
+  calls: Array<{ to: string; valueWei: string; data: string }>;
+  nonce: string;
+  deadline: string;
+  intentSignature: string;
+  authorization?: {
+    chainId: number;
+    address: string;
+    nonce: string;
+    yParity: number;
+    r: string;
+    s: string;
+  };
+}): Promise<SponsorBatchResult> => {
+  const { apolloClient } = await import('../apollo/client');
+  const { data } = await apolloClient.mutate({
+    mutation: SPONSOR_BSC_BATCH,
+    variables,
+  });
+  return (data?.sponsorBscBatch || { success: false, error: 'no response' }) as SponsorBatchResult;
+};
+
 let installed = false;
 
 export const installBscServerTransport = (): void => {

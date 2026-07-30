@@ -138,3 +138,29 @@ Impl `CusdPlusVault(address,address,address,address,uint256)`:
 Proxy `ERC1967Proxy(address,bytes)`: impl address +
 `initialize(0xF29A…b623)` calldata — regenerate with
 `scripts/print_verify_args.py` if needed.
+
+## ConfioBatchDelegate — deployed 2026-07-30
+
+The EIP-7702 sponsored-batch delegate (successor to gas dusting): every
+user EOA designates this one shared contract via a 7702 authorization;
+the KMS sponsor then executes user-signed batches (approve+subscribeAndMint,
+redeemToUsdt) as type-4/type-2 transactions, paying all gas. Immutable,
+ownerless, no constructor args — replace-by-redeploy like the router.
+
+| Role | Address |
+| --- | --- |
+| **ConfioBatchDelegate** | `0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C` |
+| Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor, nonce 16) |
+
+- Deployed via `manage.py deploy_batch_delegate --broadcast --yes-mainnet`
+  (~719k gas ≈ 0.0007 BNB). Creation tx: (in deployer terminal output —
+  fill in from BscScan contract page).
+- On-chain runtime bytecode verified byte-equal to the forge artifact
+  (solc 0.8.26, optimizer 200, cancun) post-deploy, 2026-07-30.
+- BscScan source verified 2026-07-30 (`forge verify-contract`, "Pass -
+  Verified"); Sourcify submitted same day.
+- Server config: `CUSD_PLUS_BATCH_DELEGATE_ADDRESS` (this address),
+  rollout gate `CUSD_PLUS_7702_ENABLED` (canary with
+  `CUSD_PLUS_7702_MAX_PER_DAY=3`; `CUSD_PLUS_GAS_DUST_ENABLED` stays
+  armed as the break-glass fallback). Policy/broadcast code:
+  `cusd_plus/sponsor_7702.py`; audit ledger: SponsoredBatch (admin).

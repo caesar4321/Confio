@@ -168,3 +168,49 @@ class BnbAutoConvert(models.Model):
 
     def __str__(self):
         return f'BNB autoconvert {self.value_wei} wei [{self.tx_hash or "pending"}]'
+
+
+class SponsoredBatch(models.Model):
+    """Audit ledger of EIP-7702 sponsored batch executions (sponsor_7702).
+
+    One row per type-4 transaction the sponsor broadcast on a user's
+    behalf: the exact validated call batch, the gas ceiling the sponsor
+    committed to, and the receipt outcome. `noop_failed` flags the 7702
+    silent-failure mode — the tx mined "successfully" but emitted no logs,
+    meaning the delegation never applied (authorization nonce raced) and
+    nothing executed; the client retries with a fresh authorization.
+    """
+    STATUS_CHOICES = [
+        ('sent', 'Broadcast, receipt pending'),
+        ('confirmed', 'Mined and executed'),
+        ('reverted', 'Mined but reverted'),
+        ('noop_failed', 'Mined, but delegation did not apply (no-op)'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name='sponsored_batches',
+    )
+    user_bsc_address = models.CharField(max_length=42)
+    kind = models.CharField(max_length=16)  # 'subscribe' | 'redeem'
+    num_calls = models.PositiveSmallIntegerField()
+    calls_json = models.TextField()
+    tx_hash = models.CharField(max_length=66, blank=True)
+    gas_limit = models.PositiveIntegerField()
+    # Wei doesn't fit typical decimal columns; store as digits string.
+    max_fee_wei = models.CharField(max_length=32)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='sent')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        db_table = 'cusd_plus_sponsored_batches'
+        indexes = [
+            models.Index(fields=['user', 'created_at'], name='cpsb_user_created_idx'),
+            models.Index(fields=['tx_hash'], name='cpsb_tx_hash_idx'),
+            models.Index(fields=['status'], name='cpsb_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'7702 {self.kind} x{self.num_calls} [{self.status}] {self.tx_hash or "pending"}'

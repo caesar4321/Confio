@@ -14,6 +14,7 @@
 // in by the caller, which reads them from the server.
 
 import {
+  BatchCall,
   DerivedEvmWallet,
   encodeCall,
   sendCall,
@@ -21,6 +22,7 @@ import {
 } from './evmWallet';
 import { getActiveEvmWallet } from './secureDeterministicWallet';
 import { installBscServerTransport } from './bscServerRpc';
+import { executeSponsoredBatch, fetchSponsored7702Params } from './sponsored7702';
 
 // USDT (Binance-Peg BSC-USD) is fixed on BSC mainnet; the vault address is
 // deployment-specific and comes from the server.
@@ -64,7 +66,11 @@ const currentAllowance = async (
 
 /**
  * Deposit USDT-BSC into cUSD+ savings (approve if needed, then
- * subscribeAndMint). The user signs both txns; returns the mined tx hashes.
+ * subscribeAndMint) and return the mined tx hashes.
+ *
+ * Preferred rail (server-flagged): ONE user signature over the whole batch,
+ * executed sponsor-paid via EIP-7702 — the user's address needs zero BNB.
+ * Fallback rail: the original two self-signed legacy txs (gas dusting).
  * Idempotent-ish: skips the approve when allowance already covers the amount.
  */
 export const subscribeUsdtToSavings = async (
@@ -76,18 +82,52 @@ export const subscribeUsdtToSavings = async (
   const { vaultAddress, usdtWei } = params;
   const minUsdyOut = params.minUsdyOut ?? 0n;
 
+  const approveData = encodeCall('approve(address,uint256)', [
+    { type: 'address', value: vaultAddress },
+    { type: 'uint', value: MAX_UINT256 },
+  ]);
+  const mintData = encodeCall('subscribeAndMint(uint256,uint256,address)', [
+    { type: 'uint', value: usdtWei },
+    { type: 'uint', value: minUsdyOut },
+    { type: 'address', value: from },
+  ]);
+  const needsApprove = (await currentAllowance(from, vaultAddress, USDT_BSC)) < usdtWei;
+
+  // ── 7702 sponsored path ──
+  const sponsored = await fetchSponsored7702Params();
+  if (sponsored.enabled && sponsored.delegateAddress) {
+    try {
+      const calls: BatchCall[] = [
+        // Approve max once — avoids a re-approve on every future deposit.
+        ...(needsApprove ? [{ to: USDT_BSC, valueWei: 0n, data: approveData }] : []),
+        { to: vaultAddress, valueWei: 0n, data: mintData },
+      ];
+      const rec = await executeSponsoredBatch({
+        wallet,
+        calls,
+        delegateAddress: sponsored.delegateAddress,
+      });
+      // One atomic tx: the approve (if any) shares the mint's hash.
+      return {
+        approveTx: needsApprove ? rec.transactionHash : undefined,
+        mintTx: rec.transactionHash,
+        recipient: from,
+      };
+    } catch (e) {
+      // Sponsored rail down ≠ savings down: fall back to the self-signed
+      // legacy path (needs gas dust; the server keeps that rail armed).
+      console.warn('[cusdPlusVault] sponsored subscribe failed, using legacy path', e);
+    }
+  }
+
+  // ── legacy self-signed path ──
   let approveTx: string | undefined;
-  const allowance = await currentAllowance(from, vaultAddress, USDT_BSC);
-  if (allowance < usdtWei) {
-    // Approve max once — avoids a re-approve on every future deposit.
+  if (needsApprove) {
     const rec = await sendCall({
       from,
       privKeyHex: wallet.privKeyHex,
       to: USDT_BSC,
-      data: encodeCall('approve(address,uint256)', [
-        { type: 'address', value: vaultAddress },
-        { type: 'uint', value: MAX_UINT256 },
-      ]),
+      data: approveData,
     });
     approveTx = rec.transactionHash;
   }
@@ -96,11 +136,7 @@ export const subscribeUsdtToSavings = async (
     from,
     privKeyHex: wallet.privKeyHex,
     to: vaultAddress,
-    data: encodeCall('subscribeAndMint(uint256,uint256,address)', [
-      { type: 'uint', value: usdtWei },
-      { type: 'uint', value: minUsdyOut },
-      { type: 'address', value: from },
-    ]),
+    data: mintData,
   });
 
   return { approveTx, mintTx: mintRec.transactionHash, recipient: from };
@@ -134,15 +170,33 @@ export const redeemSavingsToUsdt = async (params: {
   const wallet = params.wallet ?? (await getActiveEvmWallet());
   const from = wallet.address;
   const recipient = params.recipient || from;
+  const redeemData = encodeCall('redeemToUsdt(uint256,uint256,address)', [
+    { type: 'uint', value: params.shares },
+    { type: 'uint', value: params.minUsdtOut ?? 0n },
+    { type: 'address', value: recipient },
+  ]);
+
+  // ── 7702 sponsored path (one signature, zero BNB needed) ──
+  const sponsored = await fetchSponsored7702Params();
+  if (sponsored.enabled && sponsored.delegateAddress) {
+    try {
+      const rec = await executeSponsoredBatch({
+        wallet,
+        calls: [{ to: params.vaultAddress, valueWei: 0n, data: redeemData }],
+        delegateAddress: sponsored.delegateAddress,
+      });
+      return { redeemTx: rec.transactionHash, recipient };
+    } catch (e) {
+      console.warn('[cusdPlusVault] sponsored redeem failed, using legacy path', e);
+    }
+  }
+
+  // ── legacy self-signed path ──
   const rec = await sendCall({
     from,
     privKeyHex: wallet.privKeyHex,
     to: params.vaultAddress,
-    data: encodeCall('redeemToUsdt(uint256,uint256,address)', [
-      { type: 'uint', value: params.shares },
-      { type: 'uint', value: params.minUsdtOut ?? 0n },
-      { type: 'address', value: recipient },
-    ]),
+    data: redeemData,
   });
   return { redeemTx: rec.transactionHash, recipient };
 };

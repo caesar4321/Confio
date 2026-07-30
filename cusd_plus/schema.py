@@ -63,8 +63,12 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     bnb_auto_convert_enabled = graphene.Boolean(description="Master gate for the client-signed BNB→USDT auto-convert")
     pancake_router = graphene.String(description="PancakeSwap V2 router the swap targets (also relay-allowlisted, selector-guarded)")
     bnb_auto_convert_min_swap_wei = graphene.String(description="Skip swaps smaller than this (wei, as string)")
-    bnb_auto_convert_keep_wei = graphene.String(description="BNB to leave at the address (live gas-dust target, wei as string)")
+    bnb_auto_convert_keep_wei = graphene.String(description="BNB to leave at the address (live gas-dust target, wei as string; '0' once 7702 sponsorship is on)")
     bnb_auto_convert_slippage_bps = graphene.Int(description="Slippage floor applied to the getAmountsOut quote")
+    # EIP-7702 sponsored batches (successor to gas dusting): when enabled,
+    # the client signs one intent per action and the sponsor pays all gas.
+    sponsored_7702_enabled = graphene.Boolean(description="Master gate for sponsor-paid type-4 batches")
+    batch_delegate_address = graphene.String(description="ConfioBatchDelegate the EOA designates via 7702")
 
 
 # ── Ondo Stocks (GM) market data — server proxy of api.gm.ondo.finance ──
@@ -379,9 +383,15 @@ class Query(graphene.ObjectType):
             pancake_router=getattr(settings, 'CUSD_PLUS_PANCAKE_ROUTER', None),
             bnb_auto_convert_min_swap_wei=str(getattr(
                 settings, 'CUSD_PLUS_BNB_AUTOCONVERT_MIN_SWAP_WEI', 3_000_000_000_000_000)),
-            bnb_auto_convert_keep_wei=str(_live_gas_dust_target_wei()),
+            # Under 7702 sponsorship no BNB is needed at the user address —
+            # the auto-convert can sweep everything.
+            bnb_auto_convert_keep_wei=(
+                '0' if getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
+                else str(_live_gas_dust_target_wei())),
             bnb_auto_convert_slippage_bps=getattr(
                 settings, 'CUSD_PLUS_BNB_AUTOCONVERT_SLIPPAGE_BPS', 100),
+            sponsored_7702_enabled=getattr(settings, 'CUSD_PLUS_7702_ENABLED', False),
+            batch_delegate_address=getattr(settings, 'CUSD_PLUS_BATCH_DELEGATE_ADDRESS', None) or None,
         )
 
 
@@ -570,6 +580,8 @@ BSC_READ_METHODS = {
     'eth_getTransactionCount', 'eth_gasPrice', 'eth_estimateGas',
     'eth_call', 'eth_getBalance', 'eth_getTransactionReceipt',
     'eth_blockNumber', 'eth_chainId',
+    # 7702 delegation probe (is the EOA already designating our delegate?)
+    'eth_getCode',
 }
 
 
@@ -588,43 +600,13 @@ class BscRpcResult(graphene.ObjectType):
     error = graphene.String()
 
 
-def _guardarian_savings_deposit_address(user):
-    """Deposit address of the user's newest Guardarian USDT sell still
-    awaiting funds — fetched live from Guardarian's API, never from the
-    client. Used by the relay's redeemToUsdt recipient guard."""
-    try:
-        from datetime import timedelta
-
-        import requests
-        from django.conf import settings
-        from django.utils import timezone
-
-        from usdc_transactions.models import GuardarianTransaction
-
-        tx = GuardarianTransaction.objects.filter(
-            user=user,
-            from_currency__in=['USDT'],
-            status__in=['new', 'waiting', 'waiting_for_deposit', 'waiting_for_customer'],
-            created_at__gte=timezone.now() - timedelta(hours=24),
-        ).order_by('-created_at').first()
-        if not tx:
-            return None
-        api_key = getattr(settings, 'GUARDARIAN_API_KEY', None)
-        base_url = getattr(settings, 'GUARDARIAN_API_URL', 'https://api-payments.guardarian.com/v1')
-        if not api_key:
-            return None
-        resp = requests.get(
-            f'{base_url.rstrip("/")}/transaction/{tx.guardarian_id}',
-            headers={'x-api-key': api_key},
-            timeout=10,
-        )
-        if not resp.ok:
-            return None
-        data = resp.json()
-        return data.get('deposit_address') or (data.get('deposit') or {}).get('address')
-    except Exception:
-        logger.exception('guardarian savings deposit lookup failed')
-        return None
+# Shared with the 7702 batch policy — one implementation of the Guardarian
+# lookup and the redeem-recipient rule for BOTH rails (parity is structural,
+# not copied). Kept importable under the old name for existing tests.
+from .sponsor_7702 import (  # noqa: E402
+    _guardarian_savings_deposit_address,
+    redeem_recipient_allowed as _redeem_recipient_allowed,
+)
 
 
 class SubmitBscTransaction(graphene.Mutation):
@@ -707,14 +689,12 @@ class SubmitBscTransaction(graphene.Mutation):
                     signer = _EthAccount.recover_transaction(raw).lower()
                 except Exception:
                     return SubmitBscTransaction(success=False, error='unrecoverable_signer')
-                if recipient != signer:
-                    deposit_address = _guardarian_savings_deposit_address(user)
-                    if not deposit_address or deposit_address.lower() != recipient:
-                        logger.warning(
-                            'redeemToUsdt recipient %s rejected for user %s (signer %s)',
-                            recipient, user.id, signer,
-                        )
-                        return SubmitBscTransaction(success=False, error='redeem_recipient_not_allowed')
+                if not _redeem_recipient_allowed(user, recipient, signer):
+                    logger.warning(
+                        'redeemToUsdt recipient %s rejected for user %s (signer %s)',
+                        recipient, user.id, signer,
+                    )
+                    return SubmitBscTransaction(success=False, error='redeem_recipient_not_allowed')
 
         from .tasks import _rpc
         try:
@@ -735,6 +715,163 @@ class SubmitBscTransaction(graphene.Mutation):
             return SubmitBscTransaction(success=True, tx_hash=tx_hash)
         except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
             return SubmitBscTransaction(success=False, error=str(exc)[:200])
+
+
+class BscCallInput(graphene.InputObjectType):
+    """One call of a 7702 sponsored batch."""
+    to = graphene.String(required=True)
+    value_wei = graphene.String(required=True, description="Must be '0' under current policy")
+    data = graphene.String(required=True, description="0x-prefixed calldata")
+
+
+class BscAuthorizationInput(graphene.InputObjectType):
+    """A signed EIP-7702 authorization tuple (client-signed, first use only)."""
+    chain_id = graphene.Int(required=True)
+    address = graphene.String(required=True, description="The delegate contract being designated")
+    nonce = graphene.String(required=True, description="The EOA's account nonce at signing")
+    y_parity = graphene.Int(required=True)
+    r = graphene.String(required=True)
+    s = graphene.String(required=True)
+
+
+class SponsorBscBatch(graphene.Mutation):
+    """Execute a user-signed call batch as a SPONSOR-PAID type-4 (EIP-7702)
+    transaction — the successor to gas dusting. The client signs an EIP-712
+    intent over the exact calls (and, on first use, a 7702 authorization
+    designating ConfioBatchDelegate at its EOA); the server validates both
+    against the vault-flow policy, simulates, and broadcasts from the KMS
+    sponsor. The user's address never needs BNB. Custody unchanged: the
+    delegate on-chain re-verifies the user's signature, so the sponsor can
+    only execute what the user signed."""
+    class Arguments:
+        calls = graphene.List(graphene.NonNull(BscCallInput), required=True)
+        nonce = graphene.String(required=True, description="Delegate intent nonce (nonces())")
+        deadline = graphene.String(required=True, description="Unix seconds")
+        intent_signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
+        authorization = BscAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    tx_hash = graphene.String()
+    authorization_required = graphene.Boolean()
+    error = graphene.String()
+
+    def mutate(self, info, calls, nonce, deadline, intent_signature, authorization=None):
+        import time as _time
+
+        from django.conf import settings
+        from django.core.cache import cache
+
+        from . import sponsor_7702
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return SponsorBscBatch(success=False, error='auth_required')
+        if not getattr(settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return SponsorBscBatch(success=False, error='disabled')
+        if not sponsor_7702.delegate_address():
+            return SponsorBscBatch(success=False, error='delegate_not_configured')
+        if _bsc_rate_limited(user.id, 'sponsor7702', 5):
+            return SponsorBscBatch(success=False, error='rate_limited')
+
+        # JWT-bound address: the intent must be signed by THIS account's
+        # registered BSC key — never a client-supplied address.
+        user_addr = _active_bsc_address(info)
+        if not user_addr:
+            return SponsorBscBatch(success=False, error='no_bsc_address')
+        user_addr = user_addr.lower()
+
+        # Per-address cooldown + daily cap (dust-rail discipline).
+        rl_key = f'cusd_plus_7702_cooldown_{user_addr}'
+        if cache.get(rl_key):
+            return SponsorBscBatch(success=False, error='rate_limited')
+        day_key = f'cusd_plus_7702_day_{user_addr}'
+        day_count = cache.get(day_key, 0)
+        if day_count >= int(getattr(settings, 'CUSD_PLUS_7702_MAX_PER_DAY', 20)):
+            logger.warning('7702 daily cap hit for %s', user_addr)
+            return SponsorBscBatch(success=False, error='daily_cap')
+
+        # Normalize + structural caps.
+        if not calls or len(calls) > 4:
+            return SponsorBscBatch(success=False, error='bad_batch_size')
+        try:
+            norm_calls = [{
+                'to': (c.to or '').lower(),
+                'value': str(int(c.value_wei)),
+                'data': (c.data or '').lower(),
+            } for c in calls]
+            nonce_i = int(nonce)
+            deadline_i = int(deadline)
+        except (TypeError, ValueError):
+            return SponsorBscBatch(success=False, error='bad_params')
+
+        now = int(_time.time())
+        if not (now + 60 <= deadline_i <= now + 1800):
+            return SponsorBscBatch(success=False, error='bad_deadline')
+
+        chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+        try:
+            sponsor_7702.validate_policy(norm_calls, user, user_addr)
+
+            digest = sponsor_7702.intent_digest(
+                norm_calls, nonce_i, deadline_i, user_addr, chain_id)
+            signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
+            if signer != user_addr:
+                return SponsorBscBatch(success=False, error='bad_intent_signature')
+
+            # Delegation state decides whether an authorization must ride
+            # along. The server's view is authoritative — the client's
+            # eth_getCode probe is advisory only.
+            auth_dict = None
+            if not sponsor_7702.is_delegated(user_addr):
+                if authorization is None:
+                    return SponsorBscBatch(
+                        success=False, authorization_required=True,
+                        error='authorization_required')
+                def _hex(x):
+                    x = (x or '').lower()
+                    return x if x.startswith('0x') else '0x' + x
+                auth_dict = {
+                    'chain_id': int(authorization.chain_id),
+                    'address': (authorization.address or '').lower(),
+                    'nonce': str(int(authorization.nonce)),
+                    'y_parity': int(authorization.y_parity),
+                    'r': _hex(authorization.r),
+                    's': _hex(authorization.s),
+                }
+                # chainId 0 would be a wildcard valid on EVERY chain —
+                # refuse it even though the tuple is user-signed.
+                if auth_dict['chain_id'] != chain_id:
+                    return SponsorBscBatch(success=False, error='bad_auth_chain')
+                if auth_dict['address'] != sponsor_7702.delegate_address():
+                    return SponsorBscBatch(success=False, error='bad_auth_delegate')
+                authority = sponsor_7702.recover_authorization_authority(auth_dict)
+                if authority != user_addr:
+                    return SponsorBscBatch(success=False, error='bad_auth_signature')
+                live_nonce = int(sponsor_7702._rpc(
+                    'eth_getTransactionCount', [user_addr, 'pending']), 16)
+                if int(auth_dict['nonce']) != live_nonce:
+                    # Signed against a stale account nonce (a legacy tx or
+                    # emergency exit landed since) — applying it would
+                    # silently no-op. Client refetches and re-signs.
+                    return SponsorBscBatch(
+                        success=False, authorization_required=True,
+                        error='stale_auth_nonce')
+
+            kind = 'redeem' if any(
+                c['data'][2:10] == sponsor_7702.SEL_REDEEM_TO_USDT for c in norm_calls
+            ) else 'subscribe'
+            tx_hash, _batch = sponsor_7702.send_sponsored_batch(
+                user, user_addr, norm_calls, nonce_i, deadline_i,
+                intent_signature, auth_dict, kind)
+        except sponsor_7702.PolicyError as exc:
+            return SponsorBscBatch(success=False, error=exc.code)
+        except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
+            logger.exception('7702 sponsored batch failed for user %s', user.id)
+            return SponsorBscBatch(success=False, error=str(exc)[:200])
+
+        cache.set(rl_key, 1, 30)  # 30s per-address cooldown
+        cache.set(day_key, day_count + 1, 24 * 3600)
+        return SponsorBscBatch(success=True, tx_hash=tx_hash)
 
 
 class RegisterBscUsdtArrival(graphene.Mutation):
@@ -834,3 +971,4 @@ class Mutation(graphene.ObjectType):
     advance_cusd_plus_conversion = AdvanceCusdPlusConversion.Field()
     submit_bsc_transaction = SubmitBscTransaction.Field()
     register_bsc_usdt_arrival = RegisterBscUsdtArrival.Field()
+    sponsor_bsc_batch = SponsorBscBatch.Field()

@@ -175,6 +175,36 @@ class EVMKMSSigner:
         )
         return raw_hex, tx_hash
 
+    def sign_typed_transaction(self, tx: dict) -> Tuple[str, str]:
+        """
+        Sign an EIP-2718 typed transaction dict (type 2 or 4) and return
+        (raw_tx_hex, tx_hash_hex) ready for eth_sendRawTransaction.
+
+        The dict must carry ``"type"`` plus the type's fields — for the 7702
+        sponsored batches: chainId, nonce, maxPriorityFeePerGas,
+        maxFeePerGas, gas, to, value, data, accessList, authorizationList
+        (each authorization a 6-key dict: chainId, address, nonce, yParity,
+        r, s). Unlike the legacy path, typed signatures carry the RAW
+        y-parity — sign_digest's v goes in unchanged, no EIP-155 offset.
+        """
+        from eth_account.typed_transactions import TypedTransaction
+        from eth_utils import keccak
+
+        unsigned = TypedTransaction.from_dict(dict(tx))
+        v, r, s = self.sign_digest(unsigned.hash())
+        signed = TypedTransaction.from_dict({**tx, "v": v, "r": r, "s": s})
+        encoded = signed.encode()
+        raw_hex = "0x" + encoded.hex()
+        tx_hash = "0x" + keccak(encoded).hex()
+        logger.info(
+            "BSC type-%s transaction %s signed with native KMS key %s (alias=%s)",
+            tx.get("type"),
+            tx_hash,
+            self.key_id,
+            self.key_alias,
+        )
+        return raw_hex, tx_hash
+
     def assert_matches_address(self, expected_address: Optional[str]) -> None:
         if expected_address and expected_address.lower() != self.address.lower():
             raise ImproperlyConfigured(
