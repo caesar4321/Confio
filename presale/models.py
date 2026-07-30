@@ -254,6 +254,20 @@ class PresalePurchase(models.Model):
         blank=True,
         help_text="User agent recorded when the user accepted the presale terms"
     )
+    attested_not_us_resident = models.BooleanField(
+        default=False,
+        help_text="User checked 'No vivo en Estados Unidos' at purchase time"
+    )
+    attested_not_us_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the 'No vivo en Estados Unidos' self-attestation"
+    )
+    ip_country = models.CharField(
+        max_length=2,
+        blank=True,
+        help_text="ISO country resolved from the client IP at purchase time"
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -346,6 +360,82 @@ class UserPresaleLimit(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - Phase {self.phase.phase_number}: {self.total_purchased} cUSD"
+
+
+class PresaleMigrationCredit(models.Model):
+    """
+    Per-user bridge between Algorand presale purchases (DB truth) and the
+    BSC ConfioPresaleVault's migratedPool (claim truth).
+
+    One row per user, created by the sync task once the user's personal
+    account has a bsc_address (populated client-side when they open the
+    updated app — there is no roster at vault deploy time). The amount is
+    the sum of their completed Algorand purchases; the Safe assigns it
+    on-chain via creditMigrated(buyers[], amounts[]), and the verify task
+    flips the row to `credited` only after reading the vault back.
+
+    States: pending (linked, awaiting batch) → queued (included in a Safe
+    batch proposal) → credited (verified on-chain). `failed` marks rows the
+    verify pass could not confirm so they are never silently lost.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('queued', 'Queued in Safe batch'),
+        ('credited', 'Credited on-chain'),
+        ('failed', 'Failed verification'),
+    ]
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.PROTECT,
+        related_name='presale_migration_credit'
+    )
+    bsc_address = models.CharField(
+        max_length=42,
+        help_text="BSC address the credit is assigned to (snapshot of Account.bsc_address at row creation)"
+    )
+    confio_amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=6,
+        validators=[MinValueValidator(Decimal('0.000001'))],
+        help_text="Total CONFIO from the user's completed Algorand purchases"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    batch_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Identifier of the Safe batch this row was queued into"
+    )
+    safe_tx_hash = models.CharField(
+        max_length=66,
+        blank=True,
+        help_text="Transaction hash of the creditMigrated call that included this row"
+    )
+    credited_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['batch_id']),
+        ]
+        verbose_name = "Presale Migration Credit"
+        verbose_name_plural = "Presale Migration Credits"
+
+    def __str__(self):
+        return f"{self.user.username} → {self.bsc_address[:10]}… : {self.confio_amount} CONFIO ({self.status})"
+
+    @property
+    def confio_base_units(self) -> int:
+        """Amount in 1e18 base units, as creditMigrated expects on-chain."""
+        return int(self.confio_amount * Decimal(10) ** 18)
 
 
 class PresaleWaitlist(models.Model):

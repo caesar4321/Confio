@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.db.models import Sum, Count
 from decimal import Decimal
 
-from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist
+from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist, PresaleMigrationCredit
 
 
 class PresalePhaseAdminForm(forms.ModelForm):
@@ -1508,3 +1508,33 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
             self.message_user(request, f"Successfully sent notifications to {success_count} user(s).")
 
     send_notification.short_description = "Send presale notifications to ALL unnotified waitlist users"
+
+
+@admin.register(PresaleMigrationCredit)
+class PresaleMigrationCreditAdmin(admin.ModelAdmin):
+    """Algorand→BSC migration credits (see presale/tasks.py pipeline)."""
+    list_display = [
+        'user',
+        'bsc_address',
+        'confio_amount',
+        'status',
+        'batch_id',
+        'credited_at',
+        'created_at',
+    ]
+    list_filter = ['status', 'created_at']
+    search_fields = ['user__username', 'user__email', 'bsc_address', 'batch_id', 'safe_tx_hash']
+    readonly_fields = ['user', 'created_at', 'updated_at', 'credited_at']
+    date_hierarchy = 'created_at'
+
+    fieldsets = (
+        ('Credit', {
+            'fields': ('user', 'bsc_address', 'confio_amount', 'status')
+        }),
+        ('Safe execution', {
+            'fields': ('batch_id', 'safe_tx_hash', 'credited_at')
+        }),
+        ('Audit', {
+            'fields': ('notes', 'created_at', 'updated_at')
+        }),
+    )

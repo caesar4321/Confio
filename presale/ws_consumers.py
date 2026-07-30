@@ -81,6 +81,17 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         except Exception:
             return ""
 
+    def _get_ip_country_hint(self):
+        """Country resolved at the CDN edge (Cloudflare CF-IPCountry), if any."""
+        try:
+            headers = {
+                k.decode("latin1").lower(): v.decode("latin1")
+                for k, v in (self.scope.get("headers") or [])
+            }
+            return headers.get("cf-ipcountry", "") or None
+        except Exception:
+            return None
+
     async def receive_json(self, content, **kwargs):
         await self._reset_idle_timer()
         t = content.get("type")
@@ -124,7 +135,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if t == "optin_prepare":
             try:
                 platform = content.get("platform", "")
-                pack = await self._optin_prepare(platform)
+                pack = await self._optin_prepare(
+                    platform,
+                    client_ip=self._get_client_ip(),
+                    ip_country_hint=self._get_ip_country_hint(),
+                )
                 if not pack.get("success"):
                     await self.send_json({"type": "error", "message": pack.get("error", "optin_prepare_failed")})
                     return
@@ -146,9 +161,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 platform = content.get("platform", "")
                 has_accepted_terms_field = "accepted_terms" in content
                 accepted_terms = bool(content.get("accepted_terms")) if has_accepted_terms_field else True
+                has_not_us_field = "not_us_attestation" in content
+                not_us_attestation = bool(content.get("not_us_attestation")) if has_not_us_field else False
                 try:
                     logging.getLogger(__name__).info(
-                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms} legacy_client={not has_accepted_terms_field}"
+                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms} not_us_attestation={not_us_attestation} legacy_client={not has_accepted_terms_field}"
                     )
                 except Exception:
                     pass
@@ -157,8 +174,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                     platform=platform,
                     accepted_terms=accepted_terms,
                     require_terms=has_accepted_terms_field,
+                    not_us_attestation=not_us_attestation,
+                    require_not_us_attestation=has_not_us_field,
                     client_ip=self._get_client_ip(),
                     user_agent=self._get_user_agent(),
+                    ip_country_hint=self._get_ip_country_hint(),
                 )
                 if not pack.get("success"):
                     await self.send_json({"type": "error", "message": pack.get("error", "prepare_failed")})
@@ -267,7 +287,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         return account
 
     @database_sync_to_async
-    def _prepare(self, amount, platform: str = "", accepted_terms: bool = False, require_terms: bool = True, client_ip: str | None = None, user_agent: str = ""):
+    def _prepare(self, amount, platform: str = "", accepted_terms: bool = False, require_terms: bool = True, not_us_attestation: bool = False, require_not_us_attestation: bool = False, client_ip: str | None = None, user_agent: str = "", ip_country_hint: str | None = None):
         from decimal import Decimal
         from django.utils import timezone
         from presale.models import PresalePhase, PresalePurchase, UserPresaleLimit, PresaleSettings
@@ -277,14 +297,20 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         user = self.scope.get("user")
 
-        # Geo-blocking check
-        from .geo_utils import check_presale_eligibility
-        is_eligible, error_msg = check_presale_eligibility(user)
+        # Geo-blocking check (phone country + IP country; test accounts bypass)
+        from .geo_utils import check_presale_eligibility, get_country_for_ip
+        is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
         if not is_eligible:
             return {"success": False, "error": error_msg}
 
         if require_terms and not accepted_terms:
             return {"success": False, "error": "terms_acceptance_required"}
+
+        # Self-attestation "No vivo en Estados Unidos" — required for updated
+        # clients that send the field; legacy clients are tolerated like the
+        # accepted_terms rollout.
+        if require_not_us_attestation and not not_us_attestation:
+            return {"success": False, "error": "not_us_attestation_required"}
 
         # Validate presale is active and find phase
         settings_obj = PresaleSettings.get_settings()
@@ -369,6 +395,9 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             accepted_terms_at=timezone.now() if require_terms and accepted_terms else None,
             accepted_terms_ip=client_ip if require_terms and accepted_terms else None,
             accepted_terms_user_agent=(user_agent or '')[:1000] if require_terms and accepted_terms else '',
+            attested_not_us_resident=bool(require_not_us_attestation and not_us_attestation),
+            attested_not_us_at=timezone.now() if require_not_us_attestation and not_us_attestation else None,
+            ip_country=(get_country_for_ip(client_ip, ip_country_hint) or ''),
         )
 
         # Build sponsored transaction group
@@ -507,7 +536,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         }
 
     @database_sync_to_async
-    def _optin_prepare(self, platform: str = ""):
+    def _optin_prepare(self, platform: str = "", client_ip: str | None = None, ip_country_hint: str | None = None):
         from users.models import Account
         from blockchain.presale_transaction_builder import PresaleTransactionBuilder
         from blockchain.algorand_account_manager import AlgorandAccountManager
@@ -517,6 +546,13 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import logging as _log
 
         user = self.scope.get("user")
+
+        # Geo-blocking check (same gate as purchase prepare; test accounts bypass)
+        from .geo_utils import check_presale_eligibility
+        is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+        if not is_eligible:
+            return {"success": False, "error": error_msg}
+
         account = self._get_active_account()
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}

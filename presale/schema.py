@@ -73,6 +73,10 @@ class PresaleQueries(graphene.ObjectType):
     
     is_presale_active = graphene.Boolean()
     is_presale_claims_unlocked = graphene.Boolean()
+    confio_current_price = graphene.Decimal(
+        description="Live CONFIO price from the BSC presale curve (cached ~60s); "
+                    "falls back to the last phase price when the vault is unreachable"
+    )
     active_presale_phase = graphene.Field(PresalePhaseType)
     all_presale_phases = graphene.List(PresalePhaseType)
     presale_phase = graphene.Field(
@@ -91,6 +95,11 @@ class PresaleQueries(graphene.ObjectType):
         """Check if presale is globally enabled - no login required for this check"""
         settings = PresaleSettings.get_settings()
         return settings.is_presale_active
+
+    def resolve_confio_current_price(self, info):
+        """Moving curve price for holdings valuation - no login required"""
+        from .price_utils import get_confio_current_price
+        return get_confio_current_price()
 
     def resolve_is_presale_claims_unlocked(self, info):
         """Check if presale claims are globally unlocked - no login required for this check"""
@@ -221,7 +230,11 @@ class JoinPresaleWaitlist(graphene.Mutation):
         user = info.context.user
         
         from .geo_utils import check_presale_eligibility
-        is_eligible, error_msg = check_presale_eligibility(user)
+        from security.request_utils import extract_client_ip_from_meta
+        request = info.context
+        client_ip = extract_client_ip_from_meta(getattr(request, 'META', None))
+        ip_country_hint = (getattr(request, 'META', None) or {}).get('HTTP_CF_IPCOUNTRY')
+        is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
         if not is_eligible:
             return JoinPresaleWaitlist(
                 success=False,
