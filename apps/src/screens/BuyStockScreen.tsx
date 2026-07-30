@@ -38,6 +38,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { CUSD_CONVERSION_UI_ENABLED } from '../config/features';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -251,7 +252,15 @@ export const BuyStockScreen = () => {
               <Text style={styles.hintError}>
                 Tu ahorro disponible es {fmtUsd(available)}.
               </Text>
-              <TouchableOpacity onPress={() => navigation.navigate('ConvertAhorro')}>
+              <TouchableOpacity
+                onPress={() =>
+                  // Conversion UI hidden: route to the Ahorros hub (bank/USDT
+                  // funding) instead of the cUSD→cUSD+ convert flow.
+                  navigation.navigate(
+                    CUSD_CONVERSION_UI_ENABLED ? 'ConvertAhorro' : 'Ahorros',
+                  )
+                }
+              >
                 <Text style={styles.fundLink}>Ahorrar primero →</Text>
               </TouchableOpacity>
             </View>

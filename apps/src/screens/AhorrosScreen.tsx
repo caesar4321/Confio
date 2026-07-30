@@ -45,6 +45,7 @@ import { useSavingsResume } from '../hooks/useSavingsResume';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
+import { CUSD_CONVERSION_UI_ENABLED } from '../config/features';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
@@ -155,16 +156,22 @@ export const AhorrosScreen = () => {
       subtitle: 'Red BNB Smart Chain (BEP-20) · desde un exchange u otra billetera',
       onPress: () => navigation.navigate('ReceiveSavings'),
     },
-    {
-      icon: 'refresh-cw',
-      title: 'Desde mi saldo cUSD',
-      subtitle:
-        cusdAvailable > 0
-          ? `${fmtUsd(cusdAvailable)} disponibles · verás el costo antes de confirmar`
-          : 'No tienes cUSD disponible ahora',
-      disabled: cusdAvailable <= 0,
-      onPress: () => navigation.navigate('ConvertAhorro'),
-    },
+    // cUSD → cUSD+ conversion hidden while the bridge leg has no home
+    // (see CUSD_CONVERSION_UI_ENABLED).
+    ...(CUSD_CONVERSION_UI_ENABLED
+      ? [
+          {
+            icon: 'refresh-cw',
+            title: 'Desde mi saldo cUSD',
+            subtitle:
+              cusdAvailable > 0
+                ? `${fmtUsd(cusdAvailable)} disponibles · verás el costo antes de confirmar`
+                : 'No tienes cUSD disponible ahora',
+            disabled: cusdAvailable <= 0,
+            onPress: () => navigation.navigate('ConvertAhorro'),
+          } as RouteOption,
+        ]
+      : []),
   ];
 
   // ── Retirar destinations ────────────────────────────────────────────────
@@ -188,12 +195,17 @@ export const AhorrosScreen = () => {
         Alert.alert('Muy pronto', 'El retiro a tu banco abre en breve.');
       },
     },
-    {
-      icon: 'dollar-sign',
-      title: 'A mi saldo cUSD',
-      subtitle: 'Para enviar, pagar o guardar · al instante',
-      onPress: () => navigation.navigate('RetirarAhorro'),
-    },
+    // cUSD+ → cUSD conversion hidden alongside the forward leg.
+    ...(CUSD_CONVERSION_UI_ENABLED
+      ? [
+          {
+            icon: 'dollar-sign',
+            title: 'A mi saldo cUSD',
+            subtitle: 'Para enviar, pagar o guardar · al instante',
+            onPress: () => navigation.navigate('RetirarAhorro'),
+          } as RouteOption,
+        ]
+      : []),
   ];
 
   const onExplorarAcciones = () => navigation.navigate('AccionesList');
