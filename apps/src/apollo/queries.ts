@@ -3935,6 +3935,19 @@ export const GET_PRESALE_STATUS = gql`
   }
 `;
 
+export const GET_PRESALE_CURVE_STATS = gql`
+  query GetPresaleCurveStats {
+    presaleCurveStats {
+      currentPrice
+      startPrice
+      finalPrice
+      totalRaisedUsd
+      nextMilestoneUsd
+      participants
+    }
+  }
+`;
+
 export const GET_MY_PRESALE_ONCHAIN_INFO = gql`
   query GetMyPresaleOnchainInfo {
     myPresaleOnchainInfo {

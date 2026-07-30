@@ -7,7 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery, useApolloClient, gql } from '@apollo/client';
-import { GET_ALL_PRESALE_PHASES, GET_ACTIVE_PRESALE, GET_PRESALE_STATUS, GET_MY_PRESALE_ONCHAIN_INFO } from '../apollo/queries';
+import { GET_PRESALE_CURVE_STATS, GET_ACTIVE_PRESALE, GET_PRESALE_STATUS, GET_MY_PRESALE_ONCHAIN_INFO } from '../apollo/queries';
 import { PresaleWsSession } from '../services/presaleWs';
 import algorandService from '../services/algorandService';
 import { formatNumber } from '../utils/numberFormatting';
@@ -19,25 +19,13 @@ import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
-type PresalePhaseCard = {
-  phase: string;
-  title: string;
-  price: string;
-  unit: string;
-  goal: string;
-  target: string;
-  location: string;
-  status: string;
-  description: string;
-  vision: string[];
-};
 
 export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
   const { selectedCountry } = useCountry();
   const apollo = useApolloClient();
-  // Fetch presale phases from server
-  const { data, loading, error } = useQuery(GET_ALL_PRESALE_PHASES, {
+  // One continuous presale: moving curve price + recaudado milestones
+  const { data, loading, error } = useQuery(GET_PRESALE_CURVE_STATS, {
     fetchPolicy: 'cache-and-network',
   });
 
@@ -52,41 +40,25 @@ export const ConfioPresaleScreen = () => {
   const { data: onchainInfoData, refetch: refetchOnchainInfo } = useQuery(GET_MY_PRESALE_ONCHAIN_INFO, { fetchPolicy: 'cache-and-network', skip: !isClaimsUnlocked });
   const claimable = onchainInfoData?.myPresaleOnchainInfo?.claimable || 0;
 
-  // Use server data
-  const presalePhases: PresalePhaseCard[] = data?.allPresalePhases ? data.allPresalePhases.map((phase: any) => ({
-    phase: `Fase ${phase.phaseNumber}`,
-    title: phase.name,
-    price: `${parseFloat(phase.pricePerToken).toFixed(2)} cUSD`,
-    unit: '$CONFIO',
-    goal: phase.goalAmount >= 1000000 ? `$${phase.goalAmount / 1000000}M` : `$${phase.goalAmount / 1000}K`,
-    target: phase.targetAudience,
-    location: phase.locationEmoji,
-    status: phase.status || 'upcoming',
-    description: phase.description.split('.')[0], // Take first sentence
-    vision: phase.visionPoints || []
-  })) : [];
+  // Use server data — the contract is the authority; nothing is hardcoded
+  const curve = data?.presaleCurveStats;
+  const currentPrice = curve ? parseFloat(curve.currentPrice) : 0;
+  const startPrice = curve ? parseFloat(curve.startPrice) : 0;
+  const finalPrice = curve ? parseFloat(curve.finalPrice) : 0;
+  const totalRaised = curve ? parseFloat(curve.totalRaisedUsd) : 0;
+  const nextMilestone = curve ? parseFloat(curve.nextMilestoneUsd) : 0;
+  const participants = curve?.participants || 0;
+  const milestoneProgress = nextMilestone > 0 ? Math.min((totalRaised / nextMilestone) * 100, 100) : 0;
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'coming_soon': return colors.secondary;
-      case 'active': return colors.primary;
-      case 'upcoming': return colors.accent;
-      case 'completed': return colors.accent;
-      case 'paused': return colors.danger;
-      default: return colors.text.light;
-    }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'coming_soon': return 'Próximamente';
-      case 'active': return 'Activa';
-      case 'upcoming': return 'Siguiente';
-      case 'completed': return 'Completada';
-      case 'paused': return 'Pausada';
-      default: return 'Pendiente';
-    }
-  };
+  const countryCode = selectedCountry?.[2] || 'VE';
+  // Early on the curve moves in the 4th decimal — users must SEE it move.
+  const formatPrice = (value: number) =>
+    formatNumber(value, countryCode, value < 1
+      ? { minimumFractionDigits: 4, maximumFractionDigits: 4 }
+      : { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatMilestone = (value: number) =>
+    value >= 1000000 ? `$${formatNumber(value / 1000000, countryCode, { maximumFractionDigits: 1 })}M`
+      : `$${formatNumber(value / 1000, countryCode, { maximumFractionDigits: 0 })}K`;
 
   const checkEligibility = () => {
     const iso = selectedCountry?.[2];
@@ -183,13 +155,13 @@ export const ConfioPresaleScreen = () => {
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.secondary} />
-          <Text style={styles.loadingText}>Cargando fases de preventa...</Text>
+          <Text style={styles.loadingText}>Cargando preventa...</Text>
         </View>
       </View>
     );
   }
 
-  if (error || !data?.allPresalePhases || data.allPresalePhases.length === 0) {
+  if (error || !curve) {
     return (
       <View style={styles.container}>
         <Header
@@ -201,7 +173,7 @@ export const ConfioPresaleScreen = () => {
         />
         <View style={styles.errorContainer}>
           <Icon name="alert-circle" size={48} color={colors.secondary} />
-          <Text style={styles.errorText}>No se pudieron cargar las fases de preventa</Text>
+          <Text style={styles.errorText}>No se pudo cargar la preventa</Text>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.errorButton}>
             <Text style={styles.errorButtonText}>Volver</Text>
           </TouchableOpacity>
@@ -320,49 +292,55 @@ export const ConfioPresaleScreen = () => {
           )}
         </View>
 
-        {/* Presale Phases — hide once claims are unlocked */}
+        {/* Price curve — one continuous presale, hide once claims are unlocked */}
         {!isClaimsUnlocked && (
           <View style={styles.phasesSection}>
-            <Text style={styles.sectionTitle}>Fases de la Preventa</Text>
-            {presalePhases.map((phase: PresalePhaseCard, index: number) => (
-              <View key={index} style={styles.phaseCard}>
-                <View style={styles.phaseHeader}>
-                  <View style={styles.phaseInfo}>
-                    <Text style={styles.phaseNumber}>{phase.phase}</Text>
-                    <Text style={styles.phaseTitle}>{phase.title}</Text>
-                  </View>
-                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(phase.status) }]}>
-                    <Text style={styles.statusText}>{getStatusText(phase.status)}</Text>
-                  </View>
+            <Text style={styles.sectionTitle}>¿Cómo funciona el precio?</Text>
+            <View style={styles.curveCard}>
+              <Text style={styles.curvePriceLabel}>Precio actual</Text>
+              <Text style={styles.curvePriceValue}>{formatPrice(currentPrice)} cUSD</Text>
+              <Text style={styles.curvePriceUnit}>por $CONFIO</Text>
+
+              <Text style={styles.curveExplainer}>
+                El precio sube automáticamente con cada compra. Sin fases ni fechas:
+                el siguiente comprador siempre paga un poco más.
+              </Text>
+
+              <View style={styles.curveEndpoints}>
+                <View style={styles.curveEndpoint}>
+                  <Text style={styles.curveEndpointLabel}>Inicio</Text>
+                  <Text style={styles.curveEndpointValue}>{formatPrice(startPrice)}</Text>
                 </View>
-                <Text style={styles.phaseDescription}>{phase.description}</Text>
-                <View style={styles.phaseDetails}>
-                  <View style={styles.priceInfo}>
-                    <Text style={styles.priceLabel}>Precio</Text>
-                    <Text style={styles.priceValue}>{phase.price}</Text>
-                    <Text style={styles.priceUnit}>por {phase.unit}</Text>
-                  </View>
-                  <View style={styles.goalInfo}>
-                    <Text style={styles.goalLabel}>Meta</Text>
-                    <Text style={styles.goalValue}>{phase.goal}</Text>
-                  </View>
-                  <View style={styles.targetInfo}>
-                    <Text style={styles.targetLabel}>Objetivo</Text>
-                    <Text style={styles.targetValue}>{phase.target}</Text>
-                  </View>
-                </View>
-                <View style={styles.locationContainer}>
-                  <Text style={styles.locationText}>{phase.location}</Text>
-                </View>
-                <View style={styles.visionTags}>
-                  {phase.vision.map((item: string, idx: number) => (
-                    <View key={idx} style={styles.visionTag}>
-                      <Text style={styles.visionTagText}>{item}</Text>
-                    </View>
-                  ))}
+                <Icon name="trending-up" size={18} color={colors.secondary} />
+                <View style={styles.curveEndpoint}>
+                  <Text style={styles.curveEndpointLabel}>Máximo</Text>
+                  <Text style={styles.curveEndpointValue}>{formatPrice(finalPrice)}</Text>
                 </View>
               </View>
-            ))}
+
+              <View style={styles.milestoneBlock}>
+                <View style={styles.milestoneRow}>
+                  <Text style={styles.milestoneLabel}>Recaudado</Text>
+                  <Text style={styles.milestoneValue}>
+                    ${formatNumber(totalRaised, countryCode, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </Text>
+                </View>
+                <View style={styles.milestoneBar}>
+                  <View style={[styles.milestoneFill, { width: `${milestoneProgress}%` }]} />
+                </View>
+                <View style={styles.milestoneRow}>
+                  <Text style={styles.milestoneLabel}>Próximo hito</Text>
+                  <Text style={styles.milestoneValue}>{formatMilestone(nextMilestone)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.participantsRow}>
+                <Icon name="users" size={14} color={colors.secondary} />
+                <Text style={styles.participantsText}>
+                  {formatNumber(participants, countryCode, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} personas ya participaron
+                </Text>
+              </View>
+            </View>
           </View>
         )}
 
@@ -577,6 +555,105 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
+  },
+  curveCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    alignItems: 'center',
+  },
+  curvePriceLabel: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginBottom: 4,
+  },
+  curvePriceValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: colors.secondary,
+  },
+  curvePriceUnit: {
+    fontSize: 13,
+    color: colors.text.light,
+    marginBottom: 12,
+  },
+  curveExplainer: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  curveEndpoints: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    paddingHorizontal: 24,
+    marginBottom: 16,
+  },
+  curveEndpoint: {
+    alignItems: 'center',
+  },
+  curveEndpointLabel: {
+    fontSize: 12,
+    color: colors.text.light,
+    marginBottom: 2,
+  },
+  curveEndpointValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  milestoneBlock: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.neutral,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  milestoneRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  milestoneLabel: {
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  milestoneValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  milestoneBar: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+    marginVertical: 8,
+  },
+  milestoneFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: colors.secondary,
+  },
+  participantsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  participantsText: {
+    fontSize: 13,
+    color: colors.text.secondary,
   },
   phaseHeader: {
     flexDirection: 'row',

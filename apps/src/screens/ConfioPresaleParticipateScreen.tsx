@@ -9,7 +9,7 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
-import { GET_ACTIVE_PRESALE, GET_MY_BALANCES, GET_PRESALE_TELEGRAM_GROUP } from '../apollo/queries';
+import { GET_ACTIVE_PRESALE, GET_PRESALE_CURVE_STATS, GET_MY_BALANCES, GET_PRESALE_TELEGRAM_GROUP } from '../apollo/queries';
 import { TelegramGroupModal } from '../components/TelegramGroupModal';
 import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -41,6 +41,9 @@ export const ConfioPresaleParticipateScreen = () => {
   const { data, loading, error, refetch } = useQuery(GET_ACTIVE_PRESALE, {
     fetchPolicy: 'cache-and-network',
   });
+  const { data: curveData } = useQuery(GET_PRESALE_CURVE_STATS, {
+    fetchPolicy: 'cache-and-network',
+  });
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
   });
@@ -52,7 +55,13 @@ export const ConfioPresaleParticipateScreen = () => {
 
   // Get presale data from query
   const presale = data?.activePresalePhase;
-  const presalePrice = presale ? parseFloat(presale.pricePerToken) : 0.25;
+  const curve = curveData?.presaleCurveStats;
+  // Display price: the moving curve price; the phase price is the fallback
+  // for old servers. What the contract charges is the authority — this is
+  // never shown as a guaranteed rate.
+  const curvePrice = curve ? parseFloat(curve.currentPrice) : NaN;
+  const phasePrice = presale ? parseFloat(presale.pricePerToken) : 0.25;
+  const presalePrice = Number.isFinite(curvePrice) && curvePrice > 0 ? curvePrice : phasePrice;
   const uiMinPurchase = 10;
   const serverMin = presale ? parseFloat(presale.minPurchase) : uiMinPurchase;
   const minAmount = serverMin || uiMinPurchase;
@@ -62,14 +71,23 @@ export const ConfioPresaleParticipateScreen = () => {
     [balancesData?.myBalances?.cusd]
   );
 
+  // Recaudado-axis progress with absolute milestones (never a % of goal)
   const presaleData = {
-    raised: presale ? parseFloat(presale.totalRaised) : 0,
-    goal: presale ? parseFloat(presale.goalAmount) : 1000000,
-    participants: presale?.totalParticipants || 0,
+    raised: curve ? parseFloat(curve.totalRaisedUsd) : (presale ? parseFloat(presale.totalRaised) : 0),
+    nextMilestone: curve ? parseFloat(curve.nextMilestoneUsd) : 0,
+    participants: curve?.participants || presale?.totalParticipants || 0,
   };
-
-  const percentComplete = Math.min((presaleData.raised / presaleData.goal) * 100, 100);
-  const hasExceededGoal = presaleData.raised > presaleData.goal;
+  const milestoneProgress = presaleData.nextMilestone > 0
+    ? Math.min((presaleData.raised / presaleData.nextMilestone) * 100, 100)
+    : 0;
+  const formatMilestone = (value: number) =>
+    value >= 1000000 ? `$${formatWithLocale(value / 1000000, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}M`
+      : `$${formatWithLocale(value / 1000, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}K`;
+  // Early on the curve moves in the 4th decimal — users must SEE it move.
+  const formatPrice = (value: number) =>
+    formatWithLocale(value, value < 1
+      ? { minimumFractionDigits: 4, maximumFractionDigits: 4 }
+      : { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const calculateTokens = (cUsdAmount: number) => {
     return cUsdAmount / presalePrice;
@@ -354,13 +372,13 @@ export const ConfioPresaleParticipateScreen = () => {
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.heroTitle}>Preventa Fase {presale?.phaseNumber || 1}</Text>
+          <Text style={styles.heroTitle}>Preventa $CONFIO</Text>
           <Text style={styles.heroSubtitle}>
-            {presale?.name || 'Raíces Fuertes'} - {presale?.phaseNumber === 1 ? 'Donde todo comienza 🌱' : presale?.description || ''}
+            El precio sube automáticamente con cada compra 🌱
           </Text>
 
           <View style={styles.priceBadge}>
-            <Text style={styles.priceText}>{presalePrice.toFixed(2)} cUSD por $CONFIO</Text>
+            <Text style={styles.priceText}>Precio actual: {formatPrice(presalePrice)} cUSD por $CONFIO</Text>
           </View>
           </View>
         </View>
@@ -368,36 +386,20 @@ export const ConfioPresaleParticipateScreen = () => {
         {/* Current Status */}
         <View style={styles.statusSection}>
           <View style={styles.statusCard}>
-            <Text style={styles.statusTitle}>
-              {hasExceededGoal ? '¡Meta Superada! 🎉' : `¡Fase ${presale?.phaseNumber || 1} Activa!`}
-            </Text>
+            <Text style={styles.statusTitle}>¡Preventa Activa!</Text>
             <Text style={styles.statusDescription}>
-              {hasExceededGoal
-                ? `La comunidad ha superado todas las expectativas. La Fase ${presale?.phaseNumber || 1} continúa disponible por tiempo limitado.`
-                : `La Fase ${presale?.phaseNumber || 1} está activa. Puedes acceder temprano al ecosistema $CONFIO con cupos limitados mientras haya disponibilidad.`
-              }
+              Una sola preventa continua: cada compra sube el precio para el siguiente.
+              Cuanto antes participes, mejor precio obtienes.
             </Text>
             <View style={styles.progressContainer}>
-              <Text style={styles.progressLabel}>Recaudado en Fase {presale?.phaseNumber || 1}</Text>
-              <Text style={[styles.progressAmount, hasExceededGoal && styles.progressAmountExceeded]}>
+              <Text style={styles.progressLabel}>Recaudado</Text>
+              <Text style={styles.progressAmount}>
                 {formatWithLocale(presaleData.raised, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
               </Text>
 
-              {hasExceededGoal ? (
-                <View style={styles.exceededContainer}>
-                  <Text style={styles.progressGoal}>
-                    Meta original: {formatWithLocale(presaleData.goal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
-                  </Text>
-                  <View style={styles.exceededBadge}>
-                    <Icon name="trending-up" size={14} color={colors.white} />
-                    <Text style={styles.exceededText}>
-                      {Math.round(((presaleData.raised - presaleData.goal) / presaleData.goal) * 100)}% sobre la meta
-                    </Text>
-                  </View>
-                </View>
-              ) : (
+              {presaleData.nextMilestone > 0 && (
                 <Text style={styles.progressGoal}>
-                  Meta: {formatWithLocale(presaleData.goal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
+                  Próximo hito: {formatMilestone(presaleData.nextMilestone)}
                 </Text>
               )}
 
@@ -405,19 +407,18 @@ export const ConfioPresaleParticipateScreen = () => {
                 <View style={styles.progressBar}>
                   <View style={[
                     styles.progressFill,
-                    { width: `${percentComplete}%` },
-                    hasExceededGoal && styles.progressFillExceeded
+                    { width: `${milestoneProgress}%` },
                   ]} />
                 </View>
-                <Text style={[styles.progressPercentage, hasExceededGoal && styles.progressPercentageExceeded]}>
-                  {hasExceededGoal ? '¡Meta alcanzada!' : `${Math.round(percentComplete)}% completado`}
+                <Text style={styles.progressPercentage}>
+                  El siguiente comprador pagará más
                 </Text>
               </View>
 
               <View style={styles.participantStats}>
-                <Icon name="users" size={14} color={hasExceededGoal ? colors.secondary : colors.primary} />
+                <Icon name="users" size={14} color={colors.primary} />
                 <Text style={styles.participantText}>
-                  <Text style={[styles.participantCount, hasExceededGoal && styles.participantCountExceeded]}>
+                  <Text style={styles.participantCount}>
                     {formatWithLocale(presaleData.participants, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </Text> personas ya participaron
                 </Text>
@@ -452,14 +453,14 @@ export const ConfioPresaleParticipateScreen = () => {
             {parsedAmount > 0 && (
               <View style={styles.resultContainer}>
                 <View style={styles.resultRow}>
-                  <Text style={styles.resultLabel}>Recibirás:</Text>
+                  <Text style={styles.resultLabel}>Recibirás aprox.:</Text>
                   <Text style={styles.resultValue}>
                     {formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO
                   </Text>
                 </View>
                 <View style={styles.resultRow}>
-                  <Text style={styles.resultLabel}>Precio por moneda:</Text>
-                  <Text style={styles.resultValue}>{presalePrice.toFixed(2)} cUSD</Text>
+                  <Text style={styles.resultLabel}>Precio actual:</Text>
+                  <Text style={styles.resultValue}>{formatPrice(presalePrice)} cUSD</Text>
                 </View>
                 {!isValidAmount && (
                   <Text style={styles.errorText}>

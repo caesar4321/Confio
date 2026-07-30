@@ -68,6 +68,18 @@ class PresaleTelegramGroupType(graphene.ObjectType):
     url = graphene.String()
 
 
+class PresaleCurveStatsType(graphene.ObjectType):
+    """The continuous-curve presale story in one object: a moving price
+    between locked endpoints, recaudado-axis progress with absolute
+    milestones (never a % of the full sale), and social proof."""
+    current_price = graphene.Decimal()
+    start_price = graphene.Decimal()
+    final_price = graphene.Decimal()
+    total_raised_usd = graphene.Decimal()
+    next_milestone_usd = graphene.Decimal()
+    participants = graphene.Int()
+
+
 class PresaleQueries(graphene.ObjectType):
     """Queries for presale data"""
     
@@ -76,6 +88,10 @@ class PresaleQueries(graphene.ObjectType):
     confio_current_price = graphene.Decimal(
         description="Live CONFIO price from the BSC presale curve (cached ~60s); "
                     "falls back to the last phase price when the vault is unreachable"
+    )
+    presale_curve_stats = graphene.Field(
+        PresaleCurveStatsType,
+        description="Moving curve price + recaudado milestones for the presale screens"
     )
     active_presale_phase = graphene.Field(PresalePhaseType)
     all_presale_phases = graphene.List(PresalePhaseType)
@@ -100,6 +116,19 @@ class PresaleQueries(graphene.ObjectType):
         """Moving curve price for holdings valuation - no login required"""
         from .price_utils import get_confio_current_price
         return get_confio_current_price()
+
+    def resolve_presale_curve_stats(self, info):
+        """Curve stats for the presale screens - no login required"""
+        from .price_utils import get_presale_curve_stats
+        stats = get_presale_curve_stats()
+        return PresaleCurveStatsType(
+            current_price=stats['current_price'],
+            start_price=stats['start_price'],
+            final_price=stats['final_price'],
+            total_raised_usd=stats['total_raised_usd'],
+            next_milestone_usd=stats['next_milestone_usd'],
+            participants=stats['participants'],
+        )
 
     def resolve_is_presale_claims_unlocked(self, info):
         """Check if presale claims are globally unlocked - no login required for this check"""

@@ -65,6 +65,60 @@ def _cache_set(key, value, ttl):
         pass
 
 
+# Curve endpoints as locked in the vault's constructor (no setter exists on
+# chain; mirrored here for display only — the contract is the authority).
+CURVE_START_PRICE = Decimal('0.20')
+CURVE_FINAL_PRICE = Decimal('1.30')
+
+# Recaudado-axis milestones for user-facing progress. Deliberately absolute
+# amounts, never a % of the $61M full sale (a fraction-of-goal bar reads as
+# "stalled" early on and resurrects the phase-goal framing we removed).
+RAISE_MILESTONES_USD = [
+    250_000, 500_000, 1_000_000, 2_500_000, 5_000_000,
+    10_000_000, 25_000_000, 50_000_000, 61_000_000,
+]
+
+STATS_CACHE_KEY = 'presale:curve_stats'
+STATS_CACHE_TTL_SEC = 60
+
+
+def get_presale_curve_stats() -> dict:
+    """
+    One authoritative stats object for the presale screens.
+
+    totalRaised/participants come from the DB (every purchase on any chain
+    creates a PresalePurchase row — buys are sponsor-gated, so nothing can
+    reach the vault without passing through Django), which avoids
+    double-counting against the vault's on-chain totalRaised.
+    """
+    cached = _cache_get(STATS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    from django.db.models import Sum, Count
+    from presale.models import PresalePurchase
+
+    agg = PresalePurchase.objects.filter(status='completed').aggregate(
+        raised=Sum('cusd_amount'),
+        participants=Count('user', distinct=True),
+    )
+    raised = agg['raised'] or Decimal('0')
+    next_milestone = next(
+        (Decimal(m) for m in RAISE_MILESTONES_USD if Decimal(m) > raised),
+        Decimal(RAISE_MILESTONES_USD[-1]),
+    )
+    stats = {
+        'current_price': get_confio_current_price(),
+        'start_price': CURVE_START_PRICE,
+        'final_price': CURVE_FINAL_PRICE,
+        'total_raised_usd': raised,
+        'next_milestone_usd': next_milestone,
+        'participants': int(agg['participants'] or 0),
+    }
+    _cache_set(STATS_CACHE_KEY, stats, STATS_CACHE_TTL_SEC)
+    return stats
+
+
 def get_confio_current_price() -> Decimal:
     """Current CONFIO price in dollars (USDT/cUSD ≈ $1), cached."""
     cached = _cache_get(CACHE_KEY)
