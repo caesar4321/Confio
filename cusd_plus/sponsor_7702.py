@@ -12,7 +12,7 @@ Policy posture (sponsor-outflow rules): the sponsor only ever executes
 call batches this module has verified are (1) signed by the JWT account's
 registered BSC key, (2) composed solely of allowlisted vault-flow calls,
 and (3) survive an eth_call simulation. Rate limits, daily caps and a
-balance preflight mirror the dust rail's discipline (tasks.check_gas_dust).
+balance preflight bound the sponsor's spend.
 """
 import json
 import logging
@@ -36,6 +36,7 @@ def _sel(sig: str) -> str:
 
 
 SEL_APPROVE = _sel('approve(address,uint256)')                       # 095ea7b3
+SEL_TRANSFER = _sel('transfer(address,uint256)')                     # a9059cbb
 SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
 SEL_EXECUTE = _sel('execute((address,uint256,bytes)[],uint256,uint256,bytes)')
@@ -61,6 +62,7 @@ GAS_PER_AUTHORIZATION = 25_000  # PER_EMPTY_ACCOUNT_COST
 GAS_EXECUTE_OVERHEAD = 30_000
 GAS_PER_SELECTOR = {
     SEL_APPROVE: 50_000,
+    SEL_TRANSFER: 80_000,  # plain ERC-20 transfer (~35-52k) + headroom
     SEL_SUBSCRIBE_AND_MINT: 620_000,
     SEL_REDEEM_TO_USDT: 400_000,
 }
@@ -259,11 +261,23 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
         selector = data_hex[:8]
 
         if c['to'] == USDT_BSC:
-            # USDT: ONLY approve, ONLY with the vault as spender.
-            if selector != SEL_APPROVE or len(data_hex) != 8 + 128:
+            if selector == SEL_APPROVE:
+                # approve: ONLY with the vault as spender.
+                if len(data_hex) != 8 + 128:
+                    raise PolicyError('bad_calldata')
+                if _word(data_hex, 0)[-40:] != vault[2:]:
+                    raise PolicyError('approve_spender_not_allowed')
+            elif selector == SEL_TRANSFER:
+                # transfer: the sponsored USDT send (2026-07-30) — the EXIT
+                # for raw wallet USDT, so the recipient is deliberately
+                # unrestricted (exits are never gated) and no eligibility
+                # applies. Cost is bounded by the rail's own rate limits and
+                # daily cap; unlike gas dust, sponsored gas can't be
+                # extracted — it's consumed by the transfer itself.
+                if len(data_hex) != 8 + 128:
+                    raise PolicyError('bad_calldata')
+            else:
                 raise PolicyError('selector_not_allowed')
-            if _word(data_hex, 0)[-40:] != vault[2:]:
-                raise PolicyError('approve_spender_not_allowed')
         elif c['to'] == vault:
             if selector == SEL_SUBSCRIBE_AND_MINT:
                 if len(data_hex) != 8 + 192:
@@ -372,8 +386,8 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
             's': authorization['s'],
         })
 
-    # The dust rail (check_gas_dust) shares this sponsor account: serialize
-    # nonce-fetch → broadcast so concurrent sends can't collide on a nonce.
+    # Other sponsor-signed flows share this account: serialize nonce-fetch →
+    # broadcast so concurrent sends can't collide on a nonce.
     got_lock = False
     for _ in range(30):
         if cache.add('bsc_sponsor_nonce_lock', 1, 15):

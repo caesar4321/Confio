@@ -630,11 +630,11 @@ def guardarian_transaction_proxy(request):
         and to_currency_clean == 'USDT'
         and _to_net_early in ('BSC', 'BEP20', 'BEP-20', 'BNB', 'BSC_BNB')
     )
-    if is_savings_rail:
-        # Geo-eligibility (Ondo): savings entries blocked in restricted regions.
-        from cusd_plus.eligibility import is_ondo_eligible, INELIGIBLE_MESSAGE
-        if not is_ondo_eligible(user):
-            return JsonResponse({'error': INELIGIBLE_MESSAGE}, status=403)
+    # Geo-eligibility moved to the MINT (cusd_plus mint gate, 2026-07-30):
+    # everyone may receive USDT-BSC — ineligible users keep it raw ("Confío
+    # Dollar"); the vault mint is refused server-side. The missing-address
+    # refusal below stays: without a registered bsc_address there is nowhere
+    # to deliver.
     if not is_sell_transaction:
         try:
             account_type = payload.get('account_type', 'personal')

@@ -49,3 +49,36 @@ def is_ondo_eligible(user) -> bool:
     if not country:
         return False
     return country not in ONDO_BLOCKED
+
+
+def check_savings_mint_eligibility(user, request_meta) -> bool:
+    """The MINT-side geo stack (2026-07-30): phone country AND IP country.
+
+    Since the phase-out, ramp deposits deliver raw USDT-BSC to everyone and
+    THIS check is where geo-eligibility is actually enforced — on the vault
+    subscribeAndMint relayed through SubmitBscTransaction / SponsorBscBatch.
+    Ineligible users simply keep raw USDT ("Confío Dollar" in the app).
+
+    Posture mirrors the presale geo stack (presale/geo_utils.py): the phone
+    country fails CLOSED (is_ondo_eligible), the IP country fails OPEN when
+    unresolvable — Cloudflare fronts prod so CF-IPCountry dominates, and an
+    unresolvable IP shouldn't strand an attested-eligible user's mint.
+
+    Gates the MINT only. Exits (redeemToUsdt, raw USDT transfers, off-ramps)
+    are NEVER gated on this.
+    """
+    if not is_ondo_eligible(user):
+        return False
+    try:
+        # Import-only reuse: geo_utils is presale-owned (shared home is a
+        # flagged follow-up); a resolver crash counts as unresolvable.
+        from presale.geo_utils import get_country_for_ip
+        from security.request_utils import extract_client_ip_from_meta
+        meta = request_meta or {}
+        ip_country = get_country_for_ip(
+            extract_client_ip_from_meta(meta),
+            meta.get('HTTP_CF_IPCOUNTRY'),
+        )
+    except Exception:  # noqa: BLE001 — unresolvable IP fails open
+        return True
+    return ip_country is None or ip_country not in ONDO_BLOCKED

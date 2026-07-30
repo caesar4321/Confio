@@ -186,7 +186,6 @@ def monitor_bridge_arrivals():
                 'conversion %s: USDT arrived on BNB (%s)',
                 conv.internal_id, log['transactionHash'],
             )
-            check_gas_dust.delay(str(conv.internal_id))
             # TODO(cusd+): websocket event + push nudge if the app is closed.
         elif (
             conv.status == 'SRC_COMMITTED'
@@ -226,8 +225,8 @@ def _registered_bsc_addresses() -> dict:
 def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, source, now):
     """A chain-observed USDT inflow becomes a conversion row born at
     DEST_ARRIVED: the funds are already at the user's address, so only leg C
-    (mint) remains — the existing foreground resume and gas dusting finish
-    it with zero client changes. amount_usd is the EXACT floored arrival:
+    (mint) remains — the existing foreground resume (sponsored 7702 batch)
+    finishes it with zero client changes. amount_usd is the EXACT floored arrival:
     the client mints exactly this, so recording more than arrived would
     revert the mint.
 
@@ -268,20 +267,31 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
         'inbound USDT deposit %s (%s): %s USDT at %s (%s)',
         conv.internal_id, source, amount_usd, to_addr, tx_hash,
     )
-    check_gas_dust.delay(str(conv.internal_id))
 
     if source == 'ramp':
         return  # order comms belong to the ramp flow (koywe_sync)
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType
+        # Copy branches on eligibility: an ineligible user's deposit stays raw
+        # USDT ("Confío Dollar" in the app) — promising "se sumará a tu
+        # ahorro" would be a lie, since the mint gate will refuse it. The row
+        # itself stays DEST_ARRIVED regardless (audit trail + auto-mint if
+        # eligibility ever flips). Product name only; USDT stays in the
+        # data payload, never in the message.
+        from .eligibility import is_ondo_eligible
+        eligible = (not is_business) and is_ondo_eligible(account.user)
+        if eligible:
+            message = f'Recibiste ${amount_usd:.2f} (USDT). Se sumará automáticamente a tu ahorro.'
+        else:
+            message = f'Recibiste ${amount_usd:.2f}. Ya está disponible en tu Confío Dollar.'
         notif_utils.create_notification(
             user=account.user,
             account=account,
             business=account.business if is_business else None,
             notification_type=NotifType.SEND_FROM_EXTERNAL,
             title='Depósito recibido',
-            message=f'Recibiste ${amount_usd:.2f} (USDT). Se sumará automáticamente a tu ahorro.',
+            message=message,
             data={
                 'transaction_type': 'deposit',
                 'currency': 'USDT',
@@ -289,7 +299,7 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
                 'amount': str(amount_usd),
                 'tx_hash': tx_hash,
                 'conversion_id': str(conv.internal_id),
-                'pending_auto_mint': True,
+                'pending_auto_mint': eligible,
             },
             related_object_type='CusdPlusConversion',
             related_object_id=str(conv.internal_id),
@@ -335,111 +345,25 @@ def allbridge_diagnose(conversion_internal_id: str) -> dict:
     return {'status_code': res.status_code, 'body': res.json() if res.ok else res.text}
 
 
-def _gas_dust_target_wei() -> int:
-    """BNB a user address needs for its next leg (approve + subscribeAndMint).
+def _bnb_gas_reserve_wei() -> int:
+    """BNB the auto-convert leaves at a user address for a SELF-SIGNED leg
+    when 7702 sponsorship is off (legacy fallback; the user funds their own
+    gas — Confío never sends BNB to user addresses. The dust rail was
+    removed 2026-07-30: every savings/transfer leg rides sponsored batches).
 
-    Sized to ONE action, not a batch: the 21k dust-tx overhead is ~$0.001,
-    so re-dusting on demand beats parking idle BNB in the user's wallet.
     Gas-price aware with a spike buffer so a rising market still clears the
-    action; capped so a gas spike can never over-drain the sponsor.
+    action; capped so a gas spike can't demand an absurd reserve.
     """
     action_gas = int(getattr(settings, 'CUSD_PLUS_GAS_ACTION_BUDGET', 700_000))  # ~645k measured + margin
-    spike_mult = int(getattr(settings, 'CUSD_PLUS_GAS_DUST_SPIKE_MULT', 3))
+    spike_mult = int(getattr(settings, 'CUSD_PLUS_GAS_RESERVE_SPIKE_MULT', 3))
     try:
         gas_price = int(_rpc('eth_gasPrice', []), 16)
     except Exception:  # noqa: BLE001
         gas_price = 1_000_000_000  # 1 gwei fallback
     gas_price = max(gas_price, int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))  # ≥0.1 gwei
     target = action_gas * gas_price * spike_mult
-    cap = int(getattr(settings, 'CUSD_PLUS_GAS_DUST_MAX_WEI', 5_000_000_000_000_000))  # 0.005 BNB hard cap
+    cap = int(getattr(settings, 'CUSD_PLUS_GAS_RESERVE_MAX_WEI', 5_000_000_000_000_000))  # 0.005 BNB hard cap
     return min(target, cap)
-
-
-@shared_task(name='cusd_plus.check_gas_dust')
-def check_gas_dust(conversion_internal_id: str):
-    """Top up user.bsc with just enough BNB for its next leg (approve +
-    subscribeAndMint). Sponsorship, not custody — BSC has no protocol-level
-    fee delegation (unlike Algorand group fee pooling), so the fee must sit
-    at the signer's own address; we pre-fund the shortfall and no more. The
-    BNB lands at the USER's address and the user signs their own tx.
-
-    Trigger point (DEST_ARRIVED) already means a verified conversion is
-    imminent, so this can't be farmed for free BNB. Gated off by default so
-    it ships dark until the savings rail is live.
-    """
-    from django.core.cache import cache
-    from .models import CusdPlusConversion
-
-    try:
-        conv = CusdPlusConversion.objects.get(internal_id=conversion_internal_id)
-    except CusdPlusConversion.DoesNotExist:
-        return
-    if not conv.user_bsc_address:
-        return
-
-    try:
-        balance_wei = int(_rpc('eth_getBalance', [conv.user_bsc_address, 'latest']), 16)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('gas dust balance check failed for %s: %s', conv.internal_id, exc)
-        return
-
-    # 7702 sponsorship supersedes dusting: sponsored type-4 batches mean the
-    # user address needs NO BNB. Checked BEFORE the dust gate so ops can keep
-    # CUSD_PLUS_GAS_DUST_ENABLED armed as a one-flag-flip fallback.
-    if getattr(settings, 'CUSD_PLUS_7702_ENABLED', False):
-        logger.info('gas dust skipped for %s: 7702 sponsorship active', conv.internal_id)
-        return
-
-    needed_wei = _gas_dust_target_wei()
-    if balance_wei >= needed_wei:
-        return  # already funded — most repeat users skip dusting entirely
-    shortfall = needed_wei - balance_wei
-
-    if not getattr(settings, 'CUSD_PLUS_GAS_DUST_ENABLED', False):
-        logger.info('gas dust needed for %s (%s wei short) but sender disabled',
-                    conv.internal_id, shortfall)
-        return
-
-    # Rate limit per address: one dust per few minutes defeats spray attacks.
-    rl_key = f'cusd_plus_gasdust_{conv.user_bsc_address.lower()}'
-    if cache.get(rl_key):
-        logger.info('gas dust rate-limited for %s', conv.user_bsc_address)
-        return
-
-    # Daily cap per address: external deposits let anyone mint a dust
-    # trigger by sending themselves $1 USDT, so cycling (receive dust, move
-    # the BNB out, deposit again) must stop paying after a few rounds.
-    # Legit users are unaffected — BNB stays put, so repeat actions skip
-    # dusting entirely; a capped row just waits for the next day's resume.
-    day_key = f'cusd_plus_gasdust_day_{conv.user_bsc_address.lower()}'
-    day_count = cache.get(day_key, 0)
-    if day_count >= int(getattr(settings, 'CUSD_PLUS_GAS_DUST_MAX_PER_DAY', 5)):
-        logger.warning('gas dust daily cap hit for %s (%s)', conv.user_bsc_address, conv.internal_id)
-        return
-
-    try:
-        from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
-        signer = get_bsc_sponsor_signer_from_settings()
-        sender = signer.address
-        nonce = int(_rpc('eth_getTransactionCount', [sender, 'pending']), 16)
-        gas_price = max(int(_rpc('eth_gasPrice', []), 16),
-                        int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
-        sponsor_balance = int(_rpc('eth_getBalance', [sender, 'latest']), 16)
-        if sponsor_balance < shortfall + 21_000 * gas_price:
-            logger.error('sponsor BNB too low for gas dust (have %s, need %s) — refill needed',
-                         sponsor_balance, shortfall)
-            return
-        raw, txh = signer.sign_transaction({
-            'chainId': settings.BSC_CHAIN_ID, 'nonce': nonce, 'gasPrice': gas_price,
-            'gas': 21000, 'to': conv.user_bsc_address, 'value': shortfall, 'data': b'',
-        })
-        sent = _rpc('eth_sendRawTransaction', [raw])
-        cache.set(rl_key, 1, 180)  # 3-min cooldown per address
-        cache.set(day_key, day_count + 1, 24 * 3600)
-        logger.info('gas dust sent %s wei to %s for %s: %s',
-                    shortfall, conv.user_bsc_address, conv.internal_id, sent)
-    except Exception as exc:  # noqa: BLE001 — dusting must never crash the scanner
-        logger.exception('gas dust send failed for %s: %s', conv.internal_id, exc)
 
 
 @shared_task(name='cusd_plus.check_sponsored_batch_receipt', bind=True, max_retries=10)

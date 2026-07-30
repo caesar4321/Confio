@@ -852,21 +852,6 @@ class UpsertRampUserAddress(graphene.Mutation):
         return cls(success=True, error=None, ramp_address=ramp_address)
 
 
-def _get_bsc_usdt_balance(address: str) -> Decimal:
-    """USDT (18 decimals) balance at a BSC address via eth_call balanceOf."""
-    import requests as _requests
-    rpc = getattr(settings, 'CUSD_PLUS_BSC_RPC_URL', 'https://bsc-dataseed.bnbchain.org')
-    usdt = getattr(settings, 'CUSD_PLUS_USDT_BSC', '0x55d398326f99059fF775485246999027B3197955')
-    data = '0x70a08231' + address.lower().replace('0x', '').rjust(64, '0')
-    res = _requests.post(rpc, json={
-        'jsonrpc': '2.0', 'id': 1, 'method': 'eth_call',
-        'params': [{'to': usdt, 'data': data}, 'latest'],
-    }, timeout=15)
-    res.raise_for_status()
-    result = res.json().get('result') or '0x0'
-    return Decimal(int(result, 16)) / Decimal(10 ** 18)
-
-
 class CreateRampOrder(graphene.Mutation):
     class Arguments:
         direction = graphene.String(required=True)
@@ -908,12 +893,10 @@ class CreateRampOrder(graphene.Mutation):
         if destination not in ('cusd', 'cusd_plus'):
             return RampOrderType(success=False, error='destination must be cusd or cusd_plus')
         savings_rail = destination == 'cusd_plus'
-        if savings_rail and normalized_direction == 'ON_RAMP':
-            # Geo-eligibility (Ondo): savings ENTRIES are blocked in
-            # restricted regions; exits (OFF_RAMP) are never gated.
-            from cusd_plus.eligibility import is_ondo_eligible, INELIGIBLE_MESSAGE
-            if not is_ondo_eligible(user):
-                return RampOrderType(success=False, error=INELIGIBLE_MESSAGE)
+        # Geo-eligibility moved to the MINT (cusd_plus mint gate, 2026-07-30):
+        # everyone may receive USDT-BSC — ineligible users simply keep it raw
+        # ("Confío Dollar"), the vault mint is refused server-side. Exits
+        # (OFF_RAMP) were never gated and still aren't.
         if savings_rail and not getattr(current_account, 'bsc_address', None):
             return RampOrderType(
                 success=False,
@@ -951,7 +934,13 @@ class CreateRampOrder(graphene.Mutation):
         try:
             if normalized_direction == 'OFF_RAMP':
                 if savings_rail:
-                    available_usdt = _get_bsc_usdt_balance(current_account.bsc_address)
+                    from cusd_plus import vault as cusd_plus_vault
+                    # fresh=True: sufficiency must not pass/fail on a 30s-stale
+                    # figure; RPC failure raises into the outer error handler.
+                    available_usdt = (
+                        Decimal(cusd_plus_vault.usdt_balance_raw(current_account.bsc_address, fresh=True))
+                        / Decimal(10 ** 18)
+                    )
                     if available_usdt < decimal_amount:
                         return RampOrderType(
                             success=False,

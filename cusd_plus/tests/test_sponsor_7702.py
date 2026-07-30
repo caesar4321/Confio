@@ -92,9 +92,21 @@ class PolicyTests(SimpleTestCase):
     def test_unknown_destination_rejected(self):
         self._assert_rejected([_call('0x' + 'ab' * 20, _approve_data())], 'destination_not_allowed')
 
-    def test_usdt_non_approve_rejected(self):
-        transfer = '0x' + 'a9059cbb' + _word(USER) + _word(1)
-        self._assert_rejected([_call(USDT, transfer)], 'selector_not_allowed')
+    def test_usdt_transfer_allowed_any_recipient(self):
+        # Policy change 2026-07-30: sponsored USDT transfer IS allowed — the
+        # raw-USDT exit. Recipient deliberately unrestricted (exits are never
+        # gated), so even a foreign recipient passes.
+        transfer = '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + 'cd' * 20) + _word(1)
+        with override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT):
+            sponsor_7702.validate_policy([_call(USDT, transfer)], mock.Mock(), USER)
+
+    def test_usdt_transfer_bad_length_rejected(self):
+        short = '0x' + sponsor_7702.SEL_TRANSFER + _word(1)
+        self._assert_rejected([_call(USDT, short)], 'bad_calldata')
+
+    def test_usdt_other_selector_rejected(self):
+        transfer_from = '0x' + '23b872dd' + _word(USER) + _word(USER) + _word(1)
+        self._assert_rejected([_call(USDT, transfer_from)], 'selector_not_allowed')
 
     def test_approve_foreign_spender_rejected(self):
         self._assert_rejected(
@@ -417,23 +429,6 @@ class SponsorBscBatchTests(SimpleTestCase):
         self.assertTrue(res.success, res.error)
         self.assertEqual(HexBytes(sent[0])[0], 2)  # type-2 envelope
         self.assertEqual(ledger.create.call_args.kwargs['kind'], 'redeem')
-
-
-class DustShortCircuitTests(SimpleTestCase):
-    """check_gas_dust must stand down while 7702 sponsorship is on."""
-
-    @override_settings(CUSD_PLUS_7702_ENABLED=True, CUSD_PLUS_GAS_DUST_ENABLED=True)
-    def test_no_dust_while_7702_active(self):
-        from cusd_plus import tasks
-        conv = mock.Mock(user_bsc_address=USER, internal_id='x')
-        with mock.patch('cusd_plus.models.CusdPlusConversion.objects') as objs, \
-             mock.patch.object(tasks, '_rpc', return_value='0x0') as rpc, \
-             mock.patch('blockchain.evm_kms_signer.get_bsc_sponsor_signer_from_settings') as signer:
-            objs.get.return_value = conv
-            tasks.check_gas_dust('x')
-        signer.assert_not_called()
-        # only the balance probe ran — no nonce/gasPrice/broadcast calls
-        self.assertEqual(rpc.call_count, 1)
 
 
 class ReceiptCheckerTests(SimpleTestCase):

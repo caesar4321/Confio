@@ -191,10 +191,13 @@ POSITION_LAST_TTL = 7 * 24 * 3600
 
 
 def invalidate_position(user_bsc_address: str) -> None:
-    """Drop the fresh-read cache so the next summary re-reads the chain
-    (called when a conversion leg lands and the balance just changed)."""
+    """Drop the fresh-read caches so the next summary re-reads the chain
+    (called when a conversion leg lands and the balances just changed —
+    a mint moves BOTH the vault position and the wallet USDT)."""
     if user_bsc_address:
-        cache.delete(f'cusd_plus_pos:{user_bsc_address.lower()}')
+        key = user_bsc_address.lower()
+        cache.delete(f'cusd_plus_pos:{key}')
+        cache.delete(f'cusd_plus_usdt:{key}')
 
 
 def position_usd(user_bsc_address: str) -> float:
@@ -221,6 +224,45 @@ def position_usd(user_bsc_address: str) -> float:
     cache.set(f'cusd_plus_pos:{key}', value, POSITION_TTL)
     cache.set(f'cusd_plus_pos_last:{key}', value, POSITION_LAST_TTL)
     return value
+
+
+def usdt_address() -> str:
+    """Binance-Peg BSC-USD (18 decimals) — the ramp delivery + exit asset."""
+    return getattr(
+        settings, 'CUSD_PLUS_USDT_BSC',
+        '0x55d398326f99059fF775485246999027B3197955',
+    )
+
+
+def usdt_balance_raw(user_bsc_address: str, fresh: bool = False) -> int:
+    """Wei of raw wallet USDT (pre-mint, or held as "Confío Dollar" by
+    geo-ineligible users). Cached POSITION_TTL like position_usd, with a
+    last-known fallback — a flaky node degrades to slightly stale, never to
+    a false 0 (which would make just-landed money vanish from the screen).
+    fresh=True bypasses the cache for exactness-sensitive callers (off-ramp
+    sufficiency); it raises on RPC failure instead of falling back."""
+    if not user_bsc_address:
+        return 0
+    key = user_bsc_address.lower()
+    if fresh:
+        return erc20_balance_raw(usdt_address(), key)
+    cached = cache.get(f'cusd_plus_usdt:{key}')
+    if cached is not None:
+        return cached
+    try:
+        raw = erc20_balance_raw(usdt_address(), key)
+    except Exception:  # noqa: BLE001 — read failure must not break the screen
+        logger.warning('USDT balance read failed for %s', user_bsc_address, exc_info=True)
+        last = cache.get(f'cusd_plus_usdt_last:{key}')
+        return last if last is not None else 0
+    cache.set(f'cusd_plus_usdt:{key}', raw, POSITION_TTL)
+    cache.set(f'cusd_plus_usdt_last:{key}', raw, POSITION_LAST_TTL)
+    return raw
+
+
+def usdt_balance_usd(user_bsc_address: str) -> float:
+    """USD value of raw wallet USDT, display-grade (cached read)."""
+    return usdt_balance_raw(user_bsc_address) / (10 ** 18)
 
 
 def health() -> dict:

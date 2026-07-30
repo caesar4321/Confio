@@ -33,6 +33,9 @@ class CusdPlusSummaryType(graphene.ObjectType):
     earned_month_usd = graphene.Float()
     savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo) by phone country; gates ENTRY only — exits are never gated")
     stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
+    cusd_deposits_paused = graphene.Boolean(description="cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)")
+    usdt_balance_usd = graphene.Float(description="Raw wallet USDT-BSC (pre-mint, or held as 'Confío Dollar' by geo-ineligible users) — display-grade, cached")
+    usdt_balance_wei = graphene.String(description="Same balance in exact wei (string; 18dp) for MAX-send and mint math")
 
 
 class CusdPlusMovementType(graphene.ObjectType):
@@ -318,6 +321,11 @@ class Query(graphene.ObjectType):
         # first mint; the ledger for earned_today/month lands with leg C).
         bsc_address = _active_bsc_address(info)
         balance_usd = vault.position_usd(bsc_address) if bsc_address else 0.0
+        # Raw wallet USDT: money that landed but hasn't minted (or never will,
+        # for geo-ineligible users — their "Confío Dollar"). One cached read
+        # serves both fields; the client re-reads balanceOf live before any
+        # exact-amount send, so 30s staleness here is display-only.
+        usdt_wei_int = vault.usdt_balance_raw(bsc_address) if bsc_address else 0
         # SERVER-DERIVED live: the oracle's on-chain daily rate compounded
         # over a year (gross) and at the vault's kept share (net) — floats
         # with US Treasuries, never hardcoded. Falls back to last-known,
@@ -332,6 +340,9 @@ class Query(graphene.ObjectType):
             savings_enabled=eligible,
             # Dark until the demand signal (decision 2dcfada5) AND geo-eligible.
             stocks_enabled=eligible and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False),
+            cusd_deposits_paused=getattr(settings, 'CUSD_DEPOSITS_PAUSED', True),
+            usdt_balance_usd=usdt_wei_int / (10 ** 18),
+            usdt_balance_wei=str(usdt_wei_int),
         )
 
     def resolve_cusd_plus_movements(self, info, limit=20, offset=0):
@@ -362,10 +373,11 @@ class Query(graphene.ObjectType):
         if not user or not user.is_authenticated:
             return None
         from django.conf import settings
-        # Live dust target (gas-price aware, RPC-failure safe internally):
-        # the auto-convert leaves this much BNB behind so the user's next
-        # savings leg doesn't immediately need re-dusting.
-        from .tasks import _gas_dust_target_wei as _live_gas_dust_target_wei
+        # Live gas reserve (gas-price aware, RPC-failure safe internally):
+        # when 7702 is off, the auto-convert leaves this much BNB behind so
+        # the user's next SELF-SIGNED leg has gas (user-funded; the dust
+        # rail was removed 2026-07-30).
+        from .tasks import _bnb_gas_reserve_wei as _live_gas_reserve_wei
         # paused=True until the conversion rails ship — the client treats the
         # kill switch as authoritative, so no build can convert prematurely.
         return CusdPlusConvertParamsType(
@@ -387,7 +399,7 @@ class Query(graphene.ObjectType):
             # the auto-convert can sweep everything.
             bnb_auto_convert_keep_wei=(
                 '0' if getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
-                else str(_live_gas_dust_target_wei())),
+                else str(_live_gas_reserve_wei())),
             bnb_auto_convert_slippage_bps=getattr(
                 settings, 'CUSD_PLUS_BNB_AUTOCONVERT_SLIPPAGE_BPS', 100),
             sponsored_7702_enabled=getattr(settings, 'CUSD_PLUS_7702_ENABLED', False),
@@ -604,6 +616,7 @@ class BscRpcResult(graphene.ObjectType):
 # lookup and the redeem-recipient rule for BOTH rails (parity is structural,
 # not copied). Kept importable under the old name for existing tests.
 from .sponsor_7702 import (  # noqa: E402
+    SEL_SUBSCRIBE_AND_MINT as _SEL_SUBSCRIBE_AND_MINT,
     _guardarian_savings_deposit_address,
     redeem_recipient_allowed as _redeem_recipient_allowed,
 )
@@ -695,6 +708,14 @@ class SubmitBscTransaction(graphene.Mutation):
                         recipient, user.id, signer,
                     )
                     return SubmitBscTransaction(success=False, error='redeem_recipient_not_allowed')
+            # Mint geo-gate (2026-07-30): since ramps deliver raw USDT to
+            # everyone, THIS is where geo-eligibility is enforced — phone
+            # country + Cloudflare IP country. Mint only; redeem above and
+            # raw USDT transfers stay ungated (exits are never gated).
+            if data_hex.startswith(_SEL_SUBSCRIBE_AND_MINT):
+                from .eligibility import check_savings_mint_eligibility
+                if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
+                    return SubmitBscTransaction(success=False, error='mint_not_available')
 
         from .tasks import _rpc
         try:
@@ -712,6 +733,17 @@ class SubmitBscTransaction(graphene.Mutation):
                     )
                 except Exception:  # noqa: BLE001 — ledger write must not fail the relay
                     logger.exception('BnbAutoConvert ledger write failed for %s', tx_hash)
+            # Balance caches (vault position + wallet USDT) just changed for
+            # vault/USDT-touching relays — drop the fresh-read keys so the
+            # next summary re-reads the chain instead of showing a 30s-stale
+            # figure right after a send.
+            try:
+                from . import vault as _vault
+                _addr = _active_bsc_address(info)
+                if _addr:
+                    _vault.invalidate_position(_addr)
+            except Exception:  # noqa: BLE001 — cache hygiene must not fail the relay
+                pass
             return SubmitBscTransaction(success=True, tx_hash=tx_hash)
         except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
             return SubmitBscTransaction(success=False, error=str(exc)[:200])
@@ -807,6 +839,21 @@ class SponsorBscBatch(graphene.Mutation):
         now = int(_time.time())
         if not (now + 60 <= deadline_i <= now + 1800):
             return SponsorBscBatch(success=False, error='bad_deadline')
+
+        # Mint geo-gate (2026-07-30): ramps deliver raw USDT to everyone, so
+        # geo-eligibility (phone + Cloudflare IP country) is enforced HERE on
+        # any batch carrying a vault subscribeAndMint. Lives outside
+        # validate_policy on purpose — the policy is a pure calldata check
+        # (tests call it directly) and has no request context. Redeems and
+        # approvals pass untouched: exits are never gated.
+        vault_l = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+        if any(
+            c['to'] == vault_l and c['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
+            for c in norm_calls
+        ):
+            from .eligibility import check_savings_mint_eligibility
+            if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
+                return SponsorBscBatch(success=False, error='mint_not_available')
 
         chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
         try:
