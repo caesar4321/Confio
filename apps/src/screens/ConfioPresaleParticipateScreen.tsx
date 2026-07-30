@@ -29,6 +29,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
   const [amount, setAmount] = useState('');
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
+  const [hasAttestedNotUs, setHasAttestedNotUs] = useState(false);
   const [showTelegramModal, setShowTelegramModal] = useState(false);
 
   // Use the app's selected country for formatting
@@ -78,7 +79,7 @@ export const ConfioPresaleParticipateScreen = () => {
   const tokensReceived = calculateTokens(parsedAmount);
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
   const exceedsBalance = !balancesLoading && parsedAmount > availableCusd;
-  const canSubmit = isValidAmount && parsedAmount > 0 && !exceedsBalance && hasAcceptedTerms && !busy;
+  const canSubmit = isValidAmount && parsedAmount > 0 && !exceedsBalance && hasAcceptedTerms && hasAttestedNotUs && !busy;
 
   // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
   // Throws an error if the server returns an error message (e.g., backup check failure)
@@ -260,6 +261,10 @@ export const ConfioPresaleParticipateScreen = () => {
     }
     if (!hasAcceptedTerms) {
       Alert.alert('Confirmación requerida', 'Debes aceptar los Términos de la preventa antes de continuar.');
+      return;
+    }
+    if (!hasAttestedNotUs) {
+      Alert.alert('Confirmación requerida', 'Debes confirmar que no vives en Estados Unidos antes de continuar.');
       return;
     }
 
@@ -498,6 +503,21 @@ export const ConfioPresaleParticipateScreen = () => {
                   Términos de Servicio
                 </Text>
                 {' '}y entiendo que no hay garantía de valor ni de liquidez.
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              activeOpacity={0.85}
+              onPress={() => setHasAttestedNotUs(current => !current)}
+            >
+              <Icon
+                name={hasAttestedNotUs ? 'check-square' : 'square'}
+                size={20}
+                color={hasAttestedNotUs ? colors.primary : colors.text.light}
+              />
+              <Text style={styles.checkboxText}>
+                Confirmo que no vivo en Estados Unidos.
               </Text>
             </TouchableOpacity>
           </View>

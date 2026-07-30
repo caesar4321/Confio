@@ -3931,6 +3931,7 @@ export const GET_PRESALE_STATUS = gql`
   query GetPresaleStatus {
     isPresaleActive
     isPresaleClaimsUnlocked
+    confioCurrentPrice
   }
 `;
 
