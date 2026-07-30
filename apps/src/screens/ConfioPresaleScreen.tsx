@@ -56,9 +56,13 @@ export const ConfioPresaleScreen = () => {
     formatNumber(value, countryCode, value < 1
       ? { minimumFractionDigits: 4, maximumFractionDigits: 4 }
       : { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const formatMilestone = (value: number) =>
-    value >= 1000000 ? `$${formatNumber(value / 1000000, countryCode, { maximumFractionDigits: 1 })}M`
-      : `$${formatNumber(value / 1000, countryCode, { maximumFractionDigits: 0 })}K`;
+  const formatMilestone = (value: number) => {
+    if (value >= 1000000) {
+      const millions = value / 1000000;
+      return `$${formatNumber(millions, countryCode, { maximumFractionDigits: 1 })} ${millions === 1 ? 'millón' : 'millones'}`;
+    }
+    return `$${formatNumber(value / 1000, countryCode, { maximumFractionDigits: 0 })} mil`;
+  };
 
   const checkEligibility = () => {
     const iso = selectedCountry?.[2];

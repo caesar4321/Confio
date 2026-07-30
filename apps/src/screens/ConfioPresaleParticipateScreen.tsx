@@ -80,9 +80,13 @@ export const ConfioPresaleParticipateScreen = () => {
   const milestoneProgress = presaleData.nextMilestone > 0
     ? Math.min((presaleData.raised / presaleData.nextMilestone) * 100, 100)
     : 0;
-  const formatMilestone = (value: number) =>
-    value >= 1000000 ? `$${formatWithLocale(value / 1000000, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}M`
-      : `$${formatWithLocale(value / 1000, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}K`;
+  const formatMilestone = (value: number) => {
+    if (value >= 1000000) {
+      const millions = value / 1000000;
+      return `$${formatWithLocale(millions, { minimumFractionDigits: 0, maximumFractionDigits: 1 })} ${millions === 1 ? 'millón' : 'millones'}`;
+    }
+    return `$${formatWithLocale(value / 1000, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} mil`;
+  };
   // Early on the curve moves in the 4th decimal — users must SEE it move.
   const formatPrice = (value: number) =>
     formatWithLocale(value, value < 1
