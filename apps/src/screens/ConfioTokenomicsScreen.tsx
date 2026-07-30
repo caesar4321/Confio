@@ -40,16 +40,16 @@ export const ConfioTokenomicsScreen = () => {
       tokens: founderAndTeamTokens,
       percentage: pct(founderAndTeamTokens),
       description:
-        'Reserva del fundador (como en cualquier startup que inicia con 100%) para operar y escalar: nómina, expansión y cumplimiento. Bloqueo total hasta fase 3/lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye el 1% destinado al equipo clave, que se libera por partes iguales durante 24 meses tras el lanzamiento en DEX.',
+        'Reserva del fundador (como en cualquier startup que inicia con 100%) para operar y escalar: nómina, expansión y cumplimiento. Bloqueo total hasta el lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye el 1% destinado al equipo clave, que se libera por partes iguales durante 24 meses tras el lanzamiento en DEX.',
       color: colors.secondary,
       icon: 'shield',
     },
     {
-      category: 'Preventas por fases',
+      category: 'Preventa comunitaria',
       tokens: presaleTokens,
       percentage: pct(presaleTokens),
       description:
-        'Tres microfases fundacionales ($0.20 / $0.25 / $0.30) y dos fases de expansión ($0.50 / $1.00). Se emiten 74M CONFIO (~$61M meta) y se liberan 100% al cerrar la fase 3 y lanzar en DEX.',
+        '74M CONFIO en una sola preventa continua: el precio comienza en $0.20 y sube automáticamente con cada compra, hasta un máximo de $1.30. Quien participa antes obtiene mejor precio. Los tokens se desbloquean con el lanzamiento en DEX.',
       color: colors.primary,
       icon: 'users',
     },
@@ -58,7 +58,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: rewardsTokens,
       percentage: pct(rewardsTokens),
       description:
-        '0.74% (7.4M CONFIO) para “Invita y gana”. Pago inmediato on-chain en la primera recarga o ahorro real de US$20 ($5 + $5). El monto de tokens se calcula al precio de la fase vigente.',
+        '0.74% (7.4M CONFIO) para “Invita y gana”. Pago inmediato on-chain en la primera recarga o ahorro real de US$20 ($5 + $5). El monto de tokens se calcula al precio vigente de la preventa.',
       color: colors.accent,
       icon: 'gift',
     },
@@ -67,7 +67,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: culturalTokens,
       percentage: pct(culturalTokens),
       description:
-        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el lanzamiento en DEX; luego liberado de forma gradual en 3 meses.',
+        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el lanzamiento en DEX; luego liberado de forma gradual en 3 meses.',
       color: colors.offRampIcon,
       icon: 'heart',
     },
@@ -107,8 +107,8 @@ export const ConfioTokenomicsScreen = () => {
         'Cualquier persona puede participar',
         'Interfaz simple y en español',
         'Fundador comprometido y transparente',
-        'Inversión desde montos pequeños',
-        'Oportunidad que nunca has tenido'
+        'Participa desde montos pequeños',
+        'Reglas públicas que no cambian'
       ],
       icon: 'heart',
       color: colors.primary
@@ -191,7 +191,7 @@ export const ConfioTokenomicsScreen = () => {
             <Icon name="heart" size={24} color={colors.secondary} />
             <Text style={styles.philosophyTitle}>La Primera Oportunidad Real para Ti</Text>
             <Text style={styles.philosophyDescription}>
-              Por primera vez en la historia, puedes invertir en un proyecto prometedor sin ser millonario,
+              Por primera vez, puedes ser parte de un proyecto desde el principio sin ser millonario,
               sin entender tecnología complicada, y sin conexiones especiales.
               Solo necesitas creer en el futuro financiero de nuestra gente.
             </Text>
@@ -200,7 +200,7 @@ export const ConfioTokenomicsScreen = () => {
 
         {/* Comparison Section */}
         <View style={styles.comparisonSection}>
-          <Text style={styles.sectionTitle}>¿Por Qué la Gente Común Nunca Puede Invertir?</Text>
+          <Text style={styles.sectionTitle}>¿Por Qué Esto Casi Nunca Llega a la Gente Común?</Text>
 
           {comparisonData.map((comparison, index) => (
             <View key={index} style={styles.comparisonCard}>
@@ -240,11 +240,12 @@ export const ConfioTokenomicsScreen = () => {
             <Text style={styles.futureTitle}>Resumen rápido</Text>
             <Text style={styles.futureDescription}>
               - Suministro total: {formatWithLocale(totalSupply)} CONFIO.{'\n'}
-              - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y lanzar en DEX.{'\n'}
-              - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras lanzamiento en DEX.{'\n'}
-              - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/lanzamiento en DEX; luego liberado gradualmente en 3 meses.{'\n'}
-              - Recompensas: 7.4M CONFIO on-chain en la primera recarga o ahorro real (≥ US$20), calculadas al precio de la fase vigente.{'\n'}
-              - Sin VCs ni pools ocultos. Todo está documentado y visible.
+              - Preventa: 74M CONFIO (7.4%) en una sola preventa continua — el precio sube automáticamente con cada compra, de $0.20 a $1.30. Desbloqueo con el lanzamiento en DEX.{'\n'}
+              - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta el lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras lanzamiento en DEX.{'\n'}
+              - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta el lanzamiento en DEX; luego liberado gradualmente en 3 meses.{'\n'}
+              - Recompensas: 7.4M CONFIO on-chain en la primera recarga o ahorro real (≥ US$20), calculadas al precio vigente de la preventa.{'\n'}
+              - Sin VCs ni pools ocultos. Todo está documentado y visible.{'\n'}
+              - $CONFIO es un token de acceso al ecosistema: no representa acciones, dividendos ni derechos sobre ingresos de Confío.
             </Text>
             <TouchableOpacity
               style={styles.linkButton}
