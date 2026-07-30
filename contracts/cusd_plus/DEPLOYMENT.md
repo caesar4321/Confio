@@ -164,3 +164,76 @@ ownerless, no constructor args — replace-by-redeploy like the router.
   `CUSD_PLUS_7702_MAX_PER_DAY=3`; `CUSD_PLUS_GAS_DUST_ENABLED` stays
   armed as the break-glass fallback). Policy/broadcast code:
   `cusd_plus/sponsor_7702.py`; audit ledger: SponsoredBatch (admin).
+
+## ConfioPresaleVault — deployed 2026-07-30
+
+$CONFIO presale on curve "A" (0–4M @ $0.20→0.30, 4–24M @ $0.30→0.70,
+24–74M @ $0.70→1.30; full sale $61M), USDT-denominated, sponsor-gated
+buys, migratedPool credits for Algorand purchasers. Non-upgradeable —
+the segment table has no setter.
+
+| Role | Address |
+| --- | --- |
+| **ConfioPresaleVault** | `0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583` |
+| Owner | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
+| Sponsor (gate) | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS) |
+| Payment token | `0x55d398326f99059fF775485246999027B3197955` (USDT 18dp) |
+
+- Creation tx: `0x3f3ce2a9e9298f6f60e490fffd4dfd4a6e0d61d0b5347f2d7fabe8061bfd5f18`
+  (KMS sponsor, nonce 19, ~2.23M gas ≈ 0.0022 BNB), deployed via
+  `manage.py deploy_presale_vault --broadcast --yes-mainnet`.
+- `initialSold` seeded LIVE from Algorand app 3353218127 `confio_sold`
+  at broadcast: 17,713.85 CONFIO (17713850000 ×1e12). Post-deploy reads
+  confirmed: currentPrice 0.200443 USDT, totalSold = migratedPool =
+  17,713.85. Algorand sales after this moment are added via
+  `expandMigratedPool()` at cutover.
+- BscScan source verified 2026-07-30 (`forge verify-contract`, "Pass -
+  Verified").
+- Server config: `BSC_PRESALE_VAULT_ADDRESS` (.env.mainnet). Migration
+  credits: `manage.py presale_migration_credits sync|batch|verify|status`
+  (Safe executes the printed creditMigrated calldata). Claims stay closed
+  until the CONFIO BEP-20 exists: `setConfioToken()` (one-shot) then
+  `setClaimsUnlocked(true)`, both Safe-only.
+
+## ConfioToken ($CONFIO BEP-20) — deployed 2026-07-30
+
+Fixed-supply BEP-20 home of $CONFIO after the Algorand→BSC migration.
+Mirrors ASA 3351104258 (name "Confío", unit CONFIO, 1B total) at 18dp.
+NO owner, NO minter, NO pause — the entire 1,000,000,000 CONFIO was
+minted in the constructor to the Safe treasury; ERC20Permit + Burnable
+are the only extensions.
+
+| Role | Address |
+| --- | --- |
+| **ConfioToken (CONFIO)** | `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1` |
+| Treasury (full supply) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
+
+- Creation tx: `0x178930be1412d14dcc721096765a744f50fef05ed02fe7a2f77e85509d5d2c95`
+  (KMS sponsor, nonce 20, ~1.03M gas ≈ 0.001 BNB), deployed via
+  `manage.py deploy_confio_token --broadcast --yes-mainnet`.
+- Post-deploy reads: totalSupply = balanceOf(Safe) = 1,000,000,000 CONFIO.
+- BscScan source verified 2026-07-30 (`forge verify-contract`, "Pass -
+  Verified").
+- Server config: `BSC_CONFIO_TOKEN_ADDRESS` (.env.mainnet).
+- Pending Safe transactions to open presale claims:
+  1. `ConfioPresaleVault.setConfioToken(0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1)`
+     — calldata `0x76eba8ba000000000000000000000000d57bec35857839dc33f6fabe7356c6a19a8d72c1`
+     to `0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583` (one-shot, verify first)
+  2. `ConfioToken.transfer(0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583, amount ≥ totalSold)`
+  3. `ConfioPresaleVault.setClaimsUnlocked(true)` when claims open
+
+### Token name display on BscScan (decision 2026-07-30)
+
+BscScan HTML-escapes the accented on-chain name ("Conf&#237;o") as
+anti-spoofing. DECIDED: keep `name() = "Confío"` on-chain (no redeploy);
+fix presentation via the BscScan **token info update** instead. Process:
+1. Log in at bscscan.com (account required) → token page → "Update Token
+   Info" → ownership verification for
+   `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`.
+2. Ownership is proven by signing their nonce message with the DEPLOYER
+   (KMS sponsor `0xf9f9…fc9D` — no wallet has this key):
+   `manage.py bsc_sign_message "<exact message from the form>"`
+   prints the EIP-191 signature to paste back (verified recovering
+   correctly 2026-07-30).
+3. Submit form: name "Confío", symbol CONFIO, logo (256px PNG from
+   apps/src/assets/png/CONFIO.png), site https://confio.lat, socials.

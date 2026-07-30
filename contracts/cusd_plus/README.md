@@ -141,6 +141,45 @@ vault). GM touchpoints are provisional and isolated in `_gmBuy/_gmSell`.
 pass-through, slippage floors, pause, and frozen-user rejection — the
 vault backing invariant holds through trades.
 
+## ConfioPresaleVault — $CONFIO presale on the "A" curve
+
+`ConfioPresaleVault.sol` is the BSC successor to the stepped Algorand
+presale (`contracts/presale/confio_presale.py`). Instead of admin-repriced
+phases, the price rises with cumulative tokens sold along the locked
+piecewise-linear curve "A" — chosen over a power curve because anyone can
+audit it with three lines of arithmetic:
+
+| cumulative sold | price          | segment raise |
+|-----------------|----------------|---------------|
+| 0 → 4M          | $0.20 → $0.30  | $1M           |
+| 4M → 24M        | $0.30 → $0.70  | $10M          |
+| 24M → 74M       | $0.70 → $1.30  | $50M          |
+
+Full sale = $61M. The segment table is constructor-set with no setter, so
+nobody — including the owner — can reprice. `buy(q, cap)` charges the
+exact integral under the curve (ceil-rounded; fuzz-proven that splitting
+buys never gets a discount) atomically with recording the allocation.
+Participation is sponsor-gated at the contract level
+(`tx.origin`/`msg.sender` in an owner-rotatable sponsor set): the Django
+backend decides WHO buys (geo, limits), the contract alone decides AT WHAT
+PRICE.
+
+**Algorand migration**: `initialSold` (constructor) seeds the curve with
+what Algorand already sold and fills a `migratedPool`; the Safe assigns it
+to users' BSC addresses via `creditMigrated(buyers[], amounts[])` as each
+Algorand→BSC address link materializes (links only exist once a user opens
+the app, so credits trickle in). Credits draw the pool down — the owner
+can never conjure allocations beyond what the curve has priced.
+`uncreditMigrated` reverses a mis-assigned, still-unclaimed credit;
+`expandMigratedPool` covers Algorand sales made after this vault deploys.
+
+Claims open after the owner wires the migrated CONFIO BEP-20
+(`setConfioToken`, one-shot) and unlocks them; `claim()` is then
+permissionless, and CONFIO owed to buyers — including the unassigned
+migratedPool — is never sweepable. 26 tests (unit + fuzz) in
+`test/ConfioPresaleVault.t.sol`; deploy via
+`script/DeployPresaleVault.s.sol` (payment token is a deploy-time choice).
+
 ## Open questions (blockers before implementation)
 
 > **Investigation 2026-07-05** (docs.ondo.finance + BSC on-chain reads),
