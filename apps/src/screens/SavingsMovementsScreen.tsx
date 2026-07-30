@@ -4,7 +4,7 @@
 // (partnership, education) stay reachable; the unbounded list lives here.
 // FlatList carries the house pagination config; when the backend lands,
 // onEndReached fetches the next page from the same wiring point
-// (useAhorrosPortfolio.movements → paginated GraphQL query).
+// (useSavingsPortfolio.movements → paginated GraphQL query).
 
 import React from 'react';
 import {
@@ -19,14 +19,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../config/theme';
-import { useAhorrosPortfolio, AhorroMovement } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio, SavingsMovement } from '../hooks/useSavingsPortfolio';
 import { MovementRow } from '../components/MovementRow';
 
-export const AhorrosMovimientosScreen = () => {
+export const SavingsMovementsScreen = () => {
   const navigation = useNavigation();
-  const { movements } = useAhorrosPortfolio();
+  const { movements } = useSavingsPortfolio();
 
-  const renderItem = ({ item, index }: { item: AhorroMovement; index: number }) => (
+  const renderItem = ({ item, index }: { item: SavingsMovement; index: number }) => (
     <MovementRow movement={item} topBorder={index > 0} />
   );
 

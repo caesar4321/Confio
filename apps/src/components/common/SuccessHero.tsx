@@ -21,7 +21,7 @@ interface SuccessHeroProps {
 }
 
 /**
- * The app-wide success moment (grammar from ConvertAhorro/RetirarAhorro,
+ * The app-wide success moment (grammar from ConvertSavings/WithdrawSavings,
  * the version the owner picked as reference): white page, emerald check
  * circle, short title, ONE big amount in primaryDark, one hint line.
  * Everything else on a success screen is secondary to these four things.

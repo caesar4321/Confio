@@ -26,10 +26,13 @@ const GET_AHORRO_PORTFOLIO = gql`
     cusdPlusSummary {
       savingsEnabled
       stocksEnabled
+      cusdDepositsPaused
       balanceUsd
       netApyPct
       earnedTodayUsd
       earnedMonthUsd
+      usdtBalanceUsd
+      usdtBalanceWei
     }
     gmHoldings {
       symbol
@@ -52,30 +55,31 @@ export interface StockPosition {
   dayChangePct: number;
 }
 
-export type AhorroMovementType =
+export type SavingsMovementType =
   | 'deposit' // Ahorraste (cUSD → cUSD+ or ramp-in)
   | 'withdraw' // Retiraste (→ cUSD or bank)
   | 'buy' // Compraste una acción (from cUSD+)
   | 'sell' // Vendiste una acción (back to cUSD+)
   | 'yield'; // weekly/monthly yield summary row (never per-day spam)
 
-export interface AhorroMovement {
+export interface SavingsMovement {
   id: string;
-  type: AhorroMovementType;
+  type: SavingsMovementType;
   title: string; // e.g. 'Ahorraste', 'Compraste TSLA'
   amountUsd: number; // signed: deposits/sell/yield positive into savings
   createdAt: string; // ISO
 }
 
-export interface AhorrosPortfolio {
+export interface SavingsPortfolio {
   savings: {
     enabled: boolean; // issuer geo-eligibility; gates entry surfaces only
+    cusdDepositsPaused: boolean; // cUSD phase-out: stop promoting new cUSD ramp deposits
     balanceUsd: number; // USD value only — share counts are never exposed
     netApyPct: number;
     earnedTodayUsd: number;
     earnedMonthUsd: number;
     // NOTE: no entryCostPct here on purpose — conversion cost is server-quoted
-    // in-flow (ConvertAhorro) and never printed in marketing copy. The stale
+    // in-flow (ConvertSavings) and never printed in marketing copy. The stale
     // Jupiter-era 0.15% figure lived here once; don't bring it back.
   };
   stocks: {
@@ -84,30 +88,47 @@ export interface AhorrosPortfolio {
     earnedTodayUsd: number;
     positions: StockPosition[];
   };
-  movements: AhorroMovement[];
+  movements: SavingsMovement[];
+  /** Raw wallet USDT-BSC: landed-but-not-minted money (eligible users,
+   *  transient) or the whole "Confío Dollar" balance (geo-ineligible users).
+   *  TOP-LEVEL on purpose — never part of savings.balanceUsd, which caps the
+   *  vault redeem rails. */
+  usdtBalanceUsd: number;
+  /** Same balance in exact wei (server string; client re-reads live before
+   *  exact-amount sends). */
+  usdtBalanceWei: string;
   totalUsd: number;
   earnedTodayUsd: number;
   earnedMonthUsd: number;
+  /** Force a network refetch (pull-to-refresh). Server-side balance caches
+   *  are ~30s, so this is "as fresh as the server will serve". */
+  refetch: () => Promise<unknown>;
 }
 
-export const useAhorrosPortfolio = (): AhorrosPortfolio => {
-  const { data } = useQuery(GET_AHORRO_PORTFOLIO, {
+export const useSavingsPortfolio = (): SavingsPortfolio => {
+  const { data, refetch } = useQuery(GET_AHORRO_PORTFOLIO, {
     fetchPolicy: 'cache-and-network',
     pollInterval: 60_000, // matches the server-side GM cache TTL
   });
   const summary = data?.cusdPlusSummary;
   // Fail-open before the server answers (most users are eligible LATAM —
   // avoids flash-hiding the hub); authoritative once it does. The server
-  // rejects ineligible deposits regardless of what the UI shows.
+  // gates the MINT (phone + IP country): ineligible deposits simply land as
+  // raw USDT ("Confío Dollar"), never as cUSD+.
   const savingsEnabled: boolean = summary?.savingsEnabled ?? true;
   // Stocks (Ondo GM): server flag = geo-eligible AND CUSD_PLUS_STOCKS_ENABLED.
   // Fail-closed before the answer — an investment surface appearing beats
   // one being yanked away from a blocked user.
   const stocksEnabled: boolean = summary?.stocksEnabled ?? false;
+  // cUSD phase-out steering. Defaults to the shipped prod state (paused) so
+  // the pre-answer frame renders the intended savings-first sheet instead of
+  // flashing the legacy cUSD option and collapsing one round-trip later.
+  const cusdDepositsPaused: boolean = summary?.cusdDepositsPaused ?? true;
 
   return useMemo(() => {
     const savings = {
       enabled: savingsEnabled,
+      cusdDepositsPaused,
       balanceUsd: summary?.balanceUsd ?? 0,
       // Server-derived; 0 until the oracle-rate derivation (or config) is
       // set — an honest 0% beats a hardcoded 3% (locked design rule).
@@ -138,14 +159,17 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio => {
     };
     // Movements stay a launch-day empty state until the cusdPlusMovements
     // ledger lands server-side (resolver is still a stub returning []).
-    const movements: AhorroMovement[] = [];
+    const movements: SavingsMovement[] = [];
     return {
       savings,
       stocks,
       movements,
+      usdtBalanceUsd: summary?.usdtBalanceUsd ?? 0,
+      usdtBalanceWei: summary?.usdtBalanceWei ?? '0',
       totalUsd: savings.balanceUsd + stocks.totalUsd,
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
+      refetch,
     };
-  }, [data, savingsEnabled, stocksEnabled, summary]);
+  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch]);
 };

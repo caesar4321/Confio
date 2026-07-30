@@ -51,8 +51,8 @@ import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { useCountry } from '../contexts/CountryContext';
-import { isRampBlockedCountry } from '../config/env';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { isRampBlockedCountry, isKoyweRoutingEnabledForCountry } from '../config/env';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -201,7 +201,7 @@ export const HomeScreen = () => {
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
   // Ahorros e Inversiones portfolio total for the wallet-row entry (stubbed
   // until the cUSD+/stocks backend lands; single wiring point in the hook).
-  const ahorrosPortfolio = useAhorrosPortfolio();
+  const savingsPortfolio = useSavingsPortfolio();
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrerMutation] = useMutation(SET_REFERRER);
 
@@ -455,6 +455,14 @@ export const HomeScreen = () => {
 
 
   const confioPriceUsd = React.useMemo(() => {
+    // Preferred: the live BSC curve price (server-cached ~60s). The curve
+    // moves with every purchase, unlike the static phase price below.
+    const rawCurve = presaleStatusData?.confioCurrentPrice;
+    const curvePrice = rawCurve ? parseFloat(rawCurve) : NaN;
+    if (Number.isFinite(curvePrice) && curvePrice > 0) {
+      return curvePrice;
+    }
+
     const rawActive = activePresaleData?.activePresalePhase?.pricePerToken;
     const activeStatus = (activePresaleData?.activePresalePhase?.status || '').toLowerCase();
     const activePrice = rawActive ? parseFloat(rawActive) : NaN;
@@ -488,7 +496,7 @@ export const HomeScreen = () => {
       }
     }
     return 0.2;
-  }, [activePresaleData, allPresalePhasesData]);
+  }, [presaleStatusData, activePresaleData, allPresalePhasesData]);
 
   const confioLocked = React.useMemo(() =>
     parseFloat(myBalancesData?.myBalances?.confioLocked || myBalancesData?.myBalances?.confioPresaleLocked || '0'),
@@ -514,10 +522,19 @@ export const HomeScreen = () => {
     return floored.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   }, [floorToDecimals]);
 
-  // Calculate portfolio value including CONFIO marked to current presale price
+  // Calculate portfolio value including CONFIO marked to current presale
+  // price plus the cUSD+ savings position AND raw wallet USDT (Mercado Pago
+  // model: the spendable AND yielding dollars are one headline number, and
+  // money must never vanish between USDT landing and the silent mint —
+  // for geo-ineligible users the raw USDT IS their dollar). Stocks stay
+  // out — the home number must never have a red day; Acciones live in
+  // their own row.
   const totalUSDValue = React.useMemo(
-    () => cUSDBalance + usdcBalance + confioUsdValue,
-    [cUSDBalance, usdcBalance, confioUsdValue]
+    () =>
+      cUSDBalance + usdcBalance + confioUsdValue +
+      savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd,
+    [cUSDBalance, usdcBalance, confioUsdValue,
+     savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd]
   );
 
   // Use real exchange rate from API only - no fallbacks
@@ -781,23 +798,48 @@ export const HomeScreen = () => {
   const [rechargeSheetVisible, setRechargeSheetVisible] = useState(false);
   const [withdrawSheetVisible, setWithdrawSheetVisible] = useState(false);
 
-  const rechargeOptions: RouteOption[] = [
-    {
-      icon: 'dollar-sign',
-      title: 'Para usar día a día',
-      subtitle: 'Enviar, pagar y comprar CONFIO · cUSD',
-      onPress: () => navigateToRampOrEfectivo('TopUp'),
+  // cUSD phase-out (cusdDepositsPaused, server-flipped): while paused there
+  // is exactly ONE door for EVERYONE — the USDT-BSC rail. Eligibility only
+  // decides what the delivered USDT becomes (silent mint to cUSD+ vs raw
+  // "Confío Dollar"), so the copy varies but the destination doesn't.
+  // Unpaused restores both doors with savings first.
+  const savingsRechargeOption: RouteOption = {
+    icon: 'trending-up',
+    title: savingsPortfolio.savings.enabled
+      ? 'Para ahorrar e invertir'
+      : 'Recargar dólares',
+    subtitle: savingsPortfolio.savings.enabled
+      ? 'Gana rendimiento mientras decides · cUSD+'
+      : 'Se acreditan en tu Confío Dollar',
+    onPress: () => {
+      // USDT-BSC rail: Koywe delivers USDT to the user's own address.
+      navigation.navigate('TopUp', { destination: 'cusd_plus' });
     },
-    ...(ahorrosPortfolio.savings.enabled ? [{
-      icon: 'trending-up',
-      title: 'Para ahorrar e invertir',
-      subtitle: 'Gana rendimiento mientras decides · cUSD+',
-      onPress: () => {
-        // Savings rail: Koywe delivers USDT-BSC to the user's own address.
-        navigation.navigate('TopUp', { destination: 'cusd_plus' });
-      },
-    }] : []),
-  ];
+  };
+  const cusdRechargeOption: RouteOption = {
+    icon: 'dollar-sign',
+    title: 'Para usar día a día',
+    subtitle: 'Enviar, pagar y comprar CONFIO · cUSD',
+    onPress: () => navigateToRampOrEfectivo('TopUp'),
+  };
+  const rechargeOptions: RouteOption[] = savingsPortfolio.savings.cusdDepositsPaused
+    ? [savingsRechargeOption]
+    : (savingsPortfolio.savings.enabled
+        ? [savingsRechargeOption, cusdRechargeOption]
+        : [cusdRechargeOption]);
+  // A one-option sheet is pure friction: go straight to the flow. Read via
+  // a ref because the quickActions useMemo (narrow deps) would otherwise
+  // capture a stale options array.
+  const rechargeOptionsRef = React.useRef(rechargeOptions);
+  rechargeOptionsRef.current = rechargeOptions;
+  const openRechargeFlow = React.useCallback(() => {
+    const opts = rechargeOptionsRef.current;
+    if (opts.length === 1) {
+      opts[0].onPress();
+      return;
+    }
+    setRechargeSheetVisible(true);
+  }, []);
 
   // Both options land in the user's bank — the differentiator is where the
   // money sits NOW, so subtitles show live balances instead of destinations.
@@ -812,15 +854,24 @@ export const HomeScreen = () => {
     {
       icon: 'trending-up',
       title: 'Desde mis ahorros',
+      // savings.balanceUsd, not totalUsd: this rail redeems the VAULT only —
+      // stocks can't exit through it, so advertising the combined figure
+      // would overstate what's withdrawable here.
       subtitle:
-        ahorrosPortfolio.totalUsd > 0
-          ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)} en Confío Dollar+`
+        savingsPortfolio.savings.balanceUsd > 0
+          ? `$${formatFixedFloor(savingsPortfolio.savings.balanceUsd, 2)} en ${savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}`
           : 'Aún no tienes ahorros',
-      disabled: ahorrosPortfolio.totalUsd <= 0,
+      disabled: savingsPortfolio.savings.balanceUsd <= 0,
       onPress: () => {
-        // TODO(cusd+): direct off-ramp from the savings chain — cUSD+ →
-        // USDY redeem → USDT-BSC → Koywe sell (all 8 fiats confirmed).
-        // Never hops through cUSD/Algorand: saves the user ~0.65%.
+        // Same country split as SavingsScreen's retirar: Guardarian countries
+        // redeem the vault directly (cUSD+ → USDT-BSC → bank, no Algorand
+        // hop); the Koywe SellScreen branch ignores `destination` and would
+        // silently sell cUSD, so those countries keep the stub until the
+        // Koywe savings off-ramp lands.
+        if (!isKoyweRoutingEnabledForCountry(rampCountryCode)) {
+          navigation.navigate('Sell', { destination: 'cusd_plus' });
+          return;
+        }
         Alert.alert('Muy pronto', 'El retiro directo desde tu ahorro abre en breve.');
       },
     },
@@ -965,7 +1016,7 @@ export const HomeScreen = () => {
         label: 'Recargar',
         icon: 'dollar-sign',
         color: colors.accent,
-        route: () => setRechargeSheetVisible(true),
+        route: openRechargeFlow,
       },
       {
         id: 'withdraw',
@@ -1562,33 +1613,86 @@ export const HomeScreen = () => {
                 ]
               }}
             >
-              {/* cUSD Wallet */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.walletCard,
-                  pressed && { opacity: 0.7 }
-                ]}
-                onPress={navigateToCUSDAccount}
-              >
-                <View style={styles.walletCardContent}>
-                  <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
-                    <Image source={cUSDLogo} style={styles.walletLogo} />
+              {/* Primary dollar row (IA inversion, 2026-07-30: cUSD phases
+                  out, ALL deposits land as USDT-BSC). Eligible users see
+                  "Confío Dollar+" (vault + landed-not-yet-minted USDT);
+                  geo-ineligible users see plain "Confío Dollar" — same money
+                  minus the yield, USDT never marketed by name. ONE calm
+                  entry, deliberately NO day-change here; stocks now live in
+                  their own row. Principle: home shows calm balances. */}
+              {/* Issuer geo-gate: the entry hides only where the feature
+                  isn't offered AND nothing is held — anyone holding vault
+                  or wallet balance must always reach their money. */}
+              {!activeAccount?.isEmployee &&
+                (savingsPortfolio.savings.enabled ||
+                  savingsPortfolio.savings.balanceUsd > 0 ||
+                  savingsPortfolio.usdtBalanceUsd > 0) && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.walletCard,
+                    pressed && { opacity: 0.7 }
+                  ]}
+                  onPress={() => navigation.navigate('Savings')}
+                >
+                  <View style={styles.walletCardContent}>
+                    <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
+                      <Image source={cUSDPlusLogo} style={styles.walletLogo} />
+                    </View>
+                    <View style={styles.walletInfo}>
+                      <Text style={styles.walletName}>
+                        {savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}
+                      </Text>
+                      <Text style={styles.walletSymbol}>
+                        {savingsPortfolio.savings.enabled ? 'Ahorro que rinde' : 'Dólar digital'}
+                      </Text>
+                    </View>
+                    <View style={styles.walletBalanceContainer}>
+                      <Text style={styles.walletBalanceText}>
+                        {showBalance
+                          ? `$${formatFixedFloor(savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd, 2)}`
+                          : '••••'}
+                      </Text>
+                      <Icon name="chevron-right" size={20} color={colors.text.light} />
+                    </View>
                   </View>
-                  <View style={styles.walletInfo}>
-                    <Text style={styles.walletName}>Confío Dollar</Text>
-                    <Text style={styles.walletSymbol}>cUSD</Text>
+                </Pressable>
+              )}
+
+              {/* Legacy cUSD — demoted row. While deposits are paused the
+                  row exists only to drain (send/pay/retirar), so hide it
+                  entirely once the balance reaches zero. */}
+              {(!savingsPortfolio.savings.cusdDepositsPaused || cUSDBalance > 0) && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.walletCard,
+                    pressed && { opacity: 0.7 }
+                  ]}
+                  onPress={navigateToCUSDAccount}
+                >
+                  <View style={styles.walletCardContent}>
+                    <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
+                      <Image source={cUSDLogo} style={styles.walletLogo} />
+                    </View>
+                    <View style={styles.walletInfo}>
+                      <Text style={styles.walletName}>Confío Dollar</Text>
+                      <Text style={styles.walletSymbol}>
+                        {savingsPortfolio.savings.cusdDepositsPaused
+                          ? 'Versión anterior · Solo retiros y pagos'
+                          : 'cUSD'}
+                      </Text>
+                    </View>
+                    <View style={styles.walletBalanceContainer}>
+                      <Text style={styles.walletBalanceText}>
+                        {/* Hide balance for employees without viewBalance permission */}
+                        {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
+                          ? '••••'
+                          : showBalance ? `$${formatFixedFloor(cUSDBalance, 2)}` : '••••'}
+                      </Text>
+                      <Icon name="chevron-right" size={20} color={colors.text.light} />
+                    </View>
                   </View>
-                  <View style={styles.walletBalanceContainer}>
-                    <Text style={styles.walletBalanceText}>
-                      {/* Hide balance for employees without viewBalance permission */}
-                      {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
-                        ? '••••'
-                        : showBalance ? `$${formatFixedFloor(cUSDBalance, 2)}` : '••••'}
-                    </Text>
-                    <Icon name="chevron-right" size={20} color={colors.text.light} />
-                  </View>
-                </View>
-              </Pressable>
+                </Pressable>
+              )}
 
               {/* CONFIO Wallet */}
               <Pressable
@@ -1618,41 +1722,30 @@ export const HomeScreen = () => {
                 </View>
               </Pressable>
 
-              {/* Ahorros e Inversiones — ONE calm entry (the agreed 3-row
-                  home). Combined total, and deliberately NO day-change here:
-                  deltas, the savings/stocks split, and red days live inside
-                  the hub, which answers "why did it move?" in the same glance
-                  (hero split line + per-product cards + hoy lines with the
-                  ≥ $0.01 rule). On the home a red delta would read as "my
-                  savings dropped". Principle: home shows calm balances, the
-                  hub shows the living portfolio. */}
-              {/* Issuer geo-gate: hide the entry where the feature isn't
-                  offered — but never hide it from someone holding a balance,
-                  who must always be able to reach Retirar. */}
+              {/* Acciones de EE.UU. — investments get their own row (split
+                  from the old combined Ahorros hub): stocks have red days
+                  and belong visually apart from the payment dollar. Shown
+                  for stocks-enabled users and anyone still holding. */}
               {!activeAccount?.isEmployee &&
-                (ahorrosPortfolio.savings.enabled || ahorrosPortfolio.totalUsd > 0) && (
+                (savingsPortfolio.stocks.enabled || savingsPortfolio.stocks.totalUsd > 0) && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={() => navigation.navigate('Ahorros')}
+                  onPress={() => navigation.navigate('StocksList')}
                 >
                   <View style={styles.walletCardContent}>
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
                       <Image source={cUSDPlusLogo} style={styles.walletLogo} />
                     </View>
                     <View style={styles.walletInfo}>
-                      <Text style={styles.walletName}>Ahorros e Inversiones</Text>
-                      <Text style={styles.walletSymbol}>
-                        {ahorrosPortfolio.stocks.enabled
-                          ? 'cUSD+ · Acciones de EE.UU.'
-                          : 'cUSD+ · Ahorro que rinde'}
-                      </Text>
+                      <Text style={styles.walletName}>Acciones de EE.UU.</Text>
+                      <Text style={styles.walletSymbol}>Inversiones · Ondo</Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
                       <Text style={styles.walletBalanceText}>
-                        {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)}` : '••••'}
+                        {showBalance ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}` : '••••'}
                       </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>

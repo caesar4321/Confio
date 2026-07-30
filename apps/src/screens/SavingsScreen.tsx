@@ -1,20 +1,20 @@
-// Ahorros e Inversiones — portfolio hub (Federico's "bolsa" architecture),
-// designed for its END STATE from day one: savings (Confío Dollar+) and US
-// stocks (Ondo Stocks) live side by side so enabling stocks later never
-// reflows the screen.
+// The primary-dollar ACCOUNT surface (IA inversion, 2026-07-30). Two
+// variants off the same screen, keyed on savings.enabled:
+// - Eligible: "Confío Dollar+" — vault position + yield, Ahorrar/Retirar.
+// - Geo-ineligible: "Confío Dollar" — raw wallet USDT branded as the plain
+//   dollar (USDT only ever appears in fine print), Recibir/Enviar/Retirar.
+// Stocks moved OUT to StocksListScreen + their own home row: investments
+// have red days and belong visually apart from the payment dollar.
 //
 // Locked design decisions this screen encodes:
 // - Accumulating-share model stays invisible: USD values only, never share
 //   counts. "cUSD+" is a product name, not a displayed unit.
 // - The rate is live and server-driven (oracle gross minus Confío's 15%
 //   share). Copy never hardcodes "3%" — rates float with US Treasuries.
-// - Conversion cost is passed through transparently before confirming.
-// - Stocks section gates on portfolio.stocks.enabled (decision 2dcfada5:
-//   server flag at release, dark until demand signal; geofence US/CA/BR).
-// - Savings language is "ahorro/rendimiento" (bank-replacement mental model);
-//   only the stocks block says "inversión". No crypto jargon anywhere.
+// - Savings language is "ahorro/rendimiento" (bank-replacement mental model).
+//   No crypto jargon anywhere; raw USDT is "dólares digitales" in fine print.
 
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -24,107 +24,109 @@ import {
   StatusBar,
   Image,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@apollo/client';
+import { gql, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
-import { TickerLogo } from '../components/TickerLogo';
 import { MovementRow } from '../components/MovementRow';
-import { useGmMarket } from '../hooks/useGmMarket';
 import { useSavingsResume } from '../hooks/useSavingsResume';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
 import { CUSD_CONVERSION_UI_ENABLED } from '../config/features';
-import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
-const EDUCATION_CARDS = [
-  {
-    icon: 'shield',
-    title: 'Respaldado por bonos del Tesoro de EE.UU.',
-    body:
-      'Tu ahorro está respaldado 1:1 por USDY de Ondo Finance, un token ' +
-      'garantizado por bonos del Tesoro de Estados Unidos.',
-  },
-  {
-    icon: 'clock',
-    title: 'Retira cuando quieras',
-    body: 'Sin plazos, sin penalidades. Tu dinero vuelve a cUSD al instante.',
-  },
-  {
-    icon: 'percent',
-    title: 'Sin comisiones ocultas',
-    body:
-      'La tasa que ves ya descuenta nuestra comisión. Si un movimiento ' +
-      'tiene costo, lo ves antes de confirmar — nunca después.',
-  },
-] as const;
+// Cache-first vault-address lookup for the pull-to-refresh mint kick (same
+// query useSavingsResume warms, so this is normally a cache hit).
+const VAULT_ADDRESS_FOR_REFRESH = gql`
+  query CusdPlusVaultAddressRefresh {
+    cusdPlusConvertParams {
+      vaultAddress
+    }
+  }
+`;
 
-export const AhorrosScreen = () => {
+export const SavingsScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
-  const portfolio = useAhorrosPortfolio();
+  const portfolio = useSavingsPortfolio();
   // Finish any pending cUSD+ mints (leg C) on mount + every re-foreground —
   // the savings sibling of the USDC→cUSD auto-swap resume contract.
   useSavingsResume();
-  const { stocks: gmStocks, session: gmSession } = useGmMarket();
-  const featuredTickers = gmStocks.slice(0, 5);
-  // Universe size from the live list (438 today → "400+"), honest fallback
-  // while loading; session label mirrors AccionesListScreen's grammar.
-  const gmUniverseLabel = gmStocks.length >= 100
-    ? `${Math.floor(gmStocks.length / 100) * 100}+`
-    : '400+';
-  const gmSessionLabel =
-    gmSession === 'core'
-      ? 'Mercado abierto'
-      : gmSession === 'extended'
-        ? 'Sesión extendida'
-        : gmSession === 'off-hours'
-          ? 'Fin de semana · activos seleccionados'
-          : 'Mercado cerrado';
-  const { savings, stocks, movements } = portfolio;
+  const { savings, movements, usdtBalanceUsd } = portfolio;
+  // The variant switch: eligible = yield account, ineligible = plain dollar.
+  const isYieldVariant = savings.enabled;
 
-  const { data: balancesData } = useQuery(GET_MY_BALANCES, {
+  const { data: balancesData, refetch: refetchBalances } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
   });
   const cusdAvailable = parseFloat(balancesData?.myBalances?.cusd || '0') || 0;
 
+  // Pull-to-refresh: the "did my deposit arrive?" gesture. Kicks the pending
+  // mint resume (same leg the foreground listener runs) and force-refetches
+  // both balance queries; server-side caches are ~30s, so this is as fresh
+  // as the server will serve.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      try {
+        const { apolloClient } = await import('../apollo/client');
+        const { resumeSavingsMints } = await import('../services/savingsLegC');
+        const { data: vp } = await apolloClient.query({
+          query: VAULT_ADDRESS_FOR_REFRESH,
+          fetchPolicy: 'cache-first',
+        });
+        const vaultAddress = vp?.cusdPlusConvertParams?.vaultAddress;
+        if (vaultAddress) await resumeSavingsMints(vaultAddress);
+      } catch {}
+      await Promise.all([portfolio.refetch(), refetchBalances()]);
+    } catch {
+      // Refresh is best-effort; the 60s poll self-heals.
+    } finally {
+      setRefreshing(false);
+    }
+  }, [portfolio.refetch, refetchBalances]);
+
   const hasSavings = savings.balanceUsd > 0;
-  const hasStocks = stocks.positions.length > 0;
-  const hasAnything = portfolio.totalUsd > 0;
+  const hasUsdt = usdtBalanceUsd > 0;
+  // The account total this screen owns: vault position + raw wallet USDT.
+  // Stocks are deliberately absent — they live in AccionesList now.
+  const accountTotalUsd = savings.balanceUsd + usdtBalanceUsd;
+  const hasAnything = accountTotalUsd > 0;
 
   // Adaptive precision (2 dp, 3 dp under 1¢) so small savers still see the
   // daily tick; below display resolution the part is omitted entirely —
   // "+$0.00" reads as broken.
+  // Savings-only deltas since the stocks split (stocks report in their row).
   const tickerParts: string[] = [];
-  const hoyDelta = formatUsdDeltaAbs(portfolio.earnedTodayUsd);
+  const hoyDelta = formatUsdDeltaAbs(savings.earnedTodayUsd);
   if (hoyDelta) {
-    tickerParts.push(`Hoy ${portfolio.earnedTodayUsd >= 0 ? '+' : '\u2212'}${hoyDelta}`);
+    tickerParts.push(`Hoy ${savings.earnedTodayUsd >= 0 ? '+' : '\u2212'}${hoyDelta}`);
   }
-  const mesDelta = formatUsdDeltaAbs(portfolio.earnedMonthUsd);
-  if (mesDelta && portfolio.earnedMonthUsd > 0) {
+  const mesDelta = formatUsdDeltaAbs(savings.earnedMonthUsd);
+  if (mesDelta && savings.earnedMonthUsd > 0) {
     tickerParts.push(`Este mes +${mesDelta}`);
   }
-  const savingsHoy = formatUsdDeltaAbs(savings.earnedTodayUsd);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-  const [ahorrarSheet, setAhorrarSheet] = useState(false);
-  const [retirarSheet, setRetirarSheet] = useState(false);
+  const [saveSheet, setSaveSheet] = useState(false);
+  const [withdrawSheet, setWithdrawSheet] = useState(false);
 
   // Ramp routing mirrors TopUp/Sell: Koywe countries use the Koywe rail
   // (bank off-ramp still pending there); everyone else rides Guardarian,
@@ -140,7 +142,7 @@ export const AhorrosScreen = () => {
   // leg at all). Converting existing cUSD is for money already inside — a
   // valid move, not the promoted entry. Costs are server-quoted in-flow,
   // never printed here.
-  const ahorrarOptions: RouteOption[] = [
+  const saveOptions: RouteOption[] = [
     {
       icon: 'credit-card',
       title: 'Recargar desde mi banco',
@@ -154,7 +156,7 @@ export const AhorrosScreen = () => {
       icon: 'download',
       title: 'Recibir USDT',
       subtitle: 'Red BNB Smart Chain (BEP-20) · desde un exchange u otra billetera',
-      onPress: () => navigation.navigate('ReceiveSavings'),
+      onPress: () => navigation.navigate('ReceiveSavings', { destination: 'cusd_plus' }),
     },
     // cUSD → cUSD+ conversion hidden while the bridge leg has no home
     // (see CUSD_CONVERSION_UI_ENABLED).
@@ -168,7 +170,7 @@ export const AhorrosScreen = () => {
                 ? `${fmtUsd(cusdAvailable)} disponibles · verás el costo antes de confirmar`
                 : 'No tienes cUSD disponible ahora',
             disabled: cusdAvailable <= 0,
-            onPress: () => navigation.navigate('ConvertAhorro'),
+            onPress: () => navigation.navigate('ConvertSavings'),
           } as RouteOption,
         ]
       : []),
@@ -177,7 +179,7 @@ export const AhorrosScreen = () => {
   // ── Retirar destinations ────────────────────────────────────────────────
   // Mirrors the Ahorrar sheet: the outside world (bank, direct rail — no
   // conversion hop) leads; the in-app destination comes second.
-  const retirarOptions: RouteOption[] = [
+  const withdrawOptions: RouteOption[] = [
     {
       icon: 'home',
       title: 'A mi banco',
@@ -186,7 +188,7 @@ export const AhorrosScreen = () => {
         if (!isKoyweCountry) {
           // Guardarian rail: sell USDT-BSC straight from the savings vault
           // (redeemToUsdt pays the ramp's deposit address directly).
-          setRetirarSheet(false);
+          setWithdrawSheet(false);
           navigation.navigate('Sell', { destination: 'cusd_plus' });
           return;
         }
@@ -202,13 +204,11 @@ export const AhorrosScreen = () => {
             icon: 'dollar-sign',
             title: 'A mi saldo cUSD',
             subtitle: 'Para enviar, pagar o guardar · al instante',
-            onPress: () => navigation.navigate('RetirarAhorro'),
+            onPress: () => navigation.navigate('WithdrawSavings'),
           } as RouteOption,
         ]
       : []),
   ];
-
-  const onExplorarAcciones = () => navigation.navigate('AccionesList');
 
   return (
     <View style={styles.container}>
@@ -217,109 +217,93 @@ export const AhorrosScreen = () => {
         {/* Brand field: emerald gradient + coin ring, padding on headerInner
             (Yoga insets absolute children by parent padding). */}
         <View style={styles.header}>
-          <BrandFieldBackground id="ahorrosField" ringCy="28%" />
+          <BrandFieldBackground id="savingsField" ringCy="28%" />
           <View style={styles.headerInner}>
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
               <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Ahorros e Inversiones</Text>
+            <Text style={styles.headerTitle}>
+              {isYieldVariant ? 'Confío Dollar+' : 'Confío Dollar'}
+            </Text>
             <View style={styles.headerIconBtn} />
           </View>
 
-          {/* Hero: ONE portfolio number (savings + stocks). Empty state sells
-              the outcome, not the product. */}
+          {/* Hero: ONE account number (vault + raw wallet USDT — money must
+              never vanish between landing and the silent mint) + the rate
+              (account-grammar: the product card is gone, so the hero owns
+              rate + deltas). Empty state sells the outcome. */}
           <View style={styles.hero}>
-            <Text style={styles.heroLabel}>Valor total</Text>
-            <Text style={styles.heroAmount}>{fmtUsd(portfolio.totalUsd)}</Text>
-            {/* Split line: savings never dips, stocks fluctuate — showing the
-                two parts keeps a red stock day from reading as "my savings
-                went down". Only shown when both exist. */}
-            {hasSavings && hasStocks && (
+            <Text style={styles.heroLabel}>
+              {isYieldVariant ? 'Valor total' : 'Tu saldo'}
+            </Text>
+            <Text style={styles.heroAmount}>{fmtUsd(accountTotalUsd)}</Text>
+            {isYieldVariant && hasSavings && savings.netApyPct > 0 && (
+              <Text style={styles.heroRate}>
+                Rindiendo ~{formatNumber(savings.netApyPct, { maximumFractionDigits: 1 })}% anual
+              </Text>
+            )}
+            {/* Landed-but-not-minted money, named honestly per variant:
+                eligible users see it as "on its way" to the vault; for
+                ineligible users the raw balance IS the product, so the
+                mechanics go to fine print instead. */}
+            {isYieldVariant && hasUsdt && (
               <Text style={styles.heroSplit}>
-                Ahorro {fmtUsd(savings.balanceUsd)}
-                {'   ·   '}Inversión {fmtUsd(stocks.totalUsd)}
+                En camino a tu ahorro {fmtUsd(usdtBalanceUsd)}
+              </Text>
+            )}
+            {!isYieldVariant && hasAnything && (
+              <Text style={styles.heroSplit}>
+                Tu saldo se guarda como dólares digitales (USDT) en tu propia dirección
               </Text>
             )}
             {hasAnything ? (
-              tickerParts.length > 0 && (
+              isYieldVariant && tickerParts.length > 0 && (
                 <View style={styles.heroTickerRow}>
                   <Icon name="trending-up" size={14} color={colors.white} />
                   <Text style={styles.heroTicker}>{tickerParts.join('  ·  ')}</Text>
                 </View>
               )
             ) : (
-              <Text style={styles.heroEmptyHint}>Tu dinero puede crecer mientras duerme</Text>
+              <Text style={styles.heroEmptyHint}>
+                {isYieldVariant
+                  ? savings.netApyPct > 0
+                    ? `Gana ~${formatNumber(savings.netApyPct, { maximumFractionDigits: 1 })}% anual — tu dinero crece mientras duerme`
+                    : 'Tu dinero puede crecer mientras duerme'
+                  : 'Dólares digitales, siempre tuyos'}
+              </Text>
             )}
           </View>
           </View>
         </View>
       </SafeAreaView>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* ── Ahorro: Confío Dollar+ ──────────────────────────────────────── */}
-        <Text style={styles.sectionTitle}>Ahorro</Text>
-        <View style={styles.card}>
-          <View style={styles.productRow}>
-            <View style={styles.productLogoWrap}>
-              <Image source={cUSDPlusLogo} style={styles.productLogo} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.productName}>Confío Dollar+</Text>
-              <Text style={styles.productSymbol}>cUSD+</Text>
-            </View>
-            {hasSavings ? (
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.productValue}>{fmtUsd(savings.balanceUsd)}</Text>
-                {savingsHoy && (
-                  <Text style={styles.productDayChange}>hoy +{savingsHoy}</Text>
-                )}
-              </View>
-            ) : (
-              <View style={styles.ratePill}>
-                <Text style={styles.ratePillText}>
-                  ~{formatNumber(savings.netApyPct, { maximumFractionDigits: 1 })}% anual
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {hasSavings && (
-            <View style={styles.rateLineRow}>
-              <View style={styles.rateDot} />
-              <Text style={styles.rateLineText}>
-                Rindiendo ~{formatNumber(savings.netApyPct, { maximumFractionDigits: 1 })}% anual
-              </Text>
-            </View>
-          )}
-
-          <Text style={styles.backedLine}>
-            Respaldado por bonos del Tesoro de EE.UU. · La tasa varía con los bonos y ya
-            descuenta nuestra comisión
-          </Text>
-
-          {/* Issuer geo-gate: entry hidden, exit always available. */}
-          {!savings.enabled && (
-            <View style={styles.geoNotice}>
-              <Icon name="globe" size={14} color={colors.text.secondary} />
-              <Text style={styles.geoNoticeText}>
-                El ahorro con rendimiento no está disponible en tu país por
-                requisitos del emisor (Ondo Finance). Si tienes saldo, siempre
-                puedes retirarlo.
-              </Text>
-            </View>
-          )}
-
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
+        {/* ACCOUNT grammar (2026-07-30): the hero already carries balance +
+            rate, so no product card — just actions, then the history. All
+            education lives in ProtectedSavings (reached from the link row
+            below AND the Home stats tile); duplicating it here buried it
+            under Movimientos anyway. */}
+        {isYieldVariant ? (
           <View style={styles.ctaRow}>
-            {savings.enabled && (
-              <TouchableOpacity style={styles.ctaPrimary} onPress={() => setAhorrarSheet(true)} activeOpacity={0.85}>
-                <Icon name="arrow-down-circle" size={18} color={colors.white} />
-                <Text style={styles.ctaPrimaryText}>Ahorrar</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity style={styles.ctaPrimary} onPress={() => setSaveSheet(true)} activeOpacity={0.85}>
+              <Icon name="arrow-down-circle" size={18} color={colors.white} />
+              <Text style={styles.ctaPrimaryText}>Ahorrar</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.ctaSecondary, !hasSavings && styles.ctaDisabled]}
-              onPress={() => setRetirarSheet(true)}
+              onPress={() => setWithdrawSheet(true)}
               disabled={!hasSavings}
               activeOpacity={0.85}
             >
@@ -328,130 +312,76 @@ export const AhorrosScreen = () => {
               </Text>
             </TouchableOpacity>
           </View>
-
-          {savings.enabled && cusdAvailable > 0 && !hasSavings && (
-            <View style={styles.availableRow}>
-              <Icon name="info" size={13} color={colors.text.secondary} />
-              <Text style={styles.availableText}>
-                Tienes {fmtUsd(cusdAvailable)} en cUSD disponibles para ahorrar
+        ) : (
+          /* Ineligible variant: the plain-dollar account. Recibir always;
+             Enviar moves raw wallet USDT (sponsor-paid 7702 transfer — THE
+             exit that must exist wherever deposits do); Retirar redeems any
+             legacy vault balance (exits are never geo-gated). */
+          <View style={styles.ctaRow}>
+            <TouchableOpacity
+              style={styles.ctaPrimary}
+              onPress={() => navigation.navigate('ReceiveSavings', { destination: 'usdt' })}
+              activeOpacity={0.85}
+            >
+              <Icon name="download" size={18} color={colors.white} />
+              <Text style={styles.ctaPrimaryText}>Recibir</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.ctaSecondary, !hasUsdt && styles.ctaDisabled]}
+              onPress={() => navigation.navigate('SendUsdt')}
+              disabled={!hasUsdt}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.ctaSecondaryText, !hasUsdt && styles.ctaDisabledText]}>
+                Enviar
               </Text>
-            </View>
-          )}
-        </View>
-
-        {/* ── Inversión: Acciones de EE.UU. (Ondo Stocks) ─────────────────── */}
-        {stocks.enabled && (
-          <>
-            <Text style={styles.sectionTitle}>Inversión</Text>
-            <View style={styles.card}>
-              <View style={styles.productRow}>
-                <View style={[styles.productLogoWrap, styles.stocksLogoWrap]}>
-                  <Icon name="bar-chart-2" size={22} color={colors.white} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.productName}>Acciones de EE.UU.</Text>
-                  <Text style={styles.productSymbol}>
-                    Tesla, NVIDIA, Apple y {gmUniverseLabel} más
-                  </Text>
-                  {/* Live session from the GM status API — a hardcoded
-                      "Mercado abierto" on a Sunday reads as broken. */}
-                  <View style={styles.marketStatusRow}>
-                    <View
-                      style={[
-                        styles.marketStatusDot,
-                        gmSession === 'closed' && styles.marketStatusDotClosed,
-                      ]}
-                    />
-                    <Text style={styles.marketStatusText}>{gmSessionLabel}</Text>
-                  </View>
-                </View>
-                {hasStocks && (
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.productValue}>{fmtUsd(stocks.totalUsd)}</Text>
-                    <Text
-                      style={[
-                        styles.productDayChange,
-                        stocks.earnedTodayUsd < 0 && styles.dayChangeNegative,
-                      ]}
-                    >
-                      hoy {stocks.earnedTodayUsd >= 0 ? '+' : ''}
-                      {fmtUsd(stocks.earnedTodayUsd)}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {hasStocks ? (
-                <View style={styles.positionsList}>
-                  {stocks.positions.map((p) => (
-                    <TouchableOpacity
-                      key={p.ticker}
-                      style={styles.positionRow}
-                      activeOpacity={0.8}
-                      onPress={() => navigation.navigate('StockDetail', { ticker: p.ticker })}
-                    >
-                      <View style={styles.tickerCircleSmall}>
-                        <Text style={styles.tickerCircleSmallText}>{p.ticker.slice(0, 4)}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.positionTicker}>{p.ticker}</Text>
-                        <Text style={styles.positionName}>{p.name}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.positionValue}>{fmtUsd(p.valueUsd)}</Text>
-                        <Text
-                          style={[
-                            styles.positionChange,
-                            p.dayChangePct < 0 && styles.dayChangeNegative,
-                          ]}
-                        >
-                          {p.dayChangePct >= 0 ? '+' : ''}
-                          {formatNumber(p.dayChangePct, { maximumFractionDigits: 2 })}%
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : (
-                <>
-                  <View style={styles.tickerStrip}>
-                    {featuredTickers.map((t) => (
-                      <TouchableOpacity
-                        key={t.ticker}
-                        style={styles.tickerItem}
-                        activeOpacity={0.8}
-                        onPress={() => navigation.navigate('StockDetail', { ticker: t.ticker })}
-                      >
-                        <TickerLogo ticker={t.ticker} color={t.color} logoUrl={t.logoUrl} size={44} />
-                        <Text style={styles.tickerName} numberOfLines={1}>
-                          {t.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={styles.stocksEmptyHint}>
-                    Invierte en las empresas que conoces, desde $1, sin abrir cuenta en EE.UU.
-                  </Text>
-                </>
-              )}
-
+            </TouchableOpacity>
+            {hasSavings && (
               <TouchableOpacity
-                style={styles.ctaOutline}
-                onPress={onExplorarAcciones}
+                style={styles.ctaSecondary}
+                onPress={() => setWithdrawSheet(true)}
                 activeOpacity={0.85}
               >
-                <Text style={styles.ctaOutlineText}>
-                  {hasStocks ? 'Explorar más acciones' : 'Explorar acciones'}
-                </Text>
-                <Icon name="arrow-right" size={16} color={colors.primaryDark} />
+                <Text style={styles.ctaSecondaryText}>Retirar</Text>
               </TouchableOpacity>
-            </View>
-          </>
+            )}
+          </View>
         )}
 
-        {/* Partnership: real logo, nominative use — Ondo is the issuer of both
-            USDY (savings backing) and the tokenized stocks, so this row
-            belongs to the product cards above it, not to the history. */}
+        {/* Issuer geo-gate: entry hidden, money always reachable. */}
+        {!isYieldVariant && (
+          <View style={[styles.geoNotice, styles.geoNoticeStandalone]}>
+            <Icon name="globe" size={14} color={colors.text.secondary} />
+            <Text style={styles.geoNoticeText}>
+              El rendimiento no está disponible en tu país por requisitos
+              del emisor (Ondo Finance). Tu dinero siempre es tuyo: puedes
+              recibirlo, enviarlo y retirarlo cuando quieras.
+            </Text>
+          </View>
+        )}
+
+        {/* ONE education door instead of inline sections: everything
+            (respaldo, tasa, costos, retiros) lives in ProtectedSavings. */}
+        <TouchableOpacity
+          style={styles.howItWorksRow}
+          onPress={() => navigation.navigate('ProtectedSavings')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.howItWorksIconWrap}>
+            <Icon name="shield" size={16} color={colors.primaryDark} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.howItWorksTitle}>¿Cómo funciona?</Text>
+            <Text style={styles.howItWorksSub}>
+              {isYieldVariant
+                ? 'Respaldo, rendimiento y costos — sin letra chica'
+                : 'Respaldo verificable y costos — sin letra chica'}
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={18} color={colors.text.light} />
+        </TouchableOpacity>
+
+        {/* Partnership: real logo, nominative use. */}
         <View style={styles.partnerRow}>
           <Text style={styles.partnerText}>En alianza con</Text>
           <Image source={OndoLogo} style={styles.partnerLogo} />
@@ -466,7 +396,7 @@ export const AhorrosScreen = () => {
           {movements.length > 0 && (
             <TouchableOpacity
               style={styles.verTodosBtn}
-              onPress={() => navigation.navigate('AhorrosMovimientos')}
+              onPress={() => navigation.navigate('SavingsMovements')}
               activeOpacity={0.7}
             >
               <Text style={styles.verTodosText}>Ver todos</Text>
@@ -489,45 +419,19 @@ export const AhorrosScreen = () => {
           </View>
         )}
 
-        {/* Education (savings-focused; stocks education lives in its flow) */}
-        <Text style={styles.sectionTitle}>¿Cómo funciona?</Text>
-        {EDUCATION_CARDS.map((c) => (
-          <View key={c.icon} style={styles.eduCard}>
-            <View style={styles.eduIconWrap}>
-              <Icon name={c.icon} size={18} color={colors.primaryDark} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.eduTitle}>{c.title}</Text>
-              <Text style={styles.eduBody}>{c.body}</Text>
-            </View>
-          </View>
-        ))}
-
-        {/* Honest footer: floating rate, market risk for stocks, no guarantees */}
-        <View style={styles.disclaimer}>
-          <Icon name="info" size={14} color={colors.accent} />
-          <Text style={styles.disclaimerText}>
-            El rendimiento del ahorro proviene de bonos del Tesoro de EE.UU. vía USDY (Ondo
-            Finance) y varía día a día; no es una tasa fija ni garantizada.
-            {stocks.enabled
-              ? ' Las acciones pueden subir o bajar de valor — invierte solo lo que puedas mantener.'
-              : ''}{' '}
-            Verás todos los costos antes de confirmar cualquier operación.
-          </Text>
-        </View>
       </ScrollView>
 
       <RouteSheet
-        visible={ahorrarSheet}
+        visible={saveSheet}
         title="¿Desde dónde quieres ahorrar?"
-        options={ahorrarOptions}
-        onClose={() => setAhorrarSheet(false)}
+        options={saveOptions}
+        onClose={() => setSaveSheet(false)}
       />
       <RouteSheet
-        visible={retirarSheet}
+        visible={withdrawSheet}
         title="¿A dónde quieres retirar?"
-        options={retirarOptions}
-        onClose={() => setRetirarSheet(false)}
+        options={withdrawOptions}
+        onClose={() => setWithdrawSheet(false)}
       />
     </View>
   );
@@ -546,9 +450,10 @@ const styles = StyleSheet.create({
   heroLabel: { fontSize: 13, color: colors.white, opacity: 0.85 },
   heroAmount: { fontSize: 40, fontWeight: 'bold', color: colors.white, marginTop: 4 },
   heroSplit: { fontSize: 13, color: colors.white, opacity: 0.9, marginTop: 6, fontWeight: '600' },
+  heroRate: { fontSize: 13, fontWeight: '600', color: colors.white, opacity: 0.95, marginTop: 6 },
   heroTickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   heroTicker: { fontSize: 13, color: colors.white, opacity: 0.9 },
-  heroEmptyHint: { fontSize: 13, color: colors.white, opacity: 0.85, marginTop: 8 },
+  heroEmptyHint: { fontSize: 13, color: colors.white, opacity: 0.85, marginTop: 8, textAlign: 'center', paddingHorizontal: 24 },
 
   scrollContent: { padding: 16, paddingBottom: 40 },
 
@@ -574,39 +479,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
-  productRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  productLogoWrap: { width: 44, height: 44 },
-  stocksLogoWrap: {
-    borderRadius: 22,
-    backgroundColor: colors.secondaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  productLogo: { width: 44, height: 44, borderRadius: 22 },
-  productName: { fontSize: 17, fontWeight: '700', color: colors.text.primary },
-  productSymbol: { fontSize: 13, color: colors.text.secondary, marginTop: 1 },
-  marketStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
-  marketStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primaryDark },
-  marketStatusDotClosed: { backgroundColor: colors.text.light },
-  marketStatusText: { fontSize: 11, fontWeight: '600', color: colors.text.secondary },
-  productValue: { fontSize: 17, fontWeight: '700', color: colors.text.primary },
-  productDayChange: { fontSize: 12, fontWeight: '600', color: colors.primaryDark, marginTop: 1 },
-  dayChangeNegative: { color: colors.error.icon },
-
-  ratePill: {
-    backgroundColor: colors.primaryLight,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  ratePillText: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
-
-  rateLineRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
-  rateDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primaryDark },
-  rateLineText: { fontSize: 13, fontWeight: '600', color: colors.primaryDark },
-
-  backedLine: { fontSize: 12, color: colors.text.secondary, marginTop: 12, lineHeight: 17 },
-
   geoNotice: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -617,7 +489,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutralDark,
   },
   geoNoticeText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.text.secondary },
-  ctaRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  geoNoticeStandalone: { marginTop: 0, marginBottom: 16 },
+  // Standalone action row (account grammar — no product card around it).
+  ctaRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   ctaPrimary: {
     flex: 1,
     flexDirection: 'row',
@@ -640,59 +514,28 @@ const styles = StyleSheet.create({
   ctaSecondaryText: { color: colors.text.primary, fontSize: 15, fontWeight: '700' },
   ctaDisabled: { opacity: 0.5 },
   ctaDisabledText: { color: colors.text.light },
-  ctaOutline: {
+
+  howItWorksRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderWidth: 1.5,
-    borderColor: colors.primaryDark,
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginTop: 14,
+    gap: 12,
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    marginBottom: 12,
   },
-  ctaOutlineText: { color: colors.primaryDark, fontSize: 15, fontWeight: '700' },
-
-  availableRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
-  availableText: { fontSize: 12, color: colors.text.secondary, flex: 1 },
-
-  tickerStrip: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-    paddingHorizontal: 2,
-  },
-  tickerItem: { alignItems: 'center', width: 56 },
-  tickerName: { fontSize: 10, color: colors.text.secondary, marginTop: 5 },
-  stocksEmptyHint: {
-    fontSize: 12,
-    color: colors.text.secondary,
-    marginTop: 14,
-    lineHeight: 17,
-  },
-
-  positionsList: { marginTop: 8 },
-  positionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.surfaceMuted,
-  },
-  tickerCircleSmall: {
+  howItWorksIconWrap: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: colors.secondaryDark,
+    backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tickerCircleSmallText: { color: colors.white, fontSize: 9, fontWeight: '800' },
-  positionTicker: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  positionName: { fontSize: 11, color: colors.text.secondary },
-  positionValue: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  positionChange: { fontSize: 11, fontWeight: '600', color: colors.primaryDark },
+  howItWorksTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  howItWorksSub: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
 
   movementsEmpty: {
     alignItems: 'center',
@@ -729,35 +572,4 @@ const styles = StyleSheet.create({
   partnerText: { fontSize: 12, color: colors.text.light },
   partnerLogo: { width: 16, height: 16, borderRadius: 4 },
   partnerBrand: { fontSize: 12, fontWeight: '700', color: colors.text.secondary },
-
-  eduCard: {
-    flexDirection: 'row',
-    gap: 12,
-    backgroundColor: colors.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    marginBottom: 10,
-  },
-  eduIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  eduTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  eduBody: { fontSize: 13, color: colors.text.secondary, marginTop: 3, lineHeight: 18 },
-
-  disclaimer: {
-    flexDirection: 'row',
-    gap: 8,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 6,
-  },
-  disclaimerText: { flex: 1, fontSize: 11, color: colors.text.secondary, lineHeight: 16 },
 });

@@ -6,7 +6,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
-import { AhorroMovement } from '../hooks/useAhorrosPortfolio';
+import { SavingsMovement } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 
 const MOVEMENT_ICONS: Record<string, string> = {
@@ -21,7 +21,7 @@ const formatMovementDate = (iso: string) =>
   new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
 
 interface Props {
-  movement: AhorroMovement;
+  movement: SavingsMovement;
   topBorder?: boolean;
 }
 

@@ -2470,6 +2470,7 @@ export const TradeChatScreen: React.FC = () => {
               renderItem={({ item, index }) => {
                 const getAccountTypeLabel = (type: string) => {
                   const labels: { [key: string]: string } = {
+                    // Display copy (bank account types) — stays Spanish.
                     'ahorro': 'Ahorros',
                     'corriente': 'Corriente',
                     'nomina': 'Nómina',

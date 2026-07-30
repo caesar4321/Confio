@@ -6,6 +6,7 @@ import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navig
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 
 type ReferralActionRouteProp = RouteProp<MainStackParamList, 'ReferralActionPrompt'>;
 
@@ -13,38 +14,53 @@ export const ReferralActionPromptScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const route = useRoute<ReferralActionRouteProp>();
   const event = route.params?.event || 'top_up';
+  // Phase-out (2026-07-30): with cUSD deposits paused, the milestone rail is
+  // the USDT-BSC top-up and receive. Copy softened to "$20" — the reward
+  // criteria vs the new rail is a flagged product decision, not a UI one.
+  const { savings: savingsInfo } = useSavingsPortfolio();
+  const paused = savingsInfo.cusdDepositsPaused;
+  const receiveDest = savingsInfo.enabled ? ('cusd_plus' as const) : ('usdt' as const);
 
   const stepOptions = useMemo(() => ({
     top_up: {
       title: 'Desbloquea tu bono de 5 $CONFIO',
       steps: [
         'Tienes 5 $CONFIO bloqueados en tu cuenta',
-        'Haz una recarga de 20 cUSD o más para activarlos',
+        paused
+          ? 'Haz una recarga de $20 o más para activarlos'
+          : 'Haz una recarga de 20 cUSD o más para activarlos',
         '¡Listo! El bono se desbloquea al instante',
       ],
-      requirement:
-        'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 cUSD para desbloquearlo y usarlo.',
+      requirement: paused
+        ? 'El bono está reservado para ti. Solo necesitas completar tu primera recarga de $20 o más para desbloquearlo y usarlo.'
+        : 'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 cUSD para desbloquearlo y usarlo.',
       actions: [
         {
           label: 'Recargar en Confío',
           icon: 'credit-card',
           onPress: () =>
-            navigation.navigate('TopUp'),
+            paused
+              ? navigation.navigate('TopUp', { destination: 'cusd_plus' })
+              : navigation.navigate('TopUp'),
         },
         {
-          label: 'Depositar cUSD',
+          label: paused ? 'Recibir dólares' : 'Depositar cUSD',
           icon: 'download',
           onPress: () =>
-            navigation.navigate('USDCDeposit', {
-              tokenType: 'usdc',
-            }),
+            paused
+              ? navigation.navigate('ReceiveSavings', { destination: receiveDest })
+              : navigation.navigate('USDCDeposit', {
+                  tokenType: 'usdc',
+                }),
         },
       ],
       ctaLabel: 'Ver opciones de depósito',
       action: () =>
-        navigation.navigate('USDCDeposit', {
-          tokenType: 'cusd',
-        }),
+        paused
+          ? navigation.navigate('ReceiveSavings', { destination: receiveDest })
+          : navigation.navigate('USDCDeposit', {
+              tokenType: 'cusd',
+            }),
     },
     conversion_usdc_to_cusd: {
       title: 'Depósito convertido a cUSD',
@@ -53,7 +69,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
       ctaLabel: 'Ir a Convertir',
       action: () => navigation.navigate('USDCConversion'),
     },
-  }), [navigation]);
+  }), [navigation, paused, receiveDest]);
 
   const nextSteps = stepOptions[event as keyof typeof stepOptions] || stepOptions.top_up;
 

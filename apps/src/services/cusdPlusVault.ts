@@ -4,7 +4,7 @@
 //   - direct USDT-BSC rail (user already holds USDT on BSC)
 //   - conversion flow's final leg (cUSD → burn → Allbridge → USDT-BSC → here)
 // The user signs every transaction with their own EVM key (getActiveEvmWallet);
-// Confío only sponsors gas (server-side dusting). Nothing custodial here.
+// Confío only sponsors gas (EIP-7702 sponsored batches). Nothing custodial here.
 //
 // Sizing (measured on a BSC mainnet fork against the real Ondo IM):
 //   subscribeAndMint ≈ 599k gas, approve ≈ 46k. sendCall estimates ×1.3.
@@ -70,7 +70,8 @@ const currentAllowance = async (
  *
  * Preferred rail (server-flagged): ONE user signature over the whole batch,
  * executed sponsor-paid via EIP-7702 — the user's address needs zero BNB.
- * Fallback rail: the original two self-signed legacy txs (gas dusting).
+ * Fallback rail: two self-signed legacy txs (needs the user's OWN BNB —
+ * the dust rail was removed 2026-07-30).
  * Idempotent-ish: skips the approve when allowance already covers the amount.
  */
 export const subscribeUsdtToSavings = async (
@@ -115,7 +116,7 @@ export const subscribeUsdtToSavings = async (
       };
     } catch (e) {
       // Sponsored rail down ≠ savings down: fall back to the self-signed
-      // legacy path (needs gas dust; the server keeps that rail armed).
+      // legacy path (works only with user-funded BNB at the address).
       console.warn('[cusdPlusVault] sponsored subscribe failed, using legacy path', e);
     }
   }
@@ -140,6 +141,54 @@ export const subscribeUsdtToSavings = async (
   });
 
   return { approveTx, mintTx: mintRec.transactionHash, recipient: from };
+};
+
+/**
+ * Send raw wallet USDT to any BSC address — the exit for landed-but-not-
+ * minted money and for geo-ineligible users' "Confío Dollar" balance.
+ *
+ * Preferred rail: ONE user signature, sponsor-paid via EIP-7702 (policy
+ * allows the USDT transfer selector since 2026-07-30) — the user's address
+ * needs zero BNB. Fallback: a self-signed legacy transfer (works only with
+ * user-funded BNB at the address; the dust rail was removed 2026-07-30).
+ */
+export const transferUsdt = async (params: {
+  /** Recipient BSC address (0x…), unrestricted — exits are never gated. */
+  to: string;
+  /** Amount in 18-dp base units. */
+  amountWei: bigint;
+  wallet?: DerivedEvmWallet;
+}): Promise<{ txHash: string }> => {
+  installBscServerTransport();
+  const wallet = params.wallet ?? (await getActiveEvmWallet());
+  const data = encodeCall('transfer(address,uint256)', [
+    { type: 'address', value: params.to },
+    { type: 'uint', value: params.amountWei },
+  ]);
+
+  const sponsored = await fetchSponsored7702Params();
+  if (sponsored.enabled && sponsored.delegateAddress) {
+    try {
+      const calls: BatchCall[] = [{ to: USDT_BSC, valueWei: 0n, data }];
+      const rec = await executeSponsoredBatch({
+        wallet,
+        calls,
+        delegateAddress: sponsored.delegateAddress,
+      });
+      return { txHash: rec.transactionHash };
+    } catch (e) {
+      console.warn('[cusdPlusVault] sponsored transfer failed, using legacy path', e);
+    }
+  }
+
+  const rec: BscReceipt = await sendCall({
+    from: wallet.address,
+    privKeyHex: wallet.privKeyHex,
+    to: USDT_BSC,
+    data,
+    gasLimit: 80_000n,
+  });
+  return { txHash: rec.transactionHash };
 };
 
 /** Vault share balance (ERC20 balanceOf) for an owner address. */

@@ -18,13 +18,13 @@ import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
 import { SellScreen } from '../screens/SellScreen';
-import { AhorrosScreen } from '../screens/AhorrosScreen';
-import { ConvertAhorroScreen } from '../screens/ConvertAhorroScreen';
-import { RetirarAhorroScreen } from '../screens/RetirarAhorroScreen';
-import { AhorrosMovimientosScreen } from '../screens/AhorrosMovimientosScreen';
+import { SavingsScreen } from '../screens/SavingsScreen';
+import { ConvertSavingsScreen } from '../screens/ConvertSavingsScreen';
+import { WithdrawSavingsScreen } from '../screens/WithdrawSavingsScreen';
+import { SavingsMovementsScreen } from '../screens/SavingsMovementsScreen';
 import { ReceiveSavingsScreen } from '../screens/ReceiveSavingsScreen';
 import { SendUsdtScreen } from '../screens/SendUsdtScreen';
-import { AccionesListScreen } from '../screens/AccionesListScreen';
+import { StocksListScreen } from '../screens/StocksListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { BuyStockScreen } from '../screens/BuyStockScreen';
 import { SellStockScreen } from '../screens/SellStockScreen';
@@ -265,29 +265,29 @@ export const MainNavigator = () => {
           }}
         />
         <Stack.Screen
-          name="Ahorros"
-          component={AhorrosScreen}
+          name="Savings"
+          component={SavingsScreen}
           options={{
             headerShown: false,
           }}
         />
         <Stack.Screen
-          name="ConvertAhorro"
-          component={ConvertAhorroScreen}
+          name="ConvertSavings"
+          component={ConvertSavingsScreen}
           options={{
             headerShown: false,
           }}
         />
         <Stack.Screen
-          name="RetirarAhorro"
-          component={RetirarAhorroScreen}
+          name="WithdrawSavings"
+          component={WithdrawSavingsScreen}
           options={{
             headerShown: false,
           }}
         />
         <Stack.Screen
-          name="AhorrosMovimientos"
-          component={AhorrosMovimientosScreen}
+          name="SavingsMovements"
+          component={SavingsMovementsScreen}
           options={{
             headerShown: false,
           }}
@@ -307,8 +307,8 @@ export const MainNavigator = () => {
           }}
         />
         <Stack.Screen
-          name="AccionesList"
-          component={AccionesListScreen}
+          name="StocksList"
+          component={StocksListScreen}
           options={{
             headerShown: false,
           }}

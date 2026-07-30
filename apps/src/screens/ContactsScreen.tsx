@@ -6,7 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { RouteSheet } from '../components/RouteSheet';
 import { AnalyticsService } from '../services/analyticsService';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import USDTLogo from '../assets/png/USDT.png';
 import Icon from 'react-native-vector-icons/Feather';
@@ -611,12 +611,17 @@ export const ContactsScreen = () => {
   );
 
   const [showReceiveSelection, setShowReceiveSelection] = useState(false);
-  // Geo-eligibility (Ondo): savings ENTRIES hide in restricted regions;
-  // the USDT send option is an EXIT and stays visible whenever the user
-  // holds savings (exits are never gated).
-  const { savings: ahorroSavings } = useAhorrosPortfolio();
-  const savingsEntryAllowed = ahorroSavings.enabled;
-  const savingsExitVisible = ahorroSavings.enabled || ahorroSavings.balanceUsd > 0;
+  // Geo-eligibility (Ondo) + phase-out (2026-07-30): since the deposit
+  // pause, EVERYONE can receive USDT-BSC — the server geo-gates only the
+  // MINT (ineligible users keep it raw as "Confío Dollar"), so the receive
+  // option shows for all; copy varies by what the money becomes. The USDT
+  // send option is an EXIT and stays visible whenever the user holds
+  // anything (exits are never gated).
+  const { savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd } = useSavingsPortfolio();
+  const cusdDepositsPaused = savingsInfo.cusdDepositsPaused;
+  const savingsEntryAllowed = savingsInfo.enabled || cusdDepositsPaused;
+  const savingsExitVisible =
+    savingsInfo.enabled || savingsInfo.balanceUsd > 0 || walletUsdtUsd > 0;
 
   const handleReceiveWithAddress = () => {
     setShowReceiveSelection(true);
@@ -1513,6 +1518,10 @@ export const ContactsScreen = () => {
           title="¿Qué quieres recibir?"
           onClose={() => setShowReceiveSelection(false)}
           options={[
+            // Algorand deposit UI hides with the phase-out (server-flippable
+            // via cusdDepositsPaused); DepositScreen stays registered for
+            // support deep links and pending deposits.
+            ...(!cusdDepositsPaused ? [
             {
               icon: 'dollar-sign',
               image: cUSDLogo,
@@ -1522,16 +1531,20 @@ export const ContactsScreen = () => {
                 setShowReceiveSelection(false);
                 navigation.navigate('USDCDeposit', {});
               },
-            },
+            }] : []),
             ...(savingsEntryAllowed ? [
             {
               icon: 'download',
               image: USDTLogo,
               title: 'Tether · USDT',
-              subtitle: 'Red BNB Smart Chain (BEP-20) · directo a tu ahorro (Confío Dollar+)',
+              subtitle: savingsInfo.enabled
+                ? 'Red BNB Smart Chain (BEP-20) · directo a tu ahorro (Confío Dollar+)'
+                : 'Red BNB Smart Chain (BEP-20) · directo a tu Confío Dollar',
               onPress: () => {
                 setShowReceiveSelection(false);
-                navigation.navigate('ReceiveSavings');
+                navigation.navigate('ReceiveSavings', {
+                  destination: savingsInfo.enabled ? 'cusd_plus' : 'usdt',
+                });
               },
             }] : []),
             // Demand probes stay VISIBLE everywhere: they measure rail-level
@@ -1593,7 +1606,9 @@ export const ContactsScreen = () => {
               icon: 'send',
               image: USDTLogo,
               title: 'Tether · USDT',
-              subtitle: 'Red BNB Smart Chain (BEP-20) · desde tu ahorro (Confío Dollar+)',
+              subtitle: savingsInfo.enabled
+                ? 'Red BNB Smart Chain (BEP-20) · desde tu saldo disponible'
+                : 'Red BNB Smart Chain (BEP-20) · desde tu Confío Dollar',
               onPress: () => {
                 setShowSendTokenSelection(false);
                 navigation.navigate('SendUsdt');

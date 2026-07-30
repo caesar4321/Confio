@@ -27,17 +27,18 @@ import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useGmMarket, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
-export const AccionesListScreen = () => {
+export const StocksListScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
   const { session, stocks, loading } = useGmMarket();
-  const { savings, stocks: myStocks } = useAhorrosPortfolio();
+  const { savings, stocks: myStocks } = useSavingsPortfolio();
   const [search, setSearch] = useState('');
 
   // Every row carries BOTH numbers with the app-wide hierarchy: the big
@@ -114,7 +115,7 @@ export const AccionesListScreen = () => {
         <View style={styles.header}>
           <Svg style={StyleSheet.absoluteFill}>
             <Defs>
-              <SvgLinearGradient id="accionesField" x1="0" y1="0" x2="0" y2="1">
+              <SvgLinearGradient id="stocksField" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0" stopColor={colors.primary} />
                 <Stop offset="1" stopColor={colors.primaryDark} />
               </SvgLinearGradient>
@@ -130,6 +131,27 @@ export const AccionesListScreen = () => {
             <Text style={styles.headerTitle}>Acciones de EE.UU.</Text>
             <View style={styles.headerIconBtn} />
           </View>
+          {/* Portfolio header (moved here with the Ahorros/Acciones split):
+              the invested total + day P&L — red days are honest HERE, never
+              on the home or the dollar account. ≥ $0.01 rule via
+              formatUsdDeltaAbs; hidden entirely with no positions. */}
+          {myStocks.totalUsd > 0 && (
+            <View style={styles.portfolioHero}>
+              <Text style={styles.portfolioLabel}>Tu inversión</Text>
+              <Text style={styles.portfolioAmount}>{fmtUsd(myStocks.totalUsd)}</Text>
+              {formatUsdDeltaAbs(myStocks.earnedTodayUsd) && (
+                <Text
+                  style={[
+                    styles.portfolioDelta,
+                    myStocks.earnedTodayUsd < 0 && styles.portfolioDeltaDown,
+                  ]}
+                >
+                  hoy {myStocks.earnedTodayUsd >= 0 ? '+' : '−'}
+                  {formatUsdDeltaAbs(myStocks.earnedTodayUsd)}
+                </Text>
+              )}
+            </View>
+          )}
           <View style={styles.headerMetaRow}>
             <View style={styles.marketChip}>
               <View
@@ -187,6 +209,15 @@ export const AccionesListScreen = () => {
               )}
             </View>
 
+            {/* Partner attribution ABOVE the fold: with 400+ rows, a footer
+                placement is effectively invisible. One slim line here shows
+                on first paint and scrolls away with the list — visibility
+                without permanently reserving screen. */}
+            <View style={styles.partnerRowTop}>
+              <Text style={styles.partnerText}>En alianza con</Text>
+              <Image source={OndoLogo} style={styles.partnerLogo} />
+              <Text style={styles.partnerBrand}>Ondo Finance</Text>
+            </View>
           </View>
         }
         ListEmptyComponent={
@@ -206,15 +237,13 @@ export const AccionesListScreen = () => {
         }
         ListFooterComponent={
           <View>
-            <View style={styles.partnerRow}>
-              <Text style={styles.partnerText}>En alianza con</Text>
-              <Image source={OndoLogo} style={styles.partnerLogo} />
-              <Text style={styles.partnerBrand}>Ondo Finance</Text>
-            </View>
+            {/* Attribution lives in the list header (above the fold); the
+                footer keeps only the risk disclaimer + a closing mention. */}
             <Text style={styles.footerDisclaimer}>
               Acciones tokenizadas respaldadas 1:1 por acciones reales en EE.UU. Los dividendos
               se reinvierten automáticamente. Pueden subir o bajar de valor — invierte solo lo
-              que puedas mantener. Disponible en jurisdicciones habilitadas.
+              que puedas mantener. Disponible en jurisdicciones habilitadas. En alianza con
+              Ondo Finance.
             </Text>
           </View>
         }
@@ -231,6 +260,12 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
+  portfolioHero: { alignItems: 'center', marginTop: 14 },
+  portfolioLabel: { fontSize: 12, color: colors.white, opacity: 0.85 },
+  portfolioAmount: { fontSize: 32, fontWeight: 'bold', color: colors.white, marginTop: 2 },
+  portfolioDelta: { fontSize: 13, fontWeight: '600', color: colors.white, opacity: 0.9, marginTop: 4 },
+  // red-200 — legible red on the emerald gradient (error.icon is too dark)
+  portfolioDeltaDown: { color: colors.error.border, opacity: 1 },
   headerMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -298,12 +333,15 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingVertical: 48, gap: 10 },
   emptyText: { fontSize: 14, color: colors.text.secondary },
 
-  partnerRow: {
+  // Slim one-liner between search and list: seen on first paint, scrolls
+  // away with the content — visibility without reserving screen.
+  partnerRowTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    marginTop: 16,
+    marginTop: 2,
+    marginBottom: 10,
   },
   partnerText: { fontSize: 12, color: colors.text.light },
   partnerLogo: { width: 16, height: 16, borderRadius: 4 },

@@ -1,13 +1,14 @@
-// Enviar USDT (BEP-20) — the savings exit for crypto-native users, in the
-// SendWithAddress house grammar (compact instrument header, balance card,
-// auto-convert banner, amount + currency badge, quick amounts, paste/scan
-// address row with live validation, fee row, footer button).
+// Enviar USDT (BEP-20) — in the SendWithAddress house grammar (compact
+// instrument header, balance card, amount + currency badge, quick amounts,
+// paste/scan address row with live validation, fee row, footer button).
 //
-// Auto-converts from cUSD+ in ONE transaction: the vault's
-// redeemToUsdt(shares, minOut, to) pays USDT to ANY address directly — no
-// intermediate balance, no bridge. Confío fee: NONE (Julian, 2026-07-05).
-// Amounts display in USD only (decision A: share math stays invisible).
-// Execution wires at vault deploy — handleSend is a stub until then.
+// Phase 1.5 (2026-07-30): sends RAW WALLET USDT — the guaranteed exit for
+// geo-ineligible users whose deposits stay unminted ("Confío Dollar"), and
+// for any landed-but-not-minted money. Sponsor-paid via EIP-7702 (the
+// policy carries the USDT transfer selector; user needs zero BNB), with a
+// self-signed legacy fallback for users holding their own BNB. The
+// vault-redeem send (cUSD+ → redeemToUsdt in one tx) is the Phase-2
+// follow-up. Confío fee: NONE (Julian, 2026-07-05).
 
 import React, { useMemo, useState } from 'react';
 import {
@@ -18,6 +19,7 @@ import {
   TextInput,
   ScrollView,
   Image,
+  Alert,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,7 +29,7 @@ import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { AddressScannerModal } from '../components/AddressScannerModal';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import USDTLogo from '../assets/png/USDT.png';
 
 const USDT_COLOR = '#26A17B'; // Tether brand teal (nominative use)
@@ -36,20 +38,22 @@ const QUICK_AMOUNTS = ['10.00', '50.00', '100.00'];
 
 export const SendUsdtScreen = () => {
   const navigation = useNavigation();
-  const { savings } = useAhorrosPortfolio();
+  const { usdtBalanceUsd, savings } = useSavingsPortfolio();
 
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
   const [showScanner, setShowScanner] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [sending, setSending] = useState(false);
 
   const amountNum = useMemo(() => {
     const v = parseFloat((amount || '0').replace(',', '.'));
     return Number.isFinite(v) ? v : 0;
   }, [amount]);
 
-  const available = savings.balanceUsd;
+  // Raw wallet USDT only this phase; the vault position exits via Retirar.
+  const available = usdtBalanceUsd;
   const isValidAddress = /^0x[0-9a-fA-F]{40}$/.test(destination.trim());
 
   const formatFixedFloor = (value: number, decimals = 2) => {
@@ -73,7 +77,7 @@ export const SendUsdtScreen = () => {
     if (floored > 0) setAmount(String(floored));
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!amountNum || amountNum < MIN_SEND_USD) {
       setErrorMessage(`El mínimo para enviar es $${MIN_SEND_USD}.`);
       setShowError(true);
@@ -89,13 +93,51 @@ export const SendUsdtScreen = () => {
       return;
     }
     if (amountNum > available) {
-      setErrorMessage('Saldo insuficiente en tu ahorro.');
+      setErrorMessage('Saldo insuficiente.');
       setShowError(true);
       return;
     }
-    // TODO(cusd+ vault deploy): shares = usd / pPlus (eth_call) →
-    // vault.redeemToUsdt(shares, minUsdtOut, destination) signed by
-    // evmWallet, gas-dusted → Movimientos entry. One transaction, no fee.
+    if (sending) return;
+    setSending(true);
+    setShowError(false);
+    try {
+      // Sponsored-first (EIP-7702, user needs zero BNB) with self-signed
+      // legacy fallback — all inside transferUsdt. Live balance re-read
+      // first so MAX sends the exact on-chain amount without reverting.
+      const { installBscServerTransport } = await import('../services/bscServerRpc');
+      installBscServerTransport();
+      const { getActiveEvmWallet } = await import('../services/secureDeterministicWallet');
+      const { selector, encodeAddress, bscEthCall } = await import('../services/evmWallet');
+      const { transferUsdt, USDT_BSC } = await import('../services/cusdPlusVault');
+      const wallet = await getActiveEvmWallet();
+      const balHex = await bscEthCall(
+        USDT_BSC,
+        selector('balanceOf(address)') + encodeAddress(wallet.address),
+      );
+      const balWei = BigInt(balHex === '0x' ? '0x0' : balHex);
+      // Cent precision from the text input, clamped to the live balance.
+      let amountWei = BigInt(Math.round(amountNum * 100)) * 10n ** 16n;
+      if (amountWei > balWei) amountWei = balWei;
+      if (amountWei <= 0n) {
+        throw new Error('Saldo insuficiente.');
+      }
+      await transferUsdt({ to: destination.trim(), amountWei, wallet });
+      Alert.alert(
+        'Enviado',
+        `Enviaste $${formatFixedFloor(Number(amountWei / 10n ** 16n) / 100, 2)} USDT por la red BNB Smart Chain.`,
+        [{ text: 'Listo', onPress: () => navigation.goBack() }],
+      );
+    } catch (e: any) {
+      // Honest, retryable: nothing left the wallet if the relay refused it.
+      setErrorMessage(
+        e?.message === 'Saldo insuficiente.'
+          ? 'Saldo insuficiente.'
+          : 'No se pudo enviar. Revisa tu conexión e inténtalo de nuevo.',
+      );
+      setShowError(true);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -120,21 +162,25 @@ export const SendUsdtScreen = () => {
       </SafeAreaView>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Available Balance */}
+        {/* Available Balance — raw wallet USDT this phase */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
-          <Text style={styles.balanceAmount}>
-            ${formatFixedFloor(available, 2)} en tu ahorro
-          </Text>
+          <Text style={styles.balanceAmount}>${formatFixedFloor(available, 2)}</Text>
           <Text style={styles.balanceMin}>Mínimo para enviar: ${MIN_SEND_USD}.00</Text>
         </View>
 
-        {/* Auto-convert banner — the USDC screen's grammar, savings edition */}
         <InlineBanner
           variant="info"
-          message="Tu saldo se muestra en tu ahorro (Confío Dollar+). Al enviar, se convierte automáticamente a USDT y se envía por la red BNB Smart Chain (BEP-20)."
+          message="Se envía como USDT por la red BNB Smart Chain (BEP-20). Asegúrate de que el destinatario acepte esa red."
           style={{ marginHorizontal: 16, marginTop: 16 }}
         />
+        {savings.balanceUsd > 0 && (
+          <InlineBanner
+            variant="info"
+            message="Tu ahorro (Confío Dollar+) no se envía desde aquí — retíralo primero desde la pantalla de ahorro."
+            style={{ marginHorizontal: 16, marginTop: 10 }}
+          />
+        )}
 
         {showError && (
           <InlineBanner
@@ -250,9 +296,9 @@ export const SendUsdtScreen = () => {
       {/* Send Button */}
       <View style={[styles.footer, { paddingBottom: 20 }]}>
         <Button
-          title={amountNum > available ? 'Saldo insuficiente' : 'Enviar'}
+          title={sending ? 'Enviando…' : amountNum > available ? 'Saldo insuficiente' : 'Enviar'}
           onPress={handleSend}
-          disabled={!amount || !destination || amountNum > available}
+          disabled={sending || !amount || !destination || amountNum > available}
           accessibilityLabel="Enviar"
           icon={<Icon name="send" size={20} color="#ffffff" />}
           style={{ backgroundColor: USDT_COLOR }}

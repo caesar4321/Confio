@@ -36,7 +36,7 @@ import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
 import { technicalFontFamily } from '../utils/fontFamily';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { getVaultShares, redeemSavingsToUsdt } from '../services/cusdPlusVault';
 import { getActiveEvmWallet } from '../services/secureDeterministicWallet';
@@ -104,7 +104,7 @@ export const SellScreen = () => {
     // (redeemToUsdt pays Guardarian's deposit address — no intermediate hop).
     // Default mode sells USDC-Algorand from the day-to-day balance.
     const isSavings = route.params?.destination === 'cusd_plus';
-    const { savings } = useAhorrosPortfolio();
+    const { savings } = useSavingsPortfolio();
     const savingsBalanceUsd = savings?.balanceUsd ?? 0;
     const { data: savingsParamsData } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavings });
     const vaultAddress: string = savingsParamsData?.cusdPlusConvertParams?.vaultAddress || '';

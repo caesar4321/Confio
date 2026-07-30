@@ -24,6 +24,17 @@ const IN_FLIGHT = gql`
   }
 `;
 
+// Courtesy-skip source: the server enforces the mint geo-gate (phone + IP)
+// on both relay rails regardless — this just avoids pointless signed
+// attempts (and their error noise) for users the gate will refuse.
+const ELIGIBILITY = gql`
+  query SavingsMintEligibility {
+    cusdPlusSummary {
+      savingsEnabled
+    }
+  }
+`;
+
 const ADVANCE = gql`
   mutation AdvanceCusdPlusConversion($conversionId: ID!, $newStatus: String!, $txRef: String) {
     advanceCusdPlusConversion(conversionId: $conversionId, newStatus: $newStatus, txRef: $txRef) {
@@ -49,6 +60,16 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
   running = true;
   try {
     const { apolloClient } = await import('../apollo/client');
+    // Geo-ineligible users keep their arrived USDT raw ("Confío Dollar") —
+    // don't mint. Cache-first: the summary is polled by the portfolio hook;
+    // an unknown answer falls through to attempting (server still gates).
+    try {
+      const { data: elig } = await apolloClient.query({
+        query: ELIGIBILITY,
+        fetchPolicy: 'cache-first',
+      });
+      if (elig?.cusdPlusSummary?.savingsEnabled === false) return;
+    } catch {}
     const { data } = await apolloClient.query({
       query: IN_FLIGHT,
       fetchPolicy: 'network-only',
@@ -69,7 +90,7 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
           variables: { conversionId: row.conversionId, newStatus: 'COMPLETED', txRef: mintTx },
         });
       } catch (e) {
-        // One row failing (e.g. gas not yet dusted) must not block the rest;
+        // One row failing (e.g. sponsor rail briefly down) must not block the rest;
         // the next foreground retries. Never throws to the caller.
         console.warn('[savingsLegC] mint resume failed for', row.conversionId, e);
       }

@@ -3,7 +3,7 @@
 // Same "retry on every re-foreground" contract as the USDC→cUSD auto-swap:
 // if the app closed after a conversion's USDT arrived on BSC but before the
 // mint, the next foreground completes leg C. Mounted by the savings surfaces
-// (AhorrosScreen) — scoped to when the user is in the savings context, not a
+// (SavingsScreen) — scoped to when the user is in the savings context, not a
 // global listener.
 
 import { useEffect, useRef } from 'react';

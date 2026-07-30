@@ -400,6 +400,10 @@ export const SellScreen = () => {
   };
 
   if (!isKoyweCountry) {
+    // Rendered INLINE on purpose: the legacy screen reads useRoute() itself,
+    // so it sees this screen's route and honors `destination: 'cusd_plus'`
+    // (the savings redeem rail). Converting this to its own navigation route
+    // would silently break that param threading.
     return <LegacyGuardarianSellScreen />;
   }
 

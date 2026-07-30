@@ -1,6 +1,6 @@
 // Comprar acción — buy flow funded from cUSD+ (sweep model).
 //
-// Same grammar as ConvertAhorroScreen: amount → live quote preview →
+// Same grammar as ConvertSavingsScreen: amount → live quote preview →
 // confirm → processing → success. The quote line shows token quantity
 // (fractional shares) and the pass-through operation cost.
 //
@@ -37,7 +37,7 @@ import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { CUSD_CONVERSION_UI_ENABLED } from '../config/features';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
@@ -71,7 +71,7 @@ export const BuyStockScreen = () => {
   const route = useRoute<BuyRoute>();
   const { formatNumber } = useNumberFormat();
   const { byTicker, tradabilityFor } = useGmMarket();
-  const { savings } = useAhorrosPortfolio();
+  const { savings } = useSavingsPortfolio();
 
   const stock = byTicker(route.params.ticker);
   const available = savings.balanceUsd;
@@ -257,7 +257,7 @@ export const BuyStockScreen = () => {
                   // Conversion UI hidden: route to the Ahorros hub (bank/USDT
                   // funding) instead of the cUSD→cUSD+ convert flow.
                   navigation.navigate(
-                    CUSD_CONVERSION_UI_ENABLED ? 'ConvertAhorro' : 'Ahorros',
+                    CUSD_CONVERSION_UI_ENABLED ? 'ConvertSavings' : 'Savings',
                   )
                 }
               >

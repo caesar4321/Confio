@@ -1,6 +1,6 @@
 // Retirar de Confío Dollar+ — reverse convert flow (cUSD+ → cUSD).
 //
-// Mirror of ConvertAhorroScreen: amount → live quote (pass-through cost) →
+// Mirror of ConvertSavingsScreen: amount → live quote (pass-through cost) →
 // confirm → processing → success. The destination here is always the user's
 // cUSD balance; the "a mi banco" path (direct off-ramp from the savings
 // chain) is a separate flow gated on the ramp destination work.
@@ -32,7 +32,7 @@ import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -48,10 +48,10 @@ const getQuote = (amountUsd: number) => ({
 
 type Phase = 'input' | 'processing' | 'success';
 
-export const RetirarAhorroScreen = () => {
+export const WithdrawSavingsScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
-  const { savings } = useAhorrosPortfolio();
+  const { savings } = useSavingsPortfolio();
   const available = savings.balanceUsd;
 
   const [raw, setRaw] = useState('');

@@ -27,14 +27,17 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { MainStackParamList } from '../types/navigation';
 import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../config/theme';
 import { getEvmAddressForDisplay, evmAccountKey } from '../services/secureDeterministicWallet';
 import { useAccountManager } from '../hooks/useAccountManager';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
-const STEPS = [
+// Steps 1-3 are pure network mechanics, identical for both variants; only
+// step 4 (what the money becomes) branches on the destination.
+const stepsFor = (isSavings: boolean) => [
   {
     title: 'En tu exchange o billetera, elige enviar USDT',
     body: 'Binance, OKX, Bybit, Trust Wallet — donde tengas tus USDT.',
@@ -47,14 +50,24 @@ const STEPS = [
     title: 'Pega tu dirección y envía',
     body: 'Copia la dirección de arriba. Llega en 1–2 minutos.',
   },
-  {
-    title: 'Abre Confío y confirma',
-    body: 'Lo recibido se vuelve tu ahorro (cUSD+) y empieza a generar rendimiento.',
-  },
-] as const;
+  isSavings
+    ? {
+        title: 'Abre Confío y confirma',
+        body: 'Lo recibido se vuelve tu ahorro (cUSD+) y empieza a generar rendimiento.',
+      }
+    : {
+        title: 'Abre Confío',
+        body: 'Lo recibido aparece en tu Confío Dollar, listo para enviar o retirar.',
+      },
+];
 
 export const ReceiveSavingsScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute<RouteProp<MainStackParamList, 'ReceiveSavings'>>();
+  // Variant: 'cusd_plus' (default — silent mint into savings) vs 'usdt'
+  // (geo-ineligible: the money stays raw, branded "Confío Dollar").
+  const isSavings = (route.params?.destination ?? 'cusd_plus') === 'cusd_plus';
+  const STEPS = stepsFor(isSavings);
   const [copied, setCopied] = useState(false);
 
   // Derived at sign-in alongside the Algorand key (registered server-side);
@@ -98,7 +111,7 @@ export const ReceiveSavingsScreen = () => {
     if (!address) return;
     try {
       await Share.share({
-        title: 'Dirección de ahorro Confío',
+        title: isSavings ? 'Dirección de ahorro Confío' : 'Dirección Confío',
         message:
           `Esta es mi dirección para recibir USDT en Confío:\n${address}\n\n` +
           'Importante: solo USDT por la red BNB Smart Chain (BEP-20).',
@@ -124,7 +137,9 @@ export const ReceiveSavingsScreen = () => {
           <>
             {/* Address card: QR + copy — the DepositScreen grammar */}
             <View style={styles.qrCard}>
-              <Text style={styles.qrCardTitle}>Tu dirección de ahorro</Text>
+              <Text style={styles.qrCardTitle}>
+                {isSavings ? 'Tu dirección de ahorro' : 'Tu dirección'}
+              </Text>
               <View style={styles.networkPill}>
                 <Text style={styles.networkPillText}>Red: BNB Smart Chain (BEP-20)</Text>
               </View>
@@ -165,13 +180,23 @@ export const ReceiveSavingsScreen = () => {
               </Text>
             </View>
 
-            {/* What it becomes: the savings semantic, with the brand mark */}
+            {/* What it becomes: per-variant semantic, with the brand mark */}
             <View style={styles.becomesCard}>
               <Image source={cUSDPlusLogo} style={styles.becomesLogo} />
               <Text style={styles.becomesText}>
-                Lo que recibas aquí se convierte en tu ahorro{' '}
-                <Text style={styles.warnStrong}>(Confío Dollar+)</Text> y genera rendimiento
-                diario. Confirmas la conversión al abrir la app.
+                {isSavings ? (
+                  <>
+                    Lo que recibas aquí se convierte en tu ahorro{' '}
+                    <Text style={styles.warnStrong}>(Confío Dollar+)</Text> y genera rendimiento
+                    diario. Confirmas la conversión al abrir la app.
+                  </>
+                ) : (
+                  <>
+                    Lo que recibas queda disponible en tu{' '}
+                    <Text style={styles.warnStrong}>Confío Dollar</Text>. Puedes enviarlo o
+                    retirarlo cuando quieras — siempre es tuyo.
+                  </>
+                )}
               </Text>
             </View>
 

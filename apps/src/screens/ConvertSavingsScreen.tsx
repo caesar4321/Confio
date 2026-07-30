@@ -37,7 +37,7 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useConvertQuote } from '../hooks/useConvertQuote';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { SuccessHero } from '../components/common/SuccessHero';
@@ -51,10 +51,10 @@ const MIN_AMOUNT_USD = 1;
 
 type Phase = 'input' | 'processing' | 'success';
 
-export const ConvertAhorroScreen = () => {
+export const ConvertSavingsScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
-  const { savings } = useAhorrosPortfolio();
+  const { savings } = useSavingsPortfolio();
 
   const { data: balancesData } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',

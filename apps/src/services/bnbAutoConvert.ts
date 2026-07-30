@@ -4,15 +4,15 @@
 // withdrew BNB from Binance to their Confío 0x address) is swapped to USDT
 // via PancakeSwap V2, client-signed with the user's own key. The USDT lands
 // at the user's own address, where the server's monitor_bridge_arrivals
-// treats it like any external deposit (gas dusting + savings resume).
+// treats it like any external deposit (savings resume; gas rides 7702).
 //
 // Invariants this flow preserves:
-//   - The swap pays its own gas out of the mis-deposited BNB; sponsor dust
-//     is never spent, and the live dust target (keepWei) is left behind so
-//     the user's next savings leg doesn't immediately need re-dusting.
+//   - The swap pays its own gas out of the mis-deposited BNB; under 7702
+//     keepWei is 0 (sweep everything), otherwise the server's gas-reserve
+//     target (keepWei) is left behind for the user's next SELF-SIGNED leg.
 //   - Every outbound BNB tx this produces goes through the server relay,
 //     which records it in the BnbAutoConvert ledger. That keeps "outbound
-//     BNB not in the ledger = dust extraction" a deterministic signal.
+//     BNB not in the ledger = gas extraction" a deterministic signal.
 //   - The relay only accepts swapExactETHForTokens to the router, so this
 //     service (and only this shape of tx) clears the selector guard.
 //
@@ -93,7 +93,7 @@ export interface BnbAutoConvertParams {
   router: string;
   /** Skip swaps smaller than this — gas/slippage overhead isn't worth it. */
   minSwapWei: bigint;
-  /** BNB left at the address (live gas-dust target from the server). */
+  /** BNB left at the address (live gas-reserve target from the server). */
   keepWei: bigint;
   /** Slippage floor applied to the getAmountsOut quote, in bps. */
   slippageBps: bigint;

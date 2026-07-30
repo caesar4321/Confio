@@ -94,6 +94,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         icon: 'shield',
         value: fmt(tvl),
         unit: 'cUSD',
+        // UI copy stays Spanish (identifiers-in-English rule is code-only).
         label: 'Ahorros',
         // Backing tickers for both products: cUSD (USDC 1:1) and cUSD+ (USDY,
         // US Treasuries). The "what is USDY" education lives in the Ahorros

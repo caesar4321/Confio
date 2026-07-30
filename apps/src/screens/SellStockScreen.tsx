@@ -32,7 +32,7 @@ import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -64,7 +64,7 @@ export const SellStockScreen = () => {
   const route = useRoute<SellRoute>();
   const { formatNumber } = useNumberFormat();
   const { byTicker, tradabilityFor } = useGmMarket();
-  const { stocks } = useAhorrosPortfolio();
+  const { stocks } = useSavingsPortfolio();
 
   const stock = byTicker(route.params.ticker);
   const position = stocks.positions.find((p) => p.ticker === route.params.ticker);

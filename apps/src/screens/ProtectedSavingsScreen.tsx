@@ -31,6 +31,8 @@ const GET_APY_SPLIT = gql`
     cusdPlusSummary {
       grossApyPct
       netApyPct
+      savingsEnabled
+      cusdDepositsPaused
     }
   }
 `;
@@ -70,6 +72,11 @@ export const ProtectedSavingsScreen = () => {
   });
   const grossApy = apyData?.cusdPlusSummary?.grossApyPct ?? 0;
   const netApy = apyData?.cusdPlusSummary?.netApyPct ?? 0;
+  // cUSD phase-out: while deposits are paused, the generic Recargar CTA
+  // steers eligible users to the savings rail (same rule as the Home sheet).
+  const steerToSavings =
+    (apyData?.cusdPlusSummary?.cusdDepositsPaused ?? true) &&
+    (apyData?.cusdPlusSummary?.savingsEnabled ?? true);
   const apyLive = grossApy > 0 && netApy > 0;
   const pct = (v: number) => `~${formatNumber(v, { maximumFractionDigits: 1 })}%`;
 
@@ -270,11 +277,11 @@ export const ProtectedSavingsScreen = () => {
           </View>
 
           <TouchableOpacity
-            style={styles.ahorrosLink}
-            onPress={() => navigation.navigate('Ahorros')}
+            style={styles.savingsLink}
+            onPress={() => navigation.navigate('Savings')}
             activeOpacity={0.85}
           >
-            <Text style={styles.ahorrosLinkText}>Conocer Ahorros e Inversiones</Text>
+            <Text style={styles.savingsLinkText}>Conocer Confío Dollar+</Text>
             <Icon name="arrow-right" size={15} color={colors.primary} />
           </TouchableOpacity>
 
@@ -313,11 +320,35 @@ export const ProtectedSavingsScreen = () => {
           </View>
         </View>
 
+        {/* No fine print — the two promises that used to live on the
+            savings account screen (moved here 2026-07-30 with the rest of
+            the education; the account screen links to this page). */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Icon name="check-circle" size={20} color={colors.primary} />
+            <Text style={styles.sectionTitle}>Sin letra chica</Text>
+          </View>
+          <Text style={styles.sectionBody}>
+            <Text style={styles.inlineEmphasis}>Retira cuando quieras.</Text>{' '}
+            Sin plazos ni penalidades: tu dinero está disponible al instante,
+            todos los días.
+          </Text>
+          <Text style={styles.sectionBody}>
+            <Text style={styles.inlineEmphasis}>Sin comisiones ocultas.</Text>{' '}
+            La tasa que ves ya descuenta nuestra comisión. Si un movimiento
+            tiene costo, lo ves antes de confirmar — nunca después.
+          </Text>
+        </View>
+
         {/* CTA */}
         <View style={styles.ctaSection}>
           <TouchableOpacity
             style={styles.ctaButton}
-            onPress={() => navigation.navigate('TopUp')}
+            onPress={() =>
+              steerToSavings
+                ? navigation.navigate('TopUp', { destination: 'cusd_plus' })
+                : navigation.navigate('TopUp')
+            }
             activeOpacity={0.9}
           >
             <Icon name="dollar-sign" size={20} color={colors.white} />
@@ -553,7 +584,7 @@ const styles = StyleSheet.create({
   partnerInlineText: { fontSize: 12, color: colors.text.light },
   partnerInlineLogo: { width: 15, height: 15, borderRadius: 4 },
   partnerInlineBrand: { fontSize: 12, fontWeight: '700', color: colors.text.secondary },
-  ahorrosLink: {
+  savingsLink: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -563,7 +594,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     marginBottom: 10,
   },
-  ahorrosLinkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  savingsLinkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
   chainCard: {
     backgroundColor: colors.white,
     borderRadius: 10,

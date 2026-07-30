@@ -33,7 +33,7 @@ import {
 } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
-import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'StockDetail'>;
@@ -46,7 +46,7 @@ export const StockDetailScreen = () => {
   const route = useRoute<DetailRoute>();
   const { formatNumber } = useNumberFormat();
   const { byTicker, tradabilityFor } = useGmMarket();
-  const { savings, stocks: stockHoldings } = useAhorrosPortfolio();
+  const { savings, stocks: stockHoldings } = useSavingsPortfolio();
 
   const stock = byTicker(route.params.ticker);
   const position = stockHoldings.positions.find((p) => p.ticker === route.params.ticker);

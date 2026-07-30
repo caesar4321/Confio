@@ -31,6 +31,7 @@ import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { EmptyState } from '../components/EmptyState';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -274,6 +275,10 @@ export const AccountDetailScreen = () => {
   // Fetch balances in one query to avoid UI flicker (live + presale-locked)
   const isCusd = route.params.accountType === 'cusd';
   const isConfio = route.params.accountType !== 'cusd';
+  // cUSD phase-out: while deposits are paused (server flag, singleton is
+  // already cached by Home) this screen goes retiro-only — no Recargar.
+  const { savings: ahorrosSavings } = useSavingsPortfolio();
+  const isCusdRetiroOnly = isCusd && ahorrosSavings.cusdDepositsPaused;
   const { data: balancesData, refetch: refetchBalances, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'no-cache',
   });
@@ -1978,6 +1983,15 @@ export const AccountDetailScreen = () => {
         />
       )}
 
+      {/* cUSD phase-out notice — persistent (no onDismiss), calm info tone */}
+      {isCusdRetiroOnly && (
+        <InlineBanner
+          variant="info"
+          message="Confío Dollar (cUSD) ya no recibe recargas nuevas. Puedes seguir enviando, pagando y retirando tu saldo — el dinero nuevo ahora crece en Confío Dollar+."
+          style={{ marginHorizontal: 16, marginTop: 10, marginBottom: 0 }}
+        />
+      )}
+
       {/* Action Buttons */}
       <View style={styles.actionButtonsContainer}>
         {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
@@ -2027,7 +2041,11 @@ export const AccountDetailScreen = () => {
               </TouchableOpacity>
             )}
 
-            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) && (
+            {/* Algorand receive hides for cUSD once deposits pause (the
+                phase-out blocks the deposit UI); CONFIO keeps its receive —
+                no BSC alternative exists for it yet. */}
+            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) &&
+              !isCusdRetiroOnly && (
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
@@ -2082,7 +2100,7 @@ export const AccountDetailScreen = () => {
               </TouchableOpacity>
             )}
 
-            {!activeAccount?.isEmployee && (
+            {!activeAccount?.isEmployee && !isCusdRetiroOnly && (
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
