@@ -469,7 +469,11 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     if source != 'ramp':
         try:
             from send.models import SendTransaction
-            idempotency_key = f'BSC:{tx_ref}'
+            # idempotency_key is capped at 64 chars; 'BSC:' + full 0x-hash +
+            # logIndex overflows it. 56 hex chars (224 bits) of the hash keep
+            # collision-impossibility while fitting: 4 + 56 + 1 + idx <= 64.
+            _h, _, _idx = tx_ref.partition(':')
+            idempotency_key = f'BSC:{_h[2:58]}:{_idx or 0}'
             if not SendTransaction.all_objects.filter(idempotency_key=idempotency_key).exists():
                 SendTransaction.all_objects.create(
                     sender_user=None,
