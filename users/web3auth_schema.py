@@ -18,19 +18,30 @@ User = get_user_model()
 
 class Web3AuthUserType(DjangoObjectType):
     algorand_address = graphene.String()
+    bsc_address = graphene.String()
     is_phone_verified = graphene.Boolean()
     phone_key = graphene.String()
-    
+
     class Meta:
         model = User
         fields = ['id', 'email', 'username', 'first_name', 'last_name']
-    
+
     def resolve_algorand_address(self, info):
         try:
             account = self.accounts.filter(account_type='personal', deleted_at__isnull=True).first()
             return account.algorand_address if account else None
         except Exception as e:
             logger.error(f"Error resolving algorand_address: {e}")
+            return None
+
+    def resolve_bsc_address(self, info):
+        # Wallet anchor for BSC-only users: the client must NOT silently mint
+        # a replacement master secret when the server already knows a wallet.
+        try:
+            account = self.accounts.filter(account_type='personal', deleted_at__isnull=True).first()
+            return getattr(account, 'bsc_address', None) if account else None
+        except Exception as e:
+            logger.error(f"Error resolving bsc_address: {e}")
             return None
     
     def resolve_is_phone_verified(self, info):
@@ -304,16 +315,20 @@ class Web3AuthLoginMutation(graphene.Mutation):
             # Create/update Algorand account
             # NOTE: usage of client-provided 'algorand_address' is restricted to NEW accounts only
             # to prevent existing users from accidentally overwriting their address or hijacking.
-            
-            # Prefer existing personal account address if present
+
+            # Ensure the personal account row ALWAYS exists — BSC-only users
+            # (Algorand deprecated) never enter the algorand_address branch
+            # below, but BSC address registration and JWT account context
+            # still require the row.
             existing_account = None
             try:
-                existing_account = Account.objects.filter(
+                existing_account, _ = Account.objects.get_or_create(
                     user=user,
                     account_type='personal',
-                    account_index=0
-                ).first()
-                if existing_account and existing_account.algorand_address:
+                    account_index=0,
+                    defaults={'is_keyless_migrated': True}
+                )
+                if existing_account.algorand_address:
                     # EXISTING USER: Enforce stored address (ignore client input)
                     algorand_address = existing_account.algorand_address
             except Exception:
@@ -366,137 +381,141 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 account.last_login_at = timezone.now()
                 account.save(update_fields=['last_login_at'])
                 
-                # Check balance and auto-fund if needed
-                try:
-                    from blockchain.algorand_client import get_algod_client
-                    algod_client = get_algod_client()
-                    
-                    # Try to get account info - new accounts might not exist on chain yet
-                    try:
-                        account_info = algod_client.account_info(algorand_address)
-                        balance = account_info.get('amount', 0)
-                        current_assets = account_info.get('assets', [])
-                    except Exception as e:
-                        # Account doesn't exist on chain yet - treat as 0 balance, 0 assets
-                        logger.info(f"Account {algorand_address} not on chain yet: {e}")
-                        balance = 0
-                        current_assets = []
-                        account_info = {}
-                    
-                    current_asset_ids = [asset['asset-id'] for asset in current_assets]
-                    num_assets = len(current_assets)
-                    
-                    # Calculate how many NEW assets we need to opt into (keep ints internally)
-                    # IMPORTANT: keep this list in sync with the default branch of
-                    # GenerateOptInTransactionsMutation (blockchain/mutations.py) — both
-                    # must opt new users into CONFIO + cUSD + USDC atomically in a single
-                    # sponsored group so we never rely on a second client-side roundtrip.
-                    assets_to_opt_in = []
-                    if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
-                        assets_to_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
-                        logger.info(f"User needs to opt into CONFIO: {AlgorandAccountManager.CONFIO_ASSET_ID}")
-                    if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
-                        assets_to_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
-                        logger.info(f"User needs to opt into cUSD: {AlgorandAccountManager.CUSD_ASSET_ID}")
-                    if AlgorandAccountManager.USDC_ASSET_ID and AlgorandAccountManager.USDC_ASSET_ID not in current_asset_ids:
-                        assets_to_opt_in.append(AlgorandAccountManager.USDC_ASSET_ID)
-                        logger.info(f"User needs to opt into USDC: {AlgorandAccountManager.USDC_ASSET_ID}")
-                    
-                    logger.info(f"Account {algorand_address}: balance={balance}, current_assets={num_assets}, need_opt_in={len(assets_to_opt_in)}")
-                    
-                    # Get the current minimum balance from Algorand
-                    current_min_balance = account_info.get('min-balance', 0)
-                    
-                    # Check if user will need to opt into cUSD app later
-                    apps_local_state = account_info.get('apps-local-state', [])
-                    already_opted_into_apps = [app['id'] for app in apps_local_state]
-                    needs_cusd_app_optin = AlgorandAccountManager.CUSD_APP_ID and AlgorandAccountManager.CUSD_APP_ID not in already_opted_into_apps
-                    
-                    # Simple approach: current min + new assets + app if needed
-                    new_min_balance = current_min_balance + (len(assets_to_opt_in) * 100000)
-                    
-                    if needs_cusd_app_optin:
-                        # From the error, we know 7 assets need 1,428,000 total
-                        # That's 100,000 base + 700,000 for assets = 800,000
-                        # So the app needs 1,428,000 - 800,000 = 628,000
-                        # But account already has some app min balance in current_min_balance
-                        # Testing shows the app adds exactly 158,000 to whatever the current state is
-                        app_cost = 158000
-                        new_min_balance += app_cost
-                        logger.info(f"User will need cUSD app opt-in, adding {app_cost} microAlgos")
-                    
-                    logger.info(f"MBR calculation:")
-                    logger.info(f"  Current assets on account: {num_assets}")
-                    logger.info(f"  Current min-balance: {current_min_balance} microAlgos ({current_min_balance/1000000} ALGO)")
-                    logger.info(f"  Assets to opt into: {len(assets_to_opt_in)}")
-                    logger.info(f"  App opt-in needed: {needs_cusd_app_optin}")
-                    logger.info(f"  New min-balance after opt-ins: {new_min_balance} microAlgos ({new_min_balance/1000000} ALGO)")
-                    logger.info(f"  Current balance: {balance} microAlgos ({balance/1000000} ALGO)")
-                    
-                    # Note: On testnet, accounts may have old test assets from previous deployments
-                    # We fund based on actual Algorand requirements, not just our current asset IDs
-                    
-                    # Fund EXACTLY what's needed
-                    if balance < new_min_balance:
-                        funding_amount = new_min_balance - balance
-                        logger.info(f"Auto-funding Web3Auth user {algorand_address} with {funding_amount} microAlgos ({funding_amount/1000000} ALGO)")
-                        
-                        # Use AlgorandAccountManager's funding logic
-                        from algosdk import mnemonic
-                        from algosdk.transaction import PaymentTxn, wait_for_confirmation
-                        
-                        sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
-                        params = algod_client.suggested_params()
-                        
-                        fund_txn = PaymentTxn(
-                            sender=AlgorandAccountManager.SPONSOR_ADDRESS,
-                            sp=params,
-                            receiver=algorand_address,
-                            amt=funding_amount
-                        )
-                        
-                        signed_txn = fund_txn.sign(sponsor_private_key)
-                        tx_id = algod_client.send_transaction(signed_txn)
-                        wait_for_confirmation(algod_client, tx_id, 4)
-                        logger.info(f"Successfully funded {algorand_address} with {funding_amount} microAlgos. TX: {tx_id}")
-                        
-                except Exception as e:
-                    logger.warning(f"Could not check/fund account balance: {e}")
-                
-                # Trigger sponsored opt-in for CONFIO + cUSD + USDC (async)
-                from blockchain.algorand_sponsor_service import algorand_sponsor_service
-                import asyncio
-                
-                # Generate atomic opt-in transactions for all needed assets
+                # Algorand deprecation: onboarding (MBR funding + opt-ins) only
+                # runs when the legacy flag is on. Otherwise the address is
+                # stored above and the wallet is left unfunded — new users are
+                # BSC-only, existing funded wallets are unaffected.
+                from blockchain.algorand_account_manager import algorand_onboarding_enabled
                 opt_in_transactions = []
-                
-                if assets_to_opt_in:
-                    logger.info(f"Generating atomic opt-in transactions for assets: {assets_to_opt_in}")
+                if not algorand_onboarding_enabled():
+                    assets_to_opt_in = []
+                    logger.info(f"Algorand onboarding disabled: skipping funding/opt-ins for {algorand_address}")
+                else:
+                    # Check balance and auto-fund if needed
                     try:
-                        from blockchain.mutations import GenerateOptInTransactionsMutation
-                        # Create a mock info object with authenticated user
-                        class MockInfo:
-                            class Context:
-                                def __init__(self, user):
-                                    self.user = user
-                            def __init__(self, user):
-                                self.context = self.Context(user)
-                        
-                        mock_info = MockInfo(user)
-                        opt_in_result = GenerateOptInTransactionsMutation.mutate(
-                            None, mock_info, asset_ids=assets_to_opt_in
-                        )
-                        
-                        if opt_in_result.success and opt_in_result.transactions:
-                            opt_in_transactions = opt_in_result.transactions
-                            logger.info(f"Generated atomic opt-in transactions for {len(assets_to_opt_in)} assets")
-                            logger.info(f"Opt-in transactions structure: {type(opt_in_transactions)}")
-                            if isinstance(opt_in_transactions, list) and len(opt_in_transactions) > 0:
-                                logger.info(f"First transaction keys: {opt_in_transactions[0].keys() if isinstance(opt_in_transactions[0], dict) else 'Not a dict'}")
-                        else:
-                            logger.warning(f"Could not generate opt-in transactions: {opt_in_result.error}")
+                        from blockchain.algorand_client import get_algod_client
+                        algod_client = get_algod_client()
+
+                        # Try to get account info - new accounts might not exist on chain yet
+                        try:
+                            account_info = algod_client.account_info(algorand_address)
+                            balance = account_info.get('amount', 0)
+                            current_assets = account_info.get('assets', [])
+                        except Exception as e:
+                            # Account doesn't exist on chain yet - treat as 0 balance, 0 assets
+                            logger.info(f"Account {algorand_address} not on chain yet: {e}")
+                            balance = 0
+                            current_assets = []
+                            account_info = {}
+
+                        current_asset_ids = [asset['asset-id'] for asset in current_assets]
+                        num_assets = len(current_assets)
+
+                        # Calculate how many NEW assets we need to opt into (keep ints internally)
+                        # IMPORTANT: keep this list in sync with the default branch of
+                        # GenerateOptInTransactionsMutation (blockchain/mutations.py) — both
+                        # must opt new users into CONFIO + cUSD + USDC atomically in a single
+                        # sponsored group so we never rely on a second client-side roundtrip.
+                        assets_to_opt_in = []
+                        if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
+                            assets_to_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                            logger.info(f"User needs to opt into CONFIO: {AlgorandAccountManager.CONFIO_ASSET_ID}")
+                        if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
+                            assets_to_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                            logger.info(f"User needs to opt into cUSD: {AlgorandAccountManager.CUSD_ASSET_ID}")
+                        if AlgorandAccountManager.USDC_ASSET_ID and AlgorandAccountManager.USDC_ASSET_ID not in current_asset_ids:
+                            assets_to_opt_in.append(AlgorandAccountManager.USDC_ASSET_ID)
+                            logger.info(f"User needs to opt into USDC: {AlgorandAccountManager.USDC_ASSET_ID}")
+
+                        logger.info(f"Account {algorand_address}: balance={balance}, current_assets={num_assets}, need_opt_in={len(assets_to_opt_in)}")
+
+                        # Get the current minimum balance from Algorand
+                        current_min_balance = account_info.get('min-balance', 0)
+
+                        # Check if user will need to opt into cUSD app later
+                        apps_local_state = account_info.get('apps-local-state', [])
+                        already_opted_into_apps = [app['id'] for app in apps_local_state]
+                        needs_cusd_app_optin = AlgorandAccountManager.CUSD_APP_ID and AlgorandAccountManager.CUSD_APP_ID not in already_opted_into_apps
+
+                        # Simple approach: current min + new assets + app if needed
+                        new_min_balance = current_min_balance + (len(assets_to_opt_in) * 100000)
+
+                        if needs_cusd_app_optin:
+                            # From the error, we know 7 assets need 1,428,000 total
+                            # That's 100,000 base + 700,000 for assets = 800,000
+                            # So the app needs 1,428,000 - 800,000 = 628,000
+                            # But account already has some app min balance in current_min_balance
+                            # Testing shows the app adds exactly 158,000 to whatever the current state is
+                            app_cost = 158000
+                            new_min_balance += app_cost
+                            logger.info(f"User will need cUSD app opt-in, adding {app_cost} microAlgos")
+
+                        logger.info(f"MBR calculation:")
+                        logger.info(f"  Current assets on account: {num_assets}")
+                        logger.info(f"  Current min-balance: {current_min_balance} microAlgos ({current_min_balance/1000000} ALGO)")
+                        logger.info(f"  Assets to opt into: {len(assets_to_opt_in)}")
+                        logger.info(f"  App opt-in needed: {needs_cusd_app_optin}")
+                        logger.info(f"  New min-balance after opt-ins: {new_min_balance} microAlgos ({new_min_balance/1000000} ALGO)")
+                        logger.info(f"  Current balance: {balance} microAlgos ({balance/1000000} ALGO)")
+
+                        # Note: On testnet, accounts may have old test assets from previous deployments
+                        # We fund based on actual Algorand requirements, not just our current asset IDs
+
+                        # Fund EXACTLY what's needed
+                        if balance < new_min_balance:
+                            funding_amount = new_min_balance - balance
+                            logger.info(f"Auto-funding Web3Auth user {algorand_address} with {funding_amount} microAlgos ({funding_amount/1000000} ALGO)")
+
+                            # Use AlgorandAccountManager's funding logic
+                            from algosdk import mnemonic
+                            from algosdk.transaction import PaymentTxn, wait_for_confirmation
+
+                            sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+                            params = algod_client.suggested_params()
+
+                            fund_txn = PaymentTxn(
+                                sender=AlgorandAccountManager.SPONSOR_ADDRESS,
+                                sp=params,
+                                receiver=algorand_address,
+                                amt=funding_amount
+                            )
+
+                            signed_txn = fund_txn.sign(sponsor_private_key)
+                            tx_id = algod_client.send_transaction(signed_txn)
+                            wait_for_confirmation(algod_client, tx_id, 4)
+                            logger.info(f"Successfully funded {algorand_address} with {funding_amount} microAlgos. TX: {tx_id}")
+
                     except Exception as e:
-                        logger.warning(f"Could not create atomic opt-in transactions: {e}")
+                        logger.warning(f"Could not check/fund account balance: {e}")
+
+                    # Generate atomic opt-in transactions for all needed assets
+                    if assets_to_opt_in:
+                        logger.info(f"Generating atomic opt-in transactions for assets: {assets_to_opt_in}")
+                        try:
+                            from blockchain.mutations import GenerateOptInTransactionsMutation
+                            # Create a mock info object with authenticated user
+                            class MockInfo:
+                                class Context:
+                                    def __init__(self, user):
+                                        self.user = user
+                                def __init__(self, user):
+                                    self.context = self.Context(user)
+
+                            mock_info = MockInfo(user)
+                            opt_in_result = GenerateOptInTransactionsMutation.mutate(
+                                None, mock_info, asset_ids=assets_to_opt_in
+                            )
+
+                            if opt_in_result.success and opt_in_result.transactions:
+                                opt_in_transactions = opt_in_result.transactions
+                                logger.info(f"Generated atomic opt-in transactions for {len(assets_to_opt_in)} assets")
+                                logger.info(f"Opt-in transactions structure: {type(opt_in_transactions)}")
+                                if isinstance(opt_in_transactions, list) and len(opt_in_transactions) > 0:
+                                    logger.info(f"First transaction keys: {opt_in_transactions[0].keys() if isinstance(opt_in_transactions[0], dict) else 'Not a dict'}")
+                            else:
+                                logger.warning(f"Could not generate opt-in transactions: {opt_in_result.error}")
+                        except Exception as e:
+                            logger.warning(f"Could not create atomic opt-in transactions: {e}")
             
             # Generate JWT tokens using the existing system
             # Access token with default personal account context
@@ -597,9 +616,22 @@ class AddAlgorandWalletMutation(graphene.Mutation):
             # Check what assets need opt-in from frontend
             from algosdk.v2client import algod
             from blockchain.algorand_client import get_algod_client
+            from blockchain.algorand_account_manager import algorand_onboarding_enabled
             needs_opt_in = []
             algo_balance = 0.0
-            
+
+            if not algorand_onboarding_enabled():
+                # Algorand deprecation: never steer clients into new opt-ins.
+                return cls(
+                    success=True,
+                    user=user,
+                    is_new_wallet=is_new,
+                    opted_in_assets=opted_in_assets,
+                    opt_in_errors=opt_in_errors,
+                    needs_opt_in=[],
+                    algo_balance=algo_balance
+                )
+
             try:
                 algod_client = get_algod_client()
                 account_info = algod_client.account_info(algorand_address)
@@ -654,10 +686,19 @@ class UpdateAlgorandAddressMutation(graphene.Mutation):
             # Validate Algorand address format
             if not algorand_address or len(algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address')
-            
+
             # Update the user's personal account
             account = user.accounts.filter(account_type='personal').first()
             if account:
+                # The stored address is the wallet-recovery anchor: once set, a
+                # DIFFERENT address is refused (same posture as
+                # UpdateAccountAlgorandAddress, which additionally runs the
+                # reassignment blocker — legit address changes go through it).
+                if account.algorand_address and account.algorand_address != algorand_address:
+                    return cls(
+                        success=False,
+                        error='Esta cuenta ya tiene una billetera registrada. Usa la app actualizada para cambiarla.'
+                    )
                 account.algorand_address = algorand_address
                 account.save()
             else:
@@ -667,7 +708,7 @@ class UpdateAlgorandAddressMutation(graphene.Mutation):
                     account_type='personal',
                     algorand_address=algorand_address
                 )
-            
+
             return cls(success=True, user=user)
             
         except Exception as e:

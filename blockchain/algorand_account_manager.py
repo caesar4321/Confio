@@ -23,6 +23,13 @@ from users.models import Account
 logger = logging.getLogger(__name__)
 
 
+def algorand_onboarding_enabled() -> bool:
+    """Algorand deprecation gate: when False, the sponsor never funds MBR or
+    opts new wallets into assets/apps. Addresses are still stored so existing
+    funded wallets keep working for the BSC drain migration."""
+    return bool(getattr(settings, 'ALGORAND_ONBOARDING_ENABLED', False))
+
+
 class AlgorandAccountManager:
     """
     Manages Algorand account creation and asset opt-ins for users
@@ -92,7 +99,16 @@ class AlgorandAccountManager:
             if account.algorand_address and len(account.algorand_address) == 58:
                 # Account already exists with Algorand address
                 logger.info(f"Existing Algorand account found for user {user.email}: {account.algorand_address}")
-                
+
+                if not algorand_onboarding_enabled():
+                    return {
+                        'account': account,
+                        'created': False,
+                        'algorand_address': account.algorand_address,
+                        'opted_in_assets': [],
+                        'errors': [],
+                    }
+
                 # Check current opt-in status
                 currently_opted_in = cls._check_opt_ins(account.algorand_address)
                 logger.info(f"User currently opted into assets: {currently_opted_in}")
@@ -158,7 +174,17 @@ class AlgorandAccountManager:
             # Update account with Algorand address
             account.algorand_address = algorand_address  # Using algorand_address field temporarily
             account.save()
-            
+
+            if not algorand_onboarding_enabled():
+                logger.info(f"Algorand onboarding disabled: stored address for {user.email} without funding/opt-ins")
+                return {
+                    'account': account,
+                    'created': True,
+                    'algorand_address': algorand_address,
+                    'opted_in_assets': [],
+                    'errors': [],
+                }
+
             # Initialize Algod client
             from blockchain.algorand_client import get_algod_client
             algod_client = get_algod_client()
@@ -230,6 +256,32 @@ class AlgorandAccountManager:
             }
 
     @classmethod
+    def is_funding_eligible(cls, address: str) -> bool:
+        """Sponsor-funding eligibility once Algorand onboarding is disabled:
+        only addresses registered to an account that predates
+        ALGORAND_GRANDFATHER_CUTOFF (grandfathered existing users). The
+        account's age is the predicate, NOT on-chain holdings — dust can be
+        planted to fake value, and legitimately drained accounts hold
+        nothing. Post-cutoff accounts are BSC-only."""
+        if algorand_onboarding_enabled():
+            return True
+        if not address:
+            return False
+        cutoff = getattr(settings, 'ALGORAND_GRANDFATHER_CUTOFF', None)
+        if not cutoff:
+            return False
+        try:
+            acct = (
+                Account.objects.filter(algorand_address=address, deleted_at__isnull=True)
+                .order_by('created_at')
+                .first()
+            )
+        except Exception:
+            logger.exception("is_funding_eligible lookup failed for %s", address)
+            return False
+        return bool(acct and acct.created_at and acct.created_at < cutoff)
+
+    @classmethod
     def ensure_account_ready(cls, account: Account, *, existing_address: Optional[str] = None, fund_and_opt_in: bool = True) -> Dict:
         """Ensure the provided Account row (personal or business) has an Algorand address and basic opt-ins.
 
@@ -266,7 +318,7 @@ class AlgorandAccountManager:
                 logger.info("Updated account %s (%s/%s) address %s -> %s", account.id, account.account_type, account.account_index, old, addr)
 
             # Skip funding/opt-ins if explicitly requested (e.g. client handling atomic opt-in)
-            if not fund_and_opt_in:
+            if not fund_and_opt_in or not algorand_onboarding_enabled():
                 return {
                     'account': account,
                     'created': False,
@@ -530,7 +582,7 @@ class AlgorandAccountManager:
                 }
             
             algorand_address = account.algorand_address
-            
+
             # Check if already opted in
             opted_in_assets = cls._check_opt_ins(algorand_address)
             if cls.USDC_ASSET_ID in opted_in_assets:
@@ -541,7 +593,15 @@ class AlgorandAccountManager:
                     'error': None,
                     'algorand_address': algorand_address
                 }
-            
+
+            if not algorand_onboarding_enabled():
+                return {
+                    'success': False,
+                    'already_opted_in': False,
+                    'error': 'Los depósitos por Algorand ya no están disponibles',
+                    'algorand_address': algorand_address
+                }
+
             # Initialize Algod client
             from blockchain.algorand_client import get_algod_client
             algod_client = get_algod_client()

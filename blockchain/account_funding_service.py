@@ -112,6 +112,20 @@ class AccountFundingService:
             Dict with success status and transaction ID or error
         """
         try:
+            # Algorand deprecation: only grandfathered (pre-cutoff) accounts
+            # keep sponsor top-ups. A post-cutoff client-registered address
+            # must never extract sponsor ALGO.
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            if not AlgorandAccountManager.is_funding_eligible(user_address):
+                logger.info(
+                    "Refusing opt-in funding for %s...: account not grandfathered for Algorand sponsorship",
+                    user_address[:10],
+                )
+                return {
+                    'success': False,
+                    'error': 'Algorand sponsorship is not available for new accounts'
+                }
+
             # Calculate how much funding is needed
             funding_amount = self.calculate_funding_needed(user_address, for_app_optin=True)
             

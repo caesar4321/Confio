@@ -545,7 +545,14 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
-            
+
+            # Algorand deprecation: no new sponsored opt-ins (they cost the
+            # sponsor MBR). Success with no transactions reads as "nothing to
+            # do" to every client version.
+            from blockchain.algorand_account_manager import algorand_onboarding_enabled
+            if not algorand_onboarding_enabled():
+                return cls(success=True, transactions=None)
+
             # Determine account context (personal or business)
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
@@ -1777,7 +1784,12 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
 
             if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found for account')
-            
+
+            # Algorand deprecation: sponsor-funded app opt-ins only for
+            # grandfathered accounts.
+            if not AlgorandAccountManager.is_funding_eligible(account.algorand_address):
+                return cls(success=False, error='Algorand sponsorship is not available for new accounts')
+
             # Default to cUSD app if not specified
             if not app_id:
                 app_id_int = AlgorandAccountManager.CUSD_APP_ID
@@ -2159,7 +2171,13 @@ class CheckBusinessOptInMutation(graphene.Mutation):
             if not user.is_authenticated:
                 logger.error('CheckBusinessOptIn: User not authenticated')
                 return cls(error='User not authenticated')
-            
+
+            # Algorand deprecation: business accounts no longer onboard onto
+            # Algorand — report nothing to opt into.
+            from blockchain.algorand_account_manager import algorand_onboarding_enabled
+            if not algorand_onboarding_enabled():
+                return cls(needs_opt_in=False, assets=[], hasTransactions=False)
+
             # Get JWT context properly
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info)
@@ -2497,10 +2515,29 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
-            
+
             # 1. Validate Addresses
             if len(v1_address) != 58 or len(v2_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
+
+            # The sponsor signs MBR funding + group fees below, so the V1
+            # address MUST be the caller's own registered, not-yet-migrated
+            # wallet. Without this, any authenticated caller could feed
+            # arbitrary address pairs and farm sponsor-funded opt-ins.
+            from users.models import Account
+            caller_v1_account = Account.objects.filter(
+                user=user,
+                algorand_address=v1_address,
+                is_keyless_migrated=False,
+                deleted_at__isnull=True,
+            ).first()
+            if not caller_v1_account:
+                return cls(
+                    success=False,
+                    error='V1 address is not your registered unmigrated wallet'
+                )
+            if v1_address == v2_address:
+                return cls(success=False, error='V1 and V2 addresses must differ')
 
             from algosdk.v2client import algod
             from algosdk.transaction import AssetTransferTxn, PaymentTxn, calculate_group_id
@@ -2568,15 +2605,14 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                         # Optional: Could add logic to close 0-balance spam assets here
                          has_leftover_assets = True # Treat as leftover for now to be safe
             
-            # Also ensure we target CONFIO/cUSD for V2 opt-in even if V1 doesn't have them yet
-            # (To ensure V2 is fully setup for the future)
-            # NOTE: We do NOT include legacy CONFIO here - it's a dead token
+            # V2 only opts into assets the V1 wallet ACTUALLY holds. The old
+            # behavior of always adding CONFIO+cUSD meant an empty reactivated
+            # V1 wallet still extracted ~0.2 ALGO of sponsor-funded MBR per
+            # prepared group — and post-deprecation the V2 wallet's future is
+            # on BSC, so speculative opt-ins buy nothing.
+            # NOTE: legacy CONFIO is excluded - it's a dead token
             target_v2_opt_ins = set(assets_to_migrate)
-            if AlgorandAccountManager.CONFIO_ASSET_ID:
-                target_v2_opt_ins.add(AlgorandAccountManager.CONFIO_ASSET_ID)
-            if AlgorandAccountManager.CUSD_ASSET_ID:
-                target_v2_opt_ins.add(AlgorandAccountManager.CUSD_ASSET_ID)
-            
+
             target_v2_opt_ins_list = sorted(list(target_v2_opt_ins))
 
             # 3. Check V2 State (What opt-ins are needed)

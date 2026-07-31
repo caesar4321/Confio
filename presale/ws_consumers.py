@@ -561,6 +561,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if not getattr(account, 'is_keyless_migrated', False):
             return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
 
+        # Algorand deprecation: the standalone sponsor MBR top-up below only
+        # runs for grandfathered (pre-cutoff) accounts. Post-cutoff accounts
+        # are BSC-only and cannot farm the funding.
+        if not AlgorandAccountManager.is_funding_eligible(account.algorand_address):
+            return {"success": False, "error": "La preventa en esta red ya no está disponible para cuentas nuevas."}
+
         # BLOCK ANDROID WITHOUT GOOGLE DRIVE BACKUP (Safety Check)
         # Uses Platform.OS sent from client for reliable device detection
         backup_provider = getattr(user, 'backup_provider', '')

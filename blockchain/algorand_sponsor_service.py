@@ -691,6 +691,20 @@ class AlgorandSponsorService:
             Dict with transaction result or error
         """
         try:
+            # Algorand deprecation choke point: every sponsored opt-in group
+            # (fees and optional MBR funding) requires a grandfathered
+            # account. Post-cutoff accounts are BSC-only.
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            if not AlgorandAccountManager.is_funding_eligible(user_address):
+                logger.info(
+                    "Refusing sponsored opt-in for %s...: account not grandfathered for Algorand sponsorship",
+                    user_address[:10],
+                )
+                return {
+                    'success': False,
+                    'error': 'Algorand sponsorship is not available for new accounts'
+                }
+
             # Check sponsor health
             health = await self.check_sponsor_health()
             if not health['can_sponsor']:
@@ -699,10 +713,10 @@ class AlgorandSponsorService:
                     'error': 'Sponsor service unavailable',
                     'details': health
                 }
-            
+
             # Get suggested params
             params = self.algod.suggested_params()
-            
+
             # Create opt-in transaction (0 amount transfer to self) with 0 fee
             opt_in_txn = AssetTransferTxn(
                 sender=user_address,
@@ -779,6 +793,18 @@ class AlgorandSponsorService:
         For Web3Auth users, we'll return the unsigned transaction for frontend signing.
         """
         try:
+            # Algorand deprecation choke point (see create_sponsored_opt_in).
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            if not AlgorandAccountManager.is_funding_eligible(user_address):
+                logger.info(
+                    "Refusing server-side sponsored opt-in for %s...: account not grandfathered",
+                    user_address[:10],
+                )
+                return {
+                    'success': False,
+                    'error': 'Algorand sponsorship is not available for new accounts'
+                }
+
             # Check if already opted in
             try:
                 account_info = self.algod.account_info(user_address)
