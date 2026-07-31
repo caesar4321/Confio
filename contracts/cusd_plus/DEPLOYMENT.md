@@ -173,7 +173,20 @@ ownerless, no constructor args — replace-by-redeploy like the router.
   armed as the break-glass fallback). Policy/broadcast code:
   `cusd_plus/sponsor_7702.py`; audit ledger: SponsoredBatch (admin).
 
-## ConfioPresaleVault — deployed 2026-07-30
+## ConfioPresaleVault — REDEPLOYED 2026-07-31 (audit)
+
+> The 2026-07-30 deployment at `0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583`
+> is **ABANDONED**. A Codex 5.6-Sol audit found three P1s in it: `claim()`
+> left `migratedCredited` standing so `uncreditMigrated` could revoke
+> tokens a buyer had PAID for; claims could become undercollateralized
+> (unlock didn't prove backing, and post-unlock buys borrowed earlier
+> buyers' collateral, so claim ORDER decided who got stranded); and
+> `setClaimsUnlocked(bool)` let the Safe RE-LOCK claims — a freeze power
+> `pause()` was deliberately denied. It was replaced while it still held
+> **no funds, no assigned credits, and locked claims**, so nothing had to
+> be migrated. Fixes in commit `9f9cdbf2`.
+
+## ConfioPresaleVault — deployed 2026-07-31
 
 $CONFIO presale on curve "A" (0–4M @ $0.20→0.30, 4–24M @ $0.30→0.70,
 24–74M @ $0.70→1.30; full sale $61M), USDT-denominated, sponsor-gated
@@ -182,14 +195,17 @@ the segment table has no setter.
 
 | Role | Address |
 | --- | --- |
-| **ConfioPresaleVault** | `0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583` |
+| **ConfioPresaleVault** | `0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c` |
 | Owner | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
 | Sponsor (gate) | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS) |
 | Payment token | `0x55d398326f99059fF775485246999027B3197955` (USDT 18dp) |
 
-- Creation tx: `0x3f3ce2a9e9298f6f60e490fffd4dfd4a6e0d61d0b5347f2d7fabe8061bfd5f18`
-  (KMS sponsor, nonce 19, ~2.23M gas ≈ 0.0022 BNB), deployed via
-  `manage.py deploy_presale_vault --broadcast --yes-mainnet`.
+- Creation tx: `0x5f30dea02a021cc4f3f72725badf19de606ab95c77fd50bf1429dcf3c1b43a3e`
+  (KMS sponsor, nonce 23, ~2.31M gas ≈ 0.0023 BNB), deployed via
+  `manage.py deploy_presale_vault --broadcast --yes-mainnet`. BscScan
+  verified. Post-deploy reads: currentPrice 0.200443, totalSold =
+  migratedPool = 17,713.85 CONFIO (re-seeded live from Algorand app
+  3353218127), claimsUnlocked false.
 - `initialSold` seeded LIVE from Algorand app 3353218127 `confio_sold`
   at broadcast: 17,713.85 CONFIO (17713850000 ×1e12). Post-deploy reads
   confirmed: currentPrice 0.200443 USDT, totalSold = migratedPool =
@@ -247,3 +263,41 @@ fix presentation via the BscScan **token info update** instead. Process:
    correctly 2026-07-30).
 3. Submit form: name "Confío", symbol CONFIO, logo (256px PNG from
    apps/src/assets/png/CONFIO.png), site https://confio.lat, socials.
+
+## Phase 2 — ConfioPayContract + ConfioPayrollVault, deployed 2026-07-31
+
+The cUSD phase-out's money-movement contracts. Both Safe-owned,
+non-upgradeable, and both hold fee revenue IN the contract (Julian's
+accounting rule, 07-31): balances read straight off-chain, no treasury
+EOA exists to reconcile.
+
+| Contract | Address |
+| --- | --- |
+| **ConfioPayContract** | `0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD` |
+| **ConfioPayrollVault** | `0x664378b2668f320ce3573D0eD6DD154b8C8B3835` |
+| Owner (both) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
+| cUSD+ vault | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
+
+- **ConfioPayContract** — invoice payments. Payer's 7702 batch is
+  `[token.approve(this, gross), pay(invoiceId, token, gross, merchant)]`;
+  the CONTRACT computes the 0.9% ceiling fee (`feeFor`, wei-parity with
+  the Algorand builder), pays the merchant net, and accrues fees per
+  token. Replay key is the full payment terms, not the invoice id alone —
+  keying on the id alone let anyone who read the QR brick a payment with
+  a 1-wei self-payment (audit P1). Creation tx
+  `0xae789ffbdf7cd5b71a04580355d77d375b4303ed59ec10ad3768ee13cfa0b10a`
+  (nonce 24, ~0.0009 BNB). Verified. Post-deploy: `feeFor(10e18)` =
+  0.09e18, `feeFor(10001)` = 91 (ceiling holds).
+- **ConfioPayrollVault** — per-business cUSD+ share escrow with an
+  on-chain delegate allowlist and EIP-712 delegate-signed payouts. The
+  token's per-address freeze is honored through the escrow (audit P2:
+  shares sit under THIS contract, so cUSD+ saw an unfrozen sender);
+  `totalEscrowShares` makes the invariant `balance == Σescrow + fees`
+  checkable, and `rescueSurplus` is bounded by it. `withdraw` is never
+  pausable. Creation tx
+  `0xe258a3eb257a54fbe1a043f1b31fb427646ccde03792aef8603378967dae2c1b`
+  (nonce 25, ~0.0016 BNB). Verified.
+- Config: `BSC_PAY_CONTRACT_ADDRESS`, `BSC_PAYROLL_VAULT_ADDRESS` in
+  `.env.mainnet`. Flags `BSC_SEND_ENABLED` / `BSC_PAY_ENABLED` /
+  `BSC_PAYROLL_ENABLED` all ship **False** — enable when bsc_address
+  coverage is meaningful. Payroll `withdraw` ignores its flag by design.
