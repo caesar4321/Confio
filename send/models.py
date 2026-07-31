@@ -249,6 +249,11 @@ class PhoneInvite(SoftDeleteModel):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('claimed', 'Claimed'),
+        # In-flight reclaim (audit 2026-07-31 P3): the reclaim batch is
+        # broadcast but not yet final. The row is NOT 'reclaimed' until the
+        # confirm task sees the batch mine — a reverted reclaim (e.g. the
+        # invitee claimed first) must not leave the DB claiming otherwise.
+        ('reclaiming', 'Reclaim in flight'),
         ('reclaimed', 'Reclaimed'),
     ]
 

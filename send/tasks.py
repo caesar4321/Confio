@@ -12,6 +12,11 @@ import logging
 from celery import shared_task
 from django.utils import timezone
 
+# Register the invite reclaim confirm task at worker startup — Celery
+# autodiscovers <app>.tasks, so it would otherwise never import invite_tasks
+# and the worker would reject 'send.confirm_bsc_invite_reclaim'.
+from send.invite_tasks import confirm_bsc_invite_reclaim  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT', 'CONFIO': 'CONFIO'}

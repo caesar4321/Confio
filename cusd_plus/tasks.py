@@ -728,6 +728,7 @@ _DOMAIN_CONFIRM_TASKS = {
     'pay_usdt': 'payments.confirm_bsc_payment',
     'payroll_payout': 'payroll.confirm_bsc_payroll_payout',
     'presale_buy': 'presale.confirm_bsc_purchase',
+    'invite_reclaim': 'send.confirm_bsc_invite_reclaim',
 }
 
 

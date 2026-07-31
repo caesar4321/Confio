@@ -333,6 +333,52 @@ class RecipientResolutionTests(SimpleTestCase):
         self.assertEqual(err, 'recipient_required')
 
 
+@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_SEND_ENABLED=True)
+class IdempotencyTests(SimpleTestCase):
+    """A reused idempotency key REPLAYS only when the request matches the
+    stored row; different params → conflict, never the stale calls (P3)."""
+
+    def _existing(self, amount='10', token_type='USDT', recipient_addr=RECIPIENT, ruid=2):
+        return SimpleNamespace(
+            internal_id='old123',
+            bsc_calls_json=json.dumps({'calls': [{'to': USDT_BSC, 'value': '0', 'data': '0x'}],
+                                       'kind': 'send_usdt'}),
+            amount=Decimal(amount), recipient_address=recipient_addr,
+            recipient_user_id=ruid, recipient_business_id=None, token_type=token_type)
+
+    def _prepare(self, existing, amount='10', token='', recipient_addr=RECIPIENT):
+        with _recipient_resolution(_recipient_user('VE'), None, recipient_addr), \
+             mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
+             mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=1000 * WAD), \
+             mock.patch('send.models.SendTransaction.objects') as objs:
+            objs.filter.return_value.first.return_value = existing
+            objs.create.side_effect = AssertionError('idempotent path must not create')
+            return bsc_flow.prepare_bsc_send(
+                _sender_user(), _jwt_ctx(), amount,
+                recipient_user_id='2', token=token, idempotency_key='k1')
+
+    def test_same_params_replays(self):
+        result = self._prepare(self._existing(amount='10'))
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['send_id'], 'old123')
+        self.assertEqual(result['calls'], [{'to': USDT_BSC, 'value': '0', 'data': '0x'}])
+
+    def test_different_amount_conflicts(self):
+        result = self._prepare(self._existing(amount='10'), amount='20')
+        self.assertEqual(result['error'], 'idempotency_key_conflict')
+
+    def test_different_recipient_conflicts(self):
+        result = self._prepare(
+            self._existing(recipient_addr='0x' + '99' * 20))
+        self.assertEqual(result['error'], 'idempotency_key_conflict')
+
+    def test_different_token_intent_conflicts(self):
+        # stored a dollar (USDT) send; now an explicit CONFIO request.
+        result = self._prepare(self._existing(token_type='USDT'), token='CONFIO')
+        self.assertEqual(result['error'], 'idempotency_key_conflict')
+
+
 class ConfirmTaskTests(SimpleTestCase):
     """confirm_bsc_send settles the row, writes both ledger sides for
     internal sends, and notifies both parties."""

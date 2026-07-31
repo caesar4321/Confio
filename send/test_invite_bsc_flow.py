@@ -99,3 +99,41 @@ class InviteBatchTests(SimpleTestCase):
     @override_settings(BSC_INVITE_ENABLED=False)
     def test_disabled_flag(self):
         self.assertFalse(f._enabled())
+
+
+from types import SimpleNamespace
+from unittest import mock
+
+
+class ReclaimConfirmTests(SimpleTestCase):
+    """confirm_bsc_invite_reclaim finalizes 'reclaiming' only on a confirmed
+    batch; a failed reclaim returns the invite to 'pending' (audit P3)."""
+
+    def _run(self, batch_status, kind='invite_reclaim', source_id=3):
+        from send import invite_tasks
+        invite = SimpleNamespace(pk=3, status='reclaiming', save=mock.Mock())
+        batch = SimpleNamespace(id=9, status=batch_status, kind=kind,
+                                source_id=source_id, tx_hash='0x' + 'ab' * 32)
+        with mock.patch('send.models.PhoneInvite.objects') as iobjs, \
+             mock.patch('cusd_plus.models.SponsoredBatch.objects') as bobjs:
+            iobjs.get.return_value = invite
+            bobjs.get.return_value = batch
+            invite_tasks.confirm_bsc_invite_reclaim(3, 9)
+        return invite
+
+    def test_confirmed_marks_reclaimed(self):
+        invite = self._run('confirmed')
+        self.assertEqual(invite.status, 'reclaimed')
+
+    def test_reverted_returns_to_pending(self):
+        invite = self._run('reverted')
+        self.assertEqual(invite.status, 'pending')
+
+    def test_dropped_returns_to_pending(self):
+        invite = self._run('dropped')
+        self.assertEqual(invite.status, 'pending')
+
+    def test_wrong_source_refuses_to_settle(self):
+        invite = self._run('confirmed', source_id=999)
+        self.assertEqual(invite.status, 'reclaiming')  # untouched
+        invite.save.assert_not_called()

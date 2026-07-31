@@ -190,22 +190,16 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     if not sender_addr:
         return {'success': False, 'error': 'no_bsc_address'}
 
-    # Idempotent replay: same sender + key returns the prepared row.
+    # Idempotent replay: same sender + key. Look up early but DON'T return
+    # yet — a reused key with DIFFERENT params must not silently hand back
+    # the old prepared calls (audit P3), so we compare against the resolved
+    # request below before replaying.
+    existing = None
     if idempotency_key:
         existing = SendTransaction.objects.filter(
             sender_user=user, idempotency_key=idempotency_key,
             deleted_at__isnull=True,
         ).first()
-        if existing and existing.bsc_calls_json:
-            return {
-                'success': True,
-                'send_id': existing.internal_id,
-                # bsc_calls_json is the full meta dict — the client only ever
-                # needs the calls array (P3: the replay path used to hand back
-                # the whole meta as 'calls').
-                'calls': (json.loads(existing.bsc_calls_json) or {}).get('calls', []),
-                'token_type': existing.token_type,
-            }
 
     try:
         amount_usd = Decimal(str(amount))
@@ -227,9 +221,38 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             _notify_recipient_needs_app(recipient_user, user)
         return {'success': False, 'error': 'recipient_no_bsc_address'}
 
-    amount_wei = int(amount_usd * WAD)
-
     requested = (token or '').upper()
+
+    # Now that amount + recipient + token intent are known, resolve the
+    # idempotency key: replay ONLY if the request matches the stored row;
+    # a mismatch is a reused key for a different send → reject, never return
+    # the stale calls (audit P3).
+    if existing is not None and existing.bsc_calls_json:
+        # Token intent must line up too: an explicit CONFIO/CUSD_PLUS request
+        # must match the stored token; a dollar-value request (token='') must
+        # have stored a dollar send (the funding source may differ run to run,
+        # so USDT and CUSD_PLUS are interchangeable there).
+        if requested in ('CONFIO', 'CUSD_PLUS'):
+            token_ok = existing.token_type == requested
+        else:
+            token_ok = existing.token_type in ('CUSD_PLUS', 'USDT')
+        same = (
+            token_ok
+            and existing.amount == amount_usd
+            and (existing.recipient_address or '').lower() == recipient_addr.lower()
+            and (existing.recipient_user_id or None) == (recipient_user.id if recipient_user else None)
+            and (existing.recipient_business_id or None) == (recipient_business.id if recipient_business else None)
+        )
+        if not same:
+            return {'success': False, 'error': 'idempotency_key_conflict'}
+        return {
+            'success': True,
+            'send_id': existing.internal_id,
+            'calls': (json.loads(existing.bsc_calls_json) or {}).get('calls', []),
+            'token_type': existing.token_type,
+        }
+
+    amount_wei = int(amount_usd * WAD)
     if requested and requested not in ('CUSD_PLUS', 'CONFIO'):
         return {'success': False, 'error': 'unsupported_token'}
 

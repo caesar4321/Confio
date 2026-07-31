@@ -360,7 +360,12 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
         logger.exception('[INVITE][BSC] reclaim failed %s', phone_invite.invitation_id)
         return {'success': False, 'error': str(exc)[:200]}
 
-    from django.utils import timezone
-    phone_invite.status = 'reclaimed'
+    # Mark in-flight, NOT reclaimed (audit P3): the confirm task finalizes to
+    # 'reclaimed' only once the batch mines; a reverted reclaim reverts to
+    # 'pending' so the escrow stays claimable / retryable.
+    phone_invite.status = 'reclaiming'
     phone_invite.save(update_fields=['status', 'updated_at'])
+
+    from .invite_tasks import confirm_bsc_invite_reclaim
+    confirm_bsc_invite_reclaim.apply_async(args=[phone_invite.pk, batch.id], countdown=8)
     return {'success': True, 'transaction_hash': tx_hash}
