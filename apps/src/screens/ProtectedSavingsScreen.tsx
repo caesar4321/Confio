@@ -115,14 +115,14 @@ export const ProtectedSavingsScreen = () => {
         {/* Hero */}
         <View style={styles.hero}>
           <View style={styles.heroLogoRow}>
-            <Image source={cUSDLogo} style={styles.heroLogo} resizeMode="contain" />
+            <Image source={cUSDPlusLogo} style={styles.heroLogo} resizeMode="contain" />
             <Image
-              source={cUSDPlusLogo}
+              source={cUSDLogo}
               style={[styles.heroLogo, styles.heroLogoOverlap]}
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.heroTitle}>Confío Dollar y Confío Dollar+</Text>
+          <Text style={styles.heroTitle}>Confío Dollar+</Text>
           <Text style={styles.heroSubtitle}>
             Tus dólares digitales, 100% respaldados y verificables en blockchain.
           </Text>
@@ -141,28 +141,29 @@ export const ProtectedSavingsScreen = () => {
             </View>
           </View>
           <Text style={styles.heroFootnote}>
-            cUSD: respaldado por USDC · cUSD+: respaldado por USDY (Tesoro EE.UU.)
+            cUSD+: respaldado por USDY (Tesoro EE.UU.) · cUSD: respaldado por USDC
           </Text>
         </View>
 
-        {/* What is cUSD */}
+        {/* What is cUSD+ (the protagonist); cUSD gets one honest line —
+            still circulating, reserves intact — not a co-feature. */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="help-circle" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>¿Qué son cUSD y cUSD+?</Text>
+            <Text style={styles.sectionTitle}>¿Qué es cUSD+?</Text>
           </View>
-          <Text style={styles.sectionBody}>
-            <Text style={styles.inlineEmphasis}>Confío Dollar (cUSD)</Text> es
-            tu dólar para usar: enviar, pagar, guardar. Cada cUSD tiene un
-            respaldo equivalente en USDC dentro de una reserva verificable:
-            $1 cUSD = $1 USD, hoy y siempre.
-          </Text>
           <Text style={styles.sectionBody}>
             <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>{' '}
             es tu dólar para ahorrar: está respaldado 1:1 por USDY, un token
             garantizado por bonos del Tesoro de EE.UU., y genera rendimiento
-            todos los días. Ambos son tuyos — la blockchain permite comprobar
-            públicamente que el respaldo existe.
+            todos los días. La blockchain permite comprobar públicamente que
+            el respaldo existe.
+          </Text>
+          <Text style={styles.sectionBody}>
+            ¿Y <Text style={styles.inlineEmphasis}>cUSD</Text>? Sigue en
+            circulación y 100% respaldado por USDC en una reserva verificable
+            que <Text style={styles.inlineEmphasis}>nunca se invierte</Text> —
+            puedes usarlo y retirarlo cuando quieras.
           </Text>
         </View>
 
@@ -228,37 +229,13 @@ export const ProtectedSavingsScreen = () => {
           </Text>
         </View>
 
-        {/* Two dollars, two jobs — the real yield model (cUSD+ is a
-            separate opt-in product; cUSD reserves are NEVER invested) */}
+        {/* How the yield works (cUSD's reserve promise lives in the compact
+            line above — this section is all cUSD+) */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="trending-up" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Dos dólares, dos trabajos</Text>
+            <Text style={styles.sectionTitle}>Tu rendimiento, todos los días</Text>
           </View>
-
-          <View style={styles.yieldBadgeRow}>
-            <View style={styles.yieldBadge}>
-              <Text style={styles.yieldBadgeNow}>cUSD</Text>
-              <Text style={styles.yieldBadgeLabel}>PARA USAR</Text>
-              <Text style={styles.yieldBadgeSub}>siempre $1</Text>
-            </View>
-            <Icon name="plus" size={20} color={colors.text.light} />
-            <View style={[styles.yieldBadge, styles.yieldBadgeNext]}>
-              <Text style={styles.yieldBadgeNext1}>cUSD+</Text>
-              <Text style={styles.yieldBadgeLabel}>PARA AHORRAR</Text>
-              <Text style={styles.yieldBadgeSub}>rendimiento diario</Text>
-            </View>
-          </View>
-
-          <Text style={styles.sectionBody}>
-            Las reservas USDC que respaldan tu cUSD{' '}
-            <Text style={styles.inlineEmphasis}>nunca se invierten</Text> — se
-            quedan 100% en USDC, verificables. El rendimiento vive en un
-            producto separado y opcional:{' '}
-            <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>,
-            respaldado 1:1 por USDY, un token garantizado por bonos del Tesoro
-            de EE.UU.
-          </Text>
 
           {/* Rates are LIVE from the server (Ondo's on-chain oracle) when
               available; the static example only stands in pre-launch, and
@@ -318,21 +295,15 @@ export const ProtectedSavingsScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="layers" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>¿Y qué son USDC y USDY?</Text>
+            <Text style={styles.sectionTitle}>¿Qué es USDY?</Text>
           </View>
-          <Text style={styles.sectionBody}>
-            <Text style={styles.inlineEmphasis}>USDC</Text> es el dólar digital
-            más usado del mundo, emitido por{' '}
-            <Text style={styles.inlineEmphasis}>Circle</Text>, una empresa
-            regulada en EE.UU. Cada USDC está respaldado 1:1 por efectivo y
-            bonos del Tesoro en custodios estadounidenses, con auditorías
-            públicas mensuales.
-          </Text>
           <Text style={styles.sectionBody}>
             <Text style={styles.inlineEmphasis}>USDY</Text> es un token de{' '}
             <Text style={styles.inlineEmphasis}>Ondo Finance</Text> respaldado
             por bonos del Tesoro de EE.UU. Esos bonos pagan interés todos los
-            días — ese interés es el rendimiento que recibe tu cUSD+.
+            días — ese interés es el rendimiento que recibe tu cUSD+. (USDC,
+            el respaldo de cUSD, es el dólar digital de Circle, con auditorías
+            públicas mensuales.)
           </Text>
           <Text style={styles.sectionBody}>
             Las reservas de USDY se verifican por terceros independientes:
