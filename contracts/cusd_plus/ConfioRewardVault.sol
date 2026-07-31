@@ -2,45 +2,36 @@
 pragma solidity ^0.8.24;
 
 /**
- * ConfioRewardVault — BSC mirror of the Algorand CONFIO Rewards Vault
- * (contracts/rewards/confio_rewards.py).
+ * ConfioRewardVault — CONFIO reward claims, LOCKED until DEX launch.
  *
- * Escrows CONFIO (BEP-20) and lets eligible users self-claim rewards that
- * the Django backend attested off-chain. Same shape as Algorand:
- *  - a hot ATTESTOR key writes per-user eligibility (mirrors the Algorand
- *    admin/sponsor that could call mark_eligible);
- *  - the reward is denominated in cUSD and converted to CONFIO on-chain at
- *    a manually snapshotted price, so the backend locks the USD rate at
- *    attestation time;
- *  - an optional referrer payout is recorded against the referee and can
- *    be claimed exactly once, order-independent of the referee's own claim;
- *  - a solvency invariant guarantees the vault always holds enough CONFIO
- *    to cover every outstanding obligation before a new one is written;
- *  - the owner Safe can withdraw only the surplus above obligations.
+ * Design (Julian, 2026-07-31): CONFIO has no liquidity before the DEX
+ * launch, so letting users move reward CONFIO early is useless. Rewards
+ * therefore accrue OFF-CHAIN in Confío's database — the single source of
+ * truth for who earned what — and nothing touches the chain until a user
+ * claims. Claims are LOCKED until the owner Safe opens them at DEX launch
+ * (one-way), matching the tokenomics lock ("bloqueados hasta el evento de
+ * lanzamiento/desbloqueo en DEX").
  *
- * What the BSC version DROPS (Algorand-specific): boxes, per-box MBR, the
- * sponsor payment that funded box creation, and ASA opt-in checks. Mappings
- * replace boxes; nothing needs pre-funding.
+ * Authorization is an EIP-712 signature by the backend SIGNER over the
+ * user's CUMULATIVE earned CONFIO. The user submits it and receives
+ * (cumulative − alreadyClaimed); the on-chain `claimed` mapping is BOTH the
+ * running total and the replay guard, so continued accrual just means the
+ * backend signs a larger cumulative later. No per-reward on-chain
+ * attestation; no price on-chain (the backend converts $ → CONFIO at the
+ * live presale-curve price when it computes the cumulative).
  *
- * Two asymmetries carried over from the Algorand contract on purpose:
- *  - the MAIN reward is passed in cUSD and converted at the price; the
- *    REFERRAL amount is passed directly in CONFIO (confio_rewards.py does
- *    the same — args[1] is cUSD, args[3] is micro-CONFIO).
- *  - `pause` blocks claims as well as attestation. Unlike CusdPlusVault
- *    (exits never gated), these are treasury-funded rewards, not user
- *    principal, so an emergency stop over claims is acceptable. Be precise
- *    (audit 2026-07-31): while paused, an ALLOCATED reward can neither be
- *    claimed, withdrawn (it is `outstanding()`, so below the surplus
- *    bound), nor re-attested (the pending guard blocks it) — the only exit
- *    is unpause. `renounceOwnership` is therefore disabled, so the Safe can
- *    always unpause; a paused reward can be delayed but never permanently
- *    stranded. The owner's cancelEligibility is the deliberate correction
- *    path for a mistaken allocation.
- *
- * Roles: owner = the 3-of-5 Safe (price, attestor rotation, surplus
- * withdraw, pause). attestor = the backend hot key that writes eligibility
- * (high-frequency, cannot be a Safe op). Non-upgradeable — redeploy to
- * change logic; the app points at a new address.
+ * Trust model — be honest (audit 2026-07-31): this is a fully
+ * treasury-controlled reward pool, NOT a trustless escrow. Rewards are
+ * discretionary treasury obligations. The owner Safe can, at any time
+ * including after DEX unlock, pause() and withdraw() the whole balance and
+ * never unpause — `unlockClaims` being one-way does NOT guarantee claims
+ * stay available, and bounding withdraw wouldn't fix that (the owner could
+ * rotate the signer and drain through signed claims). Users trust the
+ * 3-of-5 Safe to honor the DB obligations. A compromised SIGNER is bounded
+ * by the funded balance (fund a working tranche, top up), and — because
+ * there is no on-chain record of what is owed — the SIGNER must sign with
+ * SHORT deadlines: a corrected-down entitlement can't revoke an already
+ * issued higher-cumulative signature before its deadline, only outlast it.
  */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -49,243 +40,129 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
-    uint256 private constant WAD = 1e18;
+    // ═════════════════════════ EIP-712 ══════════════════════════════════
+
+    bytes32 private constant DOMAIN_TYPEHASH = keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    );
+    bytes32 private constant NAME_HASH = keccak256(bytes("ConfioRewardVault"));
+    bytes32 private constant VERSION_HASH = keccak256(bytes("1"));
+    bytes32 public constant CLAIM_TYPEHASH = keccak256(
+        "Claim(address user,uint256 cumulativeAmount,uint256 deadline)"
+    );
+
+    // ═════════════════════════ State ════════════════════════════════════
 
     IERC20 public immutable CONFIO;
 
-    /// Writes eligibility. Owner-rotatable hot key (the backend attestor).
-    address public attestor;
+    /// Backend key that authorizes claims. Owner-rotatable hot key.
+    address public signer;
 
-    /// CONFIO price in cUSD (WAD, i.e. USD per whole CONFIO). Must be
-    /// active and non-zero for attestation — mirrors MANUAL_ACTIVE/PRICE.
-    uint256 public manualPrice;
-    bool public manualPriceActive;
-    /// Bumped on every price set; stamped onto each reward as an audit
-    /// trail of which price was in force when it was written.
-    uint64 public priceRound;
+    /// Claims are shut until DEX launch; one-way once opened.
+    bool public claimsUnlocked;
 
-    struct Reward {
-        uint128 amount;     // CONFIO owed to the user (0 once claimed)
-        uint128 refAmount;  // CONFIO owed to `referrer` (0 once claimed)
-        address referrer;   // who may claim refAmount (0 if none)
-        bool claimed;       // main reward taken
-        bool refClaimed;    // referral portion taken (true when none)
-        uint64 priceRound;  // price round in force at attestation
-    }
-
-    mapping(address => Reward) public rewards;
-
-    // Aggregate obligation tracking (mirrors the Algorand global counters).
-    uint256 public totalEligible;
+    /// Cumulative CONFIO each user has already pulled — running total AND
+    /// replay guard (a re-submitted signature pays 0 and reverts).
+    mapping(address => uint256) public claimed;
     uint256 public totalClaimed;
-    uint256 public totalRefEligible;
-    uint256 public totalRefPaid;
-    uint256 public eligibleCount;
-    uint256 public claimCount;
-    uint256 public refClaimCount;
 
-    event AttestorSet(address indexed attestor);
-    event ManualPriceSet(uint256 price, uint64 indexed round);
-    event ManualPriceCleared(uint64 indexed round);
-    event EligibilitySet(
-        address indexed user,
-        uint256 confioAmount,
-        address indexed referrer,
-        uint256 refConfioAmount,
-        uint64 indexed priceRound
-    );
-    event Claimed(address indexed user, uint256 confioAmount);
-    event ReferralClaimed(address indexed referrer, address indexed referee, uint256 confioAmount);
-    event SurplusWithdrawn(address indexed to, uint256 amount);
-    event EligibilityCancelled(address indexed user, uint256 mainFreed, uint256 refFreed);
+    event SignerSet(address indexed signer);
+    event ClaimsUnlocked();
+    event Claimed(address indexed user, uint256 amount, uint256 cumulative);
+    event Withdrawn(address indexed to, uint256 amount);
 
-    constructor(address confio, address attestor_, address owner_) Ownable(owner_) {
-        require(confio != address(0) && attestor_ != address(0), "zero address");
+    constructor(address confio, address signer_, address owner_) Ownable(owner_) {
+        require(confio != address(0) && signer_ != address(0), "zero address");
         CONFIO = IERC20(confio);
-        attestor = attestor_;
-        emit AttestorSet(attestor_);
+        signer = signer_;
+        emit SignerSet(signer_);
     }
 
-    modifier onlyAttestor() {
-        require(msg.sender == attestor, "not attestor");
-        _;
+    // ═════════════════════════ Claim ════════════════════════════════════
+
+    /// Pull everything newly earned. `cumulativeAmount` is the user's total
+    /// lifetime reward CONFIO as of signing; the vault pays the delta over
+    /// what they've already claimed. Sponsored gas under 7702 (msg.sender
+    /// is the user's own EOA).
+    function claim(uint256 cumulativeAmount, uint256 deadline, bytes calldata signature)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 paid)
+    {
+        require(claimsUnlocked, "claims locked");
+        require(block.timestamp <= deadline, "expired");
+
+        address recovered = ECDSA.recover(claimDigest(msg.sender, cumulativeAmount, deadline), signature);
+        require(recovered == signer, "bad signature");
+
+        uint256 already = claimed[msg.sender];
+        require(cumulativeAmount > already, "nothing to claim");
+
+        paid = cumulativeAmount - already;
+        claimed[msg.sender] = cumulativeAmount;
+        totalClaimed += paid;
+
+        CONFIO.safeTransfer(msg.sender, paid);
+        emit Claimed(msg.sender, paid, cumulativeAmount);
     }
 
-    // ═════════════════════════ Views ════════════════════════════════════
-
-    /// CONFIO owed but not yet claimed (main + referral).
-    function outstanding() public view returns (uint256) {
-        return (totalEligible - totalClaimed) + (totalRefEligible - totalRefPaid);
-    }
-
-    /// CONFIO the owner could withdraw without touching any obligation.
-    function surplus() public view returns (uint256) {
-        uint256 bal = CONFIO.balanceOf(address(this));
-        uint256 owed = outstanding();
-        return bal > owed ? bal - owed : 0;
-    }
-
-    /// cUSD (WAD) → CONFIO (WAD) at the active price. Ceil-free floor
-    /// division favors the vault, same as the Algorand WideRatio.
-    function quoteConfio(uint256 cusdAmount) public view returns (uint256) {
-        require(manualPriceActive && manualPrice > 0, "price not set");
-        return Math.mulDiv(cusdAmount, WAD, manualPrice);
-    }
-
-    // ═════════════════════════ Attestation ══════════════════════════════
-
-    /// Record a user's reward. `cusdAmount` is converted to CONFIO at the
-    /// active price; `refConfioAmount` is CONFIO paid to `referrer` as-is
-    /// (0 / address(0) for no referral). Cannot overwrite a still-pending
-    /// allocation — the prior one must be claimed (or empty) first.
-    function setEligible(
-        address user,
-        uint256 cusdAmount,
-        uint64 expectedPriceRound,
-        address referrer,
-        uint256 refConfioAmount
-    ) external onlyAttestor whenNotPaused {
-        require(user != address(0), "zero user");
-        require(cusdAmount > 0, "zero reward");
-        // The backend computed cusdAmount against a specific price round;
-        // if the Safe re-priced between signing and inclusion, refuse
-        // rather than silently mint at the new rate (audit 2026-07-31).
-        require(expectedPriceRound == priceRound, "stale price round");
-
-        uint256 confioAmount = quoteConfio(cusdAmount);
-        require(confioAmount > 0, "dust reward");
-        require(confioAmount <= type(uint128).max, "amount overflow");
-
-        Reward storage r = rewards[user];
-        // No overwriting a live allocation (mirrors the Algorand assert
-        // that a re-attested box has amount==0 and refAmount==0).
-        require(r.amount == 0 && r.refAmount == 0, "pending allocation");
-
-        if (refConfioAmount > 0) {
-            require(referrer != address(0) && referrer != user, "bad referrer");
-            require(refConfioAmount <= type(uint128).max, "ref overflow");
-        } else {
-            referrer = address(0);
-        }
-
-        // Solvency BEFORE writing: the vault must already hold every
-        // outstanding obligation plus this new one.
-        require(
-            CONFIO.balanceOf(address(this)) >= outstanding() + confioAmount + refConfioAmount,
-            "insufficient reserve"
+    /// Exposed so the backend signer and clients assert digest parity.
+    function claimDigest(address user, uint256 cumulativeAmount, uint256 deadline)
+        public
+        view
+        returns (bytes32)
+    {
+        bytes32 domainSeparator = keccak256(
+            abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this))
         );
-
-        r.amount = uint128(confioAmount);
-        r.claimed = false;
-        r.referrer = referrer;
-        r.refAmount = uint128(refConfioAmount);
-        r.refClaimed = refConfioAmount == 0; // nothing to claim ⇒ settled
-        r.priceRound = priceRound;
-
-        totalEligible += confioAmount;
-        eligibleCount += 1;
-        if (refConfioAmount > 0) totalRefEligible += refConfioAmount;
-
-        emit EligibilitySet(user, confioAmount, referrer, refConfioAmount, priceRound);
-    }
-
-    // ═════════════════════════ Claims ═══════════════════════════════════
-
-    /// The user takes their CONFIO. Sponsored gas under 7702 (msg.sender is
-    /// the user's own EOA); the vault only cares who msg.sender is.
-    function claim() external nonReentrant whenNotPaused returns (uint256 amount) {
-        Reward storage r = rewards[msg.sender];
-        amount = r.amount;
-        require(amount > 0 && !r.claimed, "nothing to claim");
-
-        r.amount = 0;
-        r.claimed = true;
-        totalClaimed += amount;
-        claimCount += 1;
-
-        CONFIO.safeTransfer(msg.sender, amount);
-        emit Claimed(msg.sender, amount);
-    }
-
-    /// The referrer takes their bonus, order-independent from the referee's
-    /// own claim (mirrors claim_referrer). Only the stored referrer may.
-    function claimReferral(address referee) external nonReentrant whenNotPaused returns (uint256 amount) {
-        Reward storage r = rewards[referee];
-        require(r.referrer == msg.sender, "not referrer");
-        amount = r.refAmount;
-        require(amount > 0 && !r.refClaimed, "nothing to claim");
-
-        r.refAmount = 0;
-        r.refClaimed = true;
-        totalRefPaid += amount;
-        refClaimCount += 1;
-
-        CONFIO.safeTransfer(msg.sender, amount);
-        emit ReferralClaimed(msg.sender, referee, amount);
+        bytes32 structHash = keccak256(
+            abi.encode(CLAIM_TYPEHASH, user, cumulativeAmount, deadline)
+        );
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
     // ═════════════════════════ Admin (Safe) ═════════════════════════════
 
-    function setManualPrice(uint256 price) external onlyOwner {
-        require(price > 0, "zero price");
-        manualPrice = price;
-        manualPriceActive = true;
-        priceRound += 1;
-        emit ManualPriceSet(price, priceRound);
+    function setSigner(address signer_) external onlyOwner {
+        require(signer_ != address(0), "zero signer");
+        signer = signer_;
+        emit SignerSet(signer_);
     }
 
-    function clearManualPrice() external onlyOwner {
-        manualPriceActive = false;
-        emit ManualPriceCleared(priceRound);
+    /// One-way: opening claims is a launch event, not a toggle — no path
+    /// re-locks `claimsUnlocked`. NOTE this is not the same as guaranteed
+    /// availability: pause()+withdraw() can still suspend and defund claims
+    /// (see the trust-model note in the header). One-way unlock only means
+    /// the DEX-launch signal itself is irreversible.
+    function unlockClaims() external onlyOwner {
+        require(!claimsUnlocked, "already unlocked");
+        claimsUnlocked = true;
+        emit ClaimsUnlocked();
     }
 
-    function setAttestor(address attestor_) external onlyOwner {
-        require(attestor_ != address(0), "zero attestor");
-        attestor = attestor_;
-        emit AttestorSet(attestor_);
-    }
-
-    /// Correct a mistaken/undeliverable allocation (mirrors the Algorand
-    /// delete_box, but adjusts the obligation counters so `outstanding()`
-    /// stays exact — the Algorand version deletes the box without
-    /// decrementing totals). Clears whatever is still UNCLAIMED and frees
-    /// that CONFIO back to surplus. A deliberate Safe clawback of an
-    /// unclaimed reward: 3-of-5, correction-only, never touches CONFIO
-    /// already transferred out by a claim.
-    function cancelEligibility(address user) external onlyOwner {
-        Reward storage r = rewards[user];
-        uint256 mainOwed = r.amount;      // 0 if already claimed
-        uint256 refOwed = r.refClaimed ? 0 : r.refAmount;
-        require(mainOwed > 0 || refOwed > 0, "nothing pending");
-
-        if (mainOwed > 0) totalEligible -= mainOwed;
-        if (refOwed > 0) totalRefEligible -= refOwed;
-
-        delete rewards[user];
-        emit EligibilityCancelled(user, mainOwed, refOwed);
-    }
-
-    /// Disabled: renouncing while paused would strand every allocated
-    /// reward permanently (audit 2026-07-31). The Safe must always be able
-    /// to unpause.
-    function renounceOwnership() public view override onlyOwner {
-        revert("renounce disabled");
-    }
-
-    /// Withdraw ONLY surplus above outstanding obligations — the promised
-    /// rewards can never be swept out from under claimers.
-    function withdrawSurplus(address to, uint256 amount) external onlyOwner nonReentrant {
+    /// The reward pool is the treasury's own CONFIO; outstanding
+    /// obligations live in the DB, which the Safe reconciles before moving
+    /// funds. Not the claim path — this is fund management, not a claimer's
+    /// exit.
+    function withdraw(address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "zero recipient");
-        require(amount > 0 && amount <= surplus(), "exceeds surplus");
+        require(amount > 0, "zero amount");
         CONFIO.safeTransfer(to, amount);
-        emit SurplusWithdrawn(to, amount);
+        emit Withdrawn(to, amount);
     }
 
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
+
+    /// Disabled: renouncing while paused would strand every claimer with no
+    /// way to unpause. The Safe must always be able to operate the vault.
+    function renounceOwnership() public view override onlyOwner {
+        revert("renounce disabled");
+    }
 }
