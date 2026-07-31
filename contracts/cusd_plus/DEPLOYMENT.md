@@ -329,7 +329,7 @@ moment for a metadata fix.
   `presaleVault.setConfioToken(0xCcEb…3fa8)` — calldata
   `0x76eba8ba000000000000000000000000cceb3f6127fa9160a26a1b85857ca4c9d56b3fa8`.
 
-## CusdPlusVault v5 — mint gate (impl deployed 2026-07-31, UPGRADE PENDING)
+## CusdPlusVault v5 — mint gate (LIVE 2026-07-31, Safe nonce 4)
 
 Closes the open-mint gap: `subscribeAndMint` was permissionless on-chain,
 so Ondo eligibility (§21(b)(F) continuing US-person representation) could
@@ -364,8 +364,18 @@ was somewhere above the call, not that it approved the recipient).
   `setSponsor(router, true)` — `sellToSavings` mints to the user while the
   router is `msg.sender`, so without it every sell-into-savings reverts
   `recipient not caller`.
-- Post-execution checks: `isSponsor(KMS)` is true, a direct mint reverts
-  `not sponsored`, and a normal relayed app mint still succeeds.
+- **EXECUTED at Safe nonce 4** (signers 1/3/5 via
+  `.kms-local/kms_evm_multisig/sign_safe_transaction.py --execute`; the
+  script prompts `Type 'execute bsc' to submit:` — that exact phrase, or it
+  signs and cancels without broadcasting).
+- Post-execution VERIFIED live: impl slot = `0xaa9aff7c…f5a9`; Safe nonce 5;
+  `isSponsor(KMS)` true / anyone else false; pPlus 1.001707…, lastOraclePrice
+  1.141248…, supply 2.9849…, owner = Safe, unpaused, backing 10000 bps, guard
+  untripped; a direct mint reverts `not sponsored`; `redeemToUsdt` reverts
+  only on ERC20InsufficientBalance (i.e. the exit is NOT gated).
+  `test/PostUpgradeV5.fork.t.sol` (5/5) exercises the DEPLOYED implementation
+  against live state: production relayed mint works, unsponsored mint
+  rejected, third-party recipient rejected, exit works with no sponsor.
 - Trust model, stated honestly: this guarantees SPONSOR ROTATION CANNOT
   AFFECT EXITS. The owner Safe still can — `redeemToUsdt` is
   `whenNotPaused`, a frozen holder cannot burn, and UUPS could replace the
