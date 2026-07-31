@@ -17,7 +17,7 @@ contract ConfioTokenTest is Test {
     }
 
     function test_metadata_and_fixed_supply() public view {
-        assertEq(token.name(), unicode"Confío");
+        assertEq(token.name(), "Confio"); // ASCII by design: explorers escape accents
         assertEq(token.symbol(), "CONFIO");
         assertEq(token.decimals(), 18);
         assertEq(token.totalSupply(), 1_000_000_000e18);

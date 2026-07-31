@@ -301,3 +301,30 @@ EOA exists to reconcile.
   `.env.mainnet`. Flags `BSC_SEND_ENABLED` / `BSC_PAY_ENABLED` /
   `BSC_PAYROLL_ENABLED` all ship **False** — enable when bsc_address
   coverage is meaningful. Payroll `withdraw` ignores its flag by design.
+
+### ConfioToken RE-ISSUE 2026-07-31 — ASCII name "Confio"
+
+BscScan HTML-escapes non-ASCII token names; rather than live with
+"Conf&#237;o" on every explorer surface, the token was re-issued with the
+plain-ASCII on-chain name **"Confio"** (symbol CONFIO unchanged; the
+accented "Confío" stays in UI/branding). Timing: zero holders beyond the
+Safe, nothing wired (`setConfioToken` never executed) — the one cheap
+moment for a metadata fix.
+
+| Role | Address |
+| --- | --- |
+| **ConfioToken (CONFIO), CURRENT** | `0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8` |
+| Old token (SUPERSEDED, delisted + burned) | `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1` |
+
+- New creation tx: `0xac4a6e2b5cf40ed772b85dd74f83267066fbcc78b7db7ef9c990aa2413382abb`
+  (KMS sponsor, ~1.03M gas). Post-deploy reads: name() = "Confio",
+  totalSupply = balanceOf(Safe) = 1B. BscScan source verified 2026-07-31.
+- Old token wind-down: BscScan ownership verification RELEASED (signed
+  message 2026-07-31 via bsc_sign_message); Safe burns its full 1B —
+  Safe tx to `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`, calldata
+  `0x42966c680000000000000000000000000000000000000000033b2e3c9fd0803ce8000000`
+  (`burn(1_000_000_000e18)` — drops totalSupply to 0, the clearest
+  "dead token" signal an explorer can show).
+- The pending claim-wiring Safe steps now use the NEW address:
+  `presaleVault.setConfioToken(0xCcEb…3fa8)` — calldata
+  `0x76eba8ba000000000000000000000000cceb3f6127fa9160a26a1b85857ca4c9d56b3fa8`.

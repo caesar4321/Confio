@@ -5,8 +5,13 @@ pragma solidity ^0.8.24;
  * ConfioToken — $CONFIO on BSC.
  *
  * The BEP-20 home of the token after the Algorand→BSC migration. Mirrors
- * the Algorand ASA (id 3351104258: name "Confío", unit CONFIO, 1B total)
- * at the EVM-native 18 decimals.
+ * the Algorand ASA (id 3351104258, unit CONFIO, 1B total) at the
+ * EVM-native 18 decimals. The on-chain name is deliberately the ASCII
+ * "Confio" (no accent): Etherscan-family explorers HTML-escape non-ASCII
+ * token names ("Conf&#237;o") as anti-spoofing, and wallet/DEX rendering
+ * varies — on-chain metadata stays plain ASCII, the accented "Confío"
+ * lives in UI and branding. (Supersedes the accented first deployment at
+ * 0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1, delisted + supply burned.)
  *
  * Deliberately has NO owner, NO minter and NO pause: the entire fixed
  * supply of 1,000,000,000 CONFIO is minted once, in the constructor, to
@@ -31,8 +36,8 @@ contract ConfioToken is ERC20, ERC20Burnable, ERC20Permit {
     error ZeroAddress();
 
     constructor(address treasury)
-        ERC20(unicode"Confío", "CONFIO")
-        ERC20Permit(unicode"Confío")
+        ERC20("Confio", "CONFIO")
+        ERC20Permit("Confio")
     {
         if (treasury == address(0)) revert ZeroAddress();
         _mint(treasury, TOTAL_SUPPLY);
