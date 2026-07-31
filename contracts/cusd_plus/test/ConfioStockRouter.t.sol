@@ -65,8 +65,12 @@ contract ConfioStockRouterTest is Test {
         vault = CusdPlusVault(address(new ERC1967Proxy(
             address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
         )));
-        // Mints are sponsor-gated (2026-07-31); forge keeps tx.origin as the
-        // default sender under vm.prank, mirroring the production relay.
+        // Two DIFFERENT registrations, easy to conflate:
+        //  1. the router, so the vault accepts it minting FOR a user;
+        //  2. the default tx.origin, standing in for Confío's KMS relay.
+        // Forge keeps tx.origin as the default sender under vm.prank, so
+        // ordinary tests below model a properly relayed trade. Tests that
+        // want an UNRELAYED caller use vm.prank(x, x) to set origin too.
         vm.prank(treasury);
         vault.setSponsor(tx.origin, true);
 
@@ -208,5 +212,50 @@ contract ConfioStockRouterTest is Test {
         vm.prank(user);
         vm.expectRevert(bytes("address frozen"));
         router.buyWithSavings(address(tsla), 300e18, 0, 0, "");
+    }
+
+    // ── AUDIT REGRESSION (2026-07-31 [P1]) ───────────────────────────
+    // Registering the router as a vault sponsor makes it satisfy BOTH of
+    // the vault's mint checks on its own, so without a gate of its own the
+    // router launders any permissionless call into fresh cUSD+ — exactly
+    // the eligibility bypass the v5 vault gate exists to prevent.
+
+    function test_sell_rejectsUnrelayedCaller() public {
+        // An ineligible holder with a real stock balance, acting alone.
+        address ineligible = makeAddr("ineligibleHolder");
+        tsla.mint(ineligible, 10e18);
+        vm.prank(ineligible, ineligible); // own tx: Confío not in it
+        tsla.approve(address(router), type(uint256).max);
+
+        assertTrue(vault.isSponsor(address(router)), "router IS a vault sponsor");
+        vm.prank(ineligible, ineligible);
+        vm.expectRevert("not sponsored");
+        router.sellToSavings(address(tsla), 10e18, 0, 0, "");
+        assertEq(vault.balanceOf(ineligible), 0, "no cUSD+ was issued");
+    }
+
+    function test_buy_rejectsUnrelayedCaller() public {
+        vm.prank(user, user);
+        vm.expectRevert("not sponsored");
+        router.buyWithSavings(address(tsla), 1e18, 0, 0, "");
+    }
+
+    /// The gate must read the ORIGIN, not the router's own registration —
+    /// isSponsor(address(this)) is always true and is precisely the hole.
+    function test_gate_follows_origin_registration() public {
+        address relay = makeAddr("otherRelay");
+        tsla.mint(user, 10e18);
+        vm.prank(user, relay);
+        tsla.approve(address(router), type(uint256).max);
+
+        vm.prank(user, relay);
+        vm.expectRevert("not sponsored");
+        router.sellToSavings(address(tsla), 1e18, 0, 0, "");
+
+        vm.prank(treasury);
+        vault.setSponsor(relay, true); // relay becomes Confío-operated
+        vm.prank(user, relay);
+        uint256 sharesOut = router.sellToSavings(address(tsla), 1e18, 0, 0, "");
+        assertGt(sharesOut, 0, "same call succeeds once the origin is a relay");
     }
 }

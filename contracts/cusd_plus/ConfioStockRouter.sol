@@ -27,11 +27,34 @@ pragma solidity ^0.8.24;
  *   so pointing the app at a new address IS the upgrade path. (The vault
  *   holds user value and needed UUPS; the router does not.)
  *
- * PROVISIONAL (Ondo onboarding): IGmSettlement mirrors the pattern-C
- * attestation settle (binding quote signed off-chain, settled on-chain).
- * Exact ABI + whether GM on BNB pays/charges in USDT or USDY is an open
- * question in the Michael thread; every GM touchpoint is isolated in
- * _gmBuy/_gmSell so only those two bodies change.
+ * ══ DO NOT DEPLOY AS WRITTEN (audit 2026-07-31) ═════════════════════
+ *
+ * IGmSettlement below is a PLACEHOLDER and is already known to be wrong.
+ * README.md documents the real BNB contract as GMTokenManager
+ * 0x91f8Aff3738825e8eB16FC6f6b1A7A4647bDB299 with
+ * `mintWithAttestation(quote, signature, depositToken, depositTokenAmount)`
+ * / `redeemWithAttestation(...)` over EIP-712 quotes — not buy()/sell().
+ * Against the real contract both paths revert on selector mismatch.
+ *
+ * Worse than the ABI: GM requires the CALLER to be whitelisted and its
+ * stored `userID` to match the quote. The caller here is always this
+ * router, never the end user — so either every trade is attributed to
+ * Duende (defeating per-user onboarding) or GM refuses it. That is an
+ * ARCHITECTURAL blocker, not an adapter detail, and it must be settled
+ * with Ondo before this contract can exist in its final shape.
+ *
+ * When the real ABI lands, the rewrite MUST also carry the audit's
+ * open P2s, which were deliberately not built against a known-wrong
+ * interface:
+ *   - derive/verify the stock token from the SIGNED QUOTE instead of
+ *     trusting a caller-supplied address (or keep an owner allowlist);
+ *   - require exact input consumption on every leg and zero the GM and
+ *     VAULT allowances afterwards, so a partial fill cannot leave value
+ *     plus a live allowance behind;
+ *   - floor what the USER receives, not merely what the router receives
+ *     (a transfer-taxing token can land the user under their quote);
+ *   - commit each trade to a maxFeeBps so a fee change cannot be slipped
+ *     in front of a signed trade.
  */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -43,6 +66,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 interface ICusdPlusVaultMinimal {
     function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to) external returns (uint256);
     function subscribeAndMint(uint256 usdtIn, uint256 minUsdyOut, address recipient) external returns (uint256);
+    function isSponsor(address account) external view returns (bool);
 }
 
 /// PROVISIONAL — replace with the official GM settlement ABI at onboarding.
@@ -111,6 +135,27 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
         FEE_TREASURY = feeTreasury;
     }
 
+    /// Confío's relay must ORIGINATE the trade (audit 2026-07-31 [P1]).
+    ///
+    /// `sellToSavings` reaches the vault's PRIMARY ISSUANCE, and the vault
+    /// must register this router as a sponsor for that call to work at all
+    /// (it mints to the user while the router is msg.sender). But being a
+    /// sponsor makes the router satisfy BOTH of the vault's checks by
+    /// itself — `isSponsor[msg.sender]` is true and `tx.origin` becomes
+    /// irrelevant — so without this modifier ANY caller could launder a
+    /// permissionless call into freshly minted cUSD+, bypassing the phone
+    /// + IP eligibility checks the whole v5 gate exists to enforce. A US
+    /// person holding a transferable GM stock is exactly that caller.
+    ///
+    /// Deliberately `tx.origin`: checking `isSponsor(address(this))` would
+    /// always be true and is precisely the hole. This is NOT an exit gate
+    /// — a holder can always leave via the vault's own `redeemToUsdt`,
+    /// which no contract here can restrict.
+    modifier onlySponsoredOrigin() {
+        require(VAULT.isSponsor(tx.origin), "not sponsored");
+        _;
+    }
+
     function setStockFeeBps(uint256 newBps) external onlyOwner {
         require(newBps <= MAX_FEE_BPS, "fee above hard cap");
         emit StockFeeSet(stockFeeBps, newBps);
@@ -128,7 +173,7 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
         uint256 minUsdtOut,
         uint256 minStockOut,
         bytes calldata attestation
-    ) external nonReentrant whenNotPaused returns (uint256 stockOut) {
+    ) external nonReentrant whenNotPaused onlySponsoredOrigin returns (uint256 stockOut) {
         require(sharesIn > 0, "zero in");
 
         // Pull the savings shares and redeem them here (router is a pipe:
@@ -160,7 +205,7 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
         uint256 minPaymentOut,
         uint256 minSharesOut,
         bytes calldata attestation
-    ) external nonReentrant whenNotPaused returns (uint256 sharesOut) {
+    ) external nonReentrant whenNotPaused onlySponsoredOrigin returns (uint256 sharesOut) {
         require(stockAmount > 0, "zero in");
 
         IERC20(stockToken).safeTransferFrom(msg.sender, address(this), stockAmount);
