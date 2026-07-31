@@ -31,8 +31,9 @@ contract ConfioRewardVaultTest is Test {
     }
 
     function _setEligible(address u, uint256 cusd, address ref, uint256 refConfio) internal {
+        uint64 round = vault.priceRound(); // read BEFORE prank (it's a call)
         vm.prank(attestor);
-        vault.setEligible(u, cusd, ref, refConfio);
+        vault.setEligible(u, cusd, round, ref, refConfio);
     }
 
     // ── Attestation + conversion ─────────────────────────────────────
@@ -52,24 +53,27 @@ contract ConfioRewardVaultTest is Test {
     }
 
     function test_setEligible_onlyAttestor() public {
+        uint64 r = vault.priceRound();
         vm.prank(stranger);
         vm.expectRevert("not attestor");
-        vault.setEligible(user, 10e18, address(0), 0);
+        vault.setEligible(user, 10e18, r, address(0), 0);
     }
 
     function test_setEligible_requires_active_price() public {
         vm.prank(safeOwner);
         vault.clearManualPrice();
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert("price not set");
-        vault.setEligible(user, 10e18, address(0), 0);
+        vault.setEligible(user, 10e18, r, address(0), 0);
     }
 
     function test_cannot_overwrite_pending_allocation() public {
         _setEligible(user, 10e18, address(0), 0);
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert("pending allocation");
-        vault.setEligible(user, 5e18, address(0), 0);
+        vault.setEligible(user, 5e18, r, address(0), 0);
     }
 
     function test_can_reattest_after_claim() public {
@@ -89,18 +93,20 @@ contract ConfioRewardVaultTest is Test {
         // Drain the vault to almost nothing via surplus withdrawal.
         vm.prank(safeOwner);
         vault.withdrawSurplus(safeOwner, 10_000_000e18 - 30e18); // 30 CONFIO left
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert("insufficient reserve");
-        vault.setEligible(user, 10e18, address(0), 0); // needs 40
+        vault.setEligible(user, 10e18, r, address(0), 0); // needs 40
     }
 
     function test_reserve_accounts_for_prior_obligations() public {
         vm.prank(safeOwner);
         vault.withdrawSurplus(safeOwner, 10_000_000e18 - 60e18); // 60 CONFIO
         _setEligible(user, 10e18, address(0), 0);    // 40 owed
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert("insufficient reserve");
-        vault.setEligible(stranger, 10e18, address(0), 0); // needs another 40, only 20 free
+        vault.setEligible(stranger, 10e18, r, address(0), 0); // needs another 40, only 20 free
     }
 
     // ── Claim ────────────────────────────────────────────────────────
@@ -179,9 +185,10 @@ contract ConfioRewardVaultTest is Test {
     }
 
     function test_referrer_cannot_be_self() public {
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert("bad referrer");
-        vault.setEligible(user, 10e18, user, 5e18);
+        vault.setEligible(user, 10e18, r, user, 5e18);
     }
 
     // ── Surplus withdrawal ───────────────────────────────────────────
@@ -221,9 +228,10 @@ contract ConfioRewardVaultTest is Test {
         vm.prank(safeOwner);
         vault.pause();
 
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert();
-        vault.setEligible(stranger, 10e18, address(0), 0);
+        vault.setEligible(stranger, 10e18, r, address(0), 0);
 
         vm.prank(user);
         vm.expectRevert();
@@ -244,11 +252,12 @@ contract ConfioRewardVaultTest is Test {
         vault.setAttestor(newAttestor);
         assertEq(vault.attestor(), newAttestor);
 
+        uint64 r = vault.priceRound();
         vm.prank(attestor);
         vm.expectRevert("not attestor");
-        vault.setEligible(user, 10e18, address(0), 0);
+        vault.setEligible(user, 10e18, r, address(0), 0);
         vm.prank(newAttestor);
-        vault.setEligible(user, 10e18, address(0), 0);
+        vault.setEligible(user, 10e18, r, address(0), 0);
         (uint128 amount,,,,,) = vault.rewards(user);
         assertEq(amount, 40e18);
     }
@@ -262,6 +271,73 @@ contract ConfioRewardVaultTest is Test {
         vm.prank(safeOwner);
         vault.setManualPrice(0.5e18); // round bumps
         assertEq(vault.priceRound(), round1 + 1);
+    }
+
+    // ── AUDIT P3 fixes (2026-07-31) ──────────────────────────────────
+
+    /// Stale-price race: if the Safe re-prices between the attestor signing
+    /// and inclusion, the attestation must revert, not mint at the new rate.
+    function test_stale_price_round_rejected() public {
+        uint64 signedRound = vault.priceRound();
+        vm.prank(safeOwner);
+        vault.setManualPrice(0.5e18); // round moves under the attestor
+        vm.prank(attestor);
+        vm.expectRevert("stale price round");
+        vault.setEligible(user, 10e18, signedRound, address(0), 0);
+    }
+
+    /// cancelEligibility corrects a mistaken allocation AND keeps the
+    /// counters exact, so the freed CONFIO returns to surplus.
+    function test_cancel_eligibility_frees_obligation() public {
+        _setEligible(user, 10e18, referrer, 5e18); // 45 owed
+        assertEq(vault.outstanding(), 45e18);
+
+        vm.prank(stranger);
+        vm.expectRevert(); // owner-only
+        vault.cancelEligibility(user);
+
+        vm.prank(safeOwner);
+        vault.cancelEligibility(user);
+        assertEq(vault.outstanding(), 0, "obligation released");
+        assertEq(vault.surplus(), 10_000_000e18);
+        (uint128 amount, uint128 refAmount,,,,) = vault.rewards(user);
+        assertEq(amount, 0);
+        assertEq(refAmount, 0);
+
+        // The user can be freshly re-attested afterward.
+        _setEligible(user, 1e18, address(0), 0);
+        vm.prank(user);
+        assertEq(vault.claim(), 4e18);
+    }
+
+    function test_cancel_only_frees_unclaimed_portion() public {
+        _setEligible(user, 10e18, referrer, 5e18);
+        vm.prank(user);
+        vault.claim(); // main gone, referral still pending
+        assertEq(vault.outstanding(), 5e18);
+
+        vm.prank(safeOwner);
+        vault.cancelEligibility(user); // frees only the 5 referral
+        assertEq(vault.outstanding(), 0);
+        // The claimed 40 CONFIO stays with the user; nothing clawed back.
+        assertEq(confio.balanceOf(user), 40e18);
+    }
+
+    function test_cancel_reverts_when_nothing_pending() public {
+        _setEligible(user, 10e18, address(0), 0);
+        vm.prank(user);
+        vault.claim();
+        vm.prank(safeOwner);
+        vm.expectRevert("nothing pending");
+        vault.cancelEligibility(user);
+    }
+
+    /// Renounce is disabled so a paused vault can always be unpaused.
+    function test_renounce_ownership_disabled() public {
+        vm.prank(safeOwner);
+        vm.expectRevert("renounce disabled");
+        vault.renounceOwnership();
+        assertEq(vault.owner(), safeOwner);
     }
 
     function test_price_change_affects_new_rewards_only() public {

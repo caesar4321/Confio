@@ -28,8 +28,14 @@ pragma solidity ^0.8.24;
  *    the same — args[1] is cUSD, args[3] is micro-CONFIO).
  *  - `pause` blocks claims as well as attestation. Unlike CusdPlusVault
  *    (exits never gated), these are treasury-funded rewards, not user
- *    principal — a paused reward is still owner-recoverable and re-
- *    attestable, so an emergency stop over claims is acceptable here.
+ *    principal, so an emergency stop over claims is acceptable. Be precise
+ *    (audit 2026-07-31): while paused, an ALLOCATED reward can neither be
+ *    claimed, withdrawn (it is `outstanding()`, so below the surplus
+ *    bound), nor re-attested (the pending guard blocks it) — the only exit
+ *    is unpause. `renounceOwnership` is therefore disabled, so the Safe can
+ *    always unpause; a paused reward can be delayed but never permanently
+ *    stranded. The owner's cancelEligibility is the deliberate correction
+ *    path for a mistaken allocation.
  *
  * Roles: owner = the 3-of-5 Safe (price, attestor rotation, surplus
  * withdraw, pause). attestor = the backend hot key that writes eligibility
@@ -96,6 +102,7 @@ contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
     event Claimed(address indexed user, uint256 confioAmount);
     event ReferralClaimed(address indexed referrer, address indexed referee, uint256 confioAmount);
     event SurplusWithdrawn(address indexed to, uint256 amount);
+    event EligibilityCancelled(address indexed user, uint256 mainFreed, uint256 refFreed);
 
     constructor(address confio, address attestor_, address owner_) Ownable(owner_) {
         require(confio != address(0) && attestor_ != address(0), "zero address");
@@ -139,11 +146,16 @@ contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
     function setEligible(
         address user,
         uint256 cusdAmount,
+        uint64 expectedPriceRound,
         address referrer,
         uint256 refConfioAmount
     ) external onlyAttestor whenNotPaused {
         require(user != address(0), "zero user");
         require(cusdAmount > 0, "zero reward");
+        // The backend computed cusdAmount against a specific price round;
+        // if the Safe re-priced between signing and inclusion, refuse
+        // rather than silently mint at the new rate (audit 2026-07-31).
+        require(expectedPriceRound == priceRound, "stale price round");
 
         uint256 confioAmount = quoteConfio(cusdAmount);
         require(confioAmount > 0, "dust reward");
@@ -236,6 +248,33 @@ contract ConfioRewardVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
         require(attestor_ != address(0), "zero attestor");
         attestor = attestor_;
         emit AttestorSet(attestor_);
+    }
+
+    /// Correct a mistaken/undeliverable allocation (mirrors the Algorand
+    /// delete_box, but adjusts the obligation counters so `outstanding()`
+    /// stays exact — the Algorand version deletes the box without
+    /// decrementing totals). Clears whatever is still UNCLAIMED and frees
+    /// that CONFIO back to surplus. A deliberate Safe clawback of an
+    /// unclaimed reward: 3-of-5, correction-only, never touches CONFIO
+    /// already transferred out by a claim.
+    function cancelEligibility(address user) external onlyOwner {
+        Reward storage r = rewards[user];
+        uint256 mainOwed = r.amount;      // 0 if already claimed
+        uint256 refOwed = r.refClaimed ? 0 : r.refAmount;
+        require(mainOwed > 0 || refOwed > 0, "nothing pending");
+
+        if (mainOwed > 0) totalEligible -= mainOwed;
+        if (refOwed > 0) totalRefEligible -= refOwed;
+
+        delete rewards[user];
+        emit EligibilityCancelled(user, mainOwed, refOwed);
+    }
+
+    /// Disabled: renouncing while paused would strand every allocated
+    /// reward permanently (audit 2026-07-31). The Safe must always be able
+    /// to unpause.
+    function renounceOwnership() public view override onlyOwner {
+        revert("renounce disabled");
     }
 
     /// Withdraw ONLY surplus above outstanding obligations — the promised
