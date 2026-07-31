@@ -77,3 +77,19 @@ class SponsoredBatchAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class CusdPlusMovementAdmin(admin.ModelAdmin):
+    """Display-ledger rows (Movimientos). Read-only: rows are written by
+    confirm tasks and the inbound scanner, idempotent on reference — hand
+    edits would desync the app's history from the chain."""
+    list_display = ('created_at', 'account', 'movement_type', 'title', 'amount_usd', 'tx_hash')
+    list_filter = ('movement_type',)
+    search_fields = ('reference', 'tx_hash', 'account__id', 'title')
+    ordering = ('-created_at',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

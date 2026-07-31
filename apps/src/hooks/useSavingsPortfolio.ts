@@ -5,7 +5,9 @@
 // gmHoldings returns the account's tokenized-stock positions (server-side
 // Multicall3 scan of the GM universe — the chain is the registry — priced
 // from the cached GM market payload).
-// Movements stay an empty state until the cusdPlusMovements ledger lands.
+// Movements LIVE since 2026-07-31: cusdPlusMovements is the server-side
+// display ledger (CusdPlusMovement rows written by confirm tasks and the
+// inbound scanner, idempotent on reference).
 //
 // Notes:
 // - savings.netApyPct is SERVER-derived LIVE from Ondo's on-chain oracle:
@@ -42,6 +44,13 @@ const GET_AHORRO_PORTFOLIO = gql`
       valueUsd
       dayChangePct
     }
+    cusdPlusMovements(limit: 20) {
+      id
+      movementType
+      title
+      amountUsd
+      createdAt
+    }
   }
 `;
 
@@ -58,6 +67,10 @@ export interface StockPosition {
 export type SavingsMovementType =
   | 'deposit' // Ahorraste (cUSD → cUSD+ or ramp-in)
   | 'withdraw' // Retiraste (→ cUSD or bank)
+  | 'send' // Enviaste (cUSD+/USDT to someone)
+  | 'receive' // Recibiste
+  | 'payment' // Pagaste (a business)
+  | 'payroll' // Nómina
   | 'buy' // Compraste una acción (from cUSD+)
   | 'sell' // Vendiste una acción (back to cUSD+)
   | 'yield'; // weekly/monthly yield summary row (never per-day spam)
@@ -157,9 +170,15 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
       ),
       positions,
     };
-    // Movements stay a launch-day empty state until the cusdPlusMovements
-    // ledger lands server-side (resolver is still a stub returning []).
-    const movements: SavingsMovement[] = [];
+    // Server display ledger, newest first. Unknown future types render as
+    // neutral rows rather than crashing an old client.
+    const movements: SavingsMovement[] = (data?.cusdPlusMovements ?? []).map((m: any) => ({
+      id: m.id,
+      type: m.movementType as SavingsMovementType,
+      title: m.title,
+      amountUsd: m.amountUsd,
+      createdAt: m.createdAt,
+    }));
     return {
       savings,
       stocks,

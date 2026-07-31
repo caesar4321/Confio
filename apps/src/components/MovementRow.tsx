@@ -12,6 +12,10 @@ import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 const MOVEMENT_ICONS: Record<string, string> = {
   deposit: 'arrow-down-circle',
   withdraw: 'arrow-up-circle',
+  send: 'send',
+  receive: 'arrow-down-left',
+  payment: 'shopping-bag',
+  payroll: 'briefcase',
   buy: 'shopping-cart',
   sell: 'repeat',
   yield: 'trending-up',

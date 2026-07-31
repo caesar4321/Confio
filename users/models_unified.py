@@ -38,6 +38,10 @@ class UnifiedTransactionTable(models.Model):
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin'),
         ('ALGO', 'ALGO'),
+        # BSC dollar rails (Phase 2, 2026-07-30). The resolver upper-cases
+        # token_type on filter, so these are safe additive choices.
+        ('CUSD_PLUS', 'Confío Dollar Plus'),
+        ('USDT', 'Tether USD'),
     ]
 
     ACCOUNT_TYPE_CHOICES = [

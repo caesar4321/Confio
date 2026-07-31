@@ -390,6 +390,22 @@ def simulate(user_addr: str, calldata: str, delegated: bool, sponsor: str) -> No
         raise PolicyError('simulation_reverted')
 
 
+def acquire_sponsor_nonce_lock(attempts: int = 30, ttl_s: int = 15) -> bool:
+    """Serialize sponsor-account nonce-fetch → broadcast across EVERY rail
+    that signs from the KMS sponsor (7702 batches, presale, payroll payouts).
+    Returns True when acquired; caller MUST release_sponsor_nonce_lock() in
+    a finally block."""
+    for _ in range(attempts):
+        if cache.add('bsc_sponsor_nonce_lock', 1, ttl_s):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def release_sponsor_nonce_lock() -> None:
+    cache.delete('bsc_sponsor_nonce_lock')
+
+
 def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline: int,
                          intent_sig: str, authorization: Optional[dict], kind: str):
     """Build, sign (KMS) and broadcast the sponsored transaction: type-4
@@ -431,13 +447,7 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
 
     # Other sponsor-signed flows share this account: serialize nonce-fetch →
     # broadcast so concurrent sends can't collide on a nonce.
-    got_lock = False
-    for _ in range(30):
-        if cache.add('bsc_sponsor_nonce_lock', 1, 15):
-            got_lock = True
-            break
-        time.sleep(0.5)
-    if not got_lock:
+    if not acquire_sponsor_nonce_lock():
         raise PolicyError('sponsor_busy')
 
     try:
@@ -467,7 +477,7 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
         raw, tx_hash = signer.sign_typed_transaction(tx)
         sent = _rpc('eth_sendRawTransaction', [raw])
     finally:
-        cache.delete('bsc_sponsor_nonce_lock')
+        release_sponsor_nonce_lock()
 
     batch = SponsoredBatch.objects.create(
         user=user,

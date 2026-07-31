@@ -9,14 +9,29 @@
 // whole point of the emergency path is working while Confío is dark, so
 // these endpoints are public and Confío-independent by design.
 
+// Breadth is the whole defense here (mirrors the server's RPC-pool lesson,
+// 2026-07-31: the dataseed family silently dropped eth_getLogs for weeks —
+// a single-family pool is a single point of failure). The emergency path
+// only needs basic methods (blocks, balances, nonce, gasPrice,
+// sendRawTransaction), which every endpoint below serves keylessly; the
+// NodeReal URL is the public one from the official BNB Chain docs. Ordered
+// by observed reliability; every consumer iterates in order with failover.
 const BSC_RPCS = [
+  'https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',
   'https://bsc-dataseed.bnbchain.org',
   'https://bsc-rpc.publicnode.com',
   'https://bsc-dataseed1.defibit.io',
+  'https://bsc-dataseed1.ninicoin.io',
+  'https://bsc.drpc.org',
+  'https://1rpc.io/bnb',
 ];
 
 const ALGOD_NODES = [
   'https://mainnet-api.algonode.cloud',
+  // Nodely free tier — the same provider the Confío backend uses, but the
+  // public keyless endpoint (the emergency path must never depend on a
+  // Confío-held key).
+  'https://mainnet-api.4160.nodely.dev',
 ];
 
 export interface ChainNow {

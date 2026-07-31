@@ -346,12 +346,29 @@ class Query(graphene.ObjectType):
         )
 
     def resolve_cusd_plus_movements(self, info, limit=20, offset=0):
+        """Paginated ledger rows for the JWT account, newest first — the
+        display ledger behind SavingsScreen's Movimientos (CusdPlusMovement:
+        rows written by confirm tasks/scanner, idempotent on reference)."""
+        from .models import CusdPlusMovement
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return []
-        # TODO(cusd+): paginated ledger rows for the JWT account (newest
-        # first); yield entries are weekly aggregates, never per-day spam.
-        return []
+        account = _active_account(info)
+        if account is None:
+            return []
+        limit = max(1, min(int(limit or 20), 100))
+        offset = max(0, int(offset or 0))
+        rows = CusdPlusMovement.objects.filter(account=account)[offset:offset + limit]
+        return [
+            CusdPlusMovementType(
+                id=str(m.id),
+                movement_type=m.movement_type,
+                title=m.title,
+                amount_usd=float(m.amount_usd),
+                created_at=m.created_at,
+            )
+            for m in rows
+        ]
 
     def resolve_cusd_plus_conversions_in_flight(self, info):
         from .models import CusdPlusConversion
@@ -576,6 +593,33 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
             # the next summary shows the new position, not a 30s-old one.
             from . import vault
             vault.invalidate_position(conv.user_bsc_address)
+            # Display-ledger row (Movimientos). Idempotent on the
+            # conversion reference: replays/retries of this mutation can
+            # never duplicate. Signed amounts: into savings positive.
+            try:
+                from users.models import Account
+                from .models import CusdPlusMovement
+                account = Account.objects.filter(
+                    bsc_address__iexact=conv.user_bsc_address,
+                    deleted_at__isnull=True,
+                ).first()
+                if account is not None:
+                    into_savings = conv.direction == 'to_savings'
+                    CusdPlusMovement.objects.get_or_create(
+                        reference=f'conversion:{conv.internal_id}',
+                        defaults={
+                            'account': account,
+                            'movement_type': 'deposit' if into_savings else 'withdraw',
+                            'title': 'Ahorraste' if into_savings else 'Retiraste',
+                            'amount_usd': (conv.quoted_receive_usd
+                                           if into_savings else -conv.quoted_receive_usd),
+                            'tx_hash': conv.dest_tx_hash or '',
+                        },
+                    )
+            except Exception:  # noqa: BLE001 — ledger must not fail the mint report
+                import logging
+                logging.getLogger(__name__).exception(
+                    'movement write failed for conversion %s', conv.internal_id)
         conv.save(update_fields=update)
         return AdvanceCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
 
