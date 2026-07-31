@@ -135,6 +135,8 @@ _COUNTRY_DOCUMENT_TYPE_MAP = {
         'national_id': 'DNI',
         'dni': 'DNI',
         'cuit': 'CUIT',
+        # Foreign residents in Argentina are issued a DNI (DNI para extranjeros).
+        'foreign_id': 'DNI',
     },
     'BO': {
         'national_id': 'CI',
@@ -149,6 +151,9 @@ _COUNTRY_DOCUMENT_TYPE_MAP = {
     'CL': {
         'national_id': 'RUT',
         'rut': 'RUT',
+        # Chilean foreign-resident cards carry a RUN in RUT format (XXXXXXXX-K),
+        # which is the tax ID Koywe expects.
+        'foreign_id': 'RUT',
     },
     'CO': {
         'national_id': 'CED_CIU',
@@ -175,6 +180,8 @@ _COUNTRY_DOCUMENT_TYPE_MAP = {
         'dni': 'DNI',
         'ruc': 'RUC',
         'ce': 'CE',
+        # Carné de extranjería — the foreign-resident document in Peru.
+        'foreign_id': 'CE',
     },
 }
 
