@@ -221,6 +221,9 @@ class UnifiedTransactionType(DjangoObjectType):
                 return self.description or 'Ramp'
 
             if self.transaction_type == 'humanitarian':
+                release = getattr(self, 'humanitarian_release', None)
+                if release and release.kind == 'reimbursement':
+                    return 'Reembolso de donación'
                 direction = UnifiedTransactionType.resolve_direction(self, info)
                 if direction == 'received':
                     return 'Ayuda humanitaria recibida'

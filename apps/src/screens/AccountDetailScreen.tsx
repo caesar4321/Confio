@@ -1290,9 +1290,9 @@ export const AccountDetailScreen = () => {
           }
           break;
         case 'humanitarian':
-          baseTitle = transaction.amount.startsWith('+')
+          baseTitle = transaction.description || (transaction.amount.startsWith('+')
             ? 'Ayuda humanitaria recibida'
-            : 'Donación humanitaria';
+            : 'Donación humanitaria');
           break;
         default:
           baseTitle = 'Transacción';
@@ -1368,6 +1368,7 @@ export const AccountDetailScreen = () => {
             transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' :
             transaction.type === 'ramp' && transaction.rampDirection === 'off_ramp' ? 'Retiro' :
             transaction.type === 'ramp' ? 'Recarga' :
+            transaction.type === 'humanitarian' ? transaction.description :
             undefined,
           isInvitedFriend: transaction.isInvitation || false, // true means friend is NOT on Confío
           invitationId: transaction.invitationId,

@@ -1413,9 +1413,9 @@ export const TransactionDetailScreen = () => {
           ? `Nómina recibida de ${displayFromName}`
           : `Pago de nómina a ${displayToName}`;
       case 'humanitarian':
-        return tx.amount.startsWith('+')
+        return tx.formattedTitle || (tx.amount.startsWith('+')
           ? 'Ayuda humanitaria recibida'
-          : 'Donación humanitaria';
+          : 'Donación humanitaria');
       case 'deposit':
         return tx.formattedTitle || `Depósito ${tx.currency}`;
       case 'withdrawal':
