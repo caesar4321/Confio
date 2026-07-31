@@ -25,6 +25,8 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {CusdPlusVault} from "../CusdPlusVault.sol";
 import {MockToken, MockOracle, MockInstantManager} from "./CusdPlusVault.t.sol";
 
+address constant SPONSOR = address(uint160(uint256(keccak256("confio.kms.sponsor"))));
+
 contract VaultHandler is Test {
     CusdPlusVault public immutable vault;
     MockToken public immutable usdt;
@@ -70,7 +72,9 @@ contract VaultHandler is Test {
         address a = actors[actorSeed % 3];
         amount = bound(amount, 1e18, 100_000e18);
         usdt.mint(a, amount);
-        vm.prank(a);
+        // Production shape: user EOA is msg.sender, the sponsor is
+        // tx.origin (mints are sponsor-gated since 2026-07-31).
+        vm.prank(a, SPONSOR);
         vault.subscribeAndMint(amount, 0, a);
         _afterOp();
     }
@@ -218,6 +222,12 @@ contract CusdPlusVaultInvariantTest is Test {
             address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
         );
         vault = CusdPlusVault(address(proxy));
+        // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
+        // the default sender under vm.prank, which mirrors production:
+        // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
+        vm.prank(treasury);
+        vault.setSponsor(SPONSOR, true);
+
 
         handler = new VaultHandler(vault, usdt, usdy, oracle, treasury);
         targetContract(address(handler));

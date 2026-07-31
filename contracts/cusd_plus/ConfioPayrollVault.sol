@@ -16,8 +16,11 @@ pragma solidity ^0.8.24;
  * DESIGN RULES (house invariants):
  *  - Escrow is cUSD+ SHARES, not USDT: yield keeps accruing to parked
  *    payroll float (share price rises; share count is what's accounted).
- *  - `withdraw` is NEVER pausable — exits are never gated, same rule as
- *    everywhere else in the stack. Pause covers deposits and payouts only.
+ *  - `withdraw` is NEVER pausable. Pause covers deposits and payouts only.
+ *    Stricter than CusdPlusVault, where `redeemToUsdt` IS pause-gated on
+ *    purpose: that vault carries oracle/backing risk worth a circuit
+ *    breaker, while parked payroll shares carry none — there is no
+ *    scenario where detaining a business's own escrow protects anyone.
  *  - Payout execution is permissionless: the signature IS the
  *    authorization, so a griefing caller can only do exactly what the
  *    business already approved.

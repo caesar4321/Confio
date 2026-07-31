@@ -48,6 +48,12 @@ contract CusdPlusVaultForkTest is Test {
             address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
         );
         vault = CusdPlusVault(address(proxy));
+        // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
+        // the default sender under vm.prank, which mirrors production:
+        // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
+        vm.prank(treasury);
+        vault.setSponsor(tx.origin, true);
+
     }
 
     function _forked() internal view returns (bool) {

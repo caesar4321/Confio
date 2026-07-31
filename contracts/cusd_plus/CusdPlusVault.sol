@@ -181,6 +181,26 @@ contract CusdPlusVault is
     /// stay byte-identical to the live proxy's.
     uint256 public guardedOraclePrice;
 
+    /// Addresses whose participation makes a PRIMARY issuance legitimate:
+    /// `subscribeAndMint` requires one of them as `msg.sender` or
+    /// `tx.origin` (ConfioPresaleVault's gate, same reasoning). Under
+    /// EIP-7702 the minting user's EOA is `msg.sender` while Confío's KMS
+    /// sponsor is `tx.origin`, so every relayed mint passes and a direct
+    /// call from an arbitrary wallet does not.
+    ///
+    /// WHY (2026-07-31): cUSD+ eligibility (Ondo's continuing US-person
+    /// representation, §21(b)(F)) was enforced only in Confío's server —
+    /// anyone holding the ABI could mint around it. Structural beats
+    /// procedural: minting now REQUIRES the party that runs the phone +
+    /// IP checks. Deliberately narrow — this touches primary issuance
+    /// ONLY. Secondary transfers stay open (acquiring cUSD+ from another
+    /// holder is compliant), and `redeemToUsdt`, the sole holder exit,
+    /// stays permissionless so an exit never depends on Confío being up.
+    ///
+    /// APPENDED after `guardedOraclePrice` — layout above must stay
+    /// byte-identical to the live proxy's.
+    mapping(address => bool) public isSponsor;
+
     // ── Events ──────────────────────────────────────────────────────────
     event Accrued(uint256 oraclePrice, uint256 newPPlus);
     event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
@@ -191,6 +211,7 @@ contract CusdPlusVault is
     event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
     event AddressFrozen(address indexed target);
     event AddressUnfrozen(address indexed target);
+    event SponsorSet(address indexed sponsor, bool allowed);
 
     /// Implementation constructor: wiring lives in implementation-level
     /// immutables (cheap reads; an upgrade = new implementation with new
@@ -393,6 +414,8 @@ contract CusdPlusVault is
         whenNotPaused
         returns (uint256 sharesOut)
     {
+        // Primary issuance is gated; exits never are (see isSponsor).
+        require(isSponsor[msg.sender] || isSponsor[tx.origin], "not sponsored");
         require(usdtIn > 0, "zero in");
         accrue();
         // AFTER accrue(), so a staged anomaly is caught in this same call.
@@ -521,6 +544,15 @@ contract CusdPlusVault is
     function sweep(address token, address to, uint256 amount) external onlyOwner {
         require(token != address(USDY), "backing is sacred");
         IERC20(token).safeTransfer(to, amount);
+    }
+
+    /// Rotate the relayers allowed to originate a mint. The owner Safe can
+    /// add itself here if it ever needs to mint through the USDT path
+    /// (`depositAndMint` covers the raw-USDY path already).
+    function setSponsor(address sponsor, bool allowed) external onlyOwner {
+        require(sponsor != address(0), "zero sponsor");
+        isSponsor[sponsor] = allowed;
+        emit SponsorSet(sponsor, allowed);
     }
 
     function pause() external onlyOwner { _pause(); }

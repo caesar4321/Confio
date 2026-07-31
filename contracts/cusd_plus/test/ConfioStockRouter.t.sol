@@ -65,6 +65,10 @@ contract ConfioStockRouterTest is Test {
         vault = CusdPlusVault(address(new ERC1967Proxy(
             address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
         )));
+        // Mints are sponsor-gated (2026-07-31); forge keeps tx.origin as the
+        // default sender under vm.prank, mirroring the production relay.
+        vm.prank(treasury);
+        vault.setSponsor(tx.origin, true);
 
         gm = new MockGmSettlement(usdt);
         usdt.mint(address(gm), 10_000_000e18);

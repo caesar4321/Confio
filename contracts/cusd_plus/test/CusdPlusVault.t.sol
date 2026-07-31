@@ -113,6 +113,12 @@ contract CusdPlusVaultTest is Test {
             abi.encodeCall(CusdPlusVault.initialize, (treasury))
         );
         vault = CusdPlusVault(address(proxy));
+        // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
+        // the default sender under vm.prank, which mirrors production:
+        // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
+        vm.prank(treasury);
+        vault.setSponsor(tx.origin, true);
+
 
         usdt.mint(user, 1_000_000e18);
         vm.prank(user);
@@ -121,6 +127,98 @@ contract CusdPlusVaultTest is Test {
 
     function _backed() internal view returns (bool) {
         return vault.backingRatioBps() >= 10_000;
+    }
+
+    // ── Sponsor gate on PRIMARY ISSUANCE (2026-07-31) ────────────────
+    // Eligibility (Ondo's continuing US-person rep) was enforced only in
+    // Confío's server; anyone with the ABI could mint around it. The gate
+    // makes it structural. It must cover minting and NOTHING else.
+
+    function test_mint_rejected_without_sponsor_in_tx() public {
+        address outsider = makeAddr("outsider");
+        usdt.mint(outsider, 1_000e18);
+        vm.prank(outsider, outsider); // own tx: no sponsor anywhere
+        usdt.approve(address(vault), type(uint256).max);
+        vm.prank(outsider, outsider);
+        vm.expectRevert("not sponsored");
+        vault.subscribeAndMint(100e18, 0, outsider);
+    }
+
+    function test_mint_allowed_with_sponsor_as_origin() public {
+        // Production shape under 7702: user EOA = msg.sender, KMS = origin.
+        address relayed = makeAddr("relayed");
+        address kms = makeAddr("kms");
+        vm.prank(treasury);
+        vault.setSponsor(kms, true);
+        usdt.mint(relayed, 1_000e18);
+        vm.prank(relayed, kms);
+        usdt.approve(address(vault), type(uint256).max);
+        vm.prank(relayed, kms);
+        uint256 shares = vault.subscribeAndMint(100e18, 0, relayed);
+        assertEq(shares, 100e18);
+        assertEq(vault.balanceOf(relayed), 100e18);
+    }
+
+    function test_mint_allowed_with_sponsor_as_direct_caller() public {
+        address kms = makeAddr("kms2");
+        vm.prank(treasury);
+        vault.setSponsor(kms, true);
+        usdt.mint(kms, 1_000e18);
+        vm.startPrank(kms, kms);
+        usdt.approve(address(vault), type(uint256).max);
+        vault.subscribeAndMint(100e18, 0, kms);
+        vm.stopPrank();
+        assertEq(vault.balanceOf(kms), 100e18);
+    }
+
+    /// THE point of the asymmetry: gating entry must never gate the exit.
+    function test_exit_stays_permissionless_for_unsponsored_holder() public {
+        address holder = makeAddr("holder");
+        // Acquire by TRANSFER (secondary market — not gated, by design).
+        vm.prank(user);
+        uint256 shares = vault.subscribeAndMint(1_000e18, 0, user);
+        vm.prank(user);
+        vault.transfer(holder, shares);
+
+        // The holder was never sponsored and cannot mint...
+        vm.prank(holder, holder);
+        vm.expectRevert("not sponsored");
+        vault.subscribeAndMint(1e18, 0, holder);
+
+        // ...but can always leave, in their OWN transaction.
+        vm.prank(holder, holder);
+        uint256 out = vault.redeemToUsdt(shares, 0, holder);
+        assertGt(out, 0);
+        assertEq(vault.balanceOf(holder), 0);
+        assertEq(usdt.balanceOf(holder), out);
+    }
+
+    function test_sponsor_rotation_and_owner_only() public {
+        address kms = makeAddr("kms3");
+        vm.prank(user);
+        vm.expectRevert();
+        vault.setSponsor(kms, true); // not the owner
+
+        vm.prank(treasury);
+        vault.setSponsor(kms, true);
+        assertTrue(vault.isSponsor(kms));
+        vm.prank(treasury);
+        vault.setSponsor(kms, false);
+        assertFalse(vault.isSponsor(kms));
+
+        vm.prank(treasury);
+        vm.expectRevert("zero sponsor");
+        vault.setSponsor(address(0), true);
+    }
+
+    /// The owner-only raw-USDY mint is unaffected by the relay gate.
+    function test_owner_depositAndMint_needs_no_sponsor() public {
+        usdy.mint(treasury, 500e18);
+        vm.startPrank(treasury, treasury);
+        usdy.approve(address(vault), type(uint256).max);
+        uint256 shares = vault.depositAndMint(500e18, treasury);
+        vm.stopPrank();
+        assertEq(shares, 500e18);
     }
 
     // ── Mint / redeem ────────────────────────────────────────────────
@@ -646,6 +744,14 @@ contract CusdPlusVaultTest is Test {
         vault.freezeAddress(user);
         assertEq(uint256(vm.load(address(vault), keccak256(abi.encode(user, uint256(3))))),
             1, "slot3: frozen mapping base");
+
+        // isSponsor APPENDED at slot 5 (2026-07-31). Everything above must
+        // stay byte-identical to the live proxy — this pins that it did.
+        address kms = makeAddr("kmsSlot");
+        vm.prank(treasury);
+        vault.setSponsor(kms, true);
+        assertEq(uint256(vm.load(address(vault), keccak256(abi.encode(kms, uint256(5))))),
+            1, "slot5: isSponsor mapping base");
     }
 
 
