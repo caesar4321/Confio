@@ -16,6 +16,7 @@ from django.utils import timezone
 from achievements.models import ReferralRewardEvent, UserReferral
 from achievements.referral_security import get_duplicate_referral_reward_error
 from blockchain.rewards_service import ConfioRewardsService
+from django.conf import settings
 from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
 from users.models import Account
@@ -126,9 +127,11 @@ class EventContext:
     metadata: Optional[Dict[str, Any]] = None
 
 
-def to_micro(amount: Decimal) -> int:
-    """Convert a token amount (Decimal) into micro units."""
-    return int((amount * MICRO_MULTIPLIER).to_integral_value())
+def to_micro(amount: Decimal, decimals: int = 6) -> int:
+    """Convert a token amount (Decimal) into base units. Defaults to 6dp
+    (Algorand micro); pass decimals=18 for BSC wei."""
+    scale = MICRO_MULTIPLIER if decimals == 6 else Decimal(10) ** decimals
+    return int((Decimal(amount) * scale).to_integral_value())
 
 
 def get_primary_algorand_address(user) -> Optional[str]:
@@ -144,6 +147,23 @@ def get_primary_algorand_address(user) -> Optional[str]:
         .first()
     )
     return account.algorand_address if account else None
+
+
+def get_primary_bsc_address(user) -> Optional[str]:
+    """Return the personal BSC address for the given user (client-registered
+    on app entry; may be absent until the user opens a post-EVM build)."""
+    account = (
+        Account.objects.filter(
+            user=user,
+            account_type="personal",
+            account_index=0,
+            deleted_at__isnull=True,
+        )
+        .order_by("id")
+        .first()
+    )
+    addr = (getattr(account, "bsc_address", None) or "") if account else ""
+    return addr or None
 
 
 def _get_referred_user_referral(user) -> Optional[UserReferral]:
@@ -407,10 +427,18 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         event.save(update_fields=["reward_status", "error", "updated_at"])
         return referral
 
+    # Wholesale migration (Julian, 2026-07-31): when BSC_REWARD_ENABLED,
+    # new rewards attest on the BSC ConfioRewardVault instead of Algorand.
+    use_bsc = bool(getattr(settings, "BSC_REWARD_ENABLED", False))
+
     try:
-        service = ConfioRewardsService()
+        if use_bsc:
+            from blockchain.bsc_rewards_service import BscRewardsService
+            service = BscRewardsService()
+        else:
+            service = ConfioRewardsService()
     except Exception as exc:
-        logger.exception("Failed to initialize ConfioRewardsService")
+        logger.exception("Failed to initialize rewards service")
         event.reward_status = "failed"
         event.error = f"Service init failed: {str(exc)}"
         event.save(update_fields=["reward_status", "error", "updated_at"])
@@ -436,12 +464,18 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
     if mirror_referee_confio:
         referrer_confio = referee_confio
 
-    reward_cusd_micro = to_micro(reward_cusd)
-    referee_confio_micro = to_micro(referee_confio)
-    referrer_confio_micro = to_micro(referrer_confio)
+    resolve_address = get_primary_bsc_address if use_bsc else get_primary_algorand_address
 
-    referee_address = get_primary_algorand_address(referral.referred_user)
+    referee_address = resolve_address(referral.referred_user)
     if not referee_address:
+        # BSC address is client-registered on app entry, so a referee who
+        # hasn't opened a post-EVM build has none yet. Defer (retryable via
+        # resync) rather than fail — they earn it once registered.
+        if use_bsc:
+            event.reward_status = "skipped"
+            event.error = "Referido sin dirección BSC todavía; se reintentará."
+            event.save(update_fields=["reward_status", "error", "updated_at"])
+            return referral
         event.reward_status = "failed"
         event.error = "Usuario referido sin dirección Algorand."
         event.save(update_fields=["reward_status", "error", "updated_at"])
@@ -449,19 +483,29 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
 
     referrer_address: Optional[str] = None
     if referrer_confio > 0 and referral.referrer_user:
-        referrer_address = get_primary_algorand_address(referral.referrer_user)
+        referrer_address = resolve_address(referral.referrer_user)
         if not referrer_address:
+            # The referee is still paid; the referrer's share needs their
+            # address. Drop it here (a later resync can re-attest once the
+            # referrer registers — a fresh record after this one settles).
             referrer_confio = Decimal("0")
-            referrer_confio_micro = 0
 
     try:
-        result = service.mark_eligibility(
-            user_address=referee_address,
-            reward_cusd_micro=reward_cusd_micro,
-            referee_confio_micro=referee_confio_micro,
-            referrer_confio_micro=referrer_confio_micro,
-            referrer_address=referrer_address,
-        )
+        if use_bsc:
+            result = service.mark_eligibility(
+                user_address=referee_address,
+                reward_cusd_wei=to_micro(reward_cusd, 18),
+                referrer_confio_wei=to_micro(referrer_confio, 18),
+                referrer_address=referrer_address,
+            )
+        else:
+            result = service.mark_eligibility(
+                user_address=referee_address,
+                reward_cusd_micro=to_micro(reward_cusd),
+                referee_confio_micro=to_micro(referee_confio),
+                referrer_confio_micro=to_micro(referrer_confio),
+                referrer_address=referrer_address,
+            )
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(
             "Error syncing referral reward: %s (user=%s, referral=%s, event=%s)",
