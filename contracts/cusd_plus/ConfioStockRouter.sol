@@ -68,6 +68,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 interface ICusdPlusVaultMinimal {
     function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to) external returns (uint256);
@@ -119,9 +120,20 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
     address public immutable FEE_TREASURY;
 
     uint256 private constant BPS = 10_000;
+    uint256 private constant WAD = 1e18;
     /// Hard ceiling: 1%. The actual rate is launch config, set once Ondo's
     /// GM fee/spread arrangement is known — never anchor on a number in code.
     uint256 public constant MAX_FEE_BPS = 100;
+
+    /// How far `spend` may exceed the quote's own stated cost before the buy
+    /// reverts (audit 2026-07-31 [P1]). GM consumes only
+    /// quantity*price/1e18 and refunds the REST to us as USDon; without this
+    /// bound the server could size `sharesIn` far above the quote, and the
+    /// whole surplus would leave as "dust" — an unbounded implicit fee that
+    /// bypasses MAX_FEE_BPS and the "sin comisiones ocultas" promise. 0.25%
+    /// leaves room for USDT->USDon conversion granularity and nothing more;
+    /// a larger mismatch means the server must re-quote, not overpay.
+    uint256 public constant MAX_OVERSPEND_BPS = 25;
 
     uint256 public stockFeeBps; // starts at 0; owner sets at launch
 
@@ -213,6 +225,11 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
         uint256 maxFeeBps
     ) external nonReentrant whenNotPaused onlySponsoredOrigin returns (uint256 stockOut) {
         require(sharesIn > 0, "zero in");
+        // A zero-quantity quote would satisfy every downstream floor while
+        // still consuming savings and charging a fee (audit [P2]). GM's own
+        // minimumDepositUSD would also reject it today — don't depend on
+        // someone else's parameter for our users' safety.
+        require(quote.quantity > 0, "zero quantity");
         require(quote.chainId == block.chainid, "wrong chain");
         require(stockFeeBps <= maxFeeBps, "fee above trade cap");
 
@@ -222,12 +239,25 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
         // Pull the savings shares and redeem them here (router is a pipe:
         // everything received is spent or forwarded within this tx).
         CUSD_PLUS.safeTransferFrom(msg.sender, address(this), sharesIn);
-        uint256 usdt = VAULT.redeemToUsdt(sharesIn, minUsdtOut, address(this));
+        uint256 usdt = _redeemSavings(sharesIn, minUsdtOut);
 
         uint256 fee = (usdt * stockFeeBps) / BPS;
         if (fee > 0) USDT.safeTransfer(FEE_TREASURY, fee);
         uint256 spend = usdt - fee;
         require(spend > 0, "nothing to spend");
+
+        // Bound the overpayment (audit [P1]). GM consumes only
+        // quantity*price and refunds the surplus to us; capping `spend`
+        // against the quote's own cost is what keeps that refund a rounding
+        // remainder instead of an unbounded silent fee. Scoped so `quoteCost`
+        // leaves the stack before the settle leg.
+        {
+            uint256 quoteCost = Math.mulDiv(quote.quantity, quote.price, WAD);
+            require(
+                spend <= quoteCost + Math.mulDiv(quoteCost, MAX_OVERSPEND_BPS, BPS),
+                "overspend vs quote"
+            );
+        }
 
         uint256 minted = _gmMint(quote, signature, spend);
         require(minted >= quote.quantity, "gm: short mint");
@@ -291,6 +321,20 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
 
     // ═════════════════════════ Internals ════════════════════════════════
 
+    /// Redeem the pulled savings shares to USDT, measuring OUR OWN balance
+    /// delta rather than trusting the vault's return value (audit [P2]) —
+    /// consistent with _gmMint/_gmRedeem, and it stops stray USDT sitting in
+    /// the router from being swept into a user's trade.
+    function _redeemSavings(uint256 sharesIn, uint256 minUsdtOut)
+        private
+        returns (uint256 usdt)
+    {
+        uint256 before = USDT.balanceOf(address(this));
+        VAULT.redeemToUsdt(sharesIn, minUsdtOut, address(this));
+        usdt = USDT.balanceOf(address(this)) - before;
+        require(usdt >= minUsdtOut, "vault: insufficient usdt out");
+    }
+
     /// GM pulls `spend` USDT and mints quote.quantity to US (the caller).
     /// Extracted so `buyWithSavings` stays under the stack limit.
     ///
@@ -325,12 +369,17 @@ contract ConfioStockRouter is Ownable2Step, Pausable, ReentrancyGuardTransient {
     }
 
     /// GM converts a non-USDon deposit through usdonManager and refunds any
-    /// SURPLUS USDon to the caller — us. That surplus is conversion-rounding
-    /// dust denominated in a token the user cannot spend in this app, so it
-    /// goes to the fee treasury with its own event rather than being left to
-    /// accumulate silently in a contract that is supposed to hold nothing.
-    /// If it is ever material, switch to depositing USDon directly (held as
-    /// router working capital) so no refund leg exists at all.
+    /// SURPLUS USDon to the caller — us.
+    ///
+    /// This is only safe because `buyWithSavings` caps `spend` at the quote's
+    /// own cost + MAX_OVERSPEND_BPS: the refund is therefore bounded at 0.25%
+    /// of the trade, i.e. conversion granularity, not a discretionary amount.
+    /// The earlier version had no such cap and simply asserted "dust" in a
+    /// comment — which the audit correctly called an unbounded implicit fee.
+    /// It is denominated in a token the user cannot spend in this app, so it
+    /// goes to the fee treasury with its own event rather than accumulating
+    /// silently in a contract that is supposed to hold nothing. To remove the
+    /// leg entirely, deposit USDon directly (router working capital).
     function _forwardUsdonDust(uint256 usdonBefore) private {
         uint256 dust = USDON.balanceOf(address(this)) - usdonBefore;
         if (dust > 0) {

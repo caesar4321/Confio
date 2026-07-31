@@ -361,6 +361,57 @@ contract ConfioStockRouterTest is Test {
         assertEq(usdon.balanceOf(address(router)), 0, "router holds nothing at rest");
     }
 
+    // ── CODEX AUDIT 2026-07-31 ──────────────────────────────────────────
+
+    /// [P1] GM consumes only quantity*price and refunds the surplus to the
+    /// router. Without a cap on `spend`, that surplus leaves as "dust" to the
+    /// treasury — an unbounded implicit fee that bypasses MAX_FEE_BPS.
+    /// Sizing sharesIn well above the quote must now REVERT, not silently
+    /// transfer the difference to Confío.
+    function test_overspendVsQuote_reverts() public {
+        // Quote for $300 of stock, but spend $600 of savings.
+        GmQuote memory q = _quote(address(tsla), (300e18 * 1e18) / PRICE, 0);
+        vm.prank(user);
+        vm.expectRevert(bytes("overspend vs quote"));
+        router.buyWithSavings(q, "", 600e18, 0, 100);
+    }
+
+    /// The legitimate case still works: sharesIn sized to the quote, with the
+    /// conversion buffer inside MAX_OVERSPEND_BPS.
+    function test_spendWithinOverspendBand_passes() public {
+        uint256 sharesIn = 300e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+        vm.prank(user);
+        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, 0, 100);
+        assertEq(stockOut, q.quantity);
+    }
+
+    /// [P2] A zero-quantity quote would satisfy every downstream floor while
+    /// still consuming savings and charging a fee.
+    function test_zeroQuantityQuote_reverts() public {
+        GmQuote memory q = _quote(address(tsla), 0, 0);
+        vm.prank(user);
+        vm.expectRevert(bytes("zero quantity"));
+        router.buyWithSavings(q, "", 300e18, 0, 100);
+    }
+
+    /// [P2] Buy-side accounting must measure the router's own USDT delta, so
+    /// stray USDT sitting in the router can never join a user's trade.
+    function test_strayUsdt_notConsumedByTrade() public {
+        usdt.mint(address(router), 500e18); // accident / donation
+        uint256 sharesIn = 300e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+
+        vm.prank(user);
+        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, 0, 100);
+
+        assertEq(stockOut, q.quantity, "trade sized by the vault delta only");
+        // The stray USDT is untouched (still sweepable by the owner).
+        uint256 expectedFee = (300e18 * 30) / 10_000;
+        assertEq(usdt.balanceOf(address(router)), 500e18 - 0, "stray USDT untouched");
+        assertEq(usdt.balanceOf(feeTreasury), expectedFee, "fee unchanged");
+    }
+
     function test_wrongChainId_reverts() public {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         q.chainId = block.chainid + 1;
