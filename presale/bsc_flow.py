@@ -110,6 +110,9 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     if amount_usd > phase.max_purchase:
         return {'success': False, 'error': 'above_maximum'}
 
+    # Preliminary (non-authoritative) limit check — a fast reject before the
+    # quote RPC. The AUTHORITATIVE, race-safe reservation happens under a row
+    # lock at purchase-creation time below (audit 2026-07-31 P2).
     upl, _ = UserPresaleLimit.objects.get_or_create(user=user, phase=phase)
     if phase.max_per_user and upl.total_purchased + amount_usd > phase.max_per_user:
         return {'success': False, 'error': 'exceeds_user_limit'}
@@ -143,24 +146,50 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     avg_price = (amount_usd / confio_amount).quantize(Decimal('0.0001'))
     calls = _build_calls(vault, USDT_BSC, q_wei, amount_wei)
 
-    purchase = PresalePurchase.objects.create(
-        user=user,
-        phase=phase,
-        cusd_amount=amount_usd,
-        confio_amount=confio_amount,
-        price_per_token=avg_price,
-        status='processing',
-        from_address=user_addr,
-        funding_source='direct_cusd',
-        accepted_terms_version=TERMS['version'],
-        accepted_terms_at=timezone.now(),
-        accepted_terms_ip=client_ip,
-        accepted_terms_user_agent=(user_agent or '')[:1000],
-        attested_not_us_resident=True,
-        attested_not_us_at=timezone.now(),
-        ip_country=(get_country_for_ip(client_ip, ip_country_hint) or ''),
-        notes=json.dumps({'bsc_calls': calls, 'quote_cost_wei': str(cost_wei), 'q_wei': str(q_wei)}),
-    )
+    # Race-safe per-user reservation (audit 2026-07-31 P2): total_purchased
+    # only counts CONFIRMED purchases, so N concurrent prepares each read the
+    # same committed total and every one passes the naive check — a user
+    # could blow past max_per_user with parallel buys. Serialize on the UPL
+    # row and count in-flight ('processing') purchases as already reserved,
+    # then create THIS purchase inside the same transaction so the next
+    # prepare sees it. A stale unsigned row is reaped after 24h
+    # (abandon_stale_bsc_purchases), releasing its reservation.
+    from django.db import transaction
+    from django.db.models import Sum
+    try:
+        with transaction.atomic():
+            # The UPL row already exists (preliminary check above); lock it so
+            # concurrent prepares for this user serialize here.
+            locked = UserPresaleLimit.objects.select_for_update().get(
+                user=user, phase=phase)
+            if phase.max_per_user:
+                in_flight = (PresalePurchase.objects.filter(
+                    user=user, phase=phase, status='processing',
+                    funding_source='direct_cusd',
+                ).aggregate(s=Sum('cusd_amount'))['s'] or Decimal('0'))
+                if locked.total_purchased + in_flight + amount_usd > phase.max_per_user:
+                    return {'success': False, 'error': 'exceeds_user_limit'}
+            purchase = PresalePurchase.objects.create(
+                user=user,
+                phase=phase,
+                cusd_amount=amount_usd,
+                confio_amount=confio_amount,
+                price_per_token=avg_price,
+                status='processing',
+                from_address=user_addr,
+                funding_source='direct_cusd',
+                accepted_terms_version=TERMS['version'],
+                accepted_terms_at=timezone.now(),
+                accepted_terms_ip=client_ip,
+                accepted_terms_user_agent=(user_agent or '')[:1000],
+                attested_not_us_resident=True,
+                attested_not_us_at=timezone.now(),
+                ip_country=(get_country_for_ip(client_ip, ip_country_hint) or ''),
+                notes=json.dumps({'bsc_calls': calls, 'quote_cost_wei': str(cost_wei), 'q_wei': str(q_wei)}),
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception('[PRESALE][BSC] reservation/create failed for user %s', user.id)
+        return {'success': False, 'error': 'reservation_failed'}
 
     try:
         user_display = (
