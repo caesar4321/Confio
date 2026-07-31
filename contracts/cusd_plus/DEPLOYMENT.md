@@ -87,9 +87,9 @@ app.ondo.finance/account/wallets and whitelisted within minutes.
 On-chain proof: `IM.subscribe` eth_call as the vault no longer reverts
 `UserNotRegistered()` — it proceeds to the USDT balance pull ("BEP20:
 transfer amount exceeds balance" in simulation). Ondo GM write API key
-stored at Secrets Manager `prod/ondo-gm-api-key` (eu-central-2;
-remember: the EC2 role's secrets policy is ARN-enumerated — grant this
-new ARN in the console before prod backend code can read it).
+stored at Secrets Manager `prod/ondo-gm-api-key` (eu-central-2) —
+readable by the EC2 role (prod/* wildcard added 2026-07-31; the old
+per-ARN enumeration is gone). Unwired in code until GM trading lands.
 
 ### Remaining checklist
 
