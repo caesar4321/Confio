@@ -69,6 +69,8 @@ GAS_PER_SELECTOR = {
     SEL_REDEEM_TO_USDT: 400_000,
     SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
     SEL_PAY: 220_000,  # 2 transferFroms + replay write + accrual (133k measured)
+    _sel('createInvitation(bytes32,address,uint256)'): 140_000,  # transferFrom + struct write
+    _sel('reclaimInvitation(bytes32)'): 90_000,                  # transfer + settle
 }
 
 
