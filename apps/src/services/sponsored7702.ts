@@ -57,6 +57,32 @@ export const fetchSponsored7702Params = async (): Promise<Sponsored7702Params> =
   };
 };
 
+/** send/bsc_flow.py gate: the full-dollar send rail (server redeems cUSD+
+ * shares to USDT when wallet USDT doesn't cover). A SEPARATE query on
+ * purpose: this field is newer than the params query above, and GraphQL
+ * validation is all-or-nothing — bundling a not-yet-deployed field there
+ * would kill the whole fetch (and with it every send) against an older
+ * server. Missing field or any error → false, never a broken query. */
+export const fetchBscSendEnabled = async (): Promise<boolean> => {
+  try {
+    const { gql } = await import('@apollo/client');
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.query({
+      query: gql`
+        query BscSendRail {
+          cusdPlusConvertParams {
+            bscSendEnabled
+          }
+        }
+      `,
+      fetchPolicy: 'cache-first',
+    });
+    return Boolean(data?.cusdPlusConvertParams?.bscSendEnabled);
+  } catch {
+    return false;
+  }
+};
+
 export const delegateNonce = async (eoa: string): Promise<bigint> => {
   // nonces() on the EOA itself; a codeless (not yet delegated) EOA returns
   // empty data — that IS nonce 0.

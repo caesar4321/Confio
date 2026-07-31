@@ -1,16 +1,27 @@
-// Enviar USDT (BEP-20) — in the SendWithAddress house grammar (compact
+// Enviar por BNB Smart Chain — THE address-send screen for every BSC token
+// (route param `token`), in the SendWithAddress house grammar (compact
 // instrument header, balance card, amount + currency badge, quick amounts,
 // paste/scan address row with live validation, fee row, footer button).
+// The route keeps its historical name (SendUsdt) from the Phase-1.5
+// USDT-only exit.
 //
-// Phase 1.5 (2026-07-30): sends RAW WALLET USDT — the guaranteed exit for
-// geo-ineligible users whose deposits stay unminted ("Confío Dollar"), and
-// for any landed-but-not-minted money. Sponsor-paid via EIP-7702 (the
-// policy carries the USDT transfer selector; user needs zero BNB), with a
-// self-signed legacy fallback for users holding their own BNB. The
-// vault-redeem send (cUSD+ → redeemToUsdt in one tx) is the Phase-2
-// follow-up. Confío fee: NONE (Julian, 2026-07-05).
+//   usdt (default)  dollar-value send, the Algorand USDC-send pattern
+//                   (USDC shows/spends the cUSD balance, converting at
+//                   send): the balance ALWAYS reflects the cUSD+ position
+//                   — send/bsc_flow.py redeems shares to USDT atomically
+//                   when wallet USDT doesn't cover. Rail off → Phase-1.5
+//                   raw-wallet-USDT transfer (sponsored-first, self-signed
+//                   fallback — the exit that must never break); savings-
+//                   funded amounts refuse honestly until the rail is on.
+//   cusd_plus       the Confío Dollar TOKEN itself (shape D): recipient
+//                   gets cUSD+ at any address, no redemption. Rail-gated.
+//   confio          BEP-20 CONFIO (shape E); amount is a token count, not
+//                   USD. Rail-gated.
+//
+// Server-authoritative on the rail: the client only signs the batch the
+// server stored. Confío fee: NONE (Julian, 2026-07-05).
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -24,21 +35,98 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { AddressScannerModal } from '../components/AddressScannerModal';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import USDTLogo from '../assets/png/USDT.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import CONFIOLogo from '../assets/png/CONFIO.png';
 
-const USDT_COLOR = '#26A17B'; // Tether brand teal (nominative use)
-const MIN_SEND_USD = 1;
+type BscToken = 'usdt' | 'cusd_plus' | 'confio';
+
+const MIN_SEND = 1; // $1 for the dollar tokens, 1 CONFIO for CONFIO
 const QUICK_AMOUNTS = ['10.00', '50.00', '100.00'];
+
+const TOKEN_CONFIG: Record<BscToken, {
+  name: string;
+  logo: any;
+  color: string;
+  isUsd: boolean; // amounts and balances render as dollars
+  railOnly: boolean; // needs the server send rail (no legacy fallback)
+  networkBanner: string;
+}> = {
+  usdt: {
+    name: 'USDT',
+    logo: USDTLogo,
+    color: '#26A17B', // Tether brand teal (nominative use)
+    isUsd: true,
+    railOnly: false,
+    networkBanner:
+      'Se envía como USDT por la red BNB Smart Chain (BEP-20). ' +
+      'Asegúrate de que el destinatario acepte esa red.',
+  },
+  cusd_plus: {
+    name: 'cUSD+',
+    logo: cUSDPlusLogo,
+    color: colors.primary,
+    isUsd: true,
+    railOnly: true,
+    networkBanner:
+      'Se envía como cUSD+ (BEP-20) por la red BNB Smart Chain. El ' +
+      'destinatario recibe el token tal cual — si envías a un exchange, ' +
+      'usa USDT en su lugar.',
+  },
+  confio: {
+    name: 'CONFIO',
+    logo: CONFIOLogo,
+    color: colors.secondary,
+    isUsd: false,
+    railOnly: true,
+    networkBanner:
+      'Se envía como CONFIO (BEP-20) por la red BNB Smart Chain. ' +
+      'Asegúrate de que el destinatario acepte ese token.',
+  },
+};
 
 export const SendUsdtScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute();
+  const token: BscToken = (route.params as any)?.token || 'usdt';
+  const config = TOKEN_CONFIG[token];
   const { usdtBalanceUsd, savings } = useSavingsPortfolio();
+
+  // CONFIO-BSC balance via its OWN query (cusdPlusSummary.confioBalance is
+  // newer than the portfolio query — bundling it there would invalidate
+  // the whole money query against a server that doesn't serve it yet).
+  // Any failure → 0, never a broken portfolio.
+  const [confioBalance, setConfioBalance] = useState(0);
+  useEffect(() => {
+    if (token !== 'confio') return;
+    let alive = true;
+    (async () => {
+      try {
+        const { gql } = await import('@apollo/client');
+        const { apolloClient } = await import('../apollo/client');
+        const { data } = await apolloClient.query({
+          query: gql`
+            query ConfioBscBalance {
+              cusdPlusSummary {
+                confioBalance
+              }
+            }
+          `,
+          fetchPolicy: 'network-only',
+        });
+        if (alive) setConfioBalance(data?.cusdPlusSummary?.confioBalance ?? 0);
+      } catch {
+        // Older server: field not deployed yet — show 0, never break.
+      }
+    })();
+    return () => { alive = false; };
+  }, [token]);
 
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
@@ -52,8 +140,40 @@ export const SendUsdtScreen = () => {
     return Number.isFinite(v) ? v : 0;
   }, [amount]);
 
-  // Raw wallet USDT only this phase; the vault position exits via Retirar.
-  const available = usdtBalanceUsd;
+  // Full-dollar rail flag (send/bsc_flow.py, server-gated). Defaults to the
+  // raw-USDT behavior until the server confirms. Sends ride 7702, so the
+  // rail counts as ON only when the sponsored params are also live.
+  const [dollarRail, setDollarRail] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { fetchSponsored7702Params, fetchBscSendEnabled } =
+          await import('../services/sponsored7702');
+        const [params, sendOn] = await Promise.all([
+          fetchSponsored7702Params().catch(() => ({ enabled: false, delegateAddress: null })),
+          fetchBscSendEnabled(),
+        ]);
+        if (alive) setDollarRail(Boolean(sendOn && params.enabled));
+      } catch {
+        // Any failure keeps the safe raw-USDT behavior.
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // Per-token balance. USDT mirrors the Algorand USDC-send pattern (a USDC
+  // send shows and spends the cUSD balance, converting at send time): the
+  // cUSD+ position ALWAYS counts toward what's sendable — the server
+  // redeems shares to USDT inside the same sponsored tx. max(), not sum:
+  // the server funds a send from a single leg, so the honest one-tx
+  // capacity is the larger of the two (same as maxSendable in
+  // SendWithAddressScreen's usdc mode).
+  const available = token === 'confio'
+    ? confioBalance
+    : token === 'cusd_plus'
+      ? savings.balanceUsd
+      : Math.max(savings.balanceUsd, usdtBalanceUsd);
   const isValidAddress = /^0x[0-9a-fA-F]{40}$/.test(destination.trim());
 
   const formatFixedFloor = (value: number, decimals = 2) => {
@@ -78,8 +198,10 @@ export const SendUsdtScreen = () => {
   };
 
   const handleSend = async () => {
-    if (!amountNum || amountNum < MIN_SEND_USD) {
-      setErrorMessage(`El mínimo para enviar es $${MIN_SEND_USD}.`);
+    if (!amountNum || amountNum < MIN_SEND) {
+      setErrorMessage(config.isUsd
+        ? `El mínimo para enviar es $${MIN_SEND}.`
+        : `El mínimo para enviar es ${MIN_SEND} ${config.name}.`);
       setShowError(true);
       return;
     }
@@ -101,6 +223,55 @@ export const SendUsdtScreen = () => {
     setSending(true);
     setShowError(false);
     try {
+      if (config.railOnly && !dollarRail) {
+        // cUSD+/CONFIO ride the server rail only — no legacy fallback.
+        setErrorMessage('Los envíos están en preparación. Inténtalo más tarde.');
+        setShowError(true);
+        return;
+      }
+      if (dollarRail) {
+        // Server rail: prepare/submit against send/bsc_flow.py. The server
+        // resolves the address (it may belong to a Confío user), builds
+        // the call shape for the requested token (or picks the funding
+        // source for a dollar send) and stores the exact batch — we only
+        // sign it.
+        const { installBscServerTransport: installTransport } = await import('../services/bscServerRpc');
+        installTransport();
+        const { sendBscDollar } = await import('../services/bscSend');
+        const minuteTimestamp = Math.floor(Date.now() / 60000);
+        const idempotencyKey =
+          `sendext_${token}_${destination.trim().slice(-8)}_${amount.replace('.', '')}_${minuteTimestamp}`;
+        const res = await sendBscDollar({
+          amount: String(amountNum),
+          recipientAddress: destination.trim(),
+          idempotencyKey,
+          tokenType: token === 'cusd_plus' ? 'CUSD_PLUS'
+            : token === 'confio' ? 'CONFIO'
+              : undefined,
+        });
+        Alert.alert(
+          'Enviado',
+          token === 'confio'
+            ? `Enviaste ${formatFixedFloor(amountNum, 2)} CONFIO por la red BNB Smart Chain.`
+            : token === 'cusd_plus'
+              ? `Enviaste $${formatFixedFloor(amountNum, 2)} en cUSD+ por la red BNB Smart Chain.`
+              : res.tokenType === 'CUSD_PLUS'
+                ? `Enviaste $${formatFixedFloor(amountNum, 2)} — esa dirección es de un usuario de Confío, le llegó como Confío Dollar+.`
+                : `Enviaste $${formatFixedFloor(amountNum, 2)} USDT por la red BNB Smart Chain.`,
+          [{ text: 'Listo', onPress: () => navigation.goBack() }],
+        );
+        return;
+      }
+
+      // Legacy path (rail dark) moves RAW WALLET USDT only: a savings-
+      // funded amount would be silently clamped down by the live-balance
+      // re-read below — honest refusal instead.
+      if (amountNum > usdtBalanceUsd) {
+        setErrorMessage('Los envíos están en preparación. Inténtalo más tarde.');
+        setShowError(true);
+        return;
+      }
+
       // Sponsored-first (EIP-7702, user needs zero BNB) with self-signed
       // legacy fallback — all inside transferUsdt. Live balance re-read
       // first so MAX sends the exact on-chain amount without reverting.
@@ -129,10 +300,14 @@ export const SendUsdtScreen = () => {
       );
     } catch (e: any) {
       // Honest, retryable: nothing left the wallet if the relay refused it.
+      // Server-rail errors arrive as stable codes; map them to Spanish.
+      const { BSC_SEND_ERRORS } = await import('../services/bscSend');
+      const msg = e?.message || '';
       setErrorMessage(
-        e?.message === 'Saldo insuficiente.'
+        msg === 'Saldo insuficiente.'
           ? 'Saldo insuficiente.'
-          : 'No se pudo enviar. Revisa tu conexión e inténtalo de nuevo.',
+          : BSC_SEND_ERRORS[msg]
+            || 'No se pudo enviar. Revisa tu conexión e inténtalo de nuevo.',
       );
       setShowError(true);
     } finally {
@@ -143,8 +318,8 @@ export const SendUsdtScreen = () => {
   return (
     <View style={styles.container}>
       {/* Compact instrument header — house send-screen grammar */}
-      <SafeAreaView edges={['top']} style={{ backgroundColor: USDT_COLOR }}>
-        <View style={[styles.header, { backgroundColor: USDT_COLOR }]}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
+        <View style={[styles.header, { backgroundColor: config.color }]}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
             style={styles.backButton}
@@ -154,30 +329,38 @@ export const SendUsdtScreen = () => {
             <Icon name="arrow-left" size={24} color={colors.white} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
-            <Image source={USDTLogo} style={styles.headerLogo} />
-            <Text style={styles.headerTitle}>Enviar USDT</Text>
+            <Image source={config.logo} style={styles.headerLogo} />
+            <Text style={styles.headerTitle}>Enviar {config.name}</Text>
           </View>
           <View style={styles.placeholder} />
         </View>
       </SafeAreaView>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Available Balance — raw wallet USDT this phase */}
+        {/* Available Balance */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
-          <Text style={styles.balanceAmount}>${formatFixedFloor(available, 2)}</Text>
-          <Text style={styles.balanceMin}>Mínimo para enviar: ${MIN_SEND_USD}.00</Text>
+          <Text style={styles.balanceAmount}>
+            {config.isUsd
+              ? `$${formatFixedFloor(available, 2)}`
+              : `${formatFixedFloor(available, 2)} ${config.name}`}
+          </Text>
+          <Text style={styles.balanceMin}>
+            {config.isUsd
+              ? `Mínimo para enviar: $${MIN_SEND}.00`
+              : `Mínimo para enviar: ${MIN_SEND} ${config.name}`}
+          </Text>
         </View>
 
         <InlineBanner
           variant="info"
-          message="Se envía como USDT por la red BNB Smart Chain (BEP-20). Asegúrate de que el destinatario acepte esa red."
+          message={config.networkBanner}
           style={{ marginHorizontal: 16, marginTop: 16 }}
         />
-        {savings.balanceUsd > 0 && (
+        {token === 'usdt' && savings.balanceUsd > 0 && (
           <InlineBanner
             variant="info"
-            message="Tu ahorro (Confío Dollar+) no se envía desde aquí — retíralo primero desde la pantalla de ahorro."
+            message="Tu saldo incluye tu Confío Dollar (cUSD+). Al enviar, se convierte automáticamente a USDT y se envía a la dirección destino."
             style={{ marginHorizontal: 16, marginTop: 10 }}
           />
         )}
@@ -205,8 +388,8 @@ export const SendUsdtScreen = () => {
                 keyboardType="numeric"
               />
               <View style={styles.currencyBadge}>
-                <Image source={USDTLogo} style={styles.currencyBadgeLogo} />
-                <Text style={styles.currencyBadgeText}>USDT</Text>
+                <Image source={config.logo} style={styles.currencyBadgeLogo} />
+                <Text style={styles.currencyBadgeText}>{config.name}</Text>
               </View>
             </View>
           </View>
@@ -301,7 +484,7 @@ export const SendUsdtScreen = () => {
           disabled={sending || !amount || !destination || amountNum > available}
           accessibilityLabel="Enviar"
           icon={<Icon name="send" size={20} color="#ffffff" />}
-          style={{ backgroundColor: USDT_COLOR }}
+          style={{ backgroundColor: config.color }}
         />
       </View>
 

@@ -233,6 +233,9 @@ class PrepareBscSend(graphene.Mutation):
         recipient_address = graphene.String(required=False)
         memo = graphene.String(required=False)
         idempotency_key = graphene.String(required=False)
+        token_type = graphene.String(
+            required=False,
+            description="Explicit token request: CUSD_PLUS (the token itself) or CONFIO. Absent = dollar-value send (server picks the shape).")
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -242,7 +245,7 @@ class PrepareBscSend(graphene.Mutation):
 
     @login_required
     def mutate(self, info, amount, recipient_user_id=None, recipient_phone=None,
-               recipient_address=None, memo='', idempotency_key=''):
+               recipient_address=None, memo='', idempotency_key='', token_type=''):
         from django.conf import settings as dj_settings
 
         from cusd_plus.schema import _bsc_rate_limited
@@ -269,6 +272,7 @@ class PrepareBscSend(graphene.Mutation):
             recipient_address=recipient_address,
             memo=memo or '',
             idempotency_key=idempotency_key or '',
+            token=token_type or '',
         )
         if not result.get('success'):
             return PrepareBscSend(success=False, error=result.get('error'))

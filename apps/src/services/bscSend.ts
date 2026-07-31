@@ -27,8 +27,8 @@ import {
 } from './sponsored7702';
 
 const PREPARE = gql`
-  mutation PrepareBscSend($amount: Decimal!, $recipientUserId: ID, $recipientPhone: String, $recipientAddress: String, $memo: String, $idempotencyKey: String) {
-    prepareBscSend(amount: $amount, recipientUserId: $recipientUserId, recipientPhone: $recipientPhone, recipientAddress: $recipientAddress, memo: $memo, idempotencyKey: $idempotencyKey) {
+  mutation PrepareBscSend($amount: Decimal!, $recipientUserId: ID, $recipientPhone: String, $recipientAddress: String, $memo: String, $idempotencyKey: String, $tokenType: String) {
+    prepareBscSend(amount: $amount, recipientUserId: $recipientUserId, recipientPhone: $recipientPhone, recipientAddress: $recipientAddress, memo: $memo, idempotencyKey: $idempotencyKey, tokenType: $tokenType) {
       success
       error
       sendId
@@ -56,6 +56,10 @@ export interface BscSendParams {
   recipientAddress?: string;
   memo?: string;
   idempotencyKey?: string;
+  /** Explicit token request (shapes D/E): 'CUSD_PLUS' sends the token
+   * itself to any address, 'CONFIO' sends BEP-20 CONFIO (amount = token
+   * count). Absent = dollar-value send, server picks the shape. */
+  tokenType?: 'CUSD_PLUS' | 'CONFIO';
 }
 
 export interface BscSendResult {
@@ -71,6 +75,8 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
     'Tu contacto aún no puede recibir dólares — le avisamos para que abra la app y active su cuenta.',
   recipient_not_on_confio:
     'Ese número no está en Confío todavía.',
+  invalid_recipient_address: 'La dirección no es válida.',
+  self_send_not_allowed: 'Esa dirección es tuya — elige otro destinatario.',
   insufficient_balance: 'Saldo insuficiente.',
   bsc_send_disabled: 'Los envíos están en preparación. Inténtalo más tarde.',
   sponsor_busy: 'La red está ocupada. Inténtalo de nuevo en unos segundos.',
@@ -95,6 +101,7 @@ export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResul
       recipientAddress: params.recipientAddress,
       memo: params.memo || '',
       idempotencyKey: params.idempotencyKey || '',
+      tokenType: params.tokenType || null,
     },
   });
   const prep = data?.prepareBscSend;

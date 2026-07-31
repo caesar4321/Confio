@@ -36,6 +36,7 @@ class CusdPlusSummaryType(graphene.ObjectType):
     cusd_deposits_paused = graphene.Boolean(description="cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)")
     usdt_balance_usd = graphene.Float(description="Raw wallet USDT-BSC (pre-mint, or held as 'Confío Dollar' by geo-ineligible users) — display-grade, cached")
     usdt_balance_wei = graphene.String(description="Same balance in exact wei (string; 18dp) for MAX-send and mint math")
+    confio_balance = graphene.Float(description="BEP-20 CONFIO held by the account (token count, not USD) — display-grade; 0 until the token address is configured")
 
 
 class CusdPlusMovementType(graphene.ObjectType):
@@ -72,6 +73,7 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     # the client signs one intent per action and the sponsor pays all gas.
     sponsored_7702_enabled = graphene.Boolean(description="Master gate for sponsor-paid type-4 batches")
     batch_delegate_address = graphene.String(description="ConfioBatchDelegate the EOA designates via 7702")
+    bsc_send_enabled = graphene.Boolean(description="send/bsc_flow.py master gate — full-dollar sends (cUSD+ redeemed server-side when wallet USDT doesn't cover)")
 
 
 # ── Ondo Stocks (GM) market data — server proxy of api.gm.ondo.finance ──
@@ -326,6 +328,16 @@ class Query(graphene.ObjectType):
         # serves both fields; the client re-reads balanceOf live before any
         # exact-amount send, so 30s staleness here is display-only.
         usdt_wei_int = vault.usdt_balance_raw(bsc_address) if bsc_address else 0
+        # BEP-20 CONFIO (token count) for the send screen. Never blocks the
+        # summary: an RPC hiccup shows 0 here while the dollar fields keep
+        # their own cache fallbacks.
+        confio_wei_int = 0
+        confio_token = getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', None)
+        if bsc_address and confio_token:
+            try:
+                confio_wei_int = vault.erc20_balance_raw(confio_token, bsc_address)
+            except Exception:  # noqa: BLE001
+                confio_wei_int = 0
         # SERVER-DERIVED live: the oracle's on-chain daily rate compounded
         # over a year (gross) and at the vault's kept share (net) — floats
         # with US Treasuries, never hardcoded. Falls back to last-known,
@@ -355,6 +367,7 @@ class Query(graphene.ObjectType):
             cusd_deposits_paused=getattr(settings, 'CUSD_DEPOSITS_PAUSED', True),
             usdt_balance_usd=usdt_wei_int / (10 ** 18),
             usdt_balance_wei=str(usdt_wei_int),
+            confio_balance=confio_wei_int / (10 ** 18),
         )
 
     def resolve_cusd_plus_movements(self, info, limit=20, offset=0):
@@ -433,6 +446,7 @@ class Query(graphene.ObjectType):
                 settings, 'CUSD_PLUS_BNB_AUTOCONVERT_SLIPPAGE_BPS', 100),
             sponsored_7702_enabled=getattr(settings, 'CUSD_PLUS_7702_ENABLED', False),
             batch_delegate_address=getattr(settings, 'CUSD_PLUS_BATCH_DELEGATE_ADDRESS', None) or None,
+            bsc_send_enabled=getattr(settings, 'BSC_SEND_ENABLED', False),
         )
 
 

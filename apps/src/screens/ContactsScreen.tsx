@@ -1488,9 +1488,6 @@ export const ContactsScreen = () => {
           getItemLayout={(data, index) => (
             { length: 80, offset: 80 * index, index }
           )}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={10}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={
@@ -1581,30 +1578,30 @@ export const ContactsScreen = () => {
           title="¿Qué moneda quieres enviar?"
           onClose={() => setShowSendTokenSelection(false)}
           options={[
+            // BSC lineup leads (cUSD phase-out, 2026-07-31): the Algorand
+            // cUSD/CONFIO address-sends are deprecated — the only Algorand
+            // exit left is USDC, funded by redeeming the old cUSD.
             {
               icon: 'dollar-sign',
-              image: cUSDLogo,
-              title: cusdDepositsPaused
-                ? 'Antiguo Confío Dollar · $cUSD'
-                : 'Confío Dollar · $cUSD',
-              subtitle: 'Red Algorand · moneda estable para pagos diarios',
-              onPress: () => handleSendTokenSelection('cusd'),
+              image: cUSDPlusLogo,
+              title: 'Confío Dollar · $cUSD+',
+              subtitle: 'Red BNB Smart Chain (BEP-20) · tu dólar principal',
+              onPress: () => {
+                setShowSendTokenSelection(false);
+                navigation.navigate('SendUsdt', { token: 'cusd_plus' });
+              },
             },
             {
               icon: 'zap',
               image: CONFIOLogo,
               title: 'Confío · $CONFIO',
-              subtitle: 'Red Algorand · moneda de gobernanza y utilidad',
-              onPress: () => handleSendTokenSelection('confio'),
+              subtitle: 'Red BNB Smart Chain (BEP-20) · moneda de gobernanza y utilidad',
+              onPress: () => {
+                setShowSendTokenSelection(false);
+                navigation.navigate('SendUsdt', { token: 'confio' });
+              },
             },
             {
-              icon: 'dollar-sign',
-              image: USDCLogo,
-              title: 'USD Coin · USDC',
-              subtitle: 'Red Algorand · desde tu saldo cUSD',
-              onPress: () => handleSendTokenSelection('usdc'),
-            },
-            ...(savingsExitVisible ? [{
               icon: 'send',
               image: USDTLogo,
               title: 'Tether · USDT',
@@ -1613,9 +1610,16 @@ export const ContactsScreen = () => {
                 : 'Red BNB Smart Chain (BEP-20) · desde tu Confío Dollar',
               onPress: () => {
                 setShowSendTokenSelection(false);
-                navigation.navigate('SendUsdt');
+                navigation.navigate('SendUsdt', { token: 'usdt' });
               },
-            }] : []),
+            },
+            {
+              icon: 'dollar-sign',
+              image: USDCLogo,
+              title: 'USD Coin · USDC',
+              subtitle: 'Red Algorand · desde tu Antiguo Confío Dollar (cUSD)',
+              onPress: () => handleSendTokenSelection('usdc'),
+            },
           ]}
         />
         <RouteSheet
