@@ -3935,6 +3935,14 @@ export const GET_PRESALE_STATUS = gql`
   }
 `;
 
+export const GET_BSC_CONFIO_DOLLAR_BALANCE = gql`
+  query GetBscConfioDollarBalance {
+    cusdPlusSummary {
+      usdtBalanceUsd
+    }
+  }
+`;
+
 export const GET_PRESALE_CURVE_STATS = gql`
   query GetPresaleCurveStats {
     presaleCurveStats {
@@ -3945,6 +3953,7 @@ export const GET_PRESALE_CURVE_STATS = gql`
       nextMilestoneUsd
       participants
     }
+    presaleChain
   }
 `;
 

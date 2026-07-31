@@ -39,6 +39,7 @@ SEL_APPROVE = _sel('approve(address,uint256)')                       # 095ea7b3
 SEL_TRANSFER = _sel('transfer(address,uint256)')                     # a9059cbb
 SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
+SEL_PRESALE_BUY = _sel('buy(uint256,uint256)')                       # ConfioPresaleVault
 SEL_EXECUTE = _sel('execute((address,uint256,bytes)[],uint256,uint256,bytes)')
 
 # EIP-712 constants — canonical strings shared with ConfioBatchDelegate.sol
@@ -65,6 +66,7 @@ GAS_PER_SELECTOR = {
     SEL_TRANSFER: 80_000,  # plain ERC-20 transfer (~35-52k) + headroom
     SEL_SUBSCRIBE_AND_MINT: 620_000,
     SEL_REDEEM_TO_USDT: 400_000,
+    SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
 }
 
 
@@ -180,6 +182,47 @@ def recover_authorization_authority(auth: dict) -> Optional[str]:
         return _recover(digest, int(auth['y_parity']), int(auth['r'], 16), int(auth['s'], 16))
     except Exception:  # noqa: BLE001
         return None
+
+
+def normalize_and_validate_authorization(authorization, user_addr: str, chain_id: int) -> dict:
+    """Normalize a client 7702 authorization tuple (graphene input or dict)
+    and validate it end-to-end: delegate address, chain binding, signature
+    authority, and LIVE account nonce. Raises PolicyError with the same
+    stable codes SponsorBscBatch returns inline (this helper mirrors that
+    proven block for other sponsored rails, e.g. the presale buy).
+    Returns the normalized dict send_sponsored_batch expects."""
+    def _get(obj, snake, camel=None):
+        if isinstance(obj, dict):
+            return obj.get(snake)
+        return getattr(obj, snake, None) if hasattr(obj, snake) else getattr(obj, camel or snake, None)
+
+    def _hex(x):
+        x = (x or '').lower()
+        return x if x.startswith('0x') else '0x' + x
+
+    auth_dict = {
+        'chain_id': int(_get(authorization, 'chain_id', 'chainId')),
+        'address': (_get(authorization, 'address') or '').lower(),
+        'nonce': str(int(_get(authorization, 'nonce'))),
+        'y_parity': int(_get(authorization, 'y_parity', 'yParity')),
+        'r': _hex(_get(authorization, 'r')),
+        's': _hex(_get(authorization, 's')),
+    }
+    # chainId 0 would be a wildcard valid on EVERY chain — refuse it even
+    # though the tuple is user-signed.
+    if auth_dict['chain_id'] != chain_id:
+        raise PolicyError('bad_auth_chain')
+    if auth_dict['address'] != delegate_address():
+        raise PolicyError('bad_auth_delegate')
+    authority = recover_authorization_authority(auth_dict)
+    if authority != user_addr.lower():
+        raise PolicyError('bad_auth_signature')
+    live_nonce = int(_rpc('eth_getTransactionCount', [user_addr, 'pending']), 16)
+    if int(auth_dict['nonce']) != live_nonce:
+        # Signed against a stale account nonce — applying it would silently
+        # no-op. Client refetches and re-signs.
+        raise PolicyError('stale_auth_nonce')
+    return auth_dict
 
 
 # ── policy ──────────────────────────────────────────────────────────────

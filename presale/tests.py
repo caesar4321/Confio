@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from unittest import mock
 
@@ -5,7 +6,7 @@ from django.test import TestCase, override_settings
 
 from django.contrib.auth import get_user_model
 
-from presale.models import PresalePhase, PresalePurchase, PresaleMigrationCredit
+from presale.models import PresalePhase, PresalePurchase, PresaleSettings, PresaleMigrationCredit
 from presale.tasks import (
     sync_presale_migration_credits,
     build_presale_credit_batch,
@@ -138,3 +139,119 @@ class PresaleMigrationCreditPipelineTest(TestCase):
         row = PresaleMigrationCredit.objects.get(user=linked)
         self.assertEqual(row.status, 'credited')
         self.assertIsNotNone(row.credited_at)
+
+
+@override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT, PRESALE_CHAIN='bsc')
+class BscPurchaseFlowTest(TestCase):
+    """presale/bsc_flow.py with the chain mocked (RPC-free).
+    Run: myvenv/bin/python manage.py test presale.tests.BscPurchaseFlowTest
+    (needs a Postgres with pgvector — EC2/prod tooling, not the laptop)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        PresaleSettings.get_settings()
+        PresaleSettings.objects.update(is_presale_active=True)
+        cls.phase = PresalePhase.objects.create(
+            phase_number=1, name='Fase 1', description='x',
+            price_per_token=Decimal('0.2'), goal_amount=Decimal('1000000'),
+            status='active',
+        )
+
+    def setUp(self):
+        self.user = _mk_user('buyer', BSC_ADDR)
+        self.account = self.user.accounts.get(account_type='personal')
+
+    def _prepare(self, amount='100', **kwargs):
+        from presale import bsc_flow
+        defaults = dict(accepted_terms=True, not_us_attestation=True)
+        defaults.update(kwargs)
+        # quoteTokens → 500 CONFIO, quoteCost → 99.99, balanceOf → 1000 USDT
+        answers = {
+            bsc_flow.SEL_QUOTE_TOKENS[2:]: 500 * 10**18,
+            bsc_flow.SEL_QUOTE_COST[2:]: 99_990_000_000_000_000_000,
+            bsc_flow.SEL_BALANCE_OF[2:]: 1000 * 10**18,
+        }
+        def fake_call(to, data):
+            return answers[data[2:10]]
+        with mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_call):
+            return bsc_flow.prepare_purchase(self.user, self.account, amount, **defaults)
+
+    def test_prepare_gates(self):
+        res = self._prepare(accepted_terms=False)
+        self.assertEqual(res['error'], 'terms_acceptance_required')
+        res = self._prepare(not_us_attestation=False)
+        self.assertEqual(res['error'], 'not_us_attestation_required')
+        res = self._prepare(ip_country_hint='US')
+        self.assertIn('Estados Unidos', res['error'])
+        res = self._prepare(amount='1')
+        self.assertEqual(res['error'], 'below_minimum')
+        self.account.bsc_address = None
+        self.account.save(update_fields=['bsc_address'])
+        res = self._prepare()
+        self.assertEqual(res['error'], 'no_bsc_address')
+
+    def test_prepare_records_and_builds_exact_batch(self):
+        from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY, USDT_BSC
+        res = self._prepare()
+        self.assertTrue(res['success'], res)
+        self.assertEqual(res['confio_amount'], '500.000000')
+        purchase = PresalePurchase.objects.get(internal_id=res['purchase_id'])
+        self.assertEqual(purchase.funding_source, 'direct_cusd')
+        self.assertEqual(purchase.status, 'processing')
+        self.assertTrue(purchase.attested_not_us_resident)
+        calls = res['calls']
+        cap = 100 * 10**18
+        self.assertEqual(calls[0]['to'], USDT_BSC)
+        self.assertEqual(
+            calls[0]['data'],
+            '0x' + SEL_APPROVE + VAULT[2:].lower().rjust(64, '0') + format(cap, 'x').rjust(64, '0'))
+        self.assertEqual(calls[1]['to'], VAULT.lower())
+        self.assertEqual(
+            calls[1]['data'],
+            '0x' + SEL_PRESALE_BUY + format(500 * 10**18, 'x').rjust(64, '0') + format(cap, 'x').rjust(64, '0'))
+
+    def test_submit_verifies_signature_and_policy(self):
+        import time as _t
+        from eth_keys import keys as eth_keys
+        from cusd_plus import sponsor_7702
+        from presale import bsc_flow
+
+        res = self._prepare()
+        purchase = PresalePurchase.objects.get(internal_id=res['purchase_id'])
+        pk = eth_keys.PrivateKey(b'\x07' * 32)
+        signer_addr = pk.public_key.to_checksum_address().lower()
+        purchase.from_address = signer_addr
+        purchase.save(update_fields=['from_address'])
+        calls = json.loads(purchase.notes)['bsc_calls']
+        deadline = int(_t.time()) + 600
+        digest = sponsor_7702.intent_digest(calls, 0, deadline, signer_addr, 56)
+        sig = pk.sign_msg_hash(digest)
+        sig_hex = '0x' + sig.r.to_bytes(32, 'big').hex() + sig.s.to_bytes(32, 'big').hex() + bytes([27 + sig.v]).hex()
+
+        fake_batch = mock.Mock(id=1)
+        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True), \
+             mock.patch.object(sponsor_7702, 'send_sponsored_batch',
+                               return_value=('0x' + 'ab' * 32, fake_batch)) as sent, \
+             mock.patch('presale.tasks.confirm_bsc_presale_purchase'):
+            ok = bsc_flow.submit_purchase(self.user, purchase, 0, deadline, sig_hex)
+        self.assertTrue(ok['success'], ok)
+        self.assertEqual(sent.call_args.args[7], 'presale_buy')
+
+        # wrong signer
+        purchase.status = 'processing'
+        purchase.save(update_fields=['status'])
+        pk2 = eth_keys.PrivateKey(b'\x09' * 32)
+        sig2 = pk2.sign_msg_hash(digest)
+        bad = '0x' + sig2.r.to_bytes(32, 'big').hex() + sig2.s.to_bytes(32, 'big').hex() + bytes([27 + sig2.v]).hex()
+        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True):
+            rej = bsc_flow.submit_purchase(self.user, purchase, 0, deadline, bad)
+        self.assertEqual(rej['error'], 'bad_intent_signature')
+
+        # tampered stored calldata
+        meta = json.loads(purchase.notes)
+        meta['bsc_calls'][1]['data'] = meta['bsc_calls'][1]['data'][:-2] + 'ff'
+        purchase.notes = json.dumps(meta)
+        purchase.save(update_fields=['notes'])
+        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True):
+            rej2 = bsc_flow.submit_purchase(self.user, purchase, 0, deadline, sig_hex)
+        self.assertEqual(rej2['error'], 'bad_calldata')

@@ -93,6 +93,9 @@ class PresaleQueries(graphene.ObjectType):
         PresaleCurveStatsType,
         description="Moving curve price + recaudado milestones for the presale screens"
     )
+    presale_chain = graphene.String(
+        description="Which chain the purchase flow runs on: 'algorand' (legacy) or 'bsc'"
+    )
     active_presale_phase = graphene.Field(PresalePhaseType)
     all_presale_phases = graphene.List(PresalePhaseType)
     presale_phase = graphene.Field(
@@ -116,6 +119,11 @@ class PresaleQueries(graphene.ObjectType):
         """Moving curve price for holdings valuation - no login required"""
         from .price_utils import get_confio_current_price
         return get_confio_current_price()
+
+    def resolve_presale_chain(self, info):
+        """Purchase-flow chain switch - no login required"""
+        from django.conf import settings as dj_settings
+        return getattr(dj_settings, 'PRESALE_CHAIN', 'algorand')
 
     def resolve_presale_curve_stats(self, info):
         """Curve stats for the presale screens - no login required"""
@@ -225,6 +233,150 @@ class PresaleQueries(graphene.ObjectType):
             return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
 
 
+class BscPresaleCallType(graphene.ObjectType):
+    """One call of the sponsored 7702 buy batch (server-built; the client
+    signs exactly these and nothing else)."""
+    to = graphene.String()
+    value_wei = graphene.String()
+    data = graphene.String()
+
+
+class BscPresaleAuthorizationInput(graphene.InputObjectType):
+    """A signed EIP-7702 authorization tuple (first use only) — same shape
+    as cusd_plus's BscAuthorizationInput, defined locally to keep the
+    presale schema import-independent."""
+    chain_id = graphene.Int(required=True)
+    address = graphene.String(required=True)
+    nonce = graphene.String(required=True)
+    y_parity = graphene.Int(required=True)
+    r = graphene.String(required=True)
+    s = graphene.String(required=True)
+
+
+class PrepareBscPresalePurchase(graphene.Mutation):
+    """Step 1 of the BSC presale buy: full eligibility gate + on-chain quote
+    + purchase record. Returns the exact [approve, buy] batch the client
+    must sign as one EIP-712 intent (ConfioBatchDelegate.execute)."""
+
+    class Arguments:
+        amount_usd = graphene.Decimal(required=True)
+        accepted_terms = graphene.Boolean(required=True)
+        not_us_attestation = graphene.Boolean(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    purchase_id = graphene.String()
+    calls = graphene.List(BscPresaleCallType)
+    confio_amount = graphene.String()
+    cost = graphene.String()
+    max_payment = graphene.String()
+    avg_price = graphene.String()
+
+    @login_required
+    def mutate(self, info, amount_usd, accepted_terms, not_us_attestation):
+        from django.conf import settings as dj_settings
+
+        from cusd_plus.schema import _active_account, _bsc_rate_limited
+        from security.request_utils import extract_client_ip_from_meta
+
+        from . import bsc_flow
+
+        user = info.context.user
+        if getattr(dj_settings, 'PRESALE_CHAIN', 'algorand') != 'bsc':
+            return PrepareBscPresalePurchase(success=False, error='bsc_presale_disabled')
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return PrepareBscPresalePurchase(success=False, error='disabled')
+        if _bsc_rate_limited(user.id, 'presale_prepare', 10):
+            return PrepareBscPresalePurchase(success=False, error='rate_limited')
+
+        account = _active_account(info)
+        if not account or account.account_type != 'personal':
+            return PrepareBscPresalePurchase(success=False, error='personal_account_required')
+
+        meta = getattr(info.context, 'META', {}) or {}
+        res = bsc_flow.prepare_purchase(
+            user, account, amount_usd,
+            accepted_terms=bool(accepted_terms),
+            not_us_attestation=bool(not_us_attestation),
+            client_ip=extract_client_ip_from_meta(meta),
+            ip_country_hint=meta.get('HTTP_CF_IPCOUNTRY'),
+            user_agent=meta.get('HTTP_USER_AGENT', ''),
+        )
+        if not res.get('success'):
+            return PrepareBscPresalePurchase(success=False, error=res.get('error'))
+        return PrepareBscPresalePurchase(
+            success=True,
+            purchase_id=res['purchase_id'],
+            calls=[BscPresaleCallType(to=c['to'], value_wei=c['value'], data=c['data'])
+                   for c in res['calls']],
+            confio_amount=res['confio_amount'],
+            cost=res['cost'],
+            max_payment=res['max_payment'],
+            avg_price=res['avg_price'],
+        )
+
+
+class SubmitBscPresalePurchase(graphene.Mutation):
+    """Step 2: the user's signature over the server-stored batch. The server
+    recomputes the digest from what IT stored — a client cannot substitute
+    calldata — re-checks geo, then broadcasts from the KMS sponsor."""
+
+    class Arguments:
+        purchase_id = graphene.String(required=True)
+        nonce = graphene.String(required=True, description="Delegate intent nonce (nonces())")
+        deadline = graphene.String(required=True, description="Unix seconds")
+        intent_signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
+        authorization = BscPresaleAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    authorization_required = graphene.Boolean()
+    transaction_hash = graphene.String()
+
+    @login_required
+    def mutate(self, info, purchase_id, nonce, deadline, intent_signature, authorization=None):
+        from django.conf import settings as dj_settings
+
+        from cusd_plus.schema import _bsc_rate_limited
+        from security.request_utils import extract_client_ip_from_meta
+
+        from . import bsc_flow
+        from .models import PresalePurchase
+
+        user = info.context.user
+        if getattr(dj_settings, 'PRESALE_CHAIN', 'algorand') != 'bsc':
+            return SubmitBscPresalePurchase(success=False, error='bsc_presale_disabled')
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return SubmitBscPresalePurchase(success=False, error='disabled')
+        if _bsc_rate_limited(user.id, 'presale_submit', 5):
+            return SubmitBscPresalePurchase(success=False, error='rate_limited')
+
+        purchase = PresalePurchase.objects.filter(
+            internal_id=purchase_id, user=user).first()
+        if not purchase:
+            return SubmitBscPresalePurchase(success=False, error='purchase_not_found')
+
+        try:
+            nonce_i = int(nonce)
+            deadline_i = int(deadline)
+        except (TypeError, ValueError):
+            return SubmitBscPresalePurchase(success=False, error='bad_params')
+
+        meta = getattr(info.context, 'META', {}) or {}
+        res = bsc_flow.submit_purchase(
+            user, purchase, nonce_i, deadline_i, intent_signature,
+            authorization=authorization,
+            client_ip=extract_client_ip_from_meta(meta),
+            ip_country_hint=meta.get('HTTP_CF_IPCOUNTRY'),
+        )
+        return SubmitBscPresalePurchase(
+            success=bool(res.get('success')),
+            error=res.get('error'),
+            authorization_required=bool(res.get('authorization_required')),
+            transaction_hash=res.get('transaction_hash'),
+        )
+
+
 class PurchasePresaleTokens(graphene.Mutation):
     """Mutation to purchase CONFIO tokens during presale"""
 
@@ -294,3 +446,5 @@ class PresaleMutations(graphene.ObjectType):
     """Mutations for presale operations"""
     purchase_presale_tokens = PurchasePresaleTokens.Field()
     join_presale_waitlist = JoinPresaleWaitlist.Field()
+    prepare_bsc_presale_purchase = PrepareBscPresalePurchase.Field()
+    submit_bsc_presale_purchase = SubmitBscPresalePurchase.Field()

@@ -146,6 +146,78 @@ def build_presale_credit_batch(limit: int = 100, batch_id: str | None = None) ->
     return result
 
 
+@shared_task(bind=True, max_retries=40, name='presale.confirm_bsc_purchase')
+def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
+    """Resolve a BSC presale buy to its outcome by following the
+    SponsoredBatch row (whose own receipt task handles the tricky cases:
+    revert, and the silent 7702 no-op where the delegation never applied).
+
+    confirmed → purchase completed + per-user limit + unified row.
+    reverted/noop_failed → purchase failed (funds untouched; user retries).
+    """
+    from cusd_plus.models import SponsoredBatch
+    from users.models_unified import UnifiedTransactionTable
+
+    from .models import PresalePurchase, UserPresaleLimit
+
+    try:
+        purchase = PresalePurchase.objects.get(id=purchase_id)
+        batch = SponsoredBatch.objects.get(id=batch_id)
+    except (PresalePurchase.DoesNotExist, SponsoredBatch.DoesNotExist):
+        return
+    if purchase.status != 'processing':
+        return  # already resolved
+
+    if batch.status == 'sent':
+        raise self.retry(countdown=15)
+
+    if batch.status == 'confirmed':
+        purchase.complete_purchase(batch.tx_hash)
+        upl, _ = UserPresaleLimit.objects.get_or_create(user=purchase.user, phase=purchase.phase)
+        upl.total_purchased += purchase.cusd_amount
+        upl.last_purchase_at = timezone.now()
+        upl.save(update_fields=['total_purchased', 'last_purchase_at'])
+        UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
+            status='CONFIRMED', transaction_hash=batch.tx_hash,
+        )
+        logger.info('[PRESALE][BSC] purchase %s confirmed: %s', purchase.id, batch.tx_hash)
+    else:  # reverted / noop_failed
+        purchase.status = 'failed'
+        purchase.notes = (purchase.notes or '') + f'\n[Error] batch {batch.status}: {batch.tx_hash}'
+        purchase.save(update_fields=['status', 'notes'])
+        UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
+            status='FAILED', error_message=f'batch_{batch.status}',
+        )
+        logger.warning('[PRESALE][BSC] purchase %s failed: batch %s %s',
+                       purchase.id, batch.id, batch.status)
+
+
+@shared_task(name='presale.abandon_stale_bsc_purchases')
+def abandon_stale_bsc_purchases() -> dict:
+    """BSC purchase rows the user prepared but never signed (no tx hash)
+    expire after a day — keeps quotes honest and the admin list clean.
+    (In-flight rows WITH a tx hash are resolved by confirm_bsc_purchase.)"""
+    from datetime import timedelta
+
+    from .models import PresalePurchase
+    from users.models_unified import UnifiedTransactionTable
+
+    cutoff = timezone.now() - timedelta(hours=24)
+    stale = PresalePurchase.objects.filter(
+        status='processing',
+        funding_source='direct_cusd',
+        transaction_hash__isnull=True,
+        created_at__lt=cutoff,
+    )
+    ids = list(stale.values_list('id', flat=True))
+    updated = stale.update(status='failed')
+    if updated:
+        UnifiedTransactionTable.objects.filter(presale_purchase_id__in=ids).update(
+            status='FAILED', error_message='abandoned_unsigned')
+        logger.info('[PRESALE][BSC] abandoned %d stale unsigned purchases', updated)
+    return {'abandoned': updated}
+
+
 @shared_task(name='presale.verify_migration_credits')
 def verify_presale_migration_credits() -> dict:
     """Confirm queued rows against the vault's migratedCredited(addr)."""

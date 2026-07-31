@@ -57,14 +57,14 @@ export const fetchSponsored7702Params = async (): Promise<Sponsored7702Params> =
   };
 };
 
-const delegateNonce = async (eoa: string): Promise<bigint> => {
+export const delegateNonce = async (eoa: string): Promise<bigint> => {
   // nonces() on the EOA itself; a codeless (not yet delegated) EOA returns
   // empty data — that IS nonce 0.
   const res = await bscEthCall(eoa, selector('nonces()'));
   return res && res !== '0x' ? BigInt(res) : 0n;
 };
 
-const isDelegatedTo = async (eoa: string, delegate: string): Promise<boolean> => {
+export const isDelegatedTo = async (eoa: string, delegate: string): Promise<boolean> => {
   const code = ((await bscGetCode(eoa)) || '0x').toLowerCase();
   return code === DELEGATION_PREFIX + delegate.toLowerCase().slice(2);
 };

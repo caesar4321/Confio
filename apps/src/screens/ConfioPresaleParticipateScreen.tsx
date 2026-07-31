@@ -9,7 +9,7 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
-import { GET_ACTIVE_PRESALE, GET_PRESALE_CURVE_STATS, GET_MY_BALANCES, GET_PRESALE_TELEGRAM_GROUP } from '../apollo/queries';
+import { GET_ACTIVE_PRESALE, GET_PRESALE_CURVE_STATS, GET_BSC_CONFIO_DOLLAR_BALANCE, GET_MY_BALANCES, GET_PRESALE_TELEGRAM_GROUP } from '../apollo/queries';
 import { TelegramGroupModal } from '../components/TelegramGroupModal';
 import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -44,6 +44,13 @@ export const ConfioPresaleParticipateScreen = () => {
   const { data: curveData } = useQuery(GET_PRESALE_CURVE_STATS, {
     fetchPolicy: 'cache-and-network',
   });
+  // Purchase-flow chain: 'bsc' = sponsored 7702 buys against the curve
+  // vault (no Algorand session/opt-in at all); 'algorand' = legacy WS flow.
+  const isBscFlow = curveData?.presaleChain === 'bsc';
+  const { data: bscBalanceData } = useQuery(GET_BSC_CONFIO_DOLLAR_BALANCE, {
+    fetchPolicy: 'cache-and-network',
+    skip: !isBscFlow,
+  });
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
   });
@@ -66,9 +73,13 @@ export const ConfioPresaleParticipateScreen = () => {
   const serverMin = presale ? parseFloat(presale.minPurchase) : uiMinPurchase;
   const minAmount = serverMin || uiMinPurchase;
   const maxAmount = presale ? parseFloat(presale.maxPurchase) : 1000;
+  // Spendable balance: Confío Dollar (raw USDT-BSC) on the BSC flow,
+  // legacy cUSD (Algorand) otherwise.
   const availableCusd = React.useMemo(
-    () => parseFloat(balancesData?.myBalances?.cusd || '0'),
-    [balancesData?.myBalances?.cusd]
+    () => isBscFlow
+      ? (bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd ?? 0)
+      : parseFloat(balancesData?.myBalances?.cusd || '0'),
+    [isBscFlow, bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd, balancesData?.myBalances?.cusd]
   );
 
   // Recaudado-axis progress with absolute milestones (never a % of goal)
@@ -136,6 +147,7 @@ export const ConfioPresaleParticipateScreen = () => {
           navigation.goBack();
           return;
         }
+        if (isBscFlow) return; // no opt-in concept on BSC
 
         setLoadingMessage('Preparando preventa...');
         const s = new PresaleWsSession();
@@ -155,7 +167,7 @@ export const ConfioPresaleParticipateScreen = () => {
         setLoadingMessage('');
       }
     })();
-  }, [checkBackupEnforcement, navigation]);
+  }, [checkBackupEnforcement, navigation, isBscFlow]);
 
   const executeSwap = async () => {
     try {
@@ -175,6 +187,29 @@ export const ConfioPresaleParticipateScreen = () => {
       }
 
       setBusy(true);
+
+      // ── BSC flow: sponsored 7702 batch against the curve vault ──
+      if (isBscFlow) {
+        const { buyPresaleBsc } = await import('../services/presaleBsc');
+        await buyPresaleBsc(amount);
+        setBusy(false);
+        setAmount('');
+        refetch();
+        const tgEnabledB = telegramData?.presaleTelegramGroup?.enabled;
+        const tgUrlB = telegramData?.presaleTelegramGroup?.url;
+        if (tgEnabledB && tgUrlB) {
+          setShowTelegramModal(true);
+        } else {
+          Alert.alert(
+            'Compra exitosa',
+            'Tu compra fue exitosa.',
+            [{ text: 'Ok', onPress: () => navigation.navigate('BottomTabs', { screen: 'Home' }) }]
+          );
+        }
+        return;
+      }
+
+      // ── Legacy Algorand flow ──
       const session = new PresaleWsSession();
       await session.open();
 

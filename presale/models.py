@@ -268,6 +268,17 @@ class PresalePurchase(models.Model):
         blank=True,
         help_text="ISO country resolved from the client IP at purchase time"
     )
+    FUNDING_SOURCE_CHOICES = [
+        ('algorand_cusd', 'Legacy cUSD (Algorand)'),
+        ('direct_cusd', 'Confío Dollar (USDT-BSC)'),
+        ('cusd_plus_redeem', 'Redeemed from cUSD+'),
+    ]
+    funding_source = models.CharField(
+        max_length=20,
+        choices=FUNDING_SOURCE_CHOICES,
+        default='algorand_cusd',
+        help_text="Which balance funded this purchase"
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
