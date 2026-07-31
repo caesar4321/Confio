@@ -64,22 +64,22 @@ export interface StockPosition {
   dayChangePct: number;
 }
 
+// Every type here is a real money movement with a row behind it. Yield is
+// deliberately absent: it accrues passively and continuously, so it surfaces
+// as balance growth (and the "hoy +$X" delta), never as a ledger row.
 export type SavingsMovementType =
-  | 'deposit' // Ahorraste (cUSD → cUSD+ or ramp-in)
-  | 'withdraw' // Retiraste (→ cUSD or bank)
+  | 'deposit' // Recargaste (Ahorrar — conversion into the vault)
+  | 'withdraw' // Retiraste (→ USDT or bank)
   | 'send' // Enviaste (cUSD+/USDT to someone)
-  | 'receive' // Recibiste
+  | 'receive' // Recibiste (internal rail, or an external on-chain deposit)
   | 'payment' // Pagaste (a business)
-  | 'payroll' // Nómina
-  | 'buy' // Compraste una acción (from cUSD+)
-  | 'sell' // Vendiste una acción (back to cUSD+)
-  | 'yield'; // weekly/monthly yield summary row (never per-day spam)
+  | 'payroll'; // Nómina
 
 export interface SavingsMovement {
   id: string;
   type: SavingsMovementType;
-  title: string; // e.g. 'Ahorraste', 'Compraste TSLA'
-  amountUsd: number; // signed: deposits/sell/yield positive into savings
+  title: string; // e.g. 'Ahorraste', 'Recibiste de Ana'
+  amountUsd: number; // signed: inflows to savings positive
   createdAt: string; // ISO
 }
 

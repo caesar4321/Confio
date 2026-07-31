@@ -238,7 +238,10 @@ export class AuthService {
       try {
         info = await algod.accountInformation(legacyWallet.address).do();
       } catch {
-        return { legacyAddress: null, inspectionSucceeded: true };
+        // Algod unreachable: we could NOT verify whether the legacy wallet
+        // still holds value, so this must count as a failed inspection —
+        // callers guard V2 derivation on it for unmigrated accounts.
+        return { legacyAddress: null, inspectionSucceeded: false };
       }
 
       const relevantAssets = (info.assets || []).filter((asset: any) => {
@@ -862,7 +865,13 @@ export class AuthService {
       // instead of silently minting a replacement V2 wallet.
       // ----------------------------------------------------------------------
       const serverAlgorandAddress = authData.user?.algorandAddress || null;
-      const allowV2SecretGeneration = !!authData.isNewUser || !serverAlgorandAddress;
+      // Algorand deprecated: BSC-only returning users have NO Algorand address,
+      // so the registered BSC address is the wallet anchor. Never silently mint
+      // a replacement master secret when the server knows a wallet on either
+      // chain — the BSC address is immutable server-side, so a fresh secret
+      // would strand the funds on the original address.
+      const serverBscAddress = authData.user?.bscAddress || null;
+      const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddress);
       if (authData.isKeylessMigrated) {
         console.log('[AuthService] ⚡️ User is V2 Native/Migrated. Verifying Master Secret...', {
           isNewUser: !!authData.isNewUser,
@@ -876,6 +885,7 @@ export class AuthService {
             allowGenerate: allowV2SecretGeneration,
             provider: 'google',
             expectedAddress: serverAlgorandAddress,
+            expectedEvmAddress: serverBscAddress,
             // Token presence is not proof of upload: the sync can fail (or be
             // skipped by the verified-local fast path) and the server must not
             // be told the backup is verified in that case.
@@ -896,6 +906,7 @@ export class AuthService {
                 allowGenerate: false,
                 provider: 'google',
                 expectedAddress: serverAlgorandAddress,
+                expectedEvmAddress: serverBscAddress,
                 onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
               });
               console.log('[AuthService] ✅ Google V2 wallet recovered from Drive.');
@@ -918,89 +929,99 @@ export class AuthService {
 
 
 
-      // 7) Now derive Algorand wallet (pepper fetch requires JWT)
-      const googleContext: AccountContext = { type: 'personal', index: 0 };
-      const googleIss = 'https://accounts.google.com';
-      const googleAud = GOOGLE_CLIENT_IDS.production.web;
-      const legacyInspection = await this.getLegacyAddressIfMigrationPending(
-        googleIss,
-        googleSubject,
-        googleAud,
-        'google',
-        googleContext
-      );
-      const legacyAddress = legacyInspection.legacyAddress;
+      // 7) Algorand wallet (LEGACY): only derived for accounts that already
+      // have a server-registered Algorand address, so they can access/migrate
+      // their funds to BSC. Algorand is deprecated — new users are BSC-only
+      // and never generate an Algorand address.
+      let algorandAddress: string | null = null;
+      if (serverAlgorandAddress) {
+        const googleContext: AccountContext = { type: 'personal', index: 0 };
+        const googleIss = 'https://accounts.google.com';
+        const googleAud = GOOGLE_CLIENT_IDS.production.web;
+        const legacyInspection = await this.getLegacyAddressIfMigrationPending(
+          googleIss,
+          googleSubject,
+          googleAud,
+          'google',
+          googleContext
+        );
+        const legacyAddress = legacyInspection.legacyAddress;
 
-      if (!legacyInspection.inspectionSucceeded && !authData.isKeylessMigrated) {
-        throw new Error('No pudimos verificar el estado de migración de tu billetera anterior. Vuelve a intentar para evitar usar una dirección nueva antes de completar la migración.');
-      }
+        if (!legacyInspection.inspectionSucceeded && !authData.isKeylessMigrated) {
+          throw new Error('No pudimos verificar el estado de migración de tu billetera anterior. Vuelve a intentar para evitar usar una dirección nueva antes de completar la migración.');
+        }
 
-      const algorandService = (await import('./algorandService')).default;
-      const algorandAddress = legacyAddress
-        ? legacyAddress
-        : await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
-      if (legacyAddress) {
-        await algorandService.setCurrentAddress(legacyAddress);
-      }
-      console.log('Algorand wallet created:', algorandAddress);
-      perfLog('Algorand wallet created');
+        const algorandService = (await import('./algorandService')).default;
+        algorandAddress = legacyAddress
+          ? legacyAddress
+          : await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
+        if (legacyAddress) {
+          await algorandService.setCurrentAddress(legacyAddress);
+        }
+        console.log('Algorand wallet restored:', algorandAddress);
+        perfLog('Algorand wallet restored');
 
-      if (!legacyAddress && serverAlgorandAddress && algorandAddress !== serverAlgorandAddress) {
-        console.warn('[AuthService] Refusing mismatched V2 wallet for existing account', {
-          serverAlgorandAddress,
-          localAlgorandAddress: algorandAddress,
-        });
-        throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta desde Google Drive antes de continuar.');
-      }
+        if (!legacyAddress && algorandAddress !== serverAlgorandAddress) {
+          console.warn('[AuthService] Refusing mismatched V2 wallet for existing account', {
+            serverAlgorandAddress,
+            localAlgorandAddress: algorandAddress,
+          });
+          throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta desde Google Drive antes de continuar.');
+        }
 
-      // Update server with derived address (pass isV2Wallet if V2 sync succeeded)
-      try {
-        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-        const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress, isV2Wallet: driveSyncSucceeded } });
-        console.log('Updated server with Algorand address');
-        registerBscAddressBestEffort();
-        // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
+        // Update server with derived address (pass isV2Wallet if V2 sync succeeded)
         try {
-          const payload = updRes?.data?.updateAccountAlgorandAddress;
-          const needsOptIn = payload?.needsOptIn as number[] | undefined;
-          const txns = payload?.optInTransactions as string | any[] | undefined;
-          if (needsOptIn && needsOptIn.length > 0 && txns) {
-            const groups = typeof txns === 'string' ? JSON.parse(txns) : txns;
-            console.log('Processing server-prepared opt-in transactions...', { assets: needsOptIn });
-            await algorandService.processSponsoredOptIn(groups);
-            console.log('Server-prepared asset opt-ins submitted');
+          const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
+          const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress, isV2Wallet: driveSyncSucceeded } });
+          console.log('Updated server with Algorand address');
+          registerBscAddressBestEffort();
+          // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
+          try {
+            const payload = updRes?.data?.updateAccountAlgorandAddress;
+            const needsOptIn = payload?.needsOptIn as number[] | undefined;
+            const txns = payload?.optInTransactions as string | any[] | undefined;
+            if (needsOptIn && needsOptIn.length > 0 && txns) {
+              const groups = typeof txns === 'string' ? JSON.parse(txns) : txns;
+              console.log('Processing server-prepared opt-in transactions...', { assets: needsOptIn });
+              await algorandService.processSponsoredOptIn(groups);
+              console.log('Server-prepared asset opt-ins submitted');
+            }
+          } catch (e) {
+            console.error('Opt-in post-update handling failed (non-fatal):', e);
           }
         } catch (e) {
-          console.error('Opt-in post-update handling failed (non-fatal):', e);
+          console.error('Failed updating server with Algorand address:', e);
         }
-      } catch (e) {
-        console.error('Failed updating server with Algorand address:', e);
-      }
 
 
-      // Now that tokens are stored, process any required opt-ins for PERSONAL accounts only
-      // Business accounts handle opt-ins separately during payment flow
-      const accountManager = AccountManager.getInstance();
-      const activeContext = await accountManager.getActiveAccountContext();
-      if (activeContext.type === 'personal' && authData.needsOptIn && authData.needsOptIn.length > 0) {
-        console.log('Personal account needs to opt-in to assets:', authData.needsOptIn);
-        if (authData.optInTransactions && authData.optInTransactions.length > 0) {
-          console.log('Processing opt-in transactions for personal account...');
-          try {
-            const optInTxns = typeof authData.optInTransactions === 'string'
-              ? JSON.parse(authData.optInTransactions)
-              : authData.optInTransactions;
-            const ok = await algorandService.processSponsoredOptIn(optInTxns);
-            if (ok) {
-              console.log('Successfully processed opt-in transactions for personal account');
-            } else {
-              console.error('Opt-in transactions were not confirmed');
+        // Now that tokens are stored, process any required opt-ins for PERSONAL accounts only
+        // Business accounts handle opt-ins separately during payment flow
+        const accountManager = AccountManager.getInstance();
+        const activeContext = await accountManager.getActiveAccountContext();
+        if (activeContext.type === 'personal' && authData.needsOptIn && authData.needsOptIn.length > 0) {
+          console.log('Personal account needs to opt-in to assets:', authData.needsOptIn);
+          if (authData.optInTransactions && authData.optInTransactions.length > 0) {
+            console.log('Processing opt-in transactions for personal account...');
+            try {
+              const optInTxns = typeof authData.optInTransactions === 'string'
+                ? JSON.parse(authData.optInTransactions)
+                : authData.optInTransactions;
+              const ok = await algorandService.processSponsoredOptIn(optInTxns);
+              if (ok) {
+                console.log('Successfully processed opt-in transactions for personal account');
+              } else {
+                console.error('Opt-in transactions were not confirmed');
+              }
+            } catch (optInError) {
+              console.error('Failed to process opt-in transactions:', optInError);
+              // Don't fail login if opt-in fails - user can retry later
             }
-          } catch (optInError) {
-            console.error('Failed to process opt-in transactions:', optInError);
-            // Don't fail login if opt-in fails - user can retry later
           }
         }
+      } else {
+        console.log('No server Algorand address — skipping Algorand wallet generation (deprecated, BSC-only)');
+        perfLog('Algorand wallet skipped');
+        registerBscAddressBestEffort();
       }
 
       // 8) Set default personal account context
@@ -1013,12 +1034,14 @@ export class AuthService {
         });
         console.log('Set default personal account context (personal_0)');
 
-        // Store the Algorand address for the personal account
-        const defaultAccountContext: AccountContext = {
-          type: 'personal',
-          index: 0
-        };
-        await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
+        if (algorandAddress) {
+          // Store the legacy Algorand address for the personal account
+          const defaultAccountContext: AccountContext = {
+            type: 'personal',
+            index: 0
+          };
+          await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
+        }
       } catch (accountError) {
         console.error('Error creating default account:', accountError);
         // Don't throw here - account creation failure shouldn't break the sign-in flow
@@ -1209,6 +1232,58 @@ export class AuthService {
 
 
 
+      // Algorand wallet (LEGACY): only derived for accounts that already have
+      // a server-registered Algorand address, so they can access/migrate their
+      // funds to BSC. Algorand is deprecated — new users are BSC-only and
+      // never generate an Algorand address (the master secret is still
+      // created below because the BSC wallet derives from it).
+      const serverAlgorandAddressEarly = authData.user?.algorandAddress || null;
+      if (!serverAlgorandAddressEarly) {
+        console.log('No server Algorand address — skipping Algorand wallet generation (Apple, deprecated, BSC-only)');
+        // The registered BSC address is the wallet anchor for BSC-only users:
+        // it is immutable server-side, so silently minting a replacement
+        // master secret would strand funds on the original address.
+        const serverBscAddressApple = authData.user?.bscAddress || null;
+        const allowAppleSecretGeneration = !!authData.isNewUser || !serverBscAddressApple;
+        const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+        try {
+          await getOrCreateMasterSecret(appleSub, undefined, {
+            allowGenerate: allowAppleSecretGeneration,
+            provider: 'apple',
+            expectedEvmAddress: serverBscAddressApple,
+          });
+        } catch (v2Err) {
+          console.error('[AuthService] Failed to verify/restore Apple master secret (BSC-only):', v2Err);
+          if (allowAppleSecretGeneration) {
+            throw v2Err;
+          }
+          // Returning wallet-holder with no local secret: recover from Google
+          // Drive backup instead of generating a replacement.
+          onProgress?.('Recuperando tu billetera con Google Drive...');
+          const recoveryDriveToken = await this.getDriveAccessTokenOnly();
+          if (!recoveryDriveToken) {
+            throw new Error('Para entrar a esta cuenta necesitamos recuperar tu billetera. Concede acceso a Google Drive con la cuenta donde guardaste tu respaldo.');
+          }
+          try {
+            await getOrCreateMasterSecret(appleSub, recoveryDriveToken, {
+              allowGenerate: false,
+              provider: 'apple',
+              expectedEvmAddress: serverBscAddressApple,
+            });
+            console.log('[AuthService] Apple BSC-only wallet recovered from Google Drive.');
+          } catch (driveRecoveryErr: any) {
+            console.error('[AuthService] Failed to recover Apple BSC-only wallet from Drive:', driveRecoveryErr);
+            if (isDriveReadFailure(driveRecoveryErr)) {
+              throw new Error('No pudimos leer tu Google Drive para buscar tu respaldo. Revisa tu conexión e inténtalo de nuevo con la misma cuenta de Google.');
+            }
+            throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
+          }
+        }
+        console.log('Master secret checked/created for Apple user (BSC-only)');
+        registerBscAddressBestEffort();
+        return await this.finishAppleSignIn(userCredential, authData, null);
+      }
+
       const appleContext: AccountContext = { type: 'personal', index: 0 };
       const appleIss = 'https://appleid.apple.com';
       const appleAud = 'com.confio.app';
@@ -1342,65 +1417,74 @@ export class AuthService {
         }
       }
 
-      // Set default personal account context
-      console.log('Setting default personal account context (Apple)...');
-      try {
-        const accountManager = AccountManager.getInstance();
-        await accountManager.setActiveAccountContext({
-          type: 'personal',
-          index: 0
-        });
-        console.log('Set default personal account context (personal_0)');
+      return await this.finishAppleSignIn(userCredential, authData, algorandAddress);
+    } catch (error) {
+      console.error('Apple Sign In Error:', error);
+      throw error;
+    }
+  }
 
-        // Store the Algorand address for the personal account
+  // Shared tail of the Apple sign-in flow. algorandAddress is null for
+  // BSC-only users (Algorand deprecated — no address is ever generated for
+  // new users) and the legacy/restored address for existing Algorand users.
+  private async finishAppleSignIn(userCredential: any, authData: any, algorandAddress: string | null) {
+    // Set default personal account context
+    console.log('Setting default personal account context (Apple)...');
+    try {
+      const accountManager = AccountManager.getInstance();
+      await accountManager.setActiveAccountContext({
+        type: 'personal',
+        index: 0
+      });
+      console.log('Set default personal account context (personal_0)');
+
+      if (algorandAddress) {
+        // Store the legacy Algorand address for the personal account
         const defaultAccountContext: AccountContext = {
           type: 'personal',
           index: 0
         };
         await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
-      } catch (accountError) {
-        console.error('Error creating default account (Apple):', accountError);
-        // Don't throw here - account creation failure shouldn't break the sign-in flow
       }
-
-      // Get user info for return
-      const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
-      const lastName = lastNameParts.join(' ');
-      const isPhoneVerified = authData.user?.isPhoneVerified || false;
-      console.log('Phone verification status from backend (Apple):', isPhoneVerified);
-
-      // Return user info with Algorand address
-      const result = {
-        userInfo: {
-          email: userCredential.user.email,
-          firstName: firstName || '',
-          lastName: lastName || '',
-          photoURL: userCredential.user.photoURL
-        },
-        walletData: {
-          algorandAddress: null,
-          isPhoneVerified // Use the actual value from backend
-        },
-        algorandAddress: algorandAddress // Also store at top level for compatibility
-      };
-      console.log('Apple sign-in process completed successfully:', result);
-
-      // Report iCloud backup status for iOS users (Apple Sign-In uses iCloud Keychain)
-      if (Platform.OS === 'ios') {
-        try {
-          const { reportBackupStatus } = await import('./secureDeterministicWallet');
-          await reportBackupStatus('icloud');
-          console.log('[AuthService] iCloud backup status reported for Apple sign-in');
-        } catch (e) {
-          console.warn('[AuthService] Failed to report iCloud backup status:', e);
-        }
-      }
-
-      return result;
-    } catch (error) {
-      console.error('Apple Sign In Error:', error);
-      throw error;
+    } catch (accountError) {
+      console.error('Error creating default account (Apple):', accountError);
+      // Don't throw here - account creation failure shouldn't break the sign-in flow
     }
+
+    // Get user info for return
+    const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
+    const lastName = lastNameParts.join(' ');
+    const isPhoneVerified = authData.user?.isPhoneVerified || false;
+    console.log('Phone verification status from backend (Apple):', isPhoneVerified);
+
+    // Return user info with Algorand address
+    const result = {
+      userInfo: {
+        email: userCredential.user.email,
+        firstName: firstName || '',
+        lastName: lastName || '',
+        photoURL: userCredential.user.photoURL
+      },
+      walletData: {
+        algorandAddress: null,
+        isPhoneVerified // Use the actual value from backend
+      },
+      algorandAddress: algorandAddress // Also store at top level for compatibility
+    };
+    console.log('Apple sign-in process completed successfully:', result);
+
+    // Report iCloud backup status for iOS users (Apple Sign-In uses iCloud Keychain)
+    if (Platform.OS === 'ios') {
+      try {
+        const { reportBackupStatus } = await import('./secureDeterministicWallet');
+        await reportBackupStatus('icloud');
+        console.log('[AuthService] iCloud backup status reported for Apple sign-in');
+      } catch (e) {
+        console.warn('[AuthService] Failed to report iCloud backup status:', e);
+      }
+    }
+
+    return result;
   }
 
 
@@ -1483,6 +1567,44 @@ export class AuthService {
   }
 
   /**
+   * Algorand deprecation gate: returns the server-registered account state
+   * for the given account context ({ algorandAddress: null } means the server
+   * definitively has no Algorand wallet — BSC-only, never derive/generate
+   * one), or 'unknown' when the lookup failed. Callers must treat 'unknown'
+   * as "do not mint" too: derivation is only a restore when the server truth
+   * is known.
+   */
+  private async getServerAccountForContext(
+    accountContext: AccountContext
+  ): Promise<{ algorandAddress: string | null; isKeylessMigrated: boolean } | 'unknown'> {
+    try {
+      const { GET_MY_MIGRATION_STATUS } = await import('../apollo/queries');
+      const { data } = await apolloClient.query({
+        query: GET_MY_MIGRATION_STATUS,
+        fetchPolicy: 'network-only',
+      });
+      const accounts = data?.userAccounts;
+      if (!Array.isArray(accounts)) return 'unknown';
+      const match = accounts.find((a: any) => {
+        if (accountContext.type === 'business') {
+          return a?.accountType?.toLowerCase() === 'business'
+            && accountContext.businessId
+            && String(a?.business?.id) === String(accountContext.businessId);
+        }
+        return a?.accountType?.toLowerCase() === 'personal'
+          && (a?.accountIndex ?? 0) === (accountContext.index ?? 0);
+      });
+      return {
+        algorandAddress: match?.algorandAddress || null,
+        isKeylessMigrated: !!match?.isKeylessMigrated,
+      };
+    } catch (e) {
+      console.warn('[AuthService] Could not check server Algorand address (treating as unknown, no derivation):', e);
+      return 'unknown';
+    }
+  }
+
+  /**
    * Store Algorand address for a specific account context
    */
   async computeAndStoreAlgorandAddress(accountContext: AccountContext): Promise<string> {
@@ -1524,6 +1646,20 @@ export class AuthService {
       const oauthSubject = oauthData.subject;
       const provider = oauthData.provider;
 
+      // Algorand deprecation: only RESTORE wallets the server already knows
+      // about. Accounts without a server-registered address are BSC-only and
+      // must never mint a fresh Algorand address; when the server can't be
+      // reached we also refuse (derivation without server truth could mint).
+      const serverAccount = await this.getServerAccountForContext(accountContext);
+      if (serverAccount === 'unknown') {
+        console.log('Server wallet state unknown — refusing Algorand derivation this attempt:', accountContext);
+        return '';
+      }
+      if (!serverAccount.algorandAddress) {
+        console.log('No server Algorand address for context — skipping derivation (deprecated, BSC-only):', accountContext);
+        return '';
+      }
+
       // Use the secure deterministic wallet service to generate address for this account
       const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
       const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
@@ -1541,13 +1677,20 @@ export class AuthService {
       const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
       const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+      const legacyInspection = await this.getLegacyAddressIfMigrationPending(
         iss,
         oauthSubject,
         aud,
         provider,
         accountContext
       );
+      if (!legacyInspection.inspectionSucceeded && !serverAccount.isKeylessMigrated) {
+        // Same rule as the login flows: a V1-pending user must not get a V2
+        // address derived while we can't verify their migration state.
+        console.warn('[AuthService] Legacy migration inspection failed for unmigrated account — aborting derivation');
+        return '';
+      }
+      const legacyAddress = legacyInspection.legacyAddress;
 
       const walletAddress = legacyAddress || (await (async () => {
         const wallet = await secureDeterministicWallet.createOrRestoreWallet(
@@ -2349,13 +2492,21 @@ export class AuthService {
               const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
               const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-              const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+              const seedMigrationInspection = await this.getLegacyAddressIfMigrationPending(
                 iss,
                 oauthSubject,
                 aud,
                 provider,
                 accountContext
               );
+              if (!seedMigrationInspection.inspectionSucceeded) {
+                // Opportunistic seed migration only: never overwrite the
+                // stored address with a fresh derivation while we can't
+                // verify the legacy-migration state. Retried next switch.
+                console.warn('AuthService - Legacy inspection failed; deferring seed migration for this switch');
+                throw new Error('legacy-inspection-failed');
+              }
+              const legacyAddress = seedMigrationInspection.legacyAddress;
 
               const nextAddress = legacyAddress || (await (async () => {
                 const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
@@ -2409,6 +2560,20 @@ export class AuthService {
         return; // Address already exists (possibly migrated), no need to generate further
       }
 
+      // Algorand deprecation: only RESTORE wallets the server already knows
+      // about. Accounts without a server-registered address (all newly created
+      // ones) are BSC-only and must never mint a fresh Algorand address; when
+      // the server can't be reached we also refuse for this switch.
+      const serverAccountForSwitch = await this.getServerAccountForContext(accountContext);
+      if (serverAccountForSwitch === 'unknown') {
+        console.log('AuthService - Server wallet state unknown — skipping Algorand generation for this switch');
+        return;
+      }
+      if (!serverAccountForSwitch.algorandAddress) {
+        console.log('AuthService - No server Algorand address for switched account — skipping generation (deprecated, BSC-only)');
+        return;
+      }
+
       // Get OAuth subject from secure storage (only needed if no stored address)
       const { oauthStorage } = await import('./oauthStorageService');
       const oauthData = await oauthStorage.getOAuthSubject();
@@ -2443,13 +2608,20 @@ export class AuthService {
         provider: provider
       });
 
-      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+      const switchInspection = await this.getLegacyAddressIfMigrationPending(
         iss,
         oauthSubject,
         aud,
         provider,
         accountContext
       );
+      if (!switchInspection.inspectionSucceeded && !serverAccountForSwitch.isKeylessMigrated) {
+        // Same rule as the login flows: a V1-pending user must not get a V2
+        // address derived while migration state can't be verified.
+        console.warn('AuthService - Legacy inspection failed for unmigrated account — skipping address generation for this switch');
+        return;
+      }
+      const legacyAddress = switchInspection.legacyAddress;
 
       const walletAddress = legacyAddress || (await (async () => {
         const wallet = await secureDeterministicWallet.createOrRestoreWallet(

@@ -529,6 +529,16 @@ function derivePersonalV2Address(masterSecret: Uint8Array): string {
   }).address;
 }
 
+// EVM sibling of derivePersonalV2Address. Anchor for BSC-only users
+// (Algorand deprecated): their server-registered bsc_address is immutable,
+// so a secret must derive to it before we accept it.
+function derivePersonalEvmAddress(masterSecret: Uint8Array): string {
+  return deriveEvmKeyFromMasterSecret(masterSecret, {
+    accountType: 'personal',
+    accountIndex: 0,
+  }).address.toLowerCase();
+}
+
 async function storeAddressBoundMasterSecret(
   credentialStorage: any,
   address: string | null | undefined,
@@ -645,8 +655,19 @@ async function findOldestRestorableDriveBackup(
   AES: any,
   appBackupKey: string,
   Utf8: any,
-  expectedAddress?: string | null
+  expectedAddress?: string | null,
+  expectedEvmAddress?: string | null
 ): Promise<OldestDriveBackupResult> {
+  // A candidate backup matches when it derives to ANY provided anchor —
+  // the Algorand address (legacy accounts) or the BSC address (BSC-only
+  // accounts, Algorand deprecated). No anchors = accept the oldest.
+  const expectedEvm = expectedEvmAddress ? expectedEvmAddress.toLowerCase() : null;
+  const candidateMatchesAnchor = (decrypted: Uint8Array): boolean => {
+    if (!expectedAddress && !expectedEvm) return true;
+    if (expectedAddress && derivePersonalV2Address(decrypted) === expectedAddress) return true;
+    if (expectedEvm && derivePersonalEvmAddress(decrypted) === expectedEvm) return true;
+    return false;
+  };
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
   const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
   const manifest = await fetchManifest(googleDriveStorage, accessToken);
@@ -675,7 +696,7 @@ async function findOldestRestorableDriveBackup(
   // the cold-start Android login (no BlockStore) feel stuck on
   // "Verificando seguridad del dispositivo...". The targeted path is 1
   // listFiles + 1 downloadFile per manifest entry.
-  if (expectedAddress && manifest.wallets.length > 0) {
+  if ((expectedAddress || expectedEvm) && manifest.wallets.length > 0) {
     for (const entry of manifest.wallets) {
       if (!entry.id) continue;
       const filename = `confio_wallet_v2_${entry.id}.enc`;
@@ -686,7 +707,7 @@ async function findOldestRestorableDriveBackup(
         const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
         if (!decrypted) continue;
         const candidateAddress = derivePersonalV2Address(decrypted);
-        if (candidateAddress === expectedAddress) {
+        if (candidateMatchesAnchor(decrypted)) {
           console.log('[MasterSecret] Fast-path matched manifest entry HEAD:', {
             id: entry.id,
             deviceHint: entry.deviceHint || 'unknown',
@@ -704,10 +725,11 @@ async function findOldestRestorableDriveBackup(
             // no-expectedAddress paths anyway.
           };
         }
-        console.log('[MasterSecret] Fast-path entry did not match expected address; continuing.', {
+        console.log('[MasterSecret] Fast-path entry did not match expected anchors; continuing.', {
           id: entry.id,
           candidateAddress,
           expectedAddress,
+          expectedEvmAddress: expectedEvm,
         });
       } catch (e) {
         console.warn('[MasterSecret] Fast-path failed for manifest entry; falling back to full scan.', entry.id, e);
@@ -798,11 +820,12 @@ async function findOldestRestorableDriveBackup(
       if (decrypted) {
         foundDecryptable = true;
         const candidateAddress = derivePersonalV2Address(decrypted);
-        if (expectedAddress && candidateAddress !== expectedAddress) {
+        if (!candidateMatchesAnchor(decrypted)) {
           console.log('[MasterSecret] Skipping Drive backup candidate with non-matching address:', {
             name: candidate.name,
             candidateAddress,
             expectedAddress,
+            expectedEvmAddress: expectedEvm,
             deviceHint: candidate.deviceHint || 'unknown',
           });
           continue;
@@ -1268,6 +1291,14 @@ export async function getOrCreateMasterSecret(
     allowGenerate?: boolean;
     provider?: 'google' | 'apple';
     expectedAddress?: string | null;
+    /**
+     * EVM (BSC) anchor for accounts with no Algorand address (Algorand
+     * deprecated). Local and Drive-restored secrets must derive to this
+     * personal-account EVM address; a matching restore also bypasses the
+     * Apple cross-identity guard (which otherwise aborts every clean-device
+     * restore because there is no local secret to compare against).
+     */
+    expectedEvmAddress?: string | null;
     requireCloudSync?: boolean;
     /**
      * Reports whether the Drive backup upload in this call actually completed.
@@ -1363,6 +1394,29 @@ export async function getOrCreateMasterSecret(
       }
     }
 
+    // EVM-anchored check (BSC-only accounts, Algorand deprecated): mirror the
+    // expectedAddress logic above using the immutable server bsc_address.
+    if (localSecret && !options?.expectedAddress && options?.expectedEvmAddress) {
+      const expectedEvm = options.expectedEvmAddress.toLowerCase();
+      const localEvm = derivePersonalEvmAddress(localSecret);
+      if (localEvm !== expectedEvm) {
+        console.warn('[MasterSecret] Local V2 secret does not derive to the server BSC address.', {
+          localEvm,
+          expectedEvm,
+        });
+        if (options.allowGenerate === false && !accessToken) {
+          throw new Error(
+            'Esta cuenta ya fue vinculada a otra billetera. Necesitamos recuperar esa billetera desde Google Drive antes de continuar.'
+          );
+        }
+        // Fall through to the Drive restore below; the restored secret is
+        // validated against the same EVM anchor.
+      } else if (!options?.requireCloudSync) {
+        console.log('[MasterSecret] Local secret matches server BSC address. Skipping Drive scan.');
+        return localSecret;
+      }
+    }
+
     // SANITY CHECK: Ensure we never use the string "null" or "undefined" as an ID
     if (localWalletId === 'null' || localWalletId === 'undefined') {
       console.warn('[MasterSecret] Detected corrupted wallet ID "null"/"undefined". Treating as missing.');
@@ -1397,7 +1451,8 @@ export async function getOrCreateMasterSecret(
         AES,
         APP_BACKUP_KEY,
         Utf8,
-        options?.expectedAddress
+        options?.expectedAddress,
+        options?.expectedEvmAddress
       );
 
       if (restore.secret) {
@@ -1408,6 +1463,22 @@ export async function getOrCreateMasterSecret(
           throw new Error(
             'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
           );
+        }
+
+        // EVM anchor (BSC-only accounts): the restored secret must derive to
+        // the server-registered BSC address. A verified match doubles as
+        // proof this is the right wallet, so it bypasses the Apple
+        // cross-identity guard below (a clean device has no local secret to
+        // compare, which would otherwise abort every legitimate restore).
+        let evmAnchorValidated = false;
+        if (!options?.expectedAddress && options?.expectedEvmAddress) {
+          const restoredEvm = derivePersonalEvmAddress(restore.secret);
+          if (restoredEvm !== options.expectedEvmAddress.toLowerCase()) {
+            throw new Error(
+              'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
+            );
+          }
+          evmAnchorValidated = true;
         }
 
         // Cross-identity guards. Per the architectural rules: the
@@ -1431,6 +1502,7 @@ export async function getOrCreateMasterSecret(
         if (
           options?.provider === 'apple' &&
           !options?.expectedAddress &&
+          !evmAnchorValidated &&
           (restore.manifestHasAndroidEntry ||
             multipleV2BackupsOnDrive ||
             restoredFromAndroid ||
@@ -1467,11 +1539,27 @@ export async function getOrCreateMasterSecret(
 
         reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
       } else if (restore.foundAny) {
-        if (options?.expectedAddress && restore.foundDecryptable) {
+        if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
           throw new Error('No encontramos en este Google Drive el respaldo de la billetera registrada para esta cuenta.');
         }
         throw new Error('[MasterSecret] Existing Drive wallet backups were found but none could be decrypted; refusing to generate a replacement secret.');
       }
+    }
+
+    // FINAL EVM-ANCHOR GUARD (BSC-only accounts): if we still hold a secret
+    // that does NOT derive to the server-registered BSC address, refuse —
+    // returning (and syncing) it would silently replace the user's real
+    // wallet. This closes the fallthrough where a mismatched local secret
+    // survives an empty Drive scan.
+    if (
+      localSecret &&
+      !options?.expectedAddress &&
+      options?.expectedEvmAddress &&
+      derivePersonalEvmAddress(localSecret) !== options.expectedEvmAddress.toLowerCase()
+    ) {
+      throw new Error(
+        'No encontramos el respaldo correcto de tu billetera. Intenta con la cuenta de Google donde guardaste tu respaldo o contáctanos para ayudarte.'
+      );
     }
 
     // =================================================================================

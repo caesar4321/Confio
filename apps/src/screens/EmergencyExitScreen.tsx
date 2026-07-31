@@ -12,15 +12,19 @@
 // Stage 1 is the wait/status surface; once eligible, a 4-step WIZARD
 // (one decision per screen, internal step state — never separate routes:
 // this screen lives in BOTH stacks and shares selection/dest/check state):
-// Paso 1 cuenta+comisiones (with a beginner intro to gas/ALGO/BNB) →
+// Paso 1 cuenta+comisión (with a beginner intro to gas/BNB) →
 // Paso 2 destino → Paso 3 checklist → Paso 4 resumen+ejecución.
+//
+// BSC-only since the 2026-07 migration: the Algorand leg was removed from
+// this screen (users exiting legacy Algorand balances are a support case,
+// not a self-serve flow).
 //
 // Execution is Direct mode always (user gas, public RPCs): it works in
 // every server state. A fee-free Sponsored mode for the explicit-ban case
 // layers on when the backend ships a ban signal. The exit moves USER
 // ASSETS ONLY — no close-outs, no native sweeps (engine invariants).
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
   ActivityIndicator, Alert, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking,
@@ -31,11 +35,10 @@ import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { colors } from '../config/theme';
-import { API_URL, CONFIO_ASSET_ID } from '../config/env';
+import { API_URL } from '../config/env';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { AddressScannerModal } from '../components/AddressScannerModal';
 import { evmAccountKey, getEvmAddressForDisplay, getActiveEvmWallet } from '../services/secureDeterministicWallet';
-import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { emergencyStore } from '../services/emergencyExit/store';
 import {
@@ -46,23 +49,18 @@ import {
   devElapseCooloff, ReachabilityResult, ExitEligibility, NORMAL_COOLOFF_SECONDS,
 } from '../services/emergencyExit/reachability';
 import {
-  executeAlgorandExit, fetchAlgoAccount, AlgoExitResult,
-  CUSD_ASSET_ID, USDC_ASSET_ID,
-} from '../services/emergencyExit/algorandExit';
-import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
   installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BscExitResult,
 } from '../services/emergencyExit/bscExit';
 
-const ALGO_ADDR_RE = /^[A-Z2-7]{58}$/;
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
 // Wizard step headers — the ONE decision each screen asks for.
 const WIZARD_STEPS = [
-  { title: 'Tu cuenta y las comisiones', sub: 'Elige qué cuenta retiras y revisa que cada red tenga para su comisión.' },
-  { title: '¿A dónde va tu dinero?', sub: 'Una billetera que sea tuya, en la red correcta.' },
+  { title: 'Tu cuenta y la comisión', sub: 'Elige qué cuenta retiras y revisa que tengas para la comisión de red.' },
+  { title: '¿A dónde va tu dinero?', sub: 'Una billetera que sea tuya, en BNB Smart Chain.' },
   { title: 'Confirma que estás a salvo', sub: 'Cuatro confirmaciones. Tómate tu tiempo.' },
-  { title: 'Revisa y mueve tu dinero', sub: 'Último paso — cada envío se firma con tu biometría.' },
+  { title: 'Revisa y mueve tu dinero', sub: 'Último paso — el envío se firma con tu biometría.' },
 ];
 
 const CHECKLIST = [
@@ -73,21 +71,11 @@ const CHECKLIST = [
 ];
 
 // Human names for engine step ids — raw ids are for support, not users.
-// The exit sweeps EVERY funded ASA (the engine iterates account.assets),
-// so name the known ones; unknown ids keep the raw fallback.
-const ASSET_NAMES: Record<number, string> = {
-  [CUSD_ASSET_ID]: 'cUSD',
-  [USDC_ASSET_ID]: 'USDC',
-  [CONFIO_ASSET_ID]: 'CONFIO',
-};
-const assetName = (id: number): string => ASSET_NAMES[id] ?? `activo ${id}`;
 const STEP_NAMES: Record<string, string> = {
-  burnCusd: 'Canjear cUSD por USDC',
   redeemCusdPlus: 'Canjear tu ahorro por USDT',
   transferUsdt: 'Enviar USDT',
 };
-const stepName = (id: string): string =>
-  STEP_NAMES[id] ?? (id.startsWith('assetTransfer_') ? `Enviar ${assetName(Number(id.split('_')[1]))}` : id);
+const stepName = (id: string): string => STEP_NAMES[id] ?? id;
 
 const fmtRemaining = (sec: number): string => {
   const h = Math.floor(sec / 3600);
@@ -96,19 +84,6 @@ const fmtRemaining = (sec: number): string => {
 };
 
 const truncAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a);
-
-// Redeem-first is the promise — when cUSD ships raw instead, say WHY, or
-// the recipient's "why did cUSD arrive instead of dollars?" lands on support.
-const CUSD_FALLBACK_COPY: Record<string, string> = {
-  below_min_burn:
-    'Tus cUSD se enviaron tal cual: eran menos de 1 cUSD, el mínimo del contrato para canjearlos por USDC.',
-  dest_missing_usdc:
-    'Tus cUSD se enviaron tal cual: tu billetera de destino no acepta USDC (canjearlos habría dejado USDC varado aquí).',
-  self_missing_usdc:
-    'Tus cUSD se enviaron tal cual: esta cuenta no tiene activado USDC.',
-  not_opted_into_app:
-    'Tus cUSD se enviaron tal cual: esta cuenta no está registrada en el contrato de canje.',
-};
 
 type EmState = (ReachabilityResult & { chainNowSec: number | null }) | null;
 
@@ -124,41 +99,23 @@ export const EmergencyExitScreen: React.FC = () => {
   const [roster, setRoster] = useState<RosterAccount[]>([]);
   const [selCtx, setSelCtx] = useState<RosterAccount | null>(null);
   const [accountKey, setAccountKey] = useState('');
-  const [algorandAddress, setAlgorandAddress] = useState('');
 
   const [es, setEs] = useState<EmState>(null);
   const [elig, setElig] = useState<ExitEligibility | null>(null);
   const [evaluating, setEvaluating] = useState(true);
 
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
-  // Gas shortfalls, null = still reading. Cards render only when short.
-  const [algoFeeShortMicro, setAlgoFeeShortMicro] = useState<bigint | null>(null);
+  // Gas shortfall, null = still reading.
   const [bscGasShortWei, setBscGasShortWei] = useState<bigint | null>(null);
-  // What the SOURCE account actually holds (funded ASA ids) — drives the
-  // proactive destination opt-in check on the destino step.
-  const [srcFundedAssetIds, setSrcFundedAssetIds] = useState<number[]>([]);
-  // Destination opt-in preflight: which required ASAs the dest is missing.
-  type DestOptIns =
-    | { kind: 'checking' }
-    | { kind: 'ok' }
-    | { kind: 'missing'; assets: number[] }
-    | { kind: 'unfunded' }   // address not on chain yet (no ALGO)
-    | { kind: 'unknown' };   // RPC unreachable — execution still guards
-  const [destOptIns, setDestOptIns] = useState<DestOptIns | null>(null);
 
-  const [algDest, setAlgDest] = useState('');
   const [bscDest, setBscDest] = useState('');
-  const [scanTarget, setScanTarget] = useState<'algo' | 'bsc' | null>(null);
-  // ONE QR at a time, on demand: two codes side by side scan ambiguously
-  // (the camera grabs whichever decodes first — wrong-chain top-ups).
+  const [scanVisible, setScanVisible] = useState(false);
+  // QR on demand, in a modal — a big code scans reliably.
   const [qrModal, setQrModal] = useState<{ chain: string; address: string } | null>(null);
   const [checks, setChecks] = useState<boolean[]>(CHECKLIST.map(() => false));
 
-  const [algRunning, setAlgRunning] = useState(false);
   const [bscRunning, setBscRunning] = useState(false);
-  const [algResult, setAlgResult] = useState<AlgoExitResult | null>(null);
   const [bscResult, setBscResult] = useState<BscExitResult | null>(null);
-  const [algError, setAlgError] = useState<string | null>(null);
   const [bscError, setBscError] = useState<string | null>(null);
 
   // Wizard step within the eligible flow (0..3). Internal state, not
@@ -209,46 +166,22 @@ export const EmergencyExitScreen: React.FC = () => {
     })();
   }, []);
 
-  // Resolve the SELECTED account's addresses (local V2 derivation, with the
-  // per-account stored addresses as legacy fallback), then read live gas
+  // Resolve the SELECTED account's address (local V2 derivation, with the
+  // per-account stored address as legacy fallback), then read live gas
   // status from public RPCs (all must work exactly when Confío doesn't).
   useEffect(() => {
     if (!selCtx) return;
     let stale = false;
     (async () => {
       setAccountKey(rosterAccountKey(selCtx));
-      setAlgorandAddress('');
       setEvmAddress(null);
-      setAlgoFeeShortMicro(null);
       setBscGasShortWei(null);
-      setSrcFundedAssetIds([]);
-      setDestOptIns(null);
       // Results/errors belong to the previously selected account.
-      setAlgResult(null); setBscResult(null); setAlgError(null); setBscError(null);
+      setBscResult(null); setBscError(null);
       try {
         const ctx = { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } as const;
         const { deriveAddressesForContext } = await import('../services/secureDeterministicWallet');
         const derived = await deriveAddressesForContext(ctx);
-
-        let algoAddr = derived.algorand;
-        if (!algoAddr) {
-          const { AuthService } = await import('../services/authService');
-          algoAddr = await AuthService.getInstance().getAlgorandAddress(ctx as any).catch(() => '');
-        }
-        if (stale) return;
-        if (algoAddr) {
-          setAlgorandAddress(algoAddr);
-          fetchAlgoAccount(algoAddr)
-            .then((a) => {
-              const fundedAssets = a.assets.filter((x) => x.amountMicro > 0n);
-              if (!stale) setSrcFundedAssetIds(fundedAssets.map((x) => x.id));
-              // Fee budget: one min-fee per funded asset + 4× for the burn group.
-              const budget = BigInt(fundedAssets.length + 5) * 1000n;
-              const spendable = a.amountMicro - a.minBalanceMicro;
-              if (!stale) setAlgoFeeShortMicro(spendable >= budget ? 0n : budget - spendable);
-            })
-            .catch(() => { if (!stale) setAlgoFeeShortMicro(null); });
-        }
 
         let evmAddr = derived.evm;
         if (!evmAddr) {
@@ -279,53 +212,11 @@ export const EmergencyExitScreen: React.FC = () => {
   }, [selCtx]);
 
   const allChecked = checks.every(Boolean);
-  const algDestValid = ALGO_ADDR_RE.test(algDest.trim()) && algDest.trim() !== algorandAddress;
-
-  // Proactive destination opt-in preflight (public algod, no server): the
-  // moment a valid Algorand destination is typed, tell the user which of
-  // THEIR assets that wallet doesn't accept yet — before execution, not
-  // after. Execution keeps its own guard (never sends unaccepted assets).
-  useEffect(() => {
-    const dest = algDest.trim();
-    if (!ALGO_ADDR_RE.test(dest) || dest === algorandAddress) {
-      setDestOptIns(null);
-      return;
-    }
-    let stale = false;
-    setDestOptIns({ kind: 'checking' });
-    const t = setTimeout(async () => {
-      try {
-        const destAcct = await fetchAlgoAccount(dest);
-        if (stale) return;
-        const destOpted = new Set(destAcct.assets.map((a) => a.id));
-        // Required: everything the source holds; plus USDC when cUSD is
-        // funded (the redeem-first path outputs USDC to send onward).
-        const required = new Set(srcFundedAssetIds);
-        if (required.has(CUSD_ASSET_ID)) required.add(USDC_ASSET_ID);
-        const missing = [...required].filter((id) => !destOpted.has(id));
-        setDestOptIns(missing.length ? { kind: 'missing', assets: missing } : { kind: 'ok' });
-      } catch (e: any) {
-        if (stale) return;
-        // algod embeds the HTTP status in the error message: 404 ⇒ the
-        // address has never been funded (not on chain yet).
-        setDestOptIns(String(e?.message ?? '').includes('http 404')
-          ? { kind: 'unfunded' }
-          : { kind: 'unknown' });
-      }
-    }, 600);
-    return () => { stale = true; clearTimeout(t); };
-  }, [algDest, algorandAddress, srcFundedAssetIds]);
   const bscDestValid =
     EVM_ADDR_RE.test(bscDest.trim()) &&
     bscDest.trim().toLowerCase() !== (evmAddress ?? '').toLowerCase();
   const eligible = !!elig?.eligible;
   const offline = es?.state === 'offline';
-  // Destination gate: at least one chain filled, and nothing invalid left
-  // behind (a half-typed address must block, not silently be skipped).
-  const destsOk =
-    (algDestValid || bscDestValid) &&
-    (!algDest.trim() || algDestValid) &&
-    (!bscDest.trim() || bscDestValid);
 
   const startCooloff = async () => {
     const ok = await biometricAuthService.authenticate(
@@ -339,35 +230,6 @@ export const EmergencyExitScreen: React.FC = () => {
   const cancelCooloff = async () => {
     await cancelExitCooloff(emergencyStore, accountKey);
     await evaluate();
-  };
-
-  const runAlgorand = async () => {
-    const ok = await biometricAuthService.authenticate('Confirmar salida de emergencia (Algorand)');
-    if (!ok) return;
-    setAlgRunning(true); setAlgError(null);
-    try {
-      const result = await executeAlgorandExit({
-        address: algorandAddress,
-        dest: algDest.trim(),
-        sign: (b) => algorandService.signTransactionBytes(
-          b,
-          selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined,
-        ),
-        accountKey,
-        store: emergencyStore,
-      });
-      setAlgResult(result);
-      if (result.degraded.length) {
-        Alert.alert(
-          'Atención',
-          'Tus cUSD no pudieron canjearse por USDC y se enviaron tal cual. Para canjearlos por dólares necesitarás una herramienta externa de canje.',
-        );
-      }
-    } catch (e: any) {
-      setAlgError(e?.message || String(e));
-    } finally {
-      setAlgRunning(false);
-    }
   };
 
   const runBsc = async () => {
@@ -447,7 +309,7 @@ export const EmergencyExitScreen: React.FC = () => {
   })();
 
   // ── Stage: 1 = wait/status, 2 = destination+confirm, 3 = done-ish ─────
-  const anyResult = !!(algResult || bscResult);
+  const anyResult = !!bscResult;
   const stage = eligible || anyResult ? 2 : 1;
 
   const renderWaitCard = () => {
@@ -506,76 +368,17 @@ export const EmergencyExitScreen: React.FC = () => {
     return null;
   };
 
-  // Destination opt-in preflight UI (Algorand only — EVM needs no opt-ins).
-  const renderDestOptIns = () => {
-    if (!destOptIns) return null;
-    if (destOptIns.kind === 'checking') {
-      return (
-        <View style={styles.chainWarnRow}>
-          <ActivityIndicator size="small" color={colors.text.secondary} />
-          <Text style={[styles.chainWarnText, { color: colors.text.secondary }]}>
-            Verificando qué activos acepta esta billetera…
-          </Text>
-        </View>
-      );
-    }
-    if (destOptIns.kind === 'ok') {
-      return (
-        <View style={styles.chainWarnRow}>
-          <Icon name="check-circle" size={13} color={colors.primaryDark} />
-          <Text style={[styles.chainWarnText, { color: colors.primaryDark }]}>
-            Esta billetera acepta todos tus activos.
-          </Text>
-        </View>
-      );
-    }
-    if (destOptIns.kind === 'missing') {
-      return (
-        <View style={styles.scamBox}>
-          <Icon name="alert-triangle" size={15} color={colors.warning.text} />
-          <Text style={styles.scamBoxText}>
-            Esta billetera aún no acepta: {destOptIns.assets.map(assetName).join(', ')}.
-            {'\n'}En Pera: toca «+» en Activos, busca cada uno y actívalo
-            (opt-in). Lo que no acepte quedará bloqueado — no se pierde,
-            puedes reintentar después de activarlo.
-          </Text>
-        </View>
-      );
-    }
-    if (destOptIns.kind === 'unfunded') {
-      return (
-        <View style={styles.scamBox}>
-          <Icon name="alert-triangle" size={15} color={colors.warning.text} />
-          <Text style={styles.scamBoxText}>
-            Esta dirección aún no está activada en Algorand (no tiene ALGO).
-            Deposita un poco de ALGO allí y activa (opt-in) tus activos antes
-            de continuar.
-          </Text>
-        </View>
-      );
-    }
-    return (
-      <View style={styles.chainWarnRow}>
-        <Icon name="help-circle" size={13} color={colors.text.secondary} />
-        <Text style={[styles.chainWarnText, { color: colors.text.secondary }]}>
-          No se pudo verificar esta billetera — si no acepta algún activo, la
-          salida lo bloqueará por sí sola (nada se pierde).
-        </Text>
-      </View>
-    );
-  };
-
   const gasStatusLine = (short: bigint | null, fmt: (v: bigint) => string) => {
     if (short === null) return { icon: 'help-circle', color: colors.text.secondary, text: 'No se pudo verificar — si un envío falla por comisiones, deposita un poco aquí.' };
     if (short === 0n) return { icon: 'check-circle', color: colors.primaryDark, text: 'Comisiones listas' };
     return { icon: 'alert-circle', color: colors.warning.text, text: `Falta ≈ ${fmt(short)}` };
   };
 
-  // ALWAYS visible: these addresses are the user's lifeline in Direct
-  // mode. Hiding them when balances look sufficient proved too clever —
-  // and under a ban the reads can fail entirely, which must not make the
-  // addresses vanish. But QRs render ONE at a time, in a modal: two codes
-  // side by side scan ambiguously, and a wrong-chain top-up is lost money.
+  // ALWAYS visible: this address is the user's lifeline in Direct mode.
+  // Hiding it when the balance looks sufficient proved too clever — and
+  // under a ban the reads can fail entirely, which must not make the
+  // address vanish. The QR renders on demand, in a modal, where a big
+  // code scans reliably.
   const renderChainGasRow = (
     chain: string,
     address: string,
@@ -606,25 +409,22 @@ export const EmergencyExitScreen: React.FC = () => {
   );
 
   const renderGasCards = () => {
-    const algo = gasStatusLine(algoFeeShortMicro, (v) => `${(Number(v) / 1e6).toFixed(3)} ALGO`);
     const bsc = gasStatusLine(bscGasShortWei, (v) => `${(Number(v) / 1e18).toFixed(5)} BNB`);
     return (
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Comisiones de red</Text>
+        <Text style={styles.cardTitle}>Comisión de red</Text>
         <Text style={styles.bodyText}>
-          Cada red de blockchain cobra una pequeña comisión por enviar — como
-          una estampilla postal. Y cada red la cobra en su propia moneda:
-          ALGO en la red Algorand, BNB en BNB Smart Chain.
+          La red de blockchain cobra una pequeña comisión por enviar — como
+          una estampilla postal — y la cobra en su propia moneda: BNB, la
+          moneda de BNB Smart Chain.
         </Text>
         <Text style={styles.bodyText}>
-          Normalmente Confío paga esas comisiones por ti. Sin nuestros
-          servidores, salen de TUS direcciones. Si a una red le falta,
-          deposita esa moneda aquí:
+          Normalmente Confío paga esa comisión por ti. Sin nuestros
+          servidores, sale de TU dirección. Si te falta, deposita BNB aquí:
         </Text>
-        {!!algorandAddress && renderChainGasRow('Red Algorand (ALGO)', algorandAddress, algo)}
         {!!evmAddress && renderChainGasRow('Red BNB Smart Chain (BNB)', evmAddress, bsc)}
-        {!algorandAddress && !evmAddress && (
-          <Text style={styles.bodyText}>Cargando tus direcciones…</Text>
+        {!evmAddress && (
+          <Text style={styles.bodyText}>Cargando tu dirección…</Text>
         )}
       </View>
     );
@@ -784,7 +584,7 @@ export const EmergencyExitScreen: React.FC = () => {
               <Text style={styles.cardTitle}>Cómo funciona</Text>
               {[
                 ['map-pin', 'Eliges la billetera de destino — una que sea tuya.'],
-                ['send', 'Tu dinero sale como USDC y USDT, directo por la blockchain.'],
+                ['send', 'Tu dinero sale como USDT, directo por la blockchain.'],
                 ['zap', 'En una emergencia real (Confío inaccesible por más de 24 horas), no hay espera: la salida es inmediata.'],
               ].map(([icon, text], i) => (
                 <View key={i} style={styles.howRow}>
@@ -815,8 +615,8 @@ export const EmergencyExitScreen: React.FC = () => {
               <>
                 {renderGasCards()}
                 <TouchableOpacity
-                  style={[styles.primaryBtn, !algorandAddress && !evmAddress && styles.execBtnDisabled]}
-                  disabled={!algorandAddress && !evmAddress}
+                  style={[styles.primaryBtn, !evmAddress && styles.execBtnDisabled]}
+                  disabled={!evmAddress}
                   onPress={() => goToStep(1)}
                 >
                   <Text style={styles.primaryBtnText}>Continuar</Text>
@@ -829,35 +629,6 @@ export const EmergencyExitScreen: React.FC = () => {
             {wStep === 1 && (
               <>
             <View style={styles.card}>
-              <Text style={styles.bodyText}>
-                Puedes llenar una sola red y volver luego por la otra.
-              </Text>
-              <Text style={styles.inputLabel}>Billetera Algorand (Pera)</Text>
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={[styles.input, styles.inputFlex, !!algDest && !algDestValid && styles.inputBad]}
-                  value={algDest} onChangeText={setAlgDest} autoCapitalize="characters"
-                  autoCorrect={false} placeholder="Dirección de 58 caracteres"
-                  placeholderTextColor={colors.text.light}
-                />
-                <TouchableOpacity
-                  style={styles.pasteBtn}
-                  onPress={async () => {
-                    try { const t = await Clipboard.getString(); if (t) setAlgDest(t.trim()); } catch {}
-                  }}
-                  accessibilityLabel="Pegar dirección Algorand"
-                >
-                  <Icon name="clipboard" size={15} color={colors.primaryDark} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.pasteBtn}
-                  onPress={() => setScanTarget('algo')}
-                  accessibilityLabel="Escanear dirección Algorand"
-                >
-                  <Icon name="camera" size={15} color={colors.primaryDark} />
-                </TouchableOpacity>
-              </View>
-              {renderDestOptIns()}
               <Text style={styles.inputLabel}>Billetera BNB Smart Chain (MetaMask)</Text>
               <View style={styles.inputRow}>
                 <TextInput
@@ -877,7 +648,7 @@ export const EmergencyExitScreen: React.FC = () => {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.pasteBtn}
-                  onPress={() => setScanTarget('bsc')}
+                  onPress={() => setScanVisible(true)}
                   accessibilityLabel="Escanear dirección BNB Smart Chain"
                 >
                   <Icon name="camera" size={15} color={colors.primaryDark} />
@@ -894,14 +665,14 @@ export const EmergencyExitScreen: React.FC = () => {
               <View style={styles.chainWarnRow}>
                 <Icon name="alert-triangle" size={13} color={colors.warning.text} />
                 <Text style={styles.chainWarnText}>
-                  Cada dirección debe ser de SU red. Lo enviado a la red
-                  equivocada no se puede recuperar.
+                  La dirección debe ser de la red BNB Smart Chain. Lo enviado
+                  a la red equivocada no se puede recuperar.
                 </Text>
               </View>
             </View>
                 <TouchableOpacity
-                  style={[styles.primaryBtn, !destsOk && styles.execBtnDisabled]}
-                  disabled={!destsOk}
+                  style={[styles.primaryBtn, !bscDestValid && styles.execBtnDisabled]}
+                  disabled={!bscDestValid}
                   onPress={() => goToStep(2)}
                 >
                   <Text style={styles.primaryBtnText}>Continuar</Text>
@@ -954,58 +725,22 @@ export const EmergencyExitScreen: React.FC = () => {
                 <Icon name={selCtx?.type === 'personal' ? 'user' : 'briefcase'} size={14} color={colors.text.secondary} />
                 <Text style={styles.summaryText}>Cuenta: {selCtx?.name ?? 'Personal'}</Text>
               </View>
-              {algDestValid && (
-                <View style={styles.summaryRow}>
-                  <Icon name="send" size={14} color={colors.text.secondary} />
-                  <Text style={styles.summaryText}>Dólares (Algorand) → {truncAddr(algDest.trim())}</Text>
-                </View>
-              )}
               {bscDestValid && (
                 <View style={styles.summaryRow}>
                   <Icon name="send" size={14} color={colors.text.secondary} />
-                  <Text style={styles.summaryText}>Ahorro (BNB Smart Chain) → {truncAddr(bscDest.trim())}</Text>
+                  <Text style={styles.summaryText}>Mi dinero (BNB Smart Chain) → {truncAddr(bscDest.trim())}</Text>
                 </View>
               )}
             </View>
 
             <View style={styles.card}>
               <TouchableOpacity
-                style={[styles.execBtn, (!eligible || !allChecked || !algDestValid || !algorandAddress || algRunning || offline) && styles.execBtnDisabled]}
-                disabled={!eligible || !allChecked || !algDestValid || !algorandAddress || algRunning || offline}
-                onPress={runAlgorand}
-              >
-                <Icon name="send" size={16} color={colors.white} />
-                <Text style={styles.execBtnText}>Mis dólares (Algorand)</Text>
-              </TouchableOpacity>
-              {!!algResult?.cusdFallbackReason && !!CUSD_FALLBACK_COPY[algResult.cusdFallbackReason] && (
-                <View style={styles.chainWarnRow}>
-                  <Icon name="info" size={13} color={colors.text.secondary} />
-                  <Text style={[styles.chainWarnText, { color: colors.text.secondary }]}>
-                    {CUSD_FALLBACK_COPY[algResult.cusdFallbackReason]}
-                  </Text>
-                </View>
-              )}
-              {!!algResult?.destMissingOptIns.length && (
-                <View style={styles.chainWarnRow}>
-                  <Icon name="pause-circle" size={13} color={colors.warning.text} />
-                  <Text style={styles.chainWarnText}>
-                    Tu billetera de destino aún no acepta{' '}
-                    {algResult.destMissingOptIns.map(assetName).join(', ')}.
-                    Actívalos allí (opt-in) y reintenta — nunca enviaremos a
-                    donde no los acepten.
-                  </Text>
-                </View>
-              )}
-              {renderProgress(algResult, algError, algRunning,
-                (tx) => `https://explorer.perawallet.app/tx/${tx}/`)}
-
-              <TouchableOpacity
                 style={[styles.execBtn, (!eligible || !allChecked || !bscDestValid || bscRunning || offline) && styles.execBtnDisabled]}
                 disabled={!eligible || !allChecked || !bscDestValid || bscRunning || offline}
                 onPress={runBsc}
               >
                 <Icon name="send" size={16} color={colors.white} />
-                <Text style={styles.execBtnText}>Mi ahorro (BNB Smart Chain)</Text>
+                <Text style={styles.execBtnText}>Mover mi dinero</Text>
               </TouchableOpacity>
               {renderProgress(bscResult, bscError, bscRunning,
                 (tx) => `https://bscscan.com/tx/${tx}`)}
@@ -1034,12 +769,11 @@ export const EmergencyExitScreen: React.FC = () => {
       </KeyboardAvoidingView>
 
       <AddressScannerModal
-        visible={scanTarget !== null}
-        onClose={() => setScanTarget(null)}
+        visible={scanVisible}
+        onClose={() => setScanVisible(false)}
         onScanned={(addr: string) => {
-          if (scanTarget === 'algo') setAlgDest(addr.trim());
-          if (scanTarget === 'bsc') setBscDest(addr.trim());
-          setScanTarget(null);
+          setBscDest(addr.trim());
+          setScanVisible(false);
         }}
       />
 

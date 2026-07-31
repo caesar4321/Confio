@@ -1994,7 +1994,9 @@ export const AccountDetailScreen = () => {
       )}
 
       {/* Action Buttons */}
-      <View style={styles.actionButtonsContainer}>
+      {/* The card tucks under the green header (negative margin); when a banner
+          sits in between, drop the overlap so it doesn't cover the banner. */}
+      <View style={[styles.actionButtonsContainer, (copyBanner || isCusdRetiroOnly) && styles.actionButtonsContainerBelowBanner]}>
         {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
           // Employee welcome message
           <View style={styles.employeeMessageContainer}>
@@ -2713,6 +2715,9 @@ const styles = StyleSheet.create({
     marginTop: -16,
     paddingHorizontal: 16,
     marginBottom: 16,
+  },
+  actionButtonsContainerBelowBanner: {
+    marginTop: 12,
   },
   employeeMessageContainer: {
     backgroundColor: colors.white,

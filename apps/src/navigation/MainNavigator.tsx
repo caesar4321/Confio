@@ -22,6 +22,7 @@ import { SavingsScreen } from '../screens/SavingsScreen';
 import { ConvertSavingsScreen } from '../screens/ConvertSavingsScreen';
 import { WithdrawSavingsScreen } from '../screens/WithdrawSavingsScreen';
 import { SavingsMovementsScreen } from '../screens/SavingsMovementsScreen';
+import { SavingsMovementDetailScreen } from '../screens/SavingsMovementDetailScreen';
 import { ReceiveSavingsScreen } from '../screens/ReceiveSavingsScreen';
 import { SendUsdtScreen } from '../screens/SendUsdtScreen';
 import { StocksListScreen } from '../screens/StocksListScreen';
@@ -288,6 +289,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="SavingsMovements"
           component={SavingsMovementsScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="SavingsMovementDetail"
+          component={SavingsMovementDetailScreen}
           options={{
             headerShown: false,
           }}

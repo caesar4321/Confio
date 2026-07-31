@@ -1,10 +1,15 @@
 // Shared row for Ahorros e Inversiones movements — used by the hub's
-// "Movimientos" preview (recent few) and the full AhorrosMovimientos screen,
-// so the two can never drift apart visually.
+// "Movimientos" preview (recent few) and the full SavingsMovements screen, so
+// the two can never drift apart visually or in tap behaviour: both open
+// SavingsMovementDetail, matching the Historial de transacciones pattern in
+// AccountDetailScreen where every row is a live detail link.
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SavingsMovement } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
@@ -16,9 +21,6 @@ const MOVEMENT_ICONS: Record<string, string> = {
   receive: 'arrow-down-left',
   payment: 'shopping-bag',
   payroll: 'briefcase',
-  buy: 'shopping-cart',
-  sell: 'repeat',
-  yield: 'trending-up',
 };
 
 const formatMovementDate = (iso: string) =>
@@ -29,25 +31,36 @@ interface Props {
   topBorder?: boolean;
 }
 
-export const MovementRow = ({ movement: m, topBorder }: Props) => (
-  <View style={[styles.row, topBorder && styles.rowBorder]}>
-    <View style={styles.icon}>
-      <Icon
-        name={MOVEMENT_ICONS[m.type] || 'circle'}
-        size={16}
-        color={colors.primaryDark}
-      />
-    </View>
-    <View style={{ flex: 1 }}>
-      <Text style={styles.title}>{m.title}</Text>
-      <Text style={styles.date}>{formatMovementDate(m.createdAt)}</Text>
-    </View>
-    <Text style={[styles.amount, m.amountUsd < 0 && styles.amountOut]}>
-      {m.amountUsd >= 0 ? '+' : '−'}
-      {formatUsdDeltaAbs(m.amountUsd) ?? '$0.00'}
-    </Text>
-  </View>
-);
+export const MovementRow = ({ movement: m, topBorder }: Props) => {
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const signedAmount = `${m.amountUsd >= 0 ? '+' : '−'}${formatUsdDeltaAbs(m.amountUsd) ?? '$0.00'}`;
+
+  return (
+    <TouchableOpacity
+      style={[styles.row, topBorder && styles.rowBorder]}
+      onPress={() => navigation.navigate('SavingsMovementDetail', { movement: m })}
+      activeOpacity={0.6}
+      accessibilityRole="button"
+      accessibilityLabel={`${m.title}. ${signedAmount}. ${formatMovementDate(m.createdAt)}.`}
+      accessibilityHint="Abre el detalle del movimiento."
+    >
+      <View style={styles.icon}>
+        <Icon
+          name={MOVEMENT_ICONS[m.type] || 'circle'}
+          size={16}
+          color={colors.primaryDark}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.title}>{m.title}</Text>
+        <Text style={styles.date}>{formatMovementDate(m.createdAt)}</Text>
+      </View>
+      <Text style={[styles.amount, m.amountUsd < 0 && styles.amountOut]}>
+        {signedAmount}
+      </Text>
+    </TouchableOpacity>
+  );
+};
 
 const styles = StyleSheet.create({
   row: {

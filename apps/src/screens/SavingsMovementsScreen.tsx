@@ -52,7 +52,7 @@ export const SavingsMovementsScreen = () => {
           <View style={styles.empty}>
             <Icon name="clock" size={26} color={colors.text.light} />
             <Text style={styles.emptyText}>
-              Aquí verás tus ahorros, retiros, compras y el rendimiento que ganas.
+              Aquí verás tus recargas, retiros, envíos y pagos.
             </Text>
           </View>
         }

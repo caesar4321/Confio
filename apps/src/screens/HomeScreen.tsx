@@ -1646,7 +1646,11 @@ export const HomeScreen = () => {
                         {savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}
                       </Text>
                       <Text style={styles.walletSymbol}>
-                        {savingsPortfolio.savings.enabled ? 'Ahorro que rinde' : 'Dólar digital'}
+                        {/* Ticker in the subtitle like every other row
+                            (CONFIO / cUSD). Ineligible variant stays
+                            ticker-less: that money is raw USDT, not
+                            cUSD+ — no dishonest badge. */}
+                        {savingsPortfolio.savings.enabled ? 'cUSD+ · Ahorro que rinde' : 'Dólar digital'}
                       </Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>

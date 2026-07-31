@@ -170,6 +170,7 @@ export const WEB3AUTH_LOGIN = gql`
         id
         email
         algorandAddress
+        bscAddress
         isPhoneVerified
       }
     }

@@ -123,3 +123,6 @@ confio.tar.gz
 .kms-local/
 .gstack/
 .rehearsal_key_bsc
+
+# Signed Ondo contract — local reading copy, NEVER commit
+.ondo-contract-tmp.pdf

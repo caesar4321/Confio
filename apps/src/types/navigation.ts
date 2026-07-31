@@ -1,4 +1,7 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
+// Type-only: keeps the Apollo-bearing hook module out of this file's runtime
+// graph (navigation types are imported almost everywhere).
+import type { SavingsMovement } from '../hooks/useSavingsPortfolio';
 
 // Auth Stack - Handles authentication flow
 export type AuthStackParamList = {
@@ -169,6 +172,7 @@ export type MainStackParamList = {
   ConvertSavings: undefined;
   WithdrawSavings: undefined;
   SavingsMovements: undefined;
+  SavingsMovementDetail: { movement: SavingsMovement };
   ReceiveSavings: { destination?: 'cusd_plus' | 'usdt' } | undefined;
   SendUsdt: { token?: 'usdt' | 'cusd_plus' | 'confio' } | undefined;
   StocksList: undefined;

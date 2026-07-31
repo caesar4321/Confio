@@ -152,9 +152,11 @@ export const useBackupEnforcement = () => {
 
             const serverAddress = serverAccount?.algorandAddress || null;
             if (!serverAddress) {
+                // Algorand deprecated: new accounts are BSC-only and never get
+                // an Algorand address, so re-login would not fix this.
                 Alert.alert(
-                    'Billetera no lista',
-                    'No podemos mostrar una dirección para recibir fondos todavía. Cierra sesión e inicia sesión nuevamente para terminar de configurar tu billetera.'
+                    'Depósito no disponible',
+                    'Esta cuenta no usa la red anterior (Algorand), así que esta vía de depósito no está disponible. Usa las opciones de depósito principales de la app.'
                 );
                 return false;
             }
