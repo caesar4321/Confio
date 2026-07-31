@@ -371,3 +371,12 @@ was somewhere above the call, not that it approved the recipient).
   `whenNotPaused`, a frozen holder cannot burn, and UUPS could replace the
   logic. Those powers are deliberate (oracle/IM emergencies, Ondo
   dependency migration) and predate this gate.
+- Old-token burn EXECUTED 2026-07-31: Safe nonce 3 (KMS owners 1/3/5,
+  sponsor-submitted) — tx
+  `0xa321f178f2c91d5807f5c56d0c12166f6b1ea8644430a5799660f2aca7fb6930`,
+  block 113200348. Verified on-chain: OLD totalSupply = 0,
+  OLD balanceOf(Safe) = 0; NEW balanceOf(Safe) = 1,000,000,000.
+  (Etherscan.io "release verification" form for the old record rejects
+  deployer signatures their own verify tool accepts — appears to compare
+  against the token address itself; abandoned as cosmetic, support-ticket
+  evidence pack = any signed release message + verifiedSignatures pass.)
