@@ -586,7 +586,7 @@ class StatsSummaryType(graphene.ObjectType):
     users_new_7d = graphene.Int()
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
-    usdy_reserve = graphene.Float()  # USDY backing cUSD+ (BSC vault); 0 until deployed
+    usdy_reserve = graphene.Float()  # USD value of the USDY backing cUSD+ (BSC vault)
     circulating_cusd = graphene.Float()
     presale_cusd_raised = graphene.Float()
     presale_cusd_raised_7d = graphene.Float()
@@ -1532,6 +1532,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		]
 
 		# Protected savings and TVL come from the cUSD contract when algod is available.
+		from cusd_plus import vault as cusd_plus_vault
 		from blockchain.cusd_metrics import get_cusd_platform_metrics
 		cusd_metrics = get_cusd_platform_metrics()
 		protected_savings = float(cusd_metrics.total_supply)
@@ -1561,9 +1562,12 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			'users_new_7d': users_new_7d,
 			'protected_savings': protected_savings,
 			'total_value_locked': total_value_locked,
-			# TODO(cusd+): read the vault's USDY balance (BSC) and fold its USD
-			# value into total_value_locked as well once the vault deploys.
-			'usdy_reserve': 0.0,
+			# USD value of the USDY backing cUSD+ (vault balance x oracle
+			# price — USDY accrues in price, so a token count would both
+			# understate the reserve and look frozen). Kept SEPARATE from
+			# total_value_locked, which is the cUSD/USDC side: the app shows
+			# one pill per rail, each labelled with its own asset.
+			'usdy_reserve': cusd_plus_vault.usdy_reserve_usd(),
 			'circulating_cusd': circulating_cusd,
 			'presale_cusd_raised': float(presale_cusd_raised),
 			'presale_cusd_raised_7d': float(presale_cusd_raised_7d),
@@ -3405,9 +3409,20 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
             account.save()
 
             # After setting address, check/fund and prepare asset opt-ins for CONFIO and cUSD
+            # Algorand deprecation: with onboarding disabled we only store the
+            # address (needed for the drain migration) — no MBR funding, no opt-ins.
             needs_opt_in = []  # String IDs for GraphQL return
             needs_ids_int = []  # Int IDs for internal use
             opt_in_transactions = []
+            from blockchain.algorand_account_manager import algorand_onboarding_enabled
+            if not algorand_onboarding_enabled():
+                return UpdateAccountAlgorandAddress(
+                    success=True,
+                    error=None,
+                    account=account,
+                    needs_opt_in=[],
+                    opt_in_transactions=[]
+                )
             try:
                 from blockchain.algorand_account_manager import AlgorandAccountManager
                 from algosdk.v2client import algod
@@ -3576,8 +3591,11 @@ class SwitchAccountToken(graphene.Mutation):
 			opt_in_transactions = []
 			opt_in_required = False
 			
-			# If switching to a business account, check if it needs opt-ins
-			if account_type == 'business' and business_id:
+			# If switching to a business account, check if it needs opt-ins.
+			# Skipped entirely once Algorand onboarding is disabled (BSC migration):
+			# new business accounts stay off Algorand, funded ones need no opt-ins.
+			from blockchain.algorand_account_manager import algorand_onboarding_enabled
+			if account_type == 'business' and business_id and algorand_onboarding_enabled():
 				from blockchain.algorand_account_manager import AlgorandAccountManager
 				from blockchain.algorand_sponsor_service import algorand_sponsor_service
 				import asyncio
@@ -5475,6 +5493,10 @@ def _ensure_personal_account_mbr_funded(user) -> bool:
     Idempotent — when on-chain balance already covers the required MBR
     this is a no-op (one read against algod).
     """
+    from blockchain.algorand_account_manager import algorand_onboarding_enabled
+    if not algorand_onboarding_enabled():
+        return True  # Algorand deprecated: sponsor no longer funds MBR.
+
     account = (
         Account.objects.filter(
             user=user,

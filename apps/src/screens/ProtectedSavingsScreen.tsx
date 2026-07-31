@@ -74,9 +74,10 @@ export const ProtectedSavingsScreen = () => {
   const s = data?.statsSummary;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
   const tvlLabel = formatWhole(tvl, currency.thousandsSeparator);
-  // statsSummary.usdyReserve is live (deployed 2026-07-04; 0 until the BSC
-  // vault ships and the server folds its USDY balance in);
-  // 0 is the honest present-tense value until the reserve exists.
+  // statsSummary.usdyReserve is the USD VALUE of the USDY the vault holds
+  // (server reads balance × oracle price, 2026-07-31), not a token count:
+  // USDY accrues in price, so counting tokens would understate the reserve
+  // and sit frozen while it actually grows. Same unit as the USDC pill.
   const usdyReserve = (s as any)?.usdyReserve ?? 0;
   const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);
 
@@ -130,7 +131,7 @@ export const ProtectedSavingsScreen = () => {
             <View style={styles.heroStatPill}>
               <Icon name="trending-up" size={14} color={colors.primary} />
               <Text style={styles.heroStatText}>
-                {usdyLabel} USDY en reserva
+                US${usdyLabel} en USDY
               </Text>
             </View>
           </View>

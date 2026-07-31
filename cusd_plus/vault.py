@@ -29,6 +29,7 @@ SEL_TOTAL_SUPPLY = _sel('totalSupply()')
 SEL_BACKING = _sel('backingRatioBps()')
 SEL_TOTAL_OWED = _sel('totalOwedUsd()')
 SEL_RANGES = _sel('ranges(uint256)')  # Ondo RWADynamicOracle rate schedule
+SEL_GET_PRICE = _sel('getPrice()')     # oracle: USD per USDY, 1e18
 SEL_YIELD_SHARE = _sel('CONFIO_YIELD_SHARE_BPS()')
 
 RAY = 10 ** 27  # oracle dailyInterestRate scale
@@ -223,6 +224,54 @@ def position_usd(user_bsc_address: str) -> float:
         return last if last is not None else 0.0
     cache.set(f'cusd_plus_pos:{key}', value, POSITION_TTL)
     cache.set(f'cusd_plus_pos_last:{key}', value, POSITION_LAST_TTL)
+    return value
+
+
+# Reserve stat cadence: this is a platform-wide marketing number, not a
+# per-user balance — a minute of staleness is invisible, a hammered node
+# is not.
+RESERVE_TTL = 60
+RESERVE_LAST_TTL = 7 * 24 * 3600
+
+
+def usdy_address() -> str:
+    """Ondo USDY on BNB (18 decimals) — the vault's backing asset."""
+    return getattr(
+        settings, 'CUSD_PLUS_USDY_BSC',
+        '0x608593d17A2decBbc4399e4185bE4922F97eD32E',
+    )
+
+
+def usdy_reserve_usd() -> float:
+    """USD value of the USDY the vault actually holds — the cUSD+ side of
+    the public reserve stat (the cUSD side is USDC, 1:1).
+
+    USDY is ACCUMULATING: the token count stays put while its price rises,
+    so a token count would understate the reserve and sit visually frozen.
+    We therefore publish balance x oracle price, the same unit as the USDC
+    figure and the same unit as what holders are owed. It grows with yield
+    even absent deposits — correct, because the liability (Sigma cUSD+
+    value) grows in lockstep; the vault's own invariant keeps reserve >=
+    owed at every state change.
+
+    Cached RESERVE_TTL, last-known fallback: an unreachable node must never
+    publish a false 0 reserve."""
+    vault = vault_address()
+    oracle = oracle_address()
+    if not vault or not oracle:
+        return 0.0
+    cached = cache.get('cusd_plus_reserve_usd')
+    if cached is not None:
+        return cached
+    try:
+        held = erc20_balance_raw(usdy_address(), vault)
+        value = 0.0 if held == 0 else (held * _call(oracle, SEL_GET_PRICE)) / (10 ** 36)
+    except Exception:  # noqa: BLE001 — a flaky node must not zero the stat
+        logger.warning('cUSD+ reserve read failed', exc_info=True)
+        last = cache.get('cusd_plus_reserve_usd_last')
+        return last if last is not None else 0.0
+    cache.set('cusd_plus_reserve_usd', value, RESERVE_TTL)
+    cache.set('cusd_plus_reserve_usd_last', value, RESERVE_LAST_TTL)
     return value
 
 
