@@ -22,15 +22,45 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-BSC_RPC_URL = getattr(settings, 'CUSD_PLUS_BSC_RPC_URL', 'https://bsc-dataseed.bnbchain.org')
+# RPC POOL, not a single URL (2026-07-31 incident): the public dataseed
+# family stopped serving eth_getLogs entirely ('limit exceeded' on every
+# range), which silently killed this scanner for weeks — cursor never set,
+# zero deposit rows, zero notifications, while the beat retried twice a
+# minute. No contracted provider exists, so resilience comes from breadth:
+# every call rotates across public endpoints, preferring the last one that
+# worked. Probed 2026-07-31: nodereal public (from the official BNB Chain
+# docs) serves getLogs up to ~5k blocks; 1rpc serves it capped at 50-block
+# ranges (the micro-chunk fallback); dataseed still fine for everything
+# that is not getLogs.
+_DEFAULT_RPC_POOL = (
+    'https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3',
+    'https://bsc-dataseed.bnbchain.org',
+    'https://1rpc.io/bnb',
+)
+BSC_RPC_URLS = [
+    u.strip() for u in getattr(
+        settings, 'CUSD_PLUS_BSC_RPC_URLS', ','.join(_DEFAULT_RPC_POOL)
+    ).split(',') if u.strip()
+]
 USDT_BSC = getattr(settings, 'CUSD_PLUS_USDT_BSC', '0x55d398326f99059fF775485246999027B3197955')
 # keccak256("Transfer(address,address,uint256)")
 TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
+# getLogs chunking: primary chunk fits every healthy endpoint; the micro
+# chunk fits 1rpc's 50-block cap when the primaries are all down.
+GETLOGS_CHUNK_BLOCKS = int(getattr(settings, 'CUSD_PLUS_BSC_GETLOGS_CHUNK', 2000))
+GETLOGS_MICRO_CHUNK_BLOCKS = 50
 
-def _rpc(method, params, timeout=15):
+# After this many consecutive fully-failed scans, log at ERROR (alerting
+# picks ERROR up; WARNINGs every 30s proved invisible) and back off to
+# attempting only every 10th beat so dead endpoints aren't hammered.
+SCAN_FAILURE_ALERT_THRESHOLD = 10
+_FAILURE_KEY = 'cusd_plus_bsc_scan_failures'
+
+
+def _rpc_single(url, method, params, timeout=15):
     res = requests.post(
-        BSC_RPC_URL,
+        url,
         json={'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params},
         timeout=timeout,
     )
@@ -39,6 +69,54 @@ def _rpc(method, params, timeout=15):
     if 'error' in body:
         raise RuntimeError(f"bsc rpc: {body['error']}")
     return body['result']
+
+
+def _rpc(method, params, timeout=15):
+    """Try the pool in preference order; remember the last URL that worked
+    so steady state is one request, not a failover cascade."""
+    from django.core.cache import cache
+
+    preferred = cache.get('cusd_plus_bsc_rpc_preferred')
+    ordered = list(BSC_RPC_URLS)
+    if preferred in ordered:
+        ordered.remove(preferred)
+        ordered.insert(0, preferred)
+    last_exc = None
+    for url in ordered:
+        try:
+            result = _rpc_single(url, method, params, timeout)
+            if url != preferred:
+                cache.set('cusd_plus_bsc_rpc_preferred', url, 3600)
+            return result
+        except Exception as exc:  # noqa: BLE001 — try the next endpoint
+            last_exc = exc
+            logger.info('bsc rpc %s failed on %s: %s', method, url, exc)
+    raise RuntimeError(f'all {len(ordered)} BSC RPC endpoints failed: {last_exc}')
+
+
+def _get_logs_chunked(from_block: int, to_block: int, topics, address=USDT_BSC) -> list:
+    """eth_getLogs over [from_block, to_block] in endpoint-friendly chunks.
+    Each chunk rotates the pool; a chunk that fails everywhere is retried
+    once more in 50-block micro-chunks (1rpc's cap). Raises only when a
+    range is unservable by every endpoint at every granularity — the
+    caller leaves the cursor untouched and rescans next beat."""
+    logs: list = []
+    b = from_block
+    while b <= to_block:
+        hi = min(b + GETLOGS_CHUNK_BLOCKS - 1, to_block)
+        params = {'fromBlock': hex(b), 'toBlock': hex(hi),
+                  'address': address, 'topics': topics}
+        try:
+            logs += _rpc('eth_getLogs', [params])
+        except Exception:  # noqa: BLE001 — degrade to micro-chunks
+            m = b
+            while m <= hi:
+                mhi = min(m + GETLOGS_MICRO_CHUNK_BLOCKS - 1, hi)
+                params['fromBlock'], params['toBlock'] = hex(m), hex(mhi)
+                logs += _rpc('eth_getLogs', [params])  # raises if truly dead
+                m = mhi + 1
+        b = hi + 1
+    return logs
 
 
 def _address_topic(address: str) -> str:
@@ -105,10 +183,30 @@ def monitor_bridge_arrivals():
     if not watch_all:
         return  # idle: zero RPC calls
 
+    # Backoff: after SCAN_FAILURE_ALERT_THRESHOLD consecutive dead scans,
+    # attempt only every 10th beat instead of hammering dead endpoints
+    # twice a minute (which worsens per-IP rate limits).
+    failures = int(cache.get(_FAILURE_KEY) or 0)
+    if failures >= SCAN_FAILURE_ALERT_THRESHOLD and failures % 10 != 0:
+        cache.set(_FAILURE_KEY, failures + 1, None)
+        return
+
+    def _scan_failed(stage, exc):
+        n = failures + 1
+        cache.set(_FAILURE_KEY, n, None)
+        if n >= SCAN_FAILURE_ALERT_THRESHOLD:
+            logger.error(
+                'BSC deposit scanner DEAD for %s consecutive runs (%s: %s) — '
+                'external USDT deposits are going undetected and unnotified',
+                n, stage, exc,
+            )
+        else:
+            logger.warning('bsc %s failed: %s', stage, exc)
+
     try:
         latest_block = int(_rpc('eth_blockNumber', []), 16)
     except Exception as exc:  # noqa: BLE001 — watcher must not die
-        logger.warning('bsc blockNumber failed: %s', exc)
+        _scan_failed('blockNumber', exc)
         return
 
     rewind = int(getattr(settings, 'CUSD_PLUS_BSC_SCAN_REWIND_BLOCKS', 100))
@@ -119,17 +217,18 @@ def monitor_bridge_arrivals():
     addrs = sorted(watch_all)
     for i in range(0, len(addrs), 800):
         try:
-            logs += _rpc('eth_getLogs', [{
-                'fromBlock': hex(from_block),
-                'toBlock': hex(latest_block),
-                'address': USDT_BSC,
-                'topics': [TRANSFER_TOPIC, None,
-                           [_address_topic(a) for a in addrs[i:i + 800]]],
-            }])
+            logs += _get_logs_chunked(
+                from_block, latest_block,
+                [TRANSFER_TOPIC, None,
+                 [_address_topic(a) for a in addrs[i:i + 800]]],
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning('bsc getLogs failed: %s', exc)
+            _scan_failed('getLogs', exc)
             return  # cursor untouched — next run rescans the window
     cache.set('cusd_plus_bsc_scan_cursor', latest_block, None)
+    if failures:
+        logger.info('BSC deposit scanner recovered after %s failed runs', failures)
+    cache.set(_FAILURE_KEY, 0, None)
 
     now = timezone.now()
     min_deposit = Decimal(str(getattr(settings, 'CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD', 1)))
@@ -199,6 +298,95 @@ def monitor_bridge_arrivals():
                 'Support diagnostic: allbridge_diagnose("%s")',
                 conv.internal_id, timeout, conv.src_tx_id, conv.internal_id,
             )
+
+    # ── cUSD+ (vault share) inbound pass (Phase 2) ──────────────────────
+    # External cUSD+ receives (another wallet sends shares directly) get a
+    # ledger row + push. Internal sends are EXCLUDED here — the send
+    # confirm task records both sides — by skipping logs whose sender is
+    # also a registered address. Mints (from = 0x0) never match a
+    # registered `from`, and redeems burn (to = 0x0) so they never match a
+    # registered `to`. Failures here must never disturb the USDT pipeline.
+    try:
+        _scan_cusd_plus_arrivals(registered, from_block, latest_block, min_deposit)
+    except Exception:  # noqa: BLE001
+        logger.exception('cUSD+ inbound scan failed (USDT pipeline unaffected)')
+
+
+def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: int,
+                             min_deposit) -> None:
+    from decimal import ROUND_DOWN as _RD
+
+    from .models import CusdPlusMovement
+    from . import vault as cp_vault
+
+    vault_addr = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+    if not vault_addr or not registered:
+        return
+
+    logs: list[dict] = []
+    addrs = sorted(registered)
+    for i in range(0, len(addrs), 800):
+        logs += _get_logs_chunked(
+            from_block, latest_block,
+            [TRANSFER_TOPIC, None,
+             [_address_topic(a) for a in addrs[i:i + 800]]],
+            address=vault_addr,
+        )
+    if not logs:
+        return
+
+    pps_wad = cp_vault.p_plus_wad()
+    for log in logs:
+        sender = ('0x' + log['topics'][1][-40:]).lower()
+        if sender in registered:
+            continue  # internal send — recorded by the send confirm task
+        key = ('0x' + log['topics'][2][-40:]).lower()
+        account_id = registered.get(key)
+        if account_id is None:
+            continue
+        shares = int(log['data'], 16)
+        amount_usd = (Decimal(shares) * Decimal(pps_wad) / Decimal(10 ** 36)).quantize(
+            Decimal('0.000001'), rounding=_RD)
+        if amount_usd < min_deposit:
+            continue  # dust — strangers must not spam rows/notifications
+        reference = f"scan_cusdp:{log['transactionHash']}:{int(log.get('logIndex', '0x0'), 16)}"
+        _, created = CusdPlusMovement.objects.get_or_create(
+            reference=reference,
+            defaults={
+                'account_id': account_id,
+                'movement_type': 'receive',
+                'title': 'Recibiste Confío Dollar+',
+                'amount_usd': amount_usd,
+                'tx_hash': log['transactionHash'],
+            },
+        )
+        if not created:
+            continue  # rescan window replay
+        cp_vault.invalidate_position(key)
+        try:
+            from users.models import Account
+            from notifications import utils as notif_utils
+            from notifications.models import NotificationType as NotifType
+            account = Account.objects.filter(id=account_id).select_related(
+                'user', 'business').first()
+            if account and account.user_id:
+                notif_utils.create_notification(
+                    user=account.user,
+                    account=account,
+                    business=account.business if account.account_type == 'business' else None,
+                    notification_type=NotifType.SEND_RECEIVED,
+                    title='Depósito recibido',
+                    message=f'Recibiste ${amount_usd:.2f} en tu Confío Dollar+.',
+                    data={
+                        'transaction_type': 'deposit',
+                        'currency': 'CUSD_PLUS',
+                        'network': 'BSC',
+                        'amount': str(amount_usd),
+                        'tx_hash': log['transactionHash'],
+                    },
+                )
+        except Exception:  # noqa: BLE001 — comms failure must not lose the row
+            logger.exception('cUSD+ receive notification failed for %s', reference)
 
 
 def _registered_bsc_addresses() -> dict:
