@@ -19,6 +19,22 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
+
+// cUSD+ reserve verification chain (BSC vault deployed 2026-07-10):
+// vault token page → live USDY holdings → Ondo's issuer page → third-party
+// attestations. The Ondo USDY page is the CANONICAL home of the attestation
+// reports (Tokenholder Protections section); the Dropbox folders below are
+// the direct links Ondo's onboarding team provided (2026-07) — if they ever
+// rot, the USDY page always carries the current ones.
+const CUSD_PLUS_TOKEN_BSCSCAN_URL =
+  'https://bscscan.com/token/0x3C29417eb4314155e63d4C7D4507852b87763Ed1';
+const CUSD_PLUS_VAULT_ASSETS_URL =
+  'https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#asset-multichain';
+const ONDO_USDY_URL = 'https://app.ondo.finance/assets/usdy';
+const USDY_ATTESTATION_DAILY_URL =
+  'https://www.dropbox.com/scl/fo/375wdvar3rbc7o23nxsgp/AOFY8jhpENaNx9WAw-WPnbY?rlkey=4icqn1z9bez725wywr30fx52a&st=bsxeh8j5&dl=0';
+const USDY_ATTESTATION_MONTHLY_URL =
+  'https://www.dropbox.com/scl/fo/fk5t99zyihshuak3u1u9v/AMYiYSUwvoL6osa2FX_G_M8?rlkey=0ttmb4ifhdg4ebvhbh8aa3juc&st=fyoof4cu&dl=0';
 import cUSDLogo from '../assets/png/cUSD.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
@@ -191,15 +207,19 @@ export const ProtectedSavingsScreen = () => {
               <Icon name="external-link" size={13} color={colors.primary} />
               <Text style={styles.linkText}>Ver respaldo USDC</Text>
             </TouchableOpacity>
-            {/* TODO(cusd+): BscScan URLs at deploy — cUSD+ token page and the
-                USDY reserve address holdings */}
-            <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
-              <Icon name="external-link" size={13} color={colors.text.light} />
-              <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver cUSD+ en circulación</Text>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => openUrl(CUSD_PLUS_TOKEN_BSCSCAN_URL)}
+            >
+              <Icon name="external-link" size={13} color={colors.primary} />
+              <Text style={styles.linkText}>Ver cUSD+ en circulación</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
-              <Icon name="external-link" size={13} color={colors.text.light} />
-              <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver respaldo USDY</Text>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => openUrl(CUSD_PLUS_VAULT_ASSETS_URL)}
+            >
+              <Icon name="external-link" size={13} color={colors.primary} />
+              <Text style={styles.linkText}>Ver respaldo USDY</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.tipText}>
@@ -314,6 +334,34 @@ export const ProtectedSavingsScreen = () => {
             por bonos del Tesoro de EE.UU. Esos bonos pagan interés todos los
             días — ese interés es el rendimiento que recibe tu cUSD+.
           </Text>
+          <Text style={styles.sectionBody}>
+            Las reservas de USDY se verifican por terceros independientes:
+            Ondo publica reportes de atestación diarios y mensuales en su
+            página oficial.
+          </Text>
+          <View style={styles.linksRow}>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => openUrl(ONDO_USDY_URL)}
+            >
+              <Icon name="external-link" size={13} color={colors.primary} />
+              <Text style={styles.linkText}>USDY en Ondo Finance</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => openUrl(USDY_ATTESTATION_DAILY_URL)}
+            >
+              <Icon name="external-link" size={13} color={colors.primary} />
+              <Text style={styles.linkText}>Atestación diaria</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => openUrl(USDY_ATTESTATION_MONTHLY_URL)}
+            >
+              <Icon name="external-link" size={13} color={colors.primary} />
+              <Text style={styles.linkText}>Atestación mensual</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.chainCard}>
             <Text style={styles.chainLine}>cUSD → USDC → dólares reales</Text>
             <Text style={styles.chainLine}>cUSD+ → USDY → bonos del Tesoro de EE.UU.</Text>
