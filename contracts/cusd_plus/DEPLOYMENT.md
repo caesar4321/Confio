@@ -347,6 +347,13 @@ was somewhere above the call, not that it approved the recipient).
 
 - Impl deployed via `manage.py deploy_cusd_plus_vault --impl-only
   --broadcast --yes-mainnet` (KMS nonce 27, ~0.0033 BNB). BscScan verified.
+- **Proxy RE-LINKED on BscScan to v5** (`verifyproxycontract` +
+  `checkproxyverification`, confirmed reading back
+  `Implementation = 0xaa9aff7c…f5a9`). This is a SEPARATE step from
+  verifying the implementation source: until it is done the explorer still
+  resolves the proxy to the previous implementation, so "Read/Write as
+  Proxy" shows the OLD ABI (no `isSponsor` / `setSponsor`). Do this after
+  every UUPS upgrade.
 - **The Safe transaction — ONE atomic tx:**
   - `to`: `0x3C29417eb4314155e63d4C7D4507852b87763Ed1`
   - `value`: `0`
