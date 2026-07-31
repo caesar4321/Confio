@@ -397,3 +397,37 @@ was somewhere above the call, not that it approved the recipient).
   deployer signatures their own verify tool accepts — appears to compare
   against the token address itself; abandoned as cosmetic, support-ticket
   evidence pack = any signed release message + verifiedSignatures pass.)
+
+## ConfioRewardVault — deployed 2026-07-31 (Safe-owned)
+
+BSC mirror of the Algorand CONFIO rewards vault. Escrows CONFIO, users
+self-claim backend-attested rewards; owner = Safe, attestor = KMS sponsor.
+
+| Item | Value |
+| --- | --- |
+| **ConfioRewardVault** | `0x1766A2Ac798dA2247E5Da6E410453D526FD2f6ab` |
+| CONFIO (reward token) | `0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8` |
+| attestor (hot key) | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
+| owner | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
+
+- Deployed via `manage.py deploy_reward_vault --broadcast --yes-mainnet`
+  (KMS nonce 30, ~0.0015 BNB). Creation tx
+  `0x37c281966ce98e05ea686f7461319e0f982210d58fe8d020d57e9ce3f069c8cc`.
+  BscScan verified.
+- **NOT yet operational — needs TWO Safe actions + backend wiring:**
+  1. `setManualPrice(price)` — the CONFIO price in cUSD (WAD). At $0.20
+     that is `200000000000000000`. Bumps priceRound 0→1.
+  2. Transfer a TRANCHE of CONFIO from the Safe into the vault. The reward
+     fund is **7,400,000 CONFIO total across ALL chains** (tokenomics §3);
+     the live Algorand vault (app 3361825928) has already committed ~2,250
+     (1,425 still unclaimed there). Fund a working tranche, never the whole
+     fund behind the hot attestor (Codex P3). The solvency invariant blocks
+     any attestation until CONFIO is present.
+  3. Backend: point the achievements/referral reward flow at
+     `setEligible(user, cusdAmount, expectedPriceRound, referrer,
+     refConfioAmount)` and `claim()`. Each side of a valid pair earns $5,
+     converted at the active price; the referral $5 is converted by the
+     backend and passed as CONFIO.
+- Config: `BSC_REWARD_VAULT_ADDRESS`, flag `BSC_REWARD_ENABLED` (ships
+  False). Cross-chain integrity: BSC vault + Algorand vault combined must
+  never exceed 7,400,000 CONFIO (tokenomics §10).
