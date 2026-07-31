@@ -50,7 +50,7 @@ const FriendlyRoadmap = () => {
         '수익형 저축(Confío Dollar+)과 미국 주식을 Ondo Finance와 함께 Confío 안에서 제공합니다.'
       ),
       icon: '🤝',
-      status: 'active'
+      status: 'completed'
     },
     {
       quarter: 'Q4 2026',
