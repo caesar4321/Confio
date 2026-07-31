@@ -35,7 +35,6 @@ const USDY_ATTESTATION_DAILY_URL =
   'https://www.dropbox.com/scl/fo/375wdvar3rbc7o23nxsgp/AOFY8jhpENaNx9WAw-WPnbY?rlkey=4icqn1z9bez725wywr30fx52a&st=bsxeh8j5&dl=0';
 const USDY_ATTESTATION_MONTHLY_URL =
   'https://www.dropbox.com/scl/fo/fk5t99zyihshuak3u1u9v/AMYiYSUwvoL6osa2FX_G_M8?rlkey=0ttmb4ifhdg4ebvhbh8aa3juc&st=fyoof4cu&dl=0';
-import cUSDLogo from '../assets/png/cUSD.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
@@ -116,11 +115,6 @@ export const ProtectedSavingsScreen = () => {
         <View style={styles.hero}>
           <View style={styles.heroLogoRow}>
             <Image source={cUSDPlusLogo} style={styles.heroLogo} resizeMode="contain" />
-            <Image
-              source={cUSDLogo}
-              style={[styles.heroLogo, styles.heroLogoOverlap]}
-              resizeMode="contain"
-            />
           </View>
           <Text style={styles.heroTitle}>Confío Dollar+</Text>
           <Text style={styles.heroSubtitle}>
