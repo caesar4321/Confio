@@ -40,8 +40,7 @@ const FriendlyAssets = () => {
               {t('Ver en BscScan', 'View on BscScan', 'BscScan에서 보기')}
             </a>
           )
-        },
-        { label: t('Estado', 'Status', '상태'), value: t('En alianza con Ondo Finance', 'In partnership with Ondo Finance', 'Ondo Finance와 파트너십') }
+        }
       ],
       highlight: {
         icon: '🌱',
