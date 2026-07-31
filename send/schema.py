@@ -329,9 +329,144 @@ class SubmitBscSend(graphene.Mutation):
         )
 
 
+# ═══════════════════ BSC invite escrow (send to non-user) ═══════════════
+# Inviter locks cUSD+/CONFIO for a phone that isn't a Confío user; the KMS
+# sponsor releases it when they join (auto-claim in the verification flow),
+# or the inviter reclaims after 7 days. send/invite_bsc_flow.py + the
+# ConfioInviteEscrow contract.
+
+
+class PrepareBscInvite(graphene.Mutation):
+    class Arguments:
+        phone = graphene.String(required=True)
+        phone_country = graphene.String(required=False)
+        amount = graphene.Decimal(required=True)
+        token_type = graphene.String(required=True, description="CUSD_PLUS or CONFIO")
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    invite_id = graphene.String()
+    calls = graphene.List(BscSendCallType)
+
+    @login_required
+    def mutate(self, info, phone, amount, token_type, phone_country=None):
+        from django.conf import settings as dj_settings
+        from users.jwt_context import get_jwt_business_context_with_validation
+        from blockchain.invite_send_transaction_builder import InviteSendTransactionBuilder
+        from . import invite_bsc_flow
+
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return PrepareBscInvite(success=False, error='disabled')
+        jwt_ctx = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not jwt_ctx:
+            return PrepareBscInvite(success=False, error='permission_denied')
+        phone_key = InviteSendTransactionBuilder.normalize_phone(phone, phone_country)
+        result = invite_bsc_flow.prepare_create(
+            info.context.user, jwt_ctx, phone_key, token_type, amount)
+        if not result.get('success'):
+            return PrepareBscInvite(success=False, error=result.get('error'))
+        return PrepareBscInvite(
+            success=True, invite_id=result['invite_id'],
+            calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data'])
+                   for c in result['calls']])
+
+
+class SubmitBscInvite(graphene.Mutation):
+    class Arguments:
+        invite_id = graphene.String(required=True)
+        nonce = graphene.String(required=True)
+        deadline = graphene.String(required=True)
+        intent_signature = graphene.String(required=True)
+        authorization = BscSendAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    authorization_required = graphene.Boolean()
+    transaction_hash = graphene.String()
+
+    @login_required
+    def mutate(self, info, invite_id, nonce, deadline, intent_signature, authorization=None):
+        from .models import PhoneInvite
+        from . import invite_bsc_flow
+
+        invite = PhoneInvite.objects.filter(
+            invitation_id=invite_id.replace('0x', ''), status='pending',
+            deleted_at__isnull=True).first()
+        if not invite:
+            return SubmitBscInvite(success=False, error='invite_not_found')
+        result = invite_bsc_flow.submit_create(
+            info.context.user, invite, nonce, deadline, intent_signature, authorization)
+        return SubmitBscInvite(
+            success=result.get('success', False), error=result.get('error'),
+            authorization_required=bool(result.get('authorization_required')),
+            transaction_hash=result.get('transaction_hash'))
+
+
+class SubmitBscReclaimInvite(graphene.Mutation):
+    class Arguments:
+        invite_id = graphene.String(required=True)
+        nonce = graphene.String(required=True)
+        deadline = graphene.String(required=True)
+        intent_signature = graphene.String(required=True)
+        authorization = BscSendAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    authorization_required = graphene.Boolean()
+    transaction_hash = graphene.String()
+    calls = graphene.List(BscSendCallType)
+
+    @login_required
+    def mutate(self, info, invite_id, nonce, deadline, intent_signature, authorization=None):
+        from .models import PhoneInvite
+        from . import invite_bsc_flow
+
+        invite = PhoneInvite.objects.filter(
+            invitation_id=invite_id.replace('0x', ''), inviter_user=info.context.user,
+            status='pending', deleted_at__isnull=True).first()
+        if not invite:
+            return SubmitBscReclaimInvite(success=False, error='invite_not_found')
+        result = invite_bsc_flow.submit_reclaim(
+            info.context.user, invite, nonce, deadline, intent_signature, authorization)
+        return SubmitBscReclaimInvite(
+            success=result.get('success', False), error=result.get('error'),
+            authorization_required=bool(result.get('authorization_required')),
+            transaction_hash=result.get('transaction_hash'))
+
+
+class ReclaimInviteCalls(graphene.Mutation):
+    """Return the reclaim call the inviter must sign (client fetches, signs,
+    then calls submitBscReclaimInvite)."""
+    class Arguments:
+        invite_id = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    calls = graphene.List(BscSendCallType)
+
+    @login_required
+    def mutate(self, info, invite_id):
+        from .models import PhoneInvite
+        from . import invite_bsc_flow
+
+        invite = PhoneInvite.objects.filter(
+            invitation_id=invite_id.replace('0x', ''), inviter_user=info.context.user,
+            status='pending', deleted_at__isnull=True).first()
+        if not invite:
+            return ReclaimInviteCalls(success=False, error='invite_not_found')
+        calls = invite_bsc_flow.build_reclaim_calls('0x' + invite.invitation_id)
+        return ReclaimInviteCalls(
+            success=True,
+            calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data']) for c in calls])
+
+
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""
     # Algorand sends live in blockchain/mutations.py; BSC sends (Phase 2,
     # cUSD phase-out) live here on the sponsored 7702 rail.
     prepare_bsc_send = PrepareBscSend.Field()
     submit_bsc_send = SubmitBscSend.Field()
+    prepare_bsc_invite = PrepareBscInvite.Field()
+    submit_bsc_invite = SubmitBscInvite.Field()
+    reclaim_invite_calls = ReclaimInviteCalls.Field()
+    submit_bsc_reclaim_invite = SubmitBscReclaimInvite.Field()

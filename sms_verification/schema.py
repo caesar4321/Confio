@@ -328,14 +328,20 @@ class VerifySMSCode(graphene.Mutation):
 
                         # Best-effort auto-claim invite
                         try:
+                            pk = normalize_phone(phone_number, country_code)
+                            # BSC invites (cUSD+/CONFIO) release via the escrow
+                            # sponsor; all pending ones for this phone at once.
+                            from send.invite_bsc_flow import claim_pending_bsc_invites
+                            claim_pending_bsc_invites(user, pk)
+                            # Legacy Algorand invite (single, first pending).
                             acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
                             recipient_addr = getattr(acct, 'algorand_address', None)
                             if recipient_addr:
                                 from send.models import PhoneInvite
-                                pk = normalize_phone(phone_number, country_code)
                                 inv = PhoneInvite.objects.filter(
                                     phone_key=pk,
                                     status='pending',
+                                    token_type__in=('CUSD', 'CONFIO', 'USDC'),
                                     deleted_at__isnull=True
                                 ).order_by('-created_at').first()
                                 if inv:
@@ -396,14 +402,17 @@ class VerifySMSCode(graphene.Mutation):
 
             # Best-effort auto-claim invitation as in Telegram flow
             try:
+                pk = normalize_phone(phone_number, country_code)
+                from send.invite_bsc_flow import claim_pending_bsc_invites
+                claim_pending_bsc_invites(user, pk)
                 acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
                 recipient_addr = getattr(acct, 'algorand_address', None)
                 if recipient_addr:
                     from send.models import PhoneInvite
-                    pk = normalize_phone(phone_number, country_code)
                     inv = PhoneInvite.objects.filter(
                         phone_key=pk,
                         status='pending',
+                        token_type__in=('CUSD', 'CONFIO', 'USDC'),
                         deleted_at__isnull=True
                     ).order_by('-created_at').first()
                     if inv:

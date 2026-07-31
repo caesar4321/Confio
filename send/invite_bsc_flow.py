@@ -293,6 +293,33 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     return {'success': True, 'transaction_hash': sent or tx_hash}
 
 
+def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
+    """Release every pending BSC-token invite addressed to `phone_key` to
+    the newly-verified user. Called from the phone-verification auto-claim.
+    Returns the number claimed. Best-effort — never raises into onboarding.
+    """
+    from .models import PhoneInvite
+
+    if not _enabled() or not phone_key:
+        return 0
+    claimed = 0
+    pending = PhoneInvite.objects.filter(
+        phone_key=phone_key, status='pending',
+        token_type__in=('CUSD_PLUS', 'CONFIO'), deleted_at__isnull=True,
+    )
+    for inv in pending:
+        try:
+            res = claim_for_recipient(inv, recipient_user)
+            if res.get('success'):
+                claimed += 1
+            else:
+                logger.info('[INVITE][BSC] auto-claim skipped %s: %s',
+                            inv.invitation_id, res.get('error'))
+        except Exception:  # noqa: BLE001 — onboarding must not fail on this
+            logger.exception('[INVITE][BSC] auto-claim errored %s', inv.invitation_id)
+    return claimed
+
+
 # ── Reclaim (inviter, 7702) ──────────────────────────────────────────────
 
 def build_reclaim_calls(invite_id32: str) -> list:

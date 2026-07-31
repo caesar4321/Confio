@@ -838,6 +838,7 @@ type Web3AuthUserType {
   lastName: String!
   email: String!
   algorandAddress: String
+  bscAddress: String
   isPhoneVerified: Boolean
   phoneKey: String
 }
@@ -6203,6 +6204,22 @@ type Mutation {
     nonce: String!
     sendId: String!
   ): SubmitBscSend
+  prepareBscInvite(
+    amount: Decimal!
+    phone: String!
+    phoneCountry: String
+
+    """CUSD_PLUS or CONFIO"""
+    tokenType: String!
+  ): PrepareBscInvite
+  submitBscInvite(authorization: BscSendAuthorizationInput, deadline: String!, intentSignature: String!, inviteId: String!, nonce: String!): SubmitBscInvite
+
+  """
+  Return the reclaim call the inviter must sign (client fetches, signs,
+  then calls submitBscReclaimInvite).
+  """
+  reclaimInviteCalls(inviteId: String!): ReclaimInviteCalls
+  submitBscReclaimInvite(authorization: BscSendAuthorizationInput, deadline: String!, intentSignature: String!, inviteId: String!, nonce: String!): SubmitBscReclaimInvite
   initiateSmsVerification(countryCode: String!, phoneNumber: String!): InitiateSMSVerification
   verifySmsCode(code: String!, countryCode: String!, phoneNumber: String!): VerifySMSCode
   initiateTelegramVerification(countryCode: String!, phoneNumber: String!): InitiateTelegramVerification
@@ -7573,6 +7590,38 @@ input BscSendAuthorizationInput {
   yParity: Int!
   r: String!
   s: String!
+}
+
+type PrepareBscInvite {
+  success: Boolean
+  error: String
+  inviteId: String
+  calls: [BscSendCallType]
+}
+
+type SubmitBscInvite {
+  success: Boolean
+  error: String
+  authorizationRequired: Boolean
+  transactionHash: String
+}
+
+"""
+Return the reclaim call the inviter must sign (client fetches, signs,
+then calls submitBscReclaimInvite).
+"""
+type ReclaimInviteCalls {
+  success: Boolean
+  error: String
+  calls: [BscSendCallType]
+}
+
+type SubmitBscReclaimInvite {
+  success: Boolean
+  error: String
+  authorizationRequired: Boolean
+  transactionHash: String
+  calls: [BscSendCallType]
 }
 
 type InitiateSMSVerification {
