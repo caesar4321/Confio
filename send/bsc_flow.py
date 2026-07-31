@@ -61,6 +61,15 @@ WAD = 10 ** 18
 # share count meets a slightly newer price at execution — 0.5% absorbs any
 # realistic drift while still bounding what the recipient could lose.
 REDEEM_MIN_OUT_BPS = 9_950
+# MAX-send dust tolerance: the mint path floors twice on-chain (USDY units
+# at the oracle price, then shares at pPlus), leaving a position a few wei
+# short of the deposited cents — while every float layer above (position_usd,
+# GraphQL, the app) reads it back as exactly the cent amount, so MAX
+# re-requests a value the wallet is wei-short of. A request over the live
+# balance by ≤ this is a full-position send, not an overdraft: clamp to the
+# real balance instead of refusing. 10**12 wei = $0.000001 — far above any
+# rounding dust, far below a spendable amount.
+MAX_SEND_DUST_WEI = 10 ** 12
 EVM_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 
@@ -267,7 +276,11 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
             return {'success': False, 'error': 'balance_unavailable'}
         if confio_raw < amount_wei:
-            return {'success': False, 'error': 'insufficient_balance'}
+            if confio_raw + MAX_SEND_DUST_WEI < amount_wei:
+                return {'success': False, 'error': 'insufficient_balance'}
+            amount_wei = confio_raw  # dust-short MAX → send the full balance
+        if amount_wei <= 0:
+            return {'success': False, 'error': 'invalid_amount'}
         kind = 'send_confio'
         token_type = 'CONFIO'
         token_addr, units, min_out = confio_addr, amount_wei, None
@@ -290,9 +303,11 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             # D: explicit cUSD+ token send — shares-funded only, delivered
             # as-is to ANY recipient (no eligibility fork; exits and
             # transfers of an existing position are never gated).
-            if shares_value_wei < amount_wei:
+            if shares_value_wei + MAX_SEND_DUST_WEI < amount_wei:
                 return {'success': False, 'error': 'insufficient_balance'}
             shares = (amount_wei * WAD) // pps_wad
+            if shares > shares_raw:
+                shares = shares_raw  # dust-short MAX → the whole position
             if shares <= 0:
                 return {'success': False, 'error': 'invalid_amount'}
             kind = 'send_cusd_plus'
@@ -302,10 +317,12 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 'to': vault_addr, 'value': '0',
                 'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
             }]
-        elif shares_value_wei >= amount_wei:
+        elif shares_value_wei + MAX_SEND_DUST_WEI >= amount_wei:
             # Value → shares at the live price; floor favors the sender's
             # remaining balance (never over-burn).
             shares = (amount_wei * WAD) // pps_wad
+            if shares > shares_raw:
+                shares = shares_raw  # dust-short MAX → the whole position
             if shares <= 0:
                 return {'success': False, 'error': 'invalid_amount'}
             recipient_eligible = (
@@ -333,7 +350,11 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                     'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
                             + _uint_word(min_out) + _addr_word(recipient_addr),
                 }]
-        elif usdt_raw >= amount_wei:
+        elif usdt_raw + MAX_SEND_DUST_WEI >= amount_wei:
+            if amount_wei > usdt_raw:
+                amount_wei = usdt_raw  # dust-short MAX → the full wallet balance
+            if amount_wei <= 0:
+                return {'success': False, 'error': 'invalid_amount'}
             kind = 'send_usdt'
             token_type = 'USDT'
             token_addr, units, min_out = USDT_BSC, amount_wei, None

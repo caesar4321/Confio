@@ -205,6 +205,75 @@ class PrepareCallShapeTests(SimpleTestCase):
         result, _, _ = self._prepare(recipient_user=None, token='DOGE')
         self.assertEqual(result['error'], 'unsupported_token')
 
+    # ── MAX dust tolerance ──────────────────────────────────────────────
+    # The mint path floors twice on-chain, so a $2.99 deposit reads back as
+    # exactly 2.99 in every float layer while being wei-short of 2.99e18.
+    # MAX re-requests 2.99 → that's a full-position send, never an overdraft.
+
+    def _prepare_raw(self, amount, shares_raw, usdt=0, token='',
+                     pps=11 * WAD // 10, recipient_user=None):
+        captured = {}
+
+        def _create(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(internal_id='sid123', **kwargs)
+
+        with _recipient_resolution(recipient_user, None, RECIPIENT), \
+             mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=shares_raw), \
+             mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=usdt), \
+             mock.patch('send.models.SendTransaction.objects') as objs:
+            objs.filter.return_value.first.return_value = None
+            objs.create.side_effect = _create
+            result = bsc_flow.prepare_bsc_send(
+                _sender_user(), _jwt_ctx(), amount,
+                recipient_user_id='2', token=token)
+        return result, captured
+
+    def test_max_on_dust_short_position_redeems_full_position(self):
+        pps = 11 * WAD // 10
+        amount_wei = 299 * WAD // 100
+        shares_raw = (amount_wei * WAD) // pps - 1  # 1 share-wei short of 2.99
+        result, _ = self._prepare_raw('2.99', shares_raw, pps=pps)
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertTrue(call['data'][2:].startswith(SEL_REDEEM_TO_USDT))
+        # clamped to the ENTIRE position, not the (unaffordable) ideal shares
+        self.assertEqual(int(call['data'][10:74], 16), shares_raw)
+
+    def test_max_explicit_cusd_plus_dust_short_sends_full_position(self):
+        pps = 11 * WAD // 10
+        amount_wei = 299 * WAD // 100
+        shares_raw = (amount_wei * WAD) // pps - 1
+        result, _ = self._prepare_raw('2.99', shares_raw, pps=pps, token='CUSD_PLUS')
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
+        self.assertEqual(int(call['data'][74:138], 16), shares_raw)
+
+    def test_max_usdt_dust_short_sends_full_wallet_balance(self):
+        usdt_raw = 299 * WAD // 100 - 1
+        result, _ = self._prepare_raw('2.99', shares_raw=0, usdt=usdt_raw)
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertEqual(call['to'], USDT_BSC)
+        self.assertEqual(int(call['data'][74:138], 16), usdt_raw)
+
+    @override_settings(BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
+    def test_max_confio_dust_short_sends_full_balance(self):
+        confio_raw = 10 * WAD - 1
+        result, _ = self._prepare_raw('10', shares_raw=confio_raw, token='CONFIO')
+        self.assertTrue(result['success'], result)
+        self.assertEqual(int(result['calls'][0]['data'][74:138], 16), confio_raw)
+
+    def test_shortfall_beyond_dust_still_refuses(self):
+        pps = 11 * WAD // 10
+        amount_wei = 299 * WAD // 100
+        short = amount_wei - 2 * bsc_flow.MAX_SEND_DUST_WEI
+        shares_raw = (short * WAD) // pps
+        result, _ = self._prepare_raw('2.99', shares_raw, pps=pps)
+        self.assertEqual(result['error'], 'insufficient_balance')
+
 
 class SubmitValidatorTests(SimpleTestCase):
     """_validate_send_batch: the stored call must equal the canonical intent
