@@ -273,21 +273,29 @@ EOA exists to reconcile.
 
 | Contract | Address |
 | --- | --- |
-| **ConfioPayContract** | `0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD` |
+| **ConfioPayContract** (v2, server-authorized) | `0x71256d060Ba718ff758647Ab4CB91A113a09E93d` |
+| ~~ConfioPayContract v1~~ (STALE, permissionless) | ~~`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`~~ |
 | **ConfioPayrollVault** | `0x664378b2668f320ce3573D0eD6DD154b8C8B3835` |
 | Owner (both) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
 | cUSD+ vault | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
 
 - **ConfioPayContract** — invoice payments. Payer's 7702 batch is
-  `[token.approve(this, gross), pay(invoiceId, token, gross, merchant)]`;
-  the CONTRACT computes the 0.9% ceiling fee (`feeFor`, wei-parity with
-  the Algorand builder), pays the merchant net, and accrues fees per
-  token. Replay key is the full payment terms, not the invoice id alone —
-  keying on the id alone let anyone who read the QR brick a payment with
-  a 1-wei self-payment (audit P1). Creation tx
-  `0xae789ffbdf7cd5b71a04580355d77d375b4303ed59ec10ad3768ee13cfa0b10a`
-  (nonce 24, ~0.0009 BNB). Verified. Post-deploy: `feeFor(10e18)` =
-  0.09e18, `feeFor(10001)` = 91 (ceiling holds).
+  `[token.approve(this, gross), pay(invoiceId, token, gross, merchant,
+  deadline, authSig)]`; the CONTRACT computes the 0.9% ceiling fee
+  (`feeFor`, wei-parity with the Algorand builder), pays the merchant net,
+  and accrues fees per token.
+  **REDEPLOYED 2026-07-31 (migration audit P1):** v1's replay guard traded
+  griefing for an honest double-charge (two payers of one invoice both
+  settled on distinct keys). v2 is SERVER-AUTHORIZED — the backend (the
+  sponsor KMS key = `paymentSigner`) signs an EIP-712
+  `Pay(invoiceId,payer,token,gross,merchant,deadline)`, and the guard is
+  GLOBAL `invoiceDone[invoiceId]`: un-grief-able (no forge-able signature)
+  AND exactly one settlement per invoice. Owner can rotate the signer
+  (`setPaymentSigner`). Creation tx
+  `0xc910369cea3736b6e5bac2bf644ee798277be928c42934db7d2e2feb812f51bc`
+  (nonce 34, ~0.0014 BNB). BscScan verified ("Pass - Verified"). Post-deploy
+  reads: `paymentSigner` = sponsor `0xf9f9…fc9D`, `owner` = Safe.
+  **v1 `0x1FAEFF…` is abandoned — do not use.**
 - **ConfioPayrollVault** — per-business cUSD+ share escrow with an
   on-chain delegate allowlist and EIP-712 delegate-signed payouts. The
   token's per-address freeze is honored through the escrow (audit P2:
