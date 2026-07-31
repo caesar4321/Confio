@@ -1906,6 +1906,179 @@ class Query(graphene.ObjectType):
             return 0
 
 
+# ═══════════════════ BSC payroll (ConfioPayrollVault) ═══════════════════
+# Phase 2 W3 of the cUSD phase-out: escrow + delegate-signed payouts on
+# BSC. Two mutation pairs — admin ops (business EOA, 7702 batch rebuilt
+# server-side from integer params) and payouts (delegate signs the
+# EIP-712 Payout digest with their OWN key; the KMS sponsor broadcasts).
+
+
+class BscPayrollCallType(graphene.ObjectType):
+    """One call of a business admin batch (server-built)."""
+    to = graphene.String()
+    value_wei = graphene.String()
+    data = graphene.String()
+
+
+class BscPayrollAuthorizationInput(graphene.InputObjectType):
+    """A signed EIP-7702 authorization tuple (first use only)."""
+    chain_id = graphene.Int(required=True)
+    address = graphene.String(required=True)
+    nonce = graphene.String(required=True)
+    y_parity = graphene.Int(required=True)
+    r = graphene.String(required=True)
+    s = graphene.String(required=True)
+
+
+class PrepareBscPayrollAdmin(graphene.Mutation):
+    """Business escrow ops: fund / withdraw / set_delegate. Returns the
+    canonical batch for the BUSINESS EOA to sign as one 7702 intent."""
+
+    class Arguments:
+        action = graphene.String(required=True, description="fund | withdraw | set_delegate")
+        amount = graphene.Decimal(required=False, description="USD, for fund/withdraw")
+        delegate_user_id = graphene.ID(required=False)
+        allowed = graphene.Boolean(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    calls = graphene.List(BscPayrollCallType)
+    shares = graphene.String()
+    delegate_address = graphene.String()
+
+    def mutate(self, info, action, amount=None, delegate_user_id=None, allowed=True):
+        from . import bsc_flow
+
+        jwt_ctx = get_jwt_business_context_with_validation(
+            info, required_permission='send_funds')
+        if not jwt_ctx:
+            return PrepareBscPayrollAdmin(success=False, error='permission_denied')
+        result = bsc_flow.prepare_bsc_payroll_admin(
+            info.context.user, jwt_ctx, action, amount=amount,
+            delegate_user_id=delegate_user_id, allowed=bool(allowed))
+        if not result.get('success'):
+            return PrepareBscPayrollAdmin(success=False, error=result.get('error'))
+        return PrepareBscPayrollAdmin(
+            success=True,
+            calls=[
+                BscPayrollCallType(to=c['to'], value_wei=c['value'], data=c['data'])
+                for c in result['calls']
+            ],
+            shares=result.get('shares'),
+            delegate_address=result.get('delegate_address'),
+        )
+
+
+class SubmitBscPayrollAdmin(graphene.Mutation):
+    """The business signature over the batch — rebuilt server-side from the
+    integer params, so tampered calldata simply fails signature recovery."""
+
+    class Arguments:
+        action = graphene.String(required=True)
+        shares = graphene.String(required=False)
+        delegate_address = graphene.String(required=False)
+        allowed = graphene.Boolean(required=False)
+        nonce = graphene.String(required=True, description="Delegate intent nonce (nonces())")
+        deadline = graphene.String(required=True, description="Unix seconds")
+        intent_signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
+        authorization = BscPayrollAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    authorization_required = graphene.Boolean()
+    transaction_hash = graphene.String()
+
+    def mutate(self, info, action, nonce, deadline, intent_signature,
+               shares=None, delegate_address='', allowed=True, authorization=None):
+        from . import bsc_flow
+
+        jwt_ctx = get_jwt_business_context_with_validation(
+            info, required_permission='send_funds')
+        if not jwt_ctx:
+            return SubmitBscPayrollAdmin(success=False, error='permission_denied')
+        result = bsc_flow.submit_bsc_payroll_admin(
+            info.context.user, jwt_ctx, action, nonce, deadline,
+            intent_signature, authorization=authorization, shares=shares,
+            delegate_address=delegate_address or '', allowed=bool(allowed))
+        return SubmitBscPayrollAdmin(
+            success=result.get('success', False),
+            error=result.get('error'),
+            authorization_required=result.get('authorization_required', False),
+            transaction_hash=result.get('transaction_hash'),
+        )
+
+
+class PrepareBscPayrollPayout(graphene.Mutation):
+    """Step 1 of a BSC payout: gates + eligibility branch server-side,
+    stores the exact Payout struct on the item, returns the EIP-712 digest
+    the executing delegate signs with their OWN personal EVM key."""
+
+    class Arguments:
+        payroll_item_id = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    digest = graphene.String()
+    deadline = graphene.Int()
+    redeem_to_usdt = graphene.Boolean()
+
+    def mutate(self, info, payroll_item_id):
+        from . import bsc_flow
+
+        jwt_ctx = get_jwt_business_context_with_validation(
+            info, required_permission='send_funds')
+        if not jwt_ctx:
+            return PrepareBscPayrollPayout(success=False, error='permission_denied')
+        item = PayrollItem.objects.filter(
+            internal_id=payroll_item_id, deleted_at__isnull=True,
+        ).select_related('run__business', 'recipient_user', 'recipient_account').first()
+        if not item:
+            return PrepareBscPayrollPayout(success=False, error='item_not_found')
+        result = bsc_flow.prepare_bsc_payroll_payout(info.context.user, jwt_ctx, item)
+        if not result.get('success'):
+            return PrepareBscPayrollPayout(success=False, error=result.get('error'))
+        return PrepareBscPayrollPayout(
+            success=True,
+            digest=result['digest'],
+            deadline=result['deadline'],
+            redeem_to_usdt=result['redeem_to_usdt'],
+        )
+
+
+class SubmitBscPayrollPayout(graphene.Mutation):
+    """Step 2: the delegate's signature over the STORED Payout. The server
+    recovers the signer, re-checks the on-chain allowlist, and broadcasts
+    payout() as a plain KMS-sponsor transaction."""
+
+    class Arguments:
+        payroll_item_id = graphene.String(required=True)
+        signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transaction_hash = graphene.String()
+
+    def mutate(self, info, payroll_item_id, signature):
+        from . import bsc_flow
+
+        jwt_ctx = get_jwt_business_context_with_validation(
+            info, required_permission='send_funds')
+        if not jwt_ctx:
+            return SubmitBscPayrollPayout(success=False, error='permission_denied')
+        item = PayrollItem.objects.filter(
+            internal_id=payroll_item_id, deleted_at__isnull=True,
+        ).select_related('run__business', 'recipient_user', 'recipient_account').first()
+        if not item:
+            return SubmitBscPayrollPayout(success=False, error='item_not_found')
+        result = bsc_flow.submit_bsc_payroll_payout(
+            info.context.user, jwt_ctx, item, signature)
+        return SubmitBscPayrollPayout(
+            success=result.get('success', False),
+            error=result.get('error'),
+            transaction_hash=result.get('transaction_hash'),
+        )
+
+
 class Mutation(graphene.ObjectType):
     create_payroll_run = CreatePayrollRun.Field()
     prepare_payroll_item_payout = PreparePayrollItemPayout.Field()
@@ -1919,3 +2092,8 @@ class Mutation(graphene.ObjectType):
     # Payroll recipients mutations to be added when ready
     create_payroll_recipient = CreatePayrollRecipient.Field()
     delete_payroll_recipient = DeletePayrollRecipient.Field()
+    # BSC payroll (ConfioPayrollVault)
+    prepare_bsc_payroll_admin = PrepareBscPayrollAdmin.Field()
+    submit_bsc_payroll_admin = SubmitBscPayrollAdmin.Field()
+    prepare_bsc_payroll_payout = PrepareBscPayrollPayout.Field()
+    submit_bsc_payroll_payout = SubmitBscPayrollPayout.Field()

@@ -35,6 +35,8 @@ class PayrollRun(SoftDeleteModel):
         ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin'),
+        ('CUSD_PLUS', 'Confío Dollar Plus'),
+        ('USDT', 'Tether USD (BSC)'),
     ]
 
     run_id = models.CharField(max_length=32, unique=True, default=generate_run_id, editable=False)

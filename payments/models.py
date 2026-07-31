@@ -33,7 +33,11 @@ class PaymentTransaction(SoftDeleteModel):
     TOKEN_TYPES = [
         ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
-        ('USDC', 'USD Coin')
+        ('USDC', 'USD Coin'),
+        # BSC dollar rails (Phase 2): what actually moved on-chain — the
+        # invoice itself stays dollar-denominated ('CUSD').
+        ('CUSD_PLUS', 'Confío Dollar Plus'),
+        ('USDT', 'Tether USD'),
     ]
 
     # Unique identifier for the payment transaction

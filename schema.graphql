@@ -5,18 +5,54 @@ type UserType {
   username: String!
   firstName: String!
   lastName: String!
-  email: String!
+  email: String
+  createdAt: DateTime!
 
   """User's country ISO code for phone number"""
   phoneCountry: UsersUserPhoneCountryChoices
-
-  """User's phone number without country code"""
   phoneNumber: String
+
+  """Provider where the wallet backup was last verified"""
+  backupProvider: UsersUserBackupProviderChoices
   isIdentityVerified: Boolean
+  isOtpVerified: Boolean
   lastVerifiedDate: DateTime
   verificationStatus: String
   accounts: [AccountType]
+  isStaff: Boolean
+  requiresBackupCompletion: Boolean
+
+  """
+  Which onboarding modal (if any) should the client render next: ICP > RATING > NONE
+  """
+  pendingModal: PendingModalEnum
+  confioIcpCapturedAt: DateTime
+  confioRatingPromptedAt: DateTime
+
+  """Referral tier: member, early_supporter, community_builder, embajador"""
+  statusTier: String
+
+  """Number of successful referrals"""
+  referralCount: Int
+
+  """Name of the next tier to unlock (null if max)"""
+  nextTierName: String
+
+  """Referrals still needed for next tier (0 if max)"""
+  nextTierReferralsNeeded: Int
+
+  """
+  Verified Badge: earned by having 1+ referral with claimable/claimed reward
+  """
+  isReferralVerified: Boolean
 }
+
+"""
+The `DateTime` scalar type represents a DateTime
+value as specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar DateTime
 
 """An enumeration."""
 enum UsersUserPhoneCountryChoices {
@@ -747,12 +783,20 @@ enum UsersUserPhoneCountryChoices {
   ZW
 }
 
-"""
-The `DateTime` scalar type represents a DateTime
-value as specified by
-[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
-"""
-scalar DateTime
+"""An enumeration."""
+enum UsersUserBackupProviderChoices {
+  """Google Drive"""
+  GOOGLE_DRIVE
+
+  """iCloud"""
+  ICLOUD
+}
+
+enum PendingModalEnum {
+  NONE
+  ICP
+  RATING
+}
 
 type AccountType {
   id: ID!
@@ -767,7 +811,15 @@ type AccountType {
 
   """Associated business for business accounts"""
   business: BusinessType
+
+  """Algorand address for this account"""
+  algorandAddress: String
   lastLoginAt: DateTime
+
+  """
+  Whether this account has migrated to V2 keyless wallet (server-side tracking)
+  """
+  isKeylessMigrated: Boolean!
   accountId: String
   displayName: String
   avatarLetter: String
@@ -1033,7 +1085,22 @@ type InfluencerReferralType {
 
   """Additional attribution data"""
   attributionData: JSONString!
+
+  """CONFIO asignado al referido (en unidades token)"""
+  rewardRefereeConfio: Decimal!
+
+  """CONFIO asignado al referidor (en unidades token)"""
+  rewardReferrerConfio: Decimal!
+
+  """Estado on-chain específico para el referido"""
+  refereeRewardStatus: AchievementsUserReferralRefereeRewardStatusChoices!
+
+  """Estado on-chain específico para el referidor"""
+  referrerRewardStatus: AchievementsUserReferralReferrerRewardStatusChoices!
   influencerUser: UserType
+  viewerRewardEventId: ID
+  referrerRewardEventId: ID
+  refereeRewardEventId: ID
 }
 
 """An enumeration."""
@@ -1049,6 +1116,42 @@ enum AchievementsUserReferralStatusChoices {
 
   """Inactivo"""
   INACTIVE
+}
+
+"""An enumeration."""
+enum AchievementsUserReferralRefereeRewardStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Elegible"""
+  ELIGIBLE
+
+  """Fallido"""
+  FAILED
+
+  """Omitido"""
+  SKIPPED
+
+  """Reclamado"""
+  CLAIMED
+}
+
+"""An enumeration."""
+enum AchievementsUserReferralReferrerRewardStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Elegible"""
+  ELIGIBLE
+
+  """Fallido"""
+  FAILED
+
+  """Omitido"""
+  SKIPPED
+
+  """Reclamado"""
+  CLAIMED
 }
 
 type TikTokViralShareType {
@@ -1142,7 +1245,9 @@ type UnifiedTransactionType {
   id: ID!
   transactionType: UsersUnifiedTransactionTableTransactionTypeChoices!
   amount: String!
-  tokenType: UsersUnifiedTransactionTableTokenTypeChoices!
+
+  """Token type (CUSD, USDC, etc)"""
+  tokenType: String
   status: UsersUnifiedTransactionTableStatusChoices!
 
   """Transaction hash on blockchain"""
@@ -1194,7 +1299,13 @@ type UnifiedTransactionType {
   """Payment transaction ID"""
   paymentTransactionId: String
 
-  """Conversion type (usdc_to_cusd or cusd_to_usdc)"""
+  """Standardized Internal ID (UUID)"""
+  internalId: String
+
+  """Source transaction idempotency key"""
+  idempotencyKey: String
+
+  """Conversion type (usdc_to_cusd, cusd_to_usdc)"""
   conversionType: String
 
   """Amount being converted from"""
@@ -1211,6 +1322,24 @@ type UnifiedTransactionType {
 
   """P2P Trade ID if this is an exchange transaction"""
   p2pTradeId: String
+
+  """Ramp direction (on_ramp/off_ramp)"""
+  rampDirection: String
+
+  """Ramp provider display name"""
+  rampProvider: String
+
+  """Ramp fiat-side amount"""
+  rampFiatAmount: String
+
+  """Ramp fiat-side currency"""
+  rampFiatCurrency: String
+
+  """Ramp-specific status (PENDING, PROCESSING, COMPLETED, etc)"""
+  rampStatus: String
+
+  """Payroll Item ID"""
+  itemId: String
 }
 
 """An enumeration."""
@@ -1220,6 +1349,9 @@ enum UsersUnifiedTransactionTableTransactionTypeChoices {
 
   """Payment"""
   PAYMENT
+
+  """Payroll"""
+  PAYROLL
 
   """Conversion"""
   CONVERSION
@@ -1233,20 +1365,11 @@ enum UsersUnifiedTransactionTableTransactionTypeChoices {
   """Presale Purchase"""
   PRESALE
 
+  """Ramp"""
+  RAMP
+
   """Humanitarian Aid"""
   HUMANITARIAN
-}
-
-"""An enumeration."""
-enum UsersUnifiedTransactionTableTokenTypeChoices {
-  """Confío Dollar"""
-  CUSD
-
-  """Confío Token"""
-  CONFIO
-
-  """USD Coin"""
-  USDC
 }
 
 """An enumeration."""
@@ -1308,6 +1431,7 @@ type SendTransactionType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
+  internalId: String!
 
   """User who sent the transaction (null for external deposits)"""
   senderUser: Web3AuthUserType
@@ -1343,7 +1467,7 @@ type SendTransactionType {
   memo: String!
   status: SendSendTransactionStatusChoices!
 
-  """Sui transaction digest (0x + 32 bytes, 66 hex characters total)"""
+  """Algorand transaction ID (52 chars; field kept at 66 for legacy rows)"""
   transactionHash: String
   errorMessage: String!
 
@@ -1397,6 +1521,15 @@ enum SendSendTransactionTokenTypeChoices {
 
   """USD Coin"""
   USDC
+
+  """ALGO"""
+  ALGO
+
+  """Confío Dollar Plus"""
+  CUSD_PLUS
+
+  """Tether USD"""
+  USDT
 }
 
 """An enumeration."""
@@ -1428,7 +1561,7 @@ type InvoiceType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
-  invoiceId: String!
+  internalId: String!
 
   """User who created this invoice (business owner or cashier)"""
   createdByUser: Web3AuthUserType!
@@ -1455,6 +1588,7 @@ type InvoiceType {
   isExpired: Boolean
   qrCodeData: String
   paymentTransactions: [PaymentTransactionType]
+  currency: String
 }
 
 """An enumeration."""
@@ -1498,7 +1632,7 @@ type PaymentTransactionType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
-  paymentTransactionId: String!
+  internalId: String!
 
   """User who initiated the payment"""
   payerUser: Web3AuthUserType!
@@ -1570,6 +1704,12 @@ enum PaymentsPaymentTransactionTokenTypeChoices {
 
   """USD Coin"""
   USDC
+
+  """Confío Dollar Plus"""
+  CUSD_PLUS
+
+  """Tether USD"""
+  USDT
 }
 
 """An enumeration."""
@@ -1594,6 +1734,252 @@ enum PaymentsPaymentTransactionStatusChoices {
 
   """Failed"""
   FAILED
+}
+
+type RampAvailabilityType {
+  countryCode: String
+  countryName: String
+  fiatCurrency: String
+  onRampEnabled: Boolean
+  offRampEnabled: Boolean
+  onRampMethods: [RampPaymentMethodType]
+  offRampMethods: [RampPaymentMethodType]
+  tokenSymbol: String
+  networkSymbol: String
+  networkDisplay: String
+  assetNote: String
+  quoteDisclaimer: String
+}
+
+type RampPaymentMethodCatalogType {
+  id: ID!
+
+  """Provider code, e.g. WIREPE or QRI-PE"""
+  code: String!
+  countryCode: String
+  displayName: String
+  providerType: String
+  description: String!
+  icon: String!
+  isActive: Boolean
+  displayOrder: Int
+  country: CountryType
+  bank: BankType
+  requiresPhone: Boolean
+  requiresEmail: Boolean
+  requiresAccountNumber: Boolean
+  requiresIdentification: Boolean
+  supportsOnRamp: Boolean
+  supportsOffRamp: Boolean
+  fieldSchema: JSONString
+}
+
+type CountryType {
+  id: ID!
+
+  """ISO 3166-1 alpha-2 country code (e.g., VE, CO, AR)"""
+  code: String!
+
+  """Country name"""
+  name: String!
+
+  """Country flag emoji (e.g., 🇻🇪)"""
+  flagEmoji: String
+
+  """Currency code (e.g., VES, COP, ARS)"""
+  currencyCode: String!
+
+  """Currency symbol (e.g., Bs., $)"""
+  currencySymbol: String!
+
+  """Whether bank transfers require recipient ID number"""
+  requiresIdentification: Boolean!
+
+  """Local name for ID document (e.g., Cédula, DNI, RUT)"""
+  identificationName: String!
+
+  """Expected format for ID (e.g., 'V-12345678', '12345678-9')"""
+  identificationFormat: String
+
+  """Typical account number length"""
+  accountNumberLength: Int!
+
+  """Whether country supports phone-based payments"""
+  supportsPhonePayments: Boolean!
+
+  """Whether Confío operates in this country"""
+  isActive: Boolean!
+
+  """Display order in lists (lower numbers first)"""
+  displayOrder: Int!
+}
+
+type BankType {
+  id: ID!
+
+  """Country where this bank operates"""
+  country: CountryType!
+
+  """Bank code/identifier"""
+  code: String!
+
+  """Bank name"""
+  name: String!
+
+  """Short/common name for the bank"""
+  shortName: String
+
+  """Whether bank supports checking accounts"""
+  supportsChecking: Boolean!
+
+  """Whether bank supports savings accounts"""
+  supportsSavings: Boolean!
+
+  """Whether bank supports payroll accounts"""
+  supportsPayroll: Boolean!
+
+  """Whether this bank is currently supported"""
+  isActive: Boolean!
+
+  """Display order in lists (lower numbers first)"""
+  displayOrder: Int!
+  accountTypeChoices: [String]
+}
+
+type RampPaymentMethodType {
+  paymentMethodId: ID
+  code: String
+  displayName: String
+  description: String
+  providerType: String
+  icon: String
+  requiresPhone: Boolean
+  requiresEmail: Boolean
+  requiresAccountNumber: Boolean
+  requiresIdentification: Boolean
+  supportsOnRamp: Boolean
+  supportsOffRamp: Boolean
+  fiatCurrency: String
+  onRampMinAmount: String
+  onRampMaxAmount: String
+  offRampMinAmount: String
+  offRampMaxAmount: String
+}
+
+type RampQuoteType {
+  direction: String
+  countryCode: String
+  fiatCurrency: String
+  amountIn: String
+  amountOut: String
+  exchangeRate: String
+  feeAmount: String
+  feeCurrency: String
+  networkFeeAmount: String
+  networkFeeCurrency: String
+  rateDisplay: String
+  totalChangeDisplay: String
+  tokenSymbol: String
+  networkSymbol: String
+  networkDisplay: String
+  assetNote: String
+}
+
+type RampOrderType {
+  success: Boolean
+  error: String
+  orderId: String
+  direction: String
+  countryCode: String
+  fiatCurrency: String
+  paymentMethodCode: String
+  paymentMethodDisplay: String
+  amountIn: String
+  amountOut: String
+  totalChangeDisplay: String
+  rateDisplay: String
+  nextStep: String
+  nextActionUrl: String
+  paymentDetails: JSONString
+  instructionSnapshot: JSONString
+}
+
+type RampOrderStatusType {
+  success: Boolean
+  error: String
+  orderId: String
+  status: String
+  statusDetails: String
+  nextActionUrl: String
+  paymentDetails: JSONString
+  instructionSnapshot: JSONString
+  instructionSnapshotCreated: JSONString
+  instructionSnapshotLatest: JSONString
+  providerPayloadCreated: JSONString
+  providerPayloadLatest: JSONString
+}
+
+type RampUserAddressType {
+  addressStreet: String
+  addressNeighborhood: String
+  addressCity: String
+  addressState: String
+  addressZipCode: String
+  addressCountry: String
+  countryName: String
+  economicActivity: String
+  authEmail: String
+  isComplete: Boolean
+  updatedAt: DateTime
+}
+
+type PendingAutoSwapType {
+  id: ID!
+  assetType: BlockchainPendingAutoSwapAssetTypeChoices!
+
+  """"""
+  amountMicro: BigInt!
+  amountDecimal: Decimal!
+  sourceAddress: String!
+  sourceTxHash: String!
+  status: BlockchainPendingAutoSwapStatusChoices!
+  errorMessage: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""An enumeration."""
+enum BlockchainPendingAutoSwapAssetTypeChoices {
+  """USDC"""
+  USDC
+
+  """ALGO"""
+  ALGO
+}
+
+"""
+The `BigInt` scalar type represents non-fractional whole numeric values.
+`BigInt` is not constrained to 32-bit like the `Int` type and thus is a less
+compatible type.
+"""
+scalar BigInt
+
+"""An enumeration."""
+enum BlockchainPendingAutoSwapStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Submitted"""
+  SUBMITTED
+
+  """Completed"""
+  COMPLETED
+
+  """Failed"""
+  FAILED
+
+  """Cancelled"""
+  CANCELLED
 }
 
 type P2POfferType {
@@ -1672,6 +2058,7 @@ type P2PTradeType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
+  internalId: String
   offer: P2POfferType
 
   """DEPRECATED: Use buyer_user or buyer_business instead"""
@@ -1886,13 +2273,6 @@ type DisputeEvidenceType {
   uploadedAt: DateTime!
 }
 
-"""
-The `BigInt` scalar type represents non-fractional whole numeric values.
-`BigInt` is not constrained to 32-bit like the `Int` type and thus is a less
-compatible type.
-"""
-scalar BigInt
-
 """An enumeration."""
 enum P2PExchangeP2PDisputeEvidenceSourceChoices {
   """Mobile App"""
@@ -2029,78 +2409,6 @@ type P2PPaymentMethodType {
   country: CountryType
 }
 
-type BankType {
-  id: ID!
-
-  """Country where this bank operates"""
-  country: CountryType!
-
-  """Bank code/identifier"""
-  code: String!
-
-  """Bank name"""
-  name: String!
-
-  """Short/common name for the bank"""
-  shortName: String
-
-  """Whether bank supports checking accounts"""
-  supportsChecking: Boolean!
-
-  """Whether bank supports savings accounts"""
-  supportsSavings: Boolean!
-
-  """Whether bank supports payroll accounts"""
-  supportsPayroll: Boolean!
-
-  """Whether this bank is currently supported"""
-  isActive: Boolean!
-
-  """Display order in lists (lower numbers first)"""
-  displayOrder: Int!
-  accountTypeChoices: [String]
-}
-
-type CountryType {
-  id: ID!
-
-  """ISO 3166-1 alpha-2 country code (e.g., VE, CO, AR)"""
-  code: String!
-
-  """Country name"""
-  name: String!
-
-  """Country flag emoji (e.g., 🇻🇪)"""
-  flagEmoji: String
-
-  """Currency code (e.g., VES, COP, ARS)"""
-  currencyCode: String!
-
-  """Currency symbol (e.g., Bs., $)"""
-  currencySymbol: String!
-
-  """Whether bank transfers require recipient ID number"""
-  requiresIdentification: Boolean!
-
-  """Local name for ID document (e.g., Cédula, DNI, RUT)"""
-  identificationName: String!
-
-  """Expected format for ID (e.g., 'V-12345678', '12345678-9')"""
-  identificationFormat: String
-
-  """Typical account number length"""
-  accountNumberLength: Int!
-
-  """Whether country supports phone-based payments"""
-  supportsPhonePayments: Boolean!
-
-  """Whether Confío operates in this country"""
-  isActive: Boolean!
-
-  """Display order in lists (lower numbers first)"""
-  displayOrder: Int!
-}
-
 type P2PUserStatsType {
   id: ID!
 
@@ -2174,6 +2482,9 @@ enum ExchangeRatesExchangeRateSourceChoices {
   """CurrencyLayer"""
   CURRENCYLAYER
 
+  """Binance P2P"""
+  BINANCE_P2P
+
   """Bluelytics (Argentina)"""
   BLUELYTICS
 
@@ -2190,7 +2501,7 @@ enum ExchangeRatesExchangeRateSourceChoices {
 """GraphQL type for Conversion model"""
 type ConversionType {
   id: ID!
-  conversionId: UUID!
+  internalId: UUID!
 
   """User who initiated the conversion (if personal account)"""
   actorUser: Web3AuthUserType
@@ -2244,6 +2555,9 @@ enum ConversionConversionConversionTypeChoices {
 
   """cUSD to USDC"""
   CUSD_TO_USDC
+
+  """USDC to ALGO"""
+  USDC_TO_ALGO
 }
 
 """An enumeration."""
@@ -2270,7 +2584,7 @@ enum ConversionConversionStatusChoices {
 """GraphQL type for USDCDeposit model"""
 type USDCDepositType {
   id: ID!
-  depositId: UUID!
+  internalId: String
 
   """User who made the deposit (if personal account)"""
   actorUser: Web3AuthUserType
@@ -2329,7 +2643,7 @@ enum UsdcTransactionsUSDCDepositStatusChoices {
 """GraphQL type for USDCWithdrawal model"""
 type USDCWithdrawalType {
   id: ID!
-  withdrawalId: UUID!
+  internalId: String
 
   """User who made the withdrawal (if personal account)"""
   actorUser: Web3AuthUserType
@@ -2434,6 +2748,7 @@ type UnifiedUSDCTransactionType {
   updatedAt: DateTime!
   completedAt: DateTime
   transactionHash: String
+  internalId: String
   formattedTitle: String
   iconName: String
   iconColor: String
@@ -2501,6 +2816,8 @@ type IdentityVerificationType {
 
   """Date and time when verification was approved"""
   verifiedAt: DateTime
+  statusDetail: String
+  requiresManualReview: Boolean
 }
 
 """An enumeration."""
@@ -2613,6 +2930,7 @@ type PresalePhaseType {
 
 type PresalePurchaseType {
   id: ID!
+  internalId: String
   user: Web3AuthUserType!
   phase: PresalePhaseType!
   cusdAmount: Decimal!
@@ -2625,9 +2943,34 @@ type PresalePurchaseType {
   """Blockchain transaction hash"""
   transactionHash: String
   fromAddress: String
+
+  """Terms version accepted by the user at purchase time"""
+  acceptedTermsVersion: String!
+
+  """Timestamp when the user accepted the presale terms"""
+  acceptedTermsAt: DateTime
+
+  """Client IP recorded when the user accepted the presale terms"""
+  acceptedTermsIp: String
+
+  """User agent recorded when the user accepted the presale terms"""
+  acceptedTermsUserAgent: String!
+
+  """User checked 'No vivo en Estados Unidos' at purchase time"""
+  attestedNotUsResident: Boolean!
+
+  """Timestamp of the 'No vivo en Estados Unidos' self-attestation"""
+  attestedNotUsAt: DateTime
+
+  """ISO country resolved from the client IP at purchase time"""
+  ipCountry: String!
+
+  """Which balance funded this purchase"""
+  fundingSource: PresalePresalePurchaseFundingSourceChoices!
   notes: String!
   createdAt: DateTime!
   completedAt: DateTime
+  unifiedTransaction: UnifiedTransactionType
 }
 
 """An enumeration."""
@@ -2648,6 +2991,18 @@ enum PresalePresalePurchaseStatusChoices {
   REFUNDED
 }
 
+"""An enumeration."""
+enum PresalePresalePurchaseFundingSourceChoices {
+  """Legacy cUSD (Algorand)"""
+  ALGORAND_CUSD
+
+  """Confío Dollar (USDT-BSC)"""
+  DIRECT_CUSD
+
+  """Redeemed from cUSD+"""
+  CUSD_PLUS_REDEEM
+}
+
 type PresaleStatsType {
   id: ID!
   phase: PresalePhaseType!
@@ -2666,6 +3021,275 @@ type UserPresaleLimitType {
   lastPurchaseAt: DateTime
 }
 
+type HumanitarianCampaignType {
+  publicId: String!
+  slug: String!
+  title: String!
+  countryCode: String!
+  description: String!
+
+  """Title shown above the volunteer application form."""
+  volunteerSectionTitle: String!
+
+  """Body copy shown above the volunteer application form."""
+  volunteerSectionSubtitle: String!
+
+  """Placeholder for the volunteer service area input."""
+  volunteerServiceAreaPlaceholder: String!
+
+  """Placeholder for the volunteer notes input."""
+  volunteerNotesPlaceholder: String!
+
+  """Submit button label for volunteer applications."""
+  volunteerCtaLabel: String!
+  status: HumanitarianHumanitarianCampaignStatusChoices!
+  goalAmount: Decimal!
+  totalDonated: Decimal!
+  totalReleased: Decimal!
+  donationCount: Int!
+  releaseCount: Int!
+  vaultAddress: String!
+  updatedAt: DateTime!
+  releases(limit: Int = 20): [HumanitarianReleaseType]
+  donations(limit: Int = 20): [HumanitarianDonationType]
+}
+
+"""An enumeration."""
+enum HumanitarianHumanitarianCampaignStatusChoices {
+  """Draft"""
+  DRAFT
+
+  """Active"""
+  ACTIVE
+
+  """Paused"""
+  PAUSED
+
+  """Closed"""
+  CLOSED
+}
+
+type HumanitarianDonationType {
+  publicId: String!
+  donorDisplayName: String!
+  amount: Decimal!
+  status: HumanitarianHumanitarianDonationStatusChoices!
+  transactionHash: String!
+  donatedAt: DateTime!
+  donorCountryCode: String
+}
+
+"""An enumeration."""
+enum HumanitarianHumanitarianDonationStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Confirmed"""
+  CONFIRMED
+
+  """Failed"""
+  FAILED
+}
+
+type HumanitarianReleaseType {
+  publicId: String!
+  amount: Decimal!
+  status: HumanitarianHumanitarianReleaseStatusChoices!
+  purpose: String!
+  transactionHash: String!
+  publicNote: String!
+  releasedAt: DateTime
+  createdAt: DateTime!
+  proofLinks: [HumanitarianProofLinkType]
+  volunteerName: String
+}
+
+"""An enumeration."""
+enum HumanitarianHumanitarianReleaseStatusChoices {
+  """Draft"""
+  DRAFT
+
+  """Submitted"""
+  SUBMITTED
+
+  """Confirmed"""
+  CONFIRMED
+
+  """Failed"""
+  FAILED
+
+  """Proof pending"""
+  PROOF_PENDING
+
+  """Proof published"""
+  PROOF_PUBLISHED
+
+  """Cancelled"""
+  CANCELLED
+}
+
+type HumanitarianProofLinkType {
+  url: String!
+  title: String!
+
+  """TikTok, Instagram, YouTube, X, etc."""
+  platform: String!
+  position: Int!
+}
+
+type HumanitarianVolunteerApplicationType {
+  publicId: String!
+  status: HumanitarianHumanitarianVolunteerApplicationStatusChoices!
+  serviceArea: String!
+  localPhone: String!
+  notes: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  hasVerifiedCountryKyc: Boolean
+  hasVerifiedVenezuelanKyc: Boolean
+}
+
+"""An enumeration."""
+enum HumanitarianHumanitarianVolunteerApplicationStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Approved"""
+  APPROVED
+
+  """Rejected"""
+  REJECTED
+
+  """Suspended"""
+  SUSPENDED
+}
+
+type PayrollRunType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  runId: String!
+
+  """Business owning this payroll run"""
+  business: BusinessType!
+
+  """User who created the payroll run"""
+  createdByUser: Web3AuthUserType!
+  tokenType: PayrollPayrollRunTokenTypeChoices!
+
+  """Cap window length in seconds"""
+  periodSeconds: BigInt
+
+  """Optional gross cap per window (same decimals as token)"""
+  capAmount: Decimal
+  grossTotal: Decimal!
+  netTotal: Decimal!
+  feeTotal: Decimal!
+  status: PayrollPayrollRunStatusChoices!
+  scheduledAt: DateTime
+  items: [PayrollItemType]
+}
+
+"""An enumeration."""
+enum PayrollPayrollRunTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+
+  """USD Coin"""
+  USDC
+
+  """Confío Dollar Plus"""
+  CUSD_PLUS
+
+  """Tether USD (BSC)"""
+  USDT
+}
+
+"""An enumeration."""
+enum PayrollPayrollRunStatusChoices {
+  """Draft"""
+  DRAFT
+
+  """Ready"""
+  READY
+
+  """Partial"""
+  PARTIAL
+
+  """Completed"""
+  COMPLETED
+
+  """Cancelled"""
+  CANCELLED
+}
+
+type PayrollItemType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  internalId: String!
+  run: PayrollRunType!
+  recipientUser: Web3AuthUserType!
+  recipientAccount: AccountType!
+  tokenType: PayrollPayrollItemTokenTypeChoices!
+  netAmount: Decimal!
+  grossAmount: Decimal!
+  feeAmount: Decimal!
+  status: PayrollPayrollItemStatusChoices!
+
+  """Blockchain transaction hash"""
+  transactionHash: String!
+
+  """Unsigned transactions and metadata"""
+  blockchainData: JSONString
+
+  """Delegate who executed the payout"""
+  executedByUser: Web3AuthUserType
+  executedAt: DateTime
+}
+
+"""An enumeration."""
+enum PayrollPayrollItemTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+
+  """USD Coin"""
+  USDC
+
+  """Confío Dollar Plus"""
+  CUSD_PLUS
+
+  """Tether USD (BSC)"""
+  USDT
+}
+
+"""An enumeration."""
+enum PayrollPayrollItemStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Prepared"""
+  PREPARED
+
+  """Submitted"""
+  SUBMITTED
+
+  """Confirmed"""
+  CONFIRMED
+
+  """Failed"""
+  FAILED
+
+  """Cancelled"""
+  CANCELLED
+}
+
 type Query {
   algorandBalance(address: String): Float
   algorandTransactions(limit: Int): [JSONString]
@@ -2673,29 +3297,124 @@ type Query {
   checkSponsorHealth: CheckSponsorHealthQuery
   p2pTradeBoxExists(tradeId: String!): Boolean
   inviteReceiptForPhone(phone: String!, phoneCountry: String): InviteReceiptType
+  allPendingInvitesForPhone(phone: String!, phoneCountry: String): [PendingInviteType]
+  pendingAutoSwap(accountId: ID): PendingAutoSwapType
+  messageInbox(contextKey: String): MessageInboxType
+  messageInboxUnreadCount(contextKey: String): Int
+  messageChannelThread(channelId: String!, offset: Int, limit: Int, contextKey: String): MessageChannelThreadPageType
+  discoverPost(contentItemId: ID!): DiscoverFeedItemType
+  discoverFeed(offset: Int, limit: Int): DiscoverFeedPageType
+  portalSupportConversations(status: String, search: String): [PortalSupportConversationType]
+  portalSupportConversation(conversationId: ID!): PortalSupportConversationType
+  portalContentItems(channelSlug: String, status: String): [PortalContentItemType]
   notifications(notificationType: NotificationTypeEnum, isRead: Boolean, accountId: String, businessId: String, before: String, after: String, first: Int, last: Int): NotificationConnection
   notification(id: ID!): NotificationType
   notificationPreferences: NotificationPreferenceType
-  unreadNotificationCount: Int
+  unreadNotificationCount(contextKey: String): Int
   fcmDeviceTokens: [FCMDeviceTokenType]
+  humanitarianCampaign(slug: String!): HumanitarianCampaignType
+  humanitarianDonations(slug: String!, offset: Int = 0, limit: Int = 15): [HumanitarianDonationType]
+  activeHumanitarianCampaigns: [HumanitarianCampaignType]
+  activeVenezuelaHumanitarianCampaign: HumanitarianCampaignType
+  myHumanitarianVolunteerApplication(slug: String!): HumanitarianVolunteerApplicationType
   isPresaleActive: Boolean
   isPresaleClaimsUnlocked: Boolean
+
+  """
+  Live CONFIO price from the BSC presale curve (cached ~60s); falls back to the last phase price when the vault is unreachable
+  """
+  confioCurrentPrice: Decimal
+
+  """Moving curve price + recaudado milestones for the presale screens"""
+  presaleCurveStats: PresaleCurveStatsType
+
+  """Which chain the purchase flow runs on: 'algorand' (legacy) or 'bsc'"""
+  presaleChain: String
   activePresalePhase: PresalePhaseType
   allPresalePhases: [PresalePhaseType]
   presalePhase(phaseNumber: Int!): PresalePhaseType
   myPresalePurchases: [PresalePurchaseType]
   myPresaleLimit(phaseNumber: Int!): UserPresaleLimitType
   myPresaleOnchainInfo: PresaleOnchainInfo
+  presaleTelegramGroup: PresaleTelegramGroupType
   myDevices: [UserDeviceType]
   myKycStatus: IdentityVerificationType
   myPersonalKycStatus: IdentityVerificationType
   myPersonalVerifiedKyc: IdentityVerificationType
   businessKycStatus(businessId: ID!): IdentityVerificationType
+
+  """Directory of financieras in a supported country"""
+  financieras(
+    state: String
+    city: String
+    neighborhood: String
+
+    """
+    Defaults to the user's phone country; override to browse another country
+    """
+    countryCode: String
+    search: String
+
+    """'rating' or 'rate'"""
+    sortBy: String = "rating"
+    limit: Int = 50
+    offset: Int = 0
+  ): [FinancieraType]
+  financiera(id: ID!): FinancieraType
+  myFinancieras: [FinancieraType]
+
+  """Distinct location values for the cascade filter"""
+  financieraLocationOptions(
+    """'state', 'city' or 'neighborhood'"""
+    level: String!
+    state: String
+    city: String
+
+    """Defaults to the user's country; override for registration autocomplete"""
+    countryCode: String
+  ): [String]
+
+  """ISO 3166-2 states/provinces for the registration picker"""
+  countrySubdivisions(countryCode: String!): [CountrySubdivisionType]
+
+  """Recent confirmed USDC outflows not yet backing a review"""
+  myReviewableUsdcSends: [ReviewableUsdcSendType]
+
+  """
+  Countries with visible financieras and their listing counts, so the country picker can pin non-empty countries first
+  """
+  financieraCountries: [FinancieraCountryType]
   usdcDeposits(limit: Int): [USDCDepositType]
   usdcWithdrawals(limit: Int): [USDCWithdrawalType]
   unifiedUsdcTransactions(limit: Int, offset: Int, transactionType: String): [UnifiedUSDCTransactionType]
+  cusdPlusSummary: CusdPlusSummaryType
+  cusdPlusMovements(limit: Int = 20, offset: Int = 0): [CusdPlusMovementType!]
+  cusdPlusConvertParams: CusdPlusConvertParamsType
+  cusdPlusConversionsInFlight: [CusdPlusConversionType!]
+  gmMarket: GmMarketType
+
+  """
+  The JWT account's tokenized-stock positions (Multicall3 universe scan — chain is the registry)
+  """
+  gmHoldings: [GmHoldingType!]
+  gmOhlc(
+    symbol: String!
+
+    """1D | 1M | 3M | 6M | 1Y | MAX"""
+    range: String = "3M"
+  ): [GmCandleType!]
+
+  """
+  Read-only BSC RPC proxy (allowlisted methods) — keeps user IPs off public nodes
+  """
+  bscRpc(
+    method: String!
+
+    """JSON-encoded params array"""
+    params: String!
+  ): BscRpcResult
   conversions(limit: Int, status: String, conversionType: String): [ConversionType]
-  conversion(conversionId: String): ConversionType
+  conversion(internalId: String): ConversionType
   currentExchangeRate(sourceCurrency: String = "VES", targetCurrency: String = "USD", rateType: String = "parallel"): Decimal
   exchangeRateWithFallback(sourceCurrency: String = "VES", targetCurrency: String = "USD"): Decimal
   exchangeRates(sourceCurrency: String = "VES", targetCurrency: String = "USD", rateType: String, limit: Int = 10): [ExchangeRateType]
@@ -2706,10 +3425,38 @@ type Query {
   p2pTrade(id: ID!): P2PTradeType
   p2pTradeMessages(tradeId: ID!): [P2PMessageType]
   p2pPaymentMethods(countryCode: String): [P2PPaymentMethodType]
+  payrollRuns: [PayrollRunType]
+
+  """Pending payroll items for delegate user"""
+  pendingPayrollItems: [PayrollItemType]
+
+  """Saved payroll recipients for the current business"""
+  payrollRecipients: [PayrollRecipientType]
+
+  """Delegates for the current business account"""
+  payrollDelegates: [String]
+
+  """Balance of payroll vault for this business (token units)"""
+  payrollVaultBalance: Float
+  verifyPayrollTransaction(transactionHash: String!): VerifiedPayrollTransactionType
+
+  """Public, unauthenticated; cached 10 min"""
+  landingStats: LandingStatsType
+  koyweBankInfo(countryCode: String!): [KoyweBankInfoType]
+  rampPaymentMethods(countryCode: String, direction: String, includeInactive: Boolean): [RampPaymentMethodCatalogType]
+  rampAvailability(countryCode: String): RampAvailabilityType
+  rampQuote(direction: String!, amount: String!, countryCode: String, fiatCurrency: String, paymentMethodCode: String): RampQuoteType
+  rampOrderStatus(orderId: String!, countryCode: String): RampOrderStatusType
+  pendingRampTransaction(provider: String!, direction: String): PendingRampTransactionType
+  myRampAddress: RampUserAddressType
+  economicActivities(countryCode: String): [EconomicActivityOptionType]
+  rampAddressRequirements(countryCode: String): RampAddressRequirementType
   invoice(invoiceId: String): InvoiceType
   invoices: [InvoiceType]
   paymentTransactions: [PaymentTransactionType]
+  paymentTransaction(id: ID!): PaymentTransactionType
   paymentTransactionsWithFriend(friendUserId: ID!, limit: Int): [PaymentTransactionType]
+  resolveInvoice(invoiceId: String!): InvoiceType
   sendTransactions: [SendTransactionType]
   sendTransaction(id: ID!): SendTransactionType
   sendTransactionsWithFriend(friendUserId: ID, friendPhone: String, limit: Int): [SendTransactionType]
@@ -2783,7 +3530,9 @@ type Query {
   myConfioTransactions(limit: Int, offset: Int): [ConfioRewardTransactionType]
   userTiktokShares(status: String): [TikTokViralShareType]
   myReferralRewards(status: String): [ReferralRewardEventType]
+  myReferrals(status: String, first: Int, offset: Int): [InfluencerReferralType]
   statsSummary: StatsSummaryType
+  verifyTransaction(transactionHash: String!): VerifiedTransactionType
 }
 
 """Query to check which assets a user is opted into"""
@@ -2807,6 +3556,128 @@ type InviteReceiptType {
   assetId: String
   amount: Int
   timestamp: Int
+  invitationId: String
+}
+
+"""Type returned by all_pending_invites_for_phone query"""
+type PendingInviteType {
+  invitationId: String
+  assetId: String
+  amount: Int
+  timestamp: Int
+}
+
+type MessageInboxType {
+  totalUnreadCount: Int!
+  channels: [MessageChannelType]!
+}
+
+type MessageChannelType {
+  id: String!
+  name: String!
+  subtitle: String!
+  preview: String!
+  time: String!
+  unreadCount: Int!
+  isMuted: Boolean!
+  messages: [MessageThreadItemType]!
+}
+
+type MessageThreadItemType {
+  id: ID!
+  type: String!
+  isPinned: Boolean!
+  occurredAt: DateTime!
+  tag: String
+  title: String
+  body: String
+  text: String
+  time: String!
+  link: String
+  platforms: [String]
+  platformLinks: [PlatformLinkType]
+  imageUrl: String
+  reactionSummary: [MessageReactionType]
+  viewerReaction: String
+  canReact: Boolean!
+  senderType: String
+  senderName: String
+}
+
+type PlatformLinkType {
+  platform: String!
+  url: String!
+}
+
+type MessageReactionType {
+  emoji: String!
+  count: Int!
+}
+
+type MessageChannelThreadPageType {
+  channel: MessageChannelType!
+  hasMore: Boolean!
+}
+
+type DiscoverFeedItemType {
+  id: ID!
+  type: String!
+  tag: String!
+  tagColor: String!
+  title: String!
+  body: String!
+  time: String!
+  thumbnail: Boolean!
+  platformLinks: [PlatformLinkType]!
+  imageUrl: String
+  blocks: JSONString
+  reactionSummary: [MessageReactionType]!
+  viewerReaction: String
+  canReact: Boolean!
+}
+
+type DiscoverFeedPageType {
+  items: [DiscoverFeedItemType]!
+  hasMore: Boolean!
+}
+
+type PortalSupportConversationType {
+  id: ID!
+  customerName: String!
+  customerEmail: String
+  contextLabel: String!
+  status: String!
+  assignedToName: String
+  lastMessageAt: DateTime
+  lastPreview: String!
+  unreadCount: Int!
+  messages: [PortalSupportMessageType]!
+}
+
+type PortalSupportMessageType {
+  id: ID!
+  senderType: String!
+  senderName: String!
+  body: String!
+  createdAt: DateTime!
+}
+
+type PortalContentItemType {
+  id: ID!
+  channelSlug: String!
+  channelTitle: String!
+  itemType: String!
+  status: String!
+  title: String
+  body: String
+  tag: String
+  publishedAt: DateTime
+  visibilityPolicy: String!
+  sendPush: Boolean!
+  sendInApp: Boolean!
+  pushSentAt: DateTime
+  surfaces: [String]!
+  metadata: JSONString
 }
 
 """Pagination connection for notifications"""
@@ -2887,6 +3758,8 @@ enum NotificationTypeEnum {
   PAYMENT_RECEIVED
   PAYMENT_SENT
   INVOICE_PAID
+  PAYROLL_RECEIVED
+  PAYROLL_SENT
   P2P_OFFER_RECEIVED
   P2P_OFFER_ACCEPTED
   P2P_OFFER_REJECTED
@@ -2905,6 +3778,10 @@ enum NotificationTypeEnum {
   USDC_WITHDRAWAL_PENDING
   USDC_WITHDRAWAL_COMPLETED
   USDC_WITHDRAWAL_FAILED
+  RAMP_PENDING
+  RAMP_PROCESSING
+  RAMP_COMPLETED
+  RAMP_FAILED
   ACCOUNT_VERIFIED
   SECURITY_ALERT
   NEW_LOGIN
@@ -2926,6 +3803,7 @@ enum NotificationTypeEnum {
   REFERRAL_REWARD_READY
   REFERRAL_REWARD_CLAIMED
   PRESALE_PURCHASE_CONFIRMED
+  PRESALE_AVAILABLE
 }
 
 """GraphQL type for NotificationPreference model"""
@@ -2975,11 +3853,1134 @@ enum NotificationsFCMDeviceTokenDeviceTypeChoices {
   WEB
 }
 
+"""
+The continuous-curve presale story in one object: a moving price
+between locked endpoints, recaudado-axis progress with absolute
+milestones (never a % of the full sale), and social proof.
+"""
+type PresaleCurveStatsType {
+  currentPrice: Decimal
+  startPrice: Decimal
+  finalPrice: Decimal
+  totalRaisedUsd: Decimal
+  nextMilestoneUsd: Decimal
+  participants: Int
+}
+
 type PresaleOnchainInfo {
   purchased: Float
   claimed: Float
   claimable: Float
   locked: Boolean
+}
+
+type PresaleTelegramGroupType {
+  enabled: Boolean
+  url: String
+}
+
+type FinancieraType {
+  id: ID!
+  name: String!
+
+  """ISO country code, e.g. VE, AR"""
+  countryCode: FinancierasFinancieraCountryCodeChoices!
+
+  """Estado / provincia"""
+  state: String!
+  city: String!
+
+  """Barrio / zona"""
+  neighborhood: String!
+
+  """Digits-only E.164 without +, e.g. 584141234567"""
+  whatsapp: String!
+
+  """Mandatory: accepts USDC over the Algorand network"""
+  supportsUsdcAlgorand: Boolean!
+
+  """Has a physical storefront/local users can visit"""
+  hasPhysicalLocation: Boolean!
+
+  """Can deliver USD cash"""
+  cashUsd: Boolean!
+
+  """Can deliver local currency in cash (Bs., COP, S/, ...)"""
+  cashLocal: Boolean!
+
+  """
+  Can deliver local currency digitally (bank transfer / pago móvil / Nequi / Yape ...)
+  """
+  digitalLocal: Boolean!
+
+  """Helps newcomers use the Confío app"""
+  helpsWithConfio: Boolean!
+
+  """Offers home/office delivery (a domicilio)"""
+  homeService: Boolean!
+  openWeekends: Boolean!
+
+  """Unlisted from the directory when False (moderation switch)"""
+  isActive: Boolean!
+  createdAt: DateTime!
+  avgRating: Float
+  reviewCount: Int
+
+  """
+  Sell-side reviews feeding the public rate; buy-side reviews count only for stars
+  """
+  rateReviewCount: Int
+
+  """
+  Median USD received per 100 USDC sent, derived from reviews; null until 3+ distinct verified users have reviewed
+  """
+  avgReceivedPer100: Float
+  isVerified: Boolean
+  reviews(limit: Int = 20): [FinancieraReviewType]
+}
+
+"""An enumeration."""
+enum FinancierasFinancieraCountryCodeChoices {
+  """Afghanistan (+93)"""
+  AF
+
+  """Albania (+355)"""
+  AL
+
+  """Algeria (+213)"""
+  DZ
+
+  """American Samoa (+1)"""
+  AS
+
+  """Andorra (+376)"""
+  AD
+
+  """Angola (+244)"""
+  AO
+
+  """Anguilla (+1)"""
+  AI
+
+  """Antigua and Barbuda (+1)"""
+  AG
+
+  """Argentina (+54)"""
+  AR
+
+  """Armenia (+374)"""
+  AM
+
+  """Aruba (+297)"""
+  AW
+
+  """Australia (+61)"""
+  AU
+
+  """Austria (+43)"""
+  AT
+
+  """Azerbaijan (+994)"""
+  AZ
+
+  """Bahamas (+1)"""
+  BS
+
+  """Bahrain (+973)"""
+  BH
+
+  """Bangladesh (+880)"""
+  BD
+
+  """Barbados (+1)"""
+  BB
+
+  """Belarus (+375)"""
+  BY
+
+  """Belgium (+32)"""
+  BE
+
+  """Belize (+501)"""
+  BZ
+
+  """Benin (+229)"""
+  BJ
+
+  """Bermuda (+1)"""
+  BM
+
+  """Bhutan (+975)"""
+  BT
+
+  """Bolivia (+591)"""
+  BO
+
+  """Bosnia and Herzegovina (+387)"""
+  BA
+
+  """Botswana (+267)"""
+  BW
+
+  """Brazil (+55)"""
+  BR
+
+  """British Indian Ocean Territory (+246)"""
+  IO
+
+  """British Virgin Islands (+1)"""
+  VG
+
+  """Brunei (+673)"""
+  BN
+
+  """Bulgaria (+359)"""
+  BG
+
+  """Burkina Faso (+226)"""
+  BF
+
+  """Burundi (+257)"""
+  BI
+
+  """Cambodia (+855)"""
+  KH
+
+  """Cameroon (+237)"""
+  CM
+
+  """Canada (+1)"""
+  CA
+
+  """Cape Verde (+238)"""
+  CV
+
+  """Caribbean Netherlands (+599)"""
+  BQ
+
+  """Cayman Islands (+1)"""
+  KY
+
+  """Central African Republic (+236)"""
+  CF
+
+  """Chad (+235)"""
+  TD
+
+  """Chile (+56)"""
+  CL
+
+  """China (+86)"""
+  CN
+
+  """Christmas Island (+61)"""
+  CX
+
+  """Cocos Islands (+61)"""
+  CC
+
+  """Colombia (+57)"""
+  CO
+
+  """Comoros (+269)"""
+  KM
+
+  """Congo (DRC) (+243)"""
+  CD
+
+  """Congo (Republic) (+242)"""
+  CG
+
+  """Cook Islands (+682)"""
+  CK
+
+  """Costa Rica (+506)"""
+  CR
+
+  """Cote d'Ivoire (+225)"""
+  CI
+
+  """Croatia (+385)"""
+  HR
+
+  """Cuba (+53)"""
+  CU
+
+  """Curacao (+599)"""
+  CW
+
+  """Cyprus (+357)"""
+  CY
+
+  """Czech Republic (+420)"""
+  CZ
+
+  """Denmark (+45)"""
+  DK
+
+  """Djibouti (+253)"""
+  DJ
+
+  """Dominica (+1)"""
+  DM
+
+  """Dominican Republic (+1)"""
+  DO
+
+  """Ecuador (+593)"""
+  EC
+
+  """Egypt (+20)"""
+  EG
+
+  """El Salvador (+503)"""
+  SV
+
+  """Equatorial Guinea (+240)"""
+  GQ
+
+  """Eritrea (+291)"""
+  ER
+
+  """Estonia (+372)"""
+  EE
+
+  """Ethiopia (+251)"""
+  ET
+
+  """Falkland Islands (+500)"""
+  FK
+
+  """Faroe Islands (+298)"""
+  FO
+
+  """Fiji (+679)"""
+  FJ
+
+  """Finland (+358)"""
+  FI
+
+  """France (+33)"""
+  FR
+
+  """French Guiana (+594)"""
+  GF
+
+  """French Polynesia (+689)"""
+  PF
+
+  """Gabon (+241)"""
+  GA
+
+  """Gambia (+220)"""
+  GM
+
+  """Georgia (+995)"""
+  GE
+
+  """Germany (+49)"""
+  DE
+
+  """Ghana (+233)"""
+  GH
+
+  """Gibraltar (+350)"""
+  GI
+
+  """Greece (+30)"""
+  GR
+
+  """Greenland (+299)"""
+  GL
+
+  """Grenada (+1)"""
+  GD
+
+  """Guadeloupe (+590)"""
+  GP
+
+  """Guam (+1)"""
+  GU
+
+  """Guatemala (+502)"""
+  GT
+
+  """Guernsey (+44)"""
+  GG
+
+  """Guinea (+224)"""
+  GN
+
+  """Guinea-Bissau (+245)"""
+  GW
+
+  """Guyana (+592)"""
+  GY
+
+  """Haiti (+509)"""
+  HT
+
+  """Honduras (+504)"""
+  HN
+
+  """Hong Kong (+852)"""
+  HK
+
+  """Hungary (+36)"""
+  HU
+
+  """Iceland (+354)"""
+  IS
+
+  """India (+91)"""
+  IN
+
+  """Indonesia (+62)"""
+  ID
+
+  """Iran (+98)"""
+  IR
+
+  """Iraq (+964)"""
+  IQ
+
+  """Ireland (+353)"""
+  IE
+
+  """Isle of Man (+44)"""
+  IM
+
+  """Israel (+972)"""
+  IL
+
+  """Italy (+39)"""
+  IT
+
+  """Jamaica (+1)"""
+  JM
+
+  """Japan (+81)"""
+  JP
+
+  """Jersey (+44)"""
+  JE
+
+  """Jordan (+962)"""
+  JO
+
+  """Kazakhstan (+7)"""
+  KZ
+
+  """Kenya (+254)"""
+  KE
+
+  """Kiribati (+686)"""
+  KI
+
+  """Kosovo (+383)"""
+  XK
+
+  """Kuwait (+965)"""
+  KW
+
+  """Kyrgyzstan (+996)"""
+  KG
+
+  """Laos (+856)"""
+  LA
+
+  """Latvia (+371)"""
+  LV
+
+  """Lebanon (+961)"""
+  LB
+
+  """Lesotho (+266)"""
+  LS
+
+  """Liberia (+231)"""
+  LR
+
+  """Libya (+218)"""
+  LY
+
+  """Liechtenstein (+423)"""
+  LI
+
+  """Lithuania (+370)"""
+  LT
+
+  """Luxembourg (+352)"""
+  LU
+
+  """Macau (+853)"""
+  MO
+
+  """Macedonia (+389)"""
+  MK
+
+  """Madagascar (+261)"""
+  MG
+
+  """Malawi (+265)"""
+  MW
+
+  """Malaysia (+60)"""
+  MY
+
+  """Maldives (+960)"""
+  MV
+
+  """Mali (+223)"""
+  ML
+
+  """Malta (+356)"""
+  MT
+
+  """Marshall Islands (+692)"""
+  MH
+
+  """Martinique (+596)"""
+  MQ
+
+  """Mauritania (+222)"""
+  MR
+
+  """Mauritius (+230)"""
+  MU
+
+  """Mayotte (+262)"""
+  YT
+
+  """Mexico (+52)"""
+  MX
+
+  """Micronesia (+691)"""
+  FM
+
+  """Moldova (+373)"""
+  MD
+
+  """Monaco (+377)"""
+  MC
+
+  """Mongolia (+976)"""
+  MN
+
+  """Montenegro (+382)"""
+  ME
+
+  """Montserrat (+1)"""
+  MS
+
+  """Morocco (+212)"""
+  MA
+
+  """Mozambique (+258)"""
+  MZ
+
+  """Myanmar (+95)"""
+  MM
+
+  """Namibia (+264)"""
+  NA
+
+  """Nauru (+674)"""
+  NR
+
+  """Nepal (+977)"""
+  NP
+
+  """Netherlands (+31)"""
+  NL
+
+  """New Caledonia (+687)"""
+  NC
+
+  """New Zealand (+64)"""
+  NZ
+
+  """Nicaragua (+505)"""
+  NI
+
+  """Niger (+227)"""
+  NE
+
+  """Nigeria (+234)"""
+  NG
+
+  """Niue (+683)"""
+  NU
+
+  """Norfolk Island (+672)"""
+  NF
+
+  """North Korea (+850)"""
+  KP
+
+  """Northern Mariana Islands (+1)"""
+  MP
+
+  """Norway (+47)"""
+  NO
+
+  """Oman (+968)"""
+  OM
+
+  """Pakistan (+92)"""
+  PK
+
+  """Palau (+680)"""
+  PW
+
+  """Palestine (+970)"""
+  PS
+
+  """Panama (+507)"""
+  PA
+
+  """Papua New Guinea (+675)"""
+  PG
+
+  """Paraguay (+595)"""
+  PY
+
+  """Peru (+51)"""
+  PE
+
+  """Philippines (+63)"""
+  PH
+
+  """Poland (+48)"""
+  PL
+
+  """Portugal (+351)"""
+  PT
+
+  """Puerto Rico (+1)"""
+  PR
+
+  """Qatar (+974)"""
+  QA
+
+  """Reunion (+262)"""
+  RE
+
+  """Romania (+40)"""
+  RO
+
+  """Russia (+7)"""
+  RU
+
+  """Rwanda (+250)"""
+  RW
+
+  """Saint Barthelemy (+590)"""
+  BL
+
+  """Saint Helena (+290)"""
+  SH
+
+  """Saint Kitts and Nevis (+1)"""
+  KN
+
+  """Saint Lucia (+1)"""
+  LC
+
+  """Saint Martin (+590)"""
+  MF
+
+  """Saint Pierre and Miquelon (+508)"""
+  PM
+
+  """Saint Vincent and the Grenadines (+1)"""
+  VC
+
+  """Samoa (+685)"""
+  WS
+
+  """San Marino (+378)"""
+  SM
+
+  """Sao Tome and Principe (+239)"""
+  ST
+
+  """Saudi Arabia (+966)"""
+  SA
+
+  """Senegal (+221)"""
+  SN
+
+  """Serbia (+381)"""
+  RS
+
+  """Seychelles (+248)"""
+  SC
+
+  """Sierra Leone (+232)"""
+  SL
+
+  """Singapore (+65)"""
+  SG
+
+  """Sint Maarten (+1)"""
+  SX
+
+  """Slovakia (+421)"""
+  SK
+
+  """Slovenia (+386)"""
+  SI
+
+  """Solomon Islands (+677)"""
+  SB
+
+  """Somalia (+252)"""
+  SO
+
+  """South Africa (+27)"""
+  ZA
+
+  """South Korea (+82)"""
+  KR
+
+  """South Sudan (+211)"""
+  SS
+
+  """Spain (+34)"""
+  ES
+
+  """Sri Lanka (+94)"""
+  LK
+
+  """Sudan (+249)"""
+  SD
+
+  """Suriname (+597)"""
+  SR
+
+  """Svalbard and Jan Mayen (+47)"""
+  SJ
+
+  """Swaziland (+268)"""
+  SZ
+
+  """Sweden (+46)"""
+  SE
+
+  """Switzerland (+41)"""
+  CH
+
+  """Syria (+963)"""
+  SY
+
+  """Taiwan (+886)"""
+  TW
+
+  """Tajikistan (+992)"""
+  TJ
+
+  """Tanzania (+255)"""
+  TZ
+
+  """Thailand (+66)"""
+  TH
+
+  """Timor-Leste (+670)"""
+  TL
+
+  """Togo (+228)"""
+  TG
+
+  """Tokelau (+690)"""
+  TK
+
+  """Tonga (+676)"""
+  TO
+
+  """Trinidad and Tobago (+1)"""
+  TT
+
+  """Tunisia (+216)"""
+  TN
+
+  """Turkey (+90)"""
+  TR
+
+  """Turkmenistan (+993)"""
+  TM
+
+  """Turks and Caicos Islands (+1)"""
+  TC
+
+  """Tuvalu (+688)"""
+  TV
+
+  """U.S. Virgin Islands (+1)"""
+  VI
+
+  """Uganda (+256)"""
+  UG
+
+  """Ukraine (+380)"""
+  UA
+
+  """United Arab Emirates (+971)"""
+  AE
+
+  """United Kingdom (+44)"""
+  GB
+
+  """United States (+1)"""
+  US
+
+  """Uruguay (+598)"""
+  UY
+
+  """Uzbekistan (+998)"""
+  UZ
+
+  """Vanuatu (+678)"""
+  VU
+
+  """Vatican City (+379)"""
+  VA
+
+  """Venezuela (+58)"""
+  VE
+
+  """Vietnam (+84)"""
+  VN
+
+  """Wallis and Futuna (+681)"""
+  WF
+
+  """Western Sahara (+212)"""
+  EH
+
+  """Yemen (+967)"""
+  YE
+
+  """Zambia (+260)"""
+  ZM
+
+  """Zimbabwe (+263)"""
+  ZW
+}
+
+type FinancieraReviewType {
+  id: ID!
+  rating: Int!
+
+  """
+  Token of the backing transaction; both are $1-pegged so the derived rate math is identical
+  """
+  sentToken: FinancierasFinancieraReviewSentTokenChoices!
+
+  """Dollar-stable amount copied from the backing transaction"""
+  sentUsdc: Decimal!
+
+  """Physical USD the reviewer received"""
+  receivedUsd: Decimal!
+  comment: String!
+  createdAt: DateTime!
+
+  """'sent' if user sold USDC/cUSD, 'received' if user bought"""
+  direction: String
+}
+
+"""An enumeration."""
+enum FinancierasFinancieraReviewSentTokenChoices {
+  """USD Coin"""
+  USDC
+
+  """Confío Dollar"""
+  CUSD
+}
+
+type CountrySubdivisionType {
+  name: String
+}
+
+"""A real dollar-stable transfer the user can attach a review to."""
+type ReviewableUsdcSendType {
+  id: ID
+
+  """'send' (Confío transfer) or 'withdrawal' (external)"""
+  kind: String
+
+  """'sent' or 'received'"""
+  direction: String
+
+  """'USDC' or 'CUSD' (withdrawals are always USDC)"""
+  token: String
+  amountUsdc: Decimal
+
+  """Counterparty/address, for recognition"""
+  destination: String
+  createdAt: DateTime
+}
+
+"""A country that currently has visible listings, for the country picker."""
+type FinancieraCountryType {
+  countryCode: String
+  count: Int
+}
+
+"""Savings position for the active account (JWT context)."""
+type CusdPlusSummaryType {
+  """USD value of the position; share counts are never exposed"""
+  balanceUsd: Float
+
+  """Oracle gross minus Confío share; floats daily"""
+  netApyPct: Float
+
+  """
+  USDY gross APY before Confío's share — for the transparency split (gross / fee / net)
+  """
+  grossApyPct: Float
+  earnedTodayUsd: Float
+  earnedMonthUsd: Float
+
+  """
+  Issuer geo-eligibility (Ondo) by phone country; gates ENTRY only — exits are never gated
+  """
+  savingsEnabled: Boolean
+
+  """
+  Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)
+  """
+  stocksEnabled: Boolean
+
+  """
+  cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)
+  """
+  cusdDepositsPaused: Boolean
+
+  """
+  Raw wallet USDT-BSC (pre-mint, or held as 'Confío Dollar' by geo-ineligible users) — display-grade, cached
+  """
+  usdtBalanceUsd: Float
+
+  """Same balance in exact wei (string; 18dp) for MAX-send and mint math"""
+  usdtBalanceWei: String
+}
+
+"""
+One row of savings history (deposits, withdrawals, stock buys/sells
+settling against cUSD+, and weekly yield summary rows — never per-day).
+"""
+type CusdPlusMovementType {
+  id: ID
+
+  """deposit | withdraw | buy | sell | yield"""
+  movementType: String
+  title: String
+
+  """Signed: inflows to savings positive"""
+  amountUsd: Float
+  createdAt: DateTime
+}
+
+"""
+Decision (b), 2026-07-04: the CLIENT prices the bridge leg with the
+ported Allbridge pool math (apps/src/services/allbridgeQuote.ts, validated
+against the official SDK); the server owns only these guard/fee knobs.
+Contract-side floors (minUsdyOut / receive minimums) remain the hard
+protection — these params shape UX, they don't secure funds.
+"""
+type CusdPlusConvertParamsType {
+  """Guard: max total conversion cost in bps (remote config)"""
+  spreadThresholdBps: Int
+
+  """Confío conversion fee — open pricing decision, 0 until set"""
+  confioFeeBps: Int
+  minAmountUsd: Float
+
+  """Kill switch: pause all conversions regardless of cost"""
+  paused: Boolean
+
+  """
+  Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative
+  """
+  gmTradeFeeBps: Int
+
+  """
+  cUSD+ vault (proxy) on BSC — client targets this for leg C (subscribeAndMint/redeem)
+  """
+  vaultAddress: String
+
+  """Master gate for the client-signed BNB→USDT auto-convert"""
+  bnbAutoConvertEnabled: Boolean
+
+  """
+  PancakeSwap V2 router the swap targets (also relay-allowlisted, selector-guarded)
+  """
+  pancakeRouter: String
+
+  """Skip swaps smaller than this (wei, as string)"""
+  bnbAutoConvertMinSwapWei: String
+
+  """
+  BNB to leave at the address (live gas-dust target, wei as string; '0' once 7702 sponsorship is on)
+  """
+  bnbAutoConvertKeepWei: String
+
+  """Slippage floor applied to the getAmountsOut quote"""
+  bnbAutoConvertSlippageBps: Int
+
+  """Master gate for sponsor-paid type-4 batches"""
+  sponsored7702Enabled: Boolean
+
+  """ConfioBatchDelegate the EOA designates via 7702"""
+  batchDelegateAddress: String
+}
+
+"""
+One client-driven conversion saga row (ORCHESTRATION.md). The client
+uses inFlight rows to resume the next leg on foreground.
+"""
+type CusdPlusConversionType {
+  conversionId: ID
+  direction: String
+  amountUsd: Float
+  quotedReceiveUsd: Float
+  status: String
+  srcTxId: String
+  destTxHash: String
+  userBscAddress: String
+  createdAt: DateTime
+}
+
+type GmMarketType {
+  """core | extended | off-hours | closed"""
+  session: String
+  assets: [GmAssetType!]
+}
+
+type GmAssetType {
+  """GM token symbol, e.g. TSLAon — the on-chain/trading id"""
+  symbol: String
+
+  """Underlying ticker, e.g. TSLA — the display id"""
+  ticker: String
+  name: String
+  priceUsd: Float
+  dayChangePct: Float
+
+  """Tradable on weekends/holidays (per-asset, per Ondo)"""
+  offHours: Boolean
+
+  """Downsampled 24h price series for charts"""
+  sparkline24h: [Float]
+
+  """Served from OUR S3 mirror — the app never hotlinks third parties"""
+  logoUrl: String
+}
+
+"""
+One tokenized-stock position of the JWT account. Units are fine to
+expose for stocks (market convention) — the never-expose-share-counts
+rule is specific to cUSD+ (decision A).
+"""
+type GmHoldingType {
+  """GM token symbol, e.g. TSLAon"""
+  symbol: String
+  ticker: String
+  name: String
+  units: Float
+
+  """units × cached GM display price — display only, never settlement"""
+  valueUsd: Float
+  dayChangePct: Float
+}
+
+type GmCandleType {
+  """ms epoch"""
+  timestamp: Float
+  open: Float
+  high: Float
+  low: Float
+  close: Float
+}
+
+type BscRpcResult {
+  """JSON-encoded RPC result"""
+  result: String
+  error: String
+}
+
+type PayrollRecipientType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """Business that will pay this recipient"""
+  business: BusinessType!
+  recipientUser: Web3AuthUserType!
+  recipientAccount: AccountType!
+
+  """Friendly name for the recipient"""
+  displayName: String!
+  isEmployee: Boolean
+  employeeRole: String
+  employeeEffectivePermissions: JSONString
+}
+
+type VerifiedPayrollTransactionType {
+  isValid: Boolean
+  status: String
+  transactionHash: String
+  amount: String
+  currency: String
+  timestamp: DateTime
+  senderName: String
+  recipientNameMasked: String
+  recipientPhoneMasked: String
+  verificationMessage: String
+}
+
+"""
+Public traction numbers for the confio.lat landing page. Definitions
+mirror the admin dashboard so marketing and ops always quote the same
+figures (Koywe grey-box "On-chain Deposited Volume"; presale raised).
+"""
+type LandingStatsType {
+  depositedVolumeUsd: Float
+  presaleRaisedUsd: Float
+}
+
+type KoyweBankInfoType {
+  bankCode: String
+  name: String
+  institutionName: String
+  countryCode: String
+}
+
+type PendingRampTransactionType {
+  internalId: String
+  provider: String
+  direction: String
+  status: String
+  providerOrderId: String
+  externalId: String
+  countryCode: String
+  createdAt: DateTime
+  instructionSnapshotCreated: JSONString
+  instructionSnapshotLatest: JSONString
+  providerPayloadCreated: JSONString
+  providerPayloadLatest: JSONString
+}
+
+type EconomicActivityOptionType {
+  label: String
+  value: String
+}
+
+type RampAddressRequirementType {
+  requiresAddressNeighborhood: Boolean
+  addressNeighborhoodLabel: String
+  addressNeighborhoodPlaceholder: String
 }
 
 """Represents a business where user is employed"""
@@ -3060,17 +5061,12 @@ type EmployeeInvitationType {
   createdAt: DateTime!
   business: BusinessType!
   invitationCode: String!
-
-  """Phone number of the invited employee"""
   employeePhone: String
-
-  """ISO country code for the phone number"""
   employeePhoneCountry: String
 
   """Name of the invited employee (optional)"""
   employeeName: String!
   employeeUsername: String
-  displayInvitee: String
   role: UsersEmployeeInvitationRoleChoices!
   invitedBy: Web3AuthUserType
   status: UsersEmployeeInvitationStatusChoices!
@@ -3082,6 +5078,7 @@ type EmployeeInvitationType {
 
   """Optional message to include with the invitation"""
   message: String!
+  displayInvitee: String
   isExpired: Boolean
   permissions: JSONString
 }
@@ -3194,6 +5191,7 @@ type BankInfoType {
 
   """Identification number (required for some countries/banks)"""
   identificationNumber: String
+  providerMetadata: JSONString
 
   """Whether this is the default bank account for this account"""
   isDefault: Boolean!
@@ -3213,6 +5211,7 @@ type BankInfoType {
   identificationLabel: String
   paymentDetails: JSONString
   paymentMethod: P2PPaymentMethodType
+  rampPaymentMethod: RampPaymentMethodCatalogType
 }
 
 """An enumeration."""
@@ -3236,6 +5235,12 @@ type UserByPhoneType {
   isOnConfio: Boolean
   activeAccountId: ID
   activeAccountAlgorandAddress: String
+
+  """Referral status tier of this contact"""
+  statusTier: String
+
+  """Verified Badge for this contact"""
+  isReferralVerified: Boolean
 }
 
 """Ambassador profile with tier and performance metrics"""
@@ -3380,9 +5385,12 @@ type ConfioBalanceType {
 
 """Token balances object"""
 type BalancesType {
+  algo: String
   cusd: String
   confio: String
   confioPresaleLocked: String
+  confioLocked: String
+  pendingReferralReward: String
   usdc: String
 }
 
@@ -3391,6 +5399,7 @@ type ConfioRewardTransactionType {
   id: ID!
   createdAt: DateTime!
   user: Web3AuthUserType!
+  internalId: String
   transactionType: AchievementsConfioRewardTransactionTransactionTypeChoices!
   amount: Float
   balanceAfter: Float
@@ -3447,6 +5456,7 @@ type ReferralRewardEventType {
   createdAt: DateTime!
   updatedAt: DateTime!
   claimableConfio: Decimal
+  triggerDisplay: String
 }
 
 """An enumeration."""
@@ -3469,21 +5479,14 @@ enum AchievementsReferralRewardEventRewardStatusChoices {
   """Fallido"""
   FAILED
 
-  """Reclamado"""
-  CLAIMED
-
   """Omitido"""
   SKIPPED
+
+  """Reclamado"""
+  CLAIMED
 }
 
 """Lightweight real-time stats for the $CONFIO info screen"""
-"""Per-country verified user count for the LATAM community screen"""
-type CountryStatType {
-  countryIso: String!
-  countryName: String!
-  verifiedCount: Int!
-}
-
 type StatsSummaryType {
   totalUsers: Int
   diditVerifiedUsers: Int
@@ -3491,6 +5494,7 @@ type StatsSummaryType {
   usersNew7d: Int
   protectedSavings: Float
   totalValueLocked: Float
+  usdyReserve: Float
   circulatingCusd: Float
   presaleCusdRaised: Float
   presaleCusdRaised7d: Float
@@ -3504,12 +5508,34 @@ type StatsSummaryType {
   cusdAppPeraUrl: String
 }
 
+"""Per-country verified user count for the LATAM community screen"""
+type CountryStatType {
+  countryIso: String!
+  countryName: String!
+  verifiedCount: Int!
+}
+
+type VerifiedTransactionType {
+  isValid: Boolean
+  status: String
+  transactionHash: String
+  amount: String
+  currency: String
+  timestamp: DateTime
+  senderName: String
+  recipientNameMasked: String
+  recipientPhoneMasked: String
+  verificationMessage: String
+  transactionType: String
+  metadata: JSONString
+}
+
 type Mutation {
   """
   Web3Auth authentication mutation.
   Creates/updates user data AND generates JWT tokens using the existing JWT system.
   """
-  web3AuthLogin(algorandAddress: String, deviceFingerprint: JSONString, firebaseIdToken: String!): Web3AuthLoginMutation
+  web3AuthLogin(algorandAddress: String, deviceFingerprint: JSONString, firebaseIdToken: String!, platformOs: String): Web3AuthLoginMutation
 
   """
   Add Algorand wallet to an existing Firebase-authenticated user.
@@ -3550,6 +5576,12 @@ type Mutation {
   This is called when a trader navigates to the Deposit USDC screen.
   """
   optInToUsdc: OptInToUSDCMutation
+
+  """
+  Mark the user's wallet as migrated to the V2 architecture (Manifest + UUID).
+  This indicates the user has successfully created or imported a wallet using the new system.
+  """
+  markWalletMigrated(migratedFromAddress: String): MarkWalletMigrated
   claimInviteForPhone(invitationId: String, phone: String, phoneCountry: String, recipientAddress: String!): ClaimInviteForPhone
 
   """
@@ -3609,13 +5641,58 @@ type Mutation {
   Create a sponsored opt-in transaction for an asset.
   Returns unsigned user transaction and signed sponsor transaction for atomic group.
   """
-  algorandSponsoredOptIn(assetId: String): AlgorandSponsoredOptInMutation
+  algorandSponsoredOptIn(appId: String, assetId: String): AlgorandSponsoredOptInMutation
 
   """
   Submit a complete sponsored transaction group after client signing.
   Sponsor transaction is always placed first in the group for proper fee payment.
   """
   submitSponsoredGroup(signedSponsorTxn: String, signedUserTxn: String!): SubmitSponsoredGroupMutation
+
+  """
+  Generate a complete atomic migration group:
+  1. Sponsor -> V2 (Fund MBR for opt-ins)
+  2. Sponsor -> V1 (Fund fees for closures)
+  3. V2 -> Opt in to assets
+  4. V1 -> Close assets to V2
+  5. V1 -> Close Algo to V2
+  
+  Returns the group with signed sponsor txns and unsigned user txns.
+  """
+  prepareAtomicMigration(v1Address: String!, v2Address: String!): PrepareAtomicMigrationMutation
+
+  """
+  Builds an unsigned transaction group for auto-swapping.
+  Handles two cases:
+  1. USDC -> cUSD swap (direct).
+  2. ALGO -> cUSD swap (two steps via Tinyman: ALGO -> USDC -> cUSD).
+  
+  Returns a base64 encoded msgpack of the transaction group that the client must sign and submit.
+  """
+  buildAutoSwapTransactions(amount: String!, inputAssetType: String!): BuildAutoSwapTransactionsMutation
+
+  """
+  Server-destination variant of the Guardarian sell send (same trust posture
+  for ramp sends): finds the user's newest Guardarian SELL still
+  waiting for its crypto deposit, re-fetches the deposit address from
+  Guardarian's API server-side, and delegates to BuildBurnAndSend — the
+  client never supplies (or sees) the destination.
+  """
+  buildGuardarianOfframpTransactions: BuildGuardarianOfframpTransactionsMutation
+
+  """
+  Submits an auto-swap transaction group to the Algorand network.
+  Receives base64-encoded signed user transactions and sponsor transactions.
+  Optionally accepts a withdrawal_id to also record the USDC send in transaction history.
+  """
+  submitAutoSwapTransactions(internalId: String!, signedTransactions: [String]!, sponsorTransactions: [String]!, withdrawalId: String): SubmitAutoSwapTransactionsMutation
+
+  """
+  Builds an atomic 5-txn group: burn cUSD → USDC, then send USDC to recipient.
+  All in one Algorand atomic group so the USDC send uses the freshly-minted USDC.
+  Also creates a USDCWithdrawal record so the send appears in transaction history.
+  """
+  buildBurnAndSend(amount: String!, note: String, providerOrderId: String, rampProvider: String, recipientAddress: String!): BuildBurnAndSendMutation
 
   """
   Check if business account needs opt-ins for CONFIO and cUSD assets
@@ -3655,11 +5732,11 @@ type Mutation {
     """Store payment receipt on-chain"""
     createReceipt: Boolean = false
 
+    """Optional payment ID for tracking"""
+    internalId: String
+
     """Optional transaction note"""
     note: String
-
-    """Optional payment ID for tracking"""
-    paymentId: String
   ): CreateSponsoredPaymentMutation
 
   """
@@ -3668,7 +5745,7 @@ type Mutation {
   """
   submitSponsoredPayment(
     """Payment ID for database update"""
-    paymentId: String
+    internalId: String
 
     """Array of base64 encoded signed transactions in group order"""
     signedTransactions: JSONString!
@@ -3681,9 +5758,21 @@ type Mutation {
     """Signed AXFER from inviter (base64 msgpack)"""
     signedUserTxn: String!
 
-    """List of sponsor txns as JSON strings with fields {txn, index}"""
-    sponsorTransactions: [JSONString]!
+    """List of sponsor txns with fields {txn, index}"""
+    sponsorTransactions: [SponsorTxnInput]!
   ): SubmitInviteForPhone
+  prepareReclaimInvite(invitationId: String!): PrepareReclaimInvite
+  submitReclaimInvite(invitationId: String!, signedUserTxn: String!, sponsorTransactions: [SponsorTxnInput]!): SubmitReclaimInvite
+  markMessageChannelSeen(channelId: String!): MarkMessageChannelSeen
+  reactToMessageContent(contentItemId: ID!, emoji: String!): ReactToMessageContent
+  trackContentPlatformClick(contentItemId: ID!, platform: String!, surface: String!): TrackContentPlatformClick
+  sendSupportMessage(body: String!): SendSupportMessage
+  updateMessageChannelMute(channelId: String!, isMuted: Boolean!): UpdateMessageChannelMute
+  portalSendSupportReply(body: String!, conversationId: ID!): PortalSendSupportReply
+  portalSetSupportConversationStatus(conversationId: ID!, status: String!): PortalSetSupportConversationStatus
+  portalSaveContentItem(body: String, channelSlug: String!, contentItemId: ID, itemType: String!, metadata: JSONString, publishedAt: DateTime, sendInApp: Boolean, sendPush: Boolean, status: String!, surfaces: [String], tag: String, title: String, visibilityPolicy: String): PortalSaveContentItem
+  portalDeleteContentItem(contentItemId: ID!): PortalDeleteContentItem
+  requestPublicationImageUpload(contentType: String = "image/webp", filename: String): RequestPublicationImageUpload
 
   """Mark a notification as read"""
   markNotificationRead(notificationId: ID!): MarkNotificationRead
@@ -3705,12 +5794,155 @@ type Mutation {
 
   """Send a test push notification to the current user"""
   sendTestPushNotification: SendTestPushNotification
+  applyHumanitarianVolunteer(campaignSlug: String!, localPhone: String, notes: String, serviceArea: String): ApplyHumanitarianVolunteer
 
   """Mutation to purchase CONFIO tokens during presale"""
   purchasePresaleTokens(cusdAmount: Decimal!, phaseNumber: Int): PurchasePresaleTokens
 
+  """Mutation to join the presale waitlist"""
+  joinPresaleWaitlist: JoinPresaleWaitlist
+
+  """
+  Step 1 of the BSC presale buy: full eligibility gate + on-chain quote
+  + purchase record. Returns the exact [approve, buy] batch the client
+  must sign as one EIP-712 intent (ConfioBatchDelegate.execute).
+  """
+  prepareBscPresalePurchase(acceptedTerms: Boolean!, amountUsd: Decimal!, notUsAttestation: Boolean!): PrepareBscPresalePurchase
+
+  """
+  Step 2: the user's signature over the server-stored batch. The server
+  recomputes the digest from what IT stored — a client cannot substitute
+  calldata — re-checks geo, then broadcasts from the KMS sponsor.
+  """
+  submitBscPresalePurchase(
+    authorization: BscPresaleAuthorizationInput
+
+    """Unix seconds"""
+    deadline: String!
+
+    """65-byte r‖s‖v hex"""
+    intentSignature: String!
+
+    """Delegate intent nonce (nonces())"""
+    nonce: String!
+    purchaseId: String!
+  ): SubmitBscPresalePurchase
+
   """Check KYC status for current user"""
   checkKycStatus(amount: Decimal, operationType: String!): CheckKYCStatus
+
+  """Generate a nonce for Play Integrity token request"""
+  requestIntegrityNonce: RequestIntegrityNonce
+
+  """Verify a Firebase App Check token and check historical violations"""
+  verifyAppCheck(action: String!, deviceFingerprint: String, token: String!): VerifyAppCheck
+
+  """
+  Record an accepted quote. Nothing on chain yet — ABANDONED if the
+  user never signs (24h sweep).
+  """
+  startCusdPlusConversion(amountUsd: Float!, direction: String!, quotedCostPct: Float!, quotedReceiveUsd: Float!, userAlgoAddress: String = "", userBscAddress: String = ""): StartCusdPlusConversion
+
+  """
+  Client reports a leg it signed. Transitions are monotonic and
+  validated; the bridge poller independently verifies SRC_COMMITTED ->
+  DEST_ARRIVED, so a lying client cannot fake delivery.
+  """
+  advanceCusdPlusConversion(conversionId: ID!, newStatus: String!, txRef: String = ""): AdvanceCusdPlusConversion
+
+  """
+  Relay a CLIENT-SIGNED BSC transaction to the node (the EVM analogue
+  of submitSponsoredGroup). Decodes the raw tx and only relays legacy
+  EIP-155 txns on our chain whose `to` is an allowlisted Confío-flow
+  contract — the relay can't be used as an open broadcast proxy.
+  """
+  submitBscTransaction(rawTx: String!): SubmitBscTransaction
+
+  """
+  Foreground fast-path for monitor_bridge_arrivals: record a specific
+  tx's USDT arrival NOW instead of waiting for the next beat scan.
+  
+  The BNB auto-convert calls this right after its swap receipt so the
+  whole BNB→USDT→cUSD+ chain finishes in ONE foreground session (the
+  Algorand auto-swap's one-shot UX, minus EVM's missing atomicity):
+  swap → this mutation → resumeSavingsMints picks up the fresh row.
+  
+  Grants no new capability: it parses the SAME chain truth with the SAME
+  guards (registered addresses, deposit floor, in-flight protection) into
+  the SAME idempotent recorder the beat scanner uses — only sooner. If it
+  fails, the beat scan records the arrival minutes later as before.
+  """
+  registerBscUsdtArrival(txHash: String!): RegisterBscUsdtArrival
+
+  """
+  Execute a user-signed call batch as a SPONSOR-PAID type-4 (EIP-7702)
+  transaction — the successor to gas dusting. The client signs an EIP-712
+  intent over the exact calls (and, on first use, a 7702 authorization
+  designating ConfioBatchDelegate at its EOA); the server validates both
+  against the vault-flow policy, simulates, and broadcasts from the KMS
+  sponsor. The user's address never needs BNB. Custody unchanged: the
+  delegate on-chain re-verifies the user's signature, so the sponsor can
+  only execute what the user signed.
+  """
+  sponsorBscBatch(
+    authorization: BscAuthorizationInput
+    calls: [BscCallInput!]!
+
+    """Unix seconds"""
+    deadline: String!
+
+    """65-byte r‖s‖v hex"""
+    intentSignature: String!
+
+    """Delegate intent nonce (nonces())"""
+    nonce: String!
+  ): SponsorBscBatch
+  registerFinanciera(
+    cashLocal: Boolean = false
+    cashUsd: Boolean = true
+    city: String!
+    countryCode: String!
+    digitalLocal: Boolean = false
+    hasPhysicalLocation: Boolean = true
+    helpsWithConfio: Boolean = false
+    homeService: Boolean = false
+    name: String!
+    neighborhood: String
+    openWeekends: Boolean = false
+    state: String!
+    supportsUsdcAlgorand: Boolean!
+
+    """Digits-only E.164 without +"""
+    whatsapp: String!
+  ): RegisterFinanciera
+
+  """
+  Owner edits to a listing. Country is fixed (delete + re-register to move
+  countries) and supports_usdc_algorand stays mandatory, so neither is editable.
+  """
+  updateFinanciera(cashLocal: Boolean, cashUsd: Boolean, city: String, digitalLocal: Boolean, financieraId: ID!, hasPhysicalLocation: Boolean, helpsWithConfio: Boolean, homeService: Boolean, name: String, neighborhood: String, openWeekends: Boolean, state: String, whatsapp: String): UpdateFinanciera
+
+  """Pause/unpause a listing (e.g. vacations) without losing its reviews."""
+  setFinancieraActive(financieraId: ID!, isActive: Boolean!): SetFinancieraActive
+  deleteFinanciera(financieraId: ID!): DeleteFinanciera
+
+  """
+  Reviews must be anchored to a real USDC-Algorand transaction. The
+  transaction amount comes from the server, never from the client.
+  """
+  submitFinancieraReview(
+    comment: String
+    financieraId: ID!
+    rating: Int!
+    receivedUsd: Decimal!
+
+    """Confirmed USDC send backing this review"""
+    sendTransactionId: ID
+
+    """Completed USDC withdrawal backing this review"""
+    usdcWithdrawalId: ID
+  ): SubmitFinancieraReview
+  reportFinanciera(financieraId: ID!, reason: String!): ReportFinanciera
 
   """Mutation for creating a new USDC deposit"""
   createUsdcDeposit(input: USDCDepositInput!): CreateUSDCDeposit
@@ -3747,6 +5979,159 @@ type Mutation {
 
   """Mutation for admins to add evidence or notes to disputes"""
   addDisputeEvidence(content: String!, disputeId: ID!, evidenceType: String!, evidenceUrls: [String]): AddDisputeEvidence
+  createPayrollRun(
+    """Optional gross cap per window"""
+    capAmount: String
+    items: [PayrollItemInput]!
+    periodSeconds: Int
+
+    """ISO datetime or YYYY-MM-DD for scheduling"""
+    scheduledAt: String
+    tokenType: String = "CUSD"
+  ): CreatePayrollRun
+  preparePayrollItemPayout(
+    note: String
+
+    """Payroll internal_id to prepare payout for"""
+    payrollItemId: String!
+  ): PreparePayrollItemPayout
+  submitPayrollItemPayout(
+    """Payroll internal_id to submit payout for"""
+    payrollItemId: String!
+
+    """Base64-encoded signed AppCall transaction"""
+    signedTransaction: String!
+
+    """Base64-encoded signed sponsor transaction"""
+    sponsorSignature: String
+  ): SubmitPayrollItemPayout
+  preparePayrollVaultFunding(
+    """Amount to fund in payroll token units (e.g., cUSD)"""
+    amount: Float!
+  ): PreparePayrollVaultFunding
+  submitPayrollVaultFunding(
+    """Signed business AXFER transaction (single item)"""
+    signedTransactions: [String]!
+
+    """Signed sponsor app call transaction"""
+    sponsorAppCall: String
+  ): SubmitPayrollVaultFunding
+
+  """
+  Prepare an unsigned withdrawal from the business payroll vault (to business account_0).
+  """
+  preparePayrollVaultWithdrawal(
+    """Amount to withdraw in payroll token units (e.g., cUSD)"""
+    amount: Float!
+  ): PreparePayrollVaultWithdrawal
+
+  """Submit a signed withdraw_vault transaction."""
+  submitPayrollVaultWithdrawal(
+    """Base64 signed AppCall for withdraw_vault"""
+    signedTransaction: String!
+  ): SubmitPayrollVaultWithdrawal
+  setBusinessDelegates(
+    add: [String]!
+
+    """Business account address"""
+    businessAccount: String!
+    remove: [String]!
+
+    """Optional base64 signed AppCall; if provided, server will broadcast."""
+    signedTransaction: String
+  ): SetBusinessDelegates
+  setBusinessDelegatesByEmployee(
+    """Employee IDs to add as delegates"""
+    addEmployeeIds: [ID]!
+
+    """Business account address"""
+    businessAccount: String!
+
+    """Employee IDs to remove as delegates"""
+    removeEmployeeIds: [ID]!
+
+    """Optional base64 signed AppCall; if provided, server will broadcast."""
+    signedTransaction: String
+  ): SetBusinessDelegatesByEmployee
+  createPayrollRecipient(
+    displayName: String
+
+    """If true and the user is owner, mark as owner recipient"""
+    markOwner: Boolean
+    recipientAccountId: ID!
+    recipientUserId: ID!
+  ): CreatePayrollRecipient
+  deletePayrollRecipient(recipientId: ID!): DeletePayrollRecipient
+
+  """
+  Business escrow ops: fund / withdraw / set_delegate. Returns the
+  canonical batch for the BUSINESS EOA to sign as one 7702 intent.
+  """
+  prepareBscPayrollAdmin(
+    """fund | withdraw | set_delegate"""
+    action: String!
+    allowed: Boolean
+
+    """USD, for fund/withdraw"""
+    amount: Decimal
+    delegateUserId: ID
+  ): PrepareBscPayrollAdmin
+
+  """
+  The business signature over the batch — rebuilt server-side from the
+  integer params, so tampered calldata simply fails signature recovery.
+  """
+  submitBscPayrollAdmin(
+    action: String!
+    allowed: Boolean
+    authorization: BscPayrollAuthorizationInput
+
+    """Unix seconds"""
+    deadline: String!
+    delegateAddress: String
+
+    """65-byte r‖s‖v hex"""
+    intentSignature: String!
+
+    """Delegate intent nonce (nonces())"""
+    nonce: String!
+    shares: String
+  ): SubmitBscPayrollAdmin
+
+  """
+  Step 1 of a BSC payout: gates + eligibility branch server-side,
+  stores the exact Payout struct on the item, returns the EIP-712 digest
+  the executing delegate signs with their OWN personal EVM key.
+  """
+  prepareBscPayrollPayout(payrollItemId: String!): PrepareBscPayrollPayout
+
+  """
+  Step 2: the delegate's signature over the STORED Payout. The server
+  recovers the signer, re-checks the on-chain allowlist, and broadcasts
+  payout() as a plain KMS-sponsor transaction.
+  """
+  submitBscPayrollPayout(
+    payrollItemId: String!
+
+    """65-byte r‖s‖v hex"""
+    signature: String!
+  ): SubmitBscPayrollPayout
+  createRampOrder(
+    amount: String!
+    authEmail: String
+    bankInfoId: ID
+    countryCode: String
+
+    """
+    'cusd' (day-to-day) or 'cusd_plus' (savings: USDT-BSC to the account's BSC address)
+    """
+    destination: String = "cusd"
+    direction: String!
+    fiatCurrency: String
+    paymentMethodCode: String!
+  ): RampOrderType
+  createMockRampOrder(amount: String!, countryCode: String, direction: String!, fiatCurrency: String, paymentMethodCode: String!): RampOrderType
+  upsertRampUserAddress(addressCity: String!, addressNeighborhood: String, addressState: String!, addressStreet: String!, addressZipCode: String!, authEmail: String, economicActivity: String): UpsertRampUserAddress
 
   """Mutation for creating a new invoice"""
   createInvoice(input: InvoiceInput!): CreateInvoice
@@ -3760,26 +6145,120 @@ type Mutation {
     idempotencyKey: String
     invoiceId: String!
   ): PayInvoice
+
+  """
+  Step 1 of a BSC invoice payment: server validates the invoice, picks
+  the funding token, computes the 0.9% ceiling fee, and stores the exact
+  2-transfer batch [merchant_net, treasury_fee].
+  """
+  prepareBscInvoicePayment(
+    idempotencyKey: String
+
+    """Invoice internal_id (the QR payload)"""
+    invoiceId: String!
+  ): PrepareBscInvoicePayment
+
+  """
+  Step 2: the payer's signature over the server-stored batch; the
+  digest is recomputed from what the SERVER stored, then broadcast from
+  the KMS sponsor.
+  """
+  submitBscInvoicePayment(
+    authorization: BscPaymentAuthorizationInput
+
+    """Unix seconds"""
+    deadline: String!
+
+    """65-byte r‖s‖v hex"""
+    intentSignature: String!
+
+    """Delegate intent nonce (nonces())"""
+    nonce: String!
+    paymentId: String!
+  ): SubmitBscInvoicePayment
+
+  """
+  Step 1 of a BSC dollar send: resolve the recipient (user id → phone →
+  raw 0x address, Algorand-rail priority), pick the funding source and
+  call shape server-side, store the exact batch. Returns the calls the
+  client must sign as one EIP-712 intent (ConfioBatchDelegate.execute).
+  """
+  prepareBscSend(amount: Decimal!, idempotencyKey: String, memo: String, recipientAddress: String, recipientPhone: String, recipientUserId: ID): PrepareBscSend
+
+  """
+  Step 2: the sender's signature over the server-stored batch. The
+  digest is recomputed from what the SERVER stored — a client cannot
+  substitute calldata — then broadcast from the KMS sponsor.
+  """
+  submitBscSend(
+    authorization: BscSendAuthorizationInput
+
+    """Unix seconds"""
+    deadline: String!
+
+    """65-byte r‖s‖v hex"""
+    intentSignature: String!
+
+    """Delegate intent nonce (nonces())"""
+    nonce: String!
+    sendId: String!
+  ): SubmitBscSend
   initiateSmsVerification(countryCode: String!, phoneNumber: String!): InitiateSMSVerification
   verifySmsCode(code: String!, countryCode: String!, phoneNumber: String!): VerifySMSCode
   initiateTelegramVerification(countryCode: String!, phoneNumber: String!): InitiateTelegramVerification
   verifyTelegramCode(code: String!, countryCode: String!, phoneNumber: String!): VerifyTelegramCode
   checkTelegramDeliveryStatus(countryCode: String!, phoneNumber: String!): CheckTelegramDeliveryStatus
+
+  """
+  Record a client-originated funnel event.
+  
+  Safe for unauthenticated callers (session_id carries pre-signup identity).
+  Returns success even on validation failure so analytics never breaks UX;
+  the `recorded` flag tells the client whether the event was actually
+  persisted.
+  """
+  trackFunnelEvent(channel: String, country: String, eventName: String!, platform: String, properties: JSONString, sessionId: String, sourceType: String): TrackFunnelEvent
   addBusinessEmployee(input: AddBusinessEmployeeInput!): AddBusinessEmployee
   updateBusinessEmployee(input: UpdateBusinessEmployeeInput!): UpdateBusinessEmployee
   removeBusinessEmployee(input: RemoveBusinessEmployeeInput!): RemoveBusinessEmployee
   inviteEmployee(input: InviteEmployeeInput!): InviteEmployee
   acceptInvitation(invitationCode: String!): AcceptInvitation
   cancelInvitation(invitationId: ID!): CancelInvitation
+
+  """
+  Report the status of a wallet backup to the server for safety tracking.
+  Called when:
+  1. iOS user logs in (Provider='icloud') [Implicit]
+  2. Any user successfully uploads to Drive (Provider='google_drive') [Explicit]
+  """
+  reportBackupStatus(deviceName: String, isVerified: Boolean!, provider: String!): ReportBackupStatus
   updatePhoneNumber(countryCode: String!, phoneNumber: String!): UpdatePhoneNumber
   updateUsername(username: String!): UpdateUsername
   updateUserProfile(firstName: String!, lastName: String!): UpdateUserProfile
+
+  """
+  Persist user's ICP self-report. Empty tags list == user skipped.
+  
+  Always sets confio_icp_captured_at, which flips pendingModal off.
+  Single-submit per user; safe to call repeatedly (no-op after first capture).
+  """
+  submitConfioIcp(otherText: String, tags: [String!]!): SubmitConfioIcp
+
+  """
+  Persist user's rating + action choice. Single submit at Step 2.
+  
+  Action enum: FEEDBACK | STORE | SKIP. Stars 1-5 required regardless of action.
+  Setting confio_rating_prompted_at gates the modal from re-firing.
+  """
+  submitConfioRating(action: RatingActionEnum!, feedbackText: String, stars: Int!): SubmitConfioRating
   invalidateAuthTokens: InvalidateAuthTokens
-  refreshToken(refreshToken: String!): RefreshToken
+  refreshToken(accountIndex: Int, accountType: String, businessId: ID, refreshToken: String!): RefreshToken
 
   """Generate a new JWT token with updated account context"""
   switchAccountToken(accountIndex: Int!, accountType: String!, businessId: ID): SwitchAccountToken
   submitIdentityVerification(documentBackImage: String, documentExpiryDate: Date, documentFrontImage: String!, documentIssuingCountry: String!, documentNumber: String!, documentType: String!, selfieWithDocument: String!, verifiedAddress: String!, verifiedCity: String!, verifiedCountry: String!, verifiedDateOfBirth: Date!, verifiedFirstName: String!, verifiedLastName: String!, verifiedNationality: String!, verifiedPostalCode: String, verifiedState: String!): SubmitIdentityVerification
+  createDiditVerificationSession: CreateDiditVerificationSession
+  syncDiditVerificationSession(sessionId: String!): SyncDiditVerificationSession
   requestIdentityUpload(
     contentType: String = "image/jpeg"
     filename: String
@@ -3793,9 +6272,22 @@ type Mutation {
   rejectIdentityVerification(reason: String!, verificationId: ID!): RejectIdentityVerification
   createBusiness(address: String, businessRegistrationNumber: String, category: String!, description: String, name: String!): CreateBusiness
   updateBusiness(address: String, businessId: ID!, businessRegistrationNumber: String, category: String!, description: String, name: String!): UpdateBusiness
-  updateAccountAlgorandAddress(algorandAddress: String!): UpdateAccountAlgorandAddress
-  createBankInfo(accountHolderName: String!, accountNumber: String, accountType: String, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID!, phoneNumber: String, username: String): CreateBankInfo
-  updateBankInfo(accountHolderName: String!, accountNumber: String!, accountType: String!, bankInfoId: ID!, identificationNumber: String, isDefault: Boolean): UpdateBankInfo
+  updateAccountAlgorandAddress(
+    algorandAddress: String!
+
+    """Set to true if client is using V2 architecture (master secret)"""
+    isV2Wallet: Boolean
+  ): UpdateAccountAlgorandAddress
+
+  """
+  Register the account's BSC (savings chain) address — the EVM sibling
+  of UpdateAccountAlgorandAddress. Client-derived (confio/evm/v1 domain);
+  the server cannot derive it (non-custodial). Needed by cUSD+ ramps
+  (Koywe USDT-BSC delivery) and the BSC inbound scanner.
+  """
+  updateAccountBscAddress(bscAddress: String!): UpdateAccountBscAddress
+  createBankInfo(accountHolderName: String!, accountNumber: String, accountType: String, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID, phoneNumber: String, providerMetadata: JSONString, rampPaymentMethodId: ID, username: String): CreateBankInfo
+  updateBankInfo(accountHolderName: String!, accountNumber: String, accountType: String, bankInfoId: ID!, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID, phoneNumber: String, providerMetadata: JSONString, rampPaymentMethodId: ID, username: String): UpdateBankInfo
   deleteBankInfo(bankInfoId: ID!): DeleteBankInfo
   setDefaultBankInfo(bankInfoId: ID!): SetDefaultBankInfo
 
@@ -3815,7 +6307,7 @@ type Mutation {
   updateInfluencerStatus(newStatus: String!, referrerIdentifier: String!): UpdateInfluencerStatus
 
   """Registers who invited the current user (username or phone)."""
-  setReferrer(referralType: String, referrerIdentifier: String!): SetReferrer
+  setReferrer(attributionData: JSONString, referralType: String, referrerIdentifier: String!): SetReferrer
 
   """Returns the registered referrer, if any."""
   checkReferralStatus: CheckReferralStatus
@@ -3836,6 +6328,8 @@ type Web3AuthLoginMutation {
   user: Web3AuthUserType
   needsOptIn: [String]
   optInTransactions: JSONString
+  isKeylessMigrated: Boolean
+  isNewUser: Boolean
 }
 
 """
@@ -3921,6 +6415,15 @@ This is called when a trader navigates to the Deposit USDC screen.
 type OptInToUSDCMutation {
   success: Boolean
   alreadyOptedIn: Boolean
+  error: String
+}
+
+"""
+Mark the user's wallet as migrated to the V2 architecture (Manifest + UUID).
+This indicates the user has successfully created or imported a wallet using the new system.
+"""
+type MarkWalletMigrated {
+  success: Boolean
   error: String
 }
 
@@ -4024,6 +6527,7 @@ type AlgorandSponsoredOptInMutation {
   groupId: String
   assetId: String
   assetName: String
+  appId: String
 }
 
 """
@@ -4034,8 +6538,74 @@ type SubmitSponsoredGroupMutation {
   success: Boolean
   error: String
   transactionId: String
+  internalId: String
   confirmedRound: Int
   feesSaved: Float
+}
+
+"""
+Generate a complete atomic migration group:
+1. Sponsor -> V2 (Fund MBR for opt-ins)
+2. Sponsor -> V1 (Fund fees for closures)
+3. V2 -> Opt in to assets
+4. V1 -> Close assets to V2
+5. V1 -> Close Algo to V2
+
+Returns the group with signed sponsor txns and unsigned user txns.
+"""
+type PrepareAtomicMigrationMutation {
+  success: Boolean
+  error: String
+  transactions: JSONString
+}
+
+"""
+Builds an unsigned transaction group for auto-swapping.
+Handles two cases:
+1. USDC -> cUSD swap (direct).
+2. ALGO -> cUSD swap (two steps via Tinyman: ALGO -> USDC -> cUSD).
+
+Returns a base64 encoded msgpack of the transaction group that the client must sign and submit.
+"""
+type BuildAutoSwapTransactionsMutation {
+  success: Boolean
+  error: String
+  transactions: JSONString
+}
+
+"""
+Server-destination variant of the Guardarian sell send (same trust posture
+for ramp sends): finds the user's newest Guardarian SELL still
+waiting for its crypto deposit, re-fetches the deposit address from
+Guardarian's API server-side, and delegates to BuildBurnAndSend — the
+client never supplies (or sees) the destination.
+"""
+type BuildGuardarianOfframpTransactionsMutation {
+  success: Boolean
+  error: String
+  transactions: JSONString
+}
+
+"""
+Submits an auto-swap transaction group to the Algorand network.
+Receives base64-encoded signed user transactions and sponsor transactions.
+Optionally accepts a withdrawal_id to also record the USDC send in transaction history.
+"""
+type SubmitAutoSwapTransactionsMutation {
+  success: Boolean
+  error: String
+  txid: String
+}
+
+"""
+Builds an atomic 5-txn group: burn cUSD → USDC, then send USDC to recipient.
+All in one Algorand atomic group so the USDC send uses the freshly-minted USDC.
+Also creates a USDCWithdrawal record so the send appears in transaction history.
+"""
+type BuildBurnAndSendMutation {
+  success: Boolean
+  error: String
+  transactions: JSONString
 }
 
 """
@@ -4097,7 +6667,7 @@ type CreateSponsoredPaymentMutation {
   feeAmount: Float
 
   """Payment ID for tracking"""
-  paymentId: String
+  internalId: String
 }
 
 """
@@ -4140,6 +6710,88 @@ type SubmitInviteForPhone {
   success: Boolean
   error: String
   txid: String
+  internalId: String
+}
+
+input SponsorTxnInput {
+  txn: String!
+  index: Int!
+}
+
+type PrepareReclaimInvite {
+  success: Boolean
+  error: String
+  userTransaction: InviteUserTxnType
+  sponsorTransactions: [SponsorTxnType]
+  groupId: String
+}
+
+type SubmitReclaimInvite {
+  success: Boolean
+  error: String
+  txid: String
+}
+
+type MarkMessageChannelSeen {
+  success: Boolean!
+  totalUnreadCount: Int!
+}
+
+type ReactToMessageContent {
+  success: Boolean!
+  contentItemId: ID!
+  reactionSummary: [MessageReactionType]!
+  viewerReaction: String
+}
+
+type TrackContentPlatformClick {
+  success: Boolean!
+}
+
+type SendSupportMessage {
+  success: Boolean!
+  message: MessageThreadItemType!
+}
+
+type UpdateMessageChannelMute {
+  success: Boolean!
+  channelId: String!
+  isMuted: Boolean!
+}
+
+type PortalSendSupportReply {
+  success: Boolean!
+  conversation: PortalSupportConversationType!
+}
+
+type PortalSetSupportConversationStatus {
+  success: Boolean!
+  conversation: PortalSupportConversationType!
+}
+
+type PortalSaveContentItem {
+  success: Boolean!
+  contentItem: PortalContentItemType!
+}
+
+type PortalDeleteContentItem {
+  success: Boolean!
+  deletedContentItemId: ID!
+}
+
+type RequestPublicationImageUpload {
+  success: Boolean!
+  error: String
+  upload: PublicationImageUploadType
+}
+
+type PublicationImageUploadType {
+  url: String!
+  key: String!
+  method: String!
+  fields: JSONString
+  expiresIn: Int!
+  publicUrl: String!
 }
 
 """Mark a notification as read"""
@@ -4184,6 +6836,12 @@ type SendTestPushNotification {
   failedCount: Int
 }
 
+type ApplyHumanitarianVolunteer {
+  success: Boolean
+  error: String
+  application: HumanitarianVolunteerApplicationType
+}
+
 """Mutation to purchase CONFIO tokens during presale"""
 type PurchasePresaleTokens {
   success: Boolean
@@ -4191,11 +6849,225 @@ type PurchasePresaleTokens {
   purchase: PresalePurchaseType
 }
 
+"""Mutation to join the presale waitlist"""
+type JoinPresaleWaitlist {
+  success: Boolean
+  message: String
+  alreadyJoined: Boolean
+}
+
+"""
+Step 1 of the BSC presale buy: full eligibility gate + on-chain quote
++ purchase record. Returns the exact [approve, buy] batch the client
+must sign as one EIP-712 intent (ConfioBatchDelegate.execute).
+"""
+type PrepareBscPresalePurchase {
+  success: Boolean
+  error: String
+  purchaseId: String
+  calls: [BscPresaleCallType]
+  confioAmount: String
+  cost: String
+  maxPayment: String
+  avgPrice: String
+}
+
+"""
+One call of the sponsored 7702 buy batch (server-built; the client
+signs exactly these and nothing else).
+"""
+type BscPresaleCallType {
+  to: String
+  valueWei: String
+  data: String
+}
+
+"""
+Step 2: the user's signature over the server-stored batch. The server
+recomputes the digest from what IT stored — a client cannot substitute
+calldata — re-checks geo, then broadcasts from the KMS sponsor.
+"""
+type SubmitBscPresalePurchase {
+  success: Boolean
+  error: String
+  authorizationRequired: Boolean
+  transactionHash: String
+}
+
+"""
+A signed EIP-7702 authorization tuple (first use only) — same shape
+as cusd_plus's BscAuthorizationInput, defined locally to keep the
+presale schema import-independent.
+"""
+input BscPresaleAuthorizationInput {
+  chainId: Int!
+  address: String!
+  nonce: String!
+  yParity: Int!
+  r: String!
+  s: String!
+}
+
 """Check KYC status for current user"""
 type CheckKYCStatus {
   kycRequired: Boolean
   reason: String
   verificationStatus: String
+  statusDetail: String
+}
+
+"""Generate a nonce for Play Integrity token request"""
+type RequestIntegrityNonce {
+  success: Boolean
+  nonce: String
+  error: String
+}
+
+"""Verify a Firebase App Check token and check historical violations"""
+type VerifyAppCheck {
+  success: Boolean
+  passed: Boolean
+  isBlocked: Boolean
+  hasHistoricalViolation: Boolean
+  error: String
+}
+
+"""
+Record an accepted quote. Nothing on chain yet — ABANDONED if the
+user never signs (24h sweep).
+"""
+type StartCusdPlusConversion {
+  conversion: CusdPlusConversionType
+  success: Boolean
+  errors: [String]
+}
+
+"""
+Client reports a leg it signed. Transitions are monotonic and
+validated; the bridge poller independently verifies SRC_COMMITTED ->
+DEST_ARRIVED, so a lying client cannot fake delivery.
+"""
+type AdvanceCusdPlusConversion {
+  conversion: CusdPlusConversionType
+  success: Boolean
+  errors: [String]
+}
+
+"""
+Relay a CLIENT-SIGNED BSC transaction to the node (the EVM analogue
+of submitSponsoredGroup). Decodes the raw tx and only relays legacy
+EIP-155 txns on our chain whose `to` is an allowlisted Confío-flow
+contract — the relay can't be used as an open broadcast proxy.
+"""
+type SubmitBscTransaction {
+  success: Boolean
+  txHash: String
+  error: String
+}
+
+"""
+Foreground fast-path for monitor_bridge_arrivals: record a specific
+tx's USDT arrival NOW instead of waiting for the next beat scan.
+
+The BNB auto-convert calls this right after its swap receipt so the
+whole BNB→USDT→cUSD+ chain finishes in ONE foreground session (the
+Algorand auto-swap's one-shot UX, minus EVM's missing atomicity):
+swap → this mutation → resumeSavingsMints picks up the fresh row.
+
+Grants no new capability: it parses the SAME chain truth with the SAME
+guards (registered addresses, deposit floor, in-flight protection) into
+the SAME idempotent recorder the beat scanner uses — only sooner. If it
+fails, the beat scan records the arrival minutes later as before.
+"""
+type RegisterBscUsdtArrival {
+  success: Boolean
+  recorded: Boolean
+  error: String
+}
+
+"""
+Execute a user-signed call batch as a SPONSOR-PAID type-4 (EIP-7702)
+transaction — the successor to gas dusting. The client signs an EIP-712
+intent over the exact calls (and, on first use, a 7702 authorization
+designating ConfioBatchDelegate at its EOA); the server validates both
+against the vault-flow policy, simulates, and broadcasts from the KMS
+sponsor. The user's address never needs BNB. Custody unchanged: the
+delegate on-chain re-verifies the user's signature, so the sponsor can
+only execute what the user signed.
+"""
+type SponsorBscBatch {
+  success: Boolean
+  txHash: String
+  authorizationRequired: Boolean
+  error: String
+}
+
+"""A signed EIP-7702 authorization tuple (client-signed, first use only)."""
+input BscAuthorizationInput {
+  chainId: Int!
+
+  """The delegate contract being designated"""
+  address: String!
+
+  """The EOA's account nonce at signing"""
+  nonce: String!
+  yParity: Int!
+  r: String!
+  s: String!
+}
+
+"""One call of a 7702 sponsored batch."""
+input BscCallInput {
+  to: String!
+
+  """Must be '0' under current policy"""
+  valueWei: String!
+
+  """0x-prefixed calldata"""
+  data: String!
+}
+
+type RegisterFinanciera {
+  success: Boolean
+  error: String
+  financiera: FinancieraType
+}
+
+"""
+Owner edits to a listing. Country is fixed (delete + re-register to move
+countries) and supports_usdc_algorand stays mandatory, so neither is editable.
+"""
+type UpdateFinanciera {
+  success: Boolean
+  error: String
+  financiera: FinancieraType
+}
+
+"""Pause/unpause a listing (e.g. vacations) without losing its reviews."""
+type SetFinancieraActive {
+  success: Boolean
+  error: String
+  financiera: FinancieraType
+}
+
+type DeleteFinanciera {
+  success: Boolean
+  error: String
+}
+
+"""
+Reviews must be anchored to a real USDC-Algorand transaction. The
+transaction amount comes from the server, never from the client.
+"""
+type SubmitFinancieraReview {
+  success: Boolean
+  error: String
+  review: FinancieraReviewType
+}
+
+type ReportFinanciera {
+  success: Boolean
+  error: String
 }
 
 """Mutation for creating a new USDC deposit"""
@@ -4392,6 +7264,180 @@ type AddDisputeEvidence {
   errors: [String]
 }
 
+type CreatePayrollRun {
+  run: PayrollRunType
+  success: Boolean
+  errors: [String]
+}
+
+input PayrollItemInput {
+  """Confío account ID that will receive payroll"""
+  recipientAccountId: ID!
+
+  """Net amount to deliver (decimal string)"""
+  netAmount: String!
+}
+
+type PreparePayrollItemPayout {
+  item: PayrollItemType
+  run: PayrollRunType
+
+  """Unsigned transactions for delegate to sign"""
+  transactions: JSONString
+
+  """Base64-encoded unsigned transaction for direct signing"""
+  unsignedTransactionB64: String
+
+  """Base64-encoded signed sponsor transaction"""
+  sponsorTransaction: String
+  grossAmount: Float
+  netAmount: Float
+  feeAmount: Float
+  groupId: String
+  success: Boolean
+  errors: [String]
+}
+
+type SubmitPayrollItemPayout {
+  item: PayrollItemType
+  run: PayrollRunType
+  transactionHash: String
+  success: Boolean
+  errors: [String]
+}
+
+type PreparePayrollVaultFunding {
+  """Unsigned business AXFER transaction (single item)"""
+  unsignedTransactions: [String]
+
+  """Signed sponsor app call transaction"""
+  sponsorAppCall: String
+  groupId: String
+  amount: Float
+  success: Boolean
+  errors: [String]
+}
+
+type SubmitPayrollVaultFunding {
+  transactionHash: String
+  success: Boolean
+  errors: [String]
+}
+
+"""
+Prepare an unsigned withdrawal from the business payroll vault (to business account_0).
+"""
+type PreparePayrollVaultWithdrawal {
+  success: Boolean
+  errors: [String]
+
+  """Unsigned withdrawal AppCall (base64 msgpack)"""
+  transaction: String
+  amount: Float
+}
+
+"""Submit a signed withdraw_vault transaction."""
+type SubmitPayrollVaultWithdrawal {
+  success: Boolean
+  errors: [String]
+  transactionHash: String
+}
+
+type SetBusinessDelegates {
+  success: Boolean
+  errors: [String]
+  unsignedTransactionB64: String
+  transactionHash: String
+}
+
+type SetBusinessDelegatesByEmployee {
+  success: Boolean
+  errors: [String]
+  unsignedTransactionB64: String
+  transactionHash: String
+}
+
+type CreatePayrollRecipient {
+  recipient: PayrollRecipientType
+  success: Boolean
+  errors: [String]
+}
+
+type DeletePayrollRecipient {
+  success: Boolean
+  errors: [String]
+}
+
+"""
+Business escrow ops: fund / withdraw / set_delegate. Returns the
+canonical batch for the BUSINESS EOA to sign as one 7702 intent.
+"""
+type PrepareBscPayrollAdmin {
+  success: Boolean
+  error: String
+  calls: [BscPayrollCallType]
+  shares: String
+  delegateAddress: String
+}
+
+"""One call of a business admin batch (server-built)."""
+type BscPayrollCallType {
+  to: String
+  valueWei: String
+  data: String
+}
+
+"""
+The business signature over the batch — rebuilt server-side from the
+integer params, so tampered calldata simply fails signature recovery.
+"""
+type SubmitBscPayrollAdmin {
+  success: Boolean
+  error: String
+  authorizationRequired: Boolean
+  transactionHash: String
+}
+
+"""A signed EIP-7702 authorization tuple (first use only)."""
+input BscPayrollAuthorizationInput {
+  chainId: Int!
+  address: String!
+  nonce: String!
+  yParity: Int!
+  r: String!
+  s: String!
+}
+
+"""
+Step 1 of a BSC payout: gates + eligibility branch server-side,
+stores the exact Payout struct on the item, returns the EIP-712 digest
+the executing delegate signs with their OWN personal EVM key.
+"""
+type PrepareBscPayrollPayout {
+  success: Boolean
+  error: String
+  digest: String
+  deadline: Int
+  redeemToUsdt: Boolean
+}
+
+"""
+Step 2: the delegate's signature over the STORED Payout. The server
+recovers the signer, re-checks the on-chain allowlist, and broadcasts
+payout() as a plain KMS-sponsor transaction.
+"""
+type SubmitBscPayrollPayout {
+  success: Boolean
+  error: String
+  transactionHash: String
+}
+
+type UpsertRampUserAddress {
+  success: Boolean
+  error: String
+  rampAddress: RampUserAddressType
+}
+
 """Mutation for creating a new invoice"""
 type CreateInvoice {
   invoice: InvoiceType
@@ -4436,6 +7482,99 @@ type PayInvoice {
   errors: [String]
 }
 
+"""
+Step 1 of a BSC invoice payment: server validates the invoice, picks
+the funding token, computes the 0.9% ceiling fee, and stores the exact
+2-transfer batch [merchant_net, treasury_fee].
+"""
+type PrepareBscInvoicePayment {
+  success: Boolean
+  error: String
+  paymentId: String
+  calls: [BscPaymentCallType]
+  tokenType: String
+  net: String
+  fee: String
+}
+
+"""
+One call of the sponsored 7702 payment batch (server-built; the
+client signs exactly these and nothing else).
+"""
+type BscPaymentCallType {
+  to: String
+  valueWei: String
+  data: String
+}
+
+"""
+Step 2: the payer's signature over the server-stored batch; the
+digest is recomputed from what the SERVER stored, then broadcast from
+the KMS sponsor.
+"""
+type SubmitBscInvoicePayment {
+  success: Boolean
+  error: String
+  authorizationRequired: Boolean
+  transactionHash: String
+}
+
+"""A signed EIP-7702 authorization tuple (first use only)."""
+input BscPaymentAuthorizationInput {
+  chainId: Int!
+  address: String!
+  nonce: String!
+  yParity: Int!
+  r: String!
+  s: String!
+}
+
+"""
+Step 1 of a BSC dollar send: resolve the recipient (user id → phone →
+raw 0x address, Algorand-rail priority), pick the funding source and
+call shape server-side, store the exact batch. Returns the calls the
+client must sign as one EIP-712 intent (ConfioBatchDelegate.execute).
+"""
+type PrepareBscSend {
+  success: Boolean
+  error: String
+  sendId: String
+  calls: [BscSendCallType]
+  tokenType: String
+}
+
+"""
+One call of the sponsored 7702 send batch (server-built; the client
+signs exactly these and nothing else).
+"""
+type BscSendCallType {
+  to: String
+  valueWei: String
+  data: String
+}
+
+"""
+Step 2: the sender's signature over the server-stored batch. The
+digest is recomputed from what the SERVER stored — a client cannot
+substitute calldata — then broadcast from the KMS sponsor.
+"""
+type SubmitBscSend {
+  success: Boolean
+  error: String
+  authorizationRequired: Boolean
+  transactionHash: String
+}
+
+"""A signed EIP-7702 authorization tuple (first use only)."""
+input BscSendAuthorizationInput {
+  chainId: Int!
+  address: String!
+  nonce: String!
+  yParity: Int!
+  r: String!
+  s: String!
+}
+
 type InitiateSMSVerification {
   success: Boolean
   error: String
@@ -4461,6 +7600,19 @@ type CheckTelegramDeliveryStatus {
   deliveryStatus: String
   error: String
   canRetry: Boolean
+}
+
+"""
+Record a client-originated funnel event.
+
+Safe for unauthenticated callers (session_id carries pre-signup identity).
+Returns success even on validation failure so analytics never breaks UX;
+the `recorded` flag tells the client whether the event was actually
+persisted.
+"""
+type TrackFunnelEvent {
+  success: Boolean
+  recorded: Boolean
 }
 
 type AddBusinessEmployee {
@@ -4542,6 +7694,17 @@ type CancelInvitation {
   errors: [String]
 }
 
+"""
+Report the status of a wallet backup to the server for safety tracking.
+Called when:
+1. iOS user logs in (Provider='icloud') [Implicit]
+2. Any user successfully uploads to Drive (Provider='google_drive') [Explicit]
+"""
+type ReportBackupStatus {
+  success: Boolean
+  error: String
+}
+
 type UpdatePhoneNumber {
   success: Boolean
   error: String
@@ -4557,6 +7720,36 @@ type UpdateUserProfile {
   success: Boolean
   error: String
   user: UserType
+}
+
+"""
+Persist user's ICP self-report. Empty tags list == user skipped.
+
+Always sets confio_icp_captured_at, which flips pendingModal off.
+Single-submit per user; safe to call repeatedly (no-op after first capture).
+"""
+type SubmitConfioIcp {
+  success: Boolean
+  error: String
+  user: UserType
+}
+
+"""
+Persist user's rating + action choice. Single submit at Step 2.
+
+Action enum: FEEDBACK | STORE | SKIP. Stars 1-5 required regardless of action.
+Setting confio_rating_prompted_at gates the modal from re-firing.
+"""
+type SubmitConfioRating {
+  success: Boolean
+  error: String
+  user: UserType
+}
+
+enum RatingActionEnum {
+  FEEDBACK
+  STORE
+  SKIP
 }
 
 type InvalidateAuthTokens {
@@ -4590,6 +7783,29 @@ value as specified by
 [iso8601](https://en.wikipedia.org/wiki/ISO_8601).
 """
 scalar Date
+
+type CreateDiditVerificationSession {
+  success: Boolean
+  error: String
+  session: DiditSessionInfo
+  verification: IdentityVerificationType
+}
+
+type DiditSessionInfo {
+  sessionId: String
+  sessionToken: String
+  status: String
+  vendorData: JSONString
+}
+
+type SyncDiditVerificationSession {
+  success: Boolean
+  error: String
+  verification: IdentityVerificationType
+  verificationStatus: String
+  statusDetail: String
+  requiresManualReview: Boolean
+}
 
 type RequestIdentityUpload {
   upload: PresignedUploadInfo
@@ -4634,6 +7850,17 @@ type UpdateAccountAlgorandAddress {
   account: AccountType
   needsOptIn: [String]
   optInTransactions: JSONString
+}
+
+"""
+Register the account's BSC (savings chain) address — the EVM sibling
+of UpdateAccountAlgorandAddress. Client-derived (confio/evm/v1 domain);
+the server cannot derive it (non-custodial). Needed by cUSD+ ramps
+(Koywe USDT-BSC delivery) and the BSC inbound scanner.
+"""
+type UpdateAccountBscAddress {
+  success: Boolean
+  error: String
 }
 
 type CreateBankInfo {

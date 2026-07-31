@@ -202,9 +202,136 @@ class Query(graphene.ObjectType):
         return transactions
 
 
+class BscSendCallType(graphene.ObjectType):
+    """One call of the sponsored 7702 send batch (server-built; the client
+    signs exactly these and nothing else)."""
+    to = graphene.String()
+    value_wei = graphene.String()
+    data = graphene.String()
+
+
+class BscSendAuthorizationInput(graphene.InputObjectType):
+    """A signed EIP-7702 authorization tuple (first use only)."""
+    chain_id = graphene.Int(required=True)
+    address = graphene.String(required=True)
+    nonce = graphene.String(required=True)
+    y_parity = graphene.Int(required=True)
+    r = graphene.String(required=True)
+    s = graphene.String(required=True)
+
+
+class PrepareBscSend(graphene.Mutation):
+    """Step 1 of a BSC dollar send: resolve the recipient (user id → phone →
+    raw 0x address, Algorand-rail priority), pick the funding source and
+    call shape server-side, store the exact batch. Returns the calls the
+    client must sign as one EIP-712 intent (ConfioBatchDelegate.execute)."""
+
+    class Arguments:
+        amount = graphene.Decimal(required=True)
+        recipient_user_id = graphene.ID(required=False)
+        recipient_phone = graphene.String(required=False)
+        recipient_address = graphene.String(required=False)
+        memo = graphene.String(required=False)
+        idempotency_key = graphene.String(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    send_id = graphene.String()
+    calls = graphene.List(BscSendCallType)
+    token_type = graphene.String()
+
+    @login_required
+    def mutate(self, info, amount, recipient_user_id=None, recipient_phone=None,
+               recipient_address=None, memo='', idempotency_key=''):
+        from django.conf import settings as dj_settings
+
+        from cusd_plus.schema import _bsc_rate_limited
+        from users.jwt_context import get_jwt_business_context_with_validation
+
+        from . import bsc_flow
+
+        user = info.context.user
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return PrepareBscSend(success=False, error='disabled')
+        if _bsc_rate_limited(user.id, 'bsc_send_prepare', 10):
+            return PrepareBscSend(success=False, error='rate_limited')
+
+        # Sender context is JWT-derived; business sends need send_funds.
+        jwt_ctx = get_jwt_business_context_with_validation(
+            info, required_permission='send_funds')
+        if not jwt_ctx:
+            return PrepareBscSend(success=False, error='permission_denied')
+
+        result = bsc_flow.prepare_bsc_send(
+            user, jwt_ctx, amount,
+            recipient_user_id=recipient_user_id,
+            recipient_phone=recipient_phone,
+            recipient_address=recipient_address,
+            memo=memo or '',
+            idempotency_key=idempotency_key or '',
+        )
+        if not result.get('success'):
+            return PrepareBscSend(success=False, error=result.get('error'))
+        return PrepareBscSend(
+            success=True,
+            send_id=result['send_id'],
+            calls=[
+                BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data'])
+                for c in result['calls']
+            ],
+            token_type=result['token_type'],
+        )
+
+
+class SubmitBscSend(graphene.Mutation):
+    """Step 2: the sender's signature over the server-stored batch. The
+    digest is recomputed from what the SERVER stored — a client cannot
+    substitute calldata — then broadcast from the KMS sponsor."""
+
+    class Arguments:
+        send_id = graphene.String(required=True)
+        nonce = graphene.String(required=True, description="Delegate intent nonce (nonces())")
+        deadline = graphene.String(required=True, description="Unix seconds")
+        intent_signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
+        authorization = BscSendAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    authorization_required = graphene.Boolean()
+    transaction_hash = graphene.String()
+
+    @login_required
+    def mutate(self, info, send_id, nonce, deadline, intent_signature, authorization=None):
+        from django.conf import settings as dj_settings
+
+        from cusd_plus.schema import _bsc_rate_limited
+
+        from . import bsc_flow
+
+        user = info.context.user
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return SubmitBscSend(success=False, error='disabled')
+        if _bsc_rate_limited(user.id, 'bsc_send_submit', 10):
+            return SubmitBscSend(success=False, error='rate_limited')
+
+        send_tx = SendTransaction.objects.filter(
+            internal_id=send_id, deleted_at__isnull=True).first()
+        if not send_tx:
+            return SubmitBscSend(success=False, error='send_not_found')
+
+        result = bsc_flow.submit_bsc_send(
+            user, send_tx, nonce, deadline, intent_signature, authorization)
+        return SubmitBscSend(
+            success=bool(result.get('success')),
+            error=result.get('error'),
+            authorization_required=bool(result.get('authorization_required')),
+            transaction_hash=result.get('transaction_hash'),
+        )
+
+
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""
-    # Note: Send transactions are now handled by Algorand mutations in blockchain/mutations.py
-    # The old CreateSendTransaction, PrepareTransaction, and ExecuteTransaction mutations
-    # have been removed as they are no longer used.
-    pass
+    # Algorand sends live in blockchain/mutations.py; BSC sends (Phase 2,
+    # cUSD phase-out) live here on the sponsored 7702 rail.
+    prepare_bsc_send = PrepareBscSend.Field()
+    submit_bsc_send = SubmitBscSend.Field()

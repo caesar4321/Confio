@@ -13,6 +13,7 @@ from .models import Invoice, PaymentTransaction
 from django.db.models import Q
 from send.validators import validate_transaction_amount
 from security.utils import graphql_require_kyc, graphql_require_aml
+from graphql_jwt.decorators import login_required
 
 logger = logging.getLogger(__name__)
 
@@ -908,8 +909,133 @@ class Query(graphene.ObjectType):
         return queryset
 
 
+class BscPaymentCallType(graphene.ObjectType):
+    """One call of the sponsored 7702 payment batch (server-built; the
+    client signs exactly these and nothing else)."""
+    to = graphene.String()
+    value_wei = graphene.String()
+    data = graphene.String()
+
+
+class BscPaymentAuthorizationInput(graphene.InputObjectType):
+    """A signed EIP-7702 authorization tuple (first use only)."""
+    chain_id = graphene.Int(required=True)
+    address = graphene.String(required=True)
+    nonce = graphene.String(required=True)
+    y_parity = graphene.Int(required=True)
+    r = graphene.String(required=True)
+    s = graphene.String(required=True)
+
+
+class PrepareBscInvoicePayment(graphene.Mutation):
+    """Step 1 of a BSC invoice payment: server validates the invoice, picks
+    the funding token, computes the 0.9% ceiling fee, and stores the exact
+    2-transfer batch [merchant_net, treasury_fee]."""
+
+    class Arguments:
+        invoice_id = graphene.String(required=True, description="Invoice internal_id (the QR payload)")
+        idempotency_key = graphene.String(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    payment_id = graphene.String()
+    calls = graphene.List(BscPaymentCallType)
+    token_type = graphene.String()
+    net = graphene.String()
+    fee = graphene.String()
+
+    @login_required
+    def mutate(self, info, invoice_id, idempotency_key=''):
+        from django.conf import settings as dj_settings
+
+        from cusd_plus.schema import _bsc_rate_limited
+        from users.jwt_context import get_jwt_business_context_with_validation
+
+        from . import bsc_flow
+
+        user = info.context.user
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return PrepareBscInvoicePayment(success=False, error='disabled')
+        if _bsc_rate_limited(user.id, 'bsc_pay_prepare', 10):
+            return PrepareBscInvoicePayment(success=False, error='rate_limited')
+
+        jwt_ctx = get_jwt_business_context_with_validation(
+            info, required_permission='send_funds')
+        if not jwt_ctx:
+            return PrepareBscInvoicePayment(success=False, error='permission_denied')
+
+        invoice = Invoice.objects.filter(
+            internal_id=invoice_id, deleted_at__isnull=True).first()
+        if not invoice:
+            return PrepareBscInvoicePayment(success=False, error='invoice_not_found')
+
+        result = bsc_flow.prepare_bsc_payment(
+            user, jwt_ctx, invoice, idempotency_key=idempotency_key or '')
+        if not result.get('success'):
+            return PrepareBscInvoicePayment(success=False, error=result.get('error'))
+        return PrepareBscInvoicePayment(
+            success=True,
+            payment_id=result['payment_id'],
+            calls=[
+                BscPaymentCallType(to=c['to'], value_wei=c['value'], data=c['data'])
+                for c in result['calls']
+            ],
+            token_type=result['token_type'],
+            net=result['net'],
+            fee=result['fee'],
+        )
+
+
+class SubmitBscInvoicePayment(graphene.Mutation):
+    """Step 2: the payer's signature over the server-stored batch; the
+    digest is recomputed from what the SERVER stored, then broadcast from
+    the KMS sponsor."""
+
+    class Arguments:
+        payment_id = graphene.String(required=True)
+        nonce = graphene.String(required=True, description="Delegate intent nonce (nonces())")
+        deadline = graphene.String(required=True, description="Unix seconds")
+        intent_signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
+        authorization = BscPaymentAuthorizationInput(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    authorization_required = graphene.Boolean()
+    transaction_hash = graphene.String()
+
+    @login_required
+    def mutate(self, info, payment_id, nonce, deadline, intent_signature, authorization=None):
+        from django.conf import settings as dj_settings
+
+        from cusd_plus.schema import _bsc_rate_limited
+
+        from . import bsc_flow
+
+        user = info.context.user
+        if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
+            return SubmitBscInvoicePayment(success=False, error='disabled')
+        if _bsc_rate_limited(user.id, 'bsc_pay_submit', 10):
+            return SubmitBscInvoicePayment(success=False, error='rate_limited')
+
+        payment_tx = PaymentTransaction.objects.filter(
+            internal_id=payment_id, deleted_at__isnull=True).first()
+        if not payment_tx:
+            return SubmitBscInvoicePayment(success=False, error='payment_not_found')
+
+        result = bsc_flow.submit_bsc_payment(
+            user, payment_tx, nonce, deadline, intent_signature, authorization)
+        return SubmitBscInvoicePayment(
+            success=bool(result.get('success')),
+            error=result.get('error'),
+            authorization_required=bool(result.get('authorization_required')),
+            transaction_hash=result.get('transaction_hash'),
+        )
+
+
 class Mutation(graphene.ObjectType):
     """Mutation definitions for invoices"""
     create_invoice = CreateInvoice.Field()
     get_invoice = GetInvoice.Field()
     pay_invoice = PayInvoice.Field()
+    prepare_bsc_invoice_payment = PrepareBscInvoicePayment.Field()
+    submit_bsc_invoice_payment = SubmitBscInvoicePayment.Field()

@@ -26,6 +26,10 @@ class SendTransaction(SoftDeleteModel):
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin'),
         ('ALGO', 'ALGO'),
+        # BSC dollar rails (Phase 2, 2026-07-30): cUSD+ vault shares and raw
+        # USDT moved via sponsored EIP-7702 batches (send/bsc_flow.py).
+        ('CUSD_PLUS', 'Confío Dollar Plus'),
+        ('USDT', 'Tether USD'),
     ]
 
     # Unique identifier for the send transaction (internal)
@@ -137,6 +141,15 @@ class SendTransaction(SoftDeleteModel):
         blank=True,
         null=True,
         help_text='Optional key to prevent duplicate transactions'
+    )
+
+    # BSC sends only: the EXACT sponsored call batch built at prepare time,
+    # revalidated byte-for-byte at submit (presale/bsc_flow.py pattern —
+    # the client can only ever sign what the server stored).
+    bsc_calls_json = models.TextField(
+        blank=True,
+        default='',
+        help_text='Sponsored 7702 call batch for BSC sends (server-built at prepare)'
     )
     
     # Invitation tracking
