@@ -79,12 +79,17 @@ Post-deploy reads: `name()` = "Confio Dollar+", `symbol()` = "cUSD+",
 `owner()` = Safe, `pPlus()` = 1e18 (genesis $1.00),
 `backingRatioBps()` = 10000 (empty vault, fully backed).
 
-### Status: LIVE but DORMANT until PP whitelisting
+### Status: WHITELISTED (2026-07-30) — ready for the $1 live E2E
 
-`subscribeAndMint` reverts `UserNotRegistered` at the IM until the vault
-proxy address is whitelisted in the OndoIDRegistry
-(`0x898128F9f22c0192da0c5acD394D9eeAc461D911`) via Primary Purchaser
-onboarding. No funds, no risk, until then.
+Duende Limited fully approved for Ondo Global Markets 2026-07-30;
+Subscription Form executed via Dropbox Sign; vault proxy registered via
+app.ondo.finance/account/wallets and whitelisted within minutes.
+On-chain proof: `IM.subscribe` eth_call as the vault no longer reverts
+`UserNotRegistered()` — it proceeds to the USDT balance pull ("BEP20:
+transfer amount exceeds balance" in simulation). Ondo GM write API key
+stored at Secrets Manager `prod/ondo-gm-api-key` (eu-central-2;
+remember: the EC2 role's secrets policy is ARN-enumerated — grant this
+new ARN in the console before prod backend code can read it).
 
 ### Remaining checklist
 
@@ -114,8 +119,11 @@ onboarding. No funds, no risk, until then.
       | 4.0 | — | guardedOraclePrice (appended) |
 
       New variables append at slot 5+, never between existing ones.
-- [ ] Send vault proxy address to Ondo (Daniel) for PP whitelisting
-- [ ] $1 live E2E once whitelisted
+- [x] Send vault proxy address to Ondo — DONE; account approved and
+      address whitelisted in the OndoIDRegistry 2026-07-30 (self-serve
+      via the Ondo dashboard, confirmed on-chain by the IM probe).
+- [ ] $1 live E2E (subscribeAndMint -> redeemToUsdt round trip) — vault
+      needs ~1 USDT on BSC to run it
 - [ ] Router deploy (separate) once GM attestation ABI is wired — deploy
       only from `d78315a8`+ (pre-fix `sellToSavings` forwarded the shares
       floor as the IM's `minUsdyOut`, bricking every sell with honest
