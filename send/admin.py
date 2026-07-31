@@ -39,7 +39,7 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         'recipient_type_display',
         'recipient_display', 
         'amount_display', 
-        'token_type', 
+        'token_type_display', 
         'is_invitation',
         'invitation_expires_at',
         'status', 
@@ -201,6 +201,15 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     recipient_display.short_description = "Recipient"
     recipient_display.admin_order_field = 'recipient_user__username'
     
+    def token_type_display(self, obj):
+        """Raw-value-safe token column: Django renders choice fields via a
+        flatchoices lookup, so values missing from TOKEN_TYPES (e.g. USDT
+        before the Phase-2 choices land) display as EMPTY. Show the label
+        when known, the raw value otherwise — never blank."""
+        return obj.get_token_type_display() or obj.token_type
+    token_type_display.short_description = 'Token'
+    token_type_display.admin_order_field = 'token_type'
+
     def amount_display(self, obj):
         """Display amount in decimal format"""
         try:

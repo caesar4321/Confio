@@ -16,9 +16,13 @@ from django.utils import timezone
 
 
 class CusdPlusConversion(models.Model):
+    # The on-BSC leg is always USDT <-> cUSD+, whatever the origin (bridge
+    # saga, external deposit, ramp) — origin is the `source` field. The old
+    # labels said "cUSD -> cUSD+", which was only true for the bridge saga
+    # and read wrong on external USDT deposits in the admin.
     DIRECTIONS = [
-        ('to_savings', 'cUSD -> cUSD+ (Ahorrar)'),
-        ('from_savings', 'cUSD+ -> cUSD (Retirar)'),
+        ('to_savings', 'USDT -> cUSD+ (Ahorrar)'),
+        ('from_savings', 'cUSD+ -> USDT (Retirar)'),
     ]
 
     # Client-driven saga states. Monotonic; every halt leaves value at a
