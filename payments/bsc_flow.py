@@ -1,29 +1,27 @@
 """
-BSC invoice payment flow — the 2-transfer sponsored batch (Phase 2 of the
-cUSD phase-out; presale/send bsc_flow shape).
+BSC invoice payment flow — via ConfioPayContract (Phase 2 of the cUSD
+phase-out; presale/send bsc_flow shape).
 
-Locked design (Julian, 2026-07-30): NO payment contract on BSC. A payment
-is one sponsored 7702 batch of two zero-value transfers, atomic under
-ConfioBatchDelegate.execute():
+Design (Julian, 2026-07-31, superseding the 07-30 contract-less batch):
+fees sit IN each contract. A payment is one sponsored 7702 batch, atomic
+under ConfioBatchDelegate.execute():
 
-    [ token.transfer(merchant, net), token.transfer(feeRecipient, fee) ]
+    [ token.approve(payContract, gross),
+      payContract.pay(invoiceId, token, gross, merchant) ]
 
-where fee = ceil(gross * 0.9%) with the SAME ceiling-division semantics as
-the Algorand payment builder, and `token` follows the payer's funding
-source: cUSD+ vault shares (converted at the live share price) or raw
-USDT. Invoice binding lives in the DB (PaymentTransaction.invoice) + the
-tx hash — no on-chain receipt.
+The CONTRACT computes fee = ceil(gross * 0.9%) (same ceiling-division
+semantics as the Algorand builder and payment_fee_wei below), sends
+net = gross − fee to the merchant, accrues the fee in itself per token
+(owner Safe collects), and replay-guards the invoiceId on-chain. `token`
+follows the payer's funding source: cUSD+ vault shares (converted at the
+live share price) or raw USDT.
 
 Merchant token note (v1 divergence from the send flow's redeem-to-
 ineligible rule): the merchant receives the SAME token the payer spent.
 Holding cUSD+ is compliant secondary-market acquisition regardless of geo
 (the deemed-representations model; only MINTING is geo-gated), a business
 "geo" is ill-defined (eligibility is a personal-phone attribute), and the
-merchant's account screen already shows and redeems vault balances. This
-also halves gas and avoids double Instant-Manager round-trips.
-
-Fee destination: settings.BSC_FEE_RECIPIENT_ADDRESS — a dedicated
-treasury, never the sponsor.
+merchant's account screen already shows and redeems vault balances.
 """
 import json
 import logging
@@ -52,8 +50,15 @@ def _vault_address() -> str:
     return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
 
 
-def _fee_recipient() -> str:
-    return (getattr(settings, 'BSC_FEE_RECIPIENT_ADDRESS', '') or '').lower()
+def _pay_contract() -> str:
+    return (getattr(settings, 'BSC_PAY_CONTRACT_ADDRESS', '') or '').lower()
+
+
+def invoice_id_bytes32(internal_id: str) -> str:
+    """Deterministic bytes32 replay key for an invoice (uniform width;
+    the contract stores invoicePaid[id])."""
+    from eth_utils import keccak
+    return '0x' + keccak(text=internal_id).hex()
 
 
 def payment_fee_wei(gross_wei: int) -> int:
@@ -87,16 +92,16 @@ def _notify_merchant_needs_app(invoice, payer_user) -> None:
 
 def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
     from cusd_plus import vault as cp_vault
-    from cusd_plus.sponsor_7702 import SEL_TRANSFER, USDT_BSC
+    from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PAY, USDT_BSC
     from users.models import Account
     from .models import PaymentTransaction
 
     vault_addr = _vault_address()
-    fee_recipient = _fee_recipient()
+    pay_contract = _pay_contract()
     if not vault_addr:
         return {'success': False, 'error': 'vault_not_configured'}
-    if not fee_recipient:
-        return {'success': False, 'error': 'fee_recipient_not_configured'}
+    if not pay_contract:
+        return {'success': False, 'error': 'pay_contract_not_configured'}
     if not getattr(settings, 'BSC_PAY_ENABLED', False):
         return {'success': False, 'error': 'bsc_pay_disabled'}
 
@@ -156,23 +161,27 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         kind = 'pay_cusd_plus'
         token_type = 'CUSD_PLUS'
         token = vault_addr
-        net_units = (net_wei * WAD) // pps_wad
-        fee_units = (fee_wei * WAD) // pps_wad
+        gross_units = (gross_wei * WAD) // pps_wad  # shares at the live price
     elif usdt_raw >= gross_wei:
         kind = 'pay_usdt'
         token_type = 'USDT'
         token = USDT_BSC
-        net_units, fee_units = net_wei, fee_wei
+        gross_units = gross_wei
     else:
         return {'success': False, 'error': 'insufficient_balance'}
-    if net_units <= 0 or fee_units <= 0:
+    if gross_units <= 1:
+        # The contract needs at least 1 unit of fee AND 1 of net.
         return {'success': False, 'error': 'invalid_amount'}
 
+    # The contract splits net/fee itself (feeFor = the same ceiling rule);
+    # the batch only carries the approval and the pay() call.
+    invoice_id32 = invoice_id_bytes32(invoice.internal_id)
     calls = [
         {'to': token, 'value': '0',
-         'data': '0x' + SEL_TRANSFER + _addr_word(merchant_addr) + _uint_word(net_units)},
-        {'to': token, 'value': '0',
-         'data': '0x' + SEL_TRANSFER + _addr_word(fee_recipient) + _uint_word(fee_units)},
+         'data': '0x' + SEL_APPROVE + _addr_word(pay_contract) + _uint_word(gross_units)},
+        {'to': pay_contract, 'value': '0',
+         'data': '0x' + SEL_PAY + invoice_id32[2:] + _addr_word(token)
+                 + _uint_word(gross_units) + _addr_word(merchant_addr)},
     ]
 
     # Idempotent row per (invoice, payer): re-prepare refreshes the batch
@@ -228,30 +237,42 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
 
 
 def _validate_payment_batch(calls: list, payment_tx) -> None:
-    """Defense in depth on the STORED batch: exactly two zero-value
-    transfers on ONE token contract — merchant first, fee treasury second."""
-    from cusd_plus.sponsor_7702 import PolicyError, SEL_TRANSFER, USDT_BSC
+    """Defense in depth on the STORED batch: [approve(payContract, gross),
+    payContract.pay(invoiceId, token, gross, merchant)] — token allowed,
+    approval exactly the pay() amount, invoice id and merchant pinned to
+    the stored row (the contract re-enforces all of it on-chain)."""
+    from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PAY, USDT_BSC
 
     vault = _vault_address()
-    fee_recipient = _fee_recipient()
+    pay_contract = _pay_contract()
     if len(calls) != 2:
         raise PolicyError('bad_batch_size')
-    token = (calls[0].get('to') or '').lower()
-    if token not in (vault, USDT_BSC):
-        raise PolicyError('destination_not_allowed')
-    expected_words = [
-        _addr_word(payment_tx.merchant_address),
-        _addr_word(fee_recipient),
-    ]
-    for call, word in zip(calls, expected_words):
-        if (call.get('to') or '').lower() != token:
-            raise PolicyError('destination_not_allowed')
+    for call in calls:
         if int(call.get('value') or 0) != 0:
             raise PolicyError('value_not_allowed')
-        data = (call.get('data') or '').lower()
-        if (not data.startswith('0x') or len(data) != 2 + 8 + 128
-                or data[2:10] != SEL_TRANSFER or data[10:74] != word):
+        if not (call.get('data') or '').lower().startswith('0x'):
             raise PolicyError('bad_calldata')
+
+    approve, pay = calls
+    token = (approve.get('to') or '').lower()
+    if token not in (vault, USDT_BSC):
+        raise PolicyError('destination_not_allowed')
+    a_data = approve['data'].lower()
+    if (len(a_data) != 2 + 8 + 128 or a_data[2:10] != SEL_APPROVE
+            or a_data[10:74] != _addr_word(pay_contract)):
+        raise PolicyError('bad_calldata')
+    gross_word = a_data[74:138]
+
+    if (pay.get('to') or '').lower() != pay_contract:
+        raise PolicyError('destination_not_allowed')
+    p_data = pay['data'].lower()
+    invoice_id32 = invoice_id_bytes32(payment_tx.invoice.internal_id)
+    if (len(p_data) != 2 + 8 + 256 or p_data[2:10] != SEL_PAY
+            or p_data[10:74] != invoice_id32[2:]          # invoiceId
+            or p_data[74:138] != _addr_word(token)        # token == approved
+            or p_data[138:202] != gross_word              # gross == approval
+            or p_data[202:266] != _addr_word(payment_tx.merchant_address)):
+        raise PolicyError('bad_calldata')
 
 
 def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,

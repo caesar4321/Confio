@@ -33,7 +33,11 @@ pragma solidity ^0.8.24;
  *  - ineligible/external → CusdPlusVault.redeemToUsdt(netShares, minUsdtOut,
  *    recipient) — atomic burn → Ondo IM redeem → USDT lands directly at the
  *    recipient, no custody hop.
- * Fee shares go to the fee recipient AS SHARES (the treasury holds cUSD+).
+ * Fee shares STAY IN THIS CONTRACT (Julian, 07-31: fees sit in each
+ * contract — accounting reads straight off the chain): `accruedFeeShares`
+ * accumulates them and the owner (Safe) collects via collectFees. The
+ * standing invariant: CUSD_PLUS.balanceOf(this) == Σ escrowShares +
+ * accruedFeeShares.
  */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -78,8 +82,9 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     // ═════════════════════════ State ════════════════════════════════════
 
     ICusdPlusVault public immutable CUSD_PLUS;
-    address public feeRecipient;
 
+    /// Payout fees accrued in-contract, collectible by the owner (Safe).
+    uint256 public accruedFeeShares;
     /// cUSD+ shares parked per business.
     mapping(address => uint256) public escrowShares;
     /// business => delegate => may sign payouts.
@@ -101,15 +106,11 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         bool redeemedToUsdt,
         uint256 usdtOut
     );
-    event FeeRecipientSet(address indexed feeRecipient);
+    event FeesCollected(address indexed to, uint256 shares);
 
-    constructor(address cusdPlus, address feeRecipient_, address owner_)
-        Ownable(owner_)
-    {
-        require(cusdPlus != address(0) && feeRecipient_ != address(0), "zero address");
+    constructor(address cusdPlus, address owner_) Ownable(owner_) {
+        require(cusdPlus != address(0), "zero address");
         CUSD_PLUS = ICusdPlusVault(cusdPlus);
-        feeRecipient = feeRecipient_;
-        emit FeeRecipientSet(feeRecipient_);
     }
 
     // ═════════════════════════ Business ops ═════════════════════════════
@@ -179,7 +180,9 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         escrowShares[p.business] = held - total;
 
         if (p.feeShares > 0) {
-            IERC20(address(CUSD_PLUS)).safeTransfer(feeRecipient, p.feeShares);
+            // Fees never leave in the payout tx — they accrue here and the
+            // owner collects (yield keeps accruing to them meanwhile too).
+            accruedFeeShares += p.feeShares;
         }
         if (p.redeemToUsdt) {
             // Burns OUR shares; USDT lands directly at the recipient.
@@ -220,13 +223,16 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     }
 
     // ═════════════════════════ Admin ════════════════════════════════════
-    // Owner (the Safe) can rotate where fees land and freeze NEW activity;
-    // it has no path to escrowed shares.
+    // Owner (the Safe) can collect ACCRUED FEES ONLY and freeze new
+    // activity; it has no path to escrowed shares — collectFees is bounded
+    // by the accrual counter, so escrow can never be drained through it.
 
-    function setFeeRecipient(address feeRecipient_) external onlyOwner {
-        require(feeRecipient_ != address(0), "zero address");
-        feeRecipient = feeRecipient_;
-        emit FeeRecipientSet(feeRecipient_);
+    function collectFees(address to, uint256 shares) external onlyOwner nonReentrant {
+        require(to != address(0), "zero recipient");
+        require(shares > 0 && shares <= accruedFeeShares, "exceeds accrued fees");
+        accruedFeeShares -= shares;
+        IERC20(address(CUSD_PLUS)).safeTransfer(to, shares);
+        emit FeesCollected(to, shares);
     }
 
     function pause() external onlyOwner { _pause(); }

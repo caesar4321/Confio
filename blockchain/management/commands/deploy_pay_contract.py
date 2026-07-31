@@ -1,22 +1,23 @@
 """
-Deploy ConfioPayrollVault to BSC via the KMS sponsor.
+Deploy ConfioPayContract to BSC via the KMS sponsor.
 
 Same KMS-creation-tx flow as deploy_presale_vault (the sponsor key is
 non-extractable, so forge --broadcast is not an option). Single contract,
 non-upgradeable, no proxy.
 
-Constructor: (cusdPlusVault, owner)
-  - cusdPlusVault  = CUSD_PLUS_VAULT_ADDRESS (live 0x3C29…3Ed1)
-  - owner          = the 3-of-5 Safe (can only collect ACCRUED fees and
-                     pause deposits/payouts; never touches escrow —
-                     payout fees accrue IN the contract, Julian 07-31)
+Constructor: (cusdPlus, usdt, owner)
+  - cusdPlus  = CUSD_PLUS_VAULT_ADDRESS (live 0x3C29…3Ed1; vault shares
+                are one of the two payable tokens)
+  - usdt      = BSC USDT 0x55d3…7955 (the other)
+  - owner     = the 3-of-5 Safe (can only collect ACCRUED fees and pause
+                new payments — fees accrue IN the contract, Julian 07-31)
 
 Usage:
   # Dry run — builds the txn, estimates gas, broadcasts NOTHING (default):
-  myvenv/bin/python manage.py deploy_payroll_vault
+  myvenv/bin/python manage.py deploy_pay_contract
 
   # Real deployment — requires BOTH flags:
-  myvenv/bin/python manage.py deploy_payroll_vault --broadcast --yes-mainnet
+  myvenv/bin/python manage.py deploy_pay_contract --broadcast --yes-mainnet
 """
 import json
 import time
@@ -42,7 +43,7 @@ def _rpc(url: str, method: str, params: list):
 
 
 class Command(BaseCommand):
-    help = "Deploy ConfioPayrollVault to BSC via the KMS sponsor"
+    help = "Deploy ConfioPayContract to BSC via the KMS sponsor"
 
     def add_arguments(self, parser):
         parser.add_argument("--broadcast", action="store_true", help="Actually send the transaction")
@@ -60,6 +61,8 @@ class Command(BaseCommand):
         chain_id = settings.BSC_CHAIN_ID
         deployer = signer.address
 
+        from cusd_plus.sponsor_7702 import USDT_BSC
+
         cusd_plus = getattr(settings, "CUSD_PLUS_VAULT_ADDRESS", "") or ""
         if not cusd_plus:
             raise CommandError("CUSD_PLUS_VAULT_ADDRESS not configured")
@@ -70,14 +73,15 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Deployer (KMS sponsor): {deployer}")
         self.stdout.write(f"Chain {chain_id} · balance {balance/1e18:.6f} BNB · nonce {nonce} · gasPrice {gas_price/1e9:.3f} gwei")
-        self.stdout.write(f"cusdPlusVault = {cusd_plus}")
-        self.stdout.write(f"owner (Safe)  = {SAFE}")
+        self.stdout.write(f"cusdPlus     = {cusd_plus}")
+        self.stdout.write(f"usdt         = {USDT_BSC}")
+        self.stdout.write(f"owner (Safe) = {SAFE}")
 
-        art = json.loads((ARTIFACTS / "ConfioPayrollVault.sol" / "ConfioPayrollVault.json").read_text())
+        art = json.loads((ARTIFACTS / "ConfioPayContract.sol" / "ConfioPayContract.json").read_text())
         bytecode = bytes.fromhex(art["bytecode"]["object"].removeprefix("0x"))
         ctor_args = abi_encode(
-            ["address", "address"],
-            [cusd_plus, SAFE],
+            ["address", "address", "address"],
+            [cusd_plus, USDT_BSC, SAFE],
         )
         data = bytecode + ctor_args
 
@@ -87,7 +91,7 @@ class Command(BaseCommand):
         gas_est = int(_rpc(rpc_url, "eth_estimateGas", [{"from": deployer, "data": "0x" + data.hex()}]), 16)
         total_cost = gas_est * gas_price
         self.stdout.write("")
-        self.stdout.write(f"payroll vault → {vault_addr}  (~{gas_est} gas, ≈ {total_cost/1e18:.6f} BNB)")
+        self.stdout.write(f"pay contract → {vault_addr}  (~{gas_est} gas, ≈ {total_cost/1e18:.6f} BNB)")
 
         if not options["broadcast"]:
             self.stdout.write(self.style.WARNING("\nDRY RUN — nothing broadcast. Re-run with --broadcast --yes-mainnet to deploy."))
@@ -122,7 +126,8 @@ class Command(BaseCommand):
             out = _rpc(rpc_url, "eth_call", [{"to": got, "data": "0x" + selector.hex()}, "latest"])
             return to_checksum_address("0x" + out[-40:])
 
-        self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioPayrollVault: {got}"))
-        self.stdout.write(f"  CUSD_PLUS    = {call_addr('CUSD_PLUS()')}")
-        self.stdout.write(f"  owner        = {call_addr('owner()')}")
-        self.stdout.write("Next: add BSC_PAYROLL_VAULT_ADDRESS to .env.mainnet, BscScan verify, record in DEPLOYMENT.md.")
+        self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioPayContract: {got}"))
+        self.stdout.write(f"  CUSD_PLUS = {call_addr('CUSD_PLUS()')}")
+        self.stdout.write(f"  USDT      = {call_addr('USDT()')}")
+        self.stdout.write(f"  owner     = {call_addr('owner()')}")
+        self.stdout.write("Next: add BSC_PAY_CONTRACT_ADDRESS to .env.mainnet, BscScan verify, record in DEPLOYMENT.md.")

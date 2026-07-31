@@ -65,7 +65,6 @@ contract ConfioPayrollVaultTest is Test {
     ConfioPayrollVault payroll;
 
     address treasury = makeAddr("treasury");
-    address feeRecipient = makeAddr("feeRecipient");
     address safeOwner = makeAddr("safeOwner");
     address employee = makeAddr("employee");
     address sponsor = makeAddr("sponsor"); // untrusted payout caller
@@ -101,7 +100,7 @@ contract ConfioPayrollVaultTest is Test {
         );
         vault = CusdPlusVault(address(proxy));
 
-        payroll = new ConfioPayrollVault(address(vault), feeRecipient, safeOwner);
+        payroll = new ConfioPayrollVault(address(vault), safeOwner);
 
         // Business funds its payroll float: mint cUSD+ then park it.
         usdt.mint(business, 1_000_000e18);
@@ -188,8 +187,11 @@ contract ConfioPayrollVaultTest is Test {
         vm.prank(sponsor);
         payroll.payout(p, sig);
         assertEq(vault.balanceOf(employee), 100e18);
-        assertEq(vault.balanceOf(feeRecipient), 1e18);
+        assertEq(payroll.accruedFeeShares(), 1e18, "fee accrues in-contract");
         assertEq(payroll.escrowShares(business), 5_000e18 - 101e18);
+        // The standing invariant: contract balance = Σ escrow + accrued fees.
+        assertEq(vault.balanceOf(address(payroll)),
+                 payroll.escrowShares(business) + payroll.accruedFeeShares());
     }
 
     function test_payout_transfer_by_business_itself() public {
@@ -208,7 +210,7 @@ contract ConfioPayrollVaultTest is Test {
         assertEq(vault.balanceOf(employee), 0, "no shares on redeem branch");
         assertEq(usdt.balanceOf(employee), usdtOut);
         assertGe(usdtOut, 99e18, "minOut honored");
-        assertEq(vault.balanceOf(feeRecipient), 1e18, "fee stays in shares");
+        assertEq(payroll.accruedFeeShares(), 1e18, "fee accrues in shares");
     }
 
     function test_payout_redeem_slippage_reverts_whole_payout() public {
@@ -218,10 +220,10 @@ contract ConfioPayrollVaultTest is Test {
         vm.prank(sponsor);
         vm.expectRevert();
         payroll.payout(p, sig);
-        // Atomicity: fee transfer rolled back with it, item NOT consumed
+        // Atomicity: fee accrual rolled back with it, item NOT consumed
         // forever... actually it IS consumed pre-transfer — but the revert
         // rolls that back too. Item stays payable after a re-sign.
-        assertEq(vault.balanceOf(feeRecipient), 0);
+        assertEq(payroll.accruedFeeShares(), 0);
         assertEq(payroll.escrowShares(business), 5_000e18);
         assertFalse(payroll.itemUsed(keccak256(abi.encodePacked(business, bytes32("item-4")))));
     }
@@ -371,12 +373,39 @@ contract ConfioPayrollVaultTest is Test {
 
     // ── Admin surface ────────────────────────────────────────────────
 
-    function test_fee_recipient_rotation_owner_only() public {
+    function _accrueOneFee() internal {
+        ConfioPayrollVault.Payout memory p = _payout("fee-item", false);
+        vm.prank(sponsor);
+        payroll.payout(p, _sign(p, delegateKey));
+    }
+
+    function test_collect_fees_owner_only() public {
+        _accrueOneFee();
         vm.prank(stranger);
         vm.expectRevert();
-        payroll.setFeeRecipient(stranger);
+        payroll.collectFees(stranger, 1e18);
         vm.prank(safeOwner);
-        payroll.setFeeRecipient(stranger);
-        assertEq(payroll.feeRecipient(), stranger);
+        payroll.collectFees(safeOwner, 1e18);
+        assertEq(vault.balanceOf(safeOwner), 1e18);
+        assertEq(payroll.accruedFeeShares(), 0);
+    }
+
+    function test_collect_fees_bounded_by_accrual() public {
+        // Escrow can never be drained through collectFees: the bound is
+        // the accrual counter, not the contract's token balance.
+        _accrueOneFee();
+        vm.prank(safeOwner);
+        vm.expectRevert("exceeds accrued fees");
+        payroll.collectFees(safeOwner, 1e18 + 1);
+    }
+
+    function test_stray_shares_not_collectible() public {
+        // Shares sent directly to the contract don't inflate the accrual.
+        vm.prank(business);
+        vault.transfer(address(payroll), 50e18);
+        assertEq(payroll.accruedFeeShares(), 0);
+        vm.prank(safeOwner);
+        vm.expectRevert("exceeds accrued fees");
+        payroll.collectFees(safeOwner, 1);
     }
 }

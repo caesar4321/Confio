@@ -22,7 +22,6 @@ contract ConfioPayrollVaultForkTest is Test {
     address constant VAULT = 0x3C29417eb4314155e63d4C7D4507852b87763Ed1;
     address constant USDT = 0x55d398326f99059fF775485246999027B3197955;
 
-    address feeRecipient = makeAddr("feeRecipient");
     address safeOwner = makeAddr("safeOwner");
     address employee = makeAddr("employee");
     address sponsor = makeAddr("sponsor");
@@ -40,7 +39,7 @@ contract ConfioPayrollVaultForkTest is Test {
         business = vm.addr(businessKey);
         delegate = vm.addr(delegateKey);
         vault = CusdPlusVault(VAULT);
-        payroll = new ConfioPayrollVault(VAULT, feeRecipient, safeOwner);
+        payroll = new ConfioPayrollVault(VAULT, safeOwner);
 
         // Fund the business with real USDT, mint real cUSD+, park it.
         // minUsdyOut is in USDY terms: at the live USDY price (~$1.14)
@@ -84,7 +83,7 @@ contract ConfioPayrollVaultForkTest is Test {
         vm.prank(sponsor);
         payroll.payout(p, sig);
         assertEq(vault.balanceOf(employee), 100e18, "real vault shares moved");
-        assertEq(vault.balanceOf(feeRecipient), 1e18);
+        assertEq(payroll.accruedFeeShares(), 1e18);
     }
 
     function test_fork_payout_redeem_realOndoRail() public {

@@ -1,12 +1,13 @@
 """
-BSC invoice payments (payments/bsc_flow.py) — the properties that make the
-2-transfer batch safe:
+BSC invoice payments (payments/bsc_flow.py via ConfioPayContract) — the
+properties that make the [approve, pay] batch safe:
 
   1. the 0.9% fee is CEILING division in wei, exact parity with the
-     Algorand payment builder's integer semantics;
-  2. the submit-side validator accepts only [transfer(merchant, net),
-     transfer(feeTreasury, fee)] on one token — recipient or destination
-     tampering is structurally impossible;
+     Algorand payment builder AND ConfioPayContract.feeFor;
+  2. the submit-side validator accepts only [token.approve(payContract,
+     gross), payContract.pay(invoiceId, token, gross, merchant)] with the
+     invoice id and merchant pinned to the stored row — and the contract
+     re-enforces token allowlist, fee math, and invoice replay on-chain;
   3. a merchant business without a registered bsc_address BLOCKS the
      payment and nudges the invoice creator (owner-only registration).
 
@@ -19,18 +20,20 @@ from unittest import mock
 
 from django.test import SimpleTestCase, override_settings
 
-from cusd_plus.sponsor_7702 import PolicyError, SEL_TRANSFER, USDT_BSC
+from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PAY, USDT_BSC
 from payments import bsc_flow
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
-FEE_TREASURY = '0x' + 'fe' * 20
+PAY_CONTRACT = '0x' + 'ca' * 20
 PAYER = '0x' + '11' * 20
 MERCHANT = '0x' + '22' * 20
 WAD = 10 ** 18
 
 
 class FeeMathTests(SimpleTestCase):
-    """Wei ceiling parity with (amount*90 + 9999) // 10000."""
+    """Wei ceiling parity with (amount*90 + 9999) // 10000 — the same rule
+    ConfioPayContract.feeFor enforces on-chain (test_fee_ceiling_vectors
+    in ConfioPayContract.t.sol pins the identical vectors)."""
 
     def test_ceiling_vectors(self):
         for gross, want in [
@@ -49,7 +52,7 @@ class FeeMathTests(SimpleTestCase):
 
 @override_settings(
     CUSD_PLUS_VAULT_ADDRESS=VAULT,
-    BSC_FEE_RECIPIENT_ADDRESS=FEE_TREASURY,
+    BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT,
     BSC_PAY_ENABLED=True,
 )
 class PrepareBatchTests(SimpleTestCase):
@@ -98,28 +101,39 @@ class PrepareBatchTests(SimpleTestCase):
                 self._user(), {'account_type': 'personal', 'account_index': 0}, invoice)
         return result, captured.get('row'), pps
 
+    def _assert_batch_shape(self, calls, token, gross_units):
+        """[approve(payContract, gross), pay(invoiceId, token, gross, merchant)]"""
+        self.assertEqual(len(calls), 2)
+        approve, pay = calls
+        inv32 = bsc_flow.invoice_id_bytes32('inv123')[2:]
+
+        self.assertEqual(approve['to'], token)
+        self.assertEqual(approve['data'][2:10], SEL_APPROVE)
+        self.assertEqual(approve['data'][10:74], PAY_CONTRACT[2:].lower().rjust(64, '0'))
+        self.assertEqual(int(approve['data'][74:138], 16), gross_units)
+
+        self.assertEqual(pay['to'], PAY_CONTRACT.lower())
+        self.assertEqual(pay['data'][2:10], SEL_PAY)
+        self.assertEqual(pay['data'][10:74], inv32)
+        self.assertEqual(pay['data'][74:138], token[2:].lower().rjust(64, '0'))
+        self.assertEqual(int(pay['data'][138:202], 16), gross_units)
+        self.assertEqual(pay['data'][202:266], MERCHANT[2:].lower().rjust(64, '0'))
+
     def test_cusd_plus_batch_shape_and_fee(self):
         result, _, pps = self._prepare(self._invoice('10'))
         self.assertTrue(result['success'], result)
-        calls = result['calls']
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]['to'], VAULT.lower())
-        self.assertEqual(calls[1]['to'], VAULT.lower())
         gross_wei = 10 * WAD
-        fee_wei = bsc_flow.payment_fee_wei(gross_wei)
-        self.assertEqual(calls[0]['data'][10:74], MERCHANT[2:].lower().rjust(64, '0'))
-        self.assertEqual(int(calls[0]['data'][74:138], 16),
-                         ((gross_wei - fee_wei) * WAD) // pps)
-        self.assertEqual(calls[1]['data'][10:74], FEE_TREASURY[2:].rjust(64, '0'))
-        self.assertEqual(int(calls[1]['data'][74:138], 16), (fee_wei * WAD) // pps)
+        self._assert_batch_shape(result['calls'], VAULT.lower(),
+                                 (gross_wei * WAD) // pps)
         self.assertEqual(result['token_type'], 'CUSD_PLUS')
+        fee_wei = bsc_flow.payment_fee_wei(gross_wei)
+        self.assertEqual(result['fee'], str(Decimal(fee_wei) / WAD))
+        self.assertEqual(result['net'], str(Decimal(gross_wei - fee_wei) / WAD))
 
     def test_usdt_fallback_batch(self):
         result, _, _ = self._prepare(self._invoice('10'), shares_value=0, usdt=100 * WAD)
         self.assertTrue(result['success'], result)
-        self.assertEqual(result['calls'][0]['to'], USDT_BSC)
-        self.assertEqual(int(result['calls'][0]['data'][74:138], 16),
-                         10 * WAD - bsc_flow.payment_fee_wei(10 * WAD))
+        self._assert_batch_shape(result['calls'], USDT_BSC, 10 * WAD)
         self.assertEqual(result['token_type'], 'USDT')
 
     def test_merchant_without_address_blocks_and_nudges(self):
@@ -142,10 +156,10 @@ class PrepareBatchTests(SimpleTestCase):
         result, _, _ = self._prepare(self._invoice('10'), shares_value=0, usdt=0)
         self.assertEqual(result['error'], 'insufficient_balance')
 
-    @override_settings(BSC_FEE_RECIPIENT_ADDRESS='')
-    def test_missing_fee_treasury_refuses(self):
+    @override_settings(BSC_PAY_CONTRACT_ADDRESS='')
+    def test_missing_pay_contract_refuses(self):
         result, _, _ = self._prepare(self._invoice('10'))
-        self.assertEqual(result['error'], 'fee_recipient_not_configured')
+        self.assertEqual(result['error'], 'pay_contract_not_configured')
 
     def test_self_pay_blocked_for_merchant_business(self):
         result = bsc_flow.prepare_bsc_payment(
@@ -159,47 +173,75 @@ class PrepareBatchTests(SimpleTestCase):
         self.assertEqual(result['error'], 'bsc_pay_disabled')
 
 
-@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_FEE_RECIPIENT_ADDRESS=FEE_TREASURY)
+@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT)
 class SubmitValidatorTests(SimpleTestCase):
-    def _tx(self):
-        return SimpleNamespace(merchant_address=MERCHANT)
+    GROSS = 10 * WAD
 
-    def _call(self, to, recipient, units):
-        return {'to': to, 'value': '0',
-                'data': '0x' + SEL_TRANSFER + recipient[2:].lower().rjust(64, '0')
-                        + format(units, 'x').rjust(64, '0')}
+    def _tx(self):
+        return SimpleNamespace(
+            merchant_address=MERCHANT,
+            invoice=SimpleNamespace(internal_id='inv123'),
+        )
+
+    def _approve(self, token, spender=PAY_CONTRACT, amount=None):
+        return {'to': token, 'value': '0',
+                'data': '0x' + SEL_APPROVE + spender[2:].lower().rjust(64, '0')
+                        + format(amount if amount is not None else self.GROSS, 'x').rjust(64, '0')}
+
+    def _pay(self, token, to=PAY_CONTRACT, invoice_id='inv123', amount=None,
+             merchant=MERCHANT):
+        inv32 = bsc_flow.invoice_id_bytes32(invoice_id)[2:]
+        return {'to': to.lower(), 'value': '0',
+                'data': '0x' + SEL_PAY + inv32
+                        + token[2:].lower().rjust(64, '0')
+                        + format(amount if amount is not None else self.GROSS, 'x').rjust(64, '0')
+                        + merchant[2:].lower().rjust(64, '0')}
 
     def test_valid_batch_passes(self):
-        calls = [self._call(USDT_BSC, MERCHANT, 991),
-                 self._call(USDT_BSC, FEE_TREASURY, 9)]
-        bsc_flow._validate_payment_batch(calls, self._tx())
-
-    def test_fee_recipient_tamper_rejected(self):
-        calls = [self._call(USDT_BSC, MERCHANT, 991),
-                 self._call(USDT_BSC, '0x' + '99' * 20, 9)]
-        with self.assertRaises(PolicyError):
-            bsc_flow._validate_payment_batch(calls, self._tx())
+        for token in (USDT_BSC, VAULT):
+            bsc_flow._validate_payment_batch(
+                [self._approve(token), self._pay(token)], self._tx())
 
     def test_merchant_tamper_rejected(self):
-        calls = [self._call(USDT_BSC, '0x' + '99' * 20, 991),
-                 self._call(USDT_BSC, FEE_TREASURY, 9)]
+        calls = [self._approve(USDT_BSC),
+                 self._pay(USDT_BSC, merchant='0x' + '99' * 20)]
         with self.assertRaises(PolicyError):
             bsc_flow._validate_payment_batch(calls, self._tx())
 
-    def test_mixed_token_batch_rejected(self):
-        calls = [self._call(USDT_BSC, MERCHANT, 991),
-                 self._call(VAULT, FEE_TREASURY, 9)]
+    def test_invoice_tamper_rejected(self):
+        calls = [self._approve(USDT_BSC), self._pay(USDT_BSC, invoice_id='OTHER')]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx())
+
+    def test_gross_mismatch_rejected(self):
+        # approve MORE than pay() pulls → residual allowance would linger.
+        calls = [self._approve(USDT_BSC, amount=self.GROSS + 1), self._pay(USDT_BSC)]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx())
+
+    def test_foreign_spender_rejected(self):
+        calls = [self._approve(USDT_BSC, spender='0x' + '99' * 20), self._pay(USDT_BSC)]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx())
+
+    def test_pay_to_foreign_contract_rejected(self):
+        calls = [self._approve(USDT_BSC), self._pay(USDT_BSC, to='0x' + '99' * 20)]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx())
+
+    def test_token_mismatch_rejected(self):
+        # approve USDT but pay() names the vault → pay() would pull a token
+        # the payer never approved in this batch — reject upfront.
+        calls = [self._approve(USDT_BSC), self._pay(VAULT)]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx())
+
+    def test_foreign_token_rejected(self):
+        alien = '0x' + 'ab' * 20
+        calls = [self._approve(alien), self._pay(alien)]
         with self.assertRaises(PolicyError):
             bsc_flow._validate_payment_batch(calls, self._tx())
 
     def test_single_call_rejected(self):
         with self.assertRaises(PolicyError):
-            bsc_flow._validate_payment_batch(
-                [self._call(USDT_BSC, MERCHANT, 991)], self._tx())
-
-    def test_foreign_token_rejected(self):
-        alien = '0x' + 'ab' * 20
-        calls = [self._call(alien, MERCHANT, 991),
-                 self._call(alien, FEE_TREASURY, 9)]
-        with self.assertRaises(PolicyError):
-            bsc_flow._validate_payment_batch(calls, self._tx())
+            bsc_flow._validate_payment_batch([self._approve(USDT_BSC)], self._tx())
