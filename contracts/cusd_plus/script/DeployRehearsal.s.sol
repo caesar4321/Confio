@@ -18,7 +18,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {CusdPlusVault} from "../CusdPlusVault.sol";
 import {ConfioStockRouter} from "../ConfioStockRouter.sol";
 import {MockToken, MockOracle, MockInstantManager} from "../test/CusdPlusVault.t.sol";
-import {MockGmSettlement} from "../test/ConfioStockRouter.t.sol";
+import {MockGMTokenManager} from "../test/ConfioStockRouter.t.sol";
 
 contract DeployRehearsal is Script {
     function run() external {
@@ -41,11 +41,13 @@ contract DeployRehearsal is Script {
             address(impl), abi.encodeCall(CusdPlusVault.initialize, (deployer))
         )));
 
-        MockGmSettlement gm = new MockGmSettlement(usdt);
+        MockToken usdon = new MockToken("USDon");
+        MockGMTokenManager gm = new MockGMTokenManager(usdt, usdon);
         usdt.mint(address(gm), 1_000_000e18);
 
         ConfioStockRouter router = new ConfioStockRouter(
-            address(vault), address(usdt), address(gm), deployer, deployer
+            address(vault), address(usdt), address(usdon),
+            address(gm), deployer, deployer
         );
         router.setStockFeeBps(30); // rehearsal-only placeholder
 
