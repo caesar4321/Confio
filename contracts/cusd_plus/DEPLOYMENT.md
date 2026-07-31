@@ -157,8 +157,19 @@ ownerless, no constructor args — replace-by-redeploy like the router.
 
 | Role | Address |
 | --- | --- |
-| **ConfioBatchDelegate** | `0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C` |
-| Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor, nonce 16) |
+| **ConfioBatchDelegate** (v2, intent-bound) | `0xC06BD197b34a587026615C6AEd21301F5E99bc00` |
+| ~~ConfioBatchDelegate v1~~ (no intentId, abandoned) | ~~`0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C`~~ |
+| Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
+
+**REDEPLOYED 2026-07-31 (migration audit P2 — intent binding):** the
+`Execute` struct now carries a `bytes32 intentId` = keccak(kind:sourceId),
+so the user's signature binds the flow purpose + the exact domain row (new
+EXECUTE_TYPEHASH, three-way parity vector `0xf955b917…`). v2 at
+`0xC06BD197b34a587026615C6AEd21301F5E99bc00`, creation tx
+`0xc810100af1e6b2ef732a20748657018cbd1592a0b70d7a201accb39f773793c8`
+(nonce 36), BscScan verified. **v1 signs the old struct and is abandoned;
+already-shipped clients target v1, so `CUSD_PLUS_7702_ENABLED` is dark until
+the intent-binding client ships.**
 
 - Deployed via `manage.py deploy_batch_delegate --broadcast --yes-mainnet`
   (~719k gas ≈ 0.0007 BNB). Creation tx: (in deployer terminal output —
