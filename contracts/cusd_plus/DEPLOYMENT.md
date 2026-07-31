@@ -328,3 +328,46 @@ moment for a metadata fix.
 - The pending claim-wiring Safe steps now use the NEW address:
   `presaleVault.setConfioToken(0xCcEb…3fa8)` — calldata
   `0x76eba8ba000000000000000000000000cceb3f6127fa9160a26a1b85857ca4c9d56b3fa8`.
+
+## CusdPlusVault v5 — mint gate (impl deployed 2026-07-31, UPGRADE PENDING)
+
+Closes the open-mint gap: `subscribeAndMint` was permissionless on-chain,
+so Ondo eligibility (§21(b)(F) continuing US-person representation) could
+be bypassed by calling the vault directly, around Confío's phone + IP
+checks. v5 requires `isSponsor[msg.sender] || isSponsor[tx.origin]` AND
+`recipient == msg.sender || isSponsor[msg.sender]` (the second condition
+came out of the Codex audit: `tx.origin` alone proves only that a sponsor
+was somewhere above the call, not that it approved the recipient).
+
+| Item | Value |
+| --- | --- |
+| **v5 implementation** | `0xAa9AFf7CD9B995DF7d54B1e646e2746a90DbF5a9` |
+| Proxy (unchanged) | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
+| Creation tx | `0xfc01a0fc914ae4c755e67f99924e0eec7a54e8ba1567acf8c55f46638469cbda` |
+
+- Impl deployed via `manage.py deploy_cusd_plus_vault --impl-only
+  --broadcast --yes-mainnet` (KMS nonce 27, ~0.0033 BNB). BscScan verified.
+- **The Safe transaction — ONE atomic tx:**
+  - `to`: `0x3C29417eb4314155e63d4C7D4507852b87763Ed1`
+  - `value`: `0`
+  - `operation`: **CALL** (never DELEGATECALL)
+  - `data`: `0x4f1ef286` … = `upgradeToAndCall(0xAa9AFf7C…F5a9,
+    setSponsor(0xf9f93Ba8…fc9D, true))` — full bytes pinned in
+    `test/SafeTxV5.fork.t.sol`, which REPLAYS those literal bytes against
+    live state as the Safe and asserts the outcome.
+- **Never use plain `upgradeTo`.** Without a sponsor seeded in the same
+  transaction, minting is bricked until the Safe fixes it (exits are
+  unaffected either way).
+- Storage: `isSponsor` APPENDED at slot 5; slots 0–4 unchanged and pinned
+  by `test_storageLayout_pinnedToLiveProxy`.
+- **Future requirement:** when `ConfioStockRouter` is deployed it MUST get
+  `setSponsor(router, true)` — `sellToSavings` mints to the user while the
+  router is `msg.sender`, so without it every sell-into-savings reverts
+  `recipient not caller`.
+- Post-execution checks: `isSponsor(KMS)` is true, a direct mint reverts
+  `not sponsored`, and a normal relayed app mint still succeeds.
+- Trust model, stated honestly: this guarantees SPONSOR ROTATION CANNOT
+  AFFECT EXITS. The owner Safe still can — `redeemToUsdt` is
+  `whenNotPaused`, a frozen holder cannot burn, and UUPS could replace the
+  logic. Those powers are deliberate (oracle/IM emergencies, Ondo
+  dependency migration) and predate this gate.
