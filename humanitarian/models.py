@@ -177,12 +177,28 @@ class HumanitarianRelease(models.Model):
         ('cancelled', 'Cancelled'),
     ]
 
+    KIND_CHOICES = [
+        ('volunteer', 'Volunteer aid'),
+        ('reimbursement', 'Donor reimbursement'),
+    ]
+
     public_id = models.CharField(max_length=32, unique=True, default=generate_public_id, editable=False)
     campaign = models.ForeignKey(HumanitarianCampaign, on_delete=models.PROTECT, related_name='releases')
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='volunteer', db_index=True)
     volunteer_application = models.ForeignKey(
         HumanitarianVolunteerApplication,
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name='releases',
+    )
+    donation = models.OneToOneField(
+        HumanitarianDonation,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name='reimbursement',
+        help_text='Set for kind=reimbursement: the donation being refunded to its donor.',
     )
     amount = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
@@ -211,7 +227,9 @@ class HumanitarianRelease(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.amount} cUSD to {self.volunteer_application.user}'
+        if self.kind == 'reimbursement' and self.donation:
+            return f'{self.amount} cUSD reimbursed to {self.donation.donor_user or self.donation.donor_display_name}'
+        return f'{self.amount} cUSD to {self.volunteer_application.user if self.volunteer_application else self.recipient_address}'
 
     @property
     def proof_url(self):

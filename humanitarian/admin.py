@@ -108,12 +108,28 @@ class HumanitarianDonationAdmin(admin.ModelAdmin):
     list_filter = ('status', 'campaign')
     search_fields = ('donor_display_name', 'transaction_hash', 'from_address')
     readonly_fields = ('public_id', 'created_at', 'updated_at')
+    actions = ('reimburse_donations',)
+
+    @admin.action(description='Reimburse selected donations to their donors on-chain')
+    def reimburse_donations(self, request, queryset):
+        service = HumanitarianReleaseService()
+        reimbursed = 0
+        for donation in queryset.select_related('campaign', 'donor_user'):
+            try:
+                txid = service.reimburse_donation(donation, admin_user=request.user)
+            except Exception as exc:
+                self.message_user(request, f'{donation.public_id} failed: {exc}', messages.ERROR)
+                continue
+            reimbursed += 1
+            self.message_user(request, f'{donation.public_id} reimbursed: {txid}', messages.SUCCESS)
+        if reimbursed:
+            self.message_user(request, f'Reimbursed {reimbursed} donation(s).')
 
 
 @admin.register(HumanitarianRelease)
 class HumanitarianReleaseAdmin(admin.ModelAdmin):
-    list_display = ('campaign', 'volunteer_application', 'amount', 'status', 'recipient_address', 'proof_status', 'transaction_hash', 'created_at')
-    list_filter = ('status', 'campaign')
+    list_display = ('campaign', 'kind', 'volunteer_application', 'amount', 'status', 'recipient_address', 'proof_status', 'transaction_hash', 'created_at')
+    list_filter = ('status', 'kind', 'campaign')
     search_fields = ('public_id', 'recipient_address', 'transaction_hash', 'volunteer_application__user__username')
     readonly_fields = ('public_id', 'transaction_hash', 'released_by', 'released_at', 'created_at', 'updated_at')
     inlines = (HumanitarianProofLinkInline,)
@@ -158,7 +174,10 @@ class HumanitarianReleaseAdmin(admin.ModelAdmin):
     def _sync_campaign_totals(self, queryset):
         campaign_ids = set(queryset.values_list('campaign_id', flat=True))
         for campaign in HumanitarianCampaign.objects.filter(id__in=campaign_ids):
-            confirmed = campaign.releases.filter(status__in=['confirmed', 'proof_pending', 'proof_published'])
+            confirmed = campaign.releases.filter(
+                kind='volunteer',
+                status__in=['confirmed', 'proof_pending', 'proof_published'],
+            )
             campaign.total_released = confirmed.aggregate(total=Sum('amount'))['total'] or 0
             campaign.release_count = confirmed.count()
             campaign.save(update_fields=['total_released', 'release_count', 'updated_at'])

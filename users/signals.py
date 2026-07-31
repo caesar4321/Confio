@@ -434,8 +434,14 @@ def create_unified_transaction_from_humanitarian_release(release):
         return None
     try:
         campaign = release.campaign
-        recipient_user = release.volunteer_application.user
-        recipient_name = _display_name_for_user(recipient_user, 'Voluntario Confío')
+        if release.kind == 'reimbursement':
+            recipient_user = release.donation.donor_user if release.donation else None
+            recipient_name = _display_name_for_user(recipient_user, 'Donante Confío')
+            description = f"Reembolso de donación: {campaign.title}"
+        else:
+            recipient_user = release.volunteer_application.user
+            recipient_name = _display_name_for_user(recipient_user, 'Voluntario Confío')
+            description = f"Ayuda humanitaria recibida: {release.purpose}"
         unified, created = UnifiedTransactionTable.objects.update_or_create(
             humanitarian_release=release,
             defaults={
@@ -453,11 +459,11 @@ def create_unified_transaction_from_humanitarian_release(release):
                 'sender_address': campaign.vault_address or '',
                 'counterparty_user': recipient_user,
                 'counterparty_business': None,
-                'counterparty_type': 'user',
+                'counterparty_type': 'user' if recipient_user else 'external',
                 'counterparty_display_name': recipient_name,
                 'counterparty_phone': recipient_user.phone_number if recipient_user else '',
                 'counterparty_address': release.recipient_address or '',
-                'description': f"Ayuda humanitaria recibida: {release.purpose}",
+                'description': description,
                 'from_address': campaign.vault_address or '',
                 'to_address': release.recipient_address or '',
                 'transaction_date': release.released_at or release.updated_at,

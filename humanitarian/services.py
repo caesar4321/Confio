@@ -11,7 +11,7 @@ from django.utils import timezone
 from blockchain.algorand_client import get_algod_client
 from blockchain.kms_manager import get_kms_signer_from_settings
 
-from .models import HumanitarianCampaign, HumanitarianRelease
+from .models import HumanitarianCampaign, HumanitarianDonation, HumanitarianRelease
 
 
 def cusd_to_base_units(amount: Decimal) -> int:
@@ -28,8 +28,14 @@ class HumanitarianReleaseService:
     def submit_release(self, release: HumanitarianRelease, admin_user=None) -> str:
         if release.status not in ('draft', 'failed'):
             raise ValueError('Only draft or failed releases can be submitted')
-        if release.volunteer_application.status != 'approved':
-            raise ValueError('Volunteer application must be approved before release')
+        if release.kind == 'reimbursement':
+            if not release.donation or release.donation.status != 'confirmed':
+                raise ValueError('Reimbursements require a confirmed donation')
+            if release.recipient_address != release.donation.from_address:
+                raise ValueError('Reimbursement recipient must match the donation source address')
+        else:
+            if not release.volunteer_application or release.volunteer_application.status != 'approved':
+                raise ValueError('Volunteer application must be approved before release')
 
         app_id = int(
             release.campaign.algorand_app_id
@@ -85,9 +91,33 @@ class HumanitarianReleaseService:
                 'released_at',
                 'updated_at',
             ])
-            HumanitarianCampaign.objects.filter(pk=locked.campaign_id).update(
-                total_released=F('total_released') + locked.amount,
-                release_count=F('release_count') + 1,
-                updated_at=timezone.now(),
-            )
+            if locked.kind != 'reimbursement':
+                # Campaign "released" stats mean aid delivered to volunteers;
+                # donor refunds must not inflate them.
+                HumanitarianCampaign.objects.filter(pk=locked.campaign_id).update(
+                    total_released=F('total_released') + locked.amount,
+                    release_count=F('release_count') + 1,
+                    updated_at=timezone.now(),
+                )
         return txid
+
+    def reimburse_donation(self, donation: HumanitarianDonation, admin_user=None) -> str:
+        if donation.status != 'confirmed':
+            raise ValueError('Only confirmed donations can be reimbursed')
+        if not donation.from_address:
+            raise ValueError('Donation has no source address to reimburse')
+
+        with db_transaction.atomic():
+            release, created = HumanitarianRelease.objects.select_for_update().get_or_create(
+                donation=donation,
+                defaults={
+                    'campaign': donation.campaign,
+                    'kind': 'reimbursement',
+                    'amount': donation.amount,
+                    'purpose': f'Reembolso de donación: {donation.campaign.title}',
+                    'recipient_address': donation.from_address,
+                },
+            )
+        if not created and release.status not in ('draft', 'failed'):
+            raise ValueError(f'Donation {donation.public_id} already reimbursed ({release.status})')
+        return self.submit_release(release, admin_user=admin_user)

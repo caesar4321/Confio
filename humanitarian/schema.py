@@ -41,6 +41,8 @@ class HumanitarianReleaseType(DjangoObjectType):
         return self.proof_links.filter(is_public=True).order_by('position', 'created_at')
 
     def resolve_volunteer_name(self, info):
+        if not self.volunteer_application:
+            return 'Voluntario Confio'
         user = self.volunteer_application.user
         return user.get_full_name() or user.username or 'Voluntario Confio'
 
@@ -93,7 +95,8 @@ class HumanitarianCampaignType(DjangoObjectType):
 
     def resolve_releases(self, info, limit=20):
         return self.releases.filter(
-            status__in=['confirmed', 'proof_pending', 'proof_published']
+            kind='volunteer',
+            status__in=['confirmed', 'proof_pending', 'proof_published'],
         ).select_related('volunteer_application__user').prefetch_related('proof_links').order_by('-released_at', '-created_at')[:limit]
 
     def resolve_donations(self, info, limit=20):
