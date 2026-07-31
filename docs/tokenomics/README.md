@@ -54,6 +54,7 @@ $CONFIO is separate from USDT, cUSD+, USDY, Ondo Stocks, and the operating compa
 | Decimals | 18 |
 | Initial and maximum supply | 1,000,000,000 CONFIO |
 | Canonical contract | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
+| Canonical vesting vault | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
 | Privileged token powers | No owner, no minter, no token-level pause |
 | Extensions | ERC-2612 Permit and holder-initiated Burnable |
 
@@ -224,7 +225,7 @@ This fund is separate from referral rewards. Referral rewards recognize qualifyi
 
 The creative co-builder allocation is 10,000,000 CONFIO, or 1.00% of the initial supply.
 
-Its intended release structure is 24-month linear vesting after activation, with no implication that vesting equals sale. The beneficiary address, funding transaction, vesting contract, activation transaction, and claimed amount must be disclosed when the BSC vesting grant is activated.
+Its intended release structure is 24-month linear vesting after activation, with no implication that vesting equals sale. The canonical BSC vesting vault is deployed and source-verified, but this grant has not yet been funded, added, or activated. The beneficiary address, funding transaction, activation transaction, and claimed amount must be disclosed when the grant is activated.
 
 ---
 
@@ -236,7 +237,9 @@ Confío deliberately uses a traditional-startup analogy: the founder begins with
 
 The intended founder release structure is approximately 36 months of linear vesting after activation. Straight-line vesting of 893,600,000 CONFIO over 36 months is economically equivalent to approximately **24.82 million CONFIO becoming vested per month on average**. Vesting is continuous, not a scheduled monthly sale, and vested does not mean transferred or sold.
 
-The BSC vesting implementation must be deployed, funded, and publicly activated before its clock begins. Until then, the reserved founder tokens remain under multi-party treasury custody and no claim should be made that the BSC vesting clock is already running. When activated, Confío must publish the vault address, beneficiary, grant amount, start transaction, duration, vested amount, claimed amount, and treasury balances.
+The canonical BSC vesting vault is deployed, non-upgradeable, source-verified, and owned by the multi-party treasury. It enforces full funding before a grant can be added, linear vesting after a separate start transaction, beneficiary self-claims, irrevocability after start, and surplus-only treasury withdrawals.
+
+The founder grant has not yet been funded, added, or activated in that vault, so no claim should be made that its BSC vesting clock is already running. Earlier locked allocations must be reconciled one-for-one during migration so that they cannot be released twice. When the BSC grant is activated, Confío must publish the beneficiary, grant amount, funding and start transactions, duration, vested amount, claimed amount, and corresponding legacy-lock reconciliation.
 
 The size of this allocation makes public wallet mapping, vesting-state disclosure, transfer transparency, and disciplined founder reporting more important than promotional statements about long-term alignment.
 
@@ -256,6 +259,10 @@ The following concepts must not be treated as interchangeable:
 - **circulating:** tokens are actually transferable outside a locked vault or restricted claim system.
 
 Presale and reward claims are tied to the official DEX launch, not to completion of a numbered presale phase. Cultural, co-builder, and founder vesting clocks begin only upon their separately disclosed activation transactions.
+
+**Canonical BSC vesting vault:** [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code)
+
+At the date of this version, the vault is deployed but the founder, co-builder, and Cultural Invitation grants have not been funded, added, or started on BSC. Deployment alone does not create a vesting obligation or start a clock.
 
 ### 9.2 Circulating-supply definition
 
@@ -322,7 +329,7 @@ The initial DEX price is a market and liquidity event. It is not guaranteed to e
 | Continuous price movement | Every completed purchase can move the curve. Quotes can change before broadcast, and later buyers pay more under the fixed rule. |
 | DEX unlock pressure | Presale and reward claims can create meaningful transferable supply at launch. Available liquidity may be much smaller than claimable value. |
 | Treasury and reward trust | Reward entitlements live in Confío’s database and depend on a treasury-controlled vault, signer, funding, and operational availability. |
-| Vesting implementation | Founder, co-builder, and cultural BSC vesting must be deployed, funded, activated, and reported correctly. Administrative or operational errors can affect release timing. |
+| Vesting implementation | The BSC vault is deployed, but each founder, co-builder, and cultural grant still must be reconciled, funded, added, activated, and reported correctly. Administrative or migration errors can affect release timing or create double-release risk. |
 | Smart-contract risk | The token, presale, reward, vesting, sponsored-transaction, and related contracts can contain defects despite public code and extensive testing. |
 | Network risk | BNB Smart Chain can experience congestion, validator or infrastructure concentration, censorship, reorganization, exploits, fee changes, or interruption. |
 | Stablecoin risk | Presale purchases use USDT, which carries issuer, reserve, depeg, freeze, legal, and redemption risks. |
@@ -361,13 +368,16 @@ The deployed smart contracts and definitive transaction records control on-chain
 4. Confío public repository, BSC token, presale and reward contracts, tests, and deployment record.
    https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus
 
-5. Confío public repository, current on-chain curve-price reader and presale statistics.
+5. Canonical ConfioVestingVault on BscScan: fully funded grant creation, separate start, linear vesting, beneficiary claims, pre-start revocation, beneficiary migration, and surplus-only treasury withdrawal.
+   https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code
+
+6. Confío public repository, current on-chain curve-price reader and presale statistics.
    https://github.com/caesar4321/Confio/blob/main/presale/price_utils.py
 
-6. Confío public repository, reward accrual and live-curve conversion logic.
+7. Confío public repository, reward accrual and live-curve conversion logic.
    https://github.com/caesar4321/Confio/blob/main/achievements/services/referral_rewards.py
 
-7. Confío English whitepaper, current BNB Smart Chain product architecture and $CONFIO separation.
+8. Confío English whitepaper, current BNB Smart Chain product architecture and $CONFIO separation.
    https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md
 
 ---
