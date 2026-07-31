@@ -207,68 +207,120 @@ class PrepareCallShapeTests(SimpleTestCase):
 
 
 class SubmitValidatorTests(SimpleTestCase):
-    """_validate_send_batch: only the stored shapes, only the stored recipient."""
+    """_validate_send_batch: the stored call must equal the canonical intent
+    (kind + token + recipient + units + min_out) rebuilt byte-for-byte —
+    tampering the AMOUNT, recipient, token, or shape is all structurally
+    rejected."""
 
-    def _tx(self, calls, recipient=RECIPIENT, token_type='USDT'):
-        return SimpleNamespace(
-            recipient_address=recipient,
-            token_type=token_type,
-            bsc_calls_json=json.dumps({'calls': calls, 'kind': 'x'}),
-        )
+    def _meta(self, calls, kind, token, recipient=RECIPIENT, units=10 * WAD,
+              min_out=None):
+        return {'calls': calls, 'kind': kind, 'token': token,
+                'recipient': recipient, 'units': str(units),
+                'min_out': (str(min_out) if min_out is not None else None)}
+
+    def _tx(self, recipient=RECIPIENT, token_type='USDT'):
+        return SimpleNamespace(recipient_address=recipient, token_type=token_type)
 
     def _transfer_call(self, to=None, recipient=RECIPIENT, amount=10 * WAD):
         data = ('0x' + SEL_TRANSFER + recipient[2:].lower().rjust(64, '0')
                 + format(amount, 'x').rjust(64, '0'))
         return {'to': (to or USDT_BSC), 'value': '0', 'data': data}
 
+    def _redeem_call(self, shares=10 * WAD, min_out=9 * WAD, recipient=RECIPIENT, to=VAULT):
+        data = ('0x' + SEL_REDEEM_TO_USDT
+                + format(shares, 'x').rjust(64, '0')
+                + format(min_out, 'x').rjust(64, '0')
+                + recipient[2:].lower().rjust(64, '0'))
+        return {'to': to.lower(), 'value': '0', 'data': data}
+
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
     def test_valid_transfer_passes(self):
         call = self._transfer_call()
-        bsc_flow._validate_send_batch([call], self._tx([call]))
+        bsc_flow._validate_send_batch(
+            [call], self._tx(), self._meta([call], 'send_usdt', USDT_BSC))
+
+    @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
+    def test_valid_redeem_passes(self):
+        call = self._redeem_call()
+        bsc_flow._validate_send_batch(
+            [call], self._tx(),
+            self._meta([call], 'send_redeem', VAULT, min_out=9 * WAD))
+
+    @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
+    def test_amount_tamper_rejected(self):
+        # The stored call moves MORE than the canonical units → rebuild differs.
+        call = self._transfer_call(amount=20 * WAD)
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_send_batch(
+                [call], self._tx(), self._meta([call], 'send_usdt', USDT_BSC, units=10 * WAD))
+
+    @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
+    def test_redeem_min_out_tamper_rejected(self):
+        # A lowered min_out in the calldata (recipient could lose value) fails.
+        call = self._redeem_call(min_out=1)
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_send_batch(
+                [call], self._tx(), self._meta([call], 'send_redeem', VAULT, min_out=9 * WAD))
 
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
     def test_recipient_tamper_rejected(self):
+        # calldata recipient differs from the canonical (== row) recipient.
         evil = self._transfer_call(recipient='0x' + '99' * 20)
         with self.assertRaises(PolicyError):
-            bsc_flow._validate_send_batch([evil], self._tx([evil]))
+            bsc_flow._validate_send_batch(
+                [evil], self._tx(), self._meta([evil], 'send_usdt', USDT_BSC))
+
+    @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
+    def test_row_recipient_mismatch_rejected(self):
+        # canonical recipient must equal the SendTransaction row's recipient.
+        call = self._transfer_call()
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_send_batch(
+                [call], self._tx(recipient='0x' + '99' * 20),
+                self._meta([call], 'send_usdt', USDT_BSC))
 
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
     def test_foreign_destination_rejected(self):
         call = self._transfer_call(to='0x' + 'ab' * 20)
         with self.assertRaises(PolicyError):
-            bsc_flow._validate_send_batch([call], self._tx([call]))
+            bsc_flow._validate_send_batch(
+                [call], self._tx(), self._meta([call], 'send_usdt', '0x' + 'ab' * 20))
 
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
-    def test_foreign_selector_rejected(self):
-        call = {'to': USDT_BSC, 'value': '0',
-                'data': '0x' + '23b872dd' + '00' * 96}
+    def test_unknown_kind_rejected(self):
+        call = self._transfer_call()
         with self.assertRaises(PolicyError):
-            bsc_flow._validate_send_batch([call], self._tx([call]))
+            bsc_flow._validate_send_batch(
+                [call], self._tx(), self._meta([call], 'send_bogus', USDT_BSC))
 
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
     def test_multi_call_rejected(self):
         call = self._transfer_call()
         with self.assertRaises(PolicyError):
-            bsc_flow._validate_send_batch([call, call], self._tx([call, call]))
+            bsc_flow._validate_send_batch(
+                [call, call], self._tx(), self._meta([call, call], 'send_usdt', USDT_BSC))
 
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT,
                        BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
     def test_confio_row_accepts_only_the_confio_token(self):
         good = self._transfer_call(to=CONFIO_TOKEN)
         bsc_flow._validate_send_batch(
-            [good], self._tx([good], token_type='CONFIO'))
-        # A CONFIO row must not be able to move USDT (or anything else).
+            [good], self._tx(token_type='CONFIO'),
+            self._meta([good], 'send_confio', CONFIO_TOKEN))
+        # A send_confio row whose token is USDT is rejected (kind pins token).
         evil = self._transfer_call(to=USDT_BSC)
         with self.assertRaises(PolicyError):
             bsc_flow._validate_send_batch(
-                [evil], self._tx([evil], token_type='CONFIO'))
+                [evil], self._tx(token_type='CONFIO'),
+                self._meta([evil], 'send_confio', USDT_BSC))
 
     @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT,
                        BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
-    def test_non_confio_row_rejects_the_confio_token(self):
+    def test_non_confio_kind_rejects_the_confio_token(self):
         call = self._transfer_call(to=CONFIO_TOKEN)
         with self.assertRaises(PolicyError):
-            bsc_flow._validate_send_batch([call], self._tx([call]))
+            bsc_flow._validate_send_batch(
+                [call], self._tx(), self._meta([call], 'send_usdt', CONFIO_TOKEN))
 
 
 class RecipientResolutionTests(SimpleTestCase):

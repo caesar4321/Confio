@@ -200,7 +200,10 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             return {
                 'success': True,
                 'send_id': existing.internal_id,
-                'calls': json.loads(existing.bsc_calls_json),
+                # bsc_calls_json is the full meta dict — the client only ever
+                # needs the calls array (P3: the replay path used to hand back
+                # the whole meta as 'calls').
+                'calls': (json.loads(existing.bsc_calls_json) or {}).get('calls', []),
                 'token_type': existing.token_type,
             }
 
@@ -244,6 +247,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             return {'success': False, 'error': 'insufficient_balance'}
         kind = 'send_confio'
         token_type = 'CONFIO'
+        token_addr, units, min_out = confio_addr, amount_wei, None
         calls = [{
             'to': confio_addr, 'value': '0',
             'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
@@ -270,6 +274,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 return {'success': False, 'error': 'invalid_amount'}
             kind = 'send_cusd_plus'
             token_type = 'CUSD_PLUS'
+            token_addr, units, min_out = vault_addr, shares, None
             calls = [{
                 'to': vault_addr, 'value': '0',
                 'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
@@ -288,6 +293,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             if recipient_eligible:
                 kind = 'send_cusd_plus'
                 token_type = 'CUSD_PLUS'
+                token_addr, units, min_out = vault_addr, shares, None
                 calls = [{
                     'to': vault_addr, 'value': '0',
                     'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
@@ -298,6 +304,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 kind = 'send_redeem'
                 token_type = 'USDT'
                 min_out = (amount_wei * REDEEM_MIN_OUT_BPS) // 10_000
+                token_addr, units = vault_addr, shares
                 calls = [{
                     'to': vault_addr, 'value': '0',
                     'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
@@ -306,6 +313,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         elif usdt_raw >= amount_wei:
             kind = 'send_usdt'
             token_type = 'USDT'
+            token_addr, units, min_out = USDT_BSC, amount_wei, None
             calls = [{
                 'to': USDT_BSC, 'value': '0',
                 'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
@@ -342,7 +350,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         memo=(memo or '')[:500],
         status='PENDING',
         idempotency_key=idempotency_key or None,
-        bsc_calls_json=json.dumps({'calls': calls, 'kind': kind}),
+        bsc_calls_json=json.dumps({
+            'calls': calls, 'kind': kind,
+            # Canonical intent for the submit-side byte-exact rebuild (audit
+            # 2026-07-31 P2): recipient + token + units (+ min_out) pin the
+            # AMOUNT, not just the recipient, so no stored-calls drift settles.
+            'token': token_addr, 'recipient': recipient_addr,
+            'units': str(units), 'min_out': (str(min_out) if min_out is not None else None),
+        }),
     )
     # Unified row arrives via the existing post_save signal
     # (users/signals.py create_unified_transaction_from_send).
@@ -355,10 +370,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     }
 
 
-def _validate_send_batch(calls: list, send_tx) -> None:
+def _validate_send_batch(calls: list, send_tx, meta: dict) -> None:
     """Defense in depth on the STORED batch (the client never resends calls
-    — it can only sign what prepare stored): a single zero-value call to
-    the vault or USDT whose recipient word matches the stored recipient."""
+    — it can only sign what prepare stored). Rebuild the ONE expected call
+    byte-for-byte from the canonical intent (kind + token + recipient +
+    units + min_out) and require the stored call to equal it exactly, so a
+    tampered/drifted AMOUNT is caught, not just a tampered recipient (audit
+    2026-07-31 P2). The token + recipient are cross-checked against the row
+    and the allowlist before the rebuild is trusted."""
     from cusd_plus.sponsor_7702 import (
         PolicyError,
         SEL_REDEEM_TO_USDT,
@@ -367,32 +386,48 @@ def _validate_send_batch(calls: list, send_tx) -> None:
     )
 
     vault = _vault_address()
+    confio = _confio_token_address()
     if len(calls) != 1:
         raise PolicyError('bad_batch_size')
     call = calls[0]
-    to = (call.get('to') or '').lower()
-    if send_tx.token_type == 'CONFIO':
-        # Shape E rows may ONLY move the CONFIO token.
-        confio = _confio_token_address()
-        if not confio or to != confio:
-            raise PolicyError('destination_not_allowed')
-    elif to not in (vault, USDT_BSC):
-        raise PolicyError('destination_not_allowed')
     if int(call.get('value') or 0) != 0:
         raise PolicyError('value_not_allowed')
-    data = (call.get('data') or '').lower()
-    if not data.startswith('0x'):
+
+    kind = meta.get('kind')
+    token = (meta.get('token') or '').lower()
+    recipient = (meta.get('recipient') or '').lower()
+    try:
+        units = int(meta.get('units'))
+    except (TypeError, ValueError):
         raise PolicyError('bad_calldata')
-    selector = data[2:10]
-    recipient_word = _addr_word(send_tx.recipient_address)
-    if selector == SEL_TRANSFER:
-        if len(data) != 2 + 8 + 128 or data[10:74] != recipient_word:
-            raise PolicyError('bad_calldata')
-    elif selector == SEL_REDEEM_TO_USDT:
-        if to != vault or len(data) != 2 + 8 + 192 or data[138:202] != recipient_word:
-            raise PolicyError('bad_calldata')
+
+    # The canonical recipient must be exactly the row's recipient — the row
+    # is the authority the notifications and ledger key on.
+    if not recipient or recipient != (send_tx.recipient_address or '').lower():
+        raise PolicyError('recipient_mismatch')
+
+    # Token allowlist, pinned to the kind (a CONFIO row can only move CONFIO).
+    allowed = {
+        'send_confio': confio,
+        'send_usdt': USDT_BSC,
+        'send_cusd_plus': vault,
+        'send_redeem': vault,
+    }.get(kind)
+    if not allowed or token != allowed:
+        raise PolicyError('destination_not_allowed')
+
+    # Rebuild the exact call prepare must have stored.
+    if kind == 'send_redeem':
+        min_out = int(meta.get('min_out'))
+        expected_data = ('0x' + SEL_REDEEM_TO_USDT + _uint_word(units)
+                         + _uint_word(min_out) + _addr_word(recipient))
     else:
-        raise PolicyError('selector_not_allowed')
+        expected_data = '0x' + SEL_TRANSFER + _addr_word(recipient) + _uint_word(units)
+
+    if (call.get('to') or '').lower() != token:
+        raise PolicyError('destination_not_allowed')
+    if (call.get('data') or '').lower() != expected_data:
+        raise PolicyError('bad_calldata')
 
 
 def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
@@ -416,7 +451,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
     calls = meta.get('calls') or []
 
     try:
-        _validate_send_batch(calls, send_tx)
+        _validate_send_batch(calls, send_tx, meta)
 
         digest = sponsor_7702.intent_digest(
             calls, int(nonce), int(deadline), sender_addr, chain_id)
