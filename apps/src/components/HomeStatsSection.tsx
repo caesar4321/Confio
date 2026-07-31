@@ -74,7 +74,20 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = currency.thousandsSeparator;
   const decimalSeparator = currency.decimalSeparator;
-  const tvl = s?.totalValueLocked ?? s?.protectedSavings;
+  // Savings spans BOTH rails now: cUSD (USDC 1:1) and cUSD+ (USDY, valued
+  // at the oracle). Summed here rather than server-side so each stat field
+  // keeps one meaning — ProtectedSavings shows them per-rail.
+  const cusdTvl = s?.totalValueLocked ?? s?.protectedSavings ?? 0;
+  const usdyReserve = (s as any)?.usdyReserve ?? 0;
+  const tvl = cusdTvl + usdyReserve;
+  // cUSD phase-out (2026-07-31): the descriptor names ONLY the assets that
+  // actually back the figure, so it retires "USDC" by itself as cUSD drains
+  // into cUSD+ — no follow-up release, and never a backing claim the
+  // composition doesn't support. Threshold, not zero: a dust remainder of
+  // cUSD shouldn't keep a deprecated ticker on the home screen forever.
+  const cusdShare = tvl > 0 ? cusdTvl / tvl : 1;
+  const backingDescriptor =
+    cusdShare < 0.01 ? 'USDY' : usdyReserve <= 0 ? 'USDC' : 'USDC · USDY';
   const verified = s?.diditVerifiedUsers ?? 0;
   const fmt = (value: number | null | undefined) =>
     formatLocale(value, thousandsSeparator, decimalSeparator);
@@ -93,15 +106,13 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         key: 'savings',
         icon: 'shield',
         value: fmt(tvl),
-        unit: 'cUSD',
+        // Dollars, not a token ticker: the figure now blends cUSD and cUSD+.
+        unit: 'USD',
         // UI copy stays Spanish (identifiers-in-English rule is code-only).
         label: 'Ahorros',
-        // Backing tickers for both products: cUSD (USDC 1:1) and cUSD+ (USDY,
-        // US Treasuries). The "what is USDY" education lives in the Ahorros
-        // hub — the tile only names the assets. TODO(cusd+): server must fold
-        // the USDY reserve value into totalValueLocked, and ProtectedSavings
-        // must add the USDY reserve row, once cUSD+ is live.
-        descriptor: 'USDC · USDY',
+        // The "what is USDY" education lives in the Ahorros hub — the tile
+        // only names the backing assets (see backingDescriptor above).
+        descriptor: backingDescriptor,
         onPress: () => navigation.navigate('ProtectedSavings'),
       },
       {
@@ -115,7 +126,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         onPress: () => navigation.navigate('ConfioPresale'),
       },
     ],
-    [s?.totalUsers, verified, tvl, s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
+    [s?.totalUsers, verified, tvl, backingDescriptor, s?.presaleCusdRaised,
+     thousandsSeparator, decimalSeparator, navigation]
   );
 
   return (
