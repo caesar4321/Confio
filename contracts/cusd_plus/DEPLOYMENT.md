@@ -201,7 +201,8 @@ the segment table has no setter.
   credits: `manage.py presale_migration_credits sync|batch|verify|status`
   (Safe executes the printed creditMigrated calldata). Claims stay closed
   until the CONFIO BEP-20 exists: `setConfioToken()` (one-shot) then
-  `setClaimsUnlocked(true)`, both Safe-only.
+  `unlockClaims()` (one-way, and refuses unless every outstanding
+  allocation is already funded), both Safe-only.
 
 ## ConfioToken ($CONFIO BEP-20) — deployed 2026-07-30
 
@@ -228,7 +229,8 @@ are the only extensions.
      — calldata `0x76eba8ba000000000000000000000000d57bec35857839dc33f6fabe7356c6a19a8d72c1`
      to `0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583` (one-shot, verify first)
   2. `ConfioToken.transfer(0x77e74deEed3A0f0e338EBd0A457dE3b3C0E95583, amount ≥ totalSold)`
-  3. `ConfioPresaleVault.setClaimsUnlocked(true)` when claims open
+  3. `ConfioPresaleVault.unlockClaims()` when claims open — ONE-WAY, and
+     it reverts unless the vault already holds `totalSold - totalClaimed`
 
 ### Token name display on BscScan (decision 2026-07-30)
 

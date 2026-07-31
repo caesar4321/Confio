@@ -323,11 +323,11 @@ contract ConfioPresaleVaultTest is Test {
         v.creditMigrated(buyers, amounts);
 
         // credited allocation claims like any purchase
+        confio.mint(address(v), 500_000e18); // unlock requires full backing
         vm.startPrank(owner);
         v.setConfioToken(IERC20(address(confio)));
-        v.setClaimsUnlocked(true);
+        v.unlockClaims();
         vm.stopPrank();
-        confio.mint(address(v), 400_000e18);
         vm.prank(algoBuyer);
         assertEq(v.claim(), 300_000e18);
         assertEq(confio.balanceOf(algoBuyer), 300_000e18);
@@ -367,11 +367,11 @@ contract ConfioPresaleVaultTest is Test {
         amounts[0] = 100_000e18;
         vm.prank(owner);
         v.creditMigrated(buyers, amounts);
+        confio.mint(address(v), 550_000e18); // unlock requires full backing
         vm.startPrank(owner);
         v.setConfioToken(IERC20(address(confio)));
-        v.setClaimsUnlocked(true);
+        v.unlockClaims();
         vm.stopPrank();
-        confio.mint(address(v), 200_000e18);
         vm.prank(algoBuyer);
         v.claim();
         vm.prank(owner);
@@ -423,7 +423,7 @@ contract ConfioPresaleVaultTest is Test {
         // Cannot unlock before token wired
         vm.prank(owner);
         vm.expectRevert(ConfioPresaleVault.ConfioTokenNotSet.selector);
-        vault.setClaimsUnlocked(true);
+        vault.unlockClaims();
 
         vm.prank(owner);
         vault.setConfioToken(IERC20(address(confio)));
@@ -433,7 +433,7 @@ contract ConfioPresaleVaultTest is Test {
 
         confio.mint(address(vault), 1_000_000e18);
         vm.prank(owner);
-        vault.setClaimsUnlocked(true);
+        vault.unlockClaims();
 
         assertEq(vault.claimableOf(user), 1000e18);
         vm.prank(user);
@@ -497,7 +497,7 @@ contract ConfioPresaleVaultTest is Test {
         vault.setConfioToken(IERC20(address(confio)));
         confio.mint(address(vault), 1000e18);
         vm.prank(owner);
-        vault.setClaimsUnlocked(true);
+        vault.unlockClaims();
         vm.prank(user);
         assertEq(vault.claim(), 1000e18); // claims unaffected by pause
     }
@@ -536,5 +536,112 @@ contract ConfioPresaleVaultTest is Test {
         v.creditMigrated(buyers, amounts);
 
         assertEq(v.purchased(user) + v.purchased(algoBuyer) + v.migratedPool(), v.totalSold());
+    }
+
+    // ── AUDIT REGRESSIONS (2026-07-31) ──────────────────────────────
+
+    /// [P1] credit → claim → paid buy → uncredit must NOT revoke the paid
+    /// purchase. Before the fix migratedCredited survived the claim, so
+    /// `uncreditMigrated` compared against a stale credit and clawed back
+    /// tokens the buyer had actually paid for.
+    function test_uncredit_cannot_revoke_a_paid_buy_after_claim() public {
+        ConfioPresaleVault v = _newVault(500_000e18);
+
+        address[] memory buyers = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        buyers[0] = algoBuyer;
+        amounts[0] = 100_000e18;
+        vm.prank(owner);
+        v.creditMigrated(buyers, amounts);
+
+        confio.mint(address(v), 500_000e18);
+        vm.startPrank(owner);
+        v.setConfioToken(IERC20(address(confio)));
+        v.unlockClaims();
+        vm.stopPrank();
+
+        vm.prank(algoBuyer);
+        v.claim(); // takes the whole 100K credit
+        assertEq(v.migratedCredited(algoBuyer), 0, "claim consumes the credit");
+
+        // Now a REAL purchase with real money.
+        payment.mint(algoBuyer, 1_000_000e18);
+        confio.mint(address(v), 50_000e18); // keep claims fully backed
+        _sponsoredBuy(v, algoBuyer, 50_000e18, type(uint256).max);
+        assertEq(v.claimableOf(algoBuyer), 50_000e18);
+
+        // The owner cannot touch it — there is no credit left to reverse.
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 50_000e18, 0)
+        );
+        v.uncreditMigrated(algoBuyer, 50_000e18);
+        assertEq(v.claimableOf(algoBuyer), 50_000e18, "paid purchase intact");
+    }
+
+    /// [P1] Unlocking claims must prove every outstanding allocation is
+    /// funded, and post-unlock sales must not outrun the backing — a late
+    /// buyer claiming first must not be able to strand earlier buyers.
+    function test_claims_cannot_become_undercollateralized() public {
+        ConfioPresaleVault v = _newVault(0);
+        _sponsoredBuy(v, user, 20_000e18, type(uint256).max);
+
+        vm.prank(owner);
+        v.setConfioToken(IERC20(address(confio)));
+
+        // Under-funded unlock is refused outright.
+        confio.mint(address(v), 19_999e18);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ConfioPresaleVault.InsufficientBacking.selector, 19_999e18, 20_000e18
+            )
+        );
+        v.unlockClaims();
+
+        confio.mint(address(v), 1e18); // exactly funded
+        vm.prank(owner);
+        v.unlockClaims();
+
+        // A new sale that isn't backed is refused rather than silently
+        // borrowing the earlier buyer's collateral.
+        payment.mint(user2, 1_000_000e18);
+        vm.prank(user2, sponsor);
+        payment.approve(address(v), type(uint256).max);
+        vm.prank(user2, sponsor);
+        vm.expectRevert();
+        v.buy(10_000e18, type(uint256).max);
+
+        // Fund first, then the same sale succeeds.
+        confio.mint(address(v), 10_000e18);
+        _sponsoredBuy(v, user2, 10_000e18, type(uint256).max);
+
+        // Both buyers can claim in full, in either order.
+        vm.prank(user2);
+        v.claim();
+        vm.prank(user);
+        v.claim();
+        assertEq(confio.balanceOf(user), 20_000e18);
+        assertEq(confio.balanceOf(user2), 10_000e18);
+    }
+
+    /// [P1] Unlock is ONE-WAY: no owner path re-freezes opened claims.
+    function test_unlock_is_one_way() public {
+        ConfioPresaleVault v = _newVault(0);
+        _sponsoredBuy(v, user, 1_000e18, type(uint256).max);
+        confio.mint(address(v), 1_000e18);
+        vm.startPrank(owner);
+        v.setConfioToken(IERC20(address(confio)));
+        v.unlockClaims();
+        vm.expectRevert(ConfioPresaleVault.ClaimsAlreadyUnlocked.selector);
+        v.unlockClaims();
+        vm.stopPrank();
+        assertTrue(v.claimsUnlocked());
+
+        // Pausing still cannot reach claims.
+        vm.prank(owner);
+        v.pause();
+        vm.prank(user);
+        assertEq(v.claim(), 1_000e18);
     }
 }

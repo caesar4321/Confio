@@ -63,7 +63,8 @@ contract ConfioPayContractTest is Test {
         assertEq(usdt.balanceOf(merchant), 10 * WAD - fee);
         assertEq(usdt.balanceOf(address(pay)), fee);
         assertEq(pay.accruedFees(address(usdt)), fee);
-        assertTrue(pay.invoicePaid("inv-1"));
+        assertTrue(pay.paymentDone(
+            pay.paymentKey("inv-1", payer, address(usdt), 10 * WAD, merchant)));
     }
 
     function test_pay_cusd_plus_token() public {
@@ -77,9 +78,45 @@ contract ConfioPayContractTest is Test {
     function test_pay_replay_rejected() public {
         vm.startPrank(payer);
         pay.pay("inv-3", address(usdt), 1e18, merchant);
-        vm.expectRevert("invoice paid");
+        vm.expectRevert("payment done");
         pay.pay("inv-3", address(usdt), 1e18, merchant);
         vm.stopPrank();
+    }
+
+    /// AUDIT REGRESSION (2026-07-31 [P1]): keying the replay guard on the
+    /// invoice id alone let ANY caller who learned an id burn it with a
+    /// 1-wei self-payment and permanently brick the real payment.
+    function test_griefer_cannot_brick_a_real_invoice() public {
+        address griefer = makeAddr("griefer");
+        usdt.mint(griefer, 10e18);
+        vm.startPrank(griefer);
+        usdt.approve(address(pay), type(uint256).max);
+        // The old 1-wei brick is now impossible outright: the merchant must
+        // receive something.
+        vm.expectRevert("amount too small");
+        pay.pay("inv-real", address(usdt), 1, merchant);
+        // Even a well-formed spoiler on the same invoice id only consumes
+        // its OWN terms key.
+        pay.pay("inv-real", address(usdt), 2e18, merchant);
+        vm.stopPrank();
+
+        // The real payment still goes through untouched.
+        vm.prank(payer);
+        uint256 fee = pay.pay("inv-real", address(usdt), 10 * WAD, merchant);
+        assertEq(usdt.balanceOf(merchant), (2e18 - pay.feeFor(2e18)) + (10 * WAD - fee));
+    }
+
+    function test_self_payment_rejected() public {
+        vm.prank(payer);
+        vm.expectRevert("self payment");
+        pay.pay("inv-self", address(usdt), 1e18, payer);
+    }
+
+    function test_dust_payment_rejected() public {
+        // gross == 1 → fee == 1 → merchant would receive zero.
+        vm.prank(payer);
+        vm.expectRevert("amount too small");
+        pay.pay("inv-dust", address(usdt), 1, merchant);
     }
 
     function test_pay_alien_token_rejected() public {
@@ -103,7 +140,9 @@ contract ConfioPayContractTest is Test {
         pay.pay("inv-6", address(usdt), 1e18, merchant);
         vm.stopPrank();
         assertEq(usdt.balanceOf(merchant), 0, "atomic: nothing moved");
-        assertFalse(pay.invoicePaid("inv-6"), "replay key rolled back");
+        assertFalse(
+            pay.paymentDone(pay.paymentKey("inv-6", poor, address(usdt), 1e18, merchant)),
+            "replay key rolled back");
     }
 
     function test_pay_paused_rejected() public {

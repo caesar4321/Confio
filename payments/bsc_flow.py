@@ -56,7 +56,7 @@ def _pay_contract() -> str:
 
 def invoice_id_bytes32(internal_id: str) -> str:
     """Deterministic bytes32 replay key for an invoice (uniform width;
-    the contract stores invoicePaid[id])."""
+    the contract keys paymentDone on it plus the payment terms)."""
     from eth_utils import keccak
     return '0x' + keccak(text=internal_id).hex()
 

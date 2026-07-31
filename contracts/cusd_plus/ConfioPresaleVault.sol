@@ -141,6 +141,8 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     error ExceedsUnclaimedCredit(uint256 requested, uint256 available);
     error ExceedsExcessConfio(uint256 requested, uint256 excess);
     error UseSweepExcessConfio();
+    error ClaimsAlreadyUnlocked();
+    error InsufficientBacking(uint256 held, uint256 owed);
 
     constructor(
         address owner_,
@@ -318,9 +320,22 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         totalSold = sold + confioAmount;
         totalRaised += cost;
         purchased[msg.sender] += confioAmount;
+        _assertBacked();
         emit Purchased(msg.sender, confioAmount, cost, sold + confioAmount);
 
         PAYMENT_TOKEN.safeTransferFrom(msg.sender, address(this), cost);
+    }
+
+    /// Once claims are open, no new obligation may exceed the CONFIO
+    /// actually held (audit 2026-07-31, [P1]): otherwise a late buyer could
+    /// claim immediately and drain collateral reserved for earlier buyers,
+    /// making claim ORDER decide who gets frozen out. Before unlock this is
+    /// a no-op — the vault is allowed to sell ahead of funding.
+    function _assertBacked() private view {
+        if (!claimsUnlocked) return;
+        uint256 owed = totalSold - totalClaimed;
+        uint256 held = confioToken.balanceOf(address(this));
+        if (held < owed) revert InsufficientBacking(held, owed);
     }
 
     /// Send msg.sender's entire unclaimed allocation. No sponsor gate:
@@ -334,6 +349,12 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
 
         claimed[msg.sender] += amount;
         totalClaimed += amount;
+        // A claim consumes the migration credit for good (audit
+        // 2026-07-31, [P1]): leaving it standing let `uncreditMigrated`
+        // later revoke an amount the buyer had actually PAID for, since
+        // that function only compares against the unclaimed balance.
+        // Safe to zero outright because a claim always takes everything.
+        migratedCredited[msg.sender] = 0;
         emit Claimed(msg.sender, amount);
 
         token.safeTransfer(msg.sender, amount);
@@ -394,6 +415,7 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         if (amount > TOKENS_FOR_SALE - sold) revert ExceedsTokensForSale();
         totalSold = sold + amount;
         migratedPool += amount;
+        _assertBacked();
         emit MigratedPoolExpanded(amount, sold + amount);
     }
 
@@ -415,10 +437,21 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         emit ConfioTokenSet(address(token));
     }
 
-    function setClaimsUnlocked(bool unlocked) external onlyOwner {
-        if (unlocked && address(confioToken) == address(0)) revert ConfioTokenNotSet();
-        claimsUnlocked = unlocked;
-        emit ClaimsUnlockedSet(unlocked);
+    /// ONE-WAY (audit 2026-07-31, [P1]): the previous boolean setter let
+    /// the owner re-lock claims after opening them, i.e. freeze every
+    /// unclaimed buyer at will — exactly the power `pause()` was designed
+    /// NOT to have over claims. Unlocking also requires that every
+    /// outstanding allocation is already funded, so "claims are open"
+    /// cannot mean "open for whoever arrives first".
+    function unlockClaims() external onlyOwner {
+        if (claimsUnlocked) revert ClaimsAlreadyUnlocked();
+        IERC20 token = confioToken;
+        if (address(token) == address(0)) revert ConfioTokenNotSet();
+        uint256 owed = totalSold - totalClaimed;
+        uint256 held = token.balanceOf(address(this));
+        if (held < owed) revert InsufficientBacking(held, owed);
+        claimsUnlocked = true;
+        emit ClaimsUnlockedSet(true);
     }
 
     function pause() external onlyOwner {

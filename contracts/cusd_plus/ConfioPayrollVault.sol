@@ -52,6 +52,9 @@ interface ICusdPlusVault is IERC20 {
     function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to)
         external
         returns (uint256 usdtOut);
+
+    /// Per-address freeze on the underlying token.
+    function frozen(address account) external view returns (bool);
 }
 
 contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
@@ -85,6 +88,10 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
 
     /// Payout fees accrued in-contract, collectible by the owner (Safe).
     uint256 public accruedFeeShares;
+    /// Σ escrowShares — lets the invariant be CHECKED on-chain, and bounds
+    /// what `rescueSurplus` may move (audit 2026-07-31, [P3]: shares sent
+    /// here by direct transfer instead of `deposit` were unrecoverable).
+    uint256 public totalEscrowShares;
     /// cUSD+ shares parked per business.
     mapping(address => uint256) public escrowShares;
     /// business => delegate => may sign payouts.
@@ -107,6 +114,7 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         uint256 usdtOut
     );
     event FeesCollected(address indexed to, uint256 shares);
+    event SurplusRescued(address indexed to, uint256 shares);
 
     constructor(address cusdPlus, address owner_) Ownable(owner_) {
         require(cusdPlus != address(0), "zero address");
@@ -122,16 +130,23 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         require(shares > 0, "zero shares");
         IERC20(address(CUSD_PLUS)).safeTransferFrom(msg.sender, address(this), shares);
         escrowShares[msg.sender] += shares;
+        totalEscrowShares += shares;
         emit Deposited(msg.sender, shares);
     }
 
-    /// NEVER pausable (exits are never gated).
+    /// NEVER pausable (exits are never gated) — but a business frozen on
+    /// the underlying token stays frozen here too (audit 2026-07-31, [P2]:
+    /// escrow is held under THIS contract's address, so the token's own
+    /// freeze check sees an unfrozen sender and would let a frozen
+    /// business exit through payroll).
     function withdraw(uint256 shares, address to) external nonReentrant {
         require(shares > 0, "zero shares");
         require(to != address(0), "zero recipient");
+        require(!CUSD_PLUS.frozen(msg.sender), "business frozen");
         uint256 held = escrowShares[msg.sender];
         require(shares <= held, "insufficient escrow");
         escrowShares[msg.sender] = held - shares;
+        totalEscrowShares -= shares;
         IERC20(address(CUSD_PLUS)).safeTransfer(to, shares);
         emit Withdrawn(msg.sender, to, shares);
     }
@@ -173,11 +188,15 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
 
         address signer = ECDSA.recover(payoutDigest(p), signature);
         require(signer == p.business || isDelegate[p.business][signer], "bad signer");
+        // Same freeze passthrough as withdraw: escrow must not be an
+        // end-run around a token-level freeze of the paying business.
+        require(!CUSD_PLUS.frozen(p.business), "business frozen");
 
         uint256 total = p.netShares + p.feeShares;
         uint256 held = escrowShares[p.business];
         require(total <= held, "insufficient escrow");
         escrowShares[p.business] = held - total;
+        totalEscrowShares -= total;
 
         if (p.feeShares > 0) {
             // Fees never leave in the payout tx — they accrue here and the
@@ -233,6 +252,23 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         accruedFeeShares -= shares;
         IERC20(address(CUSD_PLUS)).safeTransfer(to, shares);
         emit FeesCollected(to, shares);
+    }
+
+    /// Shares that reached this contract WITHOUT going through `deposit`
+    /// (a mistaken direct transfer) would otherwise be stranded forever.
+    /// Bounded by the provable surplus, so escrow and accrued fees are
+    /// untouchable by construction, not by trust.
+    function surplusShares() public view returns (uint256) {
+        uint256 balance = CUSD_PLUS.balanceOf(address(this));
+        uint256 owed = totalEscrowShares + accruedFeeShares;
+        return balance > owed ? balance - owed : 0;
+    }
+
+    function rescueSurplus(address to, uint256 shares) external onlyOwner nonReentrant {
+        require(to != address(0), "zero recipient");
+        require(shares > 0 && shares <= surplusShares(), "exceeds surplus");
+        IERC20(address(CUSD_PLUS)).safeTransfer(to, shares);
+        emit SurplusRescued(to, shares);
     }
 
     function pause() external onlyOwner { _pause(); }

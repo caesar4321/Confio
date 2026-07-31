@@ -33,6 +33,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
@@ -44,9 +45,27 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient {
 
     /// Fee revenue accrued in-contract, per token (the only funds at rest).
     mapping(address => uint256) public accruedFees;
-    /// Server-side invoice id (bytes32) => paid. One payment per invoice,
-    /// enforced where it can't be raced.
-    mapping(bytes32 => bool) public invoicePaid;
+
+    /// Replay guard keyed on the FULL payment terms, not the invoice id
+    /// alone (audit 2026-07-31, [P1]): `pay` is permissionless, so keying
+    /// on `invoiceId` by itself let anyone who learned an id burn it with a
+    /// 1-wei self-payment and permanently brick the real payment. Keying on
+    /// (invoiceId, payer, token, gross, merchant) still blocks an exact
+    /// double-charge — the thing a replay guard is for — while a griefer's
+    /// different terms consume a different key and cannot block anyone.
+    /// A stranger paying a merchant on someone else's invoice id is just a
+    /// gift; the DB remains the authority on whether an invoice is settled.
+    mapping(bytes32 => bool) public paymentDone;
+
+    function paymentKey(
+        bytes32 invoiceId,
+        address payer,
+        address token,
+        uint256 gross,
+        address merchant
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encode(invoiceId, payer, token, gross, merchant));
+    }
 
     event PaymentMade(
         bytes32 indexed invoiceId,
@@ -65,9 +84,10 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient {
     }
 
     /// The exact fee rule shared by the Algorand builder and
-    /// payments/bsc_flow.py: ceil(gross * 90 / 10000).
+    /// payments/bsc_flow.py: ceil(gross * 90 / 10000). mulDiv keeps the
+    /// intermediate product from overflowing at absurd magnitudes.
     function feeFor(uint256 gross) public pure returns (uint256) {
-        return (gross * FEE_BPS + 9_999) / 10_000;
+        return Math.mulDiv(gross, FEE_BPS, 10_000, Math.Rounding.Ceil);
     }
 
     /// Called BY the payer (their EOA, via the sponsored 7702 batch that
@@ -80,11 +100,16 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient {
     {
         require(token == address(CUSD_PLUS) || token == address(USDT), "token not allowed");
         require(merchant != address(0) && merchant != address(this), "bad merchant");
-        require(gross > 0, "zero amount");
-        require(!invoicePaid[invoiceId], "invoice paid");
-        invoicePaid[invoiceId] = true;
-
+        require(merchant != msg.sender, "self payment");
         fee = feeFor(gross);
+        // The merchant must actually receive something: at gross == 1 the
+        // ceiling fee eats the whole payment, which is a "paid" event with
+        // a zero transfer.
+        require(gross > fee, "amount too small");
+
+        bytes32 key = paymentKey(invoiceId, msg.sender, token, gross, merchant);
+        require(!paymentDone[key], "payment done");
+        paymentDone[key] = true;
         IERC20(token).safeTransferFrom(msg.sender, merchant, gross - fee);
         IERC20(token).safeTransferFrom(msg.sender, address(this), fee);
         accruedFees[token] += fee;

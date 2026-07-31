@@ -118,5 +118,5 @@ class Command(BaseCommand):
         self.stdout.write("Next steps (all Safe transactions):")
         self.stdout.write(f"  1. presaleVault.setConfioToken({got})  [one-shot]")
         self.stdout.write("  2. token.transfer(presaleVault, >= totalSold) to fund claims")
-        self.stdout.write("  3. presaleVault.setClaimsUnlocked(true) when claims open")
+        self.stdout.write("  3. presaleVault.unlockClaims() when claims open (one-way; needs full backing)")
         self.stdout.write("Then: BscScan verify, BSC_CONFIO_TOKEN_ADDRESS in .env.mainnet, DEPLOYMENT.md.")

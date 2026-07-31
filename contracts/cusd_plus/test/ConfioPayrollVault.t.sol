@@ -408,4 +408,64 @@ contract ConfioPayrollVaultTest is Test {
         vm.expectRevert("exceeds accrued fees");
         payroll.collectFees(safeOwner, 1);
     }
+
+    // ── AUDIT REGRESSIONS (2026-07-31) ───────────────────────────────
+
+    /// [P2] Escrow must not be an end-run around a token-level freeze: the
+    /// shares sit under THIS contract's address, so cUSD+'s own check sees
+    /// an unfrozen sender and would happily let a frozen business exit.
+    function test_frozen_business_cannot_withdraw_or_pay_out() public {
+        vm.prank(treasury); // vault owner
+        vault.freezeAddress(business);
+
+        vm.prank(business);
+        vm.expectRevert("business frozen");
+        payroll.withdraw(100e18, business);
+
+        ConfioPayrollVault.Payout memory p = _payout("frozen-item", false);
+        bytes memory sig = _sign(p, delegateKey);
+        vm.prank(sponsor);
+        vm.expectRevert("business frozen");
+        payroll.payout(p, sig);
+
+        // Unfreezing restores both paths.
+        vm.prank(treasury);
+        vault.unfreezeAddress(business);
+        vm.prank(sponsor);
+        payroll.payout(p, sig);
+        assertEq(vault.balanceOf(employee), 100e18);
+    }
+
+    /// [P3] Shares that arrive by direct transfer instead of deposit were
+    /// stranded forever. They're now rescuable — but only the provable
+    /// surplus, never escrow or accrued fees.
+    function test_rescue_surplus_bounded_by_obligations() public {
+        vm.prank(business);
+        vault.transfer(address(payroll), 50e18); // mistaken direct transfer
+        assertEq(payroll.surplusShares(), 50e18);
+
+        vm.prank(safeOwner);
+        vm.expectRevert("exceeds surplus");
+        payroll.rescueSurplus(safeOwner, 50e18 + 1);
+
+        vm.prank(safeOwner);
+        payroll.rescueSurplus(safeOwner, 50e18);
+        assertEq(vault.balanceOf(safeOwner), 50e18);
+        assertEq(payroll.surplusShares(), 0);
+
+        // Escrow is untouched and still fully withdrawable.
+        vm.prank(business);
+        payroll.withdraw(5_000e18, business);
+    }
+
+    function test_invariant_balance_equals_escrow_plus_fees() public {
+        ConfioPayrollVault.Payout memory p = _payout("inv-item", false);
+        vm.prank(sponsor);
+        payroll.payout(p, _sign(p, delegateKey));
+        assertEq(payroll.totalEscrowShares(), payroll.escrowShares(business));
+        assertEq(
+            vault.balanceOf(address(payroll)),
+            payroll.totalEscrowShares() + payroll.accruedFeeShares()
+        );
+    }
 }
