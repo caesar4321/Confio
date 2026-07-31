@@ -148,9 +148,9 @@ export const ProtectedSavingsScreen = () => {
           </View>
           <Text style={styles.sectionBody}>
             <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>{' '}
-            es tu dólar para ahorrar: está respaldado 1:1 por USDY, un token
-            garantizado por bonos del Tesoro de EE.UU., y genera rendimiento
-            todos los días. La blockchain permite comprobar públicamente que
+            es tu dólar para ahorrar: cada dólar está respaldado 100% por
+            USDY, un token garantizado por bonos del Tesoro de EE.UU., y
+            genera rendimiento todos los días. La blockchain permite comprobar públicamente que
             el respaldo existe.
           </Text>
           <Text style={styles.sectionBody}>
