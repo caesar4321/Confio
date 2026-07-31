@@ -428,3 +428,32 @@ liquidity before DEX; Julian 07-31).
   deadline) + the client `claim()` flow. Rewards accrue in the DB now
   (behind BSC_REWARD_ENABLED) regardless.
 - Config: `BSC_REWARD_VAULT_ADDRESS`, `BSC_REWARD_ENABLED` (dark).
+
+## ConfioVestingVault + ConfioInviteEscrow — deployed 2026-07-31
+
+BSC mirrors of the Algorand vesting pool and invite_send (P2P deprecated,
+not mirrored). Both Safe-owned, non-upgradeable, Codex-audited (vesting
+clean at all severities; invite escrow had one P3 — invite-id squatting —
+fixed by namespacing storage keccak256(inviter, inviteId)).
+
+| Contract | Address |
+| --- | --- |
+| **ConfioVestingVault** | `0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A` |
+| **ConfioInviteEscrow** | `0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6` |
+| CONFIO | `0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8` |
+| cUSD+ (escrow only) | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
+| sponsor (escrow claims) | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS) |
+| owner (both) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
+
+- Vesting: linear per-grant (own start+duration → founder 36mo /
+  co-builder 24mo / cultural 90d in one vault). Creation tx
+  `0x1d1d295d…9252` (nonce 32). BscScan verified. Pending: fund CONFIO +
+  `addGrant`/`startGrant` per beneficiary. **Migration note:** the
+  founder/co-builder allocations are still vesting on ALGORAND (apps
+  3359301443 / 3359297921) holding Algorand CONFIO; moving them to BSC is a
+  token-migration decision (tokenomics §10 no-duplication).
+- Invite escrow: cUSD+/CONFIO escrow for a not-yet-user; sponsor claims to
+  the verified joining user, inviter reclaims after 7 days (never
+  pausable). Creation tx `0x1b97c3e9…675d` (nonce 33). BscScan verified.
+  Config `BSC_INVITE_ESCROW_ADDRESS` + `BSC_INVITE_ENABLED` (dark). Backend
+  create/claim/reclaim flow + client are the next piece.

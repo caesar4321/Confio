@@ -1,375 +1,375 @@
 # $CONFIO Tokenomics
 
-**Fixed supply. Verifiable allocations. Utility earned through real participation.**
+**Authoritative English Edition · Version 3.0 · 31 July 2026**
 
-**Global reference · Version 2.0 · July 2026**
-Julian Moon · Founder & CEO
-[confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
+> **Fixed supply. Continuous on-chain presale. Founder ownership disclosed plainly.**
 
-**Authoritative original:** This English document is the sole authoritative version of the $CONFIO tokenomics. [Español](README.es.md) and [한국어](README.ko.md) are translations provided for convenience. If a translation differs from the English text, the English text controls.
+This document describes the canonical $CONFIO token on BNB Smart Chain, its fixed supply and allocation, the continuous presale curve, reward distribution, vesting commitments, governance controls, and material risks.
 
-## How to read this document
+The English edition is the authoritative source. [Spanish](README.es.md) and [Korean](README.ko.md) editions are convenience translations and may temporarily lag behind this document. If a translation conflicts with the English edition, the English edition controls.
 
-This document describes the fixed supply, planned allocation, sale schedule, reward pools, vesting, chain policy, and material risks of $CONFIO. It supersedes the 2025 English Edition.
+$CONFIO is separate from USDT, cUSD+, USDY, Ondo Stocks, and the operating company. It does not back user dollar balances and does not by itself represent equity, debt, revenue share, or a claim on Confío’s assets or profits.
 
-$CONFIO is separate from Confío’s financial products:
+## Contents
 
-- **cUSD** is the Algorand payment asset.
-- **cUSD+** is the BNB Smart Chain savings product backed by Ondo USDY.
-- **$CONFIO** is the community, rewards, and future ecosystem-utility token. It does not back cUSD or cUSD+.
-
-Nothing in this document promises a market price, exchange listing, yield, revenue share, company ownership, or right to Confío’s profits.
-
-<details>
-<summary><strong>Contents</strong></summary>
-
-1. [Principles](#1-principles)
-2. [On-chain identity and fixed supply](#2-on-chain-identity-and-fixed-supply)
+1. [Design principles](#1-design-principles)
+2. [Canonical token and supply](#2-canonical-token-and-supply)
 3. [Allocation](#3-allocation)
-4. [Public presale](#4-public-presale)
+4. [Continuous public presale](#4-continuous-public-presale)
 5. [Referral and usage rewards](#5-referral-and-usage-rewards)
 6. [Cultural Invitation Fund](#6-cultural-invitation-fund)
-7. [Creative Co-Builder allocation](#7-creative-co-builder-allocation)
+7. [Creative co-builder allocation](#7-creative-co-builder-allocation)
 8. [Founder allocation](#8-founder-allocation)
-9. [Unlocks and circulating supply](#9-unlocks-and-circulating-supply)
-10. [Multi-chain policy and supply integrity](#10-multi-chain-policy-and-supply-integrity)
-11. [Utility and value-accrual boundary](#11-utility-and-value-accrual-boundary)
-12. [Disclosure before a DEX listing](#12-disclosure-before-a-dex-listing)
-13. [Material risks](#13-material-risks)
-14. [Legal disclaimer](#14-legal-disclaimer)
-15. [Sources and verification](#15-sources-and-verification)
-
-</details>
+9. [Vesting, claims, and circulating supply](#9-vesting-claims-and-circulating-supply)
+10. [Utility and value boundaries](#10-utility-and-value-boundaries)
+11. [DEX-launch disclosure](#11-dex-launch-disclosure)
+12. [Material risks](#12-material-risks)
+13. [Legal disclaimer](#13-legal-disclaimer)
+14. [Primary sources](#14-primary-sources)
 
 ---
 
-## 1. Principles
+## 1. Design principles
 
-$CONFIO is designed around five principles:
+1. **One canonical token:** only the disclosed BNB Smart Chain contract is official.
+2. **Fixed cap:** 1,000,000,000 CONFIO was minted once. The token has no owner, minter, or pause function. Holders may burn their own tokens, so supply can fall but cannot rise.
+3. **Continuous pricing:** the public presale has no phases, rounds, or manually selected price windows. Price follows cumulative tokens sold under an immutable piecewise-linear curve.
+4. **Founder ownership stated directly:** 893,600,000 CONFIO is the founder allocation. Treasury custody does not reclassify it as an undefined ecosystem reserve.
+5. **Claims are not circulation:** presale allocations and reward entitlements do not circulate until the applicable claim path is opened and tokens are claimed.
+6. **On-chain rules where they matter most:** the token cap, presale curve, purchase accounting, and presale backing check are enforced by public contracts.
+7. **Explicit trust boundaries:** the reward pool and future vesting operations retain disclosed treasury controls; they are not described as trustless when they are not.
+8. **No guaranteed return:** presale prices, token utilities, and future listing plans do not guarantee market value, liquidity, yield, or appreciation.
 
-1. **Fixed supply:** no additional $CONFIO can be minted.
-2. **Public identity:** the official Algorand Asset ID is the primary defense against imitation assets.
-3. **Real participation:** rewards are tied to verified product use or documented early community contribution, not indiscriminate airdrops.
-4. **Visible concentration:** large founder and contributor allocations are disclosed and time-locked rather than obscured.
-5. **Supply integrity across chains:** no future chain representation or migration may duplicate the economic supply.
+---
 
-Tokenomics cannot replace product adoption. The long-term relevance of $CONFIO depends on Confío serving real users and establishing useful, legally sustainable token functions.
+## 2. Canonical token and supply
 
-## 2. On-chain identity and fixed supply
+| Field | Current canonical value |
+|---|---|
+| Network | BNB Smart Chain |
+| Standard | BEP-20 / ERC-20 |
+| On-chain name | Confio |
+| Brand name | Confío |
+| Symbol | CONFIO |
+| Decimals | 18 |
+| Initial and maximum supply | 1,000,000,000 CONFIO |
+| Canonical contract | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
+| Privileged token powers | No owner, no minter, no token-level pause |
+| Extensions | ERC-2612 Permit and holder-initiated Burnable |
 
-| Parameter | Current state |
-| --- | --- |
-| Network | Algorand Mainnet |
-| Token standard | Algorand Standard Asset (ASA) |
-| Name | Confío |
-| Unit | CONFIO |
-| Asset ID | **3351104258** |
-| Decimals | 6 |
-| Fixed supply | **1,000,000,000 CONFIO** |
-| Manager authority | None |
-| Freeze authority | None |
-| Clawback authority | None |
+The full one-billion-token supply was minted once to the project’s multi-party treasury at deployment. Distribution from that treasury is governed by the allocations and release conditions in this document; it is not new token issuance.
 
-[Verify $CONFIO on Pera Explorer](https://explorer.perawallet.app/asset/3351104258/).
+The on-chain name uses the ASCII spelling **“Confio”** because explorers and wallets render accented token metadata inconsistently. The product and brand remain **“Confío.”**
 
-The absence of manager authority means the asset parameters and total supply cannot be changed. The absence of freeze and clawback authorities means Confío cannot freeze or forcibly retrieve $CONFIO held in a user’s Algorand account. Algorand’s reserve metadata field does not create minting power and does not change the fixed supply.
+The canonical contract supersedes the earlier accented-name deployment at `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`. That earlier contract was abandoned before external distribution or presale wiring, and its entire supply was burned. It must not be treated as an official $CONFIO token.
 
-Users should verify the Asset ID rather than relying only on the name or ticker.
+---
 
 ## 3. Allocation
 
-| Allocation | Tokens | Share | Release policy |
-| --- | ---: | ---: | --- |
-| Public presale | 74,000,000 | 7.40% | Locked until completion of Phase 3 and the official DEX launch/unlock event |
-| Referral and usage rewards | 7,400,000 | 0.74% | Earned and claimed under the active reward rules |
-| Cultural Invitation Fund | 15,000,000 | 1.50% | Planned 90-day linear vesting after the presale/DEX trigger |
-| Creative Co-Builder | 10,000,000 | 1.00% | Locked until the trigger, then linear vesting over 24 months |
-| Founder — Julian Moon | 893,600,000 | 89.36% | Locked until the trigger, then linear vesting over 36 months |
-| **Total** | **1,000,000,000** | **100.00%** | Fixed |
+| Allocation | CONFIO | Share of initial supply | Release principle |
+|---|---:|---:|---|
+| Public presale | 74,000,000 | 7.40% | Purchase allocations remain locked until the official DEX launch and one-way presale claim unlock |
+| Referral and usage rewards | 7,400,000 | 0.74% | Accrues under active program rules; on-chain claims remain locked until DEX launch |
+| Cultural Invitation Fund | 15,000,000 | 1.50% | 90-day linear vesting after its published activation event |
+| Creative co-builder allocation | 10,000,000 | 1.00% | 24-month linear vesting after activation |
+| Founder allocation — Julian Moon | 893,600,000 | 89.36% | 36-month linear vesting after activation |
+| **Total** | **1,000,000,000** | **100.00%** | Fixed initial supply |
 
-The 10,000,000-token Creative Co-Builder allocation was carved out of Julian Moon’s original 903,600,000-token founder allocation. It did not increase total supply. After that reallocation, Julian’s founder allocation is 893,600,000 tokens.
+The 89.36% founder allocation is intentionally shown as a founder allocation. The presale and disclosed contributor/community allocations are portions of the fixed supply made available by a founder-led startup; they do not turn $CONFIO into company shares.
 
-The Cultural Invitation Fund is fixed at 15,000,000 tokens in this version. Any future increase would require a clearly disclosed reallocation from an existing category; the total supply cannot be increased.
+The 10,000,000-token creative co-builder allocation was carved out of Julian Moon’s original 903,600,000-token founder allocation. It did not increase total supply. The Cultural Invitation Fund remains capped at 15,000,000 tokens unless a future version transparently reallocates tokens from an existing category; the token contract cannot mint additional supply.
 
-## 4. Public presale
+---
 
-The public presale has five price windows. Phase 1 contains three operational sub-rounds; Phases 2 and 3 are standalone rounds.
+## 4. Continuous public presale
 
-| Price window | Reference sale price | Fundraising target/cap | Tokens at the stated target |
-| --- | ---: | ---: | ---: |
-| Phase 1-1 | US$0.20 | US$250,000 | 1,250,000 |
-| Phase 1-2 | US$0.25 | US$350,000 | 1,400,000 |
-| Phase 1-3 | US$0.30 | US$400,000 | approximately 1,333,333.33 |
-| Phase 2 | US$0.50 | US$10,000,000 | 20,000,000 |
-| Phase 3 | US$1.00 | US$50,000,000 | 50,000,000 |
-| **Total** | — | **Up to US$61,000,000** | **up to 74,000,000 allocated** |
+### 4.1 One curve, no phases
 
-The target-price arithmetic above uses approximately 73,983,333.33 tokens. The remaining approximately 16,666.67 tokens stay inside the fixed 74,000,000-token presale allocation for rounding and final reconciliation; they do not increase the presale allocation.
+The public presale offers up to 74,000,000 CONFIO through one continuous, USDT-denominated price curve. There are no Phase 1, Phase 2, Phase 3, sub-rounds, scheduled repricings, or manual price transitions.
 
-The targets are maximum program amounts, not fundraising forecasts or commitments. Unsold tokens remain part of the presale allocation until Confío publishes a subsequent disposition policy.
+The contract divides the curve into three mathematical **segments** solely to calculate a continuous price efficiently:
 
-### 4.1 Operational sub-round transitions
+| Cumulative CONFIO sold | Spot-price movement | Tokens in segment | Integrated curve-cost reference |
+|---:|---:|---:|---:|
+| 0 to 4,000,000 | US$0.20 → US$0.30 | 4,000,000 | US$1,000,000 |
+| 4,000,000 to 24,000,000 | US$0.30 → US$0.70 | 20,000,000 | US$10,000,000 |
+| 24,000,000 to 74,000,000 | US$0.70 → US$1.30 | 50,000,000 | US$50,000,000 |
+| **Full curve** | **US$0.20 → US$1.30** | **74,000,000** | **US$61,000,000** |
 
-The application backend currently represents Phase 1 as one aggregate phase. Phase 1-1, 1-2, and 1-3 are implemented as manually controlled price windows:
+Within each segment, the spot price rises linearly with cumulative tokens sold. The endpoints and allocation are constructor-set and the deployed contract has no function that can change them.
 
-- at each scheduled transition, an authorized operator updates the backend price, cap, and displayed sub-round state;
-- the presale contract’s active round or price is updated through an on-chain administrator transaction;
-- the rewards application’s manually configured presale-price and round snapshot must be updated to keep referral conversions aligned with the same window;
-- the transition is not performed automatically merely because a date or fundraising threshold has passed.
+The integrated curve-cost figures show the mathematical cost of traversing each complete segment from its first token to its last. Actual BSC-USDT proceeds exclude purchase amounts collected under the earlier presale system and can also be lower if the curve is not fully sold.
 
-The price and round recorded on-chain at the time of a transaction control its token calculation. Operational procedures must reconcile the backend, presale contract, and rewards contract after every transition. Authorized controls can change an active round prospectively, but they cannot increase the fixed one-billion-token supply or the 74,000,000-token presale allocation.
+The segment boundaries do **not** create sales phases. Purchases can cross a boundary in one transaction, and the contract applies the appropriate portion of the continuous curve on each side.
 
-### 4.2 Price interpretation
+### 4.2 How a purchase is priced
 
-Presale prices are offering prices for the applicable phase. They are not independently determined valuations, guaranteed market prices, or promises that a DEX will open or remain at the same price.
+The presale contract charges the exact mathematical area under the curve for the quantity purchased. In practical terms:
 
-For arithmetic context only:
+- a buyer pays all intervening prices from the current sold position to the new sold position;
+- a larger purchase can span more than one segment;
+- splitting one purchase into several purchases creates no systematic price discount;
+- rounding is performed conservatively in favor of the vault;
+- the application reads the current on-chain price rather than maintaining a manual phase price; and
+- the buyer signs a maximum-payment amount, so a concurrent purchase that moves the curve above that cap causes the transaction to revert instead of charging more than authorized.
 
-| Sale price | Fully diluted value reference |
-| ---: | ---: |
+The contract is the authority for the purchase cost and cumulative amount sold. Backend records support eligibility, limits, user history, and display, but cannot manually select another curve price.
+
+### 4.3 Implied fully diluted value references
+
+| Curve landmark | Arithmetic reference using 1B initial supply |
+|---:|---:|
 | US$0.20 | US$200,000,000 |
-| US$0.25 | US$250,000,000 |
 | US$0.30 | US$300,000,000 |
-| US$0.50 | US$500,000,000 |
-| US$1.00 | US$1,000,000,000 |
+| US$0.70 | US$700,000,000 |
+| US$1.30 | US$1,300,000,000 |
 
-These figures multiply the phase price by the fixed one-billion-token supply. They do not represent a company valuation, an appraisal, or an expected market capitalization.
+These are simple price-times-supply references. They are not company valuations, independent appraisals, forecasts, guaranteed market capitalizations, or promises that a secondary market will trade at a curve price.
 
-### 4.3 Lock and claim policy
+### 4.4 Presale contract and controls
 
-Presale purchases create locked token entitlements. The current policy is:
+**Canonical presale contract:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
 
-- no presale allocation becomes claimable before Phase 3 is completed and the official DEX launch/unlock event occurs;
-- the on-chain unlock is intended to be permanent once executed;
-- a purchaser must satisfy the live claim, account, and jurisdictional requirements;
-- the definitive presale terms and in-product records control individual purchases.
+The contract is non-upgradeable. Its owner cannot rewrite the curve or mint CONFIO. Its limited administrative powers include:
 
-The presale allocation is therefore not the same as circulating supply before the unlock.
+- rotating approved transaction sponsors;
+- pausing new purchases;
+- assigning or correcting bounded legacy purchase credits;
+- wiring the canonical CONFIO token once;
+- opening claims once, subject to full backing;
+- withdrawing presale proceeds; and
+- withdrawing only CONFIO that exceeds outstanding presale obligations.
 
-### 4.4 Eligibility
+Purchases use BSC-USDT and sponsored EIP-7702 transaction batches. Confío’s backend applies product terms, geographic eligibility, sanctions controls, purchase limits, and account checks; the contract independently enforces price and allocation accounting.
 
-Participation is subject to applicable law, identity and sanctions controls, product terms, and geographic restrictions. Confío’s current implementation excludes U.S. residents and South Korean citizens or residents from the presale. Restrictions may be expanded or changed when required, and technical access does not establish legal eligibility.
+### 4.5 Claims and backing
 
-Presale proceeds do not back cUSD or cUSD+. User-asset backing must be assessed separately through the relevant stablecoin, reserve, vault, contract, and redemption arrangements.
+Buying during the presale records an allocation; it does not make the tokens transferable immediately.
+
+- Presale claims remain locked until the official DEX launch and unlock event.
+- Before the one-way unlock, the vault must hold enough canonical CONFIO to cover every outstanding presale allocation.
+- After unlock, the contract refuses any new purchase obligation that is not already backed by tokens held in the vault.
+- Each purchaser claims directly to the same BSC address that owns the recorded allocation.
+- The owner cannot sweep CONFIO reserved for unclaimed presale obligations.
+
+The presale allocation is therefore not circulating supply merely because it has been sold or credited.
+
+If the presale is closed before all 74,000,000 tokens are sold, the unsold amount remains classified within the presale allocation until a later authoritative tokenomics version discloses a different disposition. It does not silently become additional founder allocation or circulating supply.
+
+### 4.6 Earlier presale purchases
+
+The replacement BSC vault was initialized with **17,713.85 CONFIO** previously sold under the earlier presale system. This amount was included in `totalSold`, establishing the correct starting point on the continuous curve, and in a bounded migration pool.
+
+As users’ current BSC addresses are linked, their exact earlier allocations can be credited from that pool. Credits reduce the remaining pool and cannot create obligations beyond the amount already included in the curve. A mistaken, unclaimed credit can be corrected; a claimed allocation cannot be revoked through the migration-credit mechanism.
+
+### 4.7 Eligibility
+
+Participation is subject to the definitive presale terms, identity and sanctions controls, applicable law, account limits, and geographic restrictions. The current product excludes U.S. residents and South Korean citizens or residents from the presale. Restrictions may be expanded or changed where required, and technical access never establishes legal eligibility.
+
+---
 
 ## 5. Referral and usage rewards
 
-The 7,400,000-token reward pool is intended to reward verified adoption rather than passive wallet creation.
+The 7,400,000-token pool is intended to recognize verified product adoption and qualifying activity rather than passive wallet creation.
 
-Under the current referral flow:
+When BSC reward accrual is enabled:
 
-1. a referred user completes a qualifying top-up of at least US$19 equivalent;
-2. the referred user completes a qualifying USDC-to-cUSD conversion of at least US$19 equivalent;
-3. the referred user and referrer each become eligible for **US$5 equivalent in $CONFIO**, converted at the active presale reference price;
-4. claims and withdrawals are subject to personal identity verification and duplicate-person controls.
+1. a user completes the qualifying actions shown in the live reward terms;
+2. Confío applies identity, duplicate-person, account, and anti-abuse checks;
+3. the dollar-denominated reward is converted into CONFIO using the live on-chain presale-curve price at the time it is earned;
+4. the resulting CONFIO amount is recorded in Confío’s database as part of the user’s cumulative entitlement; and
+5. no reward token moves on-chain until reward claims open at the DEX launch.
 
-Examples:
+The conversion formula is:
 
-| Active reference price | Each eligible person | Total per valid pair |
-| ---: | ---: | ---: |
-| US$0.25 | 20 CONFIO | 40 CONFIO |
-| US$0.50 | 10 CONFIO | 20 CONFIO |
-| US$1.00 | 5 CONFIO | 10 CONFIO |
+```text
+CONFIO reward = dollar-denominated reward ÷ live on-chain curve price
+```
 
-The current anti-abuse model uses personal identity evidence rather than phone or device checks alone. A person completes identity verification using a government-issued document and live-selfie liveness and face-matching checks. Duplicate-person detection uses the normalized document identity together with the issuing country. Only the earliest valid referral linked to the same verified identity retains the reward; later duplicate referrals fail.
+This means the same dollar-denominated reward produces fewer CONFIO as the presale curve advances. It eliminates manual phase-price maintenance but does not guarantee the later market value of the resulting CONFIO.
 
-Reward parameters and qualifying events may change prospectively as the product evolves. The rules displayed in the live application and recorded for a specific reward event control that event. Earned rewards cannot exceed the funded reward pool.
+The current anti-abuse model uses identity evidence rather than phone or device checks alone. Identity verification includes a government-issued document, a live selfie, liveness checks, and face matching. Duplicate-person controls use normalized identity data and issuing country. Only the earliest valid referral associated with the same verified identity may retain the applicable reward.
+
+Exact qualifying events, reward amounts, limits, and program availability may change prospectively. The live terms and the data recorded for a specific event control that event.
+
+### 5.1 RewardVault claim model
+
+**Canonical RewardVault:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
+
+Reward claims use a short-lived EIP-712 signature over the user’s cumulative earned amount. The contract pays only the difference between that signed cumulative amount and the amount already claimed, preventing replayed claims from paying twice.
+
+This is a **treasury-controlled reward pool**, not a trustless escrow. The multi-party treasury owner can rotate the signer, pause claims, and withdraw vault funds, including after claims have been unlocked. Users therefore rely on Confío’s database records, signing service, funding policy, and treasury to honor valid reward obligations. Short signature deadlines limit the life of stale or mistakenly high authorizations.
+
+The RewardVault is deployed and source-verified, while reward accrual and claims remain subject to operational feature controls. At DEX launch, Confío must fund an appropriate CONFIO tranche, activate the claim-signing and client-claim path, and open claims before users can receive tokens from this vault.
+
+---
 
 ## 6. Cultural Invitation Fund
 
-The Cultural Invitation Fund reserves 15,000,000 $CONFIO for people whose documented hospitality, meals, transport, professional assistance, donations, memberships, creator gifts, or other direct support helped Confío take shape before conventional institutional validation.
+The Cultural Invitation Fund allocates 15,000,000 CONFIO to recognize documented community contribution made before the product had conventional scale.
 
-This allocation is:
+The intended release structure is:
 
-- not a public airdrop;
-- not a sale;
-- not compensation for employment;
-- a limited recognition program for documented early contribution.
+- aggregate allocation capped at 15,000,000 CONFIO;
+- participant-level amounts determined under a published and reconciled ledger;
+- 90-day linear vesting after the published activation event; and
+- public disclosure of the final methodology, eligible ledger, appeal process, and aggregate reconciliation before distribution.
 
-Current distribution safeguards are:
+This fund is separate from referral rewards. Referral rewards recognize qualifying product adoption; the Cultural Invitation Fund recognizes documented early cultural and community contribution.
 
-- fixed pool: **15,000,000 CONFIO**;
-- planned maximum per recipient: **150,000 CONFIO**;
-- planned minimum for an included recipient: **1,000 CONFIO**;
-- a public review and correction period before the final allocation is committed;
-- linear vesting over approximately 90 days after the presale/DEX trigger.
+---
 
-The final scoring methodology, eligible-participant ledger, appeal process, and aggregate reconciliation must be published before distribution. Earlier illustrative scoring tables are not incorporated into this version because they contained overlapping loyalty multipliers and did not constitute a final, internally consistent allocation rule.
+## 7. Creative co-builder allocation
 
-The Cultural Invitation Fund is distinct from the product referral program: one recognizes documented pre-product human contribution; the other rewards verified product adoption.
+The creative co-builder allocation is 10,000,000 CONFIO, or 1.00% of the initial supply.
 
-## 7. Creative Co-Builder allocation
+Its intended release structure is 24-month linear vesting after activation, with no implication that vesting equals sale. The beneficiary address, funding transaction, vesting contract, activation transaction, and claimed amount must be disclosed when the BSC vesting grant is activated.
 
-**10,000,000 CONFIO (1.00%)** is allocated to Susy Ramirez for long-term creative and community-building contributions.
-
-The allocation is held in a dedicated Algorand vesting application:
-
-- total locked: 10,000,000 CONFIO;
-- vesting duration after activation: approximately 24 months;
-- vesting start had not been activated as of 23 July 2026;
-- claimed amount was zero as of that date.
-
-[Verify the co-builder vesting application, App ID 3359297921, on Pera Explorer](https://explorer.perawallet.app/application/3359297921/).
-
-The vesting contract controls release timing; it does not imply that vested tokens will be sold.
+---
 
 ## 8. Founder allocation
 
-**893,600,000 CONFIO (89.36%) belongs to founder Julian Moon.** It is a founder-owned allocation—not a community-governed ecosystem reserve, protocol treasury, or unassigned team pool.
+**893,600,000 CONFIO, or 89.36% of the initial supply, is allocated to founder Julian Moon.** This is the largest allocation and creates material concentration, governance, liquidity, and perceived-sale-pressure risks that every purchaser should evaluate directly.
 
-Confío deliberately uses a traditional-startup analogy: the founder began with ownership of the fixed token supply and makes defined portions available through the presale and disclosed community and contributor allocations. Presale participants are purchasing part of that fixed token supply from the founder-led project. This analogy explains the ownership and financing model; **$CONFIO is not company equity**, and purchasing it does not make a holder a shareholder of Confío or an affiliated legal entity.
+Confío deliberately uses a traditional-startup analogy: the founder begins with ownership of the fixed token supply and sells or allocates defined portions through the presale, community programs, and contributor grants. This describes the project’s ownership and financing logic; **$CONFIO is not company equity**, and buying it does not make a holder a shareholder of Confío or an affiliated legal entity.
 
-After vesting, Julian may retain, transfer, or sell his tokens, or use them to fund hiring, development, operations, partnerships, and expansion. Those possible uses do not convert the founder-owned allocation into a separate “ecosystem reserve.”
+The intended founder release structure is approximately 36 months of linear vesting after activation. Straight-line vesting of 893,600,000 CONFIO over 36 months is economically equivalent to approximately **24.82 million CONFIO becoming vested per month on average**. Vesting is continuous, not a scheduled monthly sale, and vested does not mean transferred or sold.
 
-The allocation is held in a dedicated Algorand vesting application:
+The BSC vesting implementation must be deployed, funded, and publicly activated before its clock begins. Until then, the reserved founder tokens remain under multi-party treasury custody and no claim should be made that the BSC vesting clock is already running. When activated, Confío must publish the vault address, beneficiary, grant amount, start transaction, duration, vested amount, claimed amount, and treasury balances.
 
-- total locked: 893,600,000 CONFIO;
-- vesting duration after activation: approximately 36 months;
-- vesting start had not been activated as of 23 July 2026;
-- claimed amount was zero as of that date.
+The size of this allocation makes public wallet mapping, vesting-state disclosure, transfer transparency, and disciplined founder reporting more important than promotional statements about long-term alignment.
 
-[Verify Julian Moon’s founder vesting application, App ID 3359301443, on Pera Explorer](https://explorer.perawallet.app/application/3359301443/).
+---
 
-For scale, straight-line vesting over 36 months is economically equivalent to approximately 24.82 million tokens becoming vested per month on average. Vesting is continuous over time, not a scheduled monthly sale, and vested does not mean sold.
+## 9. Vesting, claims, and circulating supply
 
-The high concentration makes public wallet mapping, vesting-state disclosure, transfer transparency, and disciplined treasury reporting more important than the choice of blockchain.
+### 9.1 Release triggers
 
-## 9. Unlocks and circulating supply
+The following concepts must not be treated as interchangeable:
 
-Allocation is not circulation.
+- **allocated:** assigned to a category in this document;
+- **sold or earned:** a purchaser or reward participant has a recorded entitlement;
+- **vested:** a time-based restriction has elapsed;
+- **claimable:** the applicable contract and policy permit withdrawal;
+- **claimed:** tokens have moved to the beneficiary’s address; and
+- **circulating:** tokens are actually transferable outside a locked vault or restricted claim system.
 
-The previous 2025 edition described approximately 96.4 million tokens, or 9.64%, as “initial circulating supply.” That figure combined the full presale, reward, and Cultural Invitation allocations even though they do not all become liquid at the same time. It is therefore replaced by the following definition:
+Presale and reward claims are tied to the official DEX launch, not to completion of a numbered presale phase. Cultural, co-builder, and founder vesting clocks begin only upon their separately disclosed activation transactions.
 
-> **Circulating supply at DEX launch equals the tokens actually unlocked, claimed, vested, and transferable at that time—not the maximum size of every potentially distributable category.**
+### 9.2 Circulating-supply definition
 
-The actual launch figure will depend on:
+For public reporting, circulating supply should include only transferable canonical CONFIO outside locked or reserved distribution contracts. Depending on the date, this can include:
 
-- presale entitlements that are unlocked and claimed;
-- referral and usage rewards that have been validly earned and claimed;
-- the portion, if any, of the Cultural Invitation Fund vested by the measurement timestamp;
-- any founder or co-builder amount vested after activation;
-- any liquidity or market-making allocation disclosed for the launch.
+- presale allocations that have been unlocked and claimed;
+- reward allocations that have been validly claimed;
+- vested cultural, co-builder, or founder tokens that have actually been released; and
+- other transfers expressly disclosed by the treasury.
 
-Before an official DEX launch, Confío should publish a dated supply snapshot that reconciles:
+It should exclude:
 
-1. total fixed supply;
-2. balances held in vesting and reward applications;
-3. locked presale entitlements;
-4. earned but unclaimed rewards;
-5. unlocked and transferable supply;
-6. liquidity and market-making balances;
-7. any excluded, lost, or otherwise non-circulating balances.
+- unallocated treasury balances;
+- unclaimed presale allocations;
+- database-recorded but unclaimed rewards;
+- unvested grants; and
+- tokens held in distribution contracts for future obligations.
 
-## 10. Multi-chain policy and supply integrity
+The entire 74,000,000-token presale allocation must not be reported as circulating merely because it is offered for sale. Likewise, the full reward or cultural pools must not be reported as circulating before actual claims or releases.
 
-$CONFIO is currently an Algorand ASA. cUSD remains on Algorand for payments, while cUSD+ uses BNB Smart Chain because its underlying savings integration is built around Ondo USDY, USDT, and EVM contracts.
+---
 
-This document does not announce a $CONFIO migration or a BNB Smart Chain version. The canonical chain should be reconsidered only when token utility, DEX readiness, liquidity design, exchange requirements, and actual use across Confío’s products provide enough evidence.
+## 10. Utility and value boundaries
 
-If $CONFIO later gains a representation on another chain:
+$CONFIO’s current and intended role includes community recognition, product rewards, participation in the Confío ecosystem, and possible future governance or benefit mechanisms. Any material utility must be implemented and disclosed before users rely on it.
 
-- already distributed Algorand tokens must not be duplicated through an unconditional airdrop;
-- a lock-and-mint, burn-and-claim, or equivalent supply-preserving mechanism must connect old and new circulation;
-- each claim must be protected against replay and double issuance;
-- undistributed allocations may be first distributed on the selected chain without creating a second circulating copy;
-- aggregate supply and circulation across all chains must remain publicly reconcilable.
+$CONFIO does **not**:
 
-The fixed one-billion-token economic limit applies across any future representations, not separately to each chain.
+- back USDT, cUSD+, USDY, or Ondo Stocks;
+- represent a right to redeem one dollar or any other fixed amount;
+- automatically receive Confío’s cUSD+ yield share, merchant fees, payroll fees, Ondo Stocks fees, provider revenue share, or company revenue;
+- represent shares in Confío or an affiliated legal entity; or
+- guarantee voting power, listing, liquidity, appreciation, yield, dividends, buybacks, or burns.
 
-## 11. Utility and value-accrual boundary
+Confío may later propose staking, governance, fee-linked benefits, buybacks, burns, or other mechanisms. None should be assumed until definitive terms, implementation, legal review, and contract details are published.
 
-$CONFIO’s current and intended role includes community recognition, product rewards, and future ecosystem participation or governance. Exact utility may develop with the product and must be implemented and disclosed before users rely on it.
+---
 
-$CONFIO does **not** currently provide:
+## 11. DEX-launch disclosure
 
-- ownership of Confío or any affiliated legal entity;
-- a claim on company assets, revenue, yield, or profits;
-- a claim on cUSD or cUSD+ reserves;
-- a right to Ondo USDY or Ondo Stocks;
-- guaranteed voting power over regulated providers or issuer obligations;
-- guaranteed buybacks, burns, staking returns, dividends, or fee sharing;
-- a guaranteed DEX or centralized-exchange listing;
-- a guaranteed price or liquidity floor.
+Before the official DEX launch and token-claim unlock, Confío should publish a dated launch disclosure containing at least:
 
-Confío’s operating revenue—including merchant or payroll fees, its share of cUSD+ reference-price appreciation, fiat-provider economics, and any fee from Ondo Stocks transactions—does not automatically accrue to $CONFIO holders. Any future buyback, burn, fee-linked utility, or revenue-linked mechanism would require a separate public policy and appropriate legal review.
+- the canonical token, presale, reward, and active vesting-contract addresses;
+- current total supply and any burns;
+- treasury and distribution-vault balances;
+- total presale amount sold, total USDT raised, unassigned legacy pool, claims, and unclaimed obligations;
+- reward-pool funding, aggregate recorded entitlements, claim rules, and amounts claimed;
+- founder, co-builder, and cultural vesting activation status;
+- verified circulating supply under the definition in this document;
+- the DEX venue, pair, initial liquidity, liquidity ownership or lock terms, and market-making arrangements;
+- material treasury transfers and known unlocks; and
+- any change to eligibility, utility, fees, or legal terms.
 
-## 12. Disclosure before a DEX listing
+The initial DEX price is a market and liquidity event. It is not guaranteed to equal the current curve price or the final US$1.30 curve endpoint.
 
-Before an official DEX listing or presale unlock, the definitive listing disclosure should publish:
+---
 
-- the launch date, network, official contract or Asset ID, and trading venue;
-- the exact unlocked and circulating supply at a stated timestamp;
-- wallet and application mapping for every material allocation;
-- vesting start transactions and current vesting state;
-- presale claims and unclaimed entitlements;
-- reward and Cultural Invitation distributions;
-- liquidity-provider and market-making allocations and their restrictions;
-- treasury custody and governance arrangements;
-- any change to token utility, chain policy, or legal eligibility;
-- material conflicts, related-party arrangements, and market-support agreements.
-
-No promotional price should substitute for this supply disclosure.
-
-## 13. Material risks
+## 12. Material risks
 
 | Risk | Why it matters |
-| --- | --- |
-| Founder concentration | Julian Moon owns an 89.36% founder allocation. Vesting reduces immediate liquidity but does not remove control, perception, or future selling risk. |
-| Presale valuation | Phase prices imply large fully diluted value references before an external market establishes price. |
-| Unlock pressure | Presale claims and later vesting can increase transferable supply substantially. |
-| Utility uncertainty | Product success does not automatically create demand for $CONFIO unless useful token functions are implemented. |
-| Liquidity | A DEX pool may be shallow, volatile, or unavailable; quoted price can diverge from executable price. |
-| Regulatory classification | Authorities may classify a token, presale, reward, or utility differently across jurisdictions or over time. |
-| Operational and contract risk | Presale, reward, vesting, claim, bridge, or migration software can contain defects or be operated incorrectly. |
-| Chain and provider risk | Algorand, a future representation chain, wallets, indexers, exchanges, and infrastructure providers can fail or restrict access. |
-| Migration risk | A poorly designed migration can duplicate supply, strand holders, or create competing “official” assets. |
-| Fraud and impersonation | Tokens with similar names or tickers can mislead users; the Asset ID is the authoritative identifier. |
-| No automatic value capture | Confío may grow without $CONFIO receiving company revenue or product yield. |
+|---|---|
+| Founder concentration | The founder owns 89.36% of the initial supply. Vesting reduces immediate transferability but does not remove long-term concentration or potential sale pressure. |
+| Curve-implied valuation | The presale curve reaches price-times-supply references as high as US$1.3B before an external market independently establishes price. |
+| Continuous price movement | Every completed purchase can move the curve. Quotes can change before broadcast, and later buyers pay more under the fixed rule. |
+| DEX unlock pressure | Presale and reward claims can create meaningful transferable supply at launch. Available liquidity may be much smaller than claimable value. |
+| Treasury and reward trust | Reward entitlements live in Confío’s database and depend on a treasury-controlled vault, signer, funding, and operational availability. |
+| Vesting implementation | Founder, co-builder, and cultural BSC vesting must be deployed, funded, activated, and reported correctly. Administrative or operational errors can affect release timing. |
+| Smart-contract risk | The token, presale, reward, vesting, sponsored-transaction, and related contracts can contain defects despite public code and extensive testing. |
+| Network risk | BNB Smart Chain can experience congestion, validator or infrastructure concentration, censorship, reorganization, exploits, fee changes, or interruption. |
+| Stablecoin risk | Presale purchases use USDT, which carries issuer, reserve, depeg, freeze, legal, and redemption risks. |
+| Regulatory classification | Authorities may classify the token, presale, reward, or future utility differently across jurisdictions or over time. |
+| Eligibility and sanctions | A transaction can be technically possible while legally or contractually unavailable. Eligibility rules and provider policies can change. |
+| No automatic value capture | Growth in Confío users, cUSD+ balances, payment volume, fees, or company revenue does not automatically create demand or distributions for $CONFIO. |
+| Market and liquidity risk | A DEX or centralized exchange listing is not guaranteed. If listed, price can be volatile and liquidity can disappear. |
+| Key and treasury risk | Multi-party governance reduces single-key risk but does not eliminate collusion, compromise, signer failure, or mistaken treasury transactions. |
+| Impersonation risk | Tokens with the same name or symbol may be created by anyone. Only the canonical address in this document is official. |
 
-This table is not exhaustive.
+---
 
-## 14. Legal disclaimer
+## 13. Legal disclaimer
 
-This document is provided for informational and technical-reference purposes only. It is not investment, legal, tax, accounting, or financial advice and is not a prospectus, offer, solicitation, recommendation, or promise of returns.
+This document is informational and may be amended when contracts, products, laws, or definitive terms change. It is not investment, legal, tax, accounting, or financial advice, and it is not a promise of future performance.
 
-$CONFIO is not a bank deposit, is not insured, and may lose some or all of its market value. It does not represent equity, debt, a deposit claim, or a guaranteed right to revenue, profit, yield, liquidity, redemption, or listing. Availability, sale, rewards, claims, transfers, and utility may be restricted by law, jurisdiction, identity, sanctions, provider policy, or definitive product terms.
+$CONFIO is not a bank deposit, is not insured, and may lose some or all of its market value. It does not represent equity, debt, a deposit claim, or a guaranteed right to revenue, profit, yield, liquidity, redemption, governance, buybacks, listing, or appreciation.
 
-Presale participation is governed by separate definitive terms. If this document conflicts with applicable law, an executed agreement, the on-chain asset parameters, or the definitive terms of a specific transaction, the applicable law and transaction-specific terms control to the extent required.
+Presale access, rewards, claims, transfers, and utility may be limited by identity, jurisdiction, sanctions, applicable law, provider policy, technical controls, or definitive product terms. Purchasers must make their own assessment and obtain professional advice where appropriate.
 
-Forward-looking statements—including product plans, exchange plans, utilities, fundraising targets, and ecosystem uses—are uncertain and may change.
+The deployed smart contracts and definitive transaction records control on-chain behavior. If this document conflicts with a deployed contract regarding an immutable on-chain rule, the contract controls that rule. If marketing copy, a translation, or a social-media statement conflicts with this authoritative English document, this document controls unless superseded by later definitive terms.
 
-## 15. Sources and verification
+---
 
-1. Pera Explorer, $CONFIO Asset ID 3351104258: fixed supply and current asset parameters.
-   https://explorer.perawallet.app/asset/3351104258/
+## 14. Primary sources
 
-2. Confío public repository, token specification and deployment tooling.
-   https://github.com/caesar4321/Confio/blob/main/contracts/confio/CONFIO_TOKEN_SPEC.md
+1. Canonical ConfioToken on BscScan: 1,000,000,000 initial supply; no token owner, minter, or pause; ERC-2612 Permit and holder burn.
+   https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8
 
-3. Confío public repository, aggregate backend phases and the manually operated on-chain round and price controls used for presale sub-rounds.
-   https://github.com/caesar4321/Confio/blob/main/presale/management/commands/setup_presale.py
-   https://github.com/caesar4321/Confio/blob/main/contracts/presale/admin_presale.py
-   https://github.com/caesar4321/Confio/blob/main/contracts/rewards/confio_rewards.py
+2. Canonical ConfioPresaleVault on BscScan: immutable curve, USDT purchases, purchase accounting, backing checks, legacy-credit pool, and claim controls.
+   https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code
 
-4. Confío public repository, presale contract and irreversible unlock design.
-   https://github.com/caesar4321/Confio/blob/main/contracts/presale/README.md
+3. Canonical ConfioRewardVault on BscScan: cumulative EIP-712 claims, one-way DEX unlock signal, signer rotation, pause, and treasury withdrawal controls.
+   https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code
 
-5. Confío public repository, current referral reward configuration and identity policy.
+4. Confío public repository, BSC token, presale and reward contracts, tests, and deployment record.
+   https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus
+
+5. Confío public repository, current on-chain curve-price reader and presale statistics.
+   https://github.com/caesar4321/Confio/blob/main/presale/price_utils.py
+
+6. Confío public repository, reward accrual and live-curve conversion logic.
    https://github.com/caesar4321/Confio/blob/main/achievements/services/referral_rewards.py
-   https://github.com/caesar4321/Confio/blob/main/docs/security/REFERRAL_REWARD_IDENTITY_POLICY.md
 
-6. Pera Explorer, Creative Co-Builder vesting App ID 3359297921.
-   https://explorer.perawallet.app/application/3359297921/
+7. Confío English whitepaper, current BNB Smart Chain product architecture and $CONFIO separation.
+   https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md
 
-7. Pera Explorer, Julian Moon founder vesting App ID 3359301443.
-   https://explorer.perawallet.app/application/3359301443/
+---
 
-8. Confío public repository, current presale geographic restrictions.
-   https://github.com/caesar4321/Confio/blob/main/docs/legal/GEO_BLOCKING.md
-
-9. Confío global whitepaper, product architecture and chain policy.
-    https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md
-
-### Document provenance
-
-Prepared from the 2025 English tokenomics, the current public repository, Algorand Mainnet state, the current Confío whitepaper, and the product and strategy decisions reflected in the repository as of 23 July 2026.
+*$CONFIO is separate from Confío’s dollar products. Verify the canonical contract before any transaction.*
