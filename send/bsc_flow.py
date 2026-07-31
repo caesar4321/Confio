@@ -17,13 +17,23 @@ Two-step, server-authoritative:
                      CONFIRMED/FAILED, writes ledger movements and fires
                      SEND_SENT / SEND_RECEIVED.
 
-Call shapes (server decides at prepare):
+Call shapes (server decides at prepare; A–C are the dollar-value send where
+the CLIENT names no token, D–E honor an explicit token request from the
+"Enviar con dirección" sheet):
   A  sender holds cUSD+, recipient ELIGIBLE Confío user
         [vault.transfer(recipient, shares)]                 kind=send_cusd_plus
   B  sender holds cUSD+, recipient ineligible OR external
         [vault.redeemToUsdt(shares, minOut, recipient)]     kind=send_redeem
   C  sender holds raw USDT
         [USDT.transfer(recipient, wei)]                     kind=send_usdt
+  D  token='CUSD_PLUS': the sender chose the TOKEN, not just the value —
+     the recipient gets cUSD+ itself at any address, no eligibility fork
+     (a transfer of the sender's position is an exit; the geo gate covers
+     only the MINT). Shares-funded only.
+        [vault.transfer(recipient, shares)]                 kind=send_cusd_plus
+  E  token='CONFIO': plain BEP-20 transfer. `amount` is a CONFIO count,
+     not USD.
+        [CONFIO.transfer(recipient, wei)]                   kind=send_confio
 
 No geo gate anywhere in this module: sends are EXITS from the sender's
 position and never gated (house rule). An eligible recipient receiving
@@ -64,6 +74,10 @@ def _addr_word(addr: str) -> str:
 
 def _vault_address() -> str:
     return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+
+
+def _confio_token_address() -> str:
+    return (getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', '') or '').lower()
 
 
 def _display_name(user) -> str:
@@ -140,9 +154,12 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
 
 def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                      recipient_phone=None, recipient_address=None,
-                     memo: str = '', idempotency_key: str = '') -> dict:
+                     memo: str = '', idempotency_key: str = '',
+                     token: str = '') -> dict:
     """Build and store the send. `jwt_ctx` is the validated JWT business
-    context (send_funds already enforced by the mutation)."""
+    context (send_funds already enforced by the mutation). `token` empty =
+    dollar-value send (shapes A–C); 'CUSD_PLUS'/'CONFIO' = the explicit
+    token shapes D/E."""
     from cusd_plus import vault as cp_vault
     from cusd_plus.eligibility import is_ondo_eligible
     from cusd_plus.sponsor_7702 import (
@@ -209,54 +226,92 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
 
     amount_wei = int(amount_usd * WAD)
 
-    # Funding source: prefer the yield position; raw USDT is the fallback.
-    try:
-        pps_wad = cp_vault.p_plus_wad()
-        shares_raw = cp_vault.erc20_balance_raw(vault_addr, sender_addr)
-        shares_value_wei = (shares_raw * pps_wad) // WAD
-        usdt_raw = cp_vault.usdt_balance_raw(sender_addr, fresh=True)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
-        return {'success': False, 'error': 'balance_unavailable'}
+    requested = (token or '').upper()
+    if requested and requested not in ('CUSD_PLUS', 'CONFIO'):
+        return {'success': False, 'error': 'unsupported_token'}
 
-    if shares_value_wei >= amount_wei:
-        # Value → shares at the live price; floor favors the sender's
-        # remaining balance (never over-burn).
-        shares = (amount_wei * WAD) // pps_wad
-        if shares <= 0:
-            return {'success': False, 'error': 'invalid_amount'}
-        recipient_eligible = (
-            recipient_user is not None
-            and recipient_business is None
-            and is_ondo_eligible(recipient_user)
-        )
-        if recipient_eligible:
+    if requested == 'CONFIO':
+        # E: plain BEP-20 transfer of the governance/utility token.
+        confio_addr = _confio_token_address()
+        if not confio_addr:
+            return {'success': False, 'error': 'confio_not_configured'}
+        try:
+            confio_raw = cp_vault.erc20_balance_raw(confio_addr, sender_addr)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
+            return {'success': False, 'error': 'balance_unavailable'}
+        if confio_raw < amount_wei:
+            return {'success': False, 'error': 'insufficient_balance'}
+        kind = 'send_confio'
+        token_type = 'CONFIO'
+        calls = [{
+            'to': confio_addr, 'value': '0',
+            'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
+        }]
+    else:
+        # Funding source: prefer the yield position; raw USDT is the fallback.
+        try:
+            pps_wad = cp_vault.p_plus_wad()
+            shares_raw = cp_vault.erc20_balance_raw(vault_addr, sender_addr)
+            shares_value_wei = (shares_raw * pps_wad) // WAD
+            usdt_raw = cp_vault.usdt_balance_raw(sender_addr, fresh=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
+            return {'success': False, 'error': 'balance_unavailable'}
+
+        if requested == 'CUSD_PLUS':
+            # D: explicit cUSD+ token send — shares-funded only, delivered
+            # as-is to ANY recipient (no eligibility fork; exits and
+            # transfers of an existing position are never gated).
+            if shares_value_wei < amount_wei:
+                return {'success': False, 'error': 'insufficient_balance'}
+            shares = (amount_wei * WAD) // pps_wad
+            if shares <= 0:
+                return {'success': False, 'error': 'invalid_amount'}
             kind = 'send_cusd_plus'
             token_type = 'CUSD_PLUS'
             calls = [{
                 'to': vault_addr, 'value': '0',
                 'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
             }]
-        else:
-            # Ineligible or external: deliver USDT atomically (burn + IM
-            # redeem + transfer in one vault call). An exit — never gated.
-            kind = 'send_redeem'
+        elif shares_value_wei >= amount_wei:
+            # Value → shares at the live price; floor favors the sender's
+            # remaining balance (never over-burn).
+            shares = (amount_wei * WAD) // pps_wad
+            if shares <= 0:
+                return {'success': False, 'error': 'invalid_amount'}
+            recipient_eligible = (
+                recipient_user is not None
+                and recipient_business is None
+                and is_ondo_eligible(recipient_user)
+            )
+            if recipient_eligible:
+                kind = 'send_cusd_plus'
+                token_type = 'CUSD_PLUS'
+                calls = [{
+                    'to': vault_addr, 'value': '0',
+                    'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
+                }]
+            else:
+                # Ineligible or external: deliver USDT atomically (burn + IM
+                # redeem + transfer in one vault call). An exit — never gated.
+                kind = 'send_redeem'
+                token_type = 'USDT'
+                min_out = (amount_wei * REDEEM_MIN_OUT_BPS) // 10_000
+                calls = [{
+                    'to': vault_addr, 'value': '0',
+                    'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
+                            + _uint_word(min_out) + _addr_word(recipient_addr),
+                }]
+        elif usdt_raw >= amount_wei:
+            kind = 'send_usdt'
             token_type = 'USDT'
-            min_out = (amount_wei * REDEEM_MIN_OUT_BPS) // 10_000
             calls = [{
-                'to': vault_addr, 'value': '0',
-                'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
-                        + _uint_word(min_out) + _addr_word(recipient_addr),
+                'to': USDT_BSC, 'value': '0',
+                'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
             }]
-    elif usdt_raw >= amount_wei:
-        kind = 'send_usdt'
-        token_type = 'USDT'
-        calls = [{
-            'to': USDT_BSC, 'value': '0',
-            'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
-        }]
-    else:
-        return {'success': False, 'error': 'insufficient_balance'}
+        else:
+            return {'success': False, 'error': 'insufficient_balance'}
 
     recipient_display = ''
     recipient_phone_val = ''
@@ -316,7 +371,12 @@ def _validate_send_batch(calls: list, send_tx) -> None:
         raise PolicyError('bad_batch_size')
     call = calls[0]
     to = (call.get('to') or '').lower()
-    if to not in (vault, USDT_BSC):
+    if send_tx.token_type == 'CONFIO':
+        # Shape E rows may ONLY move the CONFIO token.
+        confio = _confio_token_address()
+        if not confio or to != confio:
+            raise PolicyError('destination_not_allowed')
+    elif to not in (vault, USDT_BSC):
         raise PolicyError('destination_not_allowed')
     if int(call.get('value') or 0) != 0:
         raise PolicyError('value_not_allowed')
@@ -374,7 +434,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
 
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, sender_addr, calls, int(nonce), int(deadline),
-            intent_signature, auth_dict, kind)
+            intent_signature, auth_dict, kind, source_id=send_tx.id)
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}

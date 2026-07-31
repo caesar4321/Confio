@@ -56,10 +56,17 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
     if p.status != 'SUBMITTED':
         return  # already resolved
 
-    if batch.status == 'sent':
+    # Isolation (audit 2026-07-31 P2).
+    if (batch.kind not in ('pay_cusd_plus', 'pay_usdt')
+            or batch.source_id != p.id
+            or (p.transaction_hash and batch.tx_hash != p.transaction_hash)):
+        logger.error('[PAY][BSC] batch %s does not match payment %s — refusing to settle', batch.id, p.id)
+        return
+
+    if batch.status in ('signed', 'sent'):
         raise self.retry(countdown=15)
 
-    if batch.status != 'confirmed':  # reverted / noop_failed
+    if batch.status != 'confirmed':  # reverted / noop_failed / reorged
         p.status = 'FAILED'
         p.error_message = f'batch_{batch.status}'
         p.save(update_fields=['status', 'error_message', 'updated_at'])

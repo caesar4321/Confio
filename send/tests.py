@@ -4,7 +4,9 @@ dollar sends safe:
 
   1. call-shape selection follows the eligibility matrix (A: cUSD+ transfer
      to eligible internal recipients; B: atomic redeem-to-USDT for
-     ineligible/external; C: raw USDT transfer);
+     ineligible/external; C: raw USDT transfer) — and the explicit token
+     shapes honor the request literally (D: cUSD+ itself to ANY address,
+     never a silent redeem; E: BEP-20 CONFIO, never dollar-funded);
   2. a recipient without a registered bsc_address BLOCKS the send and
      nudges the recipient (the coverage-cold-start adoption loop);
   3. the submit-side validator accepts only the stored single-call shapes
@@ -30,6 +32,7 @@ from cusd_plus.sponsor_7702 import (
 from send import bsc_flow
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+CONFIO_TOKEN = '0x' + 'cc' * 20
 SENDER = '0x' + '11' * 20
 RECIPIENT = '0x' + '22' * 20
 WAD = 10 ** 18
@@ -67,7 +70,7 @@ class PrepareCallShapeTests(SimpleTestCase):
 
     def _prepare(self, amount='10', shares_value=100 * WAD, usdt=0,
                  recipient_user=None, recipient_business=None,
-                 recipient_addr=RECIPIENT):
+                 recipient_addr=RECIPIENT, token=''):
         captured = {}
 
         def _create(**kwargs):
@@ -85,7 +88,7 @@ class PrepareCallShapeTests(SimpleTestCase):
             objs.create.side_effect = _create
             result = bsc_flow.prepare_bsc_send(
                 _sender_user(), _jwt_ctx(), amount,
-                recipient_user_id='2')
+                recipient_user_id='2', token=token)
         return result, captured, pps
 
     def test_case_a_eligible_recipient_gets_vault_transfer(self):
@@ -148,13 +151,68 @@ class PrepareCallShapeTests(SimpleTestCase):
         result, _, _ = self._prepare(recipient_user=_recipient_user('VE'))
         self.assertEqual(result['error'], 'bsc_send_disabled')
 
+    # ── explicit token shapes (D/E) ─────────────────────────────────────
+
+    def test_case_d_explicit_cusd_plus_to_external_never_redeems(self):
+        result, row, pps = self._prepare(recipient_user=None, token='CUSD_PLUS')
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertEqual(call['to'], VAULT.lower())
+        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
+        self.assertEqual(call['data'][10:74], RECIPIENT[2:].lower().rjust(64, '0'))
+        self.assertEqual(result['token_type'], 'CUSD_PLUS')
+        self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_cusd_plus')
+        self.assertEqual(int(call['data'][74:138], 16), (10 * WAD * WAD) // pps)
+
+    def test_case_d_ineligible_recipient_still_gets_the_token(self):
+        result, _, _ = self._prepare(
+            recipient_user=_recipient_user('US'), token='CUSD_PLUS')
+        self.assertTrue(result['success'], result)
+        self.assertTrue(result['calls'][0]['data'][2:].startswith(SEL_TRANSFER))
+        self.assertEqual(result['token_type'], 'CUSD_PLUS')
+
+    def test_case_d_never_falls_back_to_usdt(self):
+        # Plenty of wallet USDT can NOT fund an explicit cUSD+ send.
+        result, _, _ = self._prepare(
+            shares_value=0, usdt=100 * WAD, token='CUSD_PLUS')
+        self.assertEqual(result['error'], 'insufficient_balance')
+
+    @override_settings(BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
+    def test_case_e_confio_transfer(self):
+        # The generic erc20 mock serves the CONFIO read here: ~90.9 tokens.
+        result, row, _ = self._prepare(recipient_user=None, token='CONFIO')
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertEqual(call['to'], CONFIO_TOKEN.lower())
+        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
+        self.assertEqual(call['data'][10:74], RECIPIENT[2:].lower().rjust(64, '0'))
+        # amount is a token COUNT: 10 CONFIO → 10e18 wei, no price math.
+        self.assertEqual(int(call['data'][74:138], 16), 10 * WAD)
+        self.assertEqual(result['token_type'], 'CONFIO')
+        self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_confio')
+
+    @override_settings(BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
+    def test_case_e_insufficient_confio(self):
+        result, _, _ = self._prepare(
+            shares_value=0, usdt=100 * WAD, token='CONFIO')
+        self.assertEqual(result['error'], 'insufficient_balance')
+
+    def test_case_e_unconfigured_token_blocks(self):
+        result, _, _ = self._prepare(recipient_user=None, token='CONFIO')
+        self.assertEqual(result['error'], 'confio_not_configured')
+
+    def test_unknown_token_rejected(self):
+        result, _, _ = self._prepare(recipient_user=None, token='DOGE')
+        self.assertEqual(result['error'], 'unsupported_token')
+
 
 class SubmitValidatorTests(SimpleTestCase):
     """_validate_send_batch: only the stored shapes, only the stored recipient."""
 
-    def _tx(self, calls, recipient=RECIPIENT):
+    def _tx(self, calls, recipient=RECIPIENT, token_type='USDT'):
         return SimpleNamespace(
             recipient_address=recipient,
+            token_type=token_type,
             bsc_calls_json=json.dumps({'calls': calls, 'kind': 'x'}),
         )
 
@@ -193,6 +251,25 @@ class SubmitValidatorTests(SimpleTestCase):
         with self.assertRaises(PolicyError):
             bsc_flow._validate_send_batch([call, call], self._tx([call, call]))
 
+    @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT,
+                       BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
+    def test_confio_row_accepts_only_the_confio_token(self):
+        good = self._transfer_call(to=CONFIO_TOKEN)
+        bsc_flow._validate_send_batch(
+            [good], self._tx([good], token_type='CONFIO'))
+        # A CONFIO row must not be able to move USDT (or anything else).
+        evil = self._transfer_call(to=USDT_BSC)
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_send_batch(
+                [evil], self._tx([evil], token_type='CONFIO'))
+
+    @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT,
+                       BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
+    def test_non_confio_row_rejects_the_confio_token(self):
+        call = self._transfer_call(to=CONFIO_TOKEN)
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_send_batch([call], self._tx([call]))
+
 
 class RecipientResolutionTests(SimpleTestCase):
     def test_invalid_evm_address_rejected(self):
@@ -223,7 +300,8 @@ class ConfirmTaskTests(SimpleTestCase):
             transaction_hash='0x' + 'aa' * 32,
             save=mock.Mock(),
         )
-        batch = SimpleNamespace(id=9, status=batch_status, tx_hash=s.transaction_hash)
+        batch = SimpleNamespace(id=9, status=batch_status, tx_hash=s.transaction_hash,
+                                kind='send_cusd_plus', source_id=s.id)
         movements = []
         with mock.patch('send.models.SendTransaction.objects') as sobjs, \
              mock.patch('cusd_plus.models.SponsoredBatch.objects') as bobjs, \

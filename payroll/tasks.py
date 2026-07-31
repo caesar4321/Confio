@@ -104,7 +104,13 @@ def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
     if item.status != 'SUBMITTED':
         return  # already resolved
 
-    if batch.status == 'sent':
+    # Isolation (audit 2026-07-31 P2): only THIS item's payout batch settles it.
+    if (batch.kind != 'payroll_payout' or batch.source_id != item.id
+            or (item.transaction_hash and batch.tx_hash != item.transaction_hash)):
+        logger.error('[PAYROLL][BSC] batch %s does not match item %s — refusing to settle', batch.id, item.id)
+        return
+
+    if batch.status in ('signed', 'sent'):
         raise self.retry(countdown=15)
 
     if batch.status == 'confirmed':

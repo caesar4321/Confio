@@ -598,17 +598,32 @@ def _bnb_gas_reserve_wei() -> int:
     return min(target, cap)
 
 
-@shared_task(name='cusd_plus.check_sponsored_batch_receipt', bind=True, max_retries=10)
-def check_sponsored_batch_receipt(self, batch_id: int):
-    """Resolve a 7702 SponsoredBatch row to its receipt outcome.
+from eth_utils import keccak as _keccak
+# BatchExecuted(uint256 nonce, uint256 numCalls) — the proof a 7702
+# execute() actually ran (emitted by the user EOA running the delegate).
+_BATCH_EXECUTED_TOPIC = '0x' + _keccak(text='BatchExecuted(uint256,uint256)').hex()
 
-    The dangerous case is NOT a revert — it's the silent no-op: if the
-    authorization's account nonce raced (a legacy tx landed between signing
-    and mining), the delegation never applies, the sponsor's call hits a
-    codeless EOA, and the tx mines with status 0x1 having executed NOTHING.
-    A successful execute() always emits BatchExecuted, so success with zero
-    logs = delegation didn't apply -> noop_failed (client retries with a
-    fresh authorization; support sees it in admin).
+
+def _finality_depth() -> int:
+    return int(getattr(settings, 'CUSD_PLUS_FINALITY_DEPTH', 15))
+
+
+@shared_task(name='cusd_plus.check_sponsored_batch_receipt', bind=True, max_retries=40)
+def check_sponsored_batch_receipt(self, batch_id: int):
+    """Resolve a SponsoredBatch to a FINAL outcome (audit 2026-07-31 P1-3).
+
+    Three failure modes this guards, that "status==1 + has logs" did not:
+      1. the 7702 silent no-op — a stale authorization nonce leaves a
+         codeless EOA, the tx mines status 0x1 executing NOTHING. A real
+         execute() emits BatchExecuted(nonce); its ABSENCE (or a wrong
+         nonce, e.g. a different delegate mined) => noop_failed.
+      2. no finality — settling on the first receipt lets a reorg orphan a
+         'confirmed' money row. We wait CUSD_PLUS_FINALITY_DEPTH blocks and
+         re-check the block is canonical before AND the receipt still
+         resolves.
+      3. non-durable broadcast — a 'signed' row (broadcast may have failed)
+         is resolved the same way: if it never mined, reconciliation will
+         re-broadcast; here we just read the chain by the deterministic hash.
     """
     from .models import SponsoredBatch
 
@@ -616,7 +631,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         batch = SponsoredBatch.objects.get(id=batch_id)
     except SponsoredBatch.DoesNotExist:
         return
-    if batch.status != 'sent':
+    if batch.status not in ('sent', 'signed'):
         return  # already resolved
 
     try:
@@ -625,20 +640,80 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         logger.warning('7702 receipt check failed for %s: %s', batch.tx_hash, exc)
         receipt = None
     if not receipt:
-        # Not mined yet — back off and retry a few times, then leave 'sent'
-        # for support triage (never guess an outcome the chain hasn't given).
+        # Not mined yet (or broadcast never landed) — back off and retry,
+        # then leave for the reconciler. Never guess an outcome.
         raise self.retry(countdown=15)
 
     if receipt.get('status') != '0x1':
         batch.status = 'reverted'
-    elif not receipt.get('logs'):
-        batch.status = 'noop_failed'
-        logger.warning('7702 batch %s mined as a NO-OP (delegation not applied) for %s',
-                       batch.tx_hash, batch.user_bsc_address)
+        batch.save(update_fields=['status', 'updated_at'])
+        logger.info('7702 batch %s reverted', batch.tx_hash)
+        return
+
+    logs = receipt.get('logs') or []
+    is_7702 = batch.delegate_nonce is not None
+    if is_7702:
+        # Require the EXACT BatchExecuted(nonce) from the user EOA. Absent /
+        # wrong nonce => the batch did not execute (no-op or a different
+        # delegate ran first).
+        want_nonce = '0x' + format(int(batch.delegate_nonce), 'x').rjust(64, '0')
+        executed = any(
+            (lg.get('address') or '').lower() == batch.user_bsc_address.lower()
+            and (lg.get('topics') or [None])[0] == _BATCH_EXECUTED_TOPIC
+            and len(lg.get('topics') or []) >= 2
+            and lg['topics'][1].lower() == want_nonce
+            for lg in logs
+        )
+        if not executed:
+            batch.status = 'noop_failed'
+            batch.save(update_fields=['status', 'updated_at'])
+            logger.warning('7702 batch %s mined but did NOT execute (no BatchExecuted[nonce=%s]) for %s',
+                           batch.tx_hash, batch.delegate_nonce, batch.user_bsc_address)
+            return
     else:
-        batch.status = 'confirmed'
-    batch.save(update_fields=['status', 'updated_at'])
-    logger.info('7702 batch %s resolved: %s', batch.tx_hash, batch.status)
+        # Plain KMS contract call (payroll payout / reward / invite claim):
+        # the contract reverts on failure, so status 0x1 with any log means
+        # it executed. A zero-log success would be anomalous.
+        if not logs:
+            batch.status = 'noop_failed'
+            batch.save(update_fields=['status', 'updated_at'])
+            logger.warning('plain batch %s mined with no logs', batch.tx_hash)
+            return
+
+    # Finality: wait N confirmations, then verify the block is canonical.
+    try:
+        blk_num = int(receipt.get('blockNumber'), 16)
+        blk_hash = (receipt.get('blockHash') or '').lower()
+        head = int(_rpc('eth_blockNumber', []), 16)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('7702 finality read failed for %s: %s', batch.tx_hash, exc)
+        raise self.retry(countdown=15)
+    if head - blk_num < _finality_depth():
+        raise self.retry(countdown=15)
+    # The block that held the receipt must still be canonical at this height.
+    canonical = _rpc('eth_getBlockByNumber', [hex(blk_num), False])
+    if not canonical or (canonical.get('hash') or '').lower() != blk_hash:
+        # The tx was reorged out of that block. Re-check by hash: if it has
+        # no receipt now, it's orphaned; otherwise re-run to settle the new
+        # block.
+        recheck = None
+        try:
+            recheck = _rpc('eth_getTransactionReceipt', [batch.tx_hash])
+        except Exception:  # noqa: BLE001
+            pass
+        if not recheck:
+            batch.status = 'reorged'
+            batch.save(update_fields=['status', 'updated_at'])
+            logger.warning('7702 batch %s reorged out (block %s no longer canonical)',
+                           batch.tx_hash, blk_num)
+            return
+        raise self.retry(countdown=15)
+
+    batch.block_number = blk_num
+    batch.block_hash = blk_hash
+    batch.status = 'confirmed'
+    batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
+    logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
 
 
 @shared_task(name='cusd_plus.abandon_stale_quotes')

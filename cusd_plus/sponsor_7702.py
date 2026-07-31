@@ -394,29 +394,50 @@ def simulate(user_addr: str, calldata: str, delegated: bool, sponsor: str) -> No
         raise PolicyError('simulation_reverted')
 
 
-def acquire_sponsor_nonce_lock(attempts: int = 30, ttl_s: int = 15) -> bool:
+def acquire_sponsor_nonce_lock(attempts: int = 30, ttl_s: int = 15):
     """Serialize sponsor-account nonce-fetch → broadcast across EVERY rail
     that signs from the KMS sponsor (7702 batches, presale, payroll payouts).
-    Returns True when acquired; caller MUST release_sponsor_nonce_lock() in
-    a finally block."""
+
+    Returns an OWNERSHIP TOKEN string when acquired, else None (audit
+    2026-07-31 P2): the token must be passed to release_sponsor_nonce_lock
+    so a slow holder whose TTL expired cannot delete a DIFFERENT holder's
+    lock and let two requests allocate the same sponsor nonce. Caller MUST
+    release in a finally block."""
+    import uuid
+    token = uuid.uuid4().hex
     for _ in range(attempts):
-        if cache.add('bsc_sponsor_nonce_lock', 1, ttl_s):
-            return True
+        if cache.add('bsc_sponsor_nonce_lock', token, ttl_s):
+            return token
         time.sleep(0.5)
-    return False
+    return None
 
 
-def release_sponsor_nonce_lock() -> None:
-    cache.delete('bsc_sponsor_nonce_lock')
+def release_sponsor_nonce_lock(token=None) -> None:
+    """Release ONLY if we still own the lock (token matches). A None token
+    is the legacy unconditional release — avoid it on new call sites."""
+    if token is None:
+        cache.delete('bsc_sponsor_nonce_lock')
+        return
+    # Compare-and-delete: never clobber a lock a later holder acquired after
+    # our TTL lapsed.
+    if cache.get('bsc_sponsor_nonce_lock') == token:
+        cache.delete('bsc_sponsor_nonce_lock')
 
 
 def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline: int,
-                         intent_sig: str, authorization: Optional[dict], kind: str):
+                         intent_sig: str, authorization: Optional[dict], kind: str,
+                         source_id: Optional[int] = None):
     """Build, sign (KMS) and broadcast the sponsored transaction: type-4
     when an authorization rides along (first use — EIP-7702 requires a
     NON-EMPTY authorization list in a type-4), plain type-2 to the already-
     delegated EOA afterwards. Returns (tx_hash, batch_row). Caller has
-    already validated everything."""
+    already validated everything.
+
+    Durability (audit 2026-07-31 P1-2): the SponsoredBatch row is written
+    with the DETERMINISTIC signed tx hash BEFORE eth_sendRawTransaction, so
+    a crash mid-broadcast leaves a 'signed' row the reconciler can resolve
+    by hash — never a chain tx attached to no DB state, and never a lost row
+    that a retry would double-send."""
     from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
     from .models import SponsoredBatch
 
@@ -451,9 +472,11 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
 
     # Other sponsor-signed flows share this account: serialize nonce-fetch →
     # broadcast so concurrent sends can't collide on a nonce.
-    if not acquire_sponsor_nonce_lock():
+    lock = acquire_sponsor_nonce_lock()
+    if not lock:
         raise PolicyError('sponsor_busy')
 
+    from eth_utils import to_checksum_address
     try:
         sponsor_nonce = int(_rpc('eth_getTransactionCount', [sponsor, 'pending']), 16)
         sponsor_balance = int(_rpc('eth_getBalance', [sponsor, 'latest']), 16)
@@ -463,7 +486,6 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
                          sponsor_balance, max_cost)
             raise PolicyError('sponsor_balance_low')
 
-        from eth_utils import to_checksum_address
         tx = {
             'type': 4 if auth_list else 2,
             'chainId': chain_id,
@@ -479,23 +501,37 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
         if auth_list:
             tx['authorizationList'] = auth_list
         raw, tx_hash = signer.sign_typed_transaction(tx)
-        sent = _rpc('eth_sendRawTransaction', [raw])
-    finally:
-        release_sponsor_nonce_lock()
 
-    batch = SponsoredBatch.objects.create(
-        user=user,
-        user_bsc_address=user_addr,
-        kind=kind,
-        num_calls=len(calls),
-        calls_json=json.dumps(calls),
-        tx_hash=sent or tx_hash,
-        gas_limit=gas,
-        max_fee_wei=str(fee_per_gas),
-        status='sent',
-    )
+        # DURABLE record BEFORE broadcast. tx_hash is deterministic for the
+        # signed bytes, so this is the exact hash that will (or won't) mine.
+        batch = SponsoredBatch.objects.create(
+            user=user,
+            user_bsc_address=user_addr,
+            kind=kind,
+            source_id=source_id,
+            num_calls=len(calls),
+            calls_json=json.dumps(calls),
+            tx_hash=tx_hash,
+            delegate_nonce=int(nonce),
+            gas_limit=gas,
+            max_fee_wei=str(fee_per_gas),
+            status='signed',
+        )
+        try:
+            _rpc('eth_sendRawTransaction', [raw])
+        except Exception:  # noqa: BLE001
+            # The row survives as 'signed' with the real hash: the reconciler
+            # checks the chain and either finds it mined or re-broadcasts.
+            # NEVER lose it — a lost row is what enables the double-send.
+            logger.exception('7702 broadcast failed (row %s kept as signed): %s', batch.id, tx_hash)
+            raise
+        batch.status = 'sent'
+        batch.save(update_fields=['status', 'updated_at'])
+    finally:
+        release_sponsor_nonce_lock(lock)
+
     from .tasks import check_sponsored_batch_receipt
     check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=6)
     logger.info('7702 sponsored %s batch sent for user %s at %s: %s (gas=%s)',
-                kind, user.id, user_addr, sent, gas)
-    return sent or tx_hash, batch
+                kind, user.id, user_addr, tx_hash, gas)
+    return tx_hash, batch

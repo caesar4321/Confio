@@ -317,7 +317,7 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
 
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, payer_addr, calls, int(nonce), int(deadline),
-            intent_signature, auth_dict, kind)
+            intent_signature, auth_dict, kind, source_id=payment_tx.id)
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}

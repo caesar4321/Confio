@@ -206,7 +206,7 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
                 return {'success': False, 'error': 'authorization_required', 'authorization_required': True}
             auth_dict = sponsor_7702.normalize_and_validate_authorization(authorization, inviter_addr, chain_id)
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
-            user, inviter_addr, calls, int(nonce), int(deadline), intent_signature, auth_dict, 'invite_create')
+            user, inviter_addr, calls, int(nonce), int(deadline), intent_signature, auth_dict, 'invite_create', source_id=phone_invite.pk)
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}
@@ -351,7 +351,7 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
                 return {'success': False, 'error': 'authorization_required', 'authorization_required': True}
             auth_dict = sponsor_7702.normalize_and_validate_authorization(authorization, inviter_addr, chain_id)
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
-            user, inviter_addr, calls, int(nonce), int(deadline), intent_signature, auth_dict, 'invite_reclaim')
+            user, inviter_addr, calls, int(nonce), int(deadline), intent_signature, auth_dict, 'invite_reclaim', source_id=phone_invite.pk)
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}

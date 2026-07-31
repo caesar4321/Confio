@@ -14,7 +14,7 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT'}
+TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT', 'CONFIO': 'CONFIO'}
 
 
 def _account_for_bsc_address(addr: str):
@@ -114,7 +114,17 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
     if s.status != 'SUBMITTED':
         return  # already resolved
 
-    if batch.status == 'sent':
+    # Isolation (audit 2026-07-31 P2): this batch must actually be THIS
+    # send's batch — right flow, right source row, right hash — before it
+    # can settle the row. Blocks a mis-scheduled/duplicate task settling a
+    # row with someone else's batch.
+    if (batch.kind not in ('send_cusd_plus', 'send_redeem', 'send_usdt')
+            or batch.source_id != s.id
+            or (s.transaction_hash and batch.tx_hash != s.transaction_hash)):
+        logger.error('[SEND][BSC] batch %s does not match send %s — refusing to settle', batch.id, s.id)
+        return
+
+    if batch.status in ('signed', 'sent'):
         raise self.retry(countdown=15)
 
     if batch.status == 'confirmed':
@@ -122,19 +132,22 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
         s.save(update_fields=['status', 'updated_at'])
         # unified row updates via the post_save signal
         token = TOKEN_DISPLAY.get((s.token_type or '').upper(), s.token_type)
-        sender_account = _account_for_bsc_address(s.sender_address)
-        _movement(
-            sender_account, 'send',
-            f'Enviaste a {s.recipient_display_name or "un contacto"}',
-            -s.amount, s.transaction_hash, f'send_transaction:{s.id}:out',
-        )
-        if s.recipient_user_id or s.recipient_business_id:
-            recipient_account = _account_for_bsc_address(s.recipient_address)
+        # CusdPlusMovement is the DOLLAR display ledger (amount_usd) — a
+        # CONFIO send is a token count, not USD, so it never writes there.
+        if s.token_type != 'CONFIO':
+            sender_account = _account_for_bsc_address(s.sender_address)
             _movement(
-                recipient_account, 'receive',
-                f'Recibiste de {s.sender_display_name or "un contacto"}',
-                s.amount, s.transaction_hash, f'send_transaction:{s.id}:in',
+                sender_account, 'send',
+                f'Enviaste a {s.recipient_display_name or "un contacto"}',
+                -s.amount, s.transaction_hash, f'send_transaction:{s.id}:out',
             )
+            if s.recipient_user_id or s.recipient_business_id:
+                recipient_account = _account_for_bsc_address(s.recipient_address)
+                _movement(
+                    recipient_account, 'receive',
+                    f'Recibiste de {s.sender_display_name or "un contacto"}',
+                    s.amount, s.transaction_hash, f'send_transaction:{s.id}:in',
+                )
         _notify_send_parties(s)
         logger.info('[SEND][BSC] %s confirmed (%s %s): %s',
                     s.internal_id, s.amount, token, s.transaction_hash)

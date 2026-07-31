@@ -432,27 +432,100 @@ class SponsorBscBatchTests(SimpleTestCase):
 
 
 class ReceiptCheckerTests(SimpleTestCase):
-    """The silent no-op (status 0x1, zero logs) must be flagged, never
-    counted as success."""
+    """Finality-aware receipt resolution (audit 2026-07-31 P1-3): a 7702
+    batch is CONFIRMED only with the exact BatchExecuted(nonce) log AND
+    finality depth AND a canonical block; the silent no-op (no such log) is
+    flagged; a reorg is caught."""
 
-    def _run(self, receipt):
+    NONCE = 7
+    TXH = '0x' + 'ab' * 32
+    BLK = 100
+    BLKHASH = '0x' + 'cd' * 32
+
+    def _batch(self, delegate_nonce=NONCE):
+        return mock.Mock(status='sent', tx_hash=self.TXH, user_bsc_address=USER,
+                         delegate_nonce=delegate_nonce, block_number=None, block_hash='')
+
+    def _exec_log(self, nonce=NONCE):
+        from cusd_plus.tasks import _BATCH_EXECUTED_TOPIC
+        return {'address': USER,
+                'topics': [_BATCH_EXECUTED_TOPIC, '0x' + format(nonce, 'x').rjust(64, '0')]}
+
+    def _run(self, batch, receipt, head=BLK + 100, canonical_hash=BLKHASH):
         from cusd_plus import tasks
-        batch = mock.Mock(status='sent', tx_hash='0x' + 'ab' * 32,
-                          user_bsc_address=USER)
+        def _rpc(method, params, *a, **k):
+            if method == 'eth_getTransactionReceipt':
+                return receipt
+            if method == 'eth_blockNumber':
+                return hex(head)
+            if method == 'eth_getBlockByNumber':
+                return {'hash': canonical_hash}
+            return '0x'
         with mock.patch('cusd_plus.models.SponsoredBatch.objects') as objs, \
-             mock.patch.object(tasks, '_rpc', return_value=receipt):
+             mock.patch.object(tasks, '_rpc', side_effect=_rpc):
             objs.get.return_value = batch
-            tasks.check_sponsored_batch_receipt(99)
+            try:
+                tasks.check_sponsored_batch_receipt(99)
+            except Exception:  # a retry() raises; treat as "still pending"
+                pass
         return batch
 
+    def _receipt(self, status='0x1', logs=None):
+        return {'status': status, 'logs': logs or [],
+                'blockNumber': hex(self.BLK), 'blockHash': self.BLKHASH}
+
     def test_confirmed(self):
-        batch = self._run({'status': '0x1', 'logs': [{'address': USER}]})
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[self._exec_log()]))
         self.assertEqual(batch.status, 'confirmed')
+        self.assertEqual(batch.block_number, self.BLK)
 
     def test_reverted(self):
-        batch = self._run({'status': '0x0', 'logs': []})
+        batch = self._batch()
+        self._run(batch, self._receipt(status='0x0'))
         self.assertEqual(batch.status, 'reverted')
 
     def test_silent_noop_flagged(self):
-        batch = self._run({'status': '0x1', 'logs': []})
+        # status 0x1 but no BatchExecuted log = delegation didn't apply.
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[{'address': USER, 'topics': []}]))
         self.assertEqual(batch.status, 'noop_failed')
+
+    def test_wrong_nonce_is_noop(self):
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[self._exec_log(nonce=999)]))
+        self.assertEqual(batch.status, 'noop_failed')
+
+    def test_not_final_stays_pending(self):
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[self._exec_log()]), head=self.BLK + 1)
+        self.assertEqual(batch.status, 'sent')  # retried, not settled
+
+    def test_reorg_flagged(self):
+        # The block that held the receipt is no longer canonical, and a
+        # re-check finds no receipt → orphaned.
+        batch = self._batch()
+        def _rpc(method, params, *a, **k):
+            if method == 'eth_getTransactionReceipt':
+                # first call returns the receipt, second (re-check) returns None
+                if not hasattr(_rpc, 'seen'):
+                    _rpc.seen = True
+                    return self._receipt(logs=[self._exec_log()])
+                return None
+            if method == 'eth_blockNumber':
+                return hex(self.BLK + 100)
+            if method == 'eth_getBlockByNumber':
+                return {'hash': '0x' + 'ee' * 32}  # different hash = reorged
+            return '0x'
+        from cusd_plus import tasks
+        with mock.patch('cusd_plus.models.SponsoredBatch.objects') as objs, \
+             mock.patch.object(tasks, '_rpc', side_effect=_rpc):
+            objs.get.return_value = batch
+            tasks.check_sponsored_batch_receipt(99)
+        self.assertEqual(batch.status, 'reorged')
+
+    def test_plain_kms_confirmed_on_logs(self):
+        # delegate_nonce=None (payroll payout etc.): any log + finality.
+        batch = self._batch(delegate_nonce=None)
+        self._run(batch, self._receipt(logs=[{'address': '0x' + '22' * 20, 'topics': []}]))
+        self.assertEqual(batch.status, 'confirmed')

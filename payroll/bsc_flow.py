@@ -326,7 +326,7 @@ def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
 
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, business_addr, calls, int(nonce), int(deadline),
-            intent_signature, auth_dict, f'payroll_{action}')
+            intent_signature, auth_dict, f'payroll_{action}', source_id=business_account.id)
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}
@@ -525,24 +525,32 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
             'accessList': [],
         }
         raw, tx_hash = signer_kms.sign_typed_transaction(tx)
-        sent = _rpc('eth_sendRawTransaction', [raw])
+        # Durable BEFORE broadcast (audit 2026-07-31 P1-2). plain-KMS payout,
+        # so delegate_nonce=None; the receipt task proves it via the
+        # contract's own PaidOut log + finality. On-chain (business,itemId)
+        # replay already blocks a double-payout, so a lost-then-retried row
+        # cannot double-spend.
+        batch = SponsoredBatch.objects.create(
+            user=user,
+            user_bsc_address=business_addr,
+            kind='payroll_payout',
+            source_id=item.id,
+            num_calls=1,
+            calls_json=json.dumps([{'to': payroll_addr, 'value': '0', 'data': calldata}]),
+            tx_hash=tx_hash,
+            gas_limit=gas,
+            max_fee_wei=str(fee_per_gas),
+            status='signed',
+        )
+        _rpc('eth_sendRawTransaction', [raw])
+        batch.status = 'sent'
+        batch.save(update_fields=['status', 'updated_at'])
     except Exception as exc:  # noqa: BLE001
         logger.exception('[PAYROLL][BSC] payout broadcast failed for %s', item.internal_id)
         return {'success': False, 'error': str(exc)[:200]}
     finally:
         release_sponsor_nonce_lock()
 
-    batch = SponsoredBatch.objects.create(
-        user=user,
-        user_bsc_address=business_addr,
-        kind='payroll_payout',
-        num_calls=1,
-        calls_json=json.dumps([{'to': payroll_addr, 'value': '0', 'data': calldata}]),
-        tx_hash=sent or tx_hash,
-        gas_limit=gas,
-        max_fee_wei=str(fee_per_gas),
-        status='sent',
-    )
     from cusd_plus.tasks import check_sponsored_batch_receipt
     check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=6)
 
