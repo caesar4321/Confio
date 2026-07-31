@@ -125,6 +125,8 @@ All contracts listed below are live on BNB Smart Chain mainnet and source-verifi
 | $CONFIO token | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
 | $CONFIO presale vault | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
 | $CONFIO reward vault | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
+| $CONFIO vesting vault | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
+| Invitation escrow | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
 | Merchant-payment contract | [`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`](https://bscscan.com/address/0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD#code) |
 | Payroll vault | [`0x664378b2668f320ce3573D0eD6DD154b8C8B3835`](https://bscscan.com/address/0x664378b2668f320ce3573D0eD6DD154b8C8B3835#code) |
 
@@ -289,7 +291,6 @@ The mobile application, backend, smart contracts, deployment records, and tests 
 Security is pursued through open verifiability and conservative controls rather than obscurity:
 
 - unit, fork, invariant/fuzz, adversarial, differential, and upgrade-rehearsal tests;
-- recurring adversarial review using frontier AI coding models;
 - public source and deployment records;
 - multi-party governance for privileged operations;
 - bounded fee collection and non-sweepable backing;
@@ -461,7 +462,7 @@ Readers should review definitive product terms, risk disclosures, smart contract
 
 16. Benedetto Biondi, “The New Face Of Global Payments: Onchain Consumer Finance Apps,” *Forbes Technology Council*, 6 July 2026. https://www.forbes.com/councils/forbestechcouncil/2026/07/06/the-new-face-of-global-payments-onchain-consumer-finance-apps/
 
-17. Confío BSC contracts and deployment record: `ConfioToken.sol`, `ConfioPresaleVault.sol`, `ConfioRewardVault.sol`, `ConfioBatchDelegate.sol`, and verified deployment addresses. https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus and https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
+17. Confío BSC contracts and deployment record: `ConfioToken.sol`, `ConfioPresaleVault.sol`, `ConfioRewardVault.sol`, `ConfioVestingVault.sol`, `ConfioInviteEscrow.sol`, `ConfioBatchDelegate.sol`, and verified deployment addresses. https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus and https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
 
 18. Ondo Finance, “Ondo Stocks” and Global Markets API documentation, accessed July 2026. https://ondo.finance/ondo-stocks and https://docs.ondo.finance/api-reference/quickstart
 
