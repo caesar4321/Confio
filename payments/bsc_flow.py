@@ -67,6 +67,64 @@ def payment_fee_wei(gross_wei: int) -> int:
     return (gross_wei * FEE_BPS + BPS - 1) // BPS
 
 
+# ── Server-signed payment authorization (audit 2026-07-31 P1) ─────────────
+# The contract's invoice guard is GLOBAL on invoiceId and can only be
+# consumed with the backend's EIP-712 signature over the exact terms — so a
+# griefer can't brick an invoice and two honest payers can't both settle it.
+# The backend signer is the sponsor KMS key (also the deployed
+# paymentSigner); rotate on-chain via setPaymentSigner if the key changes.
+from eth_utils import keccak, to_checksum_address  # noqa: E402
+from eth_abi import encode as _abi_encode, decode as _abi_decode  # noqa: E402
+
+_PAY_TYPEHASH = keccak(
+    text='Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,uint256 deadline)')
+_PAY_DOMAIN_TYPEHASH = keccak(
+    text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
+_PAY_NAME_HASH = keccak(text='ConfioPay')
+_PAY_VERSION_HASH = keccak(text='1')
+
+# Server-signed authorization lifetime — the payer's 7702 batch must land
+# before this expires (the contract reverts "authorization expired"). Wide
+# enough for any realistic prepare→sign→submit; a stale one just reverts,
+# and the global invoiceDone guard means it can never double-settle.
+PAY_AUTH_TTL = 3600
+
+
+def _pay_domain_separator(pay_contract: str, chain_id: int) -> bytes:
+    return keccak(_abi_encode(
+        ['bytes32', 'bytes32', 'bytes32', 'uint256', 'address'],
+        [_PAY_DOMAIN_TYPEHASH, _PAY_NAME_HASH, _PAY_VERSION_HASH,
+         int(chain_id), to_checksum_address(pay_contract)]))
+
+
+def pay_authorization_digest(pay_contract: str, chain_id: int, invoice_id32: str,
+                             payer: str, token: str, gross: int, merchant: str,
+                             deadline: int) -> bytes:
+    """The EIP-712 digest ConfioPayContract.pay() verifies against
+    paymentSigner. Recomputed byte-for-byte here and in the validator."""
+    struct_hash = keccak(_abi_encode(
+        ['bytes32', 'bytes32', 'address', 'address', 'uint256', 'address', 'uint256'],
+        [_PAY_TYPEHASH, bytes.fromhex(invoice_id32[2:]),
+         to_checksum_address(payer), to_checksum_address(token), int(gross),
+         to_checksum_address(merchant), int(deadline)]))
+    return keccak(b'\x19\x01' + _pay_domain_separator(pay_contract, chain_id) + struct_hash)
+
+
+def _sign_pay_authorization(digest: bytes):
+    """Sign the pay digest with the sponsor KMS key. Returns (sig_hex,
+    signer_addr); signer_addr must equal the on-chain paymentSigner."""
+    from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
+    signer = get_bsc_sponsor_signer_from_settings()
+    v, r, s = signer.sign_digest(digest)  # v in {0,1}
+    sig = r.to_bytes(32, 'big') + s.to_bytes(32, 'big') + bytes([27 + int(v)])
+    return '0x' + sig.hex(), signer.address
+
+
+def _recover_pay_signer(digest: bytes, sig_hex: str) -> str:
+    from eth_account import Account
+    return Account._recover_hash(digest, signature=bytes.fromhex(sig_hex[2:].lower())).lower()
+
+
 def _notify_merchant_needs_app(invoice, payer_user) -> None:
     """Business registration is OWNER-only (users/schema.py guard), so the
     nudge goes to the invoice creator — in practice the owner or cashier
@@ -174,14 +232,27 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         return {'success': False, 'error': 'invalid_amount'}
 
     # The contract splits net/fee itself (feeFor = the same ceiling rule);
-    # the batch only carries the approval and the pay() call.
+    # the batch carries the approval and the server-authorized pay() call.
     invoice_id32 = invoice_id_bytes32(invoice.internal_id)
+    chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+    pay_deadline = int(time.time()) + PAY_AUTH_TTL
+    digest = pay_authorization_digest(
+        pay_contract, chain_id, invoice_id32, payer_addr, token,
+        gross_units, merchant_addr, pay_deadline)
+    try:
+        auth_sig, signer_addr = _sign_pay_authorization(digest)
+    except Exception:  # noqa: BLE001
+        logger.exception('[PAY][BSC] authorization signing failed for %s', invoice.internal_id)
+        return {'success': False, 'error': 'authorization_signing_failed'}
+    pay_args = _abi_encode(
+        ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
+        [bytes.fromhex(invoice_id32[2:]), to_checksum_address(token), int(gross_units),
+         to_checksum_address(merchant_addr), pay_deadline, bytes.fromhex(auth_sig[2:])])
     calls = [
         {'to': token, 'value': '0',
          'data': '0x' + SEL_APPROVE + _addr_word(pay_contract) + _uint_word(gross_units)},
         {'to': pay_contract, 'value': '0',
-         'data': '0x' + SEL_PAY + invoice_id32[2:] + _addr_word(token)
-                 + _uint_word(gross_units) + _addr_word(merchant_addr)},
+         'data': '0x' + SEL_PAY + pay_args.hex()},
     ]
 
     # Idempotent row per (invoice, payer): re-prepare refreshes the batch
@@ -215,10 +286,19 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     )
     if payment_tx.status == 'CONFIRMED':
         return {'success': False, 'error': 'invoice_already_paid'}
+    # Never rebuild an in-flight payment (audit 2026-07-31 P1): a re-prepare
+    # while SUBMITTED would reset the row to PENDING and let a second submit
+    # broadcast a duplicate batch. The chain's global invoiceDone would
+    # revert the loser, but we refuse to waste a sponsor tx over it.
+    if payment_tx.status == 'SUBMITTED':
+        return {'success': False, 'error': 'payment_in_progress'}
     payment_tx.token_type = token_type
     payment_tx.payer_address = payer_addr
     payment_tx.merchant_address = merchant_addr
-    payment_tx.blockchain_data = {'bsc_calls': calls, 'kind': kind}
+    payment_tx.blockchain_data = {
+        'bsc_calls': calls, 'kind': kind,
+        'pay_deadline': pay_deadline, 'pay_signer': signer_addr,
+    }
     payment_tx.status = 'PENDING_BLOCKCHAIN'
     payment_tx.save(update_fields=[
         'token_type', 'payer_address', 'merchant_address', 'blockchain_data',
@@ -237,10 +317,14 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
 
 
 def _validate_payment_batch(calls: list, payment_tx) -> None:
-    """Defense in depth on the STORED batch: [approve(payContract, gross),
-    payContract.pay(invoiceId, token, gross, merchant)] — token allowed,
-    approval exactly the pay() amount, invoice id and merchant pinned to
-    the stored row (the contract re-enforces all of it on-chain)."""
+    """Defense in depth on the STORED batch:
+    [approve(payContract, gross),
+     payContract.pay(invoiceId, token, gross, merchant, deadline, authSig)].
+
+    Every field is pinned to the stored row, the approval matches the pay()
+    amount, the deadline hasn't lapsed, and the embedded server authorization
+    recovers to the expected paymentSigner — the contract re-enforces all of
+    it on-chain, but a bad batch never reaches the sponsor."""
     from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PAY, USDT_BSC
 
     vault = _vault_address()
@@ -261,18 +345,44 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
     if (len(a_data) != 2 + 8 + 128 or a_data[2:10] != SEL_APPROVE
             or a_data[10:74] != _addr_word(pay_contract)):
         raise PolicyError('bad_calldata')
-    gross_word = a_data[74:138]
+    gross = int(a_data[74:138], 16)
 
     if (pay.get('to') or '').lower() != pay_contract:
         raise PolicyError('destination_not_allowed')
     p_data = pay['data'].lower()
-    invoice_id32 = invoice_id_bytes32(payment_tx.invoice.internal_id)
-    if (len(p_data) != 2 + 8 + 256 or p_data[2:10] != SEL_PAY
-            or p_data[10:74] != invoice_id32[2:]          # invoiceId
-            or p_data[74:138] != _addr_word(token)        # token == approved
-            or p_data[138:202] != gross_word              # gross == approval
-            or p_data[202:266] != _addr_word(payment_tx.merchant_address)):
+    if p_data[2:10] != SEL_PAY:
         raise PolicyError('bad_calldata')
+    try:
+        invoice_id_b, d_token, d_gross, d_merchant, d_deadline, auth_sig = _abi_decode(
+            ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
+            bytes.fromhex(p_data[10:]))
+    except Exception:  # noqa: BLE001
+        raise PolicyError('bad_calldata')
+
+    invoice_id32 = invoice_id_bytes32(payment_tx.invoice.internal_id)
+    meta = payment_tx.blockchain_data or {}
+    if ('0x' + invoice_id_b.hex() != invoice_id32          # invoiceId
+            or d_token.lower() != token                    # token == approved
+            or int(d_gross) != gross                        # gross == approval
+            or d_merchant.lower() != (payment_tx.merchant_address or '').lower()):
+        raise PolicyError('bad_calldata')
+    if int(d_deadline) != int(meta.get('pay_deadline') or 0):
+        raise PolicyError('bad_calldata')
+    if int(d_deadline) <= int(time.time()):
+        raise PolicyError('authorization_expired')
+
+    # Re-verify the server's own authorization recovers to the paymentSigner.
+    chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+    digest = pay_authorization_digest(
+        pay_contract, chain_id, invoice_id32, payment_tx.payer_address, token,
+        gross, payment_tx.merchant_address, int(d_deadline))
+    try:
+        recovered = _recover_pay_signer(digest, '0x' + auth_sig.hex())
+    except Exception:  # noqa: BLE001
+        raise PolicyError('bad_authorization')
+    expected = (meta.get('pay_signer') or '').lower()
+    if not expected or recovered != expected:
+        raise PolicyError('bad_authorization')
 
 
 def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,

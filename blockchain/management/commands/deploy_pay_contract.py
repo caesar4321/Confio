@@ -5,12 +5,17 @@ Same KMS-creation-tx flow as deploy_presale_vault (the sponsor key is
 non-extractable, so forge --broadcast is not an option). Single contract,
 non-upgradeable, no proxy.
 
-Constructor: (cusdPlus, usdt, owner)
+Constructor: (cusdPlus, usdt, signer, owner)
   - cusdPlus  = CUSD_PLUS_VAULT_ADDRESS (live 0x3C29…3Ed1; vault shares
                 are one of the two payable tokens)
   - usdt      = BSC USDT 0x55d3…7955 (the other)
-  - owner     = the 3-of-5 Safe (can only collect ACCRUED fees and pause
-                new payments — fees accrue IN the contract, Julian 07-31)
+  - signer    = the backend payment authorizer = the sponsor KMS address.
+                pay() only settles an invoice with this key's EIP-712
+                authorization over the exact terms (audit 2026-07-31 P1:
+                global invoiceDone guard, un-grief-able, no double-pay).
+                Owner can rotate it on-chain via setPaymentSigner.
+  - owner     = the 3-of-5 Safe (collects ACCRUED fees, rotates the signer,
+                pauses new payments — fees accrue IN the contract, 07-31)
 
 Usage:
   # Dry run — builds the txn, estimates gas, broadcasts NOTHING (default):
@@ -73,15 +78,16 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Deployer (KMS sponsor): {deployer}")
         self.stdout.write(f"Chain {chain_id} · balance {balance/1e18:.6f} BNB · nonce {nonce} · gasPrice {gas_price/1e9:.3f} gwei")
-        self.stdout.write(f"cusdPlus     = {cusd_plus}")
-        self.stdout.write(f"usdt         = {USDT_BSC}")
-        self.stdout.write(f"owner (Safe) = {SAFE}")
+        self.stdout.write(f"cusdPlus       = {cusd_plus}")
+        self.stdout.write(f"usdt           = {USDT_BSC}")
+        self.stdout.write(f"signer (KMS)   = {deployer}")
+        self.stdout.write(f"owner (Safe)   = {SAFE}")
 
         art = json.loads((ARTIFACTS / "ConfioPayContract.sol" / "ConfioPayContract.json").read_text())
         bytecode = bytes.fromhex(art["bytecode"]["object"].removeprefix("0x"))
         ctor_args = abi_encode(
-            ["address", "address", "address"],
-            [cusd_plus, USDT_BSC, SAFE],
+            ["address", "address", "address", "address"],
+            [cusd_plus, USDT_BSC, deployer, SAFE],
         )
         data = bytecode + ctor_args
 
@@ -127,7 +133,8 @@ class Command(BaseCommand):
             return to_checksum_address("0x" + out[-40:])
 
         self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioPayContract: {got}"))
-        self.stdout.write(f"  CUSD_PLUS = {call_addr('CUSD_PLUS()')}")
-        self.stdout.write(f"  USDT      = {call_addr('USDT()')}")
-        self.stdout.write(f"  owner     = {call_addr('owner()')}")
+        self.stdout.write(f"  CUSD_PLUS     = {call_addr('CUSD_PLUS()')}")
+        self.stdout.write(f"  USDT          = {call_addr('USDT()')}")
+        self.stdout.write(f"  paymentSigner = {call_addr('paymentSigner()')}")
+        self.stdout.write(f"  owner         = {call_addr('owner()')}")
         self.stdout.write("Next: add BSC_PAY_CONTRACT_ADDRESS to .env.mainnet, BscScan verify, record in DEPLOYMENT.md.")

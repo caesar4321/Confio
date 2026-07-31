@@ -21,13 +21,23 @@ contract ConfioPayContractTest is Test {
     address merchant = makeAddr("merchant");
     address stranger = makeAddr("stranger");
 
+    // The backend authorizer (the sponsor KMS key on-chain).
+    uint256 signerKey = 0xA11CE;
+    address paymentSigner = vm.addr(0xA11CE);
+
+    bytes32 constant PAY_TYPEHASH = keccak256(
+        "Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,uint256 deadline)"
+    );
+
     uint256 constant WAD = 1e18;
+    uint256 deadline;
 
     function setUp() public {
         cusdPlus = new MockToken("cUSD+");
         usdt = new MockToken("USDT");
         alien = new MockToken("ALIEN");
-        pay = new ConfioPayContract(address(cusdPlus), address(usdt), safeOwner);
+        pay = new ConfioPayContract(address(cusdPlus), address(usdt), paymentSigner, safeOwner);
+        deadline = block.timestamp + 3600;
 
         for (uint256 i = 0; i < 3; i++) {
             MockToken t = [cusdPlus, usdt, alien][i];
@@ -35,6 +45,29 @@ contract ConfioPayContractTest is Test {
             vm.prank(payer);
             t.approve(address(pay), type(uint256).max);
         }
+    }
+
+    // ── EIP-712 authorization helper ─────────────────────────────────────
+
+    function _auth(
+        uint256 key,
+        bytes32 invoiceId,
+        address who,
+        address token,
+        uint256 gross,
+        address to,
+        uint256 dl
+    ) internal view returns (bytes memory) {
+        bytes32 digest = pay.payDigest(invoiceId, who, token, gross, to, dl);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    // A correctly-signed authorization for `payer` from the real signer.
+    function _sig(bytes32 invoiceId, address token, uint256 gross, address to)
+        internal view returns (bytes memory)
+    {
+        return _auth(signerKey, invoiceId, payer, token, gross, to, deadline);
     }
 
     // ── Fee math (parity with the Algorand builder + bsc_flow.py) ────
@@ -58,77 +91,164 @@ contract ConfioPayContractTest is Test {
     // ── pay() ────────────────────────────────────────────────────────
 
     function test_pay_splits_net_and_accrues_fee() public {
+        bytes memory sig = _sig("inv-1", address(usdt), 10 * WAD, merchant);
         vm.prank(payer);
-        uint256 fee = pay.pay("inv-1", address(usdt), 10 * WAD, merchant);
+        uint256 fee = pay.pay("inv-1", address(usdt), 10 * WAD, merchant, deadline, sig);
         assertEq(usdt.balanceOf(merchant), 10 * WAD - fee);
         assertEq(usdt.balanceOf(address(pay)), fee);
         assertEq(pay.accruedFees(address(usdt)), fee);
-        assertTrue(pay.paymentDone(
-            pay.paymentKey("inv-1", payer, address(usdt), 10 * WAD, merchant)));
+        assertTrue(pay.invoiceDone("inv-1"));
     }
 
     function test_pay_cusd_plus_token() public {
+        bytes memory sig = _sig("inv-2", address(cusdPlus), 5 * WAD, merchant);
         vm.prank(payer);
-        uint256 fee = pay.pay("inv-2", address(cusdPlus), 5 * WAD, merchant);
+        uint256 fee = pay.pay("inv-2", address(cusdPlus), 5 * WAD, merchant, deadline, sig);
         assertEq(cusdPlus.balanceOf(merchant), 5 * WAD - fee);
         assertEq(pay.accruedFees(address(cusdPlus)), fee);
         assertEq(pay.accruedFees(address(usdt)), 0, "per-token accounting");
     }
 
-    function test_pay_replay_rejected() public {
-        vm.startPrank(payer);
-        pay.pay("inv-3", address(usdt), 1e18, merchant);
-        vm.expectRevert("payment done");
-        pay.pay("inv-3", address(usdt), 1e18, merchant);
-        vm.stopPrank();
+    /// AUDIT ([P1], 2026-07-31): the global invoiceDone guard means exactly
+    /// ONE authorized payment per invoice id ever settles — no honest
+    /// double-charge, even from two different (authorized) payers.
+    function test_invoice_single_settlement() public {
+        bytes memory sig = _sig("inv-3", address(usdt), 1e18, merchant);
+        vm.prank(payer);
+        pay.pay("inv-3", address(usdt), 1e18, merchant, deadline, sig);
+        vm.prank(payer);
+        vm.expectRevert("invoice done");
+        pay.pay("inv-3", address(usdt), 1e18, merchant, deadline, sig);
     }
 
-    /// AUDIT REGRESSION (2026-07-31 [P1]): keying the replay guard on the
-    /// invoice id alone let ANY caller who learned an id burn it with a
-    /// 1-wei self-payment and permanently brick the real payment.
+    /// A second payer, even with a valid authorization for the SAME invoice,
+    /// cannot double-charge it once it is settled.
+    function test_second_authorized_payer_cannot_double_settle() public {
+        address payer2 = makeAddr("payer2");
+        usdt.mint(payer2, 100e18);
+        vm.prank(payer2);
+        usdt.approve(address(pay), type(uint256).max);
+
+        bytes memory sig1 = _sig("inv-dup", address(usdt), 2e18, merchant);
+        vm.prank(payer);
+        pay.pay("inv-dup", address(usdt), 2e18, merchant, deadline, sig1);
+
+        bytes memory sig2 = _auth(signerKey, "inv-dup", payer2, address(usdt), 2e18, merchant, deadline);
+        vm.prank(payer2);
+        vm.expectRevert("invoice done");
+        pay.pay("inv-dup", address(usdt), 2e18, merchant, deadline, sig2);
+    }
+
+    /// AUDIT REGRESSION ([P1]): a griefer cannot brick an invoice, because
+    /// consuming invoiceDone now REQUIRES the backend's authorization — which
+    /// a griefer cannot forge. Their unsigned/self-signed call just reverts.
     function test_griefer_cannot_brick_a_real_invoice() public {
         address griefer = makeAddr("griefer");
         usdt.mint(griefer, 10e18);
         vm.startPrank(griefer);
         usdt.approve(address(pay), type(uint256).max);
-        // The old 1-wei brick is now impossible outright: the merchant must
-        // receive something.
-        vm.expectRevert("amount too small");
-        pay.pay("inv-real", address(usdt), 1, merchant);
-        // Even a well-formed spoiler on the same invoice id only consumes
-        // its OWN terms key.
-        pay.pay("inv-real", address(usdt), 2e18, merchant);
+        // Griefer forges their own authorization with a key they control.
+        uint256 fakeKey = 0xBAD;
+        bytes memory forged = _auth(fakeKey, "inv-real", griefer, address(usdt), 2e18, merchant, deadline);
+        vm.expectRevert("bad authorization");
+        pay.pay("inv-real", address(usdt), 2e18, merchant, deadline, forged);
         vm.stopPrank();
 
-        // The real payment still goes through untouched.
+        // The real, backend-authorized payment still settles untouched.
+        // (Build the sig BEFORE prank — payDigest is a staticcall that would
+        // otherwise consume the prank.)
+        bytes memory realSig = _sig("inv-real", address(usdt), 10 * WAD, merchant);
         vm.prank(payer);
-        uint256 fee = pay.pay("inv-real", address(usdt), 10 * WAD, merchant);
-        assertEq(usdt.balanceOf(merchant), (2e18 - pay.feeFor(2e18)) + (10 * WAD - fee));
+        uint256 fee = pay.pay("inv-real", address(usdt), 10 * WAD, merchant, deadline, realSig);
+        assertEq(usdt.balanceOf(merchant), 10 * WAD - fee);
+    }
+
+    function test_forged_authorization_rejected() public {
+        bytes memory forged = _auth(0xBAD, "inv-forge", payer, address(usdt), 1e18, merchant, deadline);
+        vm.prank(payer);
+        vm.expectRevert("bad authorization");
+        pay.pay("inv-forge", address(usdt), 1e18, merchant, deadline, forged);
+    }
+
+    function test_authorization_for_other_payer_rejected() public {
+        // Signed for `stranger`, presented by `payer` → digest binds payer,
+        // so the recovered signer won't match.
+        bytes memory sig = _auth(signerKey, "inv-x", stranger, address(usdt), 1e18, merchant, deadline);
+        vm.prank(payer);
+        vm.expectRevert("bad authorization");
+        pay.pay("inv-x", address(usdt), 1e18, merchant, deadline, sig);
+    }
+
+    function test_tampered_amount_rejected() public {
+        // Authorized for 1e18 but the payer submits 2e18.
+        bytes memory sig = _sig("inv-t", address(usdt), 1e18, merchant);
+        vm.prank(payer);
+        vm.expectRevert("bad authorization");
+        pay.pay("inv-t", address(usdt), 2e18, merchant, deadline, sig);
+    }
+
+    function test_expired_authorization_rejected() public {
+        uint256 past = block.timestamp + 10;
+        bytes memory sig = _auth(signerKey, "inv-exp", payer, address(usdt), 1e18, merchant, past);
+        vm.warp(past + 1);
+        vm.prank(payer);
+        vm.expectRevert("authorization expired");
+        pay.pay("inv-exp", address(usdt), 1e18, merchant, past, sig);
+    }
+
+    function test_signer_rotation() public {
+        uint256 newKey = 0xB0B;
+        address newSigner = vm.addr(newKey);
+        vm.prank(safeOwner);
+        pay.setPaymentSigner(newSigner);
+        assertEq(pay.paymentSigner(), newSigner);
+
+        // Old signer no longer works…
+        bytes memory oldSig = _sig("inv-rot", address(usdt), 1e18, merchant);
+        vm.prank(payer);
+        vm.expectRevert("bad authorization");
+        pay.pay("inv-rot", address(usdt), 1e18, merchant, deadline, oldSig);
+
+        // …the new one does.
+        bytes memory sig = _auth(newKey, "inv-rot", payer, address(usdt), 1e18, merchant, deadline);
+        vm.prank(payer);
+        pay.pay("inv-rot", address(usdt), 1e18, merchant, deadline, sig);
+        assertTrue(pay.invoiceDone("inv-rot"));
+    }
+
+    function test_set_signer_owner_only() public {
+        vm.prank(stranger);
+        vm.expectRevert();
+        pay.setPaymentSigner(stranger);
     }
 
     function test_self_payment_rejected() public {
+        bytes memory sig = _auth(signerKey, "inv-self", payer, address(usdt), 1e18, payer, deadline);
         vm.prank(payer);
         vm.expectRevert("self payment");
-        pay.pay("inv-self", address(usdt), 1e18, payer);
+        pay.pay("inv-self", address(usdt), 1e18, payer, deadline, sig);
     }
 
     function test_dust_payment_rejected() public {
         // gross == 1 → fee == 1 → merchant would receive zero.
+        bytes memory sig = _sig("inv-dust", address(usdt), 1, merchant);
         vm.prank(payer);
         vm.expectRevert("amount too small");
-        pay.pay("inv-dust", address(usdt), 1, merchant);
+        pay.pay("inv-dust", address(usdt), 1, merchant, deadline, sig);
     }
 
     function test_pay_alien_token_rejected() public {
+        bytes memory sig = _auth(signerKey, "inv-4", payer, address(alien), 1e18, merchant, deadline);
         vm.prank(payer);
         vm.expectRevert("token not allowed");
-        pay.pay("inv-4", address(alien), 1e18, merchant);
+        pay.pay("inv-4", address(alien), 1e18, merchant, deadline, sig);
     }
 
     function test_pay_merchant_cannot_be_contract_itself() public {
+        bytes memory sig = _auth(signerKey, "inv-5", payer, address(usdt), 1e18, address(pay), deadline);
         vm.prank(payer);
         vm.expectRevert("bad merchant");
-        pay.pay("inv-5", address(usdt), 1e18, address(pay));
+        pay.pay("inv-5", address(usdt), 1e18, address(pay), deadline, sig);
     }
 
     function test_pay_insufficient_allowance_reverts_whole_payment() public {
@@ -136,28 +256,29 @@ contract ConfioPayContractTest is Test {
         usdt.mint(poor, 1e18);
         vm.startPrank(poor);
         usdt.approve(address(pay), 1e18 - 1); // one wei short of gross
+        bytes memory sig = _auth(signerKey, "inv-6", poor, address(usdt), 1e18, merchant, deadline);
         vm.expectRevert();
-        pay.pay("inv-6", address(usdt), 1e18, merchant);
+        pay.pay("inv-6", address(usdt), 1e18, merchant, deadline, sig);
         vm.stopPrank();
         assertEq(usdt.balanceOf(merchant), 0, "atomic: nothing moved");
-        assertFalse(
-            pay.paymentDone(pay.paymentKey("inv-6", poor, address(usdt), 1e18, merchant)),
-            "replay key rolled back");
+        assertFalse(pay.invoiceDone("inv-6"), "invoice guard rolled back");
     }
 
     function test_pay_paused_rejected() public {
         vm.prank(safeOwner);
         pay.pause();
+        bytes memory sig = _sig("inv-7", address(usdt), 1e18, merchant);
         vm.prank(payer);
         vm.expectRevert();
-        pay.pay("inv-7", address(usdt), 1e18, merchant);
+        pay.pay("inv-7", address(usdt), 1e18, merchant, deadline, sig);
     }
 
     // ── collectFees ──────────────────────────────────────────────────
 
     function test_collect_owner_only_and_bounded() public {
+        bytes memory sig = _sig("inv-8", address(usdt), 100 * WAD, merchant);
         vm.prank(payer);
-        uint256 fee = pay.pay("inv-8", address(usdt), 100 * WAD, merchant);
+        uint256 fee = pay.pay("inv-8", address(usdt), 100 * WAD, merchant, deadline, sig);
 
         vm.prank(stranger);
         vm.expectRevert();

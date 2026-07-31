@@ -40,7 +40,7 @@ SEL_TRANSFER = _sel('transfer(address,uint256)')                     # a9059cbb
 SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
 SEL_PRESALE_BUY = _sel('buy(uint256,uint256)')                       # ConfioPresaleVault
-SEL_PAY = _sel('pay(bytes32,address,uint256,address)')               # ConfioPayContract
+SEL_PAY = _sel('pay(bytes32,address,uint256,address,uint256,bytes)')  # ConfioPayContract
 SEL_EXECUTE = _sel('execute((address,uint256,bytes)[],uint256,uint256,bytes)')
 
 # EIP-712 constants — canonical strings shared with ConfioBatchDelegate.sol
@@ -68,7 +68,7 @@ GAS_PER_SELECTOR = {
     SEL_SUBSCRIBE_AND_MINT: 620_000,
     SEL_REDEEM_TO_USDT: 400_000,
     SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
-    SEL_PAY: 220_000,  # 2 transferFroms + replay write + accrual (133k measured)
+    SEL_PAY: 240_000,  # 2 transferFroms + invoice write + accrual + ecrecover/EIP712 auth
     _sel('createInvitation(bytes32,address,uint256)'): 140_000,  # transferFrom + struct write
     _sel('reclaimInvitation(bytes32)'): 90_000,                  # transfer + settle
 }
