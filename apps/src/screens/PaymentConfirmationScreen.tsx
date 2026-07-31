@@ -28,6 +28,7 @@ import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { APP_LAYOUT } from '../config/layout';
 
 type PaymentConfirmationRouteProp = RouteProp<{
@@ -298,7 +299,21 @@ export const PaymentConfirmationScreen = () => {
   // Use snapshot balance; no immediate network dependency
   const realBalance = balanceSnapshot || '0';
 
-  const hasEnoughBalance = balanceSnapshot != null && parseFloat(realBalance) >= parseFloat(currentPayment.amount);
+  // Phase-out rail choice: dollar invoices pay from the BSC dollar first
+  // (cUSD+/USDT — the primary balance) whenever it covers the amount; the
+  // legacy Algorand cUSD path remains the fallback. CONFIO invoices stay
+  // on Algorand entirely.
+  const savingsPortfolio = useSavingsPortfolio();
+  const bscDollarAvailable =
+    savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd;
+  const isDollarInvoice =
+    String(currentPayment.currency || 'cUSD').toUpperCase() === 'CUSD';
+  const canPayBsc =
+    isDollarInvoice && bscDollarAvailable >= parseFloat(currentPayment.amount || '0');
+
+  const hasEnoughBalance =
+    canPayBsc
+    || (balanceSnapshot != null && parseFloat(realBalance) >= parseFloat(currentPayment.amount));
 
   // Prevent overstatement: floor-based formatting with tiny-balance label
   const floorToDecimals = (value: number, decimals: number) => {
@@ -353,6 +368,31 @@ export const PaymentConfirmationScreen = () => {
     const idempotencyKey = `pay_${invoiceData.internalId}_${minuteTimestamp}`;
 
     // Background preflight: moved to top-level effect
+
+    // BSC rail: no Algorand WS preflight — the server builds the batch at
+    // prepare time inside the processing screen's flow.
+    if (canPayBsc) {
+      (navigation as any).navigate('PaymentProcessing', {
+        transactionData: {
+          type: 'payment',
+          bscPay: true,
+          amount: currentPayment.amount,
+          currency: currentPayment.currency,
+          merchant: currentPayment.recipient,
+          address: currentPayment.location,
+          message: currentPayment.description,
+          action: 'Procesando pago',
+          internalId: invoiceData.internalId,
+          idempotencyKey,
+          merchantBusinessId: invoiceData.merchantAccount?.business?.id,
+        },
+      });
+      setTimeout(() => {
+        setIsProcessing(false);
+        navLock.current = false;
+      }, 1000);
+      return;
+    }
 
     // Ensure we have a prepared pack for THIS invoice before navigating (WS-only)
     let preparedForNav = prepared;

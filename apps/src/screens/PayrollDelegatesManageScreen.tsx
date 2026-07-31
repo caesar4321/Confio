@@ -131,6 +131,35 @@ export const PayrollDelegatesManageScreen = () => {
     }
     setSigningModalVisible(true);
     try {
+      // BSC rail first (W3): setDelegate on ConfioPayrollVault, signed by
+      // the business EOA as a sponsored batch. The allowlisted address is
+      // the employee's PERSONAL EVM address — the key they later sign
+      // payouts with. Dark flag falls through to the Algorand box flow.
+      if (target?.user?.id) {
+        const { runBscPayrollAdmin, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+        try {
+          await runBscPayrollAdmin({
+            action: 'set_delegate',
+            delegateUserId: String(target.user.id),
+            allowed: next,
+          });
+          setDelegateMap((prev) => ({ ...prev, [employeeId]: next }));
+          setTimeout(() => { refetchDelegates(); }, 5000);
+          setBanner({ variant: 'success', message: next ? `${name} ahora puede aprobar nómina.` : `Se revocó el permiso de ${name}.` });
+          return;
+        } catch (bscErr: any) {
+          const code = bscErr?.message || '';
+          const fallThrough = code === 'bsc_payroll_disabled'
+            || code === 'payroll_vault_not_configured'
+            || code === 'vault_not_configured'
+            || code === 'sponsored_rail_unavailable';
+          if (!fallThrough) {
+            setBanner({ variant: 'error', message: BSC_PAYROLL_ERRORS[code] || code || 'No se pudo actualizar la delegación.' });
+            return;
+          }
+        }
+      }
+
       // Step 1: Prepare transaction
       const prepRes = await mutateDelegates({
         variables: {

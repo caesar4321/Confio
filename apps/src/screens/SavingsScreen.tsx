@@ -229,15 +229,19 @@ export const SavingsScreen = () => {
             <View style={styles.headerIconBtn} />
           </View>
 
-          {/* Hero: ONE account number (vault + raw wallet USDT — money must
-              never vanish between landing and the silent mint) + the rate
-              (account-grammar: the product card is gone, so the hero owns
-              rate + deltas). Empty state sells the outcome. */}
+          {/* Hero. Eligible: ONE account number (vault + raw wallet USDT —
+              money must never vanish between landing and the silent mint)
+              + the rate. Ineligible (Julian, 07-31): this account IS the
+              mere USDT balance — any residual vault shares (received
+              externally) show as a separate withdrawable line, never
+              blended into the headline. Empty state sells the outcome. */}
           <View style={styles.hero}>
             <Text style={styles.heroLabel}>
               {isYieldVariant ? 'Valor total' : 'Tu saldo'}
             </Text>
-            <Text style={styles.heroAmount}>{fmtUsd(accountTotalUsd)}</Text>
+            <Text style={styles.heroAmount}>
+              {fmtUsd(isYieldVariant ? accountTotalUsd : usdtBalanceUsd)}
+            </Text>
             {isYieldVariant && hasSavings && savings.netApyPct > 0 && (
               <Text style={styles.heroRate}>
                 Rindiendo ~{formatNumber(savings.netApyPct, { maximumFractionDigits: 1 })}% anual
@@ -250,6 +254,11 @@ export const SavingsScreen = () => {
             {isYieldVariant && hasUsdt && (
               <Text style={styles.heroSplit}>
                 En camino a tu ahorro {fmtUsd(usdtBalanceUsd)}
+              </Text>
+            )}
+            {!isYieldVariant && hasSavings && (
+              <Text style={styles.heroSplit}>
+                Ahorro por retirar {fmtUsd(savings.balanceUsd)}
               </Text>
             )}
             {!isYieldVariant && hasAnything && (

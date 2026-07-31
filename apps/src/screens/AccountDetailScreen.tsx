@@ -1987,7 +1987,7 @@ export const AccountDetailScreen = () => {
       {isCusdRetiroOnly && (
         <InlineBanner
           variant="info"
-          message="Confío Dollar (cUSD) ya no recibe recargas nuevas. Puedes seguir enviando, pagando y retirando tu saldo — el dinero nuevo ahora crece en Confío Dollar+."
+          message="El Antiguo Confío Dollar (cUSD) ya no recibe recargas nuevas. Puedes seguir enviando, pagando y retirando tu saldo — el dinero nuevo ahora crece en Confío Dollar+."
           style={{ marginHorizontal: 16, marginTop: 10, marginBottom: 0 }}
         />
       )}

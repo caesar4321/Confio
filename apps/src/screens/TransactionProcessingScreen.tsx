@@ -734,14 +734,46 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
+    // BSC dollar send (cUSD+/USDT via sponsored 7702) — server picks the
+    // call shape; this screen just signs and reports. Only offered for
+    // recipients already on Confío (invites stay on the Algorand rail).
+    const processBscSponsoredSend = async () => {
+      const { sendBscDollar, BSC_SEND_ERRORS } = await import('../services/bscSend');
+      try {
+        setCurrentStep(1);
+        setCurrentStep(2);
+        await sendBscDollar({
+          amount: transactionData.amount,
+          recipientUserId: transactionData.recipientUserId,
+          recipientPhone: transactionData.recipientUserId
+            ? undefined
+            : transactionData.recipientPhone,
+          recipientAddress: (transactionData as any).recipientAddress,
+          memo: transactionData.memo || '',
+          idempotencyKey: transactionData.idempotencyKey,
+        });
+        setTransactionSuccess(true);
+        setIsComplete(true);
+      } catch (e: any) {
+        const code = e?.message || '';
+        setTransactionError(
+          BSC_SEND_ERRORS[code]
+          || 'No se pudo enviar. Revisa tu conexión e inténtalo de nuevo.',
+        );
+        setIsComplete(true);
+      }
+    };
+
     const processUnifiedSend = async () => {
       try {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // If recipient is not on Confío and we have a phone, route to Invite flow
-        if (transactionData.isOnConfio === false && transactionData.recipientPhone) {
+        if ((transactionData as any)?.bscSend) {
+          await processBscSponsoredSend();
+        } else if (transactionData.isOnConfio === false && transactionData.recipientPhone) {
+          // If recipient is not on Confío and we have a phone, route to Invite flow
           await processInviteSend();
         } else {
           // Pre-flight check: if we need to swap cUSD to USDC first

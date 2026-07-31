@@ -859,7 +859,7 @@ export const HomeScreen = () => {
       // would overstate what's withdrawable here.
       subtitle:
         savingsPortfolio.savings.balanceUsd > 0
-          ? `$${formatFixedFloor(savingsPortfolio.savings.balanceUsd, 2)} en ${savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}`
+          ? `$${formatFixedFloor(savingsPortfolio.savings.balanceUsd, 2)} en ${savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'ahorro por retirar'}`
           : 'Aún no tienes ahorros',
       disabled: savingsPortfolio.savings.balanceUsd <= 0,
       onPress: () => {
@@ -1213,13 +1213,16 @@ export const HomeScreen = () => {
   const navigateToCUSDAccount = useCallback(() => {
     navigation.navigate('AccountDetail', {
       accountType: 'cusd',
-      accountName: 'Confío Dollar',
+      accountName: savingsPortfolio.savings.cusdDepositsPaused
+        ? 'Antiguo Confío Dollar'
+        : 'Confío Dollar',
       accountSymbol: '$cUSD',
       accountBalance: cUSDBalance.toFixed(2),
       // Fix: Use local state algorandAddress if available, fall back to context
       accountAddress: algorandAddress || activeAccount?.algorandAddress || ''
     });
-  }, [navigation, cUSDBalance, activeAccount?.algorandAddress, algorandAddress]);
+  }, [navigation, cUSDBalance, activeAccount?.algorandAddress, algorandAddress,
+      savingsPortfolio.savings.cusdDepositsPaused]);
 
   const navigateToConfioAccount = useCallback(() => {
     navigation.navigate('AccountDetail', {
@@ -1620,13 +1623,13 @@ export const HomeScreen = () => {
                   minus the yield, USDT never marketed by name. ONE calm
                   entry, deliberately NO day-change here; stocks now live in
                   their own row. Principle: home shows calm balances. */}
-              {/* Issuer geo-gate: the entry hides only where the feature
-                  isn't offered AND nothing is held — anyone holding vault
-                  or wallet balance must always reach their money. */}
-              {!activeAccount?.isEmployee &&
-                (savingsPortfolio.savings.enabled ||
-                  savingsPortfolio.savings.balanceUsd > 0 ||
-                  savingsPortfolio.usdtBalanceUsd > 0) && (
+              {/* Row rule (Julian, 07-31): "Confío Dollar+" and the new
+                  "Confío Dollar" are the SAME slot — eligibility picks
+                  which one appears, exactly one always shows. Neither
+                  cares about the legacy row below, which is an
+                  independent overlay driven only by cUSD-Algorand
+                  balance. */}
+              {!activeAccount?.isEmployee && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
@@ -1648,8 +1651,16 @@ export const HomeScreen = () => {
                     </View>
                     <View style={styles.walletBalanceContainer}>
                       <Text style={styles.walletBalanceText}>
+                        {/* Eligible: vault + landed-not-yet-minted USDT.
+                            Ineligible: the row IS the USDT balance — a
+                            mere wallet, nothing vault-flavored. */}
                         {showBalance
-                          ? `$${formatFixedFloor(savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd, 2)}`
+                          ? `$${formatFixedFloor(
+                              savingsPortfolio.savings.enabled
+                                ? savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd
+                                : savingsPortfolio.usdtBalanceUsd,
+                              2,
+                            )}`
                           : '••••'}
                       </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
@@ -1674,10 +1685,16 @@ export const HomeScreen = () => {
                       <Image source={cUSDLogo} style={styles.walletLogo} />
                     </View>
                     <View style={styles.walletInfo}>
-                      <Text style={styles.walletName}>Confío Dollar</Text>
+                      {/* Legacy lives in the NAME (prefix), not the
+                          subtitle — the subtitle keeps what you can DO. */}
+                      <Text style={styles.walletName}>
+                        {savingsPortfolio.savings.cusdDepositsPaused
+                          ? 'Antiguo Confío Dollar'
+                          : 'Confío Dollar'}
+                      </Text>
                       <Text style={styles.walletSymbol}>
                         {savingsPortfolio.savings.cusdDepositsPaused
-                          ? 'Versión anterior · Solo retiros y pagos'
+                          ? 'Solo retiros y pagos'
                           : 'cUSD'}
                       </Text>
                     </View>

@@ -136,6 +136,33 @@ const PayrollTopUpScreen = () => {
       setProcessing(true);
       setProcessingMessage('Preparando transacción…');
 
+      // BSC rail first (W3): fund = approve+deposit of cUSD+ shares into
+      // ConfioPayrollVault, signed by the business EOA as one sponsored
+      // batch. Dark flag falls through to the legacy Algorand vault.
+      {
+        const { runBscPayrollAdmin, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+        try {
+          setProcessingMessage('Firmando transacción…');
+          await runBscPayrollAdmin({ action: 'fund', amountUsd: String(parsed) });
+          setProcessingMessage('Confirmando transacción…');
+          await Promise.all([refetchVault(), refetchBalance()]);
+          setProcessing(false);
+          Alert.alert('Fondos enviados', 'Agregamos los fondos a la bóveda de nómina.', [
+            { text: 'Entendido', onPress: () => navigation.goBack() },
+          ]);
+          return;
+        } catch (bscErr: any) {
+          const code = bscErr?.message || '';
+          const fallThrough = code === 'bsc_payroll_disabled'
+            || code === 'payroll_vault_not_configured'
+            || code === 'vault_not_configured'
+            || code === 'sponsored_rail_unavailable';
+          if (!fallThrough) {
+            throw new Error(BSC_PAYROLL_ERRORS[code] || code || 'No se pudo fondear');
+          }
+        }
+      }
+
       const prepRes = await prepareFunding({ variables: { amount: parsed } });
       const prep = prepRes.data?.preparePayrollVaultFunding;
       if (!prep?.success || !prep?.unsignedTransactions?.length) {
@@ -268,6 +295,35 @@ const PayrollTopUpScreen = () => {
     try {
       setProcessing(true);
       setProcessingMessage('Preparando retiro…');
+
+      // BSC rail first (W3). Withdraw ignores the payroll kill switch
+      // server-side (exits never gated) — only an unconfigured vault
+      // falls through to Algorand.
+      {
+        const { runBscPayrollAdmin, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+        try {
+          setProcessingMessage('Firmando retiro…');
+          await runBscPayrollAdmin({ action: 'withdraw', amountUsd: String(parsed) });
+          setProcessingMessage('Confirmando transacción…');
+          await Promise.all([refetchVault(), refetchBalance()]);
+          setProcessing(false);
+          setWithdrawAmount('');
+          Alert.alert('Retiro enviado', 'Retiramos fondos de la bóveda de nómina.', [
+            { text: 'Entendido', onPress: () => navigation.goBack() },
+          ]);
+          return;
+        } catch (bscErr: any) {
+          const code = bscErr?.message || '';
+          const fallThrough = code === 'payroll_vault_not_configured'
+            || code === 'vault_not_configured'
+            || code === 'sponsored_rail_unavailable'
+            || code === 'insufficient_escrow';
+          if (!fallThrough) {
+            throw new Error(BSC_PAYROLL_ERRORS[code] || code || 'No se pudo retirar');
+          }
+        }
+      }
+
       const prepRes = await prepareWithdraw({
         variables: {
           amount: parsed,

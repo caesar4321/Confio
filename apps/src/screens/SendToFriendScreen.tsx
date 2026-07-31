@@ -9,14 +9,16 @@ import { apolloClient } from '../apollo/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { inviteSendService } from '../services/inviteSendService';
 
-type TokenType = 'cusd' | 'confio';
+type TokenType = 'cusd' | 'confio' | 'cusd_plus';
 
 const tokenConfig = {
   cusd: {
@@ -43,6 +45,21 @@ const tokenConfig = {
     minSend: 1,
     fee: 0,  // Sponsored transactions
     description: 'Envía CONFIO a cualquier dirección Algorand',
+    quickAmounts: ['10.00', '50.00', '100.00'],
+  },
+  // The BSC dollar (Phase 2): displayed as cUSD+; the server decides what
+  // actually moves (cUSD+ shares, atomic redeem, or raw USDT).
+  cusd_plus: {
+    name: 'cUSD+',
+    fullName: 'Confío Dollar+',
+    logo: cUSDPlusLogo,
+    color: colors.primary,
+    colorDark: colors.primaryDark,
+    chipBg: colors.primarySoft,
+    chipText: colors.primaryDark,
+    minSend: 1,
+    fee: 0,  // Sponsored transactions
+    description: 'Envía dólares por BNB Smart Chain',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
 };
@@ -79,10 +96,14 @@ export const SendToFriendScreen = () => {
   const navLock = React.useRef(false);
   const [prepared, setPrepared] = useState<any | null>(null);
 
-  // Balance snapshot + background refresh
+  // Balance snapshot + background refresh. The BSC dollar reads the savings
+  // portfolio (vault position + raw wallet USDT — the server picks which
+  // moves); Algorand tokens keep the accountBalance query.
+  const savingsPortfolio = useSavingsPortfolio();
   const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
   useEffect(() => {
+    if (tokenType === 'cusd_plus') return;
     let mounted = true;
     const tok = tokenType.toUpperCase();
     try {
@@ -103,7 +124,13 @@ export const SendToFriendScreen = () => {
     }).catch(() => { }).finally(() => mounted && setBalanceLoading(false));
     return () => { mounted = false; };
   }, [tokenType]);
-  const availableBalance = React.useMemo(() => parseFloat(balanceSnapshot || '0'), [balanceSnapshot]);
+  const availableBalance = React.useMemo(() => {
+    if (tokenType === 'cusd_plus') {
+      return savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd;
+    }
+    return parseFloat(balanceSnapshot || '0');
+  }, [tokenType, balanceSnapshot,
+      savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd]);
 
   // Prevent overstatement: floor display to 2 decimals
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -121,12 +148,14 @@ export const SendToFriendScreen = () => {
 
   const handleQuickAmount = (val: string) => setAmount(val);
 
-  // Background preflight via WebSocket when inputs look valid
+  // Background preflight via WebSocket when inputs look valid (Algorand
+  // rails only — the BSC flow prepares server-side at send time).
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         setPrepared(null);
+        if (tokenType === 'cusd_plus') return;
         const amt = parseFloat(String(amount || '0'));
         if (!(isFinite(amt) && amt > 0 && friend && friend.isOnConfio !== false)) return;
         const assetType = (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO');
@@ -171,6 +200,11 @@ export const SendToFriendScreen = () => {
       // server-side idempotency guard.
       let invitePrepared: any | null = null;
       let idempotencyKey: string;
+      if (tokenType === 'cusd_plus' && friend.isOnConfio === false) {
+        // Invites stay on the Algorand rail for now — the BSC invite escrow
+        // is a follow-up. Honest error instead of a silent rail switch.
+        throw new Error('Para invitar a alguien nuevo, envía cUSD por ahora.');
+      }
       if (friend.isOnConfio === false && friend.phone) {
         const invitePhone = friend.normalizedPhones?.find(phone => phone.startsWith('+')) || friend.phone;
         const prep = await inviteSendService.prepareInvite(
@@ -196,6 +230,7 @@ export const SendToFriendScreen = () => {
       (navigation as any).replace('TransactionProcessing', {
         transactionData: {
           type: 'sent',
+          bscSend: tokenType === 'cusd_plus',
           amount: amount,
           currency: config.name,
           recipient: friend.name,

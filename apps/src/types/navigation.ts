@@ -230,7 +230,7 @@ export type MainStackParamList = {
   BlockedAccount: undefined;
   SendToFriend: {
     friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
-    tokenType?: 'cusd' | 'confio';
+    tokenType?: 'cusd' | 'confio' | 'cusd_plus';
   };
   FriendDetail: {
     friendId: string;

@@ -121,6 +121,30 @@ export const PayrollPendingScreen = () => {
       setIsProcessing(true);
       setProcessingMessage('Preparando pago…');
 
+      // BSC rail first (cUSD phase-out W3): the server prepares the
+      // ConfioPayrollVault payout and this user signs the digest with
+      // their OWN personal key (the on-chain delegate model). While the
+      // rail ships dark the prepare answers `bsc_payroll_disabled` and we
+      // fall through to the legacy Algorand flow below.
+      const { payBscPayrollItem, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+      try {
+        setProcessingMessage('Firmando pago…');
+        await payBscPayrollItem(item.internalId);
+        setIsProcessing(false);
+        Alert.alert('Pago enviado', 'La transacción de nómina fue enviada.');
+        refetch();
+        return;
+      } catch (bscErr: any) {
+        const code = bscErr?.message || '';
+        const fallThrough = code === 'bsc_payroll_disabled'
+          || code === 'payroll_vault_not_configured'
+          || code === 'vault_not_configured';
+        if (!fallThrough) {
+          throw new Error(BSC_PAYROLL_ERRORS[code] || code || 'No se pudo pagar');
+        }
+        // Rail dark → legacy Algorand payout continues below.
+      }
+
       const prepRes = await preparePayrollItem({
         variables: { payrollItemId: item.internalId },
       });

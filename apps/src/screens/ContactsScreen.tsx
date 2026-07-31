@@ -678,7 +678,7 @@ export const ContactsScreen = () => {
     setShowFriendTokenSelection(true);
   };
 
-  const handleFriendTokenSelection = (tokenType: 'cusd' | 'confio') => {
+  const handleFriendTokenSelection = (tokenType: 'cusd' | 'confio' | 'cusd_plus') => {
     setShowFriendTokenSelection(false);
     navigation.navigate('SendToFriend', { friend: selectedFriend, tokenType });
   };
@@ -1584,7 +1584,9 @@ export const ContactsScreen = () => {
             {
               icon: 'dollar-sign',
               image: cUSDLogo,
-              title: 'Confío Dollar · $cUSD',
+              title: cusdDepositsPaused
+                ? 'Antiguo Confío Dollar · $cUSD'
+                : 'Confío Dollar · $cUSD',
               subtitle: 'Red Algorand · moneda estable para pagos diarios',
               onPress: () => handleSendTokenSelection('cusd'),
             },
@@ -1621,11 +1623,23 @@ export const ContactsScreen = () => {
           title={`¿Qué moneda quieres enviar a ${selectedFriend?.name || 'tu contacto'}?`}
           onClose={() => setShowFriendTokenSelection(false)}
           options={[
+            // The BSC dollar leads (phase-out: cUSD+ IS the primary dollar)
+            // — but only for friends already on Confío (invites stay on the
+            // Algorand rail) and only when the sender holds BSC dollars.
+            ...(savingsExitVisible && selectedFriend?.isOnConfio !== false ? [{
+              icon: 'dollar-sign',
+              image: cUSDPlusLogo,
+              title: 'Confío Dollar+ · $cUSD+',
+              subtitle: 'Tu dólar principal · llega al instante',
+              onPress: () => handleFriendTokenSelection('cusd_plus'),
+            }] : []),
             {
               icon: 'dollar-sign',
               image: cUSDLogo,
-              title: 'Confío Dollar · $cUSD',
-              subtitle: 'Moneda estable para pagos diarios',
+              title: cusdDepositsPaused
+                ? 'Antiguo Confío Dollar · $cUSD'
+                : 'Confío Dollar · $cUSD',
+              subtitle: 'Red Algorand',
               onPress: () => handleFriendTokenSelection('cusd'),
             },
             {

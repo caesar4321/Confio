@@ -195,6 +195,39 @@ export const PaymentProcessingScreen = () => {
     if (ranRef.current) return;
     ranRef.current = true;
 
+    // BSC invoice payment (cUSD+/USDT via sponsored 7702) — the server
+    // stores the 2-transfer batch; this screen signs and reports.
+    const processBscPayment = async () => {
+      if (isProcessing || hasProcessedRef.current) {
+        return;
+      }
+      hasProcessedRef.current = true;
+      setIsProcessing(true);
+      const { payInvoiceBsc, BSC_PAY_ERRORS } = await import('../services/bscPay');
+      try {
+        setCurrentStep(0);
+        setCurrentStep(1);
+        setCurrentStep(2);
+        if (!transactionData.internalId) {
+          throw new Error('invoice_not_pending');
+        }
+        const result = await payInvoiceBsc(
+          transactionData.internalId,
+          transactionData.idempotencyKey,
+        );
+        setPaymentResponse({ success: true, transactionHash: result.txHash });
+        setIsComplete(true);
+      } catch (e: any) {
+        const code = e?.message || '';
+        setPaymentError(
+          BSC_PAY_ERRORS[code]
+          || 'No se pudo procesar el pago. Revisa tu conexión e inténtalo de nuevo.',
+        );
+      } finally {
+        setIsProcessing(false);
+      }
+    };
+
     const processPaymentWsOnly = async () => {
       if (isProcessing || hasProcessedRef.current) {
         return;
@@ -628,7 +661,11 @@ export const PaymentProcessingScreen = () => {
       }
     };
 
-    processPaymentWsOnly();
+    if ((transactionData as any)?.bscPay) {
+      processBscPayment();
+    } else {
+      processPaymentWsOnly();
+    }
   }, [isValid, transactionData.internalId, bioChecked]);
 
 
