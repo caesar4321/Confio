@@ -427,28 +427,36 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         event.save(update_fields=["reward_status", "error", "updated_at"])
         return referral
 
-    # Wholesale migration (Julian, 2026-07-31): when BSC_REWARD_ENABLED,
-    # new rewards attest on the BSC ConfioRewardVault instead of Algorand.
+    # Wholesale migration (Julian, 2026-07-31): when BSC_REWARD_ENABLED, the
+    # reward is recorded OFF-CHAIN only. CONFIO has no liquidity before the
+    # DEX launch, so nothing is written on-chain now — the DB is the source
+    # of truth for what each user earned, and the ConfioRewardVault pays it
+    # out (signature-authorized) only after claims unlock at DEX. The CONFIO
+    # amount is locked at the LIVE presale-curve price at the moment earned.
     use_bsc = bool(getattr(settings, "BSC_REWARD_ENABLED", False))
 
-    try:
-        if use_bsc:
-            from blockchain.bsc_rewards_service import BscRewardsService
-            service = BscRewardsService()
-        else:
+    if use_bsc:
+        service = None  # no on-chain attestation in the BSC model
+    else:
+        try:
             service = ConfioRewardsService()
-    except Exception as exc:
-        logger.exception("Failed to initialize rewards service")
-        event.reward_status = "failed"
-        event.error = f"Service init failed: {str(exc)}"
-        event.save(update_fields=["reward_status", "error", "updated_at"])
-        referral.reward_error = f"Service init failed: {str(exc)}"
-        referral.save(update_fields=["reward_error"])
-        return referral
+        except Exception as exc:
+            logger.exception("Failed to initialize rewards service")
+            event.reward_status = "failed"
+            event.error = f"Service init failed: {str(exc)}"
+            event.save(update_fields=["reward_status", "error", "updated_at"])
+            referral.reward_error = f"Service init failed: {str(exc)}"
+            referral.save(update_fields=["reward_error"])
+            return referral
 
     if reward_cusd and (not referee_confio or referee_confio <= 0):
         try:
-            referee_confio = service.convert_cusd_to_confio(reward_cusd)
+            if use_bsc:
+                from presale.price_utils import get_confio_current_price
+                price = get_confio_current_price()
+                referee_confio = (Decimal(reward_cusd) / price) if price > 0 else Decimal("0")
+            else:
+                referee_confio = service.convert_cusd_to_confio(reward_cusd)
         except Exception as exc:
             logger.warning(
                 "Unable to convert reward_cusd to CONFIO (reward=%s): %s",
@@ -486,18 +494,18 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         referrer_address = resolve_address(referral.referrer_user)
         if not referrer_address:
             # The referee is still paid; the referrer's share needs their
-            # address. Drop it here (a later resync can re-attest once the
-            # referrer registers — a fresh record after this one settles).
+            # address. Drop it here (a later resync re-records it once the
+            # referrer registers).
             referrer_confio = Decimal("0")
 
     try:
         if use_bsc:
-            result = service.mark_eligibility(
-                user_address=referee_address,
-                reward_cusd_wei=to_micro(reward_cusd, 18),
-                referrer_confio_wei=to_micro(referrer_confio, 18),
-                referrer_address=referrer_address,
-            )
+            # DB-only accrual: no chain write until the user claims post-DEX.
+            # The DB fields set below ARE the record; the reward vault pays
+            # the signed cumulative later. A synthetic result keeps the
+            # downstream DB-write block uniform.
+            from types import SimpleNamespace
+            result = SimpleNamespace(tx_id="bsc-db", box_name="")
         else:
             result = service.mark_eligibility(
                 user_address=referee_address,
