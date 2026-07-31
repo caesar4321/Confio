@@ -16,7 +16,7 @@ from datetime import timedelta
 from decimal import ROUND_DOWN, Decimal
 
 import requests
-from celery import shared_task
+from celery import current_app, shared_task
 from django.conf import settings
 from django.utils import timezone
 
@@ -714,6 +714,88 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
+
+
+# Kinds that own a SEPARATE domain confirm task keyed (source_id, batch_id).
+# Everything else (subscribe/redeem/payroll_fund/invite_*) settles via the
+# batch-level receipt task alone, so promoting the batch is enough.
+_DOMAIN_CONFIRM_TASKS = {
+    'send_cusd_plus': 'send.confirm_bsc_send',
+    'send_redeem': 'send.confirm_bsc_send',
+    'send_usdt': 'send.confirm_bsc_send',
+    'send_confio': 'send.confirm_bsc_send',
+    'pay_cusd_plus': 'payments.confirm_bsc_payment',
+    'pay_usdt': 'payments.confirm_bsc_payment',
+    'payroll_payout': 'payroll.confirm_bsc_payroll_payout',
+    'presale_buy': 'presale.confirm_bsc_purchase',
+}
+
+
+@shared_task(name='cusd_plus.reconcile_signed_batches')
+def reconcile_signed_batches():
+    """Resolve orphaned 'signed' SponsoredBatch rows (audit 2026-07-31 P1-2
+    completion). A row stays 'signed' only if the process died between the
+    durable pre-broadcast write and the 'sent' update — so its domain confirm
+    task may never have been enqueued. After a grace window we read the chain
+    by the deterministic hash:
+
+      • any node knows the hash (mempool or mined) → the broadcast DID land;
+        promote to 'sent', re-enqueue the batch receipt check AND the domain
+        confirm task (which the crash may have skipped), and let the normal
+        finality path settle it.
+      • no node knows it after the grace window → it never broadcast and the
+        KMS-signed raw is not reproducible; mark 'dropped' so the domain flow
+        fails and the user retries. A retry is safe: the 7702 delegate's
+        monotonic nonce rejects a replay of the same intent, and pay() is
+        additionally guarded by the global invoiceDone.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .models import SponsoredBatch
+
+    grace_min = int(getattr(settings, 'CUSD_PLUS_SIGNED_GRACE_MIN', 3))
+    cutoff = timezone.now() - timedelta(minutes=grace_min)
+    stuck = list(SponsoredBatch.objects.filter(
+        status='signed', updated_at__lt=cutoff).order_by('id')[:100])
+
+    out = {'promoted': 0, 'dropped': 0}
+    for batch in stuck:
+        try:
+            tx = _rpc('eth_getTransactionByHash', [batch.tx_hash])
+        except Exception as exc:  # noqa: BLE001 — never guess; try next tick
+            logger.warning('reconcile: getTransactionByHash failed for %s: %s',
+                           batch.tx_hash, exc)
+            continue
+
+        if tx is not None:
+            batch.status = 'sent'
+            batch.save(update_fields=['status', 'updated_at'])
+            check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=3)
+            task_name = _DOMAIN_CONFIRM_TASKS.get(batch.kind)
+            if task_name and batch.source_id is not None:
+                # Re-enqueue the domain confirm the crash may have skipped —
+                # the confirm tasks are idempotent (they no-op once the domain
+                # row is resolved and verify kind/source_id/tx_hash first).
+                current_app.send_task(task_name, args=[batch.source_id, batch.id],
+                                      countdown=10)
+            logger.info('reconcile: promoted orphaned batch %s (%s) to sent',
+                        batch.id, batch.tx_hash)
+            out['promoted'] += 1
+        else:
+            batch.status = 'dropped'
+            batch.save(update_fields=['status', 'updated_at'])
+            task_name = _DOMAIN_CONFIRM_TASKS.get(batch.kind)
+            if task_name and batch.source_id is not None:
+                # Let the domain flow observe the terminal 'dropped' and fail
+                # its row so the user can retry.
+                current_app.send_task(task_name, args=[batch.source_id, batch.id],
+                                      countdown=10)
+            logger.warning('reconcile: batch %s (%s) never reached the chain — dropped',
+                           batch.id, batch.tx_hash)
+            out['dropped'] += 1
+    return out
 
 
 @shared_task(name='cusd_plus.abandon_stale_quotes')

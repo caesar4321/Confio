@@ -529,3 +529,62 @@ class ReceiptCheckerTests(SimpleTestCase):
         batch = self._batch(delegate_nonce=None)
         self._run(batch, self._receipt(logs=[{'address': '0x' + '22' * 20, 'topics': []}]))
         self.assertEqual(batch.status, 'confirmed')
+
+
+@override_settings(CUSD_PLUS_SIGNED_GRACE_MIN=0)
+class ReconcileSignedBatchesTests(SimpleTestCase):
+    """Orphaned 'signed' rows (durable-broadcast crash recovery, P1-2): a
+    hash any node knows is PROMOTED and its domain confirm re-enqueued; a
+    hash no node knows after the grace window is DROPPED so the domain flow
+    fails and the user retries."""
+
+    TXH = '0x' + 'ab' * 32
+
+    def _batch(self, kind='send_usdt', source_id=7):
+        return mock.Mock(id=99, status='signed', tx_hash=self.TXH, kind=kind,
+                         source_id=source_id)
+
+    def _run(self, batch, tx_result):
+        from cusd_plus import tasks
+
+        def _rpc(method, params, *a, **k):
+            if method == 'eth_getTransactionByHash':
+                return tx_result
+            return '0x'
+
+        qs = mock.MagicMock()
+        qs.order_by.return_value.__getitem__.return_value = [batch]
+        with mock.patch('cusd_plus.models.SponsoredBatch.objects') as objs, \
+             mock.patch.object(tasks, '_rpc', side_effect=_rpc), \
+             mock.patch.object(tasks, 'check_sponsored_batch_receipt') as receipt_task, \
+             mock.patch.object(tasks, 'current_app') as capp:
+            objs.filter.return_value = qs
+            result = tasks.reconcile_signed_batches()
+        return result, receipt_task, capp
+
+    def test_known_hash_promoted_and_domain_reenqueued(self):
+        batch = self._batch(kind='send_usdt', source_id=7)
+        result, receipt_task, capp = self._run(batch, {'hash': self.TXH})
+        self.assertEqual(batch.status, 'sent')
+        self.assertEqual(result['promoted'], 1)
+        receipt_task.apply_async.assert_called_once()
+        capp.send_task.assert_called_once_with(
+            'send.confirm_bsc_send', args=[7, 99], countdown=10)
+
+    def test_unknown_hash_dropped(self):
+        batch = self._batch(kind='pay_usdt', source_id=5)
+        result, receipt_task, capp = self._run(batch, None)
+        self.assertEqual(batch.status, 'dropped')
+        self.assertEqual(result['dropped'], 1)
+        receipt_task.apply_async.assert_not_called()
+        # domain confirm still gets nudged so the row fails and the user retries
+        capp.send_task.assert_called_once_with(
+            'payments.confirm_bsc_payment', args=[5, 99], countdown=10)
+
+    def test_unmapped_kind_promotes_without_domain_task(self):
+        # invite_create settles via the batch receipt task alone.
+        batch = self._batch(kind='invite_create', source_id=3)
+        result, receipt_task, capp = self._run(batch, {'hash': self.TXH})
+        self.assertEqual(batch.status, 'sent')
+        receipt_task.apply_async.assert_called_once()
+        capp.send_task.assert_not_called()

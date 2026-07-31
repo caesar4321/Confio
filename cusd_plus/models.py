@@ -195,6 +195,11 @@ class SponsoredBatch(models.Model):
         ('reverted', 'Mined but reverted'),
         ('noop_failed', 'Mined, but delegation did not apply (no-op)'),
         ('reorged', 'Was mined then orphaned by a reorg'),
+        # A 'signed' row whose deterministic hash no node knows after the
+        # grace window: the broadcast never landed and the KMS-signed raw is
+        # not reproducible. Terminal-fail so the domain flow fails and the
+        # user can retry (the delegate's monotonic nonce makes a retry safe).
+        ('dropped', 'Signed but never reached the chain'),
     ]
 
     user = models.ForeignKey(
