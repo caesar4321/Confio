@@ -331,11 +331,23 @@ class Query(graphene.ObjectType):
         # with US Treasuries, never hardcoded. Falls back to last-known,
         # then CUSD_PLUS_NET_APY_PCT (default 0.0) if the chain is out.
         gross_apy, net_apy = vault.apy_split()
+        # "Hoy ≈": the ESTIMATED day's yield at the current balance — rate ×
+        # balance, both already in hand. A rate statement, not an accounting
+        # one (the app labels it ≈): it is exactly right as an estimate for
+        # every flow pattern, including a mint from 5 minutes ago, which is
+        # why it replaced the snapshot/cost-basis machinery (2026-07-31).
+        # Inverting net APY recovers daily·kept exactly (apy_split builds
+        # net = (1+daily·kept)^365−1). Honest-zero fallback: no rate or no
+        # balance -> 0.0 -> the ticker line hides.
+        daily_net = (1.0 + net_apy / 100.0) ** (1.0 / 365.0) - 1.0
+        earned_today = balance_usd * daily_net
         return CusdPlusSummaryType(
             balance_usd=balance_usd,
             net_apy_pct=net_apy,
             gross_apy_pct=gross_apy,
-            earned_today_usd=0.0,
+            earned_today_usd=earned_today,
+            # Monthly needs real history (ledger) — honest 0 until that
+            # lands as a considered follow-up; the ticker renders Hoy alone.
             earned_month_usd=0.0,
             savings_enabled=eligible,
             # Dark until the demand signal (decision 2dcfada5) AND geo-eligible.
