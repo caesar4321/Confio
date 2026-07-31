@@ -271,6 +271,7 @@ class PrepareBscPresalePurchase(graphene.Mutation):
     cost = graphene.String()
     max_payment = graphene.String()
     avg_price = graphene.String()
+    intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     @login_required
     def mutate(self, info, amount_usd, accepted_terms, not_us_attestation):
@@ -313,6 +314,7 @@ class PrepareBscPresalePurchase(graphene.Mutation):
             cost=res['cost'],
             max_payment=res['max_payment'],
             avg_price=res['avg_price'],
+            intent_id=res['intent_id'],
         )
 
 

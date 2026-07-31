@@ -99,7 +99,7 @@ class PrepareBatchTests(SimpleTestCase):
 
         def _goc(**kw):
             row = SimpleNamespace(
-                internal_id='pay123', save=mock.Mock(), **kw['defaults'])
+                id=555, internal_id='pay123', save=mock.Mock(), **kw['defaults'])
             captured['row'] = row
             return row, True
 

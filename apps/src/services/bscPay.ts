@@ -30,6 +30,7 @@ const PREPARE = gql`
       paymentId
       calls { to valueWei data }
       tokenType
+      intentId
       net
       fee
     }
@@ -97,7 +98,7 @@ export const payInvoiceBsc = async (
     const execNonce = await delegateNonce(wallet.address);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
-    const digest = hashBatchIntent(calls, execNonce, deadline, wallet.address);
+    const digest = hashBatchIntent(calls, execNonce, deadline, prep.intentId, wallet.address);
     const intentSignature = signIntentDigest(digest, wallet.privKeyHex);
 
     let authorization;

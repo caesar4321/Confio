@@ -249,7 +249,9 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
             if escrow_shares_raw(business_addr) < shares:
                 return {'success': False, 'error': 'insufficient_escrow'}
         calls = build_admin_calls(action, shares=shares, business_addr=business_addr)
-        return {'success': True, 'calls': calls, 'shares': str(shares)}
+        from cusd_plus.sponsor_7702 import intent_id_hex
+        return {'success': True, 'calls': calls, 'shares': str(shares),
+                'intent_id': intent_id_hex(f'payroll_{action}', business_account.id)}
 
     if action == 'set_delegate':
         User = get_user_model()
@@ -263,7 +265,9 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
             return {'success': False, 'error': 'delegate_no_bsc_address'}
         calls = build_admin_calls('set_delegate', delegate_addr=delegate_addr,
                                   allowed=allowed)
-        return {'success': True, 'calls': calls, 'delegate_address': delegate_addr}
+        from cusd_plus.sponsor_7702 import intent_id_hex
+        return {'success': True, 'calls': calls, 'delegate_address': delegate_addr,
+                'intent_id': intent_id_hex(f'payroll_{action}', business_account.id)}
 
     return {'success': False, 'error': 'unknown_action'}
 
@@ -310,8 +314,9 @@ def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
             return {'success': False, 'error': 'bad_deadline'}
 
         chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+        intent_id = sponsor_7702.intent_id_for(f'payroll_{action}', business_account.id)
         digest = sponsor_7702.intent_digest(
-            calls, int(nonce), int(deadline), business_addr, chain_id)
+            calls, int(nonce), int(deadline), business_addr, chain_id, intent_id)
         signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
         if signer != business_addr:
             return {'success': False, 'error': 'bad_intent_signature'}

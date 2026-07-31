@@ -227,6 +227,7 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     except Exception:
         logger.exception('[PRESALE][BSC] unified row create failed for purchase %s', purchase.id)
 
+    from cusd_plus.sponsor_7702 import intent_id_hex
     return {
         'success': True,
         'purchase_id': str(purchase.internal_id),
@@ -235,6 +236,7 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         'cost': str((Decimal(cost_wei) / Decimal(10) ** 18).quantize(Decimal('0.000001'))),
         'max_payment': str(amount_usd),
         'avg_price': str(avg_price),
+        'intent_id': intent_id_hex('presale_buy', purchase.id),
     }
 
 
@@ -291,7 +293,9 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
     try:
         _validate_presale_batch(calls, purchase)
 
-        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), user_addr, chain_id)
+        intent_id = sponsor_7702.intent_id_for('presale_buy', purchase.id)
+        digest = sponsor_7702.intent_digest(
+            calls, int(nonce), int(deadline), user_addr, chain_id, intent_id)
         signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
         if signer != user_addr:
             return {'success': False, 'error': 'bad_intent_signature'}

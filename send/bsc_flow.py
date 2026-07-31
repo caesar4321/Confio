@@ -254,11 +254,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         )
         if not same:
             return {'success': False, 'error': 'idempotency_key_conflict'}
+        from cusd_plus.sponsor_7702 import intent_id_hex
+        existing_kind = (json.loads(existing.bsc_calls_json) or {}).get('kind', '')
         return {
             'success': True,
             'send_id': existing.internal_id,
             'calls': (json.loads(existing.bsc_calls_json) or {}).get('calls', []),
             'token_type': existing.token_type,
+            'intent_id': intent_id_hex(existing_kind, existing.id),
         }
 
     amount_wei = int(amount_usd * WAD)
@@ -406,11 +409,15 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     # Unified row arrives via the existing post_save signal
     # (users/signals.py create_unified_transaction_from_send).
 
+    from cusd_plus.sponsor_7702 import intent_id_hex
     return {
         'success': True,
         'send_id': send_tx.internal_id,
         'calls': calls,
         'token_type': token_type,
+        # The client signs the Execute struct binding THIS intentId (audit
+        # 2026-07-31): keccak(kind:send_id), re-derived + verified at submit.
+        'intent_id': intent_id_hex(kind, send_tx.id),
     }
 
 
@@ -497,8 +504,9 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
     try:
         _validate_send_batch(calls, send_tx, meta)
 
+        intent_id = sponsor_7702.intent_id_for(kind, send_tx.id)
         digest = sponsor_7702.intent_digest(
-            calls, int(nonce), int(deadline), sender_addr, chain_id)
+            calls, int(nonce), int(deadline), sender_addr, chain_id, intent_id)
         signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
         if signer != sender_addr:
             return {'success': False, 'error': 'bad_intent_signature'}

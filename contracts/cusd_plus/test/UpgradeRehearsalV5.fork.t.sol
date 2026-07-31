@@ -155,9 +155,9 @@ contract UpgradeRehearsalV5ForkTest is Test {
             data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, u))});
         uint256 deadline = block.timestamp + 1 hours;
         (uint8 sv, bytes32 sr, bytes32 ss) =
-            vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(calls, 0, deadline));
+            vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(calls, 0, deadline, bytes32(0)));
         vm.prank(SAFE, KMS); // sponsor broadcasts
-        ConfioBatchDelegate(payable(u)).execute(calls, 0, deadline, abi.encodePacked(sr, ss, sv));
+        ConfioBatchDelegate(payable(u)).execute(calls, 0, deadline, bytes32(0), abi.encodePacked(sr, ss, sv));
         assertGt(v.balanceOf(u), 0, "relayed batch minted to the user");
 
         // Hostile batch: same sponsored origin, mint to a third party.
@@ -166,10 +166,10 @@ contract UpgradeRehearsalV5ForkTest is Test {
         bad[0] = ConfioBatchDelegate.Call({
             to: PROXY, value: 0,
             data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, thirdParty))});
-        (sv, sr, ss) = vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(bad, 1, deadline));
+        (sv, sr, ss) = vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(bad, 1, deadline, bytes32(0)));
         vm.prank(SAFE, KMS);
         vm.expectRevert(); // delegate bubbles "recipient not caller"
-        ConfioBatchDelegate(payable(u)).execute(bad, 1, deadline, abi.encodePacked(sr, ss, sv));
+        ConfioBatchDelegate(payable(u)).execute(bad, 1, deadline, bytes32(0), abi.encodePacked(sr, ss, sv));
         assertEq(v.balanceOf(thirdParty), 0, "no third-party issuance");
     }
 

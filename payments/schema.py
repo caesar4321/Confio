@@ -943,6 +943,7 @@ class PrepareBscInvoicePayment(graphene.Mutation):
     token_type = graphene.String()
     net = graphene.String()
     fee = graphene.String()
+    intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     @login_required
     def mutate(self, info, invoice_id, idempotency_key=''):
@@ -983,6 +984,7 @@ class PrepareBscInvoicePayment(graphene.Mutation):
             token_type=result['token_type'],
             net=result['net'],
             fee=result['fee'],
+            intent_id=result['intent_id'],
         )
 
 

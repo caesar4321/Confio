@@ -32,6 +32,7 @@ const PREPARE_ADMIN = gql`
       success
       error
       calls { to valueWei data }
+      intentId
       shares
       delegateAddress
     }
@@ -138,7 +139,7 @@ export const runBscPayrollAdmin = async (
   for (let attempt = 0; attempt < 2; attempt++) {
     const execNonce = await delegateNonce(wallet.address);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
-    const digest = hashBatchIntent(calls, execNonce, deadline, wallet.address);
+    const digest = hashBatchIntent(calls, execNonce, deadline, prep.intentId, wallet.address);
     const intentSignature = signIntentDigest(digest, wallet.privKeyHex);
 
     let authorization;

@@ -41,7 +41,7 @@ SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
 SEL_PRESALE_BUY = _sel('buy(uint256,uint256)')                       # ConfioPresaleVault
 SEL_PAY = _sel('pay(bytes32,address,uint256,address,uint256,bytes)')  # ConfioPayContract
-SEL_EXECUTE = _sel('execute((address,uint256,bytes)[],uint256,uint256,bytes)')
+SEL_EXECUTE = _sel('execute((address,uint256,bytes)[],uint256,uint256,bytes32,bytes)')
 
 # EIP-712 constants — canonical strings shared with ConfioBatchDelegate.sol
 # and apps/src/services/evmWallet.ts. The three-way parity anchor lives in
@@ -51,7 +51,7 @@ DOMAIN_TYPEHASH = keccak(
     text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 CALL_TYPEHASH = keccak(text='Call(address to,uint256 value,bytes data)')
 EXECUTE_TYPEHASH = keccak(
-    text='Execute(Call[] calls,uint256 nonce,uint256 deadline)Call(address to,uint256 value,bytes data)')
+    text='Execute(Call[] calls,uint256 nonce,uint256 deadline,bytes32 intentId)Call(address to,uint256 value,bytes data)')
 NAME_HASH = keccak(text='ConfioBatchDelegate')
 VERSION_HASH = keccak(text='1')
 
@@ -125,8 +125,24 @@ def _addr_bytes(addr: str) -> bytes:
     return bytes.fromhex(addr.lower().replace('0x', '').rjust(40, '0'))
 
 
-def intent_digest(calls: list, nonce: int, deadline: int, user_addr: str, chain_id: int) -> bytes:
-    """EIP-712 digest of Execute(calls, nonce, deadline) with
+def intent_id_for(kind: str, source_id=None) -> bytes:
+    """The bytes32 intentId the user's signature binds to (2026-07-31
+    migration audit): the flow PURPOSE and, for domain flows, the exact
+    domain row. keccak('<kind>:<source_id>'); the generic savings rail omits
+    the id (kind alone). Server-derived so an intent for one flow/row cannot
+    be presented as another. The client is handed the hex in prepare (domain
+    flows) or derives it identically (generic rail)."""
+    tag = f'{kind}:{source_id}' if source_id is not None else f'{kind}:'
+    return keccak(text=tag)
+
+
+def intent_id_hex(kind: str, source_id=None) -> str:
+    return '0x' + intent_id_for(kind, source_id).hex()
+
+
+def intent_digest(calls: list, nonce: int, deadline: int, user_addr: str,
+                  chain_id: int, intent_id: bytes) -> bytes:
+    """EIP-712 digest of Execute(calls, nonce, deadline, intentId) with
     verifyingContract = the user's own EOA (see ConfioBatchDelegate.sol)."""
     call_hashes = b''
     for c in calls:
@@ -139,8 +155,8 @@ def intent_digest(calls: list, nonce: int, deadline: int, user_addr: str, chain_
         [DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, chain_id, user_addr],
     ))
     struct_hash = keccak(abi_encode(
-        ['bytes32', 'bytes32', 'uint256', 'uint256'],
-        [EXECUTE_TYPEHASH, keccak(call_hashes), int(nonce), int(deadline)],
+        ['bytes32', 'bytes32', 'uint256', 'uint256', 'bytes32'],
+        [EXECUTE_TYPEHASH, keccak(call_hashes), int(nonce), int(deadline), intent_id],
     ))
     return keccak(b'\x19\x01' + domain_separator + struct_hash)
 
@@ -349,14 +365,17 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
 
 # ── transaction assembly ────────────────────────────────────────────────
 
-def execute_calldata(calls: list, nonce: int, deadline: int, signature_hex: str) -> str:
-    """ABI-encode ConfioBatchDelegate.execute(calls, nonce, deadline, sig)."""
+def execute_calldata(calls: list, nonce: int, deadline: int, signature_hex: str,
+                     intent_id: bytes) -> str:
+    """ABI-encode ConfioBatchDelegate.execute(calls, nonce, deadline,
+    intentId, sig)."""
     call_tuples = [
         (c['to'], int(c['value']), bytes.fromhex(c['data'][2:])) for c in calls
     ]
     encoded = abi_encode(
-        ['(address,uint256,bytes)[]', 'uint256', 'uint256', 'bytes'],
-        [call_tuples, int(nonce), int(deadline), bytes.fromhex(signature_hex.replace('0x', ''))],
+        ['(address,uint256,bytes)[]', 'uint256', 'uint256', 'bytes32', 'bytes'],
+        [call_tuples, int(nonce), int(deadline), intent_id,
+         bytes.fromhex(signature_hex.replace('0x', ''))],
     )
     return '0x' + SEL_EXECUTE + encoded.hex()
 
@@ -445,7 +464,11 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     signer = get_bsc_sponsor_signer_from_settings()
     sponsor = signer.address
 
-    calldata = execute_calldata(calls, nonce, deadline, intent_sig)
+    # The intentId is derived from (kind, source_id) — the SAME derivation the
+    # submit used for its recover check, so the on-chain execute and the
+    # server-verified digest bind identical bytes.
+    intent_id = intent_id_for(kind, source_id)
+    calldata = execute_calldata(calls, nonce, deadline, intent_sig, intent_id)
     simulate(user_addr, calldata, authorization is None, sponsor)
 
     gas_price = max(int(_rpc('eth_gasPrice', []), 16),

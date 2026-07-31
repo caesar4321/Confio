@@ -306,6 +306,7 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     ])
     # Unified row via the existing payment post_save signal.
 
+    from cusd_plus.sponsor_7702 import intent_id_hex
     return {
         'success': True,
         'payment_id': payment_tx.internal_id,
@@ -313,6 +314,7 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         'token_type': token_type,
         'net': str(Decimal(net_wei) / WAD),
         'fee': str(Decimal(fee_wei) / WAD),
+        'intent_id': intent_id_hex(kind, payment_tx.id),
     }
 
 
@@ -411,8 +413,9 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     try:
         _validate_payment_batch(calls, payment_tx)
 
+        intent_id = sponsor_7702.intent_id_for(kind, payment_tx.id)
         digest = sponsor_7702.intent_digest(
-            calls, int(nonce), int(deadline), payer_addr, chain_id)
+            calls, int(nonce), int(deadline), payer_addr, chain_id, intent_id)
         signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
         if signer != payer_addr:
             return {'success': False, 'error': 'bad_intent_signature'}

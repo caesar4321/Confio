@@ -51,8 +51,14 @@ contract ConfioBatchDelegate is ReentrancyGuardTransient {
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant CALL_TYPEHASH =
         keccak256("Call(address to,uint256 value,bytes data)");
+    // intentId binds the signature to a specific server-defined intent
+    // (2026-07-31 migration audit): the server derives it as
+    // keccak(kind:sourceId) — the flow purpose AND the domain row — and the
+    // user's signature commits to it. The delegate does not act on it beyond
+    // the digest; it exists so an intent for one flow/row cannot be presented
+    // as another. A bare EOA self-call still bypasses the whole check.
     bytes32 private constant EXECUTE_TYPEHASH =
-        keccak256("Execute(Call[] calls,uint256 nonce,uint256 deadline)Call(address to,uint256 value,bytes data)");
+        keccak256("Execute(Call[] calls,uint256 nonce,uint256 deadline,bytes32 intentId)Call(address to,uint256 value,bytes data)");
     bytes32 private constant NAME_HASH = keccak256(bytes("ConfioBatchDelegate"));
     bytes32 private constant VERSION_HASH = keccak256(bytes("1"));
 
@@ -69,7 +75,13 @@ contract ConfioBatchDelegate is ReentrancyGuardTransient {
      * signature by the EOA's key; callable by the EOA itself without one.
      * Atomic: any inner failure reverts the whole batch (nonce included).
      */
-    function execute(Call[] calldata calls, uint256 nonce, uint256 deadline, bytes calldata signature)
+    function execute(
+        Call[] calldata calls,
+        uint256 nonce,
+        uint256 deadline,
+        bytes32 intentId,
+        bytes calldata signature
+    )
         external
         payable
         nonReentrant
@@ -80,7 +92,7 @@ contract ConfioBatchDelegate is ReentrancyGuardTransient {
         if (msg.sender != address(this)) {
             if (block.timestamp > deadline) revert Expired();
             if (nonce != current) revert BadNonce();
-            if (ECDSA.recover(hashExecute(calls, nonce, deadline), signature) != address(this)) {
+            if (ECDSA.recover(hashExecute(calls, nonce, deadline, intentId), signature) != address(this)) {
                 revert BadSignature();
             }
         }
@@ -111,7 +123,7 @@ contract ConfioBatchDelegate is ReentrancyGuardTransient {
      * the server's simulator, and tests can ask the chain for the exact
      * bytes instead of trusting a reimplementation.
      */
-    function hashExecute(Call[] calldata calls, uint256 nonce, uint256 deadline)
+    function hashExecute(Call[] calldata calls, uint256 nonce, uint256 deadline, bytes32 intentId)
         public
         view
         returns (bytes32)
@@ -126,7 +138,7 @@ contract ConfioBatchDelegate is ReentrancyGuardTransient {
             abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this))
         );
         bytes32 structHash = keccak256(
-            abi.encode(EXECUTE_TYPEHASH, keccak256(abi.encodePacked(callHashes)), nonce, deadline)
+            abi.encode(EXECUTE_TYPEHASH, keccak256(abi.encodePacked(callHashes)), nonce, deadline, intentId)
         );
         return keccak256(abi.encodePacked(hex"1901", domainSeparator, structHash));
     }

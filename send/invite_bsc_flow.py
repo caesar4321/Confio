@@ -95,6 +95,7 @@ def build_create_calls(token_type: str, amount_wei: int, invite_id32: str) -> li
 
 def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount) -> dict:
     """Build + store the create batch on a PhoneInvite row."""
+    from cusd_plus import sponsor_7702
     from users.models import Account
     from .models import PhoneInvite, SendTransaction
 
@@ -155,6 +156,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount) -> di
         'calls': calls,
         'inviter': inviter_addr,
         'phone_invite_pk': invite.pk,
+        'intent_id': sponsor_7702.intent_id_hex('invite_create', invite.pk),
     }
 
 
@@ -197,7 +199,8 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
 
     try:
         _validate_create_batch(calls, phone_invite.token_type, invite_id32)
-        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id)
+        intent_id = sponsor_7702.intent_id_for('invite_create', phone_invite.pk)
+        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id, intent_id)
         if sponsor_7702.recover_intent_signer(digest, intent_signature) != inviter_addr:
             return {'success': False, 'error': 'bad_intent_signature'}
         auth_dict = None
@@ -342,7 +345,8 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
         return {'success': False, 'error': 'bad_deadline'}
 
     try:
-        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id)
+        intent_id = sponsor_7702.intent_id_for('invite_reclaim', phone_invite.pk)
+        digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id, intent_id)
         if sponsor_7702.recover_intent_signer(digest, intent_signature) != inviter_addr:
             return {'success': False, 'error': 'bad_intent_signature'}
         auth_dict = None

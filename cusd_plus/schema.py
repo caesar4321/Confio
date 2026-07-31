@@ -40,13 +40,57 @@ class CusdPlusSummaryType(graphene.ObjectType):
 
 
 class CusdPlusMovementType(graphene.ObjectType):
-    """One row of savings history (deposits, withdrawals, stock buys/sells
-    settling against cUSD+, and weekly yield summary rows — never per-day)."""
+    """One row of savings history — Recargar/Retirar (conversions) plus the
+    money rails that settle in cUSD+/USDT (send, receive, payment, payroll).
+    Yield is passive and automatic: it shows up as balance growth, never as
+    a row."""
     id = graphene.ID()
-    movement_type = graphene.String(description="deposit | withdraw | buy | sell | yield")
+    movement_type = graphene.String(
+        description="deposit | withdraw | send | receive | payment | payroll")
     title = graphene.String()
     amount_usd = graphene.Float(description="Signed: inflows to savings positive")
     created_at = graphene.DateTime()
+    tx_hash = graphene.String(description="BSC transaction hash, '' when the row predates hash capture")
+    source_type = graphene.String(
+        description="Rail that produced this row (conversion | send | payment | payroll), "
+                    "null for externally-scanned inbound deposits which have no source record")
+    source_id = graphene.String(description="Primary key / internal id of the source row, null when source_type is null")
+
+
+# reference is written as '<rail>:<id>[:<leg>]' by the confirm tasks, or
+# 'scan_cusdp:<txhash>:<logIndex>' by the inbound scanner (external deposit —
+# no source row exists, so it stays unlinked). Parsing here keeps the raw
+# idempotency string server-side; the client only ever sees the resolved pair.
+_MOVEMENT_SOURCE_RAILS = {
+    'conversion': 'conversion',
+    'send_transaction': 'send',
+    'payment_transaction': 'payment',
+    'payroll_item': 'payroll',
+}
+
+
+def _movement_source(reference):
+    """('conversion', '<id>') for rail rows, (None, None) for scanner rows."""
+    prefix, _, rest = (reference or '').partition(':')
+    rail = _MOVEMENT_SOURCE_RAILS.get(prefix)
+    if rail is None or not rest:
+        return None, None
+    # Strip the ':out'/':in' leg suffix; ids themselves never contain ':'.
+    return rail, rest.split(':', 1)[0] or None
+
+
+def _movement_type(m):
+    source_type, source_id = _movement_source(m.reference)
+    return CusdPlusMovementType(
+        id=str(m.id),
+        movement_type=m.movement_type,
+        title=m.title,
+        amount_usd=float(m.amount_usd),
+        created_at=m.created_at,
+        tx_hash=m.tx_hash or '',
+        source_type=source_type,
+        source_id=source_id,
+    )
 
 
 class CusdPlusConvertParamsType(graphene.ObjectType):
@@ -146,6 +190,11 @@ class Query(graphene.ObjectType):
         graphene.NonNull(CusdPlusMovementType),
         limit=graphene.Int(default_value=20),
         offset=graphene.Int(default_value=0),
+    )
+    cusd_plus_movement = graphene.Field(
+        CusdPlusMovementType,
+        id=graphene.ID(required=True),
+        description="One ledger row for the JWT account — backs the movement detail screen",
     )
     cusd_plus_convert_params = graphene.Field(CusdPlusConvertParamsType)
     cusd_plus_conversions_in_flight = graphene.List(
@@ -384,16 +433,22 @@ class Query(graphene.ObjectType):
         limit = max(1, min(int(limit or 20), 100))
         offset = max(0, int(offset or 0))
         rows = CusdPlusMovement.objects.filter(account=account)[offset:offset + limit]
-        return [
-            CusdPlusMovementType(
-                id=str(m.id),
-                movement_type=m.movement_type,
-                title=m.title,
-                amount_usd=float(m.amount_usd),
-                created_at=m.created_at,
-            )
-            for m in rows
-        ]
+        return [_movement_type(m) for m in rows]
+
+    def resolve_cusd_plus_movement(self, info, id):
+        """One ledger row, scoped to the JWT account — backs the movement
+        detail screen. Isolated from cusdPlusMovements on purpose: the hub's
+        portfolio query must never gain fields that would fail it wholesale
+        against a server that predates them."""
+        from .models import CusdPlusMovement
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        account = _active_account(info)
+        if account is None:
+            return None
+        m = CusdPlusMovement.objects.filter(account=account, id=id).first()
+        return _movement_type(m) if m is not None else None
 
     def resolve_cusd_plus_conversions_in_flight(self, info):
         from .models import CusdPlusConversion
@@ -933,8 +988,15 @@ class SponsorBscBatch(graphene.Mutation):
         try:
             sponsor_7702.validate_policy(norm_calls, user, user_addr)
 
+            # The generic savings rail's kind (and thus the intentId the user
+            # signed) is derived from the selectors; the client derives the
+            # SAME value. source_id is omitted (no domain row here).
+            kind = 'redeem' if any(
+                c['data'][2:10] == sponsor_7702.SEL_REDEEM_TO_USDT for c in norm_calls
+            ) else 'subscribe'
+            intent_id = sponsor_7702.intent_id_for(kind)
             digest = sponsor_7702.intent_digest(
-                norm_calls, nonce_i, deadline_i, user_addr, chain_id)
+                norm_calls, nonce_i, deadline_i, user_addr, chain_id, intent_id)
             signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
             if signer != user_addr:
                 return SponsorBscBatch(success=False, error='bad_intent_signature')
@@ -978,9 +1040,6 @@ class SponsorBscBatch(graphene.Mutation):
                         success=False, authorization_required=True,
                         error='stale_auth_nonce')
 
-            kind = 'redeem' if any(
-                c['data'][2:10] == sponsor_7702.SEL_REDEEM_TO_USDT for c in norm_calls
-            ) else 'subscribe'
             tx_hash, _batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind)

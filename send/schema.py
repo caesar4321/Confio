@@ -242,6 +242,7 @@ class PrepareBscSend(graphene.Mutation):
     send_id = graphene.String()
     calls = graphene.List(BscSendCallType)
     token_type = graphene.String()
+    intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     @login_required
     def mutate(self, info, amount, recipient_user_id=None, recipient_phone=None,
@@ -284,6 +285,7 @@ class PrepareBscSend(graphene.Mutation):
                 for c in result['calls']
             ],
             token_type=result['token_type'],
+            intent_id=result['intent_id'],
         )
 
 
@@ -351,6 +353,7 @@ class PrepareBscInvite(graphene.Mutation):
     error = graphene.String()
     invite_id = graphene.String()
     calls = graphene.List(BscSendCallType)
+    intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     @login_required
     def mutate(self, info, phone, amount, token_type, phone_country=None):
@@ -372,7 +375,8 @@ class PrepareBscInvite(graphene.Mutation):
         return PrepareBscInvite(
             success=True, invite_id=result['invite_id'],
             calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data'])
-                   for c in result['calls']])
+                   for c in result['calls']],
+            intent_id=result['intent_id'])
 
 
 class SubmitBscInvite(graphene.Mutation):
@@ -447,9 +451,11 @@ class ReclaimInviteCalls(graphene.Mutation):
     success = graphene.Boolean()
     error = graphene.String()
     calls = graphene.List(BscSendCallType)
+    intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     @login_required
     def mutate(self, info, invite_id):
+        from cusd_plus import sponsor_7702
         from .models import PhoneInvite
         from . import invite_bsc_flow
 
@@ -461,7 +467,8 @@ class ReclaimInviteCalls(graphene.Mutation):
         calls = invite_bsc_flow.build_reclaim_calls('0x' + invite.invitation_id)
         return ReclaimInviteCalls(
             success=True,
-            calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data']) for c in calls])
+            calls=[BscSendCallType(to=c['to'], value_wei=c['value'], data=c['data']) for c in calls],
+            intent_id=sponsor_7702.intent_id_hex('invite_reclaim', invite.pk))
 
 
 class Mutation(graphene.ObjectType):

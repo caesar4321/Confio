@@ -321,7 +321,7 @@ const DOMAIN_TYPEHASH = typehash(
 );
 const CALL_TYPEHASH = typehash('Call(address to,uint256 value,bytes data)');
 const EXECUTE_TYPEHASH = typehash(
-  'Execute(Call[] calls,uint256 nonce,uint256 deadline)Call(address to,uint256 value,bytes data)',
+  'Execute(Call[] calls,uint256 nonce,uint256 deadline,bytes32 intentId)Call(address to,uint256 value,bytes data)',
 );
 const NAME_HASH = bytesToHex(keccak_256(utf8ToBytes('ConfioBatchDelegate')));
 const VERSION_HASH = bytesToHex(keccak_256(utf8ToBytes('1')));
@@ -329,12 +329,16 @@ const VERSION_HASH = bytesToHex(keccak_256(utf8ToBytes('1')));
 const keccakHex = (hexNoPrefix: string): string =>
   bytesToHex(keccak_256(hexNoPrefix ? hexToBytes(hexNoPrefix) : new Uint8Array(0)));
 
-/** EIP-712 digest the EOA signs for execute(calls, nonce, deadline) —
- * domain binds chainId + the USER'S OWN ADDRESS (verifyingContract). */
+/** EIP-712 digest the EOA signs for execute(calls, nonce, deadline, intentId) —
+ * domain binds chainId + the USER'S OWN ADDRESS (verifyingContract). intentId
+ * (bytes32, 0x-prefixed) binds the signature to a specific server-defined
+ * intent (migration audit 2026-07-31): domain flows receive it from prepare;
+ * the savings rail derives it (see deriveIntentId). */
 export function hashBatchIntent(
   calls: BatchCall[],
   nonce: bigint,
   deadline: bigint,
+  intentId: string,
   userAddress: string,
   chainId: bigint = BSC_NETWORK.chainId,
 ): Uint8Array {
@@ -352,9 +356,26 @@ export function hashBatchIntent(
     DOMAIN_TYPEHASH + NAME_HASH + VERSION_HASH + encodeUint(chainId) + encodeAddress(userAddress),
   );
   const structHash = keccakHex(
-    EXECUTE_TYPEHASH + keccakHex(callHashes) + encodeUint(nonce) + encodeUint(deadline),
+    EXECUTE_TYPEHASH +
+      keccakHex(callHashes) +
+      encodeUint(nonce) +
+      encodeUint(deadline) +
+      intentId.replace(/^0x/, '').padStart(64, '0'),
   );
   return keccak_256(hexToBytes('1901' + domainSeparator + structHash));
+}
+
+/** The savings rail (generic sponsorBscBatch) has no prepare step, so the
+ * client derives intentId the same way the server does: kind from the
+ * selectors (redeem if any redeemToUsdt call, else subscribe), keccak(kind:).
+ * Domain flows (send/pay/presale/invite/payroll) ignore this and pass the
+ * intentId the server returned. */
+const SEL_REDEEM_TO_USDT = 'f4794519'; // redeemToUsdt(uint256,uint256,address)
+export function deriveIntentId(calls: BatchCall[]): string {
+  const kind = calls.some((c) => c.data.replace(/^0x/, '').slice(0, 8) === SEL_REDEEM_TO_USDT)
+    ? 'redeem'
+    : 'subscribe';
+  return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${kind}:`)));
 }
 
 /** 65-byte r‖s‖v signature (v = 27/28, what OZ ECDSA.recover expects). */

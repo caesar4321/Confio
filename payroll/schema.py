@@ -1945,6 +1945,7 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
     calls = graphene.List(BscPayrollCallType)
     shares = graphene.String()
     delegate_address = graphene.String()
+    intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     def mutate(self, info, action, amount=None, delegate_user_id=None, allowed=True):
         from . import bsc_flow
@@ -1966,6 +1967,7 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
             ],
             shares=result.get('shares'),
             delegate_address=result.get('delegate_address'),
+            intent_id=result.get('intent_id'),
         )
 
 

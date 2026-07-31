@@ -81,37 +81,40 @@ const DELEGATE = '0x7777777777777777777777777777777777777777';
       { name: 'calls', type: 'Call[]' },
       { name: 'nonce', type: 'uint256' },
       { name: 'deadline', type: 'uint256' },
+      { name: 'intentId', type: 'bytes32' },
     ],
   };
   const domain = (verifyingContract: string) => ({
     name: 'ConfioBatchDelegate', version: '1', chainId: 56, verifyingContract,
   });
 
+  const testIntentId = '0x' + '11'.repeat(32);
   const calls = [
     { to: '0x1234567890abcdef1234567890abcdef12345678', valueWei: 0n, data: '0x095ea7b3' + '00'.repeat(64) },
     { to: '0x8AC7230489E800008ac7230489e80000AABBCCdd'.toLowerCase(), valueWei: 3n, data: '0x' },
   ];
-  const mineDigest = '0x' + bytesToHex(hashBatchIntent(calls, 9n, 1_900_000_000n, w1.address, 56n));
+  const mineDigest = '0x' + bytesToHex(hashBatchIntent(calls, 9n, 1_900_000_000n, testIntentId, w1.address, 56n));
   const value = {
     calls: calls.map((c) => ({ to: c.to, value: c.valueWei, data: c.data })),
-    nonce: 9n, deadline: 1_900_000_000n,
+    nonce: 9n, deadline: 1_900_000_000n, intentId: testIntentId,
   };
   const theirsDigest = TypedDataEncoder.hash(domain(w1.address), types, value);
   const digestMatch = mineDigest === theirsDigest;
 
-  const sig = signIntentDigest(hashBatchIntent(calls, 9n, 1_900_000_000n, w1.address, 56n), w1.privKeyHex);
+  const sig = signIntentDigest(hashBatchIntent(calls, 9n, 1_900_000_000n, testIntentId, w1.address, 56n), w1.privKeyHex);
   const recovered = verifyTypedData(domain(w1.address), types, value, sig);
   const recoverMatch = recovered === w1.address;
 
-  // Shared fixed vector (verifyingContract 0x…0aa, chainId 56):
+  // Shared fixed vector (verifyingContract 0x…0aa, chainId 56, intentId 0):
   const vectorCalls = [
     { to: '0x1111111111111111111111111111111111111111', valueWei: 0n, data: '0xdeadbeef' },
     { to: '0x2222222222222222222222222222222222222222', valueWei: 1_000_000n, data: '0x' },
   ];
   const vectorDigest = '0x' + bytesToHex(hashBatchIntent(
-    vectorCalls, 7n, 1_900_000_000n, '0x00000000000000000000000000000000000000aa', 56n));
+    vectorCalls, 7n, 1_900_000_000n, '0x' + '00'.repeat(32),
+    '0x00000000000000000000000000000000000000aa', 56n));
   const vectorMatch =
-    vectorDigest === '0xcc3b97117afebdebc5713d09e5cbefbed16143c3405bda7b6516c0bc7efce6c6';
+    vectorDigest === '0xf955b9171a0a662c24b602836539fb8a7bdd57272ea2aed94e41917ebd2bd2d2';
 
   ok = ok && digestMatch && recoverMatch && vectorMatch;
   console.log(`712 digest vs ethers: ${digestMatch ? 'MATCH' : 'MISMATCH'}`);

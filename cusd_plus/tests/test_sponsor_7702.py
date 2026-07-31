@@ -52,8 +52,17 @@ def _call(to, data, value='0'):
     return {'to': to.lower(), 'value': value, 'data': data.lower()}
 
 
+def _intent_id(calls):
+    """The generic rail's intentId derivation — kind from the selectors
+    (mirror of cusd_plus/schema.py), source_id omitted."""
+    kind = 'redeem' if any(
+        c['data'][2:10] == sponsor_7702.SEL_REDEEM_TO_USDT for c in calls) else 'subscribe'
+    return sponsor_7702.intent_id_for(kind)
+
+
 def _sign_intent(calls, nonce, deadline, key=USER_KEY, user_addr=USER):
-    digest = sponsor_7702.intent_digest(calls, nonce, deadline, user_addr, CHAIN_ID)
+    digest = sponsor_7702.intent_digest(
+        calls, nonce, deadline, user_addr, CHAIN_ID, _intent_id(calls))
     return '0x' + key.sign_msg_hash(digest).to_bytes().hex()  # r‖s‖v(0/1)
 
 
@@ -148,15 +157,17 @@ class SignatureTests(SimpleTestCase):
             _call('0x1111111111111111111111111111111111111111', '0xdeadbeef'),
             {'to': '0x2222222222222222222222222222222222222222', 'value': '1000000', 'data': '0x'},
         ]
+        # intentId = bytes32(0), matching the forge + mts vectors.
         digest = sponsor_7702.intent_digest(
-            calls, 7, 1_900_000_000, '0x00000000000000000000000000000000000000aa', 56)
+            calls, 7, 1_900_000_000, '0x00000000000000000000000000000000000000aa', 56, b'\x00' * 32)
         self.assertEqual(
             digest.hex(),
-            'cc3b97117afebdebc5713d09e5cbefbed16143c3405bda7b6516c0bc7efce6c6')
+            'f955b9171a0a662c24b602836539fb8a7bdd57272ea2aed94e41917ebd2bd2d2')
 
     def test_intent_signer_roundtrip(self):
         calls = [_call(USDT, _approve_data())]
-        digest = sponsor_7702.intent_digest(calls, 0, 2_000_000_000, USER, CHAIN_ID)
+        digest = sponsor_7702.intent_digest(
+            calls, 0, 2_000_000_000, USER, CHAIN_ID, _intent_id(calls))
         sig = _sign_intent(calls, 0, 2_000_000_000)
         self.assertEqual(sponsor_7702.recover_intent_signer(digest, sig), USER)
         # 27/28-style v is accepted too (client sends what OZ ECDSA expects)
@@ -179,7 +190,8 @@ class SignatureTests(SimpleTestCase):
 
     def test_wrong_key_recovers_different_address(self):
         calls = [_call(USDT, _approve_data())]
-        digest = sponsor_7702.intent_digest(calls, 0, 2_000_000_000, USER, CHAIN_ID)
+        digest = sponsor_7702.intent_digest(
+            calls, 0, 2_000_000_000, USER, CHAIN_ID, _intent_id(calls))
         sig = _sign_intent(calls, 0, 2_000_000_000, key=MALLORY_KEY)
         self.assertNotEqual(sponsor_7702.recover_intent_signer(digest, sig), USER)
 

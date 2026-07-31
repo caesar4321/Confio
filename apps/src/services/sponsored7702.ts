@@ -21,6 +21,7 @@ import {
   bscGetCode,
   bscGetNonce,
   bscWaitForReceipt,
+  deriveIntentId,
   hashBatchIntent,
   selector,
   signIntentDigest,
@@ -116,7 +117,10 @@ export const executeSponsoredBatch = async (params: {
     const execNonce = await delegateNonce(from);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
-    const digest = hashBatchIntent(calls, execNonce, deadline, from);
+    // Savings rail: no prepare step, so derive intentId the way the server
+    // does (from the selectors). Domain flows pass the server's intentId.
+    const intentId = deriveIntentId(calls);
+    const digest = hashBatchIntent(calls, execNonce, deadline, intentId, from);
     const intentSignature = signIntentDigest(digest, wallet.privKeyHex);
 
     // First use (or re-delegation): the authorization tuple rides along.

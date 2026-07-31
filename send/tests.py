@@ -75,7 +75,7 @@ class PrepareCallShapeTests(SimpleTestCase):
 
         def _create(**kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(internal_id='sid123', **kwargs)
+            return SimpleNamespace(id=7, internal_id='sid123', **kwargs)
 
         pps = 11 * WAD // 10  # pPlus = $1.10
         with _recipient_resolution(recipient_user, recipient_business, recipient_addr), \
@@ -216,7 +216,7 @@ class PrepareCallShapeTests(SimpleTestCase):
 
         def _create(**kwargs):
             captured.update(kwargs)
-            return SimpleNamespace(internal_id='sid123', **kwargs)
+            return SimpleNamespace(id=7, internal_id='sid123', **kwargs)
 
         with _recipient_resolution(recipient_user, None, RECIPIENT), \
              mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
@@ -409,7 +409,7 @@ class IdempotencyTests(SimpleTestCase):
 
     def _existing(self, amount='10', token_type='USDT', recipient_addr=RECIPIENT, ruid=2):
         return SimpleNamespace(
-            internal_id='old123',
+            id=42, internal_id='old123',
             bsc_calls_json=json.dumps({'calls': [{'to': USDT_BSC, 'value': '0', 'data': '0x'}],
                                        'kind': 'send_usdt'}),
             amount=Decimal(amount), recipient_address=recipient_addr,

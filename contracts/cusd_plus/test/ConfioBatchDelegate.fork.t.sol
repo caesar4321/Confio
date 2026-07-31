@@ -56,7 +56,7 @@ contract ConfioBatchDelegateForkTest is Test {
         uint256 deadline
     ) internal view returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) =
-            vm.sign(userPk, ConfioBatchDelegate(payable(user)).hashExecute(calls, nonce, deadline));
+            vm.sign(userPk, ConfioBatchDelegate(payable(user)).hashExecute(calls, nonce, deadline, bytes32(0)));
         return abi.encodePacked(r, s, v);
     }
 
@@ -83,7 +83,7 @@ contract ConfioBatchDelegateForkTest is Test {
 
         uint256 g0 = gasleft();
         vm.prank(sponsor);
-        try ConfioBatchDelegate(payable(user)).execute(calls, 0, deadline, sig) {
+        try ConfioBatchDelegate(payable(user)).execute(calls, 0, deadline, bytes32(0), sig) {
             emit log_named_uint("gas: approve+subscribeAndMint batch", g0 - gasleft());
             uint256 shares = IVault(VAULT).balanceOf(user);
             emit log_named_decimal_uint("cUSD+ shares minted to EOA", shares, 18);
@@ -99,7 +99,7 @@ contract ConfioBatchDelegateForkTest is Test {
 
             uint256 g1 = gasleft();
             vm.prank(sponsor);
-            ConfioBatchDelegate(payable(user)).execute(rcalls, 1, deadline, rsig);
+            ConfioBatchDelegate(payable(user)).execute(rcalls, 1, deadline, bytes32(0), rsig);
             emit log_named_uint("gas: redeemToUsdt batch", g1 - gasleft());
 
             uint256 usdtBack = IERC20(USDT).balanceOf(user);
@@ -134,7 +134,7 @@ contract ConfioBatchDelegateForkTest is Test {
         );
         uint256 deadline = block.timestamp + 600;
         vm.prank(sponsor);
-        try ConfioBatchDelegate(payable(user)).execute(calls, 0, deadline, _sign(calls, 0, deadline)) {
+        try ConfioBatchDelegate(payable(user)).execute(calls, 0, deadline, bytes32(0), _sign(calls, 0, deadline)) {
             uint256 shares = IVault(VAULT).balanceOf(user);
 
             ConfioBatchDelegate.Call[] memory rcalls = new ConfioBatchDelegate.Call[](1);
@@ -142,7 +142,7 @@ contract ConfioBatchDelegateForkTest is Test {
                 VAULT, 0, abi.encodeCall(IVault.redeemToUsdt, (shares, 0, rampDeposit))
             );
             vm.prank(sponsor);
-            ConfioBatchDelegate(payable(user)).execute(rcalls, 1, deadline, _sign(rcalls, 1, deadline));
+            ConfioBatchDelegate(payable(user)).execute(rcalls, 1, deadline, bytes32(0), _sign(rcalls, 1, deadline));
             assertGt(IERC20(USDT).balanceOf(rampDeposit), 0, "USDT went to the ramp address");
         } catch (bytes memory reason) {
             emit log_named_bytes("real IM/vault reverted", reason);

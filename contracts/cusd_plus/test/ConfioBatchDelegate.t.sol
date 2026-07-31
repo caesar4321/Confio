@@ -59,8 +59,11 @@ contract ConfioBatchDelegateTest is Test {
         0x90a10e3e6e0ef9c0307c0baf881893473293514cc333083b3696b5a0aa5eb100;
     bytes32 constant CALL_TYPEHASH = keccak256("Call(address to,uint256 value,bytes data)");
     bytes32 constant EXECUTE_TYPEHASH = keccak256(
-        "Execute(Call[] calls,uint256 nonce,uint256 deadline)Call(address to,uint256 value,bytes data)"
+        "Execute(Call[] calls,uint256 nonce,uint256 deadline,bytes32 intentId)Call(address to,uint256 value,bytes data)"
     );
+    // A fixed intentId for the behavior tests (the delegate treats it as an
+    // opaque binding value); the shared-vector test pins bytes32(0).
+    bytes32 constant INTENT = keccak256("test-intent");
     bytes32 constant DOMAIN_TYPEHASH = keccak256(
         "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     );
@@ -92,11 +95,22 @@ contract ConfioBatchDelegateTest is Test {
     }
 
     /// Independent EIP-712 implementation (parity check vs hashExecute).
+    /// The 4-arg overload uses INTENT so the behavior tests read unchanged.
     function _digest(
         address eoa,
         ConfioBatchDelegate.Call[] memory calls,
         uint256 nonce,
         uint256 deadline
+    ) internal view returns (bytes32) {
+        return _digest(eoa, calls, nonce, deadline, INTENT);
+    }
+
+    function _digest(
+        address eoa,
+        ConfioBatchDelegate.Call[] memory calls,
+        uint256 nonce,
+        uint256 deadline,
+        bytes32 intentId
     ) internal view returns (bytes32) {
         bytes32[] memory hashes = new bytes32[](calls.length);
         for (uint256 i; i < calls.length; ++i) {
@@ -113,8 +127,9 @@ contract ConfioBatchDelegateTest is Test {
                 eoa
             )
         );
-        bytes32 sh =
-            keccak256(abi.encode(EXECUTE_TYPEHASH, keccak256(abi.encodePacked(hashes)), nonce, deadline));
+        bytes32 sh = keccak256(
+            abi.encode(EXECUTE_TYPEHASH, keccak256(abi.encodePacked(hashes)), nonce, deadline, intentId)
+        );
         return keccak256(abi.encodePacked(hex"1901", ds, sh));
     }
 
@@ -148,7 +163,7 @@ contract ConfioBatchDelegateTest is Test {
         emit BatchExecuted(0, 2);
 
         vm.prank(sponsor);
-        _asDelegate(user).execute(calls, 0, block.timestamp + 600, sig);
+        _asDelegate(user).execute(calls, 0, block.timestamp + 600, INTENT, sig);
 
         assertEq(usdt.balanceOf(address(sink)), 100e18, "sink pulled the funds");
         assertEq(usdt.balanceOf(user), 900e18);
@@ -158,7 +173,7 @@ contract ConfioBatchDelegateTest is Test {
     function test_digestParity_localVsOnchain() public view {
         ConfioBatchDelegate.Call[] memory calls = _depositBatch(42e18);
         assertEq(
-            _asDelegate(user).hashExecute(calls, 3, 12345),
+            _asDelegate(user).hashExecute(calls, 3, 12345, INTENT),
             _digest(user, calls, 3, 12345),
             "hashExecute must match the independent implementation"
         );
@@ -179,8 +194,8 @@ contract ConfioBatchDelegateTest is Test {
             0x2222222222222222222222222222222222222222, 1_000_000, ""
         );
         assertEq(
-            _asDelegate(eoa).hashExecute(calls, 7, 1_900_000_000),
-            0xcc3b97117afebdebc5713d09e5cbefbed16143c3405bda7b6516c0bc7efce6c6,
+            _asDelegate(eoa).hashExecute(calls, 7, 1_900_000_000, bytes32(0)),
+            0xf955b9171a0a662c24b602836539fb8a7bdd57272ea2aed94e41917ebd2bd2d2,
             "shared vector drifted"
         );
     }
@@ -193,11 +208,11 @@ contract ConfioBatchDelegateTest is Test {
         bytes memory sig = _sign(userPk, _digest(user, calls, 0, deadline));
 
         vm.prank(sponsor);
-        _asDelegate(user).execute(calls, 0, deadline, sig);
+        _asDelegate(user).execute(calls, 0, deadline, INTENT, sig);
 
         vm.prank(sponsor);
         vm.expectRevert(ConfioBatchDelegate.BadNonce.selector);
-        _asDelegate(user).execute(calls, 0, deadline, sig);
+        _asDelegate(user).execute(calls, 0, deadline, INTENT, sig);
     }
 
     function test_expiredRejected() public {
@@ -208,7 +223,7 @@ contract ConfioBatchDelegateTest is Test {
         vm.warp(deadline + 1);
         vm.prank(sponsor);
         vm.expectRevert(ConfioBatchDelegate.Expired.selector);
-        _asDelegate(user).execute(calls, 0, deadline, sig);
+        _asDelegate(user).execute(calls, 0, deadline, INTENT, sig);
     }
 
     function test_wrongKeyRejected() public {
@@ -219,7 +234,7 @@ contract ConfioBatchDelegateTest is Test {
 
         vm.prank(sponsor);
         vm.expectRevert(ConfioBatchDelegate.BadSignature.selector);
-        _asDelegate(user).execute(calls, 0, deadline, sig);
+        _asDelegate(user).execute(calls, 0, deadline, INTENT, sig);
     }
 
     function test_tamperedBatchRejected() public {
@@ -231,14 +246,14 @@ contract ConfioBatchDelegateTest is Test {
         ConfioBatchDelegate.Call[] memory tampered = _depositBatch(999e18);
         vm.prank(sponsor);
         vm.expectRevert(ConfioBatchDelegate.BadSignature.selector);
-        _asDelegate(user).execute(tampered, 0, deadline, sig);
+        _asDelegate(user).execute(tampered, 0, deadline, INTENT, sig);
     }
 
     function test_emptyBatchRejected() public {
         ConfioBatchDelegate.Call[] memory calls = new ConfioBatchDelegate.Call[](0);
         vm.prank(sponsor);
         vm.expectRevert(ConfioBatchDelegate.EmptyBatch.selector);
-        _asDelegate(user).execute(calls, 0, block.timestamp + 600, "");
+        _asDelegate(user).execute(calls, 0, block.timestamp + 600, INTENT, "");
     }
 
     // ── atomicity & failure surfacing ────────────────────────────────────
@@ -254,7 +269,7 @@ contract ConfioBatchDelegateTest is Test {
 
         vm.prank(sponsor);
         vm.expectRevert(bytes("sink: nope")); // inner revert data bubbles
-        _asDelegate(user).execute(calls, 0, block.timestamp + 600, sig);
+        _asDelegate(user).execute(calls, 0, block.timestamp + 600, INTENT, sig);
 
         assertEq(usdt.allowance(user, address(sink)), 0, "approve rolled back");
         assertEq(_asDelegate(user).nonces(), 0, "nonce rolled back");
@@ -268,7 +283,7 @@ contract ConfioBatchDelegateTest is Test {
 
         vm.prank(sponsor);
         vm.expectRevert(abi.encodeWithSelector(ConfioBatchDelegate.CallFailed.selector, 0));
-        _asDelegate(user).execute(calls, 0, block.timestamp + 600, sig);
+        _asDelegate(user).execute(calls, 0, block.timestamp + 600, INTENT, sig);
     }
 
     // ── self-call path ───────────────────────────────────────────────────
@@ -276,7 +291,7 @@ contract ConfioBatchDelegateTest is Test {
     function test_selfCallSkipsSignature() public {
         ConfioBatchDelegate.Call[] memory calls = _depositBatch(25e18);
         vm.prank(user); // the EOA's own key sent a normal tx to itself
-        _asDelegate(user).execute(calls, 999, 0, ""); // nonce/deadline/sig ignored
+        _asDelegate(user).execute(calls, 999, 0, INTENT, ""); // nonce/deadline/sig ignored
         assertEq(usdt.balanceOf(address(sink)), 25e18);
         assertEq(_asDelegate(user).nonces(), 1, "self-call still consumes a nonce");
     }
@@ -287,11 +302,11 @@ contract ConfioBatchDelegateTest is Test {
         bytes memory sig = _sign(userPk, _digest(user, calls, 0, deadline));
 
         vm.prank(user);
-        _asDelegate(user).execute(_depositBatch(1e18), 0, 0, "");
+        _asDelegate(user).execute(_depositBatch(1e18), 0, 0, INTENT, "");
 
         vm.prank(sponsor);
         vm.expectRevert(ConfioBatchDelegate.BadNonce.selector);
-        _asDelegate(user).execute(calls, 0, deadline, sig);
+        _asDelegate(user).execute(calls, 0, deadline, INTENT, sig);
     }
 
     // ── EOA behavior preservation ────────────────────────────────────────
@@ -319,7 +334,7 @@ contract ConfioBatchDelegateTest is Test {
         bytes memory sig = _sign(userPk, _digest(user, calls, 0, block.timestamp + 600));
 
         vm.prank(sponsor);
-        _asDelegate(user).execute(calls, 0, block.timestamp + 600, sig);
+        _asDelegate(user).execute(calls, 0, block.timestamp + 600, INTENT, sig);
         assertEq(payee.balance, 1 ether, "EOA value forwarded only under user signature");
         assertEq(user.balance, 2 ether);
     }
@@ -335,7 +350,7 @@ contract ConfioBatchDelegateTest is Test {
         bytes memory innerSig = _sign(userPk, _digest(user, inner, 1, deadline));
         evil.arm(
             user,
-            abi.encodeCall(ConfioBatchDelegate.execute, (inner, 1, deadline, innerSig))
+            abi.encodeCall(ConfioBatchDelegate.execute, (inner, 1, deadline, INTENT, innerSig))
         );
 
         // …and try to run it from inside a batch. Transient guard stops it.
@@ -345,7 +360,7 @@ contract ConfioBatchDelegateTest is Test {
 
         vm.prank(sponsor);
         vm.expectRevert(); // ReentrancyGuardReentrantCall, bubbled
-        _asDelegate(user).execute(outer, 0, deadline, outerSig);
+        _asDelegate(user).execute(outer, 0, deadline, INTENT, outerSig);
     }
 
     // ── storage discipline ───────────────────────────────────────────────
@@ -360,7 +375,7 @@ contract ConfioBatchDelegateTest is Test {
         ConfioBatchDelegate.Call[] memory calls = _depositBatch(10e18);
         bytes memory sig = _sign(userPk, _digest(user, calls, 0, block.timestamp + 600));
         vm.prank(sponsor);
-        _asDelegate(user).execute(calls, 0, block.timestamp + 600, sig);
+        _asDelegate(user).execute(calls, 0, block.timestamp + 600, INTENT, sig);
 
         assertEq(uint256(vm.load(user, STORAGE_SLOT)), 1, "nonce lives in the namespaced slot");
         assertEq(uint256(vm.load(user, bytes32(0))), 0, "slot 0 untouched");
@@ -377,15 +392,15 @@ contract ConfioBatchDelegateTest is Test {
     ) public view {
         ConfioBatchDelegate.Call[] memory calls = new ConfioBatchDelegate.Call[](1);
         calls[0] = ConfioBatchDelegate.Call(to, value, data);
-        bytes32 base = _asDelegate(user).hashExecute(calls, nonce, deadline);
+        bytes32 base = _asDelegate(user).hashExecute(calls, nonce, deadline, INTENT);
         assertEq(base, _digest(user, calls, nonce, deadline));
 
         // Any nonce/deadline drift changes the digest.
         if (deadline < type(uint256).max) {
-            assertTrue(base != _asDelegate(user).hashExecute(calls, nonce, deadline + 1));
+            assertTrue(base != _asDelegate(user).hashExecute(calls, nonce, deadline + 1, INTENT));
         }
         if (nonce < type(uint256).max) {
-            assertTrue(base != _asDelegate(user).hashExecute(calls, nonce + 1, deadline));
+            assertTrue(base != _asDelegate(user).hashExecute(calls, nonce + 1, deadline, INTENT));
         }
     }
 }
