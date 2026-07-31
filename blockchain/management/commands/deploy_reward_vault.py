@@ -135,6 +135,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioRewardVault: {got}"))
         self.stdout.write(f"  CONFIO   = {call_addr('CONFIO()')}")
-        self.stdout.write(f"  attestor = {call_addr('attestor()')}")
+        self.stdout.write(f"  signer   = {call_addr('signer()')}")
         self.stdout.write(f"  owner    = {call_addr('owner()')}")
         self.stdout.write("Next: add BSC_REWARD_VAULT_ADDRESS to .env.mainnet, BscScan verify, record in DEPLOYMENT.md.")

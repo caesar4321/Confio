@@ -398,36 +398,33 @@ was somewhere above the call, not that it approved the recipient).
   against the token address itself; abandoned as cosmetic, support-ticket
   evidence pack = any signed release message + verifiedSignatures pass.)
 
-## ConfioRewardVault — deployed 2026-07-31 (Safe-owned)
+## ConfioRewardVault — REDEPLOYED 2026-07-31 (DEX-locked signature-claim)
 
-BSC mirror of the Algorand CONFIO rewards vault. Escrows CONFIO, users
-self-claim backend-attested rewards; owner = Safe, attestor = KMS sponsor.
+Rewards accrue OFF-CHAIN in the DB; nothing on-chain until a user claims,
+and claims are LOCKED until the Safe opens them at DEX launch. Claim
+authorization is a backend EIP-712 signature over the user's cumulative
+earned CONFIO. **Supersedes the abandoned attestation-model vault
+`0x1766A2Ac798dA2247E5Da6E410453D526FD2f6ab`** (empty, never funded — the
+redesign scrapped on-chain per-reward attestation because CONFIO has no
+liquidity before DEX; Julian 07-31).
 
 | Item | Value |
 | --- | --- |
-| **ConfioRewardVault** | `0x1766A2Ac798dA2247E5Da6E410453D526FD2f6ab` |
-| CONFIO (reward token) | `0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8` |
-| attestor (hot key) | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
+| **ConfioRewardVault** | `0x812b8d86952123bED0a33E92a76211cbbACDe730` |
+| CONFIO | `0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8` |
+| signer (backend hot key) | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
 | owner | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
 
-- Deployed via `manage.py deploy_reward_vault --broadcast --yes-mainnet`
-  (KMS nonce 30, ~0.0015 BNB). Creation tx
-  `0x37c281966ce98e05ea686f7461319e0f982210d58fe8d020d57e9ce3f069c8cc`.
-  BscScan verified.
-- **NOT yet operational — needs TWO Safe actions + backend wiring:**
-  1. `setManualPrice(price)` — the CONFIO price in cUSD (WAD). At $0.20
-     that is `200000000000000000`. Bumps priceRound 0→1.
-  2. Transfer a TRANCHE of CONFIO from the Safe into the vault. The reward
-     fund is **7,400,000 CONFIO total across ALL chains** (tokenomics §3);
-     the live Algorand vault (app 3361825928) has already committed ~2,250
-     (1,425 still unclaimed there). Fund a working tranche, never the whole
-     fund behind the hot attestor (Codex P3). The solvency invariant blocks
-     any attestation until CONFIO is present.
-  3. Backend: point the achievements/referral reward flow at
-     `setEligible(user, cusdAmount, expectedPriceRound, referrer,
-     refConfioAmount)` and `claim()`. Each side of a valid pair earns $5,
-     converted at the active price; the referral $5 is converted by the
-     backend and passed as CONFIO.
-- Config: `BSC_REWARD_VAULT_ADDRESS`, flag `BSC_REWARD_ENABLED` (ships
-  False). Cross-chain integrity: BSC vault + Algorand vault combined must
-  never exceed 7,400,000 CONFIO (tokenomics §10).
+- Deployed via `manage.py deploy_reward_vault` (KMS nonce 31). BscScan
+  verified. Live reads: claimsUnlocked false, signer/owner/CONFIO wired.
+- Codex 5.6-Sol audit: no P1/P2; cumulative-claim double-spend argument
+  verified. Trust model is explicit — a treasury-controlled pool, NOT
+  trustless: the Safe can pause()+withdraw() and defund claims even after
+  unlock; rewards are discretionary Safe obligations.
+- **Before operational (in order):** (1) Safe funds a CONFIO tranche;
+  (2) at DEX, Safe calls `unlockClaims()` (one-way); (3) build the KMS
+  EIP-712 claim-SIGNER service (sign with SHORT deadlines — a corrected-down
+  entitlement can't revoke an already-issued higher signature before its
+  deadline) + the client `claim()` flow. Rewards accrue in the DB now
+  (behind BSC_REWARD_ENABLED) regardless.
+- Config: `BSC_REWARD_VAULT_ADDRESS`, `BSC_REWARD_ENABLED` (dark).
