@@ -53,7 +53,18 @@ contract ConfioInviteEscrow is Ownable2Step, Pausable, ReentrancyGuardTransient 
         bool settled;       // claimed or reclaimed
     }
 
+    /// Keyed by (inviter, inviteId), NOT inviteId alone (audit 2026-07-31
+    /// [P3]): the inviteId is derived from the recipient's phone and is
+    /// therefore public-derivable, so a global key would let anyone squat a
+    /// target's invite id with a 1-wei create and permanently block real
+    /// invites to that person. Namespacing by the actual creator means a
+    /// squatter's entry lands under THEIR key, not the real inviter's — and
+    /// it lets several people invite the same phone independently.
     mapping(bytes32 => Invitation) public invitations;
+
+    function invitationKey(address inviter, bytes32 inviteId) public pure returns (bytes32) {
+        return keccak256(abi.encode(inviter, inviteId));
+    }
 
     event SponsorSet(address indexed sponsor);
     event InvitationCreated(
@@ -92,7 +103,8 @@ contract ConfioInviteEscrow is Ownable2Step, Pausable, ReentrancyGuardTransient 
     {
         require(_allowed(token), "token not allowed");
         require(amount > 0 && amount <= type(uint128).max, "bad amount");
-        require(invitations[inviteId].inviter == address(0), "invite exists");
+        bytes32 key = invitationKey(msg.sender, inviteId);
+        require(invitations[key].inviter == address(0), "invite exists");
 
         // Pull first, then record what actually arrived (defends against a
         // fee-on-transfer token, though neither allowed token is one).
@@ -101,7 +113,7 @@ contract ConfioInviteEscrow is Ownable2Step, Pausable, ReentrancyGuardTransient 
         uint256 received = IERC20(token).balanceOf(address(this)) - before;
         require(received == amount, "unexpected transfer amount");
 
-        invitations[inviteId] = Invitation({
+        invitations[key] = Invitation({
             inviter: msg.sender,
             token: token,
             amount: uint128(amount),
@@ -116,14 +128,14 @@ contract ConfioInviteEscrow is Ownable2Step, Pausable, ReentrancyGuardTransient 
     /// Release an unclaimed, unexpired invite to the recipient the backend
     /// verified. SPONSOR-authorized — the sponsor is the party that knows
     /// which joining user the phone/invite belongs to.
-    function claimInvitation(bytes32 inviteId, address recipient)
+    function claimInvitation(bytes32 inviteId, address inviter, address recipient)
         external
         onlySponsor
         nonReentrant
         whenNotPaused
         returns (uint256 amount)
     {
-        Invitation storage inv = invitations[inviteId];
+        Invitation storage inv = invitations[invitationKey(inviter, inviteId)];
         require(inv.inviter != address(0), "no invite");
         require(!inv.settled, "settled");
         require(block.timestamp <= inv.expiresAt, "expired");
@@ -139,7 +151,7 @@ contract ConfioInviteEscrow is Ownable2Step, Pausable, ReentrancyGuardTransient 
     /// The inviter takes back an unclaimed invite after the reclaim window.
     /// NEVER pausable — an exit is always available.
     function reclaimInvitation(bytes32 inviteId) external nonReentrant returns (uint256 amount) {
-        Invitation storage inv = invitations[inviteId];
+        Invitation storage inv = invitations[invitationKey(msg.sender, inviteId)];
         require(inv.inviter == msg.sender, "not inviter");
         require(!inv.settled, "settled");
         require(block.timestamp > inv.expiresAt, "not expired");

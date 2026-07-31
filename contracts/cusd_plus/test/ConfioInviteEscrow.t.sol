@@ -46,7 +46,7 @@ contract ConfioInviteEscrowTest is Test {
 
     function test_create_locks_tokens() public {
         _create(ID, cusdPlus, 100e18);
-        (address inv, address tok, uint128 amt,, bool settled) = escrow.invitations(ID);
+        (address inv, address tok, uint128 amt,, bool settled) = escrow.invitations(escrow.invitationKey(inviter, ID));
         assertEq(inv, inviter);
         assertEq(tok, address(cusdPlus));
         assertEq(amt, 100e18);
@@ -85,10 +85,10 @@ contract ConfioInviteEscrowTest is Test {
     function test_sponsor_claims_to_recipient() public {
         _create(ID, cusdPlus, 100e18);
         vm.prank(sponsor);
-        uint256 got = escrow.claimInvitation(ID, recipient);
+        uint256 got = escrow.claimInvitation(ID, inviter, recipient);
         assertEq(got, 100e18);
         assertEq(cusdPlus.balanceOf(recipient), 100e18);
-        (,,,, bool settled) = escrow.invitations(ID);
+        (,,,, bool settled) = escrow.invitations(escrow.invitationKey(inviter, ID));
         assertTrue(settled);
     }
 
@@ -96,18 +96,18 @@ contract ConfioInviteEscrowTest is Test {
         _create(ID, cusdPlus, 100e18);
         vm.prank(stranger);
         vm.expectRevert("not sponsor");
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
         // even the recipient cannot self-claim (backend-mediated flow)
         vm.prank(recipient);
         vm.expectRevert("not sponsor");
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
     }
 
     function test_claim_recipient_cannot_be_inviter() public {
         _create(ID, cusdPlus, 100e18);
         vm.prank(sponsor);
         vm.expectRevert("recipient is inviter");
-        escrow.claimInvitation(ID, inviter);
+        escrow.claimInvitation(ID, inviter, inviter);
     }
 
     function test_claim_after_expiry_rejected() public {
@@ -115,15 +115,15 @@ contract ConfioInviteEscrowTest is Test {
         vm.warp(block.timestamp + 7 days + 1);
         vm.prank(sponsor);
         vm.expectRevert("expired");
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
     }
 
     function test_double_claim_rejected() public {
         _create(ID, cusdPlus, 100e18);
         vm.startPrank(sponsor);
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
         vm.expectRevert("settled");
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
         vm.stopPrank();
     }
 
@@ -171,7 +171,7 @@ contract ConfioInviteEscrowTest is Test {
         escrow.reclaimInvitation(ID);
         vm.prank(sponsor);
         vm.expectRevert("settled"); // settled is checked before expiry
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
     }
 
     // ── Admin ────────────────────────────────────────────────────────
@@ -186,9 +186,9 @@ contract ConfioInviteEscrowTest is Test {
         escrow.setSponsor(newSponsor);
         vm.prank(sponsor);
         vm.expectRevert("not sponsor");
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
         vm.prank(newSponsor);
-        escrow.claimInvitation(ID, recipient);
+        escrow.claimInvitation(ID, inviter, recipient);
         assertEq(cusdPlus.balanceOf(recipient), 100e18);
     }
 
@@ -196,5 +196,33 @@ contract ConfioInviteEscrowTest is Test {
         vm.prank(safeOwner);
         vm.expectRevert("renounce disabled");
         escrow.renounceOwnership();
+    }
+
+    // ── AUDIT REGRESSION (2026-07-31 [P3]) ───────────────────────────
+    // The invite id is derived from the recipient's phone (public), so a
+    // squatter must not be able to block a real inviter by front-running
+    // the same id. Storage is namespaced by the actual creator.
+    function test_squatter_cannot_block_real_invite() public {
+        // Attacker front-runs the same id with 1 wei.
+        confio.mint(stranger, 1e18);
+        vm.prank(stranger);
+        confio.approve(address(escrow), type(uint256).max);
+        vm.prank(stranger);
+        escrow.createInvitation(ID, address(confio), 1);
+
+        // The real inviter's create still succeeds under THEIR key.
+        _create(ID, cusdPlus, 100e18);
+        (address inv,,,,) = escrow.invitations(escrow.invitationKey(inviter, ID));
+        assertEq(inv, inviter, "real invite intact");
+
+        // And the sponsor claims the real one (bound to the real inviter),
+        // never the squatter's.
+        vm.prank(sponsor);
+        escrow.claimInvitation(ID, inviter, recipient);
+        assertEq(cusdPlus.balanceOf(recipient), 100e18);
+        // The squatter's 1-wei entry is independent and untouched.
+        (, , uint128 sqAmt,, bool sqSettled) = escrow.invitations(escrow.invitationKey(stranger, ID));
+        assertEq(sqAmt, 1);
+        assertFalse(sqSettled);
     }
 }
