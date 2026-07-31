@@ -128,6 +128,13 @@ class UnifiedTransactionTable(models.Model):
         on_delete=models.CASCADE,
         related_name='unified_transaction',
     )
+    cusd_plus_conversion = models.OneToOneField(
+        'cusd_plus.CusdPlusConversion',
+        on_delete=models.CASCADE,
+        related_name='unified_transaction',
+        null=True,
+        blank=True,
+    )
     
     # Denormalized fields for quick access/filtering
     amount = models.CharField(max_length=32)

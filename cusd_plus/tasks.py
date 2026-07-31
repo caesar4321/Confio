@@ -270,6 +270,7 @@ def monitor_bridge_arrivals():
             tx_hash=log['transactionHash'],
             source='ramp' if key in ramp_addrs else 'external_deposit',
             now=now,
+            from_addr='0x' + log['topics'][1][-40:],
         )
 
     for addr, conv in conv_watch.items():
@@ -281,6 +282,8 @@ def monitor_bridge_arrivals():
             conv.save(update_fields=[
                 'status', 'dest_arrived_at', 'bridge_arrival_tx', 'updated_at',
             ])
+            from .unified import sync_unified_from_cusd_plus_conversion
+            sync_unified_from_cusd_plus_conversion(conv)
             logger.info(
                 'conversion %s: USDT arrived on BNB (%s)',
                 conv.internal_id, log['transactionHash'],
@@ -410,7 +413,8 @@ def _registered_bsc_addresses() -> dict:
     return addr_map
 
 
-def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, source, now):
+def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, source, now,
+                            from_addr=''):
     """A chain-observed USDT inflow becomes a conversion row born at
     DEST_ARRIVED: the funds are already at the user's address, so only leg C
     (mint) remains — the existing foreground resume (sponsored 7702 batch)
@@ -455,6 +459,42 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
         'inbound USDT deposit %s (%s): %s USDT at %s (%s)',
         conv.internal_id, source, amount_usd, to_addr, tx_hash,
     )
+    # Ops/app mirrors — the same two surfaces the Algorand twin feeds:
+    # the conversion row into the unified ledger, and the raw USDT receipt
+    # as a SendTransaction (external sender -> user), whose post_save
+    # signal creates its own unified 'send' row. Ramp arrivals skip the
+    # receipt: ramps/signals already mirrors the order itself.
+    from .unified import sync_unified_from_cusd_plus_conversion
+    sync_unified_from_cusd_plus_conversion(conv)
+    if source != 'ramp':
+        try:
+            from send.models import SendTransaction
+            idempotency_key = f'BSC:{tx_ref}'
+            if not SendTransaction.all_objects.filter(idempotency_key=idempotency_key).exists():
+                SendTransaction.all_objects.create(
+                    sender_user=None,
+                    recipient_user=None if is_business else account.user,
+                    sender_business=None,
+                    recipient_business=account.business if is_business else None,
+                    sender_type='external',
+                    recipient_type='business' if is_business else 'user',
+                    sender_display_name='Depósito externo',
+                    recipient_display_name=account.display_name,
+                    sender_phone='',
+                    recipient_phone=(getattr(account.user, 'phone_number', '') or '')
+                                    if not is_business else '',
+                    sender_address=from_addr or '',
+                    recipient_address=to_addr,
+                    amount=str(amount_usd),
+                    token_type='USDT',
+                    memo='Depósito USDT recibido',
+                    status='CONFIRMED',
+                    transaction_hash=tx_hash,
+                    idempotency_key=idempotency_key,
+                    error_message='',
+                )
+        except Exception:  # noqa: BLE001 — receipt mirror must not lose the deposit
+            logger.exception('send receipt mirror failed for %s', tx_ref)
 
     if source == 'ramp':
         return  # order comms belong to the ramp flow (koywe_sync)

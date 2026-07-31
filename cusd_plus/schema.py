@@ -535,6 +535,8 @@ class StartCusdPlusConversion(graphene.Mutation):
             user_bsc_address=user_bsc_address,
             user_algo_address=user_algo_address,
         )
+        from .unified import sync_unified_from_cusd_plus_conversion
+        sync_unified_from_cusd_plus_conversion(conv)
         return StartCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
 
 
@@ -621,6 +623,8 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
                 logging.getLogger(__name__).exception(
                     'movement write failed for conversion %s', conv.internal_id)
         conv.save(update_fields=update)
+        from .unified import sync_unified_from_cusd_plus_conversion
+        sync_unified_from_cusd_plus_conversion(conv)
         return AdvanceCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
 
 
