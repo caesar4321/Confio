@@ -1,8 +1,8 @@
 # Confío: Latin America’s Trusted Digital Dollar Platform
 
-**One application. One network. Dollars that can save, move, and work.**
+**Dollar finance built for Latin America — user-controlled money, distributed through trust.**
 
-Confío is a fully open-source, non-custodial financial application that turns stablecoins and tokenized-asset rails on BNB Smart Chain into a familiar mobile experience for Latin American users.
+Confío is a fully open-source, non-custodial financial application built for Latin America’s dollar reality. It combines local fiat access, yield-bearing dollars, transfers, payments, payroll, and tokenized assets in a familiar mobile experience without requiring users to understand crypto.
 
 **Global reference · Version 4.0 · July 2026**<br>
 Julian Moon · Founder & CEO<br>
@@ -11,12 +11,6 @@ Julian Moon · Founder & CEO<br>
 *Lo tuyo, tuyo. · Blockchain inside. Simple as PayPal.*
 
 **Authoritative original:** This English document is the sole authoritative version of the Confío whitepaper. Translations are provided for convenience and may lag behind this original. If a translation differs from the English text, the English text controls.
-
-## How to read this paper
-
-> **A BNB Smart Chain-native product system**
->
-> Confío uses BNB Smart Chain as the single settlement environment for dollar access, savings, transfers, merchant payments, payroll, tokenized assets, and $CONFIO. One network removes cross-chain friction while the application hides wallets, gas, approvals, and contract calls from everyday users.
 
 This paper is the current global reference for Confío’s product architecture, strategy, operating model, and material risks. Detailed $CONFIO allocation and vesting terms remain in the separate tokenomics document.
 
@@ -57,14 +51,14 @@ Confío’s product system now settles entirely on BNB Smart Chain:
 | --- | --- | --- |
 | USDT | Universal funding, liquidity, and exit rail. | BSC-USDT enters through local and international providers, can be held or transferred directly, and is the input/output asset for cUSD+. |
 | cUSD+ | Primary dollar savings and transaction balance. | USDY-backed accumulating vault shares that can be saved, sent, spent, paid through payroll, or redeemed to USDT. |
-| Ondo Stocks | Eligible tokenized-market access. | Planned in-app purchases and sales settle through Ondo Global Markets on BNB Smart Chain. |
+| Ondo Stocks | Eligible tokenized-market access. | In-app purchases and sales launch in the same application update and settle through Ondo Global Markets on BNB Smart Chain. |
 | $CONFIO | Community and ecosystem token. | Fixed-supply BEP-20 on BNB Smart Chain with a USDT-denominated on-chain presale. It does not back user dollar balances. |
 
 The single-network design is not a generic chain bet. It follows the product’s economic center of gravity: Ondo Finance made its USDY, InstantManager, price oracle, USDT subscription/redemption path, and Global Markets infrastructure available on BNB Smart Chain. Confío then consolidated payments, payroll, transfers, and $CONFIO onto the same network to eliminate chain switching and fragmented liquidity. <sup>[7, 8, 10]</sup>
 
 As of 23 July 2026, Confío records 8,004 users who completed phone verification and 177 users who completed Didit identity verification by submitting a government-issued identity document and capturing a live selfie for liveness and face-matching checks. The Didit flow has a 61.5% completion rate among users who began it. Confío also records 2,094 push-reachable devices, with 2,092 of those devices used within the last 30 days. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
 
-The cUSD+ vault, sponsored-transaction delegate, $CONFIO token, replacement $CONFIO presale vault, merchant-payment contract, and payroll vault are deployed and source-verified on BNB Smart Chain. The contracts are wired into the production application, with runtime controls governing staged user exposure. The cUSD+ vault is registered for Ondo’s permissioned infrastructure and integrates production USDY, USDT, InstantManager, and oracle contracts. <sup>[8, 9]</sup>
+The cUSD+ vault, sponsored-transaction delegate, $CONFIO token, replacement $CONFIO presale vault, $CONFIO reward vault, merchant-payment contract, and payroll vault are deployed and source-verified on BNB Smart Chain. The contracts are wired into the production application, with runtime controls governing staged user exposure. The cUSD+ vault is registered for Ondo’s permissioned infrastructure and integrates production USDY, USDT, InstantManager, and oracle contracts. <sup>[8, 9, 17]</sup>
 
 ## 2. The market thesis
 
@@ -118,17 +112,19 @@ Confío presents one dollar experience while using different assets for differen
 | Run payroll | cUSD+ with optional USDT exit | Businesses fund a cUSD+ escrow; authorized delegates sign payouts, and recipients can receive cUSD+ or USDT. |
 | Buy or sell tokenized assets | Ondo Global Markets | Eligible orders settle through BNB Smart Chain using Ondo’s quote and attestation infrastructure. |
 | Participate in $CONFIO presale | USDT | A sponsored transaction purchases an allocation against an immutable on-chain price curve. |
+| Earn and claim rewards | $CONFIO RewardVault | Eligible rewards are recorded cumulatively off-chain and become claimable through signed on-chain claims after the DEX unlock. |
 
 ### 3.1 Public BNB Smart Chain deployments
 
-All contracts listed below are live on BNB Smart Chain mainnet and source-verified. The replacement presale, merchant-payment, and payroll addresses are configured in the production application.
+All contracts listed below are live on BNB Smart Chain mainnet and source-verified. The replacement presale, reward, merchant-payment, and payroll addresses are configured in the production application.
 
 | Contract | Address |
 | --- | --- |
 | cUSD+ vault proxy | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Sponsored-batch delegate | [`0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C`](https://bscscan.com/address/0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C#code) |
-| $CONFIO token | [`0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`](https://bscscan.com/token/0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1) |
+| $CONFIO token | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
 | $CONFIO presale vault | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
+| $CONFIO reward vault | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | Merchant-payment contract | [`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`](https://bscscan.com/address/0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD#code) |
 | Payroll vault | [`0x664378b2668f320ce3573D0eD6DD154b8C8B3835`](https://bscscan.com/address/0x664378b2668f320ce3573D0eD6DD154b8C8B3835#code) |
 
@@ -224,7 +220,7 @@ Businesses can hold working capital as cUSD+ in a dedicated escrow while it cont
 
 ### 6.4 Ondo Stocks
 
-Confío plans to make eligible Ondo Global Markets products available through the same application. Purchases and sales use Ondo’s quote, attestation, eligibility, and settlement infrastructure. The planned Confío fee is 0.30% on each purchase and sale, shown separately from any cost or spread in the Ondo execution quote and from third-party charges. <sup>[18]</sup>
+The same application update introduces eligible Ondo Global Markets products inside Confío. Purchases and sales use Ondo’s quote, attestation, eligibility, and settlement infrastructure. Confío applies an explicit 0.30% fee to each purchase and sale, shown separately from any cost or spread in the Ondo execution quote and from third-party charges. <sup>[18]</sup>
 
 ## 7. $CONFIO on BNB Smart Chain
 
@@ -232,9 +228,11 @@ $CONFIO is the community and ecosystem token of Confío. It is not a stablecoin,
 
 ### 7.1 Fixed-supply token
 
-The BNB Smart Chain token contract has a fixed total supply of 1,000,000,000 CONFIO. The contract has no owner, no post-deployment mint function, and no pause function; the complete supply was created once at deployment to the multi-party treasury. ERC-20 permit and voluntary burn are the only extensions. <sup>[17]</sup>
+The current BNB Smart Chain token contract has a fixed initial supply of 1,000,000,000 CONFIO. The contract has no owner, no post-deployment mint function, and no pause function; the complete initial supply was created once at deployment to the multi-party treasury. ERC-20 permit and voluntary burn are the only extensions, so total supply can decrease but cannot increase. <sup>[17]</sup>
 
-**BSC contract:** [`0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`](https://bscscan.com/token/0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1)
+**Canonical BSC contract:** [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8)
+
+The on-chain token name is deliberately the ASCII **“Confio”**, while the accented **“Confío”** remains the product and brand name. This avoids inconsistent HTML escaping and rendering of non-ASCII metadata across explorers, wallets, and decentralized exchanges. The canonical contract supersedes the initial accented-name deployment at `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`, which was delisted and had its supply burned before external distribution or presale wiring. Readers should use only the canonical address above. <sup>[17]</sup>
 
 Allocation, founder ownership, vesting, presale rights, and concentration risks are disclosed in the separate authoritative English tokenomics. The founder allocation is a founder allocation; custody in a distribution treasury does not reclassify it as an undefined ecosystem reserve.
 
@@ -251,6 +249,22 @@ The BSC presale vault accepts USDT and prices purchases on an immutable piecewis
 The curve segments have no administrative repricing function. The contract charges the integral under the curve, records the allocation, prevents split-purchase discounts through its pricing math, and opens claims only after sufficient CONFIO funding. Participation remains subject to eligibility, geographic controls, and the presale terms. <sup>[17]</sup>
 
 **Presale contract:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+
+### 7.3 Rewards and DEX-locked claims
+
+Confío’s reward system separates accrual from distribution. When reward accrual is enabled, qualifying activity is recorded in Confío’s database and dollar-denominated rewards are converted into CONFIO at the live on-chain presale-curve price. This avoids maintaining a manual token price and does not move tokens on-chain before the DEX launch.
+
+At claim time, the backend signer issues a short-lived EIP-712 authorization for the user’s cumulative earned amount. The RewardVault subtracts the amount already claimed and pays only the difference, making the cumulative total the replay guard. Short deadlines limit the life of a signature if an entitlement must be corrected downward.
+
+Claims are locked until the DEX launch. Before claims open, the multi-party treasury must fund a CONFIO tranche, the claim-signer and client claim flow must be active, and governance must call the one-way `unlockClaims()` function. User claims can then be submitted through Confío’s sponsored-transaction flow.
+
+> **Treasury-controlled reward pool**
+>
+> The RewardVault is not a trustless escrow. Reward entitlements remain discretionary treasury obligations: its governance owner can rotate the signer, pause claims, and withdraw funds, including after the one-way DEX unlock. Users therefore rely on the treasury to reconcile database obligations, fund the pool, and keep valid claims available. The signer’s exposure is limited operationally by short signature deadlines and by funding the vault in working tranches, but these controls do not remove treasury trust.
+
+**Canonical RewardVault:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
+
+This contract supersedes the earlier attestation-model vault at `0x1766A2Ac798dA2247E5Da6E410453D526FD2f6ab`, which was abandoned empty and never funded. <sup>[17]</sup>
 
 ## 8. Wallet, security, and open-source architecture
 
@@ -328,7 +342,7 @@ Confío aligns revenue with useful financial activity rather than speculative tr
 | Merchant payments | 0.9% flat Confío platform fee, enforced by the payment contract. |
 | Payroll and mass payouts | 0.9% flat Confío platform fee, with fee shares accrued separately from business escrow. |
 | cUSD+ yield share | 15% of positive USDY reference-price appreciation to Confío and 85% to the cUSD+ holder reference value. Yield is variable and not guaranteed. |
-| Ondo Stocks transactions | Planned 0.30% explicit Confío fee on each purchase and sale, separate from the Ondo execution quote and third-party charges. |
+| Ondo Stocks transactions | 0.30% explicit Confío fee on each purchase and sale, separate from the Ondo execution quote and third-party charges. |
 | Fiat-rail economics | Koywe provider pricing and Guardarian revenue-sharing may apply according to the live quote and relevant partner agreement. |
 | Future financial products | Potential fees or revenue share from other eligible RWA, brokerage, card, or business-service partners, subject to separate terms and approvals. |
 
@@ -369,6 +383,7 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 | Fiat rails | Koywe and Guardarian are live; additional providers are named only after capabilities are verified. | Coverage, payment methods, banking dependencies, pricing, and provider availability can change. |
 | Regulatory and financial crime | Government-document/live-selfie checks, residential-address verification where required, provider screening, product geofencing, and legal review. | Verification does not eliminate fraud or illicit-finance risk; providers or authorities may reject, delay, report, or restrict activity. |
 | Token concentration and presale | Fixed supply, public contracts, immutable presale curve, separate tokenomics, and on-chain treasury visibility. | Concentrated founder ownership, vesting, treasury transfers, market liquidity, and token-price volatility remain material risks. |
+| Reward claims | Cumulative EIP-712 claims, replay accounting, short signature deadlines, DEX lock, public contract, and working-tranche funding model. | The treasury can rotate the signer, pause claims, withdraw the pool, or decline to fund database obligations; rewards are not trustless claims on an immutable reserve. |
 | Metrics and concentration | Definitions, snapshot dates, and unaudited status are disclosed. | Early usage or balances may be concentrated and may not predict broad adoption. |
 
 ## 13. Roadmap and current status
@@ -381,7 +396,8 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 | Merchant payments | BSC payment flow and non-upgradeable 0.9% fee-accrual contract deployed, source-verified, and wired into production. | Expand staged user exposure and measure merchant settlement, repeat usage, and fee accrual. |
 | Payroll | cUSD+ escrow, delegate-signed payouts, optional USDT exit, backend/client flows, and payroll vault deployed, source-verified, and wired into production. | Pilot with businesses, expand staged user exposure, and verify escrow and payout reliability at meaningful volume. |
 | $CONFIO | Fixed-supply token and replacement continuous-curve presale vault deployed, source-verified, re-seeded, and wired into production on BSC. | Fund claim obligations before claims open and keep tokenomics disclosures synchronized with on-chain state. |
-| Ondo Stocks | Router design and contract tests implemented around the planned GM flow. | Finalize attestation integration, deploy the router, and launch only for eligible users. |
+| $CONFIO rewards | Canonical RewardVault deployed, source-verified, wired to the canonical token, and locked until DEX launch; database-only accrual uses the live presale-curve price when enabled. | Enable database-only accrual when operationally ready; at DEX time, fund a working tranche, activate the short-deadline EIP-712 signer and sponsored client claim flow, and unlock claims. |
+| Ondo Stocks | Included in the same BSC application release, with in-app purchase and sale flows built around Ondo’s quote, attestation, eligibility, and settlement infrastructure. | Release to eligible users and measure execution reliability, transaction volume, and repeat use. |
 | Fiat access | Koywe live across seven LATAM markets; Guardarian live for SEPA and card-based access. | Add verified providers and fallback routes without creating hidden dependencies. |
 | Distribution | 8,004 phone-complete users; 177 Didit-verified users; approximately 480,000 founder audience; effectively zero paid-media spend to date. | Convert distribution into funded users, retained balances, repeat transactions, referrals, and country-level cohorts. |
 
@@ -405,7 +421,7 @@ USDT and cUSD+ are not bank deposits and are not insured by a deposit-insurance 
 
 Any cUSD+ yield is variable, depends on USDY and the vault, and is not guaranteed. USDY access and cUSD+ minting are subject to Ondo eligibility, compliance conditions, provider availability, and applicable law.
 
-Ondo Stocks are tokenized financial products rather than direct Confío-issued shares. Availability, execution, transferability, redemption, economic rights, and geographic eligibility are governed by Ondo’s product terms, execution quotes, provider conditions, and applicable law. They are not available to U.S. persons through the contemplated product flow.
+Ondo Stocks are tokenized financial products rather than direct Confío-issued shares. Availability, execution, transferability, redemption, economic rights, and geographic eligibility are governed by Ondo’s product terms, execution quotes, provider conditions, and applicable law. They are not available to U.S. persons through the Confío product flow.
 
 $CONFIO is separate from USDT, cUSD+, USDY, and Ondo Stocks. It does not provide a claim on the backing, revenue, equity, assets, or profits of Confío unless definitive terms expressly state otherwise. Token purchasers should review the separate tokenomics, presale terms, smart contracts, vesting state, treasury concentration, and applicable law.
 
@@ -445,7 +461,7 @@ Readers should review definitive product terms, risk disclosures, smart contract
 
 16. Benedetto Biondi, “The New Face Of Global Payments: Onchain Consumer Finance Apps,” *Forbes Technology Council*, 6 July 2026. https://www.forbes.com/councils/forbestechcouncil/2026/07/06/the-new-face-of-global-payments-onchain-consumer-finance-apps/
 
-17. Confío BSC contracts and deployment record: `ConfioToken.sol`, `ConfioPresaleVault.sol`, `ConfioBatchDelegate.sol`, and verified deployment addresses. https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus
+17. Confío BSC contracts and deployment record: `ConfioToken.sol`, `ConfioPresaleVault.sol`, `ConfioRewardVault.sol`, `ConfioBatchDelegate.sol`, and verified deployment addresses. https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus and https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
 
 18. Ondo Finance, “Ondo Stocks” and Global Markets API documentation, accessed July 2026. https://ondo.finance/ondo-stocks and https://docs.ondo.finance/api-reference/quickstart
 
