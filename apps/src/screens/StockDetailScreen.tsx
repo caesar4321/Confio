@@ -34,6 +34,7 @@ import {
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'StockDetail'>;
@@ -182,37 +183,53 @@ export const StockDetailScreen = () => {
           </View>
         )}
 
-        {/* CTAs + funding line (sweep model made visible) */}
-        <View style={styles.ctaRow}>
-          <TouchableOpacity
-            style={[styles.ctaBuy, tradability === 'closed' && styles.ctaDisabled]}
-            onPress={onComprar}
-            disabled={tradability === 'closed'}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.ctaBuyText}>Comprar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.ctaSell, (!position || tradability === 'closed') && styles.ctaDisabled]}
-            onPress={onVender}
-            disabled={!position || tradability === 'closed'}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.ctaSellText, !position && styles.ctaDisabledText]}>Vender</Text>
-          </TouchableOpacity>
-        </View>
-        {/* Funding instrument, payment-method style (sweep model at a
-            glance): stocks trade against your savings, amounts stay in $. */}
-        <View style={styles.fundingSource}>
-          <Image source={cUSDPlusLogo} style={styles.fundingLogo} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.fundingTitle}>Se compra y se vende con tu ahorro</Text>
-            <Text style={styles.fundingSub}>
-              Confío Dollar+ · ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })}{' '}
-              disponibles · gana rendimiento hasta el momento de la compra
-            </Text>
+        {/* CTAs + funding line (sweep model made visible). Trading entry
+            is client-gated until the execution layer is real — never show
+            a buy button that can't actually buy. */}
+        {STOCKS_TRADING_UI_ENABLED ? (
+          <>
+            <View style={styles.ctaRow}>
+              <TouchableOpacity
+                style={[styles.ctaBuy, tradability === 'closed' && styles.ctaDisabled]}
+                onPress={onComprar}
+                disabled={tradability === 'closed'}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.ctaBuyText}>Comprar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ctaSell, (!position || tradability === 'closed') && styles.ctaDisabled]}
+                onPress={onVender}
+                disabled={!position || tradability === 'closed'}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.ctaSellText, !position && styles.ctaDisabledText]}>Vender</Text>
+              </TouchableOpacity>
+            </View>
+            {/* Funding instrument, payment-method style (sweep model at a
+                glance): stocks trade against your savings, amounts stay in $. */}
+            <View style={styles.fundingSource}>
+              <Image source={cUSDPlusLogo} style={styles.fundingLogo} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fundingTitle}>Se compra y se vende con tu ahorro</Text>
+                <Text style={styles.fundingSub}>
+                  Confío Dollar+ · ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })}{' '}
+                  disponibles · gana rendimiento hasta el momento de la compra
+                </Text>
+              </View>
+            </View>
+          </>
+        ) : (
+          <View style={styles.comingSoon}>
+            <Icon name="clock" size={16} color={colors.primaryDark} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.comingSoonTitle}>Muy pronto</Text>
+              <Text style={styles.comingSoonText}>
+                Podrás comprar y vender acciones directamente desde tu ahorro.
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* How it works */}
         <View style={styles.card}>
@@ -314,6 +331,18 @@ const styles = StyleSheet.create({
   fundingLogo: { width: 30, height: 30, borderRadius: 15 },
   fundingTitle: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
   fundingSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
+
+  comingSoon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  comingSoonTitle: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
+  comingSoonText: { fontSize: 12, color: colors.text.secondary, marginTop: 1, lineHeight: 17 },
 
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 10 },
   howText: { flex: 1, fontSize: 13, color: colors.text.secondary, lineHeight: 18 },

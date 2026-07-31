@@ -38,7 +38,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
-import { CUSD_CONVERSION_UI_ENABLED } from '../config/features';
+import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config/features';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -92,10 +92,15 @@ export const BuyStockScreen = () => {
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-  if (!stock) {
+  // Hard guard: onConfirm below is still a happy-path stub, so this screen
+  // must be unreachable (StockDetail hides the entry) AND self-defending —
+  // a deep link or future nav regression must never fake a purchase.
+  if (!STOCKS_TRADING_UI_ENABLED || !stock) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: colors.text.secondary }}>Acción no encontrada</Text>
+        <Text style={{ color: colors.text.secondary, textAlign: 'center', paddingHorizontal: 32 }}>
+          {stock ? 'Muy pronto podrás comprar acciones desde tu ahorro.' : 'Acción no encontrada'}
+        </Text>
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
           <Text style={{ color: colors.primaryDark, fontWeight: '600' }}>Volver</Text>
         </TouchableOpacity>

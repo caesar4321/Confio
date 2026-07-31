@@ -36,6 +36,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type SellRoute = RouteProp<MainStackParamList, 'SellStock'>;
@@ -83,10 +84,15 @@ export const SellStockScreen = () => {
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-  if (!stock) {
+  // Hard guard: onConfirm below is still a happy-path stub, so this screen
+  // must be unreachable (StockDetail hides the entry) AND self-defending —
+  // a deep link or future nav regression must never fake a sale.
+  if (!STOCKS_TRADING_UI_ENABLED || !stock) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: colors.text.secondary }}>Acción no encontrada</Text>
+        <Text style={{ color: colors.text.secondary, textAlign: 'center', paddingHorizontal: 32 }}>
+          {stock ? 'Muy pronto podrás vender acciones desde la app.' : 'Acción no encontrada'}
+        </Text>
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
           <Text style={{ color: colors.primaryDark, fontWeight: '600' }}>Volver</Text>
         </TouchableOpacity>
