@@ -24,6 +24,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CusdPlusVault} from "../CusdPlusVault.sol";
+import {ConfioBatchDelegate} from "../ConfioBatchDelegate.sol";
 
 contract UpgradeRehearsalV5ForkTest is Test {
     address constant PROXY = 0x3C29417eb4314155e63d4C7D4507852b87763Ed1;
@@ -128,6 +129,48 @@ contract UpgradeRehearsalV5ForkTest is Test {
         assertGt(out, 0, "exit works with the relay dark");
         assertEq(IERC20(USDT).balanceOf(holder), beforeUsdt + out);
         assertEq(v.balanceOf(holder), 0);
+    }
+
+    /// The PRODUCTION call shape, not a pranked boundary (audit [P3]): a
+    /// real ConfioBatchDelegate batch — [approve, subscribeAndMint] —
+    /// signed by the user and broadcast by the KMS sponsor, executed
+    /// against the upgraded live proxy. Delegation modeled with vm.etch,
+    /// per the existing delegate fork tests.
+    function test_fork_realDelegateBatchMintsAndPinsRecipient() public {
+        if (!_forked()) return;
+        CusdPlusVault v = CusdPlusVault(PROXY);
+        _upgrade(v);
+
+        (address u, uint256 pk) = makeAddrAndKey("v5-batch-user");
+        vm.etch(u, address(new ConfioBatchDelegate()).code);
+        deal(USDT, u, 1_000e18);
+
+        // Honest batch: mint to SELF.
+        ConfioBatchDelegate.Call[] memory calls = new ConfioBatchDelegate.Call[](2);
+        calls[0] = ConfioBatchDelegate.Call({
+            to: USDT, value: 0,
+            data: abi.encodeWithSignature("approve(address,uint256)", PROXY, type(uint256).max)});
+        calls[1] = ConfioBatchDelegate.Call({
+            to: PROXY, value: 0,
+            data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, u))});
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 sv, bytes32 sr, bytes32 ss) =
+            vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(calls, 0, deadline));
+        vm.prank(SAFE, KMS); // sponsor broadcasts
+        ConfioBatchDelegate(payable(u)).execute(calls, 0, deadline, abi.encodePacked(sr, ss, sv));
+        assertGt(v.balanceOf(u), 0, "relayed batch minted to the user");
+
+        // Hostile batch: same sponsored origin, mint to a third party.
+        address thirdParty = makeAddr("v5-ineligible");
+        ConfioBatchDelegate.Call[] memory bad = new ConfioBatchDelegate.Call[](1);
+        bad[0] = ConfioBatchDelegate.Call({
+            to: PROXY, value: 0,
+            data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, thirdParty))});
+        (sv, sr, ss) = vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(bad, 1, deadline));
+        vm.prank(SAFE, KMS);
+        vm.expectRevert(); // delegate bubbles "recipient not caller"
+        ConfioBatchDelegate(payable(u)).execute(bad, 1, deadline, abi.encodePacked(sr, ss, sv));
+        assertEq(v.balanceOf(thirdParty), 0, "no third-party issuance");
     }
 
     /// Secondary acquisition stays open — only PRIMARY issuance is gated.

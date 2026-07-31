@@ -76,6 +76,23 @@ contract TwoFacedOracle is IRWADynamicOracle {
     }
 }
 
+/// Stands in for any contract reached during a sponsored batch: it holds
+/// its own USDT and tries to mint using the ambient sponsored tx.origin.
+contract MintForwarder {
+    CusdPlusVault immutable vault;
+    MockToken immutable usdt;
+
+    constructor(CusdPlusVault v, MockToken u) {
+        vault = v;
+        usdt = u;
+        u.approve(address(v), type(uint256).max);
+    }
+
+    function mintTo(uint256 amount, address recipient) external returns (uint256) {
+        return vault.subscribeAndMint(amount, 0, recipient);
+    }
+}
+
 contract BrickedVault is CusdPlusVault {
     constructor(address a, address b, address c, address d, uint256 e)
         CusdPlusVault(a, b, c, d, e) {}
@@ -191,6 +208,55 @@ contract CusdPlusVaultTest is Test {
         assertGt(out, 0);
         assertEq(vault.balanceOf(holder), 0);
         assertEq(usdt.balanceOf(holder), out);
+    }
+
+    /// [P2] tx.origin proves a sponsor was somewhere above the call — NOT
+    /// that it approved this recipient. A sponsored transaction may only
+    /// mint to its own caller.
+    function test_sponsored_tx_cannot_mint_to_a_third_party() public {
+        address kms = makeAddr("kms4");
+        address thirdParty = makeAddr("ineligibleThirdParty");
+        vm.prank(treasury);
+        vault.setSponsor(kms, true);
+
+        usdt.mint(user, 1_000e18);
+        vm.prank(user, kms); // sponsor IS in the tx — gate 1 passes
+        vm.expectRevert("recipient not caller");
+        vault.subscribeAndMint(100e18, 0, thirdParty);
+    }
+
+    /// The same protection against a hostile contract that gets called
+    /// inside a sponsored batch and inherits the sponsored tx.origin.
+    function test_contract_in_sponsored_batch_cannot_mint_to_others() public {
+        address kms = makeAddr("kms5");
+        vm.prank(treasury);
+        vault.setSponsor(kms, true);
+        MintForwarder evil = new MintForwarder(vault, usdt);
+        usdt.mint(address(evil), 1_000e18);
+
+        // Riding a sponsored origin, it still cannot credit anyone else...
+        vm.prank(user, kms);
+        vm.expectRevert("recipient not caller");
+        evil.mintTo(100e18, makeAddr("someoneElse"));
+
+        // ...only itself, with its own money.
+        vm.prank(user, kms);
+        evil.mintTo(100e18, address(evil));
+        assertEq(vault.balanceOf(address(evil)), 100e18);
+    }
+
+    /// A registered relay (ConfioStockRouter) is exempt — it mints to the
+    /// user it settles for. That exemption is why the set must stay small.
+    function test_registered_relay_may_mint_for_someone_else() public {
+        MintForwarder relay = new MintForwarder(vault, usdt);
+        usdt.mint(address(relay), 1_000e18);
+        vm.prank(treasury);
+        vault.setSponsor(address(relay), true);
+
+        address beneficiary = makeAddr("beneficiary");
+        vm.prank(user, user); // no sponsor origin needed: relay is one
+        relay.mintTo(100e18, beneficiary);
+        assertEq(vault.balanceOf(beneficiary), 100e18);
     }
 
     function test_sponsor_rotation_and_owner_only() public {

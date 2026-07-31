@@ -195,7 +195,18 @@ contract CusdPlusVault is
     /// IP checks. Deliberately narrow — this touches primary issuance
     /// ONLY. Secondary transfers stay open (acquiring cUSD+ from another
     /// holder is compliant), and `redeemToUsdt`, the sole holder exit,
-    /// stays permissionless so an exit never depends on Confío being up.
+    /// stays permissionless so an exit never depends on Confío's RELAY
+    /// being up.
+    ///
+    /// Be precise about what that does and does not promise (audit
+    /// 2026-07-31 [P1]): emptying the sponsor set cannot touch redemption,
+    /// but the OWNER still can — `redeemToUsdt` is `whenNotPaused`, a
+    /// frozen holder cannot burn, and UUPS authority could replace the
+    /// logic outright. Those powers are deliberate (oracle/IM emergencies,
+    /// Ondo dependency migration) and predate this gate. The guarantee
+    /// here is narrow and honest: SPONSOR ROTATION CANNOT AFFECT EXITS.
+    /// It is not "exit is guaranteed against a hostile owner" — that would
+    /// require an immutable exit path plus an oracle/IM failure fallback.
     ///
     /// APPENDED after `guardedOraclePrice` — layout above must stay
     /// byte-identical to the live proxy's.
@@ -416,6 +427,15 @@ contract CusdPlusVault is
     {
         // Primary issuance is gated; exits never are (see isSponsor).
         require(isSponsor[msg.sender] || isSponsor[tx.origin], "not sponsored");
+        // AND the mint must land on the caller. `tx.origin` alone proves
+        // only that a sponsor appeared somewhere above this call — not that
+        // it approved THIS recipient (audit 2026-07-31 [P2]). Without this,
+        // any contract reached during a sponsored batch inherits the
+        // sponsored origin and could mint to an arbitrary third party.
+        // Registered relays are exempt because they mint on behalf of the
+        // user they are settling for (ConfioStockRouter.sellToSavings) —
+        // such a relay MUST be added via setSponsor when deployed.
+        require(recipient == msg.sender || isSponsor[msg.sender], "recipient not caller");
         require(usdtIn > 0, "zero in");
         accrue();
         // AFTER accrue(), so a staged anomaly is caught in this same call.
@@ -548,7 +568,10 @@ contract CusdPlusVault is
 
     /// Rotate the relayers allowed to originate a mint. The owner Safe can
     /// add itself here if it ever needs to mint through the USDT path
-    /// (`depositAndMint` covers the raw-USDY path already).
+    /// (`depositAndMint` covers the raw-USDY path already). Registering an
+    /// address here also lets it mint TO SOMEONE ELSE, so it is exactly the
+    /// set of contracts/keys trusted to pick a recipient — keep it minimal
+    /// (today: the KMS sponsor; later: ConfioStockRouter).
     function setSponsor(address sponsor, bool allowed) external onlyOwner {
         require(sponsor != address(0), "zero sponsor");
         isSponsor[sponsor] = allowed;

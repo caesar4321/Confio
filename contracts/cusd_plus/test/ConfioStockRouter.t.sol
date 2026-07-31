@@ -76,6 +76,12 @@ contract ConfioStockRouterTest is Test {
         router = new ConfioStockRouter(
             address(vault), address(usdt), address(gm), feeTreasury, treasury
         );
+        // sellToSavings mints TO THE USER while the router is msg.sender,
+        // so the router must be a registered relay (2026-07-31 gate). This
+        // is a DEPLOYMENT REQUIREMENT: setSponsor(router, true) or every
+        // sell-into-savings reverts "recipient not caller".
+        vm.prank(treasury);
+        vault.setSponsor(address(router), true);
         vm.prank(treasury);
         router.setStockFeeBps(30); // launch-config placeholder for tests only
 
