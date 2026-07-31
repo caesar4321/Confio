@@ -131,7 +131,7 @@ export const ProtectedSavingsScreen = () => {
             <View style={styles.heroStatPill}>
               <Icon name="trending-up" size={14} color={colors.primary} />
               <Text style={styles.heroStatText}>
-                US${usdyLabel} en USDY
+                US${usdyLabel} en USDY en reserva
               </Text>
             </View>
           </View>
