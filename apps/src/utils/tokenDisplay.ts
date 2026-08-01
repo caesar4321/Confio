@@ -78,6 +78,34 @@ export const isConversionIncoming = (conversionType?: string | null): boolean =>
   return key === 'usdc_to_cusd' || key === 'to_savings';
 };
 
+/**
+ * Which token a "send this person money back" action should preselect, given
+ * the currency of the transaction being viewed.
+ *
+ * The route only accepts the three the user can CHOOSE — there is no 'usdt'
+ * send, because a cUSD+ send is a dollar-value send and the server picks the
+ * rail (transfer vs redeem-to-USDT) from the recipient. So a USDT receipt maps
+ * to 'cusd_plus'. Call sites used to guess `=== 'cusd' ? 'cusd' : 'confio'`,
+ * which offered to send CONFIO after receiving dollars.
+ */
+export type SendTokenParam = 'cusd' | 'confio' | 'cusd_plus';
+
+export const sendTokenParamFor = (currency?: string | null): SendTokenParam => {
+  switch (formatTokenLabel(currency).toUpperCase()) {
+    case 'CONFIO':
+      return 'confio';
+    case 'CUSD':
+      return 'cusd';
+    case 'CUSD+':
+    case 'USDT':
+      return 'cusd_plus';
+    default:
+      // Unknown/absent: the primary dollar is the safe default — never CONFIO,
+      // which is a governance token and not what anyone just received.
+      return 'cusd_plus';
+  }
+};
+
 /** Tokens that settle on BNB Smart Chain rather than Algorand. */
 const BSC_TOKENS = new Set(['CUSD_PLUS', 'CUSD+', 'USDT']);
 

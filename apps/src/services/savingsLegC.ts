@@ -50,15 +50,33 @@ const usdToWei = (usd: number): bigint =>
 
 let running = false;
 
+// "Is a mint in flight" is MODULE state, not per-screen state. Several
+// surfaces mount the resume (Home and the savings account), and `running`
+// means only the first caller does the work — so a per-caller callback would
+// light the spinner on whichever screen happened to win the race, which may
+// not be the one the user is looking at. Every subscriber sees the same flag.
+type MintingListener = (minting: boolean) => void;
+const mintingListeners = new Set<MintingListener>();
+let mintingNow = false;
+
+const setMinting = (value: boolean): void => {
+  mintingNow = value;
+  mintingListeners.forEach(fn => fn(value));
+};
+
+/** Subscribe to mint-in-flight changes; fires immediately with current state. */
+export const subscribeSavingsMinting = (fn: MintingListener): (() => void) => {
+  mintingListeners.add(fn);
+  fn(mintingNow);
+  return () => { mintingListeners.delete(fn); };
+};
+
 /**
  * Finish any conversion whose bridge USDT has arrived (DEST_ARRIVED) by
  * minting cUSD+. Safe to call on every foreground; self-guards against
  * concurrent runs. Requires the vault address (from server config).
  */
-export const resumeSavingsMints = async (
-  vaultAddress: string,
-  opts?: { onMintingChange?: (minting: boolean) => void },
-): Promise<void> => {
+export const resumeSavingsMints = async (vaultAddress: string): Promise<void> => {
   if (running || !vaultAddress) return;
   running = true;
   let announced = false;
@@ -85,7 +103,7 @@ export const resumeSavingsMints = async (
     // foreground, and flashing a modal on the empty case would be noise.
     if (rows.length) {
       announced = true;
-      opts?.onMintingChange?.(true);
+      setMinting(true);
     }
     for (const row of rows) {
       try {
@@ -111,6 +129,6 @@ export const resumeSavingsMints = async (
     running = false;
     // Always clear, including on the query-failure path above — a modal that
     // outlives its work is worse than no modal.
-    if (announced) opts?.onMintingChange?.(false);
+    if (announced) setMinting(false);
   }
 };

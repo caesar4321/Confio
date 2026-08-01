@@ -63,6 +63,7 @@ import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import { useBnbAutoConvert } from '../hooks/useBnbAutoConvert';
+import { useSavingsResume } from '../hooks/useSavingsResume';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
@@ -208,6 +209,11 @@ export const HomeScreen = () => {
   // BSC mirror of the auto-swap: sweep mis-deposited BNB → USDT (silent,
   // server-gated; no-op until CUSD_PLUS_BNB_AUTOCONVERT_ENABLED flips on).
   useBnbAutoConvert(isAuthenticated);
+
+  // Finish any cUSD+ mint whose USDT already arrived. Home carries it for the
+  // same reason it carries the USDC→cUSD auto-swap: this is where users land,
+  // and a deposit shouldn't wait for them to open the savings account.
+  const { mintingSavings } = useSavingsResume(isAuthenticated);
 
   // Use the auto-swap hook for both ALGO and USDC detection
   const { swapModalAsset, walletRecoveryRequired, dismissWalletRecovery } = useAutoSwap({
@@ -1840,9 +1846,11 @@ export const HomeScreen = () => {
         onClose={() => setShowDeferredReferralSuccess(false)}
       />
 
+      {/* The Algorand auto-swaps take priority: they carry the
+          wallet-recovery mode. The savings mint reuses the same spinner. */}
       <AutoSwapModal
-        visible={swapModalAsset !== null || walletRecoveryRequired}
-        assetType={swapModalAsset}
+        visible={swapModalAsset !== null || walletRecoveryRequired || mintingSavings}
+        assetType={swapModalAsset ?? (mintingSavings ? 'USDT' : null)}
         mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
         onClose={dismissWalletRecovery}
       />

@@ -6,10 +6,10 @@
 // (SavingsScreen) — scoped to when the user is in the savings context, not a
 // global listener.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { gql, useQuery } from '@apollo/client';
-import { resumeSavingsMints } from '../services/savingsLegC';
+import { resumeSavingsMints, subscribeSavingsMinting } from '../services/savingsLegC';
 
 const VAULT_ADDRESS = gql`
   query CusdPlusVaultAddress {
@@ -31,32 +31,25 @@ export const useSavingsResume = (enabled: boolean = true): { mintingSavings: boo
   const vaultAddress: string | undefined = data?.cusdPlusConvertParams?.vaultAddress;
   const appState = useRef(AppState.currentState);
   const [mintingSavings, setMintingSavings] = useState(false);
-  const mounted = useRef(true);
 
-  // Guarded so a resume that finishes after navigation can't set state on an
-  // unmounted screen.
-  const onMintingChange = useCallback((minting: boolean) => {
-    if (mounted.current) setMintingSavings(minting);
-  }, []);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
+  // Shared module state, so every mounted surface shows the spinner even when
+  // a different one won the race to actually run the mint. Unsubscribing on
+  // unmount is what keeps a late finish from touching a dead screen.
+  useEffect(() => subscribeSavingsMinting(setMintingSavings), []);
 
   useEffect(() => {
     if (!vaultAddress || !enabled) return;
     // Run once on mount (covers the case where the app was already active).
-    resumeSavingsMints(vaultAddress, { onMintingChange });
+    resumeSavingsMints(vaultAddress);
 
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && next === 'active') {
-        resumeSavingsMints(vaultAddress, { onMintingChange });
+        resumeSavingsMints(vaultAddress);
       }
       appState.current = next;
     });
     return () => sub.remove();
-  }, [vaultAddress, enabled, onMintingChange]);
+  }, [vaultAddress, enabled]);
 
   return { mintingSavings };
 };

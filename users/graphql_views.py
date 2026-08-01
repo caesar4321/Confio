@@ -1,6 +1,19 @@
 import graphene
 from graphene_django import DjangoObjectType
 from .models_unified import UnifiedTransactionTable
+
+
+def _visible_unified():
+    """Ledger rows the app may show.
+
+    `deleted_at` has always existed on the model but NO reader honored it, so
+    31 rows soft-deleted on purpose (30 FAILED legacy USDC conversions, plus a
+    cUSD+ conversion created for a geo-ineligible holder that could never
+    complete) kept rendering as live movements. Every read resolver goes
+    through here; writers keep using the plain manager so the sync path still
+    sees deleted rows and cannot duplicate them.
+    """
+    return UnifiedTransactionTable.objects.filter(deleted_at__isnull=True)
 from django.db.models import Q
 
 
@@ -401,7 +414,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Base query - all transactions involving this account
         if account.account_type == 'business' and account.business:
             # For business accounts, filter by business relationships
-            queryset = UnifiedTransactionTable.objects.select_related(
+            queryset = _visible_unified().select_related(
                 'send_transaction', 
                 'payment_transaction', 
                 'conversion', 
@@ -421,7 +434,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             # Include:
             # 1. Personal-to-personal transactions (no business involved)
             # 2. Payroll transactions where user is the recipient
-            queryset = UnifiedTransactionTable.objects.select_related(
+            queryset = _visible_unified().select_related(
                 'send_transaction', 
                 'payment_transaction', 
                 'conversion', 
@@ -525,7 +538,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             from users.models import Business
             business = Business.objects.get(id=business_id)
             print(f"Transaction resolver - Filtering transactions for business id={business.id}, name={business.name}")
-            queryset = UnifiedTransactionTable.objects.filter(
+            queryset = _visible_unified().filter(
                 Q(sender_business=business) | 
                 Q(counterparty_business=business)
             )
@@ -534,7 +547,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             # Include:
             # 1. Personal-to-personal transactions (no business involved)
             # 2. Payroll transactions where user is the recipient
-            queryset = UnifiedTransactionTable.objects.filter(
+            queryset = _visible_unified().filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 
@@ -644,7 +657,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             from users.models import Business
             business = Business.objects.get(id=business_id)
             print(f"Friend transactions resolver - Filtering transactions for business id={business.id}, name={business.name}")
-            queryset = UnifiedTransactionTable.objects.filter(
+            queryset = _visible_unified().filter(
                 Q(sender_business=business) | 
                 Q(counterparty_business=business)
             )
@@ -653,7 +666,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             # Include:
             # 1. Personal-to-personal transactions (no business involved)
             # 2. Payroll transactions where user is the recipient
-            queryset = UnifiedTransactionTable.objects.filter(
+            queryset = _visible_unified().filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 

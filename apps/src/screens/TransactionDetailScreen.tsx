@@ -44,7 +44,7 @@ import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
-import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
+import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming, sendTokenParamFor } from '../utils/tokenDisplay';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -2283,7 +2283,7 @@ export const TransactionDetailScreen = () => {
 
                       navigation.navigate('SendToFriend', {
                         friend: friendData,
-                        tokenType: currentTx.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio'
+                        tokenType: sendTokenParamFor(currentTx.currency)
                       });
                     }
                   }}

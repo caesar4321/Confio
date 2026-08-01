@@ -21,6 +21,8 @@ import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery } from '@apollo/client';
 import { GET_UNIFIED_TRANSACTIONS_WITH_FRIEND, GET_ME } from '../apollo/queries';
@@ -146,6 +148,12 @@ export function FriendDetailScreen() {
 
   // State management
   const [showTokenSelection, setShowTokenSelection] = useState(false);
+  // Gating for the send sheet, identical to ContactsScreen: the cUSD+ option
+  // is an EXIT and stays visible whenever the user holds anything.
+  const { savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd } = useSavingsPortfolio();
+  const cusdDepositsPaused = savingsInfo.cusdDepositsPaused;
+  const savingsExitVisible =
+    savingsInfo.enabled || savingsInfo.balanceUsd > 0 || walletUsdtUsd > 0;
   const [refreshing, setRefreshing] = useState(false);
   const [transactionLimit, setTransactionLimit] = useState(20);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -435,7 +443,7 @@ export function FriendDetailScreen() {
     setShowTokenSelection(true);
   }, []);
 
-  const handleTokenSelect = useCallback((tokenType: 'cusd' | 'confio') => {
+  const handleTokenSelect = useCallback((tokenType: 'cusd' | 'confio' | 'cusd_plus') => {
     setShowTokenSelection(false);
     
     // Get the active account's Algorand address from the user data
@@ -739,11 +747,23 @@ export function FriendDetailScreen() {
         title="¿Qué moneda quieres enviar?"
         onClose={() => setShowTokenSelection(false)}
         options={[
+          // Same option set, gating and copy as the Contacts sheet the Enviar
+          // button on Home/AccountDetail leads to — this screen offers the
+          // same action and must not disagree about which dollars exist.
+          ...(savingsExitVisible && friend.isOnConfio !== false ? [{
+            icon: 'dollar-sign',
+            image: cUSDPlusLogo,
+            title: 'Confío Dollar+ · $cUSD+',
+            subtitle: 'Tu dólar principal · llega al instante',
+            onPress: () => handleTokenSelect('cusd_plus'),
+          }] : []),
           {
             icon: 'dollar-sign',
             image: cUSDLogo,
-            title: 'Confío Dollar · $cUSD',
-            subtitle: 'Moneda estable para pagos diarios',
+            title: cusdDepositsPaused
+              ? 'Antiguo Confío Dollar · $cUSD'
+              : 'Confío Dollar · $cUSD',
+            subtitle: 'Red Algorand',
             onPress: () => handleTokenSelect('cusd'),
           },
           {

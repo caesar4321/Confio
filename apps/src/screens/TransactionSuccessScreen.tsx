@@ -15,7 +15,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
-import { formatTokenAmount, formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
+import { formatTokenAmount, formatTokenLabel, explorerFor, sendTokenParamFor } from '../utils/tokenDisplay';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -117,7 +117,7 @@ export const TransactionSuccessScreen = () => {
 
         (navigation as any).navigate('SendToFriend', {
           friend: friendData,
-          tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio' // Use same currency as original transaction
+          tokenType: sendTokenParamFor(transactionData.currency) // same dollar the user just moved
         });
       }
     }
