@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native'
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import { technicalFontFamily } from '../utils/fontFamily';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 export interface TransactionReceiptViewProps {
     type: 'payroll' | 'payment' | 'transfer';
@@ -105,7 +106,7 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
             {/* Amount Card */}
             <View style={styles.amountCard}>
                 <Text style={styles.amountLabel}>Monto</Text>
-                <Text style={styles.amountValue}>{amount} {currency}</Text>
+                <Text style={styles.amountValue}>{amount} {formatTokenLabel(currency)}</Text>
                 <Text style={styles.amountDate}>{formatDate(date)}</Text>
             </View>
 

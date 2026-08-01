@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 interface PayrollRunReceiptViewProps {
   businessName: string;
@@ -129,7 +130,7 @@ export const PayrollRunReceiptView: React.FC<PayrollRunReceiptViewProps> = ({
       {/* Summary Card */}
       <View style={styles.summaryCard}>
         <Text style={styles.summaryLabel}>Total pagado</Text>
-        <Text style={styles.summaryValue}>{totalAmount} {currency}</Text>
+        <Text style={styles.summaryValue}>{totalAmount} {formatTokenLabel(currency)}</Text>
         <View style={styles.summaryStats}>
           <View style={styles.statItem}>
             <Icon name="users" size={16} color="#10B981" />
@@ -162,7 +163,7 @@ export const PayrollRunReceiptView: React.FC<PayrollRunReceiptViewProps> = ({
                 </View>
                 <View style={styles.employeeAmount}>
                   <Text style={styles.employeeAmountValue}>{emp.amount}</Text>
-                  <Text style={styles.employeeAmountCurrency}>{currency}</Text>
+                  <Text style={styles.employeeAmountCurrency}>{formatTokenLabel(currency)}</Text>
                 </View>
               </View>
             );

@@ -20,6 +20,7 @@ import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { APP_LAYOUT } from '../config/layout';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TransactionReceipt'>;
 type RouteProps = RouteProp<MainStackParamList, 'TransactionReceipt'>;
@@ -172,7 +173,11 @@ export const TransactionReceiptScreen = () => {
   }
 
   const amount = (transaction.amount || '0.00').replace(/^[+-]\s*/, '').replace('cUSD', '').trim();
-  const currency = transaction.currency || transaction.tokenType || 'cUSD';
+  // Format ONCE at the source: this value feeds the receipt view, the
+  // share message and the saved image, and a raw wire value (CUSD_PLUS)
+  // leaking into any of them is the same bug in three places.
+  const currency = formatTokenLabel(
+    transaction.currency || transaction.tokenType || 'cUSD');
   const date = transaction.date || transaction.executedAt || transaction.createdAt || new Date().toISOString();
   const transactionHash = transaction.hash || transaction.transactionHash || '';
   // FIX: Strictly use verificationId or internal id. NEVER use transaction hash for verification.
