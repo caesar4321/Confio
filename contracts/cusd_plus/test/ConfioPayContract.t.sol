@@ -13,6 +13,7 @@ contract MockToken is ERC20 {
 contract ConfioPayContractTest is Test {
     MockToken cusdPlus;
     MockToken usdt;
+    MockToken confio;
     MockToken alien;
     ConfioPayContract pay;
 
@@ -35,12 +36,14 @@ contract ConfioPayContractTest is Test {
     function setUp() public {
         cusdPlus = new MockToken("cUSD+");
         usdt = new MockToken("USDT");
+        confio = new MockToken("CONFIO");
         alien = new MockToken("ALIEN");
-        pay = new ConfioPayContract(address(cusdPlus), address(usdt), paymentSigner, safeOwner);
+        pay = new ConfioPayContract(
+            address(cusdPlus), address(usdt), address(confio), paymentSigner, safeOwner);
         deadline = block.timestamp + 3600;
 
-        for (uint256 i = 0; i < 3; i++) {
-            MockToken t = [cusdPlus, usdt, alien][i];
+        for (uint256 i = 0; i < 4; i++) {
+            MockToken t = [cusdPlus, usdt, confio, alien][i];
             t.mint(payer, 1_000e18);
             vm.prank(payer);
             t.approve(address(pay), type(uint256).max);
@@ -107,6 +110,19 @@ contract ConfioPayContractTest is Test {
         assertEq(cusdPlus.balanceOf(merchant), 5 * WAD - fee);
         assertEq(pay.accruedFees(address(cusdPlus)), fee);
         assertEq(pay.accruedFees(address(usdt)), 0, "per-token accounting");
+    }
+
+    /// The second charge denomination (2026-08-01): a CONFIO invoice is a
+    /// token COUNT, but settles through the identical fee/guard path.
+    function test_pay_confio_token() public {
+        bytes memory sig = _sig("inv-confio", address(confio), 250 * WAD, merchant);
+        vm.prank(payer);
+        uint256 fee = pay.pay("inv-confio", address(confio), 250 * WAD, merchant, deadline, sig);
+        assertEq(fee, pay.feeFor(250 * WAD), "same 0.9% ceiling rule");
+        assertEq(confio.balanceOf(merchant), 250 * WAD - fee);
+        assertEq(pay.accruedFees(address(confio)), fee);
+        assertEq(pay.accruedFees(address(cusdPlus)), 0, "per-token accounting");
+        assertTrue(pay.invoiceDone("inv-confio"));
     }
 
     /// AUDIT ([P1], 2026-07-31): the global invoiceDone guard means exactly

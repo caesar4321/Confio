@@ -26,7 +26,6 @@ import QRCode from 'react-native-qrcode-svg';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { jwtDecode } from 'jwt-decode';
 import authService from '../services/authService';
-import businessOptInService from '../services/businessOptInService';
 import Share from 'react-native-share';
 import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
@@ -34,11 +33,18 @@ import { useRef } from 'react';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
-import { formatTokenLabel } from '../utils/tokenDisplay';
+import { formatTokenLabel, isDollarToken } from '../utils/tokenDisplay';
 
 // Import currency icons
-const cUSDIcon = require('../assets/png/cUSD.png');
+const cUSDPlusIcon = require('../assets/png/cUSDPlus.png');
 const CONFIOIcon = require('../assets/png/CONFIO.png');
+
+// The charge menu, in WIRE values — what createInvoice stores as token_type
+// and what the payer's rail keys on. Both settle on BNB Smart Chain
+// (2026-08-01 migration): cUSD+ is the dollar (the payer may fund it from
+// raw USDT, which the pay contract allows), CONFIO is a token COUNT.
+const CUSD_PLUS = 'CUSD_PLUS';
+const CONFIO = 'CONFIO';
 
 type ChargeScreenNavigationProp = BottomTabNavigationProp<BottomTabParamList, 'Charge'>;
 
@@ -51,7 +57,7 @@ const ChargeScreen = () => {
   const viewShotRef = useRef<ViewShot>(null);
 
   const [mode, setMode] = useState('cobrar');
-  const [selectedCurrency, setSelectedCurrency] = useState('cUSD');
+  const [selectedCurrency, setSelectedCurrency] = useState(CUSD_PLUS);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [copied, setCopied] = useState(false);
@@ -125,7 +131,10 @@ const ChargeScreen = () => {
                 lastName: undefined
               },
               merchantAccount: currentInvoice.merchantAccount,
-              merchantAddress: activeAccount?.algorandAddress || '',
+              // The address that actually received it — a BSC payment lands
+              // at the account's 0x address, not its Algorand one.
+              merchantAddress: currentInvoice.paymentTransactions?.[0]?.merchantAddress
+                || activeAccount?.algorandAddress || '',
               status: currentInvoice.status,
               transactionHash: currentInvoice.paymentTransactions?.[0]?.transactionHash || 'pending',
               createdAt: currentInvoice.paidAt || new Date().toISOString()
@@ -142,15 +151,15 @@ const ChargeScreen = () => {
 
   // Currency configurations
   const currencies = {
-    cUSD: {
-      name: 'Confío Dollar',
-      symbol: 'cUSD',
+    [CUSD_PLUS]: {
+      name: 'Confío Dollar+',
+      symbol: 'cUSD+',
       color: colors.primary,
       colorDark: colors.primaryDark,
       textColor: colors.primaryText,
-      icon: cUSDIcon
+      icon: cUSDPlusIcon
     },
-    CONFIO: {
+    [CONFIO]: {
       name: 'Confío',
       symbol: 'CONFIO',
       color: colors.secondary,
@@ -181,60 +190,21 @@ const ChargeScreen = () => {
     setIsLoading(true);
 
     try {
-      // For business accounts, ensure opt-ins are complete before generating invoice (blocking)
+      // Both charge tokens settle on BSC (2026-08-01), so the business's
+      // registered BSC address — not an Algorand asset opt-in — is what makes
+      // a QR payable. Registration is OWNER-only server-side (an employee's
+      // client would derive an address the owner doesn't control), so this is
+      // best-effort here and the server has the final say at createInvoice.
       if (activeAccount.type === 'business') {
-
+        setIsOptingIn(true);
+        setOptInMessage('Preparando cuenta para recibir pagos...');
         try {
-          const businessOptInService = await import('../services/businessOptInService').then(m => m.default);
-
-          // Show opt-in modal
-          setIsOptingIn(true);
-          setOptInMessage('Preparando factura...');
-
-          const optInSuccess = await businessOptInService.checkAndHandleOptIns(
-            // Progress callback to update modal message
-            (message: string) => {
-              setOptInMessage(message);
-            }
-          );
-
-
-          // Hide opt-in modal
-          setIsOptingIn(false);
-
-          if (!optInSuccess) {
-            // Check if this is a non-owner employee who can't opt-in
-            const token = await authService.getToken();
-            const decoded: any = token ? jwtDecode(token) : {};
-            const isNonOwnerEmployee = decoded.business_employee_role && decoded.business_employee_role !== 'owner';
-
-            if (isNonOwnerEmployee) {
-              Alert.alert(
-                'Acción requerida del dueño',
-                'La cuenta del negocio necesita ser configurada por el dueño. Por favor pide al dueño del negocio que inicie sesión y genere una factura para completar la configuración.',
-                [{ text: 'Entendido' }]
-              );
-            } else {
-              Alert.alert(
-                'Cuenta no preparada',
-                'Tu cuenta empresarial necesita ser configurada para recibir pagos. Por favor intenta de nuevo.',
-                [{ text: 'Entendido' }]
-              );
-            }
-            setIsLoading(false);
-            return;
-          }
-        } catch (optInError) {
-          setIsOptingIn(false);
-          Alert.alert(
-            'Error',
-            'Error al verificar la cuenta. Por favor intenta de nuevo.',
-            [{ text: 'Entendido' }]
-          );
-          setIsLoading(false);
-          return;
+          const { ensureBscAddressRegistered } = await import('../services/authService');
+          await ensureBscAddressRegistered();
+        } catch (_) {
+          // Non-fatal: createInvoice reports merchant_not_ready if it mattered.
         }
-      } else {
+        setIsOptingIn(false);
       }
 
       const { data } = await createInvoice({
@@ -242,6 +212,11 @@ const ChargeScreen = () => {
           input: {
             amount: amount,
             tokenType: selectedCurrency,
+            // Name the rail explicitly. The server cannot infer it from
+            // 'CONFIO' alone (same wire value before and after the
+            // migration), and an invoice that doesn't say BSC is treated as
+            // a legacy Algorand charge.
+            settlementChain: 'BSC',
             description: description,
             expiresInHours: 24
           }
@@ -260,7 +235,23 @@ const ChargeScreen = () => {
         } catch (_) { }
       } else {
         const errors = data?.createInvoice?.errors || ['Error desconocido'];
-        setBanner({ variant: 'error', message: `No se pudo crear la factura: ${errors.join(', ')}` });
+        if (errors.includes('merchant_not_ready')) {
+          // Only the owner's device can derive the business's BSC key, so a
+          // cashier can't fix this — the owner has to open Confío once.
+          const token = await authService.getToken();
+          const decoded: any = token ? jwtDecode(token) : {};
+          const isNonOwnerEmployee =
+            decoded.business_employee_role && decoded.business_employee_role !== 'owner';
+          Alert.alert(
+            isNonOwnerEmployee ? 'Acción requerida del dueño' : 'Cuenta no preparada',
+            isNonOwnerEmployee
+              ? 'La cuenta del negocio aún no puede recibir pagos. Pide al dueño que abra Confío una vez para activarlos.'
+              : 'Tu cuenta empresarial aún no puede recibir pagos. Cierra y vuelve a abrir Confío e inténtalo de nuevo.',
+            [{ text: 'Entendido' }]
+          );
+        } else {
+          setBanner({ variant: 'error', message: `No se pudo crear la factura: ${errors.join(', ')}` });
+        }
       }
     } catch (error) {
       setBanner({ variant: 'error', message: 'No se pudo crear la factura. Revisa tu conexión e inténtalo de nuevo.' });
@@ -485,60 +476,40 @@ const ChargeScreen = () => {
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>Moneda para cobrar</Text>
                     <View style={styles.currencyGrid}>
-                      <TouchableOpacity
-                        style={[
-                          styles.currencyButton,
-                          selectedCurrency === 'cUSD' && styles.currencyButtonSelected
-                        ]}
-                        onPress={() => setSelectedCurrency('cUSD')}
-                      >
-                        <View style={styles.currencyContent}>
-                          <View style={styles.currencyIcon}>
-                            <Image source={currencies.cUSD.icon} style={styles.currencyIconImage} />
-                          </View>
-                          <View style={styles.currencyInfo}>
-                            <Text style={[
-                              styles.currencyName,
-                              selectedCurrency === 'cUSD' && styles.currencyNameSelected
-                            ]}>
-                              {currencies.cUSD.name}
-                            </Text>
-                            <Text style={[
-                              styles.currencySymbol,
-                              selectedCurrency === 'cUSD' && styles.currencySymbolSelected
-                            ]}>
-                              {currencies.cUSD.symbol}
-                            </Text>
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.currencyButton,
-                          selectedCurrency === 'CONFIO' && styles.currencyButtonSelected
-                        ]}
-                        onPress={() => setSelectedCurrency('CONFIO')}
-                      >
-                        <View style={styles.currencyContent}>
-                          <View style={styles.currencyIcon}>
-                            <Image source={currencies.CONFIO.icon} style={styles.currencyIconImage} />
-                          </View>
-                          <View style={styles.currencyInfo}>
-                            <Text style={[
-                              styles.currencyName,
-                              selectedCurrency === 'CONFIO' && styles.currencyNameSelected
-                            ]}>
-                              {currencies.CONFIO.name}
-                            </Text>
-                            <Text style={[
-                              styles.currencySymbol,
-                              selectedCurrency === 'CONFIO' && styles.currencySymbolSelected
-                            ]}>
-                              {currencies.CONFIO.symbol}
-                            </Text>
-                          </View>
-                        </View>
-                      </TouchableOpacity>
+                      {([CUSD_PLUS, CONFIO] as const).map((token) => {
+                        const currency = currencies[token];
+                        const selected = selectedCurrency === token;
+                        return (
+                          <TouchableOpacity
+                            key={token}
+                            style={[
+                              styles.currencyButton,
+                              selected && styles.currencyButtonSelected
+                            ]}
+                            onPress={() => setSelectedCurrency(token)}
+                          >
+                            <View style={styles.currencyContent}>
+                              <View style={styles.currencyIcon}>
+                                <Image source={currency.icon} style={styles.currencyIconImage} />
+                              </View>
+                              <View style={styles.currencyInfo}>
+                                <Text style={[
+                                  styles.currencyName,
+                                  selected && styles.currencyNameSelected
+                                ]}>
+                                  {currency.name}
+                                </Text>
+                                <Text style={[
+                                  styles.currencySymbol,
+                                  selected && styles.currencySymbolSelected
+                                ]}>
+                                  {currency.symbol}
+                                </Text>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   </View>
 
@@ -549,7 +520,7 @@ const ChargeScreen = () => {
                     <View style={styles.inputContainer}>
                       <Text style={styles.inputLabel}>Monto a cobrar</Text>
                       <View style={styles.amountInputContainer}>
-                        {selectedCurrency === 'cUSD' && (
+                        {isDollarToken(selectedCurrency) && (
                           <Icon name="dollar-sign" size={20} color={colors.text.light} style={styles.amountInputIcon} />
                         )}
                         <TextInput
@@ -591,7 +562,7 @@ const ChargeScreen = () => {
                             onPress={() => setAmount(quickAmount)}
                           >
                             <Text style={styles.quickAmountText}>
-                              {selectedCurrency === 'cUSD' ? `$${quickAmount}` : quickAmount}
+                              {isDollarToken(selectedCurrency) ? `$${quickAmount}` : quickAmount}
                             </Text>
                           </TouchableOpacity>
                         ))}
@@ -653,7 +624,7 @@ const ChargeScreen = () => {
 
                       <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
                         <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
-                          {selectedCurrency === 'cUSD' ? '$' : ''}{invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
+                          {isDollarToken(invoice?.tokenType || selectedCurrency) ? '$' : ''}{invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
                         </Text>
                         <Text style={styles.paymentDescription}>
                           {invoice?.description || description || 'Sin descripción'}

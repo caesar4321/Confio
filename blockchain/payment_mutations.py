@@ -132,14 +132,56 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 request = info.context
                 recipient_business_id = request.META.get('HTTP_X_RECIPIENT_BUSINESS_ID')
                 
-            # If still missing but we have internal_id (Invoice ID), verify if it matches an Invoice
-            if not recipient_business_id and internal_id:
+            # Resolve the invoice ONCE, up front, and let the ROW dictate the
+            # payment — this runs before any transaction is built.
+            #
+            # Codex audit 2026-08-01 [P1]: `amount` and `asset_type` arrive
+            # from the client and were never checked against the invoice, so
+            # a payer could settle a 100 cUSD invoice with 0.01 and the row
+            # would still be written against it. The BSC rail has always
+            # built from the row; this rail now does too. It also carries the
+            # chain/status/expiry gate, so a BSC invoice can never have an
+            # Algorand group built for it in the first place.
+            invoice_for_payment = None
+            if internal_id:
                 from payments.models import Invoice
-                # Try to find invoice by ID
-                inv = Invoice.objects.filter(internal_id=internal_id).first()
-                if inv and inv.merchant_business:
+                invoice_for_payment = Invoice.objects.filter(internal_id=internal_id).first()
+
+            if invoice_for_payment is not None:
+                inv = invoice_for_payment
+                if inv.settlement_chain != 'ALGORAND':
+                    return cls(success=False,
+                               error='Invoice does not settle on Algorand')
+                if inv.status != 'PENDING':
+                    return cls(success=False, error='Invoice is not payable')
+                if getattr(inv, 'is_expired', False):
+                    return cls(success=False, error='Invoice has expired')
+
+                from decimal import Decimal as _Dec
+                if _Dec(str(amount)) != _Dec(str(inv.amount)):
+                    logger.warning(
+                        "payment amount %s != invoice %s amount %s — using the invoice",
+                        amount, inv.internal_id, inv.amount)
+                amount = float(inv.amount)
+                # No silent fallback to the client's asset (Codex round 4):
+                # a blank token_type is a broken row, not permission to let
+                # the payer name the asset.
+                if not (inv.token_type or '').strip():
+                    return cls(success=False, error='Invoice has no token type')
+                asset_type = inv.token_type.upper()
+                # The memo is part of what the merchant sees on the record,
+                # so it comes from the invoice too — the payer does not get
+                # to relabel someone else's charge (Codex round 5).
+                note = inv.description or note
+
+                if not recipient_business_id and inv.merchant_business:
                     recipient_business_id = str(inv.merchant_business.id)
                     logger.info(f"Resolved recipient business {recipient_business_id} from Invoice {internal_id}")
+                elif (recipient_business_id and inv.merchant_business
+                        and str(recipient_business_id) != str(inv.merchant_business.id)):
+                    # The invoice names its merchant; a client-supplied
+                    # business that disagrees is not a payment for it.
+                    return cls(success=False, error='Recipient does not match the invoice merchant')
 
             if not recipient_business_id:
                 # For debugging - log available context
@@ -151,7 +193,14 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             from users.models import Business
             try:
                 recipient_business = Business.objects.get(id=recipient_business_id)
-                recipient_account = Account.objects.get(
+                # For an invoice, the destination is the account the INVOICE
+                # names — not whichever business account a broad lookup finds
+                # first (Codex round 4). A multi-account business would
+                # otherwise be paid at an account it never charged from.
+                recipient_account = (
+                    getattr(invoice_for_payment, 'merchant_account', None)
+                    if invoice_for_payment is not None else None
+                ) or Account.objects.get(
                     business=recipient_business,
                     account_type='business'
                 )
@@ -373,8 +422,10 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             if internal_id:
                 from payments.models import PaymentTransaction, Invoice
                 # Resolve invoice by invoice_id (internal_id param is used as invoiceId in this flow)
-                invoice_obj = Invoice.objects.filter(internal_id=internal_id).first()
-                
+                # Already resolved AND gated above (chain, status, expiry,
+                # amount, merchant) before a single transaction was built.
+                invoice_obj = invoice_for_payment
+
                 if not invoice_obj:
                      raise ValueError(f"Invoice not found for invoice_id {internal_id}")
 
@@ -473,6 +524,40 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
+            # Re-check the rail immediately before broadcast, not just at
+            # prepare (Codex audit [P1], re-check): a group prepared while
+            # the invoice was Algorand must not broadcast if the row has
+            # since been pointed at BSC. Cheap, and it closes the window an
+            # admin/ORM edit between prepare and submit would otherwise open.
+            # FAIL CLOSED, INCLUDING ON AN ABSENT ID (Codex round 4 [P1]).
+            # Guarding only `if internal_id:` meant omitting the argument
+            # skipped every check and still reached broadcast. There is no
+            # legitimate caller for that: the prepare side only creates a
+            # PaymentTransaction when internal_id is present, so an untracked
+            # submit could never be recorded anyway, and every caller in the
+            # app (PaymentProcessingScreen, and payWs over the WS consumer)
+            # sends it. Requiring it costs nothing and removes the bypass.
+            if not internal_id:
+                logger.error("refusing broadcast: submit without internal_id")
+                return cls(success=False, error='Payment id required')
+
+            from payments.models import PaymentTransaction as _PT
+            _pt = _PT.objects.filter(
+                internal_id=internal_id, deleted_at__isnull=True
+            ).select_related('invoice').first()
+            if _pt is None:
+                logger.error("refusing broadcast: no PaymentTransaction %s", internal_id)
+                return cls(success=False, error='Payment not found')
+            _inv = getattr(_pt, 'invoice', None)
+            if _inv is None:
+                logger.error("refusing broadcast: payment %s has no invoice", internal_id)
+                return cls(success=False, error='Payment is not linked to an invoice')
+            if _inv.settlement_chain != 'ALGORAND':
+                logger.error(
+                    "refusing Algorand broadcast for %s: invoice %s settles on %s",
+                    internal_id, _inv.internal_id, _inv.settlement_chain)
+                return cls(success=False, error='Invoice does not settle on Algorand')
+
             verbose = getattr(settings, 'PAYMENT_VERBOSE_LOGS', False)
             logger.info(f"Submitting sponsored payment group for user {user.id}")
             logger.info(f"Raw signed_transactions type: {type(signed_transactions)}")

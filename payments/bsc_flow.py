@@ -12,9 +12,18 @@ under ConfioBatchDelegate.execute():
 The CONTRACT computes fee = ceil(gross * 0.9%) (same ceiling-division
 semantics as the Algorand builder and payment_fee_wei below), sends
 net = gross − fee to the merchant, accrues the fee in itself per token
-(owner Safe collects), and replay-guards the invoiceId on-chain. `token`
-follows the payer's funding source: cUSD+ vault shares (converted at the
-live share price) or raw USDT.
+(owner Safe collects), and replay-guards the invoiceId on-chain.
+
+Two charge denominations (2026-08-01, ChargeScreen migration off Algorand):
+
+  DOLLAR invoice (token_type CUSD_PLUS; legacy CUSD rows still settle here)
+      `token` follows the PAYER's funding source — cUSD+ vault shares
+      converted at the live share price, or raw USDT. USDT is not a charge
+      option; it is the fallback that keeps a raw-USDT holder (including
+      anyone geo-ineligible to mint cUSD+) able to pay at all.
+  CONFIO invoice (token_type CONFIO)
+      the re-issued BEP-20 moves directly, and `amount` is a token COUNT,
+      not USD. Same 0.9% fee and the same on-chain invoice guard.
 
 Merchant token note (v1 divergence from the send flow's redeem-to-
 ineligible rule): the merchant receives the SAME token the payer spent.
@@ -52,6 +61,19 @@ def _vault_address() -> str:
 
 def _pay_contract() -> str:
     return (getattr(settings, 'BSC_PAY_CONTRACT_ADDRESS', '') or '').lower()
+
+
+def _confio_token_address() -> str:
+    return (getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', '') or '').lower()
+
+
+# Invoice token_type → what the BSC rail settles. 'CUSD' is the legacy
+# dollar wire value; it means the same thing as CUSD_PLUS here — the DOLLAR,
+# whose on-chain token the payer's funding source decides. Since the rail is
+# pinned at creation, a CUSD invoice is always ALGORAND and cannot reach this
+# module; 'CUSD' stays in the tuple only so a hand-edited row is settled
+# correctly rather than mispriced.
+DOLLAR_INVOICE_TOKENS = ('CUSD', 'CUSD_PLUS')
 
 
 def invoice_id_bytes32(internal_id: str) -> str:
@@ -168,9 +190,16 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         return {'success': False, 'error': 'invoice_not_pending'}
     if getattr(invoice, 'is_expired', False):
         return {'success': False, 'error': 'invoice_expired'}
-    if (invoice.token_type or '').upper() != 'CUSD':
-        # BSC pays dollar invoices; CONFIO invoices stay on Algorand.
-        return {'success': False, 'error': 'invoice_not_dollar'}
+    # The invoice names its rail (Codex audit 2026-08-01 [P1]). token_type
+    # cannot: 'CONFIO' is the wire value on BOTH sides of the migration, so
+    # keying off it left the same PENDING row preparable here AND on the
+    # Algorand mutation at once — and invoiceDone is per-chain, blind to an
+    # Algorand group. One authority, checked on both rails.
+    if getattr(invoice, 'settlement_chain', 'ALGORAND') != 'BSC':
+        return {'success': False, 'error': 'invoice_not_bsc'}
+    invoice_token = (invoice.token_type or '').upper()
+    if invoice_token not in DOLLAR_INVOICE_TOKENS and invoice_token != 'CONFIO':
+        return {'success': False, 'error': 'unsupported_token'}
 
     # Payer account from the JWT context only.
     if jwt_ctx['account_type'] == 'business' and jwt_ctx.get('business_id'):
@@ -198,35 +227,54 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         _notify_merchant_needs_app(invoice, user)
         return {'success': False, 'error': 'merchant_no_bsc_address'}
 
-    gross_usd = Decimal(str(invoice.amount))
-    gross_wei = int(gross_usd * WAD)
+    # `gross_amount` is USD on a dollar invoice and a CONFIO COUNT on a
+    # CONFIO one; gross_wei is that amount in the token's 18 decimals.
+    gross_amount = Decimal(str(invoice.amount))
+    gross_wei = int(gross_amount * WAD)
     fee_wei = payment_fee_wei(gross_wei)
     net_wei = gross_wei - fee_wei
     if net_wei <= 0 or fee_wei <= 0:
         return {'success': False, 'error': 'invalid_amount'}
 
-    # Funding source: prefer the yield position; raw USDT is the fallback.
-    try:
-        pps_wad = cp_vault.p_plus_wad()
-        shares_raw = cp_vault.erc20_balance_raw(vault_addr, payer_addr)
-        shares_value_wei = (shares_raw * pps_wad) // WAD
-        usdt_raw = cp_vault.usdt_balance_raw(payer_addr, fresh=True)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('[PAY][BSC] balance rpc failed: %s', exc)
-        return {'success': False, 'error': 'balance_unavailable'}
-
-    if shares_value_wei >= gross_wei:
-        kind = 'pay_cusd_plus'
-        token_type = 'CUSD_PLUS'
-        token = vault_addr
-        gross_units = (gross_wei * WAD) // pps_wad  # shares at the live price
-    elif usdt_raw >= gross_wei:
-        kind = 'pay_usdt'
-        token_type = 'USDT'
-        token = USDT_BSC
+    if invoice_token == 'CONFIO':
+        # The token IS the denomination — no funding fork, no share price.
+        confio_addr = _confio_token_address()
+        if not confio_addr:
+            return {'success': False, 'error': 'confio_not_configured'}
+        try:
+            confio_raw = cp_vault.erc20_balance_raw(confio_addr, payer_addr)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('[PAY][BSC] balance rpc failed: %s', exc)
+            return {'success': False, 'error': 'balance_unavailable'}
+        if confio_raw < gross_wei:
+            return {'success': False, 'error': 'insufficient_balance'}
+        kind = 'pay_confio'
+        token_type = 'CONFIO'
+        token = confio_addr
         gross_units = gross_wei
     else:
-        return {'success': False, 'error': 'insufficient_balance'}
+        # Funding source: prefer the yield position; raw USDT is the fallback.
+        try:
+            pps_wad = cp_vault.p_plus_wad()
+            shares_raw = cp_vault.erc20_balance_raw(vault_addr, payer_addr)
+            shares_value_wei = (shares_raw * pps_wad) // WAD
+            usdt_raw = cp_vault.usdt_balance_raw(payer_addr, fresh=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('[PAY][BSC] balance rpc failed: %s', exc)
+            return {'success': False, 'error': 'balance_unavailable'}
+
+        if shares_value_wei >= gross_wei:
+            kind = 'pay_cusd_plus'
+            token_type = 'CUSD_PLUS'
+            token = vault_addr
+            gross_units = (gross_wei * WAD) // pps_wad  # shares at the live price
+        elif usdt_raw >= gross_wei:
+            kind = 'pay_usdt'
+            token_type = 'USDT'
+            token = USDT_BSC
+            gross_units = gross_wei
+        else:
+            return {'success': False, 'error': 'insufficient_balance'}
     if gross_units <= 1:
         # The contract needs at least 1 unit of fee AND 1 of net.
         return {'success': False, 'error': 'invalid_amount'}
@@ -276,7 +324,7 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
             'merchant_account': invoice.merchant_account,
             'payer_address': payer_addr,
             'merchant_address': merchant_addr,
-            'amount': gross_usd,
+            'amount': gross_amount,
             'token_type': token_type,
             'description': invoice.description or '',
             'status': 'PENDING_BLOCKCHAIN',
@@ -331,6 +379,13 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
 
     vault = _vault_address()
     pay_contract = _pay_contract()
+    # Token pinned to the row's KIND, not merely to the contract's allowlist:
+    # a CONFIO payment row can only ever move CONFIO (send/bsc_flow shape).
+    expected_token = {
+        'pay_cusd_plus': vault,
+        'pay_usdt': USDT_BSC,
+        'pay_confio': _confio_token_address(),
+    }.get((payment_tx.blockchain_data or {}).get('kind'))
     if len(calls) != 2:
         raise PolicyError('bad_batch_size')
     for call in calls:
@@ -341,7 +396,7 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
 
     approve, pay = calls
     token = (approve.get('to') or '').lower()
-    if token not in (vault, USDT_BSC):
+    if not expected_token or token != expected_token:
         raise PolicyError('destination_not_allowed')
     a_data = approve['data'].lower()
     if (len(a_data) != 2 + 8 + 128 or a_data[2:10] != SEL_APPROVE
@@ -398,6 +453,11 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     invoice = payment_tx.invoice
     if invoice.status != 'PENDING' or getattr(invoice, 'is_expired', False):
         return {'success': False, 'error': 'invoice_not_pending'}
+    # Rail re-checked at BROADCAST time, mirroring the Algorand submit: the
+    # prepare-time check alone leaves a window an admin/ORM edit could use
+    # to point a prepared invoice at the other chain (Codex audit [P1]).
+    if getattr(invoice, 'settlement_chain', 'ALGORAND') != 'BSC':
+        return {'success': False, 'error': 'invoice_not_bsc'}
 
     payer_addr = (payment_tx.payer_address or '').lower()
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))

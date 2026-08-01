@@ -1,7 +1,14 @@
+from datetime import timedelta
+
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from users.models import SoftDeleteModel
+
+# The hard ceiling on an invoice's life, measured from creation. Lives on
+# the model so EVERY write path is bound by it — the GraphQL cap, the admin
+# extend action, and any direct ORM edit (Codex audit 2026-08-01).
+MAX_INVOICE_LIFETIME_HOURS = 24
 import uuid
 import secrets
 import string
@@ -230,9 +237,14 @@ class Invoice(SoftDeleteModel):
     ]
 
     TOKEN_TYPES = [
-        ('CUSD', 'Confío Dollar'),
+        # The charge menu after the BSC migration (2026-08-01): a merchant
+        # charges in cUSD+ (the dollar) or CONFIO (a token count), both on
+        # BNB Smart Chain. 'CUSD'/'USDC' are legacy Algorand-rail values kept
+        # for the invoices already on file.
+        ('CUSD_PLUS', 'Confío Dollar Plus'),
         ('CONFIO', 'Confío Token'),
-        ('USDC', 'USD Coin')
+        ('CUSD', 'Confío Dollar (legacy)'),
+        ('USDC', 'USD Coin (legacy)'),
     ]
 
     # Unique identifier for the invoice
@@ -285,6 +297,33 @@ class Invoice(SoftDeleteModel):
     # Invoice details
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
+
+    # WHICH CHAIN MAY SETTLE THIS INVOICE (Codex audit 2026-08-01, [P1]).
+    #
+    # token_type alone cannot answer this: 'CONFIO' is the wire value BOTH
+    # before and after the BSC migration, so a legacy Algorand invoice and a
+    # new BSC one are indistinguishable. That left the same PENDING row
+    # preparable on both rails at once — and the pay contract's on-chain
+    # invoiceDone guard is per-chain, so it structurally cannot stop an
+    # Algorand group that was already built. Two customers could each pay
+    # once and the merchant be credited twice.
+    #
+    # The rail is therefore recorded at creation and enforced on BOTH sides:
+    # prepare_bsc_payment refuses anything but BSC, PayInvoice (the Algorand
+    # mutation) refuses anything but ALGORAND. Default ALGORAND so every row
+    # that predates this column — and every invoice from an app build that
+    # doesn't know to ask for BSC — keeps the rail it was actually created
+    # for. Nothing infers the rail from a timer.
+    SETTLEMENT_CHAINS = [
+        ('BSC', 'BNB Smart Chain'),
+        ('ALGORAND', 'Algorand (legacy)'),
+    ]
+    settlement_chain = models.CharField(
+        max_length=10,
+        choices=SETTLEMENT_CHAINS,
+        default='ALGORAND',
+        help_text='The only chain allowed to settle this invoice',
+    )
     description = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
 
@@ -321,6 +360,53 @@ class Invoice(SoftDeleteModel):
     def __str__(self):
         merchant_name = self.merchant_business.name
         return f"INV-{self.internal_id[:8]}: {self.token_type} {self.amount} by {merchant_name}"
+
+    def save(self, *args, **kwargs):
+        """The settlement rail is IMMUTABLE once written.
+
+        Both rails check `settlement_chain` at prepare AND at broadcast, but
+        those checks only hold if the value cannot move under them. Flipping
+        it on a row that already has a prepared payment is precisely how one
+        invoice would become settleable on two chains — so the model refuses
+        the edit outright rather than trusting every future call site
+        (Codex audit 2026-08-01 [P1]). Correcting a genuinely wrong row means
+        cancelling it and issuing a new invoice, which is also what the
+        merchant's customer sees happen.
+        """
+        previous_expires_at = None
+        if self.pk:
+            previous = type(self).all_objects.filter(pk=self.pk).values_list(
+                'settlement_chain', 'expires_at').first()
+            if previous:
+                previous_chain, previous_expires_at = previous
+                if previous_chain and previous_chain != self.settlement_chain:
+                    raise ValueError(
+                        f"Invoice.settlement_chain is immutable "
+                        f"({previous_chain} -> {self.settlement_chain}); cancel and reissue instead")
+
+        # The lifetime ceiling belongs HERE, not only in the API and the
+        # admin action (Codex round 4): expires_at stays directly editable in
+        # the admin and by any ORM caller, so enforcing the bound at every
+        # other layer left the invariant optional.
+        #
+        # It applies only to a CHANGED expires_at (Codex round 5). Rows
+        # created while expiry was uncapped can legitimately sit past the
+        # ceiling, and a blanket check would make them unsaveable — you
+        # could no longer mark one EXPIRED or soft-delete it, which is
+        # exactly the maintenance the old rows need. Refuse new over-long
+        # expiries; never trap an existing row.
+        expiry_changed = self.expires_at is not None and self.expires_at != previous_expires_at
+        if expiry_changed:
+            # created_at is unset until auto_now_add fires on insert; for a
+            # new row "now" IS the creation moment.
+            created = self.created_at or timezone.now()
+            ceiling = created + timedelta(hours=MAX_INVOICE_LIFETIME_HOURS)
+            if self.expires_at > ceiling:
+                raise ValueError(
+                    f"Invoice.expires_at {self.expires_at.isoformat()} exceeds the "
+                    f"{MAX_INVOICE_LIFETIME_HOURS}h ceiling from creation "
+                    f"({ceiling.isoformat()})")
+        super().save(*args, **kwargs)
 
     @property
     def is_expired(self):

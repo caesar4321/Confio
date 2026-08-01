@@ -29,6 +29,7 @@ from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PAY, USDT_BSC
 from payments import bsc_flow
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+CONFIO_TOKEN = '0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8'
 PAY_CONTRACT = '0x' + 'ca' * 20
 PAYER = '0x' + '11' * 20
 MERCHANT = '0x' + '22' * 20
@@ -68,15 +69,16 @@ class FeeMathTests(SimpleTestCase):
 
 @override_settings(
     CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN,
     BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT,
     BSC_PAY_ENABLED=True,
 )
 class PrepareBatchTests(SimpleTestCase):
-    def _invoice(self, amount='10', token='CUSD'):
+    def _invoice(self, amount='10', token='CUSD_PLUS', chain='BSC'):
         merchant_business = SimpleNamespace(id=77, name='Bodega La 22')
         return SimpleNamespace(
             internal_id='inv123', status='PENDING', is_expired=False,
-            token_type=token, amount=Decimal(amount),
+            token_type=token, settlement_chain=chain, amount=Decimal(amount),
             merchant_business=merchant_business, merchant_business_id=77,
             merchant_display_name='Bodega La 22',
             merchant_account=SimpleNamespace(id=5),
@@ -174,9 +176,52 @@ class PrepareBatchTests(SimpleTestCase):
         self.assertEqual(result['error'], 'merchant_no_bsc_address')
         nudge.assert_called_once()
 
-    def test_confio_invoice_rejected(self):
-        result, _, _ = self._prepare(self._invoice('10', token='CONFIO'))
-        self.assertEqual(result['error'], 'invoice_not_dollar')
+    def test_algorand_invoice_refused_on_bsc(self):
+        """THE cross-rail guard (Codex audit [P1]). A legacy CONFIO invoice
+        is indistinguishable from a migrated one by token_type alone, so the
+        invoice names its chain and this rail refuses anything else —
+        otherwise both rails could prepare the same PENDING row and the
+        contract's per-chain invoiceDone guard could not stop the Algorand
+        half of a double settlement."""
+        for token in ('CONFIO', 'CUSD', 'CUSD_PLUS'):
+            result, _, _ = self._prepare(
+                self._invoice('10', token=token, chain='ALGORAND'))
+            self.assertEqual(result['error'], 'invoice_not_bsc', token)
+
+    def test_missing_chain_attribute_fails_closed(self):
+        invoice = self._invoice('10')
+        del invoice.settlement_chain
+        result, _, _ = self._prepare(invoice)
+        self.assertEqual(result['error'], 'invoice_not_bsc')
+
+    def test_confio_invoice_pays_in_confio(self):
+        """The second charge denomination (2026-08-01): the BEP-20 moves
+        directly, amount is a token COUNT, no share-price conversion."""
+        # shares_value drives the mocked erc20_balance_raw, which the CONFIO
+        # branch reads as the payer's raw CONFIO balance.
+        result, row, _ = self._prepare(
+            self._invoice('250', token='CONFIO'), shares_value=1_000 * WAD)
+        self.assertTrue(result['success'], result)
+        self._assert_batch_shape(result['calls'], CONFIO_TOKEN.lower(), 250 * WAD)
+        self.assertEqual(result['token_type'], 'CONFIO')
+        self.assertEqual(row.blockchain_data['kind'], 'pay_confio')
+        fee_wei = bsc_flow.payment_fee_wei(250 * WAD)
+        self.assertEqual(result['fee'], str(Decimal(fee_wei) / WAD))
+
+    def test_confio_invoice_insufficient_confio_balance(self):
+        # The CONFIO branch never falls back to the dollar funding sources.
+        result, _, _ = self._prepare(
+            self._invoice('250', token='CONFIO'), shares_value=0, usdt=10_000 * WAD)
+        self.assertEqual(result['error'], 'insufficient_balance')
+
+    @override_settings(BSC_CONFIO_TOKEN_ADDRESS='')
+    def test_confio_invoice_without_token_configured(self):
+        result, _, _ = self._prepare(self._invoice('250', token='CONFIO'))
+        self.assertEqual(result['error'], 'confio_not_configured')
+
+    def test_unknown_invoice_token_rejected(self):
+        result, _, _ = self._prepare(self._invoice('10', token='USDC'))
+        self.assertEqual(result['error'], 'unsupported_token')
 
     def test_expired_invoice_rejected(self):
         invoice = self._invoice('10')
@@ -205,16 +250,18 @@ class PrepareBatchTests(SimpleTestCase):
         self.assertEqual(result['error'], 'bsc_pay_disabled')
 
 
-@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT)
+@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN,
+                   BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT)
 class SubmitValidatorTests(SimpleTestCase):
     GROSS = 10 * WAD
 
-    def _tx(self):
+    def _tx(self, kind='pay_usdt'):
         return SimpleNamespace(
             payer_address=PAYER,
             merchant_address=MERCHANT,
             invoice=SimpleNamespace(internal_id='inv123'),
-            blockchain_data={'pay_deadline': DEADLINE, 'pay_signer': TEST_SIGNER.lower()},
+            blockchain_data={'kind': kind, 'pay_deadline': DEADLINE,
+                             'pay_signer': TEST_SIGNER.lower()},
         )
 
     def _approve(self, token, spender=PAY_CONTRACT, amount=None):
@@ -239,9 +286,23 @@ class SubmitValidatorTests(SimpleTestCase):
         return {'to': to.lower(), 'value': '0', 'data': '0x' + SEL_PAY + args.hex()}
 
     def test_valid_batch_passes(self):
-        for token in (USDT_BSC, VAULT):
+        for token, kind in ((USDT_BSC, 'pay_usdt'), (VAULT, 'pay_cusd_plus'),
+                            (CONFIO_TOKEN.lower(), 'pay_confio')):
             bsc_flow._validate_payment_batch(
-                [self._approve(token), self._pay(token)], self._tx())
+                [self._approve(token), self._pay(token)], self._tx(kind))
+
+    def test_token_not_pinned_to_kind_rejected(self):
+        """A CONFIO row can only move CONFIO: an otherwise well-formed
+        dollar batch stored on a pay_confio row is refused, even though the
+        contract's own allowlist would accept the token."""
+        calls = [self._approve(VAULT), self._pay(VAULT)]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx('pay_confio'))
+
+    def test_unknown_kind_rejected(self):
+        calls = [self._approve(USDT_BSC), self._pay(USDT_BSC)]
+        with self.assertRaises(PolicyError):
+            bsc_flow._validate_payment_batch(calls, self._tx('pay_something_else'))
 
     def test_merchant_tamper_rejected(self):
         calls = [self._approve(USDT_BSC),

@@ -17,12 +17,35 @@ from graphql_jwt.decorators import login_required
 
 logger = logging.getLogger(__name__)
 
+# An invoice may never outlive this (Codex audit 2026-08-01 [P1]). One
+# definition, on the model, so the API cap and the model's own ceiling can
+# never drift apart.
+from .models import MAX_INVOICE_LIFETIME_HOURS as MAX_INVOICE_EXPIRY_HOURS  # noqa: E402
+
+# Which chain each charge token settles on. A client that names the chain
+# wins; this is the fallback for app builds that predate the field, and it
+# is deliberately conservative — only CUSD_PLUS, which no old build can
+# send, implies BSC on its own. A bare 'CONFIO' is read as the LEGACY
+# Algorand charge, because assuming BSC there would hand an old client's
+# invoice to a rail its payer flow knows nothing about.
+TOKEN_DEFAULT_CHAIN = {
+    'CUSD_PLUS': 'BSC',
+    'CONFIO': 'ALGORAND',
+    'CUSD': 'ALGORAND',
+    'USDC': 'ALGORAND',
+}
+
+
 class InvoiceInput(graphene.InputObjectType):
     """Input type for creating a new invoice"""
     amount = graphene.String(required=True, description="Amount to request (e.g., '10.50')")
-    token_type = graphene.String(required=True, description="Type of token to request (e.g., 'cUSD', 'CONFIO')")
+    token_type = graphene.String(required=True, description="Token to charge in: 'CUSD_PLUS' or 'CONFIO' (legacy clients send 'cUSD')")
     description = graphene.String(description="Optional description for the invoice")
-    expires_in_hours = graphene.Int(description="Hours until expiration (default: 24)")
+    expires_in_hours = graphene.Int(description="Hours until expiration (default and max: 24)")
+    settlement_chain = graphene.String(
+        description="Chain that may settle this invoice: 'BSC' or 'ALGORAND'. "
+                    "Omit only from pre-migration clients — the server then infers "
+                    "the legacy rail from the token.")
 
 class PaymentTransactionType(DjangoObjectType):
     """GraphQL type for PaymentTransaction model"""
@@ -105,6 +128,7 @@ class InvoiceType(DjangoObjectType):
             'paid_by_business',
             'amount',
             'token_type',
+            'settlement_chain',
             'description',
             'status',
             'paid_at',
@@ -225,8 +249,24 @@ class CreateInvoice(graphene.Mutation):
                     errors=["Cuenta activa no encontrada"]
                 )
 
-            # Set expiration time (default 24 hours)
-            expires_in_hours = input.expires_in_hours or 24
+            # Set expiration time (default 24 hours, HARD CAP 24).
+            # Codex audit 2026-08-01 [P1]: this was caller-controlled and
+            # unbounded, so "invoices expire within a day" was a description
+            # of the default, not a property of the system — a client could
+            # ask for a year. The cap is what makes the lifetime real; the
+            # rail is pinned by settlement_chain regardless, so the cap is a
+            # bound on ambiguity, never the thing preventing cross-rail pay.
+            # Explicit None check: `or 24` silently turned an out-of-range 0
+            # into the default instead of rejecting it (Codex [P2]).
+            expires_in_hours = (
+                MAX_INVOICE_EXPIRY_HOURS if input.expires_in_hours is None
+                else input.expires_in_hours)
+            if not (1 <= expires_in_hours <= MAX_INVOICE_EXPIRY_HOURS):
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=[f"expiresInHours debe estar entre 1 y {MAX_INVOICE_EXPIRY_HOURS}"]
+                )
             expires_at = timezone.now() + timedelta(hours=expires_in_hours)
 
             # Only businesses can create invoices
@@ -249,8 +289,65 @@ class CreateInvoice(graphene.Mutation):
             merchant_type = 'business'
             merchant_display_name = merchant_business.name
 
-            # Normalize token type to canonical uppercase for DB/network
-            normalized_token = 'CUSD' if str(input.token_type).upper() == 'CUSD' else str(input.token_type).upper()
+            # Normalize token type to canonical uppercase for DB/network.
+            # The charge menu is exactly two denominations after the BSC
+            # migration (2026-08-01): CUSD_PLUS and CONFIO. 'CUSD' is still
+            # accepted — legacy app builds send it, and those invoices settle
+            # as dollar invoices on either rail — but nothing else is, so a
+            # typo'd token can never create an invoice no one can pay.
+            normalized_token = str(input.token_type).upper().replace('+', '_PLUS').replace('-', '_')
+            if normalized_token not in ('CUSD_PLUS', 'CONFIO', 'CUSD'):
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=[f"Moneda no soportada: {input.token_type}"]
+                )
+
+            # Pin the settlement rail NOW, at creation, from what the client
+            # asked for — never inferred later from token_type (which cannot
+            # tell a legacy CONFIO invoice from a migrated one) and never
+            # from elapsed time.
+            settlement_chain = (input.settlement_chain or '').upper() or \
+                TOKEN_DEFAULT_CHAIN.get(normalized_token, 'ALGORAND')
+            if settlement_chain not in ('BSC', 'ALGORAND'):
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=[f"Red no soportada: {input.settlement_chain}"]
+                )
+            # cUSD+ exists only on BSC; cUSD/USDC only on Algorand. Refuse the
+            # impossible pairs rather than store a row no rail can settle.
+            if normalized_token == 'CUSD_PLUS' and settlement_chain != 'BSC':
+                return CreateInvoice(
+                    invoice=None, success=False,
+                    errors=["cUSD+ solo se liquida en BSC"])
+            if normalized_token in ('CUSD', 'USDC') and settlement_chain != 'ALGORAND':
+                return CreateInvoice(
+                    invoice=None, success=False,
+                    errors=[f"{normalized_token} solo se liquida en Algorand"])
+
+            # A BSC QR is only payable once the business has a registered BSC
+            # address — which only the OWNER's client can derive (the
+            # users/schema.py guard). Refuse here rather than let a cashier
+            # print a QR that fails in front of the customer with
+            # merchant_no_bsc_address. Algorand invoices are unaffected.
+            if settlement_chain == 'BSC' and not (active_account.bsc_address or '').strip():
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=["merchant_not_ready"]
+                )
+            # The mirror case (Codex [P2], re-check): a BSC-era business has
+            # no Algorand address, so a CONFIO invoice from an app build too
+            # old to send settlementChain would default to Algorand and be
+            # unpayable at the till. Refusing here turns a silent dead QR
+            # into "update the app", which is the actual fix.
+            if settlement_chain == 'ALGORAND' and not (active_account.algorand_address or '').strip():
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=["merchant_not_ready"]
+                )
 
             # Create the invoice
             invoice = Invoice.objects.create(
@@ -261,6 +358,7 @@ class CreateInvoice(graphene.Mutation):
                 merchant_display_name=merchant_display_name,
                 amount=input.amount,
                 token_type=normalized_token,
+                settlement_chain=settlement_chain,
                 description=input.description or '',
                 expires_at=expires_at,
                 status='PENDING'
@@ -415,6 +513,20 @@ class PayInvoice(graphene.Mutation):
                         payment_transaction=None,
                         success=False,
                         errors=["Invoice has expired"]
+                    )
+
+                # This mutation IS the Algorand rail, and the invoice names
+                # the only chain allowed to settle it (Codex audit [P1]).
+                # Without this, a BSC invoice could be prepared here WHILE
+                # the BSC rail prepared it too — the pay contract's
+                # invoiceDone guard is per-chain and cannot see an Algorand
+                # group, so both could settle and the merchant be paid twice.
+                if invoice.settlement_chain != 'ALGORAND':
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=["Actualiza la aplicación para pagar este cobro."]
                     )
 
                 # Check if user is trying to pay their own invoice

@@ -97,7 +97,7 @@ Congelamientos bancarios, controles, fintechs fallidas, brokers informales, spre
 | Agregar dólares | USDT | El proveedor entrega BSC-USDT a la dirección propia del usuario. |
 | Ahorrar | Bóveda cUSD+ | InstantManager convierte USDT en USDY y la bóveda emite cUSD+ al valor de referencia protegido. |
 | Enviar | cUSD+ o USDT | Un receptor elegible recibe cUSD+; otros reciben USDT mediante redención atómica o transferencia directa. |
-| Pagar | cUSD+ o USDT | El contrato paga al comercio, aplica 0,9% y registra la comisión on-chain. |
+| Pagar | cUSD+ o $CONFIO, fondeado con cUSD+ o USDT | El comercio cobra en cUSD+ o $CONFIO; el contrato paga al comercio, aplica 0,9% y registra la comisión on-chain. |
 | Nómina | cUSD+ con salida opcional a USDT | La empresa fondea un escrow y delegados autorizados firman pagos. |
 | Comprar o vender activos | Ondo Global Markets | Las órdenes elegibles usan cotización y attestations de Ondo en BSC. |
 | Preventa $CONFIO | USDT | Una transacción patrocinada compra asignación sobre una curva inmutable. |
@@ -116,7 +116,7 @@ Todos están activos en mainnet y tienen código verificado.
 | Bóveda de recompensas | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | Bóveda de vesting | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
 | Escrow de invitaciones | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| Pagos a comercios | [`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`](https://bscscan.com/address/0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD#code) |
+| Pagos a comercios | [`0x039Ebe91283c686F23F4C751600a39567967736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
 | Nómina | [`0x664378b2668f320ce3573D0eD6DD154b8C8B3835`](https://bscscan.com/address/0x664378b2668f320ce3573D0eD6DD154b8C8B3835#code) |
 
 ### 3.2 Por qué importa una sola red
@@ -169,7 +169,11 @@ El usuario firma y Confío patrocina. cUSD+ se transfiere a receptores elegibles
 
 ### 6.2 Pagos a comercios
 
-QR y facturas aceptan cUSD+ o USDT. El contrato calcula 0,9%, paga el neto al comercio, evita reutilizar la factura y acumula únicamente comisiones ganadas. Aprobación y pago son atómicos.
+El comercio cobra en una de dos denominaciones: **cUSD+**, el saldo en dólares, o **$CONFIO**, expresado como cantidad de tokens y no como monto en dólares. Ambas liquidan en BNB Smart Chain.
+
+Quien tiene USDT sin convertir puede pagar igual una factura en dólares, incluido quien no es elegible para emitir cUSD+, y el comercio recibe el mismo token que gastó el pagador. USDT es una vía de fondeo del pagador, no una tercera denominación que el comercio pueda cobrar.
+
+El contrato calcula 0,9%, paga el neto al comercio y acumula únicamente comisiones ganadas. El backend firma una autorización de corta duración sobre los términos exactos y el contrato registra la liquidación contra el identificador de la factura: cada factura se liquida una sola vez y nadie sin esa autorización puede consumir su identificador. Cada factura registra además la única red autorizada a liquidarla, de modo que un mismo cobro no puede pagarse dos veces en redes distintas. Aprobación y pago son atómicos.
 
 ### 6.3 Nómina y pagos masivos
 

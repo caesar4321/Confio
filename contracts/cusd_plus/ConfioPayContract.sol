@@ -35,10 +35,17 @@ pragma solidity ^0.8.24;
  * merchant, pulls the fee into this contract, and consumes the invoiceId.
  *
  * House rules: token allowlist fixed at deploy (cUSD+ vault shares +
- * BSC-USDT — the only two dollars in the system); non-upgradeable;
- * owner (Safe) can collect accrued fees, rotate the payment signer, and
- * pause NEW payments; no path to anything but the fee accrual. Merchant
- * payout is a direct transfer — nothing but fees ever rests here.
+ * BSC-USDT + CONFIO); non-upgradeable; owner (Safe) can collect accrued
+ * fees, rotate the payment signer, and pause NEW payments; no path to
+ * anything but the fee accrual. Merchant payout is a direct transfer —
+ * nothing but fees ever rests here.
+ *
+ * The allowlist is not the charge menu (2026-08-01, ChargeScreen migration).
+ * A merchant charges in exactly two denominations — cUSD+ or CONFIO — and
+ * USDT is here as the PAYER's funding fallback: someone holding raw USDT
+ * (including anyone geo-ineligible to mint cUSD+) settles a dollar invoice
+ * with it and the merchant receives that same token. Dropping USDT would
+ * match the menu but lock ineligible payers out of paying merchants at all.
  */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -58,6 +65,10 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
 
     IERC20 public immutable CUSD_PLUS;
     IERC20 public immutable USDT;
+    /// CONFIO (BEP-20, re-issued 2026-07-31). A charge denomination in its
+    /// own right — amounts are a token COUNT, not USD — settled through the
+    /// same fee/guard path so CONFIO revenue accrues on-chain like the rest.
+    IERC20 public immutable CONFIO;
 
     /// Backend authorizer. Every pay() carries this signer's EIP-712
     /// authorization over the exact terms; rotate via setPaymentSigner
@@ -88,14 +99,18 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
     event FeesCollected(address indexed token, address indexed to, uint256 amount);
     event PaymentSignerChanged(address indexed previous, address indexed current);
 
-    constructor(address cusdPlus, address usdt, address signer_, address owner_)
+    constructor(address cusdPlus, address usdt, address confio, address signer_, address owner_)
         Ownable(owner_)
         EIP712("ConfioPay", "1")
     {
-        require(cusdPlus != address(0) && usdt != address(0), "zero address");
+        require(
+            cusdPlus != address(0) && usdt != address(0) && confio != address(0),
+            "zero address"
+        );
         require(signer_ != address(0), "zero signer");
         CUSD_PLUS = IERC20(cusdPlus);
         USDT = IERC20(usdt);
+        CONFIO = IERC20(confio);
         paymentSigner = signer_;
         emit PaymentSignerChanged(address(0), signer_);
     }
@@ -139,7 +154,10 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         returns (uint256 fee)
     {
         require(block.timestamp <= deadline, "authorization expired");
-        require(token == address(CUSD_PLUS) || token == address(USDT), "token not allowed");
+        require(
+            token == address(CUSD_PLUS) || token == address(USDT) || token == address(CONFIO),
+            "token not allowed"
+        );
         require(merchant != address(0) && merchant != address(this), "bad merchant");
         require(merchant != msg.sender, "self payment");
         require(!invoiceDone[invoiceId], "invoice done");

@@ -3013,6 +3013,7 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
         username
         firstName
         lastName
+        phoneKey
         statusTier
         isReferralVerified
       }
@@ -3021,6 +3022,7 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
         username
         firstName
         lastName
+        phoneKey
         statusTier
         isReferralVerified
       }
@@ -3939,6 +3941,33 @@ export const GET_BSC_CONFIO_DOLLAR_BALANCE = gql`
   query GetBscConfioDollarBalance {
     cusdPlusSummary {
       usdtBalanceUsd
+    }
+  }
+`;
+
+// The ONE authority on which chain may settle an invoice. 'CONFIO' is the
+// same wire value before and after the BSC migration, so the token cannot
+// answer this and a wrong guess used to mean both rails could prepare the
+// same invoice. Isolated on purpose: against a server that predates the
+// field this query fails alone, and the payer falls back to the token
+// heuristic instead of losing the whole invoice payload.
+export const GET_INVOICE_SETTLEMENT_CHAIN = gql`
+  query GetInvoiceSettlementChain($invoiceId: String!) {
+    invoice(invoiceId: $invoiceId) {
+      id
+      settlementChain
+    }
+  }
+`;
+
+// The payer's BEP-20 CONFIO count, for CONFIO invoices (BSC charge rail,
+// 2026-08-01). Deliberately its OWN query rather than a field added to the
+// shared portfolio query: one unknown field fails the whole query against an
+// older server, and this must never take the Ahorros surfaces down with it.
+export const GET_BSC_CONFIO_TOKEN_BALANCE = gql`
+  query GetBscConfioTokenBalance {
+    cusdPlusSummary {
+      confioBalance
     }
   }
 `;

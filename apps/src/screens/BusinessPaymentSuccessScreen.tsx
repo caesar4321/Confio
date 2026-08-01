@@ -23,7 +23,7 @@ import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
-import { formatTokenLabel } from '../utils/tokenDisplay';
+import { formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
 
 const { width } = Dimensions.get('window');
 
@@ -213,7 +213,10 @@ export const BusinessPaymentSuccessScreen = () => {
   };
 
   const currentCurrency = formatCurrency(paymentData.tokenType);
-  const isCUSD = currentCurrency === 'cUSD';
+  // Dollar denominations (cUSD+, and legacy cUSD) wear the primary color;
+  // CONFIO wears the secondary one.
+  const isCUSD = currentCurrency !== 'CONFIO';
+  const explorer = explorerFor(currentCurrency, paymentData.transactionHash);
   const isConfirming = (paymentData.status || '').toUpperCase() === 'SUBMITTED' || (paymentData.status || '').toUpperCase() === 'PENDING_BLOCKCHAIN';
   const headerBgColor = isCUSD ? colors.primary : colors.secondary;
   const confirmColor = '#d97706'; // amber-600
@@ -384,17 +387,18 @@ export const BusinessPaymentSuccessScreen = () => {
                     Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
                     return;
                   }
-                  const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                  const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                  // The token picks the explorer: a cUSD+/CONFIO payment
+                  // settles on BSC and Pera has never heard of its hash.
+                  const url = `${explorer.base}/tx/${encodeURIComponent(txid)}`;
                   try {
                     await Linking.openURL(url);
                   } catch {
-                    Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                    Alert.alert('Error', `No se pudo abrir ${explorer.name}.`);
                   }
                 }}
               >
                 <Icon name="external-link" size={16} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+                <Text style={styles.explorerButtonText}>Abrir en {explorer.name}</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -317,8 +317,9 @@ class SponsoredBatch(models.Model):
     )
     user_bsc_address = models.CharField(max_length=42)
     # 'subscribe' | 'redeem' | 'presale_buy' | Phase-2 kinds:
-    # send_cusd_plus | send_redeem | send_usdt | pay_cusd_plus | pay_usdt |
-    # payroll_fund | payroll_payout | invite_create | invite_reclaim | ...
+    # send_cusd_plus | send_redeem | send_usdt | send_confio | pay_cusd_plus |
+    # pay_usdt | pay_confio | payroll_fund | payroll_payout | invite_create |
+    # invite_reclaim | ...
     kind = models.CharField(max_length=32)
     # The domain row this batch settles (SendTransaction / PaymentTransaction
     # / PayrollItem / …) — confirm tasks verify (kind, source_id, tx_hash)

@@ -16,7 +16,10 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT'}
+TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT', 'CONFIO': 'CONFIO'}
+
+# Batch kinds this task is allowed to settle (audit 2026-07-31 P2 isolation).
+PAY_KINDS = ('pay_cusd_plus', 'pay_usdt', 'pay_confio')
 
 
 
@@ -40,7 +43,7 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
         return  # already resolved
 
     # Isolation (audit 2026-07-31 P2).
-    if (batch.kind not in ('pay_cusd_plus', 'pay_usdt')
+    if (batch.kind not in PAY_KINDS
             or batch.source_id != p.id
             or (p.transaction_hash and batch.tx_hash != p.transaction_hash)):
         logger.error('[PAY][BSC] batch %s does not match payment %s — refusing to settle', batch.id, p.id)

@@ -24,9 +24,9 @@ import { InlineBanner } from '../components/common/InlineBanner';
 import { ReceiptCard } from '../components/common/ReceiptCard';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { formatNumber } from '../utils/numberFormatting';
-import { useMutation } from '@apollo/client';
-import { GET_INVOICE } from '../apollo/queries';
-import { useAuth } from '../contexts/AuthContext';
+import { useMutation, useQuery } from '@apollo/client';
+import { GET_INVOICE, GET_BSC_CONFIO_TOKEN_BALANCE, GET_INVOICE_SETTLEMENT_CHAIN } from '../apollo/queries';
+import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { APP_LAYOUT } from '../config/layout';
@@ -135,6 +135,58 @@ export const PaymentConfirmationScreen = () => {
   const safeInvoiceId = invoiceData?.internalId || '';
   const safeTokenType = invoiceData?.tokenType || 'cUSD';
 
+  // Which rail settles this invoice (2026-08-01 BSC charge migration).
+  // The SERVER decides — the invoice carries its chain — because 'CONFIO'
+  // is the same wire value on both sides of the migration. Both rails
+  // enforce it server-side too, so a wrong guess here costs a retry, never
+  // a double settlement.
+  const invoiceToken = String(safeTokenType).toUpperCase();
+  const isDollarInvoice = invoiceToken === 'CUSD' || invoiceToken === 'CUSD_PLUS';
+  const isConfioInvoice = invoiceToken === 'CONFIO';
+
+  // Hooks must run unconditionally (this component early-returns below).
+  const savingsPortfolio = useSavingsPortfolio();
+  const authReady = useAuthReady();
+  const { data: chainData, loading: chainLoading, error: chainError } = useQuery(
+    GET_INVOICE_SETTLEMENT_CHAIN,
+    { variables: { invoiceId: safeInvoiceId }, skip: !safeInvoiceId,
+      fetchPolicy: 'network-only' },
+  );
+  // Undefined = not answered yet, or a server that predates the field.
+  const serverChain: string | undefined = chainData?.invoice?.settlementChain;
+  // ONLY a schema error means "this server is too old to know the rail". A
+  // timeout or a 500 says nothing about the invoice, and treating it as an
+  // old server would silently route a BSC invoice at Algorand (Codex audit
+  // [P2], re-check) — so those keep the rail pending and the user retries.
+  const chainSchemaUnknown = !!chainError && /Cannot query field|Unknown (field|argument|type)|settlementChain/i.test(
+    `${chainError.message} ${chainError.graphQLErrors?.map(e => e.message).join(' ') ?? ''}`,
+  );
+  const isBscInvoice = serverChain
+    ? serverChain === 'BSC'
+    // Fallback for a genuinely older server: only cUSD+ is unambiguously
+    // BSC. A bare CONFIO is read as the legacy Algorand charge, matching the
+    // server's own default, so the two never disagree about a pre-migration
+    // row.
+    : invoiceToken === 'CUSD_PLUS';
+  // Still resolving the rail: don't let a not-yet-loaded balance pick one.
+  const railPending = !!safeInvoiceId && !serverChain
+    && (chainLoading || (!!chainError && !chainSchemaUnknown));
+
+  // Balances must be read for the account the JWT is currently on: without
+  // the auth gate an account switch can serve the PREVIOUS account's cached
+  // number, and a zero-before-first-result reads as "no funds".
+  const { data: confioBalanceData, loading: confioBalanceLoading } = useQuery(
+    GET_BSC_CONFIO_TOKEN_BALANCE,
+    {
+      skip: !isConfioInvoice || !isBscInvoice || !authReady,
+      fetchPolicy: 'network-only',
+    },
+  );
+  const bscConfioBalance = Number(
+    confioBalanceData?.cusdPlusSummary?.confioBalance ?? 0,
+  );
+  const confioBalanceReady = !!confioBalanceData && !confioBalanceLoading;
+
   // Helper function to format amount with 2 decimal places
   const formatAmount = (amount: string | number): string => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -182,6 +234,9 @@ export const PaymentConfirmationScreen = () => {
 
   useEffect(() => {
     if (!invoiceData) return; // Guard clause
+    // A BSC invoice has no Algorand asset behind it — accountBalance would
+    // be a pointless round trip whose answer is always 0.
+    if (isBscInvoice || railPending) return;
     let mounted = true;
     const token = normalizeTokenType(safeTokenType);
     try {
@@ -213,12 +268,22 @@ export const PaymentConfirmationScreen = () => {
       if (mounted) setBalanceLoading(false);
     });
     return () => { mounted = false; };
+    // Rail state IS a dependency (Codex audit [P1], re-check): on the first
+    // render the chain query is still loading, so this effect bails — and
+    // without these deps it would never re-run once the invoice resolves to
+    // Algorand, leaving a legacy invoice with no balance snapshot forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [safeTokenType]);
+  }, [safeTokenType, isBscInvoice, railPending]);
 
   // Background preflight: create the sponsored payment so confirm only signs+submits
   useEffect(() => {
     if (!invoiceData) return;
+    // Algorand-rail preflight ONLY. The BSC batch is built server-side at
+    // confirm time. Codex audit [P1]: this used to fire for every CONFIO
+    // invoice before the rail was known, building an Algorand group for a
+    // BSC invoice; the server now refuses that, but not starting it at all
+    // is what keeps the two rails from ever racing on one invoice.
+    if (isBscInvoice || railPending) return;
     let alive = true;
 
     const runPreflight = async () => {
@@ -258,8 +323,10 @@ export const PaymentConfirmationScreen = () => {
     runPreflight();
 
     return () => { alive = false; };
+    // Same rail dependency as the balance effect: the Algorand preflight
+    // must start once the rail resolves to Algorand, not only on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [safeInvoiceId]);
+  }, [safeInvoiceId, isBscInvoice, railPending]);
 
   // Loading state (Render phase) - placed AFTER all hooks
   if (isFetchingInvoice) {
@@ -300,21 +367,29 @@ export const PaymentConfirmationScreen = () => {
   // Use snapshot balance; no immediate network dependency
   const realBalance = balanceSnapshot || '0';
 
-  // Phase-out rail choice: dollar invoices pay from the BSC dollar first
-  // (cUSD+/USDT — the primary balance) whenever it covers the amount; the
-  // legacy Algorand cUSD path remains the fallback. CONFIO invoices stay
-  // on Algorand entirely.
-  const savingsPortfolio = useSavingsPortfolio();
+  // Funding within the rail the INVOICE names. A BSC invoice pays from the
+  // BSC balance (the dollar position for cUSD+, the BEP-20 count for
+  // CONFIO); an Algorand invoice pays from the Algorand balance. The two are
+  // never alternatives for one invoice — that was the double-settlement
+  // path — so an insufficient BSC balance is "insufficient funds", not a
+  // reason to reach for the other chain.
   const bscDollarAvailable =
     savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd;
-  const isDollarInvoice =
-    String(currentPayment.currency || 'cUSD').toUpperCase() === 'CUSD';
+  const requestedAmount = parseFloat(currentPayment.amount || '0');
   const canPayBsc =
-    isDollarInvoice && bscDollarAvailable >= parseFloat(currentPayment.amount || '0');
+    isBscInvoice
+    && !railPending
+    && ((isDollarInvoice && bscDollarAvailable >= requestedAmount)
+      // Never judge a CONFIO balance we haven't actually received: an
+      // unloaded 0 would read as "no funds" and block a payable invoice.
+      || (isConfioInvoice && confioBalanceReady && bscConfioBalance >= requestedAmount));
 
   const hasEnoughBalance =
     canPayBsc
-    || (balanceSnapshot != null && parseFloat(realBalance) >= parseFloat(currentPayment.amount));
+    || (!isBscInvoice
+      && !railPending
+      && balanceSnapshot != null
+      && parseFloat(realBalance) >= parseFloat(currentPayment.amount));
 
   // Prevent overstatement: floor-based formatting with tiny-balance label
   const floorToDecimals = (value: number, decimals: number) => {
@@ -335,25 +410,36 @@ export const PaymentConfirmationScreen = () => {
 
   // Debug logging
 
-  // Wallet data for display
+  // Wallet data for display. The balance shown must be the one that will
+  // actually be spent — the rail the invoice names, not whichever number
+  // happens to be larger.
+  const tokenLabel = formatTokenLabel(currentPayment.currency);
+  const shownBalance = isBscInvoice
+    ? (isConfioInvoice ? bscConfioBalance : bscDollarAvailable)
+    : realBalance;
   const walletData = {
-    symbol: currentPayment.currency,
-    name: currentPayment.currency === 'cUSD' ? 'Confío Dollar' :
-      currentPayment.currency === 'CONFIO' ? 'Confío' :
-        currentPayment.currency === 'USDC' ? 'USD Coin' : currentPayment.currency,
-    balance: formatBalanceDisplay(realBalance),
-    color: currentPayment.currency === 'cUSD' ? colors.primary :
-      currentPayment.currency === 'CONFIO' ? colors.secondary :
-        currentPayment.currency === 'USDC' ? colors.accent : colors.primary,
-    icon: currentPayment.currency === 'cUSD' ? 'C' :
-      currentPayment.currency === 'CONFIO' ? 'F' :
-        currentPayment.currency === 'USDC' ? 'U' : '?'
+    symbol: tokenLabel,
+    name: tokenLabel === 'cUSD+' ? 'Confío Dollar+' :
+      tokenLabel === 'cUSD' ? 'Confío Dollar' :
+        tokenLabel === 'CONFIO' ? 'Confío' :
+          tokenLabel === 'USDC' ? 'USD Coin' : tokenLabel,
+    balance: formatBalanceDisplay(shownBalance),
+    color: tokenLabel === 'CONFIO' ? colors.secondary :
+      tokenLabel === 'USDC' ? colors.accent : colors.primary,
+    icon: tokenLabel === 'CONFIO' ? 'F' :
+      tokenLabel === 'USDC' ? 'U' : 'C'
   };
 
   const handleConfirmPayment = async () => {
 
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
+      return;
+    }
+
+    // Don't let a still-loading rail or balance masquerade as "no funds".
+    if (railPending || (isConfioInvoice && isBscInvoice && !confioBalanceReady)) {
+      Alert.alert('Un momento', 'Estamos verificando tu saldo. Inténtalo de nuevo en un segundo.');
       return;
     }
 

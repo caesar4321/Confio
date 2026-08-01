@@ -277,21 +277,39 @@ class InvoiceAdmin(admin.ModelAdmin):
     mark_as_expired.short_description = "Mark selected invoices as expired"
     
     def extend_expiration(self, request, queryset):
-        """Extend expiration time by 24 hours"""
+        """Extend expiration by 24 hours, bounded by the same 24h ceiling
+        createInvoice enforces.
+
+        Codex audit [P2]: repeated use of this action was the one way to
+        build an invoice that outlives the lifetime the rest of the system
+        assumes — the API caps expiry, so the admin must not be the hole
+        that uncaps it. The ceiling is anchored to CREATED_AT, not to now:
+        a "now + 24h" cap still rolls forward every time it is clicked,
+        which is the same unbounded lifetime wearing a cap.
+        """
         from datetime import timedelta
-        updated = 0
+
+        from .models import MAX_INVOICE_LIFETIME_HOURS as MAX_INVOICE_EXPIRY_HOURS
+
+        updated = skipped = 0
         for invoice in queryset:
-            if invoice.status == 'PENDING':
-                invoice.expires_at = invoice.expires_at + timedelta(hours=24)
-                invoice.save()
-                updated += 1
-        
+            if invoice.status != 'PENDING':
+                continue
+            ceiling = invoice.created_at + timedelta(hours=MAX_INVOICE_EXPIRY_HOURS)
+            if invoice.expires_at >= ceiling:
+                skipped += 1
+                continue
+            invoice.expires_at = min(invoice.expires_at + timedelta(hours=24), ceiling)
+            invoice.save()
+            updated += 1
+
         self.message_user(
-            request, 
-            f'Successfully extended expiration for {updated} invoice(s).',
+            request,
+            f'Extended {updated} invoice(s); skipped {skipped} already at the '
+            f'{MAX_INVOICE_EXPIRY_HOURS}h ceiling.',
             messages.SUCCESS
         )
-    extend_expiration.short_description = "Extend expiration by 24 hours"
+    extend_expiration.short_description = "Extend expiration (capped at 24h from now)"
     
     def cancel_invoices(self, request, queryset):
         """Cancel selected invoices"""

@@ -56,6 +56,10 @@ export const BSC_PAY_ERRORS: Record<string, string> = {
   invoice_not_pending: 'Este cobro ya no está disponible.',
   invoice_already_paid: 'Este cobro ya fue pagado.',
   bsc_pay_disabled: 'Los pagos están en preparación. Inténtalo más tarde.',
+  // The charge menu is cUSD+ and CONFIO; anything else is an invoice from a
+  // rail this build can't settle (or a token not yet configured server-side).
+  unsupported_token: 'Este cobro usa una moneda que esta versión no puede pagar. Actualiza Confío.',
+  confio_not_configured: 'Los pagos en CONFIO están en preparación. Inténtalo más tarde.',
   sponsor_busy: 'La red está ocupada. Inténtalo de nuevo en unos segundos.',
 };
 

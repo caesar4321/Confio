@@ -108,7 +108,7 @@ Confío presents one dollar experience while using different assets for differen
 | Add dollars | USDT | A fiat provider delivers BSC-USDT to the user’s own address. |
 | Save | cUSD+ vault | USDT is subscribed into USDY through Ondo’s InstantManager; the vault issues cUSD+ at its guarded reference value. |
 | Send | cUSD+ or USDT | Eligible internal recipients can receive cUSD+; other recipients receive USDT through an atomic cUSD+ redemption or direct USDT transfer. |
-| Pay a merchant | cUSD+ or USDT | The payment contract pays the merchant, enforces the 0.9% fee, and records fee accrual on-chain. |
+| Pay a merchant | cUSD+ or $CONFIO, funded from cUSD+ or USDT | The merchant charges in cUSD+ or $CONFIO; the payment contract pays the merchant, enforces the 0.9% fee, and records fee accrual on-chain. |
 | Run payroll | cUSD+ with optional USDT exit | Businesses fund a cUSD+ escrow; authorized delegates sign payouts, and recipients can receive cUSD+ or USDT. |
 | Buy or sell tokenized assets | Ondo Global Markets | Eligible orders settle through BNB Smart Chain using Ondo’s quote and attestation infrastructure. |
 | Participate in $CONFIO presale | USDT | A sponsored transaction purchases an allocation against an immutable on-chain price curve. |
@@ -127,7 +127,7 @@ All contracts listed below are live on BNB Smart Chain mainnet and source-verifi
 | $CONFIO reward vault | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | $CONFIO vesting vault | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
 | Invitation escrow | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| Merchant-payment contract | [`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`](https://bscscan.com/address/0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD#code) |
+| Merchant-payment contract | [`0x039Ebe91283c686F23F4C751600a39567967736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
 | Payroll vault | [`0x664378b2668f320ce3573D0eD6DD154b8C8B3835`](https://bscscan.com/address/0x664378b2668f320ce3573D0eD6DD154b8C8B3835#code) |
 
 ### 3.2 Why one network matters
@@ -214,7 +214,11 @@ Confío does not take a platform fee on person-to-person transfers. Provider cha
 
 ### 6.2 Merchant payments
 
-Confío’s QR and invoice payment design accepts cUSD+ or USDT. The payment contract calculates the 0.9% merchant fee, pays the merchant net amount directly, prevents reuse of the invoice identifier, and accrues only earned fees in the contract for transparent collection. The payer’s approval and payment execute atomically in a sponsored batch.
+A merchant charges in one of two denominations: **cUSD+**, the dollar balance, or **$CONFIO**, quoted as a token count rather than a dollar amount. Both settle on BNB Smart Chain.
+
+A customer who holds raw USDT can still settle a dollar invoice with it, including a customer who is not eligible to mint cUSD+. The merchant receives the same token the payer spent. USDT is therefore a funding route for the payer, not a third denomination a merchant can quote.
+
+The payment contract calculates the 0.9% merchant fee, pays the merchant net amount directly, and accrues only earned fees in the contract for transparent collection. Confío’s backend signs a short-lived authorization over the exact payment terms, and the contract records settlement against the invoice identifier itself. Exactly one payment can settle an invoice, and an identifier cannot be consumed by anyone the backend has not authorized. Each invoice also records the single network permitted to settle it, so one charge cannot be paid twice across networks. The payer’s approval and payment execute atomically in a sponsored batch.
 
 ### 6.3 Payroll and mass payouts
 

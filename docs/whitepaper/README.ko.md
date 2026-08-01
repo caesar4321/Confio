@@ -97,7 +97,7 @@ cUSD+ 볼트, 스폰서드 트랜잭션 델리게이트, $CONFIO 토큰, 프리�
 | 달러 입금 | USDT | 제공자가 사용자 BSC 주소에 USDT를 보낸다. |
 | 저축 | cUSD+ 볼트 | InstantManager가 USDT를 USDY로 구독하고 볼트가 cUSD+를 발행한다. |
 | 송금 | cUSD+ 또는 USDT | 적격 내부 수취인은 cUSD+, 그 외에는 원자적 상환 또는 직접 USDT를 받는다. |
-| 가맹점 결제 | cUSD+ 또는 USDT | 계약이 0.9%를 계산해 가맹점에 순액을 지급한다. |
+| 가맹점 결제 | cUSD+ 또는 $CONFIO, 결제 재원은 cUSD+ 또는 USDT | 가맹점이 cUSD+ 또는 $CONFIO로 청구하고, 계약이 0.9%를 계산해 가맹점에 순액을 지급한다. |
 | 급여 | cUSD+, 선택적 USDT 출금 | 기업이 에스크로를 채우고 승인된 델리게이트가 지급을 서명한다. |
 | 토큰화 자산 | Ondo Global Markets | 적격 주문이 Ondo 견적·attestation으로 BSC에서 결제된다. |
 | $CONFIO 프리세일 | USDT | 스폰서드 트랜잭션이 불변 가격곡선에서 배분을 산다. |
@@ -116,7 +116,7 @@ cUSD+ 볼트, 스폰서드 트랜잭션 델리게이트, $CONFIO 토큰, 프리�
 | 리워드 볼트 | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | 베스팅 볼트 | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
 | 초대 에스크로 | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| 가맹점 결제 | [`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`](https://bscscan.com/address/0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD#code) |
+| 가맹점 결제 | [`0x039Ebe91283c686F23F4C751600a39567967736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
 | 급여 볼트 | [`0x664378b2668f320ce3573D0eD6DD154b8C8B3835`](https://bscscan.com/address/0x664378b2668f320ce3573D0eD6DD154b8C8B3835#code) |
 
 ### 3.2 하나의 네트워크가 중요한 이유
@@ -169,7 +169,11 @@ cUSD+는 송금, 결제, 급여 직전까지 가치가 누적된다. 수취인�
 
 ### 6.2 가맹점 결제
 
-QR·청구서는 cUSD+ 또는 USDT를 받는다. 계약이 0.9%를 계산해 순액을 지급하고 invoice 재사용을 막으며 실제 발생 수수료만 누적한다.
+가맹점은 두 가지 단위 중 하나로 청구한다. 달러 잔액인 **cUSD+**, 또는 달러 금액이 아니라 토큰 수량으로 표시되는 **$CONFIO**다. 둘 다 BNB 스마트 체인에서 결제된다.
+
+USDT를 그대로 보유한 고객도 달러 청구서를 결제할 수 있으며, cUSD+ 발행 자격이 없는 고객도 마찬가지다. 가맹점은 지불자가 지불한 것과 같은 토큰을 받는다. 즉 USDT는 지불자의 결제 수단이지 가맹점이 청구할 수 있는 세 번째 단위가 아니다.
+
+계약이 0.9%를 계산해 순액을 지급하고 실제 발생 수수료만 누적한다. 백엔드가 정확한 결제 조건에 대해 단기 유효 서명을 발급하고, 계약은 invoice 식별자 자체에 결제 사실을 기록한다. 따라서 하나의 청구서는 한 번만 결제되며, 백엔드가 승인하지 않은 자는 그 식별자를 소진시킬 수 없다. 각 청구서에는 결제가 허용된 단일 네트워크도 기록되어, 같은 청구가 서로 다른 네트워크에서 두 번 결제될 수 없다. 승인과 결제는 원자적으로 실행된다.
 
 ### 6.3 급여·대량지급
 

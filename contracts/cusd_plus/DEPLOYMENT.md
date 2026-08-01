@@ -284,7 +284,8 @@ EOA exists to reconcile.
 
 | Contract | Address |
 | --- | --- |
-| **ConfioPayContract** (v2, server-authorized) | `0x71256d060Ba718ff758647Ab4CB91A113a09E93d` |
+| **ConfioPayContract** (v3, CONFIO in the allowlist) | `0x039Ebe91283c686F23F4C751600a39567967736D` |
+| ~~ConfioPayContract v2~~ (superseded, 2-token allowlist) | ~~`0x71256d060Ba718ff758647Ab4CB91A113a09E93d`~~ |
 | ~~ConfioPayContract v1~~ (STALE, permissionless) | ~~`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`~~ |
 | **ConfioPayrollVault** | `0x664378b2668f320ce3573D0eD6DD154b8C8B3835` |
 | Owner (both) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
@@ -307,6 +308,28 @@ EOA exists to reconcile.
   (nonce 34, ~0.0014 BNB). BscScan verified ("Pass - Verified"). Post-deploy
   reads: `paymentSigner` = sponsor `0xf9f9…fc9D`, `owner` = Safe.
   **v1 `0x1FAEFF…` is abandoned — do not use.**
+  **REDEPLOYED AGAIN 2026-08-01 → v3 `0x039Ebe91…736D` (ChargeScreen BSC
+  migration):** the merchant charge menu became cUSD+ **and CONFIO**, and
+  v2's allowlist was the immutable pair `{CUSD_PLUS, USDT}` — a CONFIO
+  invoice reverted "token not allowed". v3 adds a third immutable `CONFIO`
+  (`0xCcEb3F61…B3fa8`); USDT stays, since it is the PAYER's funding fallback
+  (a raw-USDT holder, including anyone geo-ineligible to mint cUSD+, must
+  still be able to pay), not a charge option. Nothing else changed; 22/22
+  forge tests pass. Creation tx
+  `0x3d8753c3f9fc5b56547872655875ee21814b7fb5e36109e7f89f0e0d0547f289`
+  (nonce 46, ~0.0014 BNB). BscScan verified ("Pass - Verified").
+  Post-deploy reads (now FATAL on mismatch, not merely printed): CUSD_PLUS,
+  USDT, CONFIO, paymentSigner = sponsor `0xf9f9…fc9D`, owner = Safe — all
+  OK. `BSC_PAY_CONTRACT_ADDRESS` updated in `.env.mainnet`.
+  **v1 `0x1FAEFF…` and v2 `0x71256d06…` are abandoned — do not use.**
+
+  **Before `BSC_PAY_ENABLED=True`** (Codex audit 2026-08-01, rounds 1-5 —
+  all P1s closed, two P2s open): land a DB check constraint + outlier
+  cleanup for the 24h invoice-lifetime ceiling (`Invoice.save()` bounds ORM
+  writes, but `queryset.update()` / raw SQL / fixtures bypass it), and
+  remove-or-track the non-invoice payment mode of
+  `SubmitSponsoredPaymentMutation` (now requires `internal_id`, which no
+  in-repo caller omits).
 - **ConfioPayrollVault** — per-business cUSD+ share escrow with an
   on-chain delegate allowlist and EIP-712 delegate-signed payouts. The
   token's per-address freeze is honored through the escrow (audit P2:
