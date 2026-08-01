@@ -59,6 +59,13 @@ VERSION_HASH = keccak(text='1')
 # approve+subscribeAndMint batch 664k, redeemToUsdt batch 390k). Fixed and
 # deterministic on purpose: eth_estimateGas can't see a not-yet-applied
 # delegation, and a griefed estimate could oversize the sponsor's spend.
+#
+# The fork numbers are a FLOOR, not the truth: they were measured at one
+# block, and the vault's redeem cost depends on third-party state we don't
+# control (Ondo's InstantManager). A fork test pinned at a cheap block keeps
+# passing while production reverts — which is what happened on 2026-08-01.
+# So budget for the expensive path here, and rely on simulate() running under
+# this same limit to catch the next divergence before it costs sponsor gas.
 GAS_BASE = 21_000
 GAS_PER_AUTHORIZATION = 25_000  # PER_EMPTY_ACCOUNT_COST
 GAS_EXECUTE_OVERHEAD = 30_000
@@ -66,7 +73,14 @@ GAS_PER_SELECTOR = {
     SEL_APPROVE: 50_000,
     SEL_TRANSFER: 80_000,  # plain ERC-20 transfer (~35-52k) + headroom
     SEL_SUBSCRIBE_AND_MINT: 620_000,
-    SEL_REDEEM_TO_USDT: 400_000,
+    # 750k, raised from 400k after prod reverts on 2026-08-01: redeemToUsdt
+    # alone estimated 590k, so the 541,200 total budget starved the inner
+    # call and it reverted with the outer frame's EIP-150 1/64 left over
+    # (518k of 541k burned, zero logs). The cost is not ours to control —
+    # _imRedeem's price depends on Ondo's InstantManager taking the cheap
+    # path (pay from its USDT balance) or the expensive one (source it),
+    # and its balance is routinely 0. Budget for the expensive path.
+    SEL_REDEEM_TO_USDT: 750_000,
     SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
     SEL_PAY: 240_000,  # 2 transferFroms + invoice write + accrual + ecrecover/EIP712 auth
     _sel('createInvitation(bytes32,address,uint256)'): 140_000,  # transferFrom + struct write
@@ -388,12 +402,19 @@ def gas_budget(calls: list, num_authorizations: int) -> int:
     return min(total, int(getattr(settings, 'CUSD_PLUS_7702_GAS_LIMIT', 1_100_000)))
 
 
-def simulate(user_addr: str, calldata: str, delegated: bool, sponsor: str) -> None:
+def simulate(user_addr: str, calldata: str, delegated: bool, sponsor: str,
+             gas: int | None = None) -> None:
     """eth_call the execute() before spending sponsor gas. For a first-time
     (undelegated) user, inject the delegate's runtime code via a state
     override; if the node rejects overrides, log and proceed on fixed
-    budgets — a revert is a hard reject either way."""
+    budgets — a revert is a hard reject either way.
+
+    `gas` is the limit the real transaction will carry. Without it the node
+    simulates at its own default ceiling, which hides an under-budgeted
+    inner call until it burns sponsor gas on-chain."""
     call_obj = {'from': sponsor, 'to': user_addr, 'data': calldata}
+    if gas is not None:
+        call_obj['gas'] = hex(int(gas))
     try:
         if delegated:
             _rpc('eth_call', [call_obj, 'latest'])
@@ -469,7 +490,13 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     # server-verified digest bind identical bytes.
     intent_id = intent_id_for(kind, source_id)
     calldata = execute_calldata(calls, nonce, deadline, intent_sig, intent_id)
-    simulate(user_addr, calldata, authorization is None, sponsor)
+    # Simulate UNDER THE REAL BUDGET. An eth_call with no gas field runs at
+    # the node's (enormous) default, so an under-budgeted call sails through
+    # the pre-flight and then reverts on-chain having spent sponsor gas —
+    # exactly how the 2026-08-01 redeem reverts reached the chain. Passing
+    # the same limit turns that class of bug into a pre-flight rejection.
+    gas = gas_budget(calls, 1 if authorization else 0)
+    simulate(user_addr, calldata, authorization is None, sponsor, gas)
 
     gas_price = max(int(_rpc('eth_gasPrice', []), 16),
                     int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
@@ -479,8 +506,6 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
         # keeps the sponsor's worst-case spend bounded and honest.
         raise PolicyError('gas_price_too_high')
     fee_per_gas = min((gas_price * 12) // 10, price_cap)
-
-    gas = gas_budget(calls, 1 if authorization else 0)
 
     auth_list = []
     if authorization:
