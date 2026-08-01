@@ -15,7 +15,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
-import { formatTokenAmount, formatTokenLabel } from '../utils/tokenDisplay';
+import { formatTokenAmount, formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -517,17 +517,18 @@ export const TransactionSuccessScreen = () => {
                     Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
                     return;
                   }
-                  const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                  const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                  const explorer = explorerFor(transactionData.currency, txid);
                   try {
-                    await Linking.openURL(url);
+                    await Linking.openURL(`${explorer.base}/tx/${encodeURIComponent(txid)}`);
                   } catch {
-                    Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                    Alert.alert('Error', `No se pudo abrir ${explorer.name}.`);
                   }
                 }}
               >
                 <Icon name="external-link" size={16} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+                <Text style={styles.explorerButtonText}>
+                  {`Abrir en ${explorerFor(transactionData.currency, (transactionData as any).transactionHash).name}`}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

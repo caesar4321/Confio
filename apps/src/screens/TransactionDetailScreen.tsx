@@ -44,7 +44,7 @@ import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
-import { formatTokenLabel } from '../utils/tokenDisplay';
+import { formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -2398,22 +2398,26 @@ export const TransactionDetailScreen = () => {
               <TouchableOpacity
                 style={[styles.explorerButton, { backgroundColor: colors.secondary }]}
                 onPress={async () => {
+                  const explorer = explorerFor(
+                    currentTx.currency,
+                    (currentTx.transactionHash || currentTx.hash || '').toString(),
+                  );
                   try {
                     const txid = (currentTx.transactionHash || currentTx.hash || '').toString();
                     if (!txid) {
                       Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
                       return;
                     }
-                    const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                    const url = `${base}/tx/${encodeURIComponent(txid)}`;
-                    await Linking.openURL(url);
+                    await Linking.openURL(`${explorer.base}/tx/${encodeURIComponent(txid)}`);
                   } catch (e) {
-                    Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                    Alert.alert('Error', `No se pudo abrir ${explorer.name}.`);
                   }
                 }}
               >
                 <Icon name="external-link" size={16} color={colors.white} style={styles.explorerIcon} />
-                <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+                <Text style={styles.explorerButtonText}>
+                  {`Abrir en ${explorerFor(currentTx.currency, (currentTx.transactionHash || currentTx.hash || '').toString()).name}`}
+                </Text>
               </TouchableOpacity>
             </ScrollView>
           </View>

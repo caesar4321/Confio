@@ -43,3 +43,38 @@ export const formatTokenAmount = (
   const value = String(amount ?? '').trim();
   return isDollarToken(currency) ? `$${value} ${label}`.trim() : `${value} ${label}`.trim();
 };
+
+/** Tokens that settle on BNB Smart Chain rather than Algorand. */
+const BSC_TOKENS = new Set(['CUSD_PLUS', 'CUSD+', 'USDT']);
+
+/**
+ * Which block explorer can actually show this transaction.
+ *
+ * Every call site hardcoded Pera (Algorand), so a cUSD+/USDT transaction
+ * linked to an explorer that has never heard of its hash. The token decides;
+ * the hash SHAPE is the fallback when the token is missing or unfamiliar
+ * (an EVM hash is 0x + 64 hex, an Algorand txid never is).
+ */
+export const explorerFor = (
+  tokenLabel?: string | null,
+  hash?: string | null,
+): { name: string; base: string } => {
+  const token = String(tokenLabel ?? '').trim().toUpperCase();
+  const looksEvm = /^0x[0-9a-fA-F]{64}$/.test(String(hash ?? '').trim());
+  if (BSC_TOKENS.has(token) || looksEvm) {
+    return { name: 'BscScan', base: 'https://bscscan.com' };
+  }
+  return {
+    name: 'Pera Explorer',
+    base: __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app',
+  };
+};
+
+/** Full explorer URL for a transaction, or null when there is no hash yet. */
+export const explorerTxUrl = (
+  tokenLabel?: string | null, hash?: string | null,
+): string | null => {
+  const h = String(hash ?? '').trim();
+  if (!h) return null;
+  return `${explorerFor(tokenLabel, h).base}/tx/${encodeURIComponent(h)}`;
+};
