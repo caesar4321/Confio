@@ -690,6 +690,9 @@ class SubmitBscTransaction(graphene.Mutation):
         router = (getattr(settings, 'CUSD_PLUS_PANCAKE_ROUTER', '') or '').lower()
         SWAP_EXACT_ETH_FOR_TOKENS = '7ff36ab5'  # swapExactETHForTokens(uint256,address[],address,uint256)
         is_autoconvert = False
+        # Set only when this tx IS a vault mint that passed the geo gate; the
+        # post-broadcast history write keys off it.
+        mint_amount_wei = None
         if router and to_addr == router:
             if not getattr(settings, 'CUSD_PLUS_BNB_AUTOCONVERT_ENABLED', False):
                 return SubmitBscTransaction(success=False, error='destination_not_allowed')
@@ -733,10 +736,29 @@ class SubmitBscTransaction(graphene.Mutation):
                 from .eligibility import check_savings_mint_eligibility
                 if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
                     return SubmitBscTransaction(success=False, error='mint_not_available')
+                # subscribeAndMint(uint256 usdtAmount, uint256 minUsdyOut,
+                # address recipient) — first word, from calldata we validated,
+                # never from the client. Recorded after broadcast.
+                mint_amount_wei = int(data_hex[8:72], 16)
 
         from .tasks import _rpc
         try:
             tx_hash = _rpc('eth_sendRawTransaction', [raw])
+            if mint_amount_wei is not None:
+                # The gate allowed it and it is on the wire: NOW the history
+                # row exists. Opening it before the gate is what stranded
+                # deposits at "pendiente" forever.
+                from .tasks import record_savings_mint
+                acct = _active_account(info)
+                record_savings_mint(
+                    user=user,
+                    business=getattr(acct, 'business', None) if acct else None,
+                    actor_type=('business' if acct is not None
+                                and acct.account_type == 'business' else 'user'),
+                    display_name=getattr(acct, 'display_name', '') if acct else '',
+                    amount_wei=mint_amount_wei, tx_hash=tx_hash,
+                    bsc_address=_active_bsc_address(info) or '',
+                )
             if is_autoconvert:
                 # Ledger row = this outbound BNB is a Confío-recorded convert.
                 # Outbound native transfers absent from this table are dust
@@ -904,10 +926,11 @@ class SponsorBscBatch(graphene.Mutation):
         # (tests call it directly) and has no request context. Redeems and
         # approvals pass untouched: exits are never gated.
         vault_l = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
-        if any(
-            c['to'] == vault_l and c['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
-            for c in norm_calls
-        ):
+        mint_call = next((
+            c for c in norm_calls
+            if c['to'] == vault_l and c['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
+        ), None)
+        if mint_call is not None:
             from .eligibility import check_savings_mint_eligibility
             if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
                 return SponsorBscBatch(success=False, error='mint_not_available')
@@ -971,6 +994,21 @@ class SponsorBscBatch(graphene.Mutation):
             tx_hash, _batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind)
+            if mint_call is not None:
+                # Gate passed and the batch is on the wire: record the mint as
+                # history. subscribeAndMint(uint256 usdtAmount, ...) — first
+                # word of calldata we validated, never a client-supplied value.
+                from .tasks import record_savings_mint
+                acct = _active_account(info)
+                record_savings_mint(
+                    user=user,
+                    business=getattr(acct, 'business', None) if acct else None,
+                    actor_type=('business' if acct is not None
+                                and acct.account_type == 'business' else 'user'),
+                    display_name=getattr(acct, 'display_name', '') if acct else '',
+                    amount_wei=int(mint_call['data'][10:74], 16),
+                    tx_hash=tx_hash, bsc_address=user_addr,
+                )
         except sponsor_7702.PolicyError as exc:
             return SponsorBscBatch(success=False, error=exc.code)
         except Exception as exc:  # noqa: BLE001 — surface node rejections honestly

@@ -438,19 +438,24 @@ def _registered_bsc_addresses() -> dict:
 
 def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, source, now,
                             from_addr=''):
-    """A chain-observed USDT inflow becomes a conversion row born at
-    DEST_ARRIVED: the funds are already at the user's address, so only leg C
-    (mint) remains — the existing foreground resume (sponsored 7702 batch)
-    finishes it with zero client changes. amount_usd is the EXACT floored arrival:
-    the client mints exactly this, so recording more than arrived would
-    revert the mint.
+    """A chain-observed USDT inflow becomes a RECEIPT — nothing more.
 
-    Idempotent by (address, bridge_arrival_tx), which BOTH row kinds set:
-    the cursor rewind makes rescans routine, and a bridge delivery re-seen
-    after its conversion advanced out of the watch set must not be reborn
-    as an external deposit. (Known trade-off: a single tx carrying multiple
-    Transfers to the same address records only the first — wallet sends are
-    one transfer per tx, and the rest stays visible on chain for support.)"""
+    The arrival is USDT at the user's own address. Whether it may become
+    cUSD+ is the mint gate's call, and that needs a request context this
+    task does not have, so no conversion row is opened here (see below).
+    amount_usd is the EXACT floored arrival.
+
+    Two dedupes, because the two records have different keys:
+      - the Conversion check below stops a BRIDGE delivery, re-seen after its
+        saga row advanced out of the watch set, from being reborn as a
+        deposit; those rows carry bridge_arrival_tx.
+      - rescans of a plain deposit are deduped by the receipt itself, in
+        _record_deposit_receipt — a cursor rewind makes rescans routine.
+
+    (Known trade-off: SendTransaction.transaction_hash is UNIQUE, so a single
+    tx carrying transfers to several registered addresses records only the
+    first — wallet sends are one transfer per tx, and the rest stays visible
+    on chain for support.)"""
     from users.models import Account
     from conversion.models import Conversion
 
@@ -462,63 +467,67 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     if account is None:
         return
     is_business = account.account_type == 'business'
-    # A geo-ineligible personal holder can NEVER finish leg C: the client's
-    # resume returns early for them and check_savings_mint_eligibility would
-    # refuse the mint anyway. A to_savings row born here therefore sits at
-    # DEST_ARRIVED forever and the app shows "Conversión USDT → cUSD+
-    # pendiente" over money that is simply sitting in their wallet as USDT.
+    # NO conversion row. A chain-observed arrival is just USDT at the user's
+    # own address; whether it may become cUSD+ depends on the MINT gate, which
+    # needs a request (phone country AND Cloudflare IP country) that this
+    # Celery task will never have. Creating the row here meant guessing with
+    # half the inputs: a phone-eligible holder connecting from a blocked
+    # country got a DEST_ARRIVED row the relay then refused on every retry,
+    # stranding it at "pendiente" forever — the same bug as the phone-
+    # ineligible case, one gate down.
     #
-    # Reversed 2026-08-01 (was: keep the row for audit + auto-mint if
-    # eligibility ever flips). The deposit is still fully recorded by the
-    # SendTransaction receipt below; what is lost is only the auto-mint on a
-    # future eligibility flip, and those funds remain in the wallet for the
-    # ordinary Ahorrar flow. Business accounts keep the row — their mint is
-    # gated on the REQUESTING user, not the account owner, so it can succeed.
-    from .eligibility import is_ondo_eligible
-    if (not is_business) and not is_ondo_eligible(account.user):
-        logger.info(
-            'inbound USDT deposit at %s (%s USDT, %s): holder ineligible for '
-            'cUSD+ — recorded as a USDT receipt, no conversion',
-            to_addr, amount_usd, tx_hash,
-        )
-        _record_deposit_receipt(
-            account=account, is_business=is_business, to_addr=to_addr,
-            from_addr=from_addr, amount_usd=amount_usd, tx_ref=tx_ref,
-            tx_hash=tx_hash, source=source, conv=None,
-        )
-        return
-    conv = Conversion.objects.create(
-        actor_user=None if is_business else account.user,
-        actor_business=account.business if is_business else None,
-        actor_type='business' if is_business else 'user',
-        actor_display_name=account.display_name,
-        conversion_type='to_savings',
-        source=source,
-        from_amount=amount_usd,
-        to_amount=amount_usd,  # already delivered — nothing left to quote
-        quoted_cost_pct=0,
-        user_bsc_address=to_addr,
-        from_transaction_hash=tx_ref,
-        bridge_arrival_tx=tx_hash,
-        status='DEST_ARRIVED',
-        dest_arrived_at=now,
-    )
-    logger.info(
-        'inbound USDT deposit %s (%s): %s USDT at %s (%s)',
-        conv.internal_id, source, amount_usd, to_addr, tx_hash,
-    )
-    # Ops/app mirrors — the same two surfaces the Algorand twin feeds:
-    # the conversion row into the unified ledger, and the raw USDT receipt
-    # as a SendTransaction (external sender -> user), whose post_save
-    # signal creates its own unified 'send' row. Ramp arrivals skip the
-    # receipt: ramps/signals already mirrors the order itself.
-    from .unified import sync_unified_from_cusd_plus_conversion
-    sync_unified_from_cusd_plus_conversion(conv)
+    # The row is now written by the relay AFTER a mint it actually allowed
+    # (record_savings_mint below), so a conversion row means "this happened",
+    # never "this is promised". The bridge saga is unaffected: those rows are
+    # born at CREATED by prepare_leg_ab and only ADVANCE through here.
     _record_deposit_receipt(
         account=account, is_business=is_business, to_addr=to_addr,
         from_addr=from_addr, amount_usd=amount_usd, tx_ref=tx_ref,
-        tx_hash=tx_hash, source=source, conv=conv,
+        tx_hash=tx_hash, source=source, conv=None,
     )
+
+
+def record_savings_mint(*, user, business, actor_type, display_name,
+                        amount_wei, tx_hash, bsc_address):
+    """History row for a mint the relay ALLOWED and broadcast.
+
+    Written after the geo gate passed and the transaction went out, so the row
+    records a completed fact. amount_wei is decoded from the validated
+    calldata, never taken from the client.
+    """
+    from decimal import Decimal, ROUND_DOWN
+    from conversion.models import Conversion
+
+    try:
+        if Conversion.objects.filter(
+            conversion_type='to_savings', to_transaction_hash=tx_hash,
+            is_deleted=False,
+        ).exists():
+            return None
+        amount = (Decimal(int(amount_wei)) / Decimal(10 ** 18)).quantize(
+            Decimal('0.000001'), rounding=ROUND_DOWN)
+        conv = Conversion.objects.create(
+            actor_user=user if actor_type != 'business' else None,
+            actor_business=business if actor_type == 'business' else None,
+            actor_type=actor_type,
+            actor_display_name=display_name or '',
+            conversion_type='to_savings',
+            source='external_deposit',
+            from_amount=amount,
+            to_amount=amount,
+            quoted_cost_pct=0,
+            user_bsc_address=bsc_address or '',
+            to_transaction_hash=tx_hash or '',
+            status='COMPLETED',
+            completed_at=timezone.now(),
+        )
+        logger.info('savings mint recorded %s: %s USDT (%s)',
+                    conv.internal_id, amount, tx_hash)
+        return conv
+    except Exception:  # noqa: BLE001 — history must not fail the relay
+        logger.exception('savings mint history write failed for %s', tx_hash)
+        return None
+
 
 
 def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
@@ -601,6 +610,11 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         # USDT ("Confío Dollar" in the app) — promising "se sumará a tu
         # ahorro" would be a lie, since the mint gate will refuse it. Product
         # name only; USDT stays in the data payload, never in the message.
+        # Phone country only — this task has no request, so no IP. That is
+        # exactly why it no longer opens a conversion row; for the COPY it is
+        # still the best signal available and right for the large majority. A
+        # phone-eligible holder behind a blocked IP gets a slightly optimistic
+        # message rather than a stuck row, which is the milder failure.
         from .eligibility import is_ondo_eligible
         eligible = (not is_business) and is_ondo_eligible(account.user)
         if eligible:

@@ -31,6 +31,7 @@ const ELIGIBILITY = gql`
   query SavingsMintEligibility {
     cusdPlusSummary {
       savingsEnabled
+      usdtBalanceUsd
     }
   }
 `;
@@ -47,6 +48,13 @@ const ADVANCE = gql`
 // BSC USDT is 18 decimals.
 const usdToWei = (usd: number): bigint =>
   BigInt(Math.round(usd * 1e6)) * 10n ** 12n;
+
+// Same conversion, but FLOORED. A sweep mints the balance the wallet actually
+// holds, and usdToWei rounds — 2.9999995 would become 3.000000 and revert for
+// insufficient USDT. Rounding up is only safe when the amount is a promise;
+// here it is a measurement.
+const usdToWeiFloor = (usd: number): bigint =>
+  BigInt(Math.floor(usd * 1e6)) * 10n ** 12n;
 
 let running = false;
 
@@ -85,12 +93,16 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     // Geo-ineligible users keep their arrived USDT raw ("Confío Dollar") —
     // don't mint. Cache-first: the summary is polled by the portfolio hook;
     // an unknown answer falls through to attempting (server still gates).
+    let usdtOnHandUsd = 0;
     try {
       const { data: elig } = await apolloClient.query({
         query: ELIGIBILITY,
-        fetchPolicy: 'cache-first',
+        // network-only: the balance decides how much to sweep, so a cached
+        // figure would mint the wrong amount.
+        fetchPolicy: 'network-only',
       });
       if (elig?.cusdPlusSummary?.savingsEnabled === false) return;
+      usdtOnHandUsd = Number(elig?.cusdPlusSummary?.usdtBalanceUsd ?? 0);
     } catch {}
     const { data } = await apolloClient.query({
       query: IN_FLIGHT,
@@ -121,6 +133,40 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         // One row failing (e.g. sponsor rail briefly down) must not block the rest;
         // the next foreground retries. Never throws to the caller.
         console.warn('[savingsLegC] mint resume failed for', row.conversionId, e);
+      }
+    }
+
+    // Plain deposits no longer arrive as DEST_ARRIVED rows: the server stopped
+    // opening a conversion it could not know was allowed (the mint gate needs
+    // a request's IP, which a Celery scanner never has). What's left is the
+    // honest signal — raw USDT sitting at the user's own address. Sweep it.
+    //
+    // AFTER the bridge rows above, and re-read: their USDT is part of this
+    // same balance, so sweeping first would mint it twice.
+    if (rows.length) {
+      try {
+        const { data: fresh } = await apolloClient.query({
+          query: ELIGIBILITY, fetchPolicy: 'network-only',
+        });
+        usdtOnHandUsd = Number(fresh?.cusdPlusSummary?.usdtBalanceUsd ?? 0);
+      } catch { usdtOnHandUsd = 0; }
+    }
+    // Ondo's InstantManager rejects sub-$1 amounts on this side too, so a
+    // smaller balance is left alone rather than burned on a reverting mint.
+    if (usdtOnHandUsd >= 1) {
+      if (!announced) { announced = true; setMinting(true); }
+      try {
+        await subscribeUsdtToSavings({
+          vaultAddress,
+          usdtWei: usdToWeiFloor(usdtOnHandUsd),
+          minUsdyOut: 0n,
+        });
+        // No mutation: the RELAY writes the history row, after the gate it
+        // actually enforced. The client never asserts a conversion happened.
+      } catch (e) {
+        // Includes mint_not_available for a blocked IP — the server refuses
+        // and the USDT simply stays raw. Next foreground retries.
+        console.warn('[savingsLegC] usdt sweep failed', e);
       }
     }
   } catch (e) {
