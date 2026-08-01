@@ -95,6 +95,9 @@ export const sendTokenParamFor = (currency?: string | null): SendTokenParam => {
     case 'CONFIO':
       return 'confio';
     case 'CUSD':
+    // USDC is the Algorand-rail dollar and auto-converts into cUSD, so the
+    // equivalent send is cUSD — same chain, same money.
+    case 'USDC':
       return 'cusd';
     case 'CUSD+':
     case 'USDT':
