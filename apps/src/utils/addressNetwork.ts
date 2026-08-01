@@ -19,12 +19,20 @@ const EXACT: Record<AddressNetwork, RegExp> = {
   bsc: /^0x[0-9a-fA-F]{40}$/,
 };
 
-// Unanchored: the address is embedded (QR payloads — algorand://ADDR,
-// ethereum:0x…@56). The alphabets cannot collide, since base32 has no
-// '0' or 'x'.
-const EMBEDDED: Record<AddressNetwork, RegExp> = {
-  algorand: /[A-Z2-7]{58}/,
-  bsc: /0x[0-9a-fA-F]{40}/,
+// Splitting the payload into candidate TOKENS and testing each whole token is
+// what makes embedded extraction safe. A plain unanchored search silently
+// truncates: `0x[0-9a-fA-F]{40}` happily matches the first 40 hex characters
+// of a 64-hex (Sui/Aptos-style) address, yielding a different, perfectly
+// valid-looking BSC destination — funds to nowhere. Base32 has the same
+// problem from the other end, where a 62-char string matches at an offset.
+//
+// Anything that cannot be part of an address is a separator, so URIs
+// (`algorand://ADDR?x=1`, `ethereum:0x…@56`) still yield the address as one
+// token, while an over-long string yields one over-long token that fails the
+// exact test and is correctly rejected.
+const TOKEN_SPLIT: Record<AddressNetwork, RegExp> = {
+  algorand: /[^A-Z2-7]+/,
+  bsc: /[^0-9a-zA-Z]+/,
 };
 
 /**
@@ -39,8 +47,12 @@ const normalize = (value: string, network: AddressNetwork): string =>
 export const findAddress = (
   value: string, network: AddressNetwork,
 ): string | null => {
-  const match = normalize(String(value ?? ''), network).match(EMBEDDED[network]);
-  return match ? match[0] : null;
+  const haystack = normalize(String(value ?? ''), network);
+  for (const token of haystack.split(TOKEN_SPLIT[network])) {
+    // EXACT test per token: never accept a prefix of something longer.
+    if (token && EXACT[network].test(token)) return token;
+  }
+  return null;
 };
 
 /** True when the whole trimmed string is a valid address for `network`. */

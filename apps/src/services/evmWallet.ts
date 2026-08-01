@@ -242,6 +242,42 @@ export interface BscReceipt {
   blockNumber: string;
 }
 
+/**
+ * The transaction IS on the network but we stopped waiting for its receipt.
+ *
+ * This is NOT a failure — the outcome is unknown, and it can still mine after
+ * we give up. Callers must never treat it as "nothing happened": retrying, or
+ * falling back to a second transfer, is how the same payment gets made twice.
+ * It carries the hash so the caller can reconcile instead of re-sending.
+ */
+export class BscReceiptTimeoutError extends Error {
+  readonly txHash: string;
+  /** True once the tx has been handed to the network — outcome unknown. */
+  readonly broadcast = true;
+  constructor(txHash: string) {
+    super(`bsc tx timeout: ${txHash}`);
+    this.name = 'BscReceiptTimeoutError';
+    this.txHash = txHash;
+  }
+}
+
+/** A revert is DEFINITIVE: it mined and changed nothing. Safe to retry. */
+export class BscRevertedError extends Error {
+  readonly txHash: string;
+  constructor(txHash: string) {
+    super(`bsc tx reverted: ${txHash}`);
+    this.name = 'BscRevertedError';
+    this.txHash = txHash;
+  }
+}
+
+/** True when a failure leaves the outcome UNKNOWN (money may still move). */
+export const isOutcomeUnknown = (e: unknown): boolean =>
+  e instanceof BscReceiptTimeoutError
+  || Boolean((e as any)?.broadcast)
+  // Defensive: an older bundle or a re-thrown copy may only carry the text.
+  || /bsc tx timeout/i.test(String((e as any)?.message || ''));
+
 /** Poll for a receipt; throws on revert or timeout. ~2s cadence. */
 export const bscWaitForReceipt = async (
   txHash: string, tries = 60,
@@ -249,12 +285,12 @@ export const bscWaitForReceipt = async (
   for (let i = 0; i < tries; i++) {
     const rec = (await rpcCall('eth_getTransactionReceipt', [txHash])) as BscReceipt | null;
     if (rec) {
-      if (rec.status !== '0x1') throw new Error(`bsc tx reverted: ${txHash}`);
+      if (rec.status !== '0x1') throw new BscRevertedError(txHash);
       return rec;
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
-  throw new Error(`bsc tx timeout: ${txHash}`);
+  throw new BscReceiptTimeoutError(txHash);
 };
 
 export const bscGetCode = async (address: string): Promise<string> =>

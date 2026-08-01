@@ -107,11 +107,13 @@ export const SellScreen = () => {
     const { savings, usdtBalanceUsd } = useSavingsPortfolio();
     const savingsBalanceUsd = savings?.balanceUsd ?? 0;
     // Ondo-ineligible users hold the plain dollar as RAW USDT and never mint
-    // vault shares — their money must still reach a bank. max(), not sum:
-    // one withdrawal moves ONE leg (redeem shares, or transfer USDT), so
-    // summing would promise a figure no single operation can deliver.
+    // vault shares — their money must still reach a bank. SUM, not max: the
+    // withdrawal now redeems the position to the user and pays from the
+    // combined raw balance, so both legs fund one payment. (It was max() when
+    // a single leg had to cover the whole amount on its own.) This matches
+    // the server's own sufficiency check for the Koywe rail.
     const rawUsdtUsd = usdtBalanceUsd ?? 0;
-    const withdrawableUsd = Math.max(savingsBalanceUsd, rawUsdtUsd);
+    const withdrawableUsd = savingsBalanceUsd + rawUsdtUsd;
     // Copy has to match the product the money actually IS. An Ondo-ineligible
     // user holds plain Confío Dollar (USDT) and has no vault at all, so
     // "ahorro"/"bóveda" would be a lie on every screen of this flow.
@@ -411,70 +413,50 @@ export const SellScreen = () => {
             const shares = vaultAddress
                 ? await getVaultShares(vaultAddress, wallet.address)
                 : 0n;
-            // Two legs, one withdrawal. Vault shares are the yield position;
-            // raw USDT is what Ondo-ineligible users hold (and what an
-            // eligible user's deposit looks like before it mints). Pick the
-            // leg on a STRICT comparison: an epsilon here would let a $10.01
-            // order pick a $10.00 vault and then fund only $10.00, so the
-            // order and the transfer would disagree by up to a cent.
-            const useVault = shares > 0n && savingsBalanceUsd > 0
-                && parsedAmount <= savingsBalanceUsd;
-            if (!useVault && !(rawUsdtUsd > 0)) {
-                throw new Error(`No tienes ${balanceNoun} disponible para retirar.`);
-            }
-            if (useVault) {
-                // Proportional share slice; a near-full amount redeems
-                // everything so rounding dust never strands in the vault.
-                // Safe in this direction only: it sends slightly MORE than
-                // the order, never less.
-                const sharesToRedeem = parsedAmount >= savingsBalanceUsd - 0.01
-                    ? shares
-                    : (shares * BigInt(Math.round(parsedAmount * 1e6)))
-                        / BigInt(Math.round(savingsBalanceUsd * 1e6));
-                if (sharesToRedeem <= 0n) {
-                    throw new Error('El monto es demasiado pequeño.');
-                }
-                // USDT-BSC is 18 decimals; floor the payout 1% under the quote.
-                const minUsdtOut = BigInt(Math.round(parsedAmount * 0.99 * 1e6)) * 10n ** 12n;
-                await redeemSavingsToUsdt({
-                    vaultAddress,
-                    shares: sharesToRedeem,
-                    minUsdtOut,
-                    recipient: depositAddress,
-                    wallet,
-                });
-            } else {
-                // LIVE balance, not the cached display figure: cusdPlusSummary
-                // is explicitly display-grade, and funding an order off a stale
-                // or cent-rounded number either underpays Guardarian or reverts
-                // on-chain AFTER the order exists. Same pattern SendUsdtScreen
-                // uses before an exact transfer.
-                const { transferUsdt, USDT_BSC } = await import('../services/cusdPlusVault');
-                const { selector, encodeAddress, bscEthCall } = await import('../services/evmWallet');
-                const balHex = await bscEthCall(
+            // ONE payment to Guardarian, always, and only once the exact
+            // amount is provably in hand — the same shape the Koywe rail
+            // uses. Redeeming straight to the provider computed shares from
+            // a CACHED dollar valuation and accepted 1% slippage, so the
+            // deposit could land above or below the order it was funding.
+            const needWei = BigInt(Math.round(parsedAmount * 1e6)) * 10n ** 12n;
+            const { transferUsdt, USDT_BSC } = await import('../services/cusdPlusVault');
+            const { selector, encodeAddress, bscEthCall } = await import('../services/evmWallet');
+            const readUsdtWei = async (): Promise<bigint> => {
+                const hex = await bscEthCall(
                     USDT_BSC,
                     selector('balanceOf(address)') + encodeAddress(wallet.address),
                 );
-                const balWei = BigInt(balHex === '0x' ? '0x0' : balHex);
-                // SIX decimals scaled to 18dp — the grain the Guardarian
-                // order was created at. Cent rounding here would send a
-                // different amount than the order says (the vault leg above
-                // already uses 1e6 for exactly this reason).
-                let amountWei = BigInt(Math.round(parsedAmount * 1e6)) * 10n ** 12n;
-                if (amountWei > balWei) {
-                    // Only a sub-cent shortfall is dust to absorb; anything
-                    // larger means the order was quoted against money that
-                    // isn't there, so refuse instead of underfunding it.
-                    if (amountWei - balWei > 10n ** 16n) {
-                        throw new Error(
-                            `Tu saldo disponible es $${(Number(balWei / 10n ** 14n) / 100).toFixed(2)}.`,
-                        );
-                    }
-                    amountWei = balWei;
+                return BigInt(hex === '0x' ? '0x0' : hex);
+            };
+
+            let usdtWei = await readUsdtWei();
+            if (usdtWei < needWei) {
+                // Short on raw USDT: redeem the position to OURSELVES first.
+                // A failure between the two steps then leaves the money in the
+                // user's own wallet, never a partial deposit in the order.
+                if (!vaultAddress || shares <= 0n) {
+                    throw new Error(`No tienes ${balanceNoun} disponible para retirar.`);
                 }
-                if (amountWei <= 0n) {
-                    throw new Error('El monto es demasiado pequeño.');
-                }
+                // Redeem the WHOLE position: a proportional slice priced off a
+                // display balance is what let the funded amount drift. The
+                // remainder stays as USDT and re-mints on the next resume.
+                const minUsdtOut = ((needWei - usdtWei) * 99n) / 100n;
+                await redeemSavingsToUsdt({
+                    vaultAddress,
+                    shares,
+                    minUsdtOut,
+                    recipient: wallet.address,
+                    wallet,
+                });
+                usdtWei = await readUsdtWei();
+            }
+            if (usdtWei < needWei) {
+                throw new Error(
+                    `Tu saldo disponible es $${(Number(usdtWei / 10n ** 12n) / 1e6).toFixed(2)}.`,
+                );
+            }
+            {
+                const amountWei = needWei;
                 await transferUsdt({ to: depositAddress, amountWei, wallet });
             }
             Alert.alert(

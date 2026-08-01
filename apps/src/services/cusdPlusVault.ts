@@ -18,8 +18,7 @@ import {
   DerivedEvmWallet,
   encodeCall,
   sendCall,
-  BscReceipt,
-} from './evmWallet';
+  BscReceipt, isOutcomeUnknown } from './evmWallet';
 import { getActiveEvmWallet } from './secureDeterministicWallet';
 import { installBscServerTransport } from './bscServerRpc';
 import { executeSponsoredBatch, fetchSponsored7702Params } from './sponsored7702';
@@ -177,7 +176,15 @@ export const transferUsdt = async (params: {
       });
       return { txHash: rec.transactionHash };
     } catch (e) {
-      console.warn('[cusdPlusVault] sponsored transfer failed, using legacy path', e);
+      // Fall back ONLY when we know nothing can still land. A receipt
+      // timeout means the sponsored tx is already on the network with an
+      // unknown outcome — broadcasting a second, self-signed transfer there
+      // is how the SAME payment gets made twice (and this function funds
+      // ramp deposits, so the second one goes to a provider that has already
+      // been paid). Surface it instead, hash and all, so the caller can
+      // reconcile rather than re-send.
+      if (isOutcomeUnknown(e)) throw e;
+      console.warn('[cusdPlusVault] sponsored transfer failed before broadcast, using legacy path', e);
     }
   }
 

@@ -788,6 +788,13 @@ export const TransactionProcessingScreen = () => {
         if (res?.tokenType && delivered[res.tokenType]) {
           transactionData.currency = delivered[res.tokenType];
         }
+        // `pending` = broadcast, receipt not observed in time. Treat it as
+        // SENT, not failed: the server's confirm task settles it from the
+        // chain, and the history row is already there. Showing an error here
+        // invites a retry whose minute-keyed idempotency key has rolled,
+        // which is exactly how the same money left twice.
+        (transactionData as any).transactionHash = res?.txHash || (transactionData as any).transactionHash;
+        (transactionData as any).status = res?.pending ? 'SUBMITTED' : 'CONFIRMED';
         setTransactionSuccess(true);
         setIsComplete(true);
       } catch (e: any) {

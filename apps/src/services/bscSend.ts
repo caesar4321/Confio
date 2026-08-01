@@ -19,6 +19,7 @@ import {
   hashBatchIntent,
   signIntentDigest,
   signSetCodeAuthorization,
+  isOutcomeUnknown,
 } from './evmWallet';
 import {
   delegateNonce,
@@ -68,6 +69,9 @@ export interface BscSendResult {
   sendId: string;
   /** What actually moved on-chain: CUSD_PLUS (shares) or USDT. */
   tokenType: string;
+  /** Broadcast, outcome not yet observed. NOT a failure and NOT retryable
+   *  — the server's confirm task settles it from the chain. */
+  pending?: boolean;
 }
 
 /** Stable error codes the UI maps to Spanish copy. */
@@ -147,7 +151,25 @@ export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResul
       throw new Error(lastError);
     }
 
-    await bscWaitForReceipt(sub.transactionHash as string);
+    try {
+      await bscWaitForReceipt(sub.transactionHash as string);
+    } catch (e) {
+      // A receipt timeout is NOT a failed send. The batch is on the network
+      // and the server already owns the row (its confirm task settles it
+      // from the chain). Reporting failure here is what produced the
+      // double-send: the user retries, the minute-keyed idempotency key has
+      // rolled, and BOTH batches settle. Hand back a pending result carrying
+      // the hash so the UI can say "confirming" instead of offering a retry.
+      if (isOutcomeUnknown(e)) {
+        return {
+          txHash: sub.transactionHash,
+          sendId: prep.sendId,
+          tokenType: prep.tokenType,
+          pending: true,
+        };
+      }
+      throw e;
+    }
     if ((await delegateNonce(wallet.address)) > execNonce) {
       return {
         txHash: sub.transactionHash,
