@@ -541,8 +541,16 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
             # collision-impossibility while fitting: 4 + 56 + 1 + idx <= 64.
             _h, _, _idx = tx_ref.partition(':')
             idempotency_key = f'BSC:{_h[2:58]}:{_idx or 0}'
+            # transaction_hash is UNIQUE. An INTERNAL send already owns the row
+            # for this hash — and already notified its recipient — so mirroring
+            # it raised IntegrityError on every user-to-user transfer, logged at
+            # ERROR. Matching the HASH as well as our own key both silences that
+            # and gives the ineligible path (which has no conversion row) a
+            # dedupe that actually holds across cursor rewinds.
+            from django.db.models import Q
             receipt_existed = SendTransaction.all_objects.filter(
-                idempotency_key=idempotency_key).exists()
+                Q(idempotency_key=idempotency_key) | Q(transaction_hash=tx_hash)
+            ).exists()
             if not receipt_existed:
                 receipt = SendTransaction.all_objects.create(
                     sender_user=None,

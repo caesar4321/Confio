@@ -43,3 +43,38 @@ class DepositEligibilityTests(SimpleTestCase):
     def test_business_account_keeps_conversion(self):
         created, _ = self._run(_account('US', kind='business'))
         self.assertEqual(len(created), 1, 'business mint is gated on the requesting user')
+
+
+class DepositReceiptTests(SimpleTestCase):
+    """The receipt mirror, which is the ONLY record for an ineligible holder."""
+
+    def _run(self, existing_row):
+        made = []
+        notified = []
+        with mock.patch('send.models.SendTransaction.all_objects') as sends, \
+             mock.patch('notifications.utils.create_notification') as notify:
+            sends.filter.return_value.exists.return_value = existing_row
+            sends.create.side_effect = lambda **kw: made.append(kw) or SimpleNamespace(
+                internal_id='r1')
+            notify.side_effect = lambda **kw: notified.append(kw)
+            tasks._record_deposit_receipt(
+                account=_account('US'), is_business=False, to_addr='0xabc',
+                from_addr='0xdef', amount_usd=Decimal('1.00'), tx_ref='0xhash:0',
+                tx_hash='0xhash', source='external_deposit', conv=None)
+        return made, notified
+
+    def test_internal_send_row_suppresses_duplicate(self):
+        # transaction_hash is UNIQUE — creating would raise IntegrityError, and
+        # the send flow already notified the recipient.
+        made, notified = self._run(existing_row=True)
+        self.assertEqual(made, [])
+        self.assertEqual(notified, [], 'no duplicate deposit notification')
+
+    def test_external_deposit_records_and_notifies_once(self):
+        made, notified = self._run(existing_row=False)
+        self.assertEqual(len(made), 1)
+        self.assertEqual(made[0]['token_type'], 'USDT')
+        self.assertEqual(len(notified), 1)
+        # ineligible copy: no promise that it joins savings
+        self.assertIn('Confío Dollar', notified[0]['message'])
+        self.assertFalse(notified[0]['data']['pending_auto_mint'])
