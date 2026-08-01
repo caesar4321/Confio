@@ -356,6 +356,17 @@ class Invoice(SoftDeleteModel):
             models.Index(fields=['status', 'expires_at']),
             models.Index(fields=['created_at']),
         ]
+        constraints = [
+            # The lifetime ceiling, at the one layer nothing routes around.
+            # save() covers ORM writes; queryset.update(), bulk_update(),
+            # raw SQL and loaddata do not (Codex audit 2026-08-01 [P2]).
+            models.CheckConstraint(
+                condition=models.Q(
+                    expires_at__lte=models.F('created_at')
+                    + timedelta(hours=MAX_INVOICE_LIFETIME_HOURS)),
+                name='invoice_lifetime_within_24h',
+            ),
+        ]
 
     def __str__(self):
         merchant_name = self.merchant_business.name

@@ -110,6 +110,12 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
             if amount is None:
                 await self.send_json({"type": "error", "message": "amount_required"})
                 return
+            # Every payment settles an invoice; the untracked mode is gone
+            # (Codex round 5 [P2]). Reject here too so the WS surface and the
+            # GraphQL surface say the same thing.
+            if not internal_id:
+                await self.send_json({"type": "error", "message": "internal_id_required"})
+                return
 
             try:
                 pack = await self._create_prepare_pack(
@@ -164,6 +170,9 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
             internal_id = content.get("internal_id") or content.get("payment_id")
             if signed is None:
                 await self.send_json({"type": "error", "message": "signed_transactions_required"})
+                return
+            if not internal_id:
+                await self.send_json({"type": "error", "message": "internal_id_required"})
                 return
             try:
                 result = await self._submit_payment(signed_transactions=signed, internal_id=internal_id)

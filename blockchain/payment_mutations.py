@@ -35,9 +35,12 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
     """
     
     class Arguments:
-        amount = graphene.Float(required=True, description="Amount to send (before fees)")
-        asset_type = graphene.String(required=False, default_value='CUSD', description="CUSD or CONFIO")
-        internal_id = graphene.String(required=False, description="Optional payment ID for tracking")
+        amount = graphene.Float(required=True, description="Amount to send (before fees); the invoice overrides it")
+        asset_type = graphene.String(required=False, default_value='CUSD', description="Ignored — taken from the invoice")
+        internal_id = graphene.String(
+            required=True,
+            description="Invoice internal_id. REQUIRED: every payment settles an invoice, "
+                        "and the invoice is what pins the chain, amount, token and merchant.")
         note = graphene.String(required=False, description="Optional transaction note")
         create_receipt = graphene.Boolean(required=False, default_value=False, description="Store payment receipt on-chain")
     
@@ -52,9 +55,16 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
     internal_id = graphene.String(description="Payment ID for tracking")
     
     @classmethod
-    def mutate(cls, root, info, amount, asset_type='CUSD', internal_id=None, 
+    def mutate(cls, root, info, amount, asset_type='CUSD', internal_id=None,
               note=None, create_receipt=False):
         try:
+            # The untracked (non-invoice) mode is GONE (Codex round 5 [P2]).
+            # It built a signable group that no PaymentTransaction recorded,
+            # took its amount and asset from the client, and had no rail to
+            # check — a surface with no caller in this repo and no way to
+            # audit what it moved. Every payment settles an invoice.
+            if not internal_id:
+                return cls(success=False, error='Invoice id required')
             t0 = time.time()
             user = info.context.user
             if not user.is_authenticated:
@@ -507,7 +517,10 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
             required=True,
             description="Array of base64 encoded signed transactions in group order"
         )
-        internal_id = graphene.String(required=False, description="Payment ID for database update")
+        internal_id = graphene.String(
+            required=True,
+            description="PaymentTransaction internal_id. REQUIRED: it is how the "
+                        "server verifies the invoice's rail before broadcasting.")
     
     success = graphene.Boolean()
     error = graphene.String()
