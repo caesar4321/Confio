@@ -2,12 +2,15 @@ from django.contrib import admin, messages
 
 
 class CusdPlusConversionAdmin(admin.ModelAdmin):
+    # is_deleted is shown and filterable because the app HIDES soft-deleted
+    # rows while the admin still lists them — without the column a row that
+    # users can no longer see is indistinguishable from a live one.
     list_display = (
         'internal_id', 'actor_display_name', 'direction', 'source', 'amount_usd',
-        'status', 'created_at', 'src_committed_at', 'dest_arrived_at',
+        'status', 'is_deleted', 'created_at', 'src_committed_at', 'dest_arrived_at',
         'completed_at',
     )
-    list_filter = ('status', 'direction', 'source', 'actor_type')
+    list_filter = ('status', 'direction', 'source', 'actor_type', 'is_deleted')
     search_fields = (
         'internal_id', 'src_tx_id', 'dest_tx_hash', 'bridge_arrival_tx',
         'actor_display_name', 'user_bsc_address', 'user_algo_address',
