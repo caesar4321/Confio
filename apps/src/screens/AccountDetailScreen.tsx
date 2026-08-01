@@ -58,7 +58,7 @@ import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
-import { formatTokenLabel } from '../utils/tokenDisplay';
+import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
 
 // Color palette
 // Keychain constants for storing balance visibility
@@ -91,6 +91,8 @@ interface Transaction {
   recipientAddress?: string;
   description?: string;
   conversionType?: string;
+  conversionFromToken?: string;
+  conversionToToken?: string;
   isExternalDeposit?: boolean;
   senderType?: string;
   secondaryCurrency?: string;
@@ -692,35 +694,29 @@ export const AccountDetailScreen = () => {
               conversionType = 'cusd_to_usdc';
             }
           }
-          if (conversionType === 'usdc_to_cusd') {
-            conversionFromToken = 'USDC';
-            conversionToToken = 'cUSD';
-          } else if (conversionType === 'cusd_to_usdc') {
-            conversionFromToken = 'cUSD';
-            conversionToToken = 'USDC';
-          }
+          // The server names both sides of every pair; the local table is the
+          // fallback for rows that predate those fields.
+          const pair = conversionPair(conversionType);
+          conversionFromToken =
+            formatTokenLabel(tx.fromToken || tx.from_token) || pair?.from;
+          conversionToToken =
+            formatTokenLabel(tx.toToken || tx.to_token) || pair?.to;
 
-          // For cUSD account view, always show cUSD amount with proper sign
-          if (conversionType === 'usdc_to_cusd') {
-            // USDC to cUSD: gaining cUSD (+)
-            const toAmount = tx.toAmount || (tx.description ? tx.description.match(/→\s*([\d.]+)\s*cUSD/)?.[1] : null);
-            const amount = parseFloat(String(toAmount || tx.fromAmount || tx.amount)).toFixed(2);
-            conversionAmount = `+${amount}`;
-          } else if (conversionType === 'cusd_to_usdc') {
-            // cUSD to USDC: losing cUSD (-)
-            const amount = parseFloat(String(tx.fromAmount || tx.amount)).toFixed(2);
-            conversionAmount = `-${amount}`;
+          // The card shows the side this account actually holds, signed from
+          // its point of view: the token arriving (+) or the token leaving (-).
+          if (pair) {
+            const incoming = isConversionIncoming(conversionType);
+            const raw = incoming
+              ? (tx.toAmount || tx.fromAmount || tx.amount)
+              : (tx.fromAmount || tx.amount);
+            const amount = parseFloat(String(raw)).toFixed(2);
+            conversionAmount = `${incoming ? '+' : '-'}${amount}`;
           } else {
-            // Fallback: no conversion type detected, still format properly
-            // Try to determine direction from token type
-            const amount = parseFloat(String(tx.amount)).toFixed(2);
-            if (tx.tokenType === 'USDC') {
-              // If showing USDC amount, it's USDC to cUSD (gaining cUSD)
-              conversionAmount = `+${amount}`;
-            } else {
-              // If showing cUSD amount, it's cUSD to USDC (losing cUSD)
-              conversionAmount = `-${amount}`;
-            }
+            // Unrecognised conversion type: keep the row's own sign rather
+            // than guessing a direction from the token, which is how the
+            // savings pair used to come out backwards.
+            const value = parseFloat(String(tx.amount));
+            conversionAmount = `${value < 0 ? '-' : '+'}${Math.abs(value).toFixed(2)}`;
           }
         }
 
@@ -738,14 +734,8 @@ export const AccountDetailScreen = () => {
         let toDisplay = undefined;
 
         if (isConversion) {
-          fromDisplay =
-            conversionType === 'usdc_to_cusd' ? 'USDC' :
-            conversionType === 'cusd_to_usdc' ? 'cUSD' :
-            undefined;
-          toDisplay =
-            conversionType === 'usdc_to_cusd' ? 'cUSD' :
-            conversionType === 'cusd_to_usdc' ? 'USDC' :
-            undefined;
+          fromDisplay = conversionFromToken;
+          toDisplay = conversionToToken;
         } else if (isReward) {
           fromDisplay = tx.senderDisplayName || tx.displayCounterparty || 'Confío Rewards';
           toDisplay = tx.counterpartyDisplayName || 'Tú';
@@ -872,11 +862,11 @@ export const AccountDetailScreen = () => {
               : signedDisplayAmount,
           // For conversions, show the currency of the amount displayed: the destination token for '+' and source for '-'
           currency: isConversion
-            ? (
-              conversionType === 'usdc_to_cusd' ? 'cUSD' :
-              conversionType === 'cusd_to_usdc' ? 'USDC' :
-              undefined
-            )
+            // The denomination of the amount shown above: the token arriving
+            // for an inbound conversion, the token leaving for an outbound one.
+            ? (isConversionIncoming(conversionType)
+              ? conversionToToken
+              : conversionFromToken)
             : type === 'ramp'
               ? (
                 rampDirection === 'on_ramp'
@@ -891,15 +881,7 @@ export const AccountDetailScreen = () => {
               }
               return tx.tokenType || route.params.accountSymbol || '';
             })(),
-          secondaryCurrency: isConversion
-            ? (
-              conversionToToken || (
-                conversionType === 'usdc_to_cusd' ? 'cUSD' :
-                conversionType === 'cusd_to_usdc' ? 'USDC' :
-                undefined
-              )
-            )
-            : undefined,
+          secondaryCurrency: isConversion ? conversionToToken : undefined,
           conversionType: isConversion ? (conversionType || tx.conversionType) : undefined,
           conversion_type: isConversion ? (conversionType || tx.conversionType) : undefined,
           conversionFromToken: isConversion ? (conversionFromToken || tx.fromToken || tx.from_token) : undefined,
@@ -983,21 +965,14 @@ export const AccountDetailScreen = () => {
         return transaction.rampDirection === 'off_ramp'
           ? `Retiro${transaction.to ? ` con ${transaction.to}` : ''}`
           : `Recarga${transaction.from ? ` con ${transaction.from}` : ''}`;
-      case 'conversion':
-        // Use conversionType field first, fallback to description parsing
-        if (transaction.conversionType === 'usdc_to_cusd') {
-          return 'Conversión USDC a cUSD';
-        } else if (transaction.conversionType === 'cusd_to_usdc') {
-          return 'Conversión cUSD a USDC';
-        } else if (transaction.description) {
-          // Fallback: parse from description
-          if (transaction.description.includes('USDC →') && transaction.description.includes('cUSD')) {
-            return 'Conversión USDC a cUSD';
-          } else if (transaction.description.includes('cUSD →') && transaction.description.includes('USDC')) {
-            return 'Conversión cUSD a USDC';
-          }
-        }
-        return 'Conversión';
+      case 'conversion': {
+        // Name both sides from the row's own tokens, so a new pair reads
+        // correctly without another branch here.
+        const pair = conversionPair(transaction.conversionType);
+        const from = transaction.conversionFromToken || pair?.from;
+        const to = transaction.conversionToToken || pair?.to;
+        return from && to ? `Conversión ${from} a ${to}` : 'Conversión';
+      }
       case 'payment':
         // If amount is positive, it's a payment received
         return transaction.amount.startsWith('+')
@@ -1285,25 +1260,13 @@ export const AccountDetailScreen = () => {
             ? `Retiro${transaction.to ? ` con ${transaction.to}` : ''}`
             : `Recarga${transaction.from ? ` con ${transaction.from}` : ''}`;
           break;
-        case 'conversion':
-          // Use short title for conversions based on conversion type
-          if (transaction.conversionType === 'usdc_to_cusd') {
-            baseTitle = 'Conversión USDC a cUSD';
-          } else if (transaction.conversionType === 'cusd_to_usdc') {
-            baseTitle = 'Conversión cUSD a USDC';
-          } else if (transaction.description) {
-            // Fallback: parse from description
-            if (transaction.description.includes('USDC →') && transaction.description.includes('cUSD')) {
-              baseTitle = 'Conversión USDC a cUSD';
-            } else if (transaction.description.includes('cUSD →') && transaction.description.includes('USDC')) {
-              baseTitle = 'Conversión cUSD a USDC';
-            } else {
-              baseTitle = 'Conversión';
-            }
-          } else {
-            baseTitle = 'Conversión';
-          }
+        case 'conversion': {
+          const pair = conversionPair(transaction.conversionType);
+          const from = transaction.conversionFromToken || pair?.from;
+          const to = transaction.conversionToToken || pair?.to;
+          baseTitle = from && to ? `Conversión ${from} a ${to}` : 'Conversión';
           break;
+        }
         case 'payment':
           if (transaction.amount.startsWith('+')) {
             // For received payments, use the from field directly (already has the payer's name)
@@ -1401,8 +1364,20 @@ export const AccountDetailScreen = () => {
           exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' :
             transaction.type === 'conversion' ? '1' : undefined,
           conversionType: transaction.conversionType,
-          formattedTitle: transaction.type === 'conversion' && transaction.conversionType === 'usdc_to_cusd' ? 'USDC → cUSD' :
-            transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' :
+          // The detail screen reads snake_case (it also serves notification
+          // payloads); without these it fell back to a hardcoded 'USDC'.
+          conversion_type: transaction.conversionType,
+          conversionFromToken: transaction.conversionFromToken,
+          conversionToToken: transaction.conversionToToken,
+          from_token: transaction.conversionFromToken,
+          to_token: transaction.conversionToToken,
+          formattedTitle: transaction.type === 'conversion'
+            ? (() => {
+              const pair = conversionPair(transaction.conversionType);
+              const from = transaction.conversionFromToken || pair?.from;
+              const to = transaction.conversionToToken || pair?.to;
+              return from && to ? `${from} → ${to}` : undefined;
+            })() :
             transaction.type === 'ramp' && transaction.rampDirection === 'off_ramp' ? 'Retiro' :
             transaction.type === 'ramp' ? 'Recarga' :
             transaction.type === 'humanitarian' ? transaction.description :

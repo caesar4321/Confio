@@ -44,7 +44,7 @@ import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
-import { formatTokenLabel, explorerFor } from '../utils/tokenDisplay';
+import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -193,6 +193,15 @@ const resolveInternalId = (tx?: any, fallback?: any): string | undefined => {
 
   return firstValidNonUuid;
 };
+
+/**
+ * Bare magnitude, for callers that apply their own sign.
+ *
+ * Notification payloads carry unsigned amounts, the in-app lists carry signed
+ * ones ("+2.99"); prefixing a sign blindly yields "++2.99".
+ */
+const stripSign = (value: unknown): string =>
+  String(value ?? '').trim().replace(/^[+-]/, '');
 
 const deriveStatusFromNotificationType = (notificationType: string | undefined): string | undefined => {
   switch ((notificationType || '').toUpperCase()) {
@@ -918,8 +927,17 @@ export const TransactionDetailScreen = () => {
     // Handle USDC conversion transactions
     let type = transactionData.transaction_type || transactionData.transactionType || transactionData.type;
 
-    // If it has conversion_type, it's a conversion transaction
-    if (transactionData.conversion_type) {
+    // Conversion fields arrive snake_case from notification payloads and
+    // camelCase from the in-app transaction lists. Reading only one case made
+    // every list-opened conversion fall through to the legacy USDC defaults
+    // below, so a USDT → cUSD+ conversion was labelled USDC.
+    const conversionType = transactionData.conversion_type || transactionData.conversionType;
+    const fromToken = transactionData.from_token || transactionData.fromToken;
+    const toToken = transactionData.to_token || transactionData.toToken;
+    const fromAmount = transactionData.from_amount || transactionData.fromAmount;
+    const toAmount = transactionData.to_amount || transactionData.toAmount;
+
+    if (conversionType) {
       type = 'conversion';
     }
 
@@ -963,8 +981,8 @@ export const TransactionDetailScreen = () => {
       from: (transactionData.from && transactionData.from.includes('...') && transactionData.from.startsWith('0x'))
         ? '' : transactionData.from,
       // For conversions (will override currency below based on direction)
-      currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
-      secondaryCurrency: transactionData.to_token || 'cUSD',
+      currency: fromToken || transactionData.token_type || transactionData.currency || 'USDC',
+      secondaryCurrency: toToken || 'cUSD',
       // Explicitly preserve business data in normalization
       payerBusiness: transactionData.payerBusiness || transactionData.senderBusiness,
       merchantBusiness: transactionData.merchantBusiness || transactionData.recipientBusiness,
@@ -982,12 +1000,10 @@ export const TransactionDetailScreen = () => {
       merchantIsReferralVerified: transactionData.merchantIsReferralVerified ?? transactionData.recipientIsReferralVerified ?? transactionData.recipientUser?.isReferralVerified ?? false,
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
       // For withdrawals: always negative (money out)
-      amount: (transactionData.conversion_type === 'cusd_to_usdc'
-        || transactionData.conversion_type === 'from_savings')
-        ? `-${transactionData.from_amount || transactionData.amount || '0'}`
-        : (transactionData.conversion_type === 'usdc_to_cusd'
-          || transactionData.conversion_type === 'to_savings')
-          ? `+${transactionData.to_amount || transactionData.amount || '0'}`
+      amount: (conversionType === 'cusd_to_usdc' || conversionType === 'from_savings')
+        ? `-${stripSign(fromAmount || transactionData.amount) || '0'}`
+        : (conversionType === 'usdc_to_cusd' || conversionType === 'to_savings')
+          ? `+${stripSign(toAmount || transactionData.amount) || '0'}`
           : type === 'withdrawal'
             ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
             : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
@@ -1000,10 +1016,9 @@ export const TransactionDetailScreen = () => {
       time: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('HH:mm') : transactionData.time,
       // Format conversion title
       // Both conversion families, named in the user's own product terms.
-      formattedTitle: transactionData.conversion_type === 'usdc_to_cusd' ? 'Conversión USDC → cUSD' :
-        transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' :
-          transactionData.conversion_type === 'to_savings' ? 'Conversión USDT → cUSD+' :
-            transactionData.conversion_type === 'from_savings' ? 'Conversión cUSD+ → USDT' : null,
+      formattedTitle: conversionPair(conversionType)
+        ? `Conversión ${fromToken || conversionPair(conversionType)!.from} → ${toToken || conversionPair(conversionType)!.to}`
+        : null,
       // For withdrawals
       destinationAddress: transactionData.destination_address || transactionData.destinationAddress,
       toAddress: transactionData.destination_address || transactionData.destinationAddress || transactionData.toAddress,
@@ -1020,15 +1035,13 @@ export const TransactionDetailScreen = () => {
       if (cur === 'CUSD') normalizedTransactionData.currency = 'cUSD';
     }
 
-    // Override conversion currency to match displayed amount
-    if (transactionData.conversion_type === 'usdc_to_cusd') {
-      normalizedTransactionData.currency = 'cUSD';
-    } else if (transactionData.conversion_type === 'cusd_to_usdc') {
-      normalizedTransactionData.currency = 'USDC';
-    } else if (transactionData.conversion_type === 'to_savings') {
-      normalizedTransactionData.currency = 'cUSD+';
-    } else if (transactionData.conversion_type === 'from_savings') {
-      normalizedTransactionData.currency = 'USDT';
+    // The Monto is denominated in whichever side the amount above refers to:
+    // the token received for an inbound conversion, the token spent otherwise.
+    const pair = conversionPair(conversionType);
+    if (pair) {
+      normalizedTransactionData.currency = isConversionIncoming(conversionType)
+        ? (toToken || pair.to)
+        : (fromToken || pair.from);
     }
 
     // For ramp detail screens, prefer direction-aware display data over provider rail labels.

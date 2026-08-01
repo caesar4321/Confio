@@ -44,6 +44,40 @@ export const formatTokenAmount = (
   return isDollarToken(currency) ? `$${value} ${label}`.trim() : `${value} ${label}`.trim();
 };
 
+/**
+ * The token pair behind each conversion type, and which side the viewer's
+ * account receives.
+ *
+ * This lived as ~8 copies of the same two-arm ternary across the list mapper
+ * and the detail screen, all of which knew only the legacy USDC pair. A
+ * savings conversion matched no arm, so it fell through to `undefined` and
+ * rendered as a bare "-2.99" with no denomination at all. One table.
+ */
+const CONVERSION_PAIRS: Record<string, { from: string; to: string }> = {
+  usdc_to_cusd: { from: 'USDC', to: 'cUSD' },
+  cusd_to_usdc: { from: 'cUSD', to: 'USDC' },
+  to_savings: { from: 'USDT', to: 'cUSD+' },
+  from_savings: { from: 'cUSD+', to: 'USDT' },
+};
+
+export const conversionPair = (
+  conversionType?: string | null,
+): { from: string; to: string } | undefined =>
+  CONVERSION_PAIRS[String(conversionType ?? '').trim().toLowerCase()];
+
+/**
+ * True when the conversion ADDS to the account it is being viewed from.
+ *
+ * A conversion touches two tokens but appears once, in the account holding
+ * the destination token — so `to_savings` is money arriving in cUSD+ (+) and
+ * `from_savings` is money leaving it (−). Unknown types return false rather
+ * than guessing a credit.
+ */
+export const isConversionIncoming = (conversionType?: string | null): boolean => {
+  const key = String(conversionType ?? '').trim().toLowerCase();
+  return key === 'usdc_to_cusd' || key === 'to_savings';
+};
+
 /** Tokens that settle on BNB Smart Chain rather than Algorand. */
 const BSC_TOKENS = new Set(['CUSD_PLUS', 'CUSD+', 'USDT']);
 
