@@ -504,6 +504,20 @@ def record_savings_mint(*, user, business, actor_type, display_name,
             is_deleted=False,
         ).exists():
             return None
+        # A bridge saga already OWNS this mint: its row was born at CREATED by
+        # prepare_leg_ab and is waiting at DEST_ARRIVED for exactly this leg,
+        # which the client then advances. Recording here too would give every
+        # bridge completion two conversions and two feed entries — the hash
+        # check above cannot catch it because the client writes that hash
+        # AFTER we run (audit 2026-08-01).
+        if Conversion.objects.filter(
+            conversion_type='to_savings',
+            user_bsc_address__iexact=bsc_address or '',
+            status__in=Conversion.IN_FLIGHT_STATUSES,
+            is_deleted=False,
+        ).exists():
+            logger.info('savings mint %s belongs to an in-flight saga — not recording', tx_hash)
+            return None
         amount = (Decimal(int(amount_wei)) / Decimal(10 ** 18)).quantize(
             Decimal('0.000001'), rounding=ROUND_DOWN)
         conv = Conversion.objects.create(
@@ -518,8 +532,13 @@ def record_savings_mint(*, user, business, actor_type, display_name,
             quoted_cost_pct=0,
             user_bsc_address=bsc_address or '',
             to_transaction_hash=tx_hash or '',
-            status='COMPLETED',
-            completed_at=timezone.now(),
+            # SUBMITTED, not COMPLETED. Broadcast is not execution: the batch
+            # receipt task can still classify this hash reverted / noop_failed
+            # / reorged / dropped. Writing COMPLETED here also fired the
+            # referral signal (a completed to_savings >= $19 pays a reward), so
+            # a transaction that later failed could have paid one.
+            # settle_savings_mint below promotes it once the receipt is final.
+            status='SUBMITTED',
         )
         logger.info('savings mint recorded %s: %s USDT (%s)',
                     conv.internal_id, amount, tx_hash)
@@ -652,6 +671,38 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         logger.exception('deposit notification failed for %s', tx_ref)
 
 
+def settle_savings_mint(tx_hash: str, outcome: str) -> None:
+    """Promote or fail the mint row once its receipt is final.
+
+    record_savings_mint writes SUBMITTED at broadcast; only here does a row
+    become COMPLETED, which is also what releases the referral signal. Called
+    from the batch receipt task for every terminal batch status.
+    """
+    from conversion.models import Conversion
+    from django.utils import timezone as _tz
+
+    if not tx_hash:
+        return
+    try:
+        row = Conversion.objects.filter(
+            conversion_type='to_savings', to_transaction_hash=tx_hash,
+            status='SUBMITTED', is_deleted=False,
+        ).first()
+        if row is None:
+            return
+        if outcome == 'confirmed':
+            row.status = 'COMPLETED'
+            row.completed_at = _tz.now()
+            row.save(update_fields=['status', 'completed_at', 'updated_at'])
+        else:
+            row.status = 'FAILED'
+            row.error_message = f'batch_{outcome}'
+            row.save(update_fields=['status', 'error_message', 'updated_at'])
+        logger.info('savings mint %s settled %s -> %s', tx_hash, outcome, row.status)
+    except Exception:  # noqa: BLE001 — settlement must not break the receipt task
+        logger.exception('savings mint settlement failed for %s', tx_hash)
+
+
 def mark_retirar_arrival(algo_address: str, txid: str) -> bool:
     """Hook for the existing inbound USDC scanner (blockchain app): when a
     USDC credit lands at an address with a from_savings conversion in
@@ -758,6 +809,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
 
     if receipt.get('status') != '0x1':
         batch.status = 'reverted'
+        settle_savings_mint(batch.tx_hash, 'reverted')
         batch.save(update_fields=['status', 'updated_at'])
         logger.info('7702 batch %s reverted', batch.tx_hash)
         return
@@ -778,6 +830,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
         )
         if not executed:
             batch.status = 'noop_failed'
+            settle_savings_mint(batch.tx_hash, 'noop_failed')
             batch.save(update_fields=['status', 'updated_at'])
             logger.warning('7702 batch %s mined but did NOT execute (no BatchExecuted[nonce=%s]) for %s',
                            batch.tx_hash, batch.delegate_nonce, batch.user_bsc_address)
@@ -815,6 +868,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             pass
         if not recheck:
             batch.status = 'reorged'
+            settle_savings_mint(batch.tx_hash, 'reorged')
             batch.save(update_fields=['status', 'updated_at'])
             logger.warning('7702 batch %s reorged out (block %s no longer canonical)',
                            batch.tx_hash, blk_num)
@@ -825,6 +879,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
+    settle_savings_mint(batch.tx_hash, 'confirmed')
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
 
 
@@ -899,6 +954,7 @@ def reconcile_signed_batches():
             out['promoted'] += 1
         else:
             batch.status = 'dropped'
+            settle_savings_mint(batch.tx_hash, 'dropped')
             batch.save(update_fields=['status', 'updated_at'])
             task_name = _DOMAIN_CONFIRM_TASKS.get(batch.kind)
             if task_name and batch.source_id is not None:

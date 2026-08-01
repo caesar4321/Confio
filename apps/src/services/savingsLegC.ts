@@ -151,9 +151,21 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         usdtOnHandUsd = Number(fresh?.cusdPlusSummary?.usdtBalanceUsd ?? 0);
       } catch { usdtOnHandUsd = 0; }
     }
-    // Ondo's InstantManager rejects sub-$1 amounts on this side too, so a
-    // smaller balance is left alone rather than burned on a reverting mint.
-    if (usdtOnHandUsd >= 1) {
+    // SWEEP DISABLED pending a server-computed sweepable amount (audit
+    // 2026-08-01). Minting the whole raw balance is wrong three ways:
+    //   1. it can consume USDT already committed to something else — a
+    //      prepared-but-unsubmitted send, or a Koywe off-ramp about to move
+    //      the wallet's raw USDT — because neither escrows its funds;
+    //   2. usdtBalanceUsd comes from a 30s cache (no fresh=True), so it can
+    //      be stale in both directions: a missed deposit or a reverting mint;
+    //   3. a bridge row whose own mint just failed leaves its USDT in this
+    //      same balance, where the sweep would take it while the row stays
+    //      DEST_ARRIVED forever.
+    // The fix is a server-side `sweepableUsdtUsd` — fresh read minus live
+    // reservations — not a client guess. Until then a deposit stays raw USDT,
+    // which is the correct fallback rather than a wrong transfer.
+    const SWEEP_ENABLED = false;
+    if (SWEEP_ENABLED && usdtOnHandUsd >= 1) {
       if (!announced) { announced = true; setMinting(true); }
       try {
         await subscribeUsdtToSavings({

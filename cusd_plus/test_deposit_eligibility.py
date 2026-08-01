@@ -78,12 +78,14 @@ class RecordSavingsMintTests(SimpleTestCase):
                 bsc_address='0xabc')
         return created, out
 
-    def test_writes_a_completed_row_from_the_decoded_amount(self):
+    def test_writes_a_submitted_row_from_the_decoded_amount(self):
         created, out = self._record()
         self.assertEqual(len(created), 1)
         row = created[0]
         self.assertEqual(row['conversion_type'], 'to_savings')
-        self.assertEqual(row['status'], 'COMPLETED')
+        # NOT completed: broadcast is not execution, and COMPLETED is what
+        # releases the referral reward (audit 2026-08-01).
+        self.assertEqual(row['status'], 'SUBMITTED')
         self.assertEqual(row['from_amount'], Decimal('2.000000'))
         self.assertEqual(row['to_transaction_hash'], '0xmint')
         self.assertIsNotNone(out)
@@ -136,3 +138,52 @@ class DepositReceiptTests(SimpleTestCase):
         # ineligible copy: no promise that it joins savings
         self.assertIn('Confío Dollar', notified[0]['message'])
         self.assertFalse(notified[0]['data']['pending_auto_mint'])
+
+
+class SavingsMintSettlementTests(SimpleTestCase):
+    """A mint row follows its receipt; it is never COMPLETED at broadcast."""
+
+    def _settle(self, outcome, status='SUBMITTED'):
+        row = SimpleNamespace(status=status, error_message='', completed_at=None,
+                              saved=[], save=lambda **kw: None)
+        row.save = lambda **kw: row.saved.append(kw)
+        with mock.patch('conversion.models.Conversion.objects') as convs:
+            convs.filter.return_value.first.return_value = row
+            tasks.settle_savings_mint('0xmint', outcome)
+        return row
+
+    def test_confirmed_promotes_to_completed(self):
+        row = self._settle('confirmed')
+        self.assertEqual(row.status, 'COMPLETED')
+        self.assertIsNotNone(row.completed_at)
+
+    def test_every_terminal_failure_fails_the_row(self):
+        for outcome in ('reverted', 'noop_failed', 'reorged', 'dropped'):
+            row = self._settle(outcome)
+            self.assertEqual(row.status, 'FAILED', outcome)
+            self.assertEqual(row.error_message, f'batch_{outcome}')
+
+    def test_no_row_is_a_noop(self):
+        with mock.patch('conversion.models.Conversion.objects') as convs:
+            convs.filter.return_value.first.return_value = None
+            tasks.settle_savings_mint('0xnothing', 'confirmed')  # must not raise
+
+    def test_missing_hash_is_a_noop(self):
+        tasks.settle_savings_mint('', 'confirmed')
+
+
+class BridgeSagaOwnsItsMintTests(SimpleTestCase):
+    """An in-flight saga row owns the mint; recording again would double it."""
+
+    def test_in_flight_saga_suppresses_a_second_row(self):
+        created = []
+        with mock.patch('conversion.models.Conversion.objects') as convs:
+            # first filter (hash) -> absent; second (in-flight saga) -> present
+            convs.filter.return_value.exists.side_effect = [False, True]
+            convs.create.side_effect = lambda **kw: created.append(kw)
+            out = tasks.record_savings_mint(
+                user=SimpleNamespace(id=1), business=None, actor_type='user',
+                display_name='X', amount_wei=10 ** 18, tx_hash='0xm',
+                bsc_address='0xabc')
+        self.assertEqual(created, [], 'the saga row is advanced by the client instead')
+        self.assertIsNone(out)

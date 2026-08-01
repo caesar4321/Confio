@@ -31,6 +31,7 @@ visible setting to decide on, not an accident.
 import ipaddress
 import logging
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Callable, Mapping
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,10 @@ class GeoPolicy:
     #: Default refusal copy, shown to the user.
     message: str
     #: Per-country copy overrides (presale says something different for KR).
-    phone_messages: Mapping[str, str] = field(default_factory=dict)
+    #: Read-only: frozen=True protects the ATTRIBUTE, not a dict behind it,
+    #: and these are module-level legal-control policies.
+    phone_messages: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({}))
     #: A user with NO verified phone country. Ondo fails CLOSED (it cannot
     #: attest a jurisdiction); presale falls through to eligible. Preserved
     #: from each feature's original behaviour — see the module docstring.

@@ -73,7 +73,7 @@ class EligibilityGateTests(SimpleTestCase):
             _user('VE'), {'REMOTE_ADDR': '10.0.0.1'}))
 
     def test_resolver_crash_fails_open(self):
-        with mock.patch('presale.geo_utils.get_country_for_ip',
+        with mock.patch('security.geo.get_country_for_ip',
                         side_effect=RuntimeError('boom')):
             self.assertTrue(check_savings_mint_eligibility(
                 _user('VE'), {'HTTP_CF_IPCOUNTRY': 'CO'}))

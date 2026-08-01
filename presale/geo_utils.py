@@ -34,6 +34,8 @@ def is_presale_test_account(user) -> bool:
 # The IP resolver moved to security/geo.py — it was never presale-specific,
 # and cusd_plus had to reach across app boundaries for it. Re-exported here so
 # every existing presale call site keeps working unchanged.
+from types import MappingProxyType  # noqa: E402
+
 from security.geo import (  # noqa: E402,F401
     GeoPolicy,
     get_country_for_ip,
@@ -44,7 +46,7 @@ PRESALE_POLICY = GeoPolicy(
     name='presale',
     phone_blocked=frozenset({'US', 'KR'}),
     message=US_BLOCK_MSG,
-    phone_messages={'US': US_BLOCK_MSG, 'KR': KR_BLOCK_MSG},
+    phone_messages=MappingProxyType({'US': US_BLOCK_MSG, 'KR': KR_BLOCK_MSG}),
     # Preserved: a user with no phone country falls through to eligible here,
     # where Ondo fails closed. Now explicit rather than accidental.
     allow_missing_phone=True,
