@@ -579,8 +579,21 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
 
     if source == 'ramp':
         return  # order comms belong to the ramp flow (koywe_sync)
-    if conv is None and receipt_existed:
-        return  # rescan of a deposit already recorded — don't re-notify
+    if conv is None:
+        # No conversion row: the RECEIPT is both the record and the dedupe
+        # marker. Notify only when one durably exists — if the write failed we
+        # must stay silent so the next scan can retry, instead of re-notifying
+        # every rewind while the deposit is missing from history entirely
+        # (audit 2026-08-01).
+        if receipt_existed:
+            return  # already recorded on an earlier pass
+        if receipt is None:
+            logger.error(
+                'inbound USDT deposit at %s (%s) has NO durable record — '
+                'receipt write failed and there is no conversion row; '
+                'suppressing the notification so a rescan can retry',
+                to_addr, tx_hash)
+            return
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType

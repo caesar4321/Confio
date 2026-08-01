@@ -73,6 +73,37 @@ def p_plus_wad() -> int:
     return cached
 
 
+def last_oracle_price_wad() -> int:
+    """The vault's guard-validated USDY price snapshot, 1e18.
+
+    Needed to predict a redeem's USDT output exactly: redeemToUsdt floors
+    TWICE (shares -> USDY at this price, then USDY -> USDT), so
+    shares * pPlus / 1e18 is an OVER-estimate and cannot be used to decide
+    whether Ondo's 1.00 USDT floor is cleared.
+    """
+    addr = vault_address()
+    if not addr:
+        return 10 ** 18
+    cached = cache.get('cusd_plus_oracle_p')
+    if cached is None:
+        cached = _call(addr, _sel('lastOraclePrice()')) or 10 ** 18
+        cache.set('cusd_plus_oracle_p', cached, 30)
+    return cached
+
+
+def redeem_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:
+    """USDT a redeemToUsdt(shares) would actually deliver.
+
+    Mirrors CusdPlusVault.redeemToUsdt + _imRedeem exactly:
+        usdyOut = mulDiv(shares, pPlus, p)   # floor
+        usdtOut = usdyOut * p / 1e18         # floor
+    """
+    if oracle_p_wad <= 0:
+        return 0
+    usdy_out = (shares * pps_wad) // oracle_p_wad
+    return (usdy_out * oracle_p_wad) // (10 ** 18)
+
+
 def confio_yield_share_bps() -> int:
     """The vault's immutable yield share, read from the chain so the
     displayed rate can never drift from what the contract actually keeps.

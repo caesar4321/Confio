@@ -570,10 +570,25 @@ def sync_koywe_ramp_transaction_from_order(
     )
 
     is_savings_rail = getattr(ramp_tx, 'destination', 'cusd') == 'cusd_plus'
+    # A savings-rail order delivers USDT to the user's address and only becomes
+    # cUSD+ if the mint is allowed. A geo-ineligible holder keeps raw USDT (the
+    # deposit watcher no longer even opens a conversion for them), so promising
+    # CUSD+ here would misstate what they hold (audit 2026-08-01).
+    keeps_raw_usdt = False
+    if is_savings_rail:
+        try:
+            from cusd_plus.eligibility import is_ondo_eligible
+            actor = getattr(ramp_tx, 'actor_user', None)
+            keeps_raw_usdt = actor is not None and not is_ondo_eligible(actor)
+        except Exception:  # noqa: BLE001 — labelling must not break the sync
+            logger.exception('ramp eligibility label check failed for %s', ramp_tx.pk)
     if direction == 'on_ramp':
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
-        ramp_tx.final_currency = 'CUSD+' if is_savings_rail else 'CUSD'
+        # An ineligible holder keeps what actually landed — USDT — not CUSD+
+        # (the mint is refused) and not legacy CUSD (wrong chain entirely).
+        ramp_tx.final_currency = (
+            'USDT BSC' if keeps_raw_usdt else ('CUSD+' if is_savings_rail else 'CUSD'))
         ramp_tx.final_amount = amount_out or ramp_tx.final_amount
     else:
         ramp_tx.fiat_amount = amount_out or ramp_tx.fiat_amount

@@ -125,7 +125,7 @@ def _notify_recipient_needs_app(recipient_user, sender_user) -> None:
 
 def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     """Mirror of the Algorand rail's priority (blockchain/mutations.py):
-    user id → phone (digits-only exact) → raw 0x address. Returns
+    user id → phone (any client shape) → raw 0x address. Returns
     (recipient_user|None, recipient_business|None, bsc_address|None, error|None).
     recipient_user is set for internal recipients even when their address is
     missing — the caller needs it to send the activation nudge."""
@@ -144,8 +144,10 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
         return recipient_user, None, (addr or None), None
 
     if recipient_phone:
-        cleaned = ''.join(filter(str.isdigit, recipient_phone))
-        found = User.objects.filter(phone_number=cleaned).first()
+        # Any shape the client may send: canonical key "57:313…", E.164, or
+        # bare local digits. `phone_number` stores local digits only.
+        from users.phone_utils import find_user_by_phone
+        found = find_user_by_phone(recipient_phone)
         if not found:
             # Non-Confío phone: the invite flow is a separate product
             # (Algorand invite-send today; BSC invites are a follow-up).
@@ -302,6 +304,8 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         # Funding source: prefer the yield position; raw USDT is the fallback.
         try:
             pps_wad = cp_vault.p_plus_wad()
+            # Needed to predict a redeem exactly (the chain floors twice).
+            oracle_p_wad = cp_vault.last_oracle_price_wad()
             shares_raw = cp_vault.erc20_balance_raw(vault_addr, sender_addr)
             shares_value_wei = (shares_raw * pps_wad) // WAD
             usdt_raw = cp_vault.usdt_balance_raw(sender_addr, fresh=True)
@@ -359,26 +363,57 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 # burns at most one extra wei of the sender's position and
                 # makes "send $1.00" deliver $1.00.
                 shares = -(-amount_wei * WAD // pps_wad)
+                # The chain floors TWICE (shares→USDY at the oracle price, then
+                # USDY→USDT), so ceiling on shares alone can still land short.
+                # Nudge up until the EXACT preview covers the request; each
+                # share-wei moves the output by about a wei, so this converges
+                # immediately. Bounded so a pathological price can't spin.
+                for _ in range(8):
+                    if shares >= shares_raw:
+                        break
+                    if cp_vault.redeem_usdt_out(shares, pps_wad, oracle_p_wad) >= amount_wei:
+                        break
+                    shares += 1
                 if shares > shares_raw:
                     shares = shares_raw  # dust-short MAX → the whole position
                 if shares <= 0:
                     return {'success': False, 'error': 'invalid_amount'}
-                # Ondo's floor applies to what the recipient RECEIVES, so it is
-                # checked on value, not shares. Refuse here with a specific
-                # code: the alternative is a batch that cannot succeed and a
-                # row stranded in PENDING.
-                redeem_value_wei = (shares * pps_wad) // WAD
-                if redeem_value_wei < ONDO_MIN_REDEEM_WEI:
+                # Ondo's floor applies to what the recipient RECEIVES. Checked
+                # against the exact two-floor preview, not shares * pPlus,
+                # which is an OVER-estimate and would approve a redemption
+                # Ondo rejects (audit 2026-08-01).
+                redeem_out_wei = cp_vault.redeem_usdt_out(shares, pps_wad, oracle_p_wad)
+                if redeem_out_wei < ONDO_MIN_REDEEM_WEI and (
+                        usdt_raw + MAX_SEND_DUST_WEI >= amount_wei):
+                    # Not a dead end: raw USDT covers this send. Refusing
+                    # outright stranded a user holding $0.50 of savings and
+                    # plenty of USDT (audit 2026-08-01).
+                    if amount_wei > usdt_raw:
+                        amount_wei = usdt_raw
+                    kind = 'send_usdt'
+                    token_type = 'USDT'
+                    token_addr, units, min_out = USDT_BSC, amount_wei, None
+                    calls = [{
+                        'to': USDT_BSC, 'value': '0',
+                        'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr)
+                                + _uint_word(amount_wei),
+                    }]
+                elif redeem_out_wei < ONDO_MIN_REDEEM_WEI:
                     return {'success': False, 'error': 'redeem_below_minimum'}
-                kind = 'send_redeem'
-                token_type = 'USDT'
-                min_out = (amount_wei * REDEEM_MIN_OUT_BPS) // 10_000
-                token_addr, units = vault_addr, shares
-                calls = [{
-                    'to': vault_addr, 'value': '0',
-                    'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
-                            + _uint_word(min_out) + _addr_word(recipient_addr),
-                }]
+                else:
+                    kind = 'send_redeem'
+                    token_type = 'USDT'
+                    # minOut floors what the RECIPIENT accepts; derived from the
+                    # exact preview, not the request, now that shares may be a
+                    # hair above it.
+                    min_out = (min(amount_wei, redeem_out_wei)
+                               * REDEEM_MIN_OUT_BPS) // 10_000
+                    token_addr, units = vault_addr, shares
+                    calls = [{
+                        'to': vault_addr, 'value': '0',
+                        'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
+                                + _uint_word(min_out) + _addr_word(recipient_addr),
+                    }]
         elif usdt_raw + MAX_SEND_DUST_WEI >= amount_wei:
             if amount_wei > usdt_raw:
                 amount_wei = usdt_raw  # dust-short MAX → the full wallet balance
@@ -556,9 +591,30 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
             # nothing re-submits this row — the client always re-prepares a new
             # one. Leaving it PENDING strands a send in the user's history
             # forever (three such rows on 2026-08-01). Terminal, not retryable.
-            send_tx.status = 'FAILED'
-            send_tx.error_message = 'simulation_reverted'
-            send_tx.save(update_fields=['status', 'error_message', 'updated_at'])
+            #
+            # But ONLY if nothing was broadcast. A concurrent or retried submit
+            # can reach this handler after a sibling call already signed and
+            # sent a batch for the same row; marking FAILED there would make
+            # confirm_bsc_send refuse to settle a batch that DID land, and the
+            # client would send again (audit 2026-08-01). The conditional
+            # UPDATE is the claim: it only fires while the row is still
+            # PENDING with no hash, and a batch row is the other witness.
+            from blockchain.models import SponsoredBatch  # noqa: PLC0415
+            broadcast = SponsoredBatch.objects.filter(source_id=send_tx.id).exists()
+            if not broadcast:
+                claimed = SendTransaction.objects.filter(
+                    pk=send_tx.pk, status='PENDING', transaction_hash='',
+                ).update(status='FAILED', error_message='simulation_reverted',
+                         updated_at=timezone.now())
+                if not claimed:
+                    logger.warning(
+                        '[SEND][BSC] %s advanced while simulating — left alone',
+                        send_tx.internal_id)
+            else:
+                logger.error(
+                    '[SEND][BSC] %s simulation reverted but a batch exists — '
+                    'NOT failing the row; the receipt task owns it',
+                    send_tx.internal_id)
         return {'success': False, 'error': exc.code}
     except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
         logger.exception('[SEND][BSC] sponsored send failed for %s', send_tx.internal_id)

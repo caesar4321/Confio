@@ -305,6 +305,34 @@ class PrepareCallShapeTests(SimpleTestCase):
         self.assertEqual(int(call['data'][74:138], 16),
                          (WAD * WAD) // self.PROD_PPS)
 
+    # ── Codex audit 2026-08-01 ──────────────────────────────────────────
+    # The guard used shares * pPlus / WAD, but the chain floors TWICE
+    # (shares -> USDY at the oracle price, then USDY -> USDT), so that proxy
+    # is an OVER-estimate and could approve a redemption Ondo rejects.
+
+    def test_guard_uses_the_exact_two_floor_preview(self):
+        # A price where the proxy says exactly 1e18 but the truth is a wei short.
+        pps, oracle = WAD, 1_050_000_000_000_000_000
+        shares = WAD
+        proxy = (shares * pps) // WAD
+        from cusd_plus.vault import redeem_usdt_out
+        truth = redeem_usdt_out(shares, pps, oracle)
+        self.assertEqual(proxy, WAD)          # the old guard would pass this
+        self.assertEqual(truth, WAD - 1)      # Ondo would reject it
+        self.assertLess(truth, proxy)
+
+    def test_redeem_below_minimum_falls_through_to_usdt(self):
+        # $0.50 of savings but plenty of raw USDT: refusing outright stranded
+        # a user who could obviously be served by branch C.
+        result, _ = self._prepare_raw('0.5', shares_raw=WAD // 2, usdt=10 * WAD)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['token_type'], 'USDT')
+        self.assertEqual(result['calls'][0]['to'], USDT_BSC)
+
+    def test_redeem_below_minimum_with_no_usdt_still_refuses(self):
+        result, _ = self._prepare_raw('0.5', shares_raw=WAD // 2, usdt=0)
+        self.assertEqual(result['error'], 'redeem_below_minimum')
+
     def test_shortfall_beyond_dust_still_refuses(self):
         pps = 11 * WAD // 10
         amount_wei = 299 * WAD // 100
