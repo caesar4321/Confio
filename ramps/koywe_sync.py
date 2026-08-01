@@ -202,8 +202,17 @@ def _collect_scalar_candidates(
     sink: list[dict[str, Any]] | None = None,
     seen: set[int] | None = None,
 ) -> list[dict[str, Any]]:
-    sink = sink or []
-    seen = seen or set()
+    # `sink or []` looked harmless and silently broke every snapshot: an
+    # EMPTY list is falsy, so each recursive call threw away the accumulator
+    # the caller passed and appended to a fresh one. The top-level call got
+    # its own empty list back, so _extract_instruction_fields saw nothing and
+    # users were shown Koywe payout instructions with no bank details at all.
+    # Same trap for `seen` (an empty set is falsy), which disabled the cycle
+    # guard on the first level.
+    if sink is None:
+        sink = []
+    if seen is None:
+        seen = set()
     if value is None or depth > _MAX_DISCOVERY_DEPTH:
         return sink
     if isinstance(value, (str, int, float, bool, Decimal)):

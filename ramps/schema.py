@@ -870,6 +870,10 @@ class CreateRampOrder(graphene.Mutation):
         if not (user and getattr(user, 'is_authenticated', False)):
             return RampOrderType(success=False, error='Authentication required')
 
+        employee_denial = _employee_ramp_denial(info)
+        if employee_denial:
+            return RampOrderType(success=False, error=employee_denial)
+
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or '').strip().upper()
         if normalized_direction not in {'ON_RAMP', 'OFF_RAMP'}:
@@ -935,12 +939,23 @@ class CreateRampOrder(graphene.Mutation):
             if normalized_direction == 'OFF_RAMP':
                 if savings_rail:
                     from cusd_plus import vault as cusd_plus_vault
+                    # The withdrawable dollar is the WHOLE BSC position, in
+                    # whichever leg it currently sits: minted cUSD+ shares plus
+                    # raw USDT that landed but hasn't minted (and never will,
+                    # for an Ondo-ineligible user). Checking raw USDT alone
+                    # refused users whose money was simply already earning —
+                    # the client redeems the shortfall to its own address
+                    # before funding, so both legs are genuinely spendable.
                     # fresh=True: sufficiency must not pass/fail on a 30s-stale
                     # figure; RPC failure raises into the outer error handler.
-                    available_usdt = (
+                    raw_usdt = (
                         Decimal(cusd_plus_vault.usdt_balance_raw(current_account.bsc_address, fresh=True))
                         / Decimal(10 ** 18)
                     )
+                    vault_usd = Decimal(str(
+                        cusd_plus_vault.position_usd(current_account.bsc_address)
+                    ))
+                    available_usdt = raw_usdt + vault_usd
                     if available_usdt < decimal_amount:
                         return RampOrderType(
                             success=False,
@@ -1105,6 +1120,10 @@ class CreateMockRampOrder(graphene.Mutation):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return RampOrderType(success=False, error='Authentication required')
+
+        employee_denial = _employee_ramp_denial(info)
+        if employee_denial:
+            return RampOrderType(success=False, error=employee_denial)
 
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or "").strip().upper()
@@ -1641,6 +1660,34 @@ def _get_country_fiat_currency(country_code: str) -> str:
         return config['fiat_currency']
     country = Country.objects.filter(code=country_code).first()
     return country.currency_code if country else 'USD'
+
+
+def _employee_ramp_denial(info):
+    """API half of the owner-only ramp rule (users/jwt_context holds the
+    primitive and the message, because the Guardarian REST proxy in
+    config/views.py must enforce the same thing).
+
+    Returns a user-facing error string when the caller must be blocked,
+    otherwise None.
+    """
+    from users.jwt_context import (
+        RAMP_OWNER_ONLY_MESSAGE,
+        get_jwt_business_context_with_validation,
+        is_business_employee,
+    )
+
+    jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+    if not jwt_context:
+        return None
+    if jwt_context.get('account_type') != 'business':
+        return None
+    # ONE source of truth, shared with the REST proxy: ask the table directly
+    # rather than trusting a key on the context dict. Both read the same rows,
+    # and a single code path means both entry points cannot drift.
+    if is_business_employee(getattr(info.context, 'user', None),
+                            jwt_context.get('business_id')):
+        return RAMP_OWNER_ONLY_MESSAGE
+    return None
 
 
 def _get_ramp_account_for_user(info, user):

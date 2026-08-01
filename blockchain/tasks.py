@@ -1208,10 +1208,17 @@ def scan_outbound_confirmations(max_batch: int = 50):
             processed += 1
 
 
-        # Sends
+        # Sends — ALGORAND ONLY. check_tx() below asks an algod node about the
+        # hash, so a BSC send (whose hash that node has never heard of) looks
+        # "missing from the pool" and gets marked FAILED even when it settled
+        # fine. BSC rows are settled by send.tasks.confirm_bsc_send against the
+        # sponsored batch instead; bsc_calls_json is the marker, since
+        # token_type can't distinguish them (CONFIO exists on both chains).
         send_qs = SendTransaction.objects.filter(
             status__in=['SUBMITTED', 'FAILED'],
             updated_at__gte=recovery_cutoff
+        ).filter(
+            Q(bsc_calls_json__isnull=True) | Q(bsc_calls_json='')
         ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for s in send_qs:
             cr, pe = check_tx(s.transaction_hash or '')

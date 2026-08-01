@@ -595,6 +595,19 @@ def guardarian_transaction_proxy(request):
     except Exception:
         return JsonResponse({'error': 'User not found'}, status=401)
 
+    # Owner-only, same rule the GraphQL ramp mutations enforce. This endpoint
+    # creates a REAL Guardarian order (including off-ramps to a bank), so
+    # guarding only the GraphQL side would leave the whole rule bypassable by
+    # calling this URL directly.
+    if payload.get('account_type') == 'business':
+        from users.jwt_context import RAMP_OWNER_ONLY_MESSAGE, is_business_employee
+        if is_business_employee(user, payload.get('business_id')):
+            logger.warning(
+                'Guardarian proxy refused: user %s is an employee of business %s',
+                user_id, payload.get('business_id'),
+            )
+            return JsonResponse({'error': RAMP_OWNER_ONLY_MESSAGE}, status=403)
+
     try:
         body = json.loads(request.body or '{}')
     except ValueError:

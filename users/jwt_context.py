@@ -60,6 +60,36 @@ def check_role_permission(role, permission):
     allowed_permissions = ROLE_PERMISSIONS.get(role, set())
     return permission in allowed_permissions
 
+# Actions that move money between the business and a BANK (fiat ramps) are
+# the OWNER's alone. No employee role qualifies — `manage_bank_accounts`
+# governs which payout methods are on file, not the authority to move funds
+# out. Owners carry no BusinessEmployee row (they are authorized through
+# Account ownership), so that row's existence is exactly the deny signal.
+#
+# Lives here, not in a single caller, because the rule has to hold on EVERY
+# entry point: the GraphQL ramp mutations and the Guardarian REST proxy both
+# create real off-ramp orders.
+RAMP_OWNER_ONLY_MESSAGE = (
+    'Solo el dueño del negocio puede recargar o retirar. '
+    'Pide a quien administra la cuenta que lo haga.'
+)
+
+
+def is_business_employee(user, business_id) -> bool:
+    """True when `user` acts on `business_id` as an EMPLOYEE rather than its
+    owner. False for owners, personal accounts, and unresolvable input."""
+    if not user or not business_id:
+        return False
+    try:
+        from .models_employee import BusinessEmployee
+        return BusinessEmployee.objects.filter(
+            user=user, business_id=business_id, deleted_at__isnull=True,
+        ).exists()
+    except Exception:  # noqa: BLE001 — a lookup failure must not grant access
+        logger.exception('employee lookup failed for business %s', business_id)
+        return True
+
+
 def get_jwt_business_context_with_validation(info, required_permission=None):
     """
     Extract business context from JWT token and validate access through BusinessEmployee.
