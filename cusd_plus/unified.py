@@ -1,13 +1,12 @@
-"""UnifiedTransactionTable mirror for cUSD+ conversions.
+"""UnifiedTransactionTable mirror for the savings (BSC) conversion rows.
 
 The unified table is the cross-feature ledger behind the app's main
-activity feed and the ops one-stop admin — every rail (send, payments,
-ramps, presale, Algorand conversions) mirrors into it. This module is the
-cusd_plus rail's mirror: one unified row per CusdPlusConversion, linked
-OneToOne (idempotent update_or_create), status evolving with the saga.
+activity feed and the ops one-stop admin. This module mirrors the savings
+saga rows of `conversion.Conversion`: one unified row each, linked OneToOne
+on the single `conversion` FK, status evolving with the saga.
 
-The BSC sibling of users.signals.create_unified_transaction_from_conversion
-(the Algorand USDC<->cUSD converter's mirror) — same field conventions.
+Sibling of users.signals.create_unified_transaction_from_conversion, which
+mirrors the same model's Algorand one-shot rows.
 """
 import logging
 
@@ -23,32 +22,32 @@ _STATUS_MAP = {
 
 
 def sync_unified_from_cusd_plus_conversion(conv) -> None:
-    """Create/update the unified row for a CusdPlusConversion. Never raises
+    """Create/update the unified row for a savings Conversion. Never raises
     — the mirror must not break the pipeline that feeds it."""
     try:
         from users.models_unified import UnifiedTransactionTable
 
-        to_savings = conv.direction == 'to_savings'
+        to_savings = conv.conversion_type == 'to_savings'
         if to_savings:
             # USDT in -> cUSD+ out; the position the user ends up with.
             token_type = 'CUSD_PLUS'
             description = (
-                f"Conversión: {conv.amount_usd} USDT → {conv.quoted_receive_usd} cUSD+"
+                f"Conversión: {conv.from_amount} USDT → {conv.to_amount} cUSD+"
             )
         else:
             token_type = 'USDT'
             description = (
-                f"Conversión: {conv.amount_usd} cUSD+ → {conv.quoted_receive_usd} USDT"
+                f"Conversión: {conv.from_amount} cUSD+ → {conv.to_amount} USDT"
             )
 
         UnifiedTransactionTable.objects.update_or_create(
-            cusd_plus_conversion=conv,
+            conversion=conv,
             defaults={
                 'transaction_type': 'conversion',
-                'amount': str(conv.quoted_receive_usd),
+                'amount': str(conv.to_amount),
                 'token_type': token_type,
                 'status': _STATUS_MAP.get(conv.status, 'PENDING'),
-                'transaction_hash': conv.dest_tx_hash or conv.bridge_arrival_tx or '',
+                'transaction_hash': conv.to_transaction_hash or conv.bridge_arrival_tx or '',
                 'error_message': conv.error_message or '',
                 # The converter converts with themselves — sender == counterparty,
                 # same convention as the Algorand conversion mirror.

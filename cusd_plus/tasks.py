@@ -133,7 +133,7 @@ def monitor_bridge_arrivals():
       - Arrival matching an in-flight to_savings conversion (>= 90% of the
         quote) -> bridge arrival: advance the saga (leg B done), dust gas.
       - Any other arrival at a REGISTERED savings address (an Account with
-        bsc_address set) -> a CusdPlusConversion row born at DEST_ARRIVED
+        bsc_address set) -> a savings Conversion row born at DEST_ARRIVED
         (source='external_deposit', or 'ramp' when a pending Koywe order
         targets the address), gas-dusted, deposit notification. The client's
         foreground resume (savingsLegC) mints it exactly like a conversion:
@@ -156,11 +156,11 @@ def monitor_bridge_arrivals():
     STUCK is judged by chain silence only — never by a vendor API.
     """
     from django.core.cache import cache
-    from .models import CusdPlusConversion
+    from conversion.models import Conversion
 
     timeout = timedelta(minutes=getattr(settings, 'CUSD_PLUS_BRIDGE_TIMEOUT_MIN', 30))
-    conversions = list(CusdPlusConversion.objects.filter(
-        direction='to_savings',
+    conversions = list(Conversion.objects.filter(
+        conversion_type='to_savings',
         status__in=('SRC_COMMITTED', 'STUCK'),
         is_deleted=False,
     ).exclude(user_bsc_address='')[:500])
@@ -238,7 +238,7 @@ def monitor_bridge_arrivals():
         raw_units = int(log['data'], 16)
         conv = conv_watch.get(key)
         if conv is not None:
-            floor_units = int(float(conv.quoted_receive_usd) * 0.9 * 1e18)
+            floor_units = int(float(conv.to_amount) * 0.9 * 1e18)
             if raw_units >= floor_units:
                 arrived[key] = log
             else:
@@ -299,7 +299,7 @@ def monitor_bridge_arrivals():
             logger.error(
                 'conversion %s STUCK: no USDT arrival on BNB after %s (src tx %s). '
                 'Support diagnostic: allbridge_diagnose("%s")',
-                conv.internal_id, timeout, conv.src_tx_id, conv.internal_id,
+                conv.internal_id, timeout, conv.from_transaction_hash, conv.internal_id,
             )
 
     # ── cUSD+ (vault share) inbound pass (Phase 2) ──────────────────────
@@ -452,9 +452,9 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     Transfers to the same address records only the first — wallet sends are
     one transfer per tx, and the rest stays visible on chain for support.)"""
     from users.models import Account
-    from .models import CusdPlusConversion
+    from conversion.models import Conversion
 
-    if CusdPlusConversion.objects.filter(
+    if Conversion.objects.filter(
         user_bsc_address=to_addr, bridge_arrival_tx=tx_hash, is_deleted=False,
     ).exists():
         return
@@ -487,18 +487,18 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
             tx_hash=tx_hash, source=source, conv=None,
         )
         return
-    conv = CusdPlusConversion.objects.create(
+    conv = Conversion.objects.create(
         actor_user=None if is_business else account.user,
         actor_business=account.business if is_business else None,
         actor_type='business' if is_business else 'user',
         actor_display_name=account.display_name,
-        direction='to_savings',
+        conversion_type='to_savings',
         source=source,
-        amount_usd=amount_usd,
-        quoted_receive_usd=amount_usd,  # already delivered — nothing left to quote
+        from_amount=amount_usd,
+        to_amount=amount_usd,  # already delivered — nothing left to quote
         quoted_cost_pct=0,
         user_bsc_address=to_addr,
-        src_tx_id=tx_ref,
+        from_transaction_hash=tx_ref,
         bridge_arrival_tx=tx_hash,
         status='DEST_ARRIVED',
         dest_arrived_at=now,
@@ -614,7 +614,7 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                 'pending_auto_mint': eligible,
             },
             **(
-                {'related_object_type': 'CusdPlusConversion',
+                {'related_object_type': 'Conversion',
                  'related_object_id': str(conv.internal_id)}
                 if conv else
                 {'related_object_type': 'SendTransaction',
@@ -629,12 +629,12 @@ def mark_retirar_arrival(algo_address: str, txid: str) -> bool:
     """Hook for the existing inbound USDC scanner (blockchain app): when a
     USDC credit lands at an address with a from_savings conversion in
     flight, record the arrival. Returns True if a row advanced."""
-    from .models import CusdPlusConversion
+    from conversion.models import Conversion
 
-    conv = CusdPlusConversion.objects.filter(
-        direction='from_savings',
+    conv = Conversion.objects.filter(
+        conversion_type='from_savings',
         status__in=('SRC_COMMITTED', 'STUCK'),
-        user_algo_address=algo_address,
+        actor_address=algo_address,
         is_deleted=False,
     ).first()
     if conv is None:
@@ -651,12 +651,12 @@ def allbridge_diagnose(conversion_internal_id: str) -> dict:
     """SUPPORT TOOL ONLY (not scheduled, not in the hot path): ask the
     Allbridge indexer what it thinks about a stuck transfer. The chain
     remains the source of truth."""
-    from .models import CusdPlusConversion
+    from conversion.models import Conversion
 
-    conv = CusdPlusConversion.objects.get(internal_id=conversion_internal_id)
-    chain = 'ALG' if conv.direction == 'to_savings' else 'BSC'
+    conv = Conversion.objects.get(internal_id=conversion_internal_id)
+    chain = 'ALG' if conv.conversion_type == 'to_savings' else 'BSC'
     res = requests.get(
-        f'https://core.api.allbridgecoreapi.net/chain/{chain}/{conv.src_tx_id}',
+        f'https://core.api.allbridgecoreapi.net/chain/{chain}/{conv.from_transaction_hash}',
         timeout=15,
     )
     return {'status_code': res.status_code, 'body': res.json() if res.ok else res.text}
@@ -888,10 +888,14 @@ def reconcile_signed_batches():
 def abandon_stale_quotes():
     """CREATED rows the user never signed expire after a day — keeps the
     resume list honest."""
-    from .models import CusdPlusConversion
+    from conversion.models import Conversion
 
     cutoff = timezone.now() - timedelta(hours=24)
-    stale = CusdPlusConversion.objects.filter(
+    # Scoped to the savings sagas: 'CREATED' is a saga-only status, but an
+    # explicit filter keeps a future Algorand status rename from sweeping
+    # rows this task was never meant to touch.
+    stale = Conversion.objects.filter(
+        conversion_type__in=Conversion.SAVINGS_TYPES,
         status='CREATED', created_at__lt=cutoff, is_deleted=False,
     )
     updated = stale.update(status='ABANDONED', updated_at=timezone.now())

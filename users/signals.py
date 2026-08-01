@@ -230,6 +230,14 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
 def create_unified_transaction_from_conversion(conversion):
     """Create or update UnifiedTransactionTable from Conversion"""
     try:
+        # Savings-saga rows (to_savings / from_savings) have their own field
+        # mapping — USDT/cUSD+ tokens, saga statuses, bridge hashes. Without
+        # this they would fall through to the `else` below and be mirrored as
+        # "Conversión: X USDC → Y cUSD", silently overwriting the correct row.
+        if conversion.is_savings:
+            from cusd_plus.unified import sync_unified_from_cusd_plus_conversion
+            sync_unified_from_cusd_plus_conversion(conversion)
+            return
         # Defensive refresh: If hashes are missing, ensure we have the latest DB state
         # This handles cases where update_fields might have been used or race conditions occurred
         if not conversion.from_transaction_hash and not conversion.to_transaction_hash:

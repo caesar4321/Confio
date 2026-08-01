@@ -18,14 +18,14 @@ from decimal import Decimal
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
-from .models import CusdPlusConversion
+from conversion.models import Conversion
 
 logger = logging.getLogger(__name__)
 
 REFERRAL_MIN_USD = Decimal('19')
 
 
-@receiver(pre_save, sender=CusdPlusConversion)
+@receiver(pre_save, sender=Conversion)
 def cache_previous_conversion_status(sender, instance, **kwargs):
     if instance.pk:
         previous = sender.objects.filter(pk=instance.pk).values_list('status', flat=True).first()
@@ -34,7 +34,7 @@ def cache_previous_conversion_status(sender, instance, **kwargs):
         instance._previous_status = None
 
 
-@receiver(post_save, sender=CusdPlusConversion)
+@receiver(post_save, sender=Conversion)
 def handle_savings_conversion_referral(sender, instance, created, **kwargs):
     """Completed to_savings conversion >= $19 activates the referral reward."""
     try:
@@ -42,9 +42,9 @@ def handle_savings_conversion_referral(sender, instance, created, **kwargs):
         just_completed = instance.status == 'COMPLETED' and previous_status != 'COMPLETED'
         if not (
             just_completed
-            and instance.direction == 'to_savings'
+            and instance.conversion_type == 'to_savings'
             and instance.actor_user_id
-            and Decimal(instance.amount_usd) >= REFERRAL_MIN_USD
+            and Decimal(instance.from_amount) >= REFERRAL_MIN_USD
         ):
             return
 
@@ -57,14 +57,14 @@ def handle_savings_conversion_referral(sender, instance, created, **kwargs):
             'Referral savings activation: user=%s conversion=%s amount=%s',
             instance.actor_user_id,
             instance.internal_id,
-            instance.amount_usd,
+            instance.from_amount,
         )
 
         metadata = {
             'cusd_plus_conversion_id': str(instance.internal_id),
             'source': 'cusd_plus_to_savings',
         }
-        amount = Decimal(instance.amount_usd)
+        amount = Decimal(instance.from_amount)
 
         # Checkpoint first, then the paying event — same order as the
         # deposit + conversion path. Duplicate guards in the service make

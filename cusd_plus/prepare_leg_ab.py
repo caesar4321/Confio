@@ -284,7 +284,7 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
     """Build prefix, verify tail, compose, sponsor-sign. Returns pack dict."""
     from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
     from blockchain.algorand_client import get_algod_client
-    from .models import CusdPlusConversion
+    from conversion.models import Conversion
 
     user_address = account.algorand_address
     bsc_address = (account.bsc_address or '').lower()
@@ -399,15 +399,15 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
         2: builder.signer.sign_transaction_msgpack(burn_call),
     }
 
-    conv = CusdPlusConversion.objects.create(
+    conv = Conversion.objects.create(
         actor_user=account.user if account.account_type == 'personal' else None,
         actor_business=account.business if account.account_type == 'business' else None,
         actor_type='user' if account.account_type == 'personal' else 'business',
         actor_display_name=account.display_name or '',
-        direction='to_savings',
-        amount_usd=amount,
-        quoted_receive_usd=receive_usd.quantize(Decimal('0.000001')),  # rule-8 server quote
-        user_algo_address=user_address,
+        conversion_type='to_savings',
+        from_amount=amount,
+        to_amount=receive_usd.quantize(Decimal('0.000001')),  # rule-8 server quote
+        actor_address=user_address,
         user_bsc_address=bsc_address,
     )
 

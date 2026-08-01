@@ -16,7 +16,7 @@ class DepositEligibilityTests(SimpleTestCase):
     def _run(self, account):
         created = []
         with mock.patch('users.models.Account.objects') as accts, \
-             mock.patch('cusd_plus.models.CusdPlusConversion.objects') as convs, \
+             mock.patch('conversion.models.Conversion.objects') as convs, \
              mock.patch('cusd_plus.tasks._record_deposit_receipt') as receipt:
             accts.filter.return_value.select_related.return_value.first.return_value = account
             convs.filter.return_value.exists.return_value = False
@@ -37,7 +37,7 @@ class DepositEligibilityTests(SimpleTestCase):
     def test_eligible_holder_still_converts(self):
         created, receipt = self._run(_account('CO'))
         self.assertEqual(len(created), 1)
-        self.assertEqual(created[0]['direction'], 'to_savings')
+        self.assertEqual(created[0]['conversion_type'], 'to_savings')
         self.assertIsNotNone(receipt.kwargs['conv'])
 
     def test_business_account_keeps_conversion(self):

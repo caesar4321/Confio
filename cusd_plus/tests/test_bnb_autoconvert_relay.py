@@ -127,7 +127,7 @@ class RegisterArrivalTests(SimpleTestCase):
         with mock.patch('cusd_plus.tasks._rpc', return_value=receipt), \
              mock.patch('cusd_plus.tasks._registered_bsc_addresses', return_value=registered), \
              mock.patch('cusd_plus.tasks._record_inbound_deposit') as rec, \
-             mock.patch('cusd_plus.models.CusdPlusConversion.objects') as conv:
+             mock.patch('conversion.models.Conversion.objects') as conv:
             conv.filter.return_value = in_flight
             res = RegisterBscUsdtArrival.mutate(None, _Info(), TX)
         return res, rec

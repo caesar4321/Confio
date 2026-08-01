@@ -1,11 +1,41 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from .models import Conversion
 
 
 @admin.register(Conversion)
 class ConversionAdmin(admin.ModelAdmin):
-    list_display = ['internal_id_hex', 'actor_display', 'actor_type_icon', 'conversion_type', 'from_amount', 'to_amount', 'status', 'created_at']
-    list_filter = ['status', 'conversion_type', 'created_at', 'actor_type']
+    # `source` and `is_deleted` matter since the savings sagas merged in:
+    # they distinguish a user-quoted convert from a chain-observed deposit,
+    # and the app hides soft-deleted rows the admin still lists.
+    list_display = ['internal_id_hex', 'actor_display', 'actor_type_icon', 'conversion_type',
+                    'source', 'from_amount', 'to_amount', 'status', 'is_deleted', 'created_at']
+    list_filter = ['status', 'conversion_type', 'source', 'is_deleted', 'created_at', 'actor_type']
+    actions = ('run_allbridge_diagnose',)
+
+    @admin.action(description='Allbridge diagnose (support tool for STUCK savings rows)')
+    def run_allbridge_diagnose(self, request, queryset):
+        """Carried over from the merged CusdPlusConversion admin. Applies only
+        to savings sagas — Algorand swaps never touch a bridge."""
+        from cusd_plus.tasks import allbridge_diagnose
+        for conv in queryset[:5]:  # support tool, not a batch job
+            if not conv.is_savings:
+                self.message_user(
+                    request, f'{conv.internal_id}: not a savings conversion — skipped',
+                    level=messages.WARNING,
+                )
+                continue
+            try:
+                result = allbridge_diagnose(str(conv.internal_id))
+                self.message_user(
+                    request,
+                    f'{conv.internal_id}: HTTP {result["status_code"]} — {str(result["body"])[:300]}',
+                    level=messages.INFO,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.message_user(
+                    request, f'{conv.internal_id}: diagnose failed — {exc}',
+                    level=messages.WARNING,
+                )
     search_fields = ['internal_id', 'actor_user__username', 'actor_user__email', 'actor_business__name', 'actor_display_name', 'from_transaction_hash', 'to_transaction_hash']
     readonly_fields = ['internal_id', 'created_at', 'updated_at', 'completed_at']
     

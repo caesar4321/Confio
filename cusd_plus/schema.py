@@ -361,19 +361,20 @@ class Query(graphene.ObjectType):
         )
 
     def resolve_cusd_plus_conversions_in_flight(self, info):
-        from .models import CusdPlusConversion
+        from conversion.models import Conversion
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return []
         scope = _actor_filter(info)
         if scope is None:
             return []
-        lookup = {'is_deleted': False, 'status__in': CusdPlusConversion.IN_FLIGHT_STATUSES}
+        lookup = {'is_deleted': False, 'conversion_type__in': Conversion.SAVINGS_TYPES,
+                  'status__in': Conversion.IN_FLIGHT_STATUSES}
         if scope['actor_type'] == 'business':
             lookup['actor_business_id'] = scope['actor_business_id']
         else:
             lookup['actor_user'] = user
-        return [_serialize(c) for c in CusdPlusConversion.objects.filter(**lookup)[:20]]
+        return [_serialize(c) for c in Conversion.objects.filter(**lookup)[:20]]
 
     def resolve_cusd_plus_convert_params(self, info):
         user = getattr(info.context, 'user', None)
@@ -432,14 +433,16 @@ class CusdPlusConversionType(graphene.ObjectType):
 
 
 def _serialize(conv):
+    # WIRE names are deliberately unchanged across the model merge so the
+    # shipped app keeps working without a coordinated release.
     return CusdPlusConversionType(
         conversion_id=str(conv.internal_id),
-        direction=conv.direction,
-        amount_usd=float(conv.amount_usd),
-        quoted_receive_usd=float(conv.quoted_receive_usd),
+        direction=conv.conversion_type,
+        amount_usd=float(conv.from_amount),
+        quoted_receive_usd=float(conv.to_amount),
         status=conv.status,
-        src_tx_id=conv.src_tx_id,
-        dest_tx_hash=conv.dest_tx_hash,
+        src_tx_id=conv.from_transaction_hash or '',
+        dest_tx_hash=conv.to_transaction_hash or '',
         user_bsc_address=conv.user_bsc_address,
         created_at=conv.created_at,
     )
@@ -496,7 +499,7 @@ class StartCusdPlusConversion(graphene.Mutation):
 
     def mutate(self, info, direction, amount_usd, quoted_receive_usd,
                quoted_cost_pct, user_bsc_address='', user_algo_address=''):
-        from .models import CusdPlusConversion
+        from conversion.models import Conversion
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return StartCusdPlusConversion(success=False, errors=['auth required'])
@@ -514,17 +517,18 @@ class StartCusdPlusConversion(graphene.Mutation):
         if scope is None:
             return StartCusdPlusConversion(success=False, errors=['no access'])
 
-        conv = CusdPlusConversion.objects.create(
+        conv = Conversion.objects.create(
             actor_user=user if scope['actor_type'] == 'user' else None,
             actor_business_id=scope.get('actor_business_id'),
             actor_type=scope['actor_type'],
             actor_display_name=getattr(user, 'username', '') or '',
-            direction=direction,
-            amount_usd=amount_usd,
-            quoted_receive_usd=quoted_receive_usd,
+            conversion_type=direction,
+            from_amount=amount_usd,
+            to_amount=quoted_receive_usd,
             quoted_cost_pct=quoted_cost_pct,
             user_bsc_address=user_bsc_address,
-            user_algo_address=user_algo_address,
+            actor_address=user_algo_address,
+            status='CREATED',
         )
         from .unified import sync_unified_from_cusd_plus_conversion
         sync_unified_from_cusd_plus_conversion(conv)
@@ -548,7 +552,7 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
     CLIENT_STATUSES = {'SRC_COMMITTED', 'COMPLETED'}
 
     def mutate(self, info, conversion_id, new_status, tx_ref=''):
-        from .models import CusdPlusConversion
+        from conversion.models import Conversion
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return AdvanceCusdPlusConversion(success=False, errors=['auth required'])
@@ -563,7 +567,8 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
             lookup['actor_business_id'] = scope['actor_business_id']
         else:
             lookup['actor_user'] = user
-        conv = CusdPlusConversion.objects.filter(**lookup).first()
+        lookup['conversion_type__in'] = Conversion.SAVINGS_TYPES
+        conv = Conversion.objects.filter(**lookup).first()
         if conv is None:
             return AdvanceCusdPlusConversion(success=False, errors=['not found'])
         if not conv.can_transition(new_status):
@@ -575,13 +580,13 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
         now = timezone.now()
         update = ['status', 'updated_at']
         if new_status == 'SRC_COMMITTED':
-            conv.src_tx_id = tx_ref or conv.src_tx_id
+            conv.from_transaction_hash = tx_ref or conv.from_transaction_hash
             conv.src_committed_at = now
-            update += ['src_tx_id', 'src_committed_at']
+            update += ['from_transaction_hash', 'src_committed_at']
         elif new_status == 'COMPLETED':
-            conv.dest_tx_hash = tx_ref or conv.dest_tx_hash
+            conv.to_transaction_hash = tx_ref or conv.to_transaction_hash
             conv.completed_at = now
-            update += ['dest_tx_hash', 'completed_at']
+            update += ['to_transaction_hash', 'completed_at']
             # Balance just changed on chain — drop the fresh-read cache so
             # the next summary shows the new position, not a 30s-old one.
             from . import vault
@@ -983,7 +988,6 @@ class RegisterBscUsdtArrival(graphene.Mutation):
 
         from django.conf import settings
 
-        from .models import CusdPlusConversion
         from .tasks import (
             _rpc, _registered_bsc_addresses, _record_inbound_deposit,
             USDT_BSC, TRANSFER_TOPIC,
@@ -1011,8 +1015,9 @@ class RegisterBscUsdtArrival(graphene.Mutation):
         # Mirror the beat scanner's in-flight protection: while a bridge
         # delivery is awaited at an address, foreground recording could
         # consume USDT a delayed delivery still needs — leave to the beat.
-        awaited = set(CusdPlusConversion.objects.filter(
-            direction='to_savings',
+        from conversion.models import Conversion as _Conv
+        awaited = set(_Conv.objects.filter(
+            conversion_type='to_savings',
             status__in=('SRC_COMMITTED', 'STUCK'),
             is_deleted=False,
         ).exclude(user_bsc_address='').values_list('user_bsc_address', flat=True))

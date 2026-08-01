@@ -128,13 +128,6 @@ class UnifiedTransactionTable(models.Model):
         on_delete=models.CASCADE,
         related_name='unified_transaction',
     )
-    cusd_plus_conversion = models.OneToOneField(
-        'cusd_plus.CusdPlusConversion',
-        on_delete=models.CASCADE,
-        related_name='unified_transaction',
-        null=True,
-        blank=True,
-    )
     
     # Denormalized fields for quick access/filtering
     amount = models.CharField(max_length=32)
@@ -272,71 +265,42 @@ class UnifiedTransactionTable(models.Model):
                 'description': self.description or 'Unknown transaction'
             }
 
-    def get_conversion_type(self):
-        """Resolve conversion type from the related row first, then description.
+    # One conversion FK now covers both rails, so these read the row
+    # directly. They used to fall back to parsing the Spanish description
+    # ("Conversión: 2.99 USDC → 2.99 cUSD") with a regex that knew only the
+    # Algorand pair — which is how savings rows ended up untyped, with no
+    # tokens and no title.
+    CONVERSION_TOKENS = {
+        'usdc_to_cusd': ('USDC', 'cUSD'),
+        'cusd_to_usdc': ('cUSD', 'USDC'),
+        'usdc_to_algo': ('USDC', 'ALGO'),
+        'to_savings': ('USDT', 'cUSD+'),
+        'from_savings': ('cUSD+', 'USDT'),
+    }
 
-        Two conversion families share this type: the Algorand pair
-        (usdc_to_cusd / cusd_to_usdc) and the BSC savings pair
-        (to_savings / from_savings). Reading only `conversion` left every
-        cUSD+ conversion with a null type, which downstream renders as an
-        untyped row with no tokens and no title."""
-        if self.transaction_type == 'conversion':
-            if self.conversion_id and self.conversion:
-                return self.conversion.conversion_type
-            if self.cusd_plus_conversion_id and self.cusd_plus_conversion:
-                # 'to_savings' | 'from_savings'
-                return self.cusd_plus_conversion.direction
-        if self.transaction_type == 'conversion' and self.description:
-            if 'USDC → cUSD' in self.description:
-                return 'usdc_to_cusd'
-            elif 'cUSD → USDC' in self.description:
-                return 'cusd_to_usdc'
+    def get_conversion_type(self):
+        if self.transaction_type == 'conversion' and self.conversion_id:
+            return self.conversion.conversion_type
         return None
-    
+
     def get_from_amount(self):
-        """For conversions, this is the amount field"""
-        if self.transaction_type == 'conversion':
-            return self.amount
+        if self.transaction_type == 'conversion' and self.conversion_id:
+            return self.conversion.from_amount
         return None
-    
+
     def get_to_amount(self):
-        """Extract to_amount from conversion description"""
-        if self.transaction_type == 'conversion' and self.description:
-            import re
-            # Match the amount after the arrow
-            match = re.search(r'→\s*([\d.]+)\s*(?:cUSD|USDC)', self.description)
-            if match:
-                return match.group(1)
+        if self.transaction_type == 'conversion' and self.conversion_id:
+            return self.conversion.to_amount
         return None
-    
+
     def get_from_token(self):
-        """For conversions, determine from token"""
-        if self.transaction_type == 'conversion':
-            conversion_type = self.get_conversion_type()
-            if conversion_type == 'usdc_to_cusd':
-                return 'USDC'
-            elif conversion_type == 'cusd_to_usdc':
-                return 'cUSD'
-            elif conversion_type == 'to_savings':
-                return 'USDT'
-            elif conversion_type == 'from_savings':
-                return 'cUSD+'
-        return None
-    
+        pair = self.CONVERSION_TOKENS.get(self.get_conversion_type())
+        return pair[0] if pair else None
+
     def get_to_token(self):
-        """For conversions, determine to token"""
-        if self.transaction_type == 'conversion':
-            conversion_type = self.get_conversion_type()
-            if conversion_type == 'usdc_to_cusd':
-                return 'cUSD'
-            elif conversion_type == 'cusd_to_usdc':
-                return 'USDC'
-            elif conversion_type == 'to_savings':
-                return 'cUSD+'
-            elif conversion_type == 'from_savings':
-                return 'USDT'
-        return None
-    
+        pair = self.CONVERSION_TOKENS.get(self.get_conversion_type())
+        return pair[1] if pair else None
+
     @property
     def internal_id(self):
         """Return standardized internal_id from linked source models"""

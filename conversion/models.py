@@ -6,16 +6,36 @@ from decimal import Decimal
 
 
 class Conversion(models.Model):
-    """Model to track USDC <-> cUSD conversions"""
-    
+    """Every conversion between two Confío-held tokens, on either chain.
+
+    ONE model for both rails, the same way SendTransaction covers Algorand
+    and BSC: chain-specific tokens are extra `CONVERSION_TYPES`, chain-
+    specific stages are extra `STATUS_CHOICES`, and chain-specific tracking
+    lives in nullable columns (SendTransaction's `bsc_calls_json` pattern).
+
+    The BSC savings rows (to_savings / from_savings) are a resumable SAGA
+    rather than a one-shot swap, so they use the extra statuses and the
+    bridge/scan columns below; the Algorand rows leave those null. Merged
+    from a parallel CusdPlusConversion model on 2026-08-01 — the fork made
+    UnifiedTransactionTable carry two FKs for one concept, and every reader
+    that checked only one silently mis-rendered the other's rows.
+    """
+
     CONVERSION_TYPES = [
         ('usdc_to_cusd', 'USDC to cUSD'),
         ('cusd_to_usdc', 'cUSD to USDC'),
         # Coinbase offramp leg: Tinyman USDC→ALGO + payment to Coinbase's
         # sell deposit address in one atomic group.
         ('usdc_to_algo', 'USDC to ALGO'),
+        # BSC savings rails. The on-chain leg is always USDT <-> cUSD+
+        # whatever the origin (in-app convert, external deposit, ramp);
+        # the origin is `source`.
+        ('to_savings', 'USDT -> cUSD+ (Ahorrar)'),
+        ('from_savings', 'cUSD+ -> USDT (Retirar)'),
     ]
-    
+
+    SAVINGS_TYPES = frozenset({'to_savings', 'from_savings'})
+
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('PENDING_SIG', 'Pending Signature'),
@@ -23,8 +43,42 @@ class Conversion(models.Model):
         ('PROCESSING', 'Processing'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
+        # Savings-saga stages. Client-driven and monotonic; every halt leaves
+        # value at a user-owned address (never a treasury), so there is no
+        # REFUNDING state.
+        ('CREATED', 'Created (quote accepted, nothing signed)'),
+        ('SRC_COMMITTED', 'Source leg committed - bridge in flight'),
+        ('STUCK', 'Bridge exceeded timeout - ops attention'),
+        ('DEST_ARRIVED', 'Funds at user destination address'),
+        ('ABANDONED', 'Never signed - expired'),
     ]
-    
+
+    # Allowed saga transitions (enforced in the Advance mutation and tasks).
+    # Applies to SAVINGS_TYPES rows only — the Algorand swap rows use the
+    # flat statuses above, exactly as SPONSORING/SIGNED apply only to
+    # sponsored sends.
+    TRANSITIONS = {
+        'CREATED': {'SRC_COMMITTED', 'ABANDONED'},
+        'SRC_COMMITTED': {'DEST_ARRIVED', 'STUCK'},
+        'STUCK': {'DEST_ARRIVED'},  # late delivery resolves a stuck bridge
+        'DEST_ARRIVED': {'COMPLETED'},
+        'COMPLETED': set(),
+        'ABANDONED': set(),
+    }
+
+    IN_FLIGHT_STATUSES = ('CREATED', 'SRC_COMMITTED', 'STUCK', 'DEST_ARRIVED')
+
+    # How the row was born. 'convert' rows start at CREATED from a user
+    # quote; chain-observed inflows (external USDT sends, ramp deliveries)
+    # are born directly at DEST_ARRIVED — the funds are already at the
+    # user's address, so only the mint leg remains. Keeps inflow accounting
+    # honest: a conversion moves existing Confío money, the others are NEW.
+    SOURCES = [
+        ('convert', 'In-app conversion (user-quoted)'),
+        ('external_deposit', 'External USDT-BSC deposit'),
+        ('ramp', 'Ramp (Koywe) delivery'),
+    ]
+
     # Unique identifier
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     
@@ -74,10 +128,36 @@ class Conversion(models.Model):
     exchange_rate = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal('1.000000'))  # Exchange rate used
     fee_amount = models.DecimalField(max_digits=19, decimal_places=6, default=Decimal('0'))  # Fee charged (if any)
     
-    # Transaction hashes for blockchain tracking
-    from_transaction_hash = models.CharField(max_length=66, blank=True, null=True)  # Transaction hash for source token
-    to_transaction_hash = models.CharField(max_length=66, blank=True, null=True)  # Transaction hash for destination token
-    
+    # Transaction hashes for blockchain tracking. 88 chars fits an Algorand
+    # base32 txid as well as an 0x EVM hash.
+    from_transaction_hash = models.CharField(max_length=88, blank=True, null=True)  # source-token tx (saga: source leg / Allbridge key)
+    to_transaction_hash = models.CharField(max_length=88, blank=True, null=True)  # destination-token tx (saga: final mint/swap)
+
+    # ── Savings-saga columns (null on the Algorand swap rows) ────────────
+    source = models.CharField(
+        max_length=20, choices=SOURCES, default='convert',
+        help_text='How the row was born (savings rows; Algorand swaps are always in-app)',
+    )
+    quoted_cost_pct = models.DecimalField(
+        max_digits=8, decimal_places=4, default=Decimal('0'),
+        help_text='Total cost pct the user accepted at quote time',
+    )
+    user_bsc_address = models.CharField(
+        max_length=42, blank=True,
+        help_text="The user's own BSC address (non-custodial; informational). "
+                  'The Algorand side lives in actor_address.',
+    )
+    bridge_arrival_tx = models.CharField(
+        max_length=88, blank=True,
+        help_text='On-chain arrival at the user destination (chain-observed, not vendor-reported)',
+    )
+    dest_scan_from_block = models.BigIntegerField(
+        null=True, blank=True,
+        help_text='Destination-chain scan cursor set when monitoring starts',
+    )
+    src_committed_at = models.DateTimeField(blank=True, null=True)
+    dest_arrived_at = models.DateTimeField(blank=True, null=True)
+
     # Status tracking
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     error_message = models.TextField(blank=True, null=True)
@@ -118,6 +198,14 @@ class Conversion(models.Model):
         if self.actor_user and self.actor_business:
             raise ValidationError("Only one of actor_user or actor_business should be set")
     
+    @property
+    def is_savings(self) -> bool:
+        """A BSC savings saga row rather than an Algorand one-shot swap."""
+        return self.conversion_type in self.SAVINGS_TYPES
+
+    def can_transition(self, new_status: str) -> bool:
+        return new_status in self.TRANSITIONS.get(self.status, set())
+
     @property
     def is_completed(self):
         return self.status == 'COMPLETED'

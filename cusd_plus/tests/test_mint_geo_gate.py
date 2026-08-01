@@ -232,7 +232,7 @@ class DepositNotificationCopyTests(SimpleTestCase):
         def _capture(**kwargs):
             captured.update(kwargs)
 
-        with mock.patch('cusd_plus.models.CusdPlusConversion.objects') as conv_objs, \
+        with mock.patch('conversion.models.Conversion.objects') as conv_objs, \
              mock.patch('users.models.Account.objects') as acct_objs, \
              mock.patch('notifications.utils.create_notification', side_effect=_capture):
             conv_objs.filter.return_value.exists.return_value = False

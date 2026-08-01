@@ -1913,8 +1913,7 @@ confio_admin_site.register(Financiera, FinancieraAdmin)
 confio_admin_site.register(FinancieraReview, FinancieraReviewAdmin)
 confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 
-from cusd_plus.models import CusdPlusConversion, BnbAutoConvert, SponsoredBatch
-from cusd_plus.admin import CusdPlusConversionAdmin, BnbAutoConvertAdmin, SponsoredBatchAdmin
-confio_admin_site.register(CusdPlusConversion, CusdPlusConversionAdmin)
+from cusd_plus.models import BnbAutoConvert, SponsoredBatch
+from cusd_plus.admin import BnbAutoConvertAdmin, SponsoredBatchAdmin
 confio_admin_site.register(BnbAutoConvert, BnbAutoConvertAdmin)
 confio_admin_site.register(SponsoredBatch, SponsoredBatchAdmin)
