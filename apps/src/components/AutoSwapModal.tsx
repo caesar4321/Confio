@@ -11,7 +11,10 @@ import {
 
 interface AutoSwapModalProps {
     visible: boolean;
-    assetType: 'ALGO' | 'USDC' | null;
+    // 'USDT' is the BSC savings mint (leg C): USDT already at the user's
+    // address becoming cUSD+. Same contract as the Algorand auto-swaps —
+    // background work the user did not initiate, so it gets the same spinner.
+    assetType: 'ALGO' | 'USDC' | 'USDT' | null;
     mode?: 'processing' | 'wallet_recovery_required';
     onClose?: () => void;
 }
@@ -42,7 +45,11 @@ const AutoSwapModal: React.FC<AutoSwapModalProps> = ({
                     </View>
 
                     <Text style={styles.title}>
-                        {needsRecovery ? 'Revisa tu billetera' : 'Optimizando tu billetera'}
+                        {needsRecovery
+                            ? 'Revisa tu billetera'
+                            : assetType === 'USDT'
+                                ? 'Sumando a tu ahorro'
+                                : 'Optimizando tu billetera'}
                     </Text>
 
                     <Text style={styles.subtitle}>
@@ -50,7 +57,9 @@ const AutoSwapModal: React.FC<AutoSwapModalProps> = ({
                             ? 'No pudimos firmar la conversión automática. Actualiza la app, vuelve a abrir Confío e inicia sesión otra vez. Si continúa, restaura o activa tu respaldo desde Perfil.'
                             : assetType === 'ALGO'
                                 ? 'Convirtiendo tu depósito de ALGO a cUSD para proteger su valor...'
-                                : 'Convirtiendo tu depósito de USDC a cUSD sin comisiones...'}
+                                : assetType === 'USDT'
+                                    ? 'Sumando tu depósito a tu ahorro para que empiece a rendir...'
+                                    : 'Convirtiendo tu depósito de USDC a cUSD sin comisiones...'}
                     </Text>
 
                     <Text style={styles.note}>

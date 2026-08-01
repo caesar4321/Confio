@@ -462,6 +462,31 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     if account is None:
         return
     is_business = account.account_type == 'business'
+    # A geo-ineligible personal holder can NEVER finish leg C: the client's
+    # resume returns early for them and check_savings_mint_eligibility would
+    # refuse the mint anyway. A to_savings row born here therefore sits at
+    # DEST_ARRIVED forever and the app shows "Conversión USDT → cUSD+
+    # pendiente" over money that is simply sitting in their wallet as USDT.
+    #
+    # Reversed 2026-08-01 (was: keep the row for audit + auto-mint if
+    # eligibility ever flips). The deposit is still fully recorded by the
+    # SendTransaction receipt below; what is lost is only the auto-mint on a
+    # future eligibility flip, and those funds remain in the wallet for the
+    # ordinary Ahorrar flow. Business accounts keep the row — their mint is
+    # gated on the REQUESTING user, not the account owner, so it can succeed.
+    from .eligibility import is_ondo_eligible
+    if (not is_business) and not is_ondo_eligible(account.user):
+        logger.info(
+            'inbound USDT deposit at %s (%s USDT, %s): holder ineligible for '
+            'cUSD+ — recorded as a USDT receipt, no conversion',
+            to_addr, amount_usd, tx_hash,
+        )
+        _record_deposit_receipt(
+            account=account, is_business=is_business, to_addr=to_addr,
+            from_addr=from_addr, amount_usd=amount_usd, tx_ref=tx_ref,
+            tx_hash=tx_hash, source=source, conv=None,
+        )
+        return
     conv = CusdPlusConversion.objects.create(
         actor_user=None if is_business else account.user,
         actor_business=account.business if is_business else None,
@@ -489,16 +514,37 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     # receipt: ramps/signals already mirrors the order itself.
     from .unified import sync_unified_from_cusd_plus_conversion
     sync_unified_from_cusd_plus_conversion(conv)
+    _record_deposit_receipt(
+        account=account, is_business=is_business, to_addr=to_addr,
+        from_addr=from_addr, amount_usd=amount_usd, tx_ref=tx_ref,
+        tx_hash=tx_hash, source=source, conv=conv,
+    )
+
+
+def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
+                            amount_usd, tx_ref, tx_hash, source, conv):
+    """The raw USDT receipt + deposit notification for an observed inflow.
+
+    Shared by both deposit paths. `conv` is the conversion row when one was
+    created, None when the holder is geo-ineligible and the USDT simply stays
+    raw — in which case the RECEIPT is what makes the path idempotent, since
+    the caller's conversion-row dedupe cannot fire on a cursor rewind.
+    """
+    from send.models import SendTransaction
+
+    receipt = None
+    receipt_existed = False
     if source != 'ramp':
         try:
-            from send.models import SendTransaction
             # idempotency_key is capped at 64 chars; 'BSC:' + full 0x-hash +
             # logIndex overflows it. 56 hex chars (224 bits) of the hash keep
             # collision-impossibility while fitting: 4 + 56 + 1 + idx <= 64.
             _h, _, _idx = tx_ref.partition(':')
             idempotency_key = f'BSC:{_h[2:58]}:{_idx or 0}'
-            if not SendTransaction.all_objects.filter(idempotency_key=idempotency_key).exists():
-                SendTransaction.all_objects.create(
+            receipt_existed = SendTransaction.all_objects.filter(
+                idempotency_key=idempotency_key).exists()
+            if not receipt_existed:
+                receipt = SendTransaction.all_objects.create(
                     sender_user=None,
                     recipient_user=None if is_business else account.user,
                     sender_business=None,
@@ -525,15 +571,15 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
 
     if source == 'ramp':
         return  # order comms belong to the ramp flow (koywe_sync)
+    if conv is None and receipt_existed:
+        return  # rescan of a deposit already recorded — don't re-notify
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType
         # Copy branches on eligibility: an ineligible user's deposit stays raw
         # USDT ("Confío Dollar" in the app) — promising "se sumará a tu
-        # ahorro" would be a lie, since the mint gate will refuse it. The row
-        # itself stays DEST_ARRIVED regardless (audit trail + auto-mint if
-        # eligibility ever flips). Product name only; USDT stays in the
-        # data payload, never in the message.
+        # ahorro" would be a lie, since the mint gate will refuse it. Product
+        # name only; USDT stays in the data payload, never in the message.
         from .eligibility import is_ondo_eligible
         eligible = (not is_business) and is_ondo_eligible(account.user)
         if eligible:
@@ -553,14 +599,22 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
                 'network': 'BSC',
                 'amount': str(amount_usd),
                 'tx_hash': tx_hash,
-                'conversion_id': str(conv.internal_id),
+                # No conversion for an ineligible holder: the notification
+                # opens the USDT receipt instead, so tapping it lands on the
+                # movement that actually exists.
+                'conversion_id': str(conv.internal_id) if conv else '',
                 'pending_auto_mint': eligible,
             },
-            related_object_type='CusdPlusConversion',
-            related_object_id=str(conv.internal_id),
+            **(
+                {'related_object_type': 'CusdPlusConversion',
+                 'related_object_id': str(conv.internal_id)}
+                if conv else
+                {'related_object_type': 'SendTransaction',
+                 'related_object_id': str(receipt.internal_id)} if receipt else {}
+            ),
         )
     except Exception:  # noqa: BLE001 — comms failure must not lose the deposit
-        logger.exception('deposit notification failed for %s', conv.internal_id)
+        logger.exception('deposit notification failed for %s', tx_ref)
 
 
 def mark_retirar_arrival(algo_address: str, txid: str) -> bool:

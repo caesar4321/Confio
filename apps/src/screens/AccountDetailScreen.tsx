@@ -56,6 +56,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
+import { useSavingsResume } from '../hooks/useSavingsResume';
 import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
 import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
@@ -285,6 +286,11 @@ export const AccountDetailScreen = () => {
   // detail surface with one history, one receipt path and one set of rows.
   const isSavingsAccount = route.params.accountType === 'cusd_plus';
   const isConfio = !isCusd && !isSavingsAccount;
+  // Finish any cUSD+ mint whose USDT already arrived. This lived on
+  // SavingsScreen and was dropped when that screen merged in here (808b7abc),
+  // which left every arrived deposit stuck at DEST_ARRIVED. Scoped to the
+  // savings account, as it was before.
+  const { mintingSavings } = useSavingsResume(isSavingsAccount);
   // Which ledger rows belong to this account. Was an inline ternary repeated
   // at five call sites; a third account type made that untenable.
   const accountTokenTypes = React.useMemo(() => {
@@ -2715,9 +2721,12 @@ export const AccountDetailScreen = () => {
         }}
       />
 
+      {/* The Algorand auto-swaps take priority: they are recovery-capable and
+          carry the wallet-recovery mode. The savings mint reuses the same
+          spinner so background conversions never move money silently. */}
       <AutoSwapModal
-        visible={!!swapModalAsset || walletRecoveryRequired}
-        assetType={swapModalAsset || 'USDC'}
+        visible={!!swapModalAsset || walletRecoveryRequired || mintingSavings}
+        assetType={swapModalAsset || (mintingSavings ? 'USDT' : 'USDC')}
         mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
         onClose={dismissWalletRecovery}
       />

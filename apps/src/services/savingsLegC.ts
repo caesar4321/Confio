@@ -55,9 +55,13 @@ let running = false;
  * minting cUSD+. Safe to call on every foreground; self-guards against
  * concurrent runs. Requires the vault address (from server config).
  */
-export const resumeSavingsMints = async (vaultAddress: string): Promise<void> => {
+export const resumeSavingsMints = async (
+  vaultAddress: string,
+  opts?: { onMintingChange?: (minting: boolean) => void },
+): Promise<void> => {
   if (running || !vaultAddress) return;
   running = true;
+  let announced = false;
   try {
     const { apolloClient } = await import('../apollo/client');
     // Geo-ineligible users keep their arrived USDT raw ("Confío Dollar") —
@@ -77,6 +81,12 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     const rows = (data?.cusdPlusConversionsInFlight || []).filter(
       (r: any) => r.status === 'DEST_ARRIVED',
     );
+    // Announce only once there is real work: the resume runs on every
+    // foreground, and flashing a modal on the empty case would be noise.
+    if (rows.length) {
+      announced = true;
+      opts?.onMintingChange?.(true);
+    }
     for (const row of rows) {
       try {
         const { mintTx } = await subscribeUsdtToSavings({
@@ -99,5 +109,8 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     console.warn('[savingsLegC] resume query failed', e);
   } finally {
     running = false;
+    // Always clear, including on the query-failure path above — a modal that
+    // outlives its work is worse than no modal.
+    if (announced) opts?.onMintingChange?.(false);
   }
 };
