@@ -109,21 +109,16 @@ class ConversionType(DjangoObjectType):
     from_token = graphene.String()
     to_token = graphene.String()
     
+    # Both read Conversion.TOKEN_PAIRS. These used to fall through to
+    # USDC/cUSD for anything unrecognised, so usdc_to_algo reported the wrong
+    # pair from the day it was added, and savings rows would have done the
+    # same the moment the models merged. Unknown types now return null
+    # instead of a confident lie.
     def resolve_from_token(self, info):
-        """Resolve the source token based on conversion type"""
-        if self.conversion_type == 'usdc_to_cusd':
-            return 'USDC'
-        if self.conversion_type == 'cusd_to_usdc':
-            return 'cUSD'
-        return 'USDC'
-    
+        return self.from_token
+
     def resolve_to_token(self, info):
-        """Resolve the destination token based on conversion type"""
-        if self.conversion_type == 'usdc_to_cusd':
-            return 'cUSD'
-        if self.conversion_type == 'cusd_to_usdc':
-            return 'USDC'
-        return 'cUSD'
+        return self.to_token
 
     def resolve_internal_id(self, info):
         """Standardize internal_id as 32-char hex string"""
@@ -665,14 +660,20 @@ class Query(graphene.ObjectType):
         if not active_account:
             return []
         
-        # Filter conversions based on actor
+        # Filter conversions based on actor. Savings sagas share this model
+        # since the 2026-08-01 merge but NOT this query: it is the Algorand
+        # USDC<->cUSD history, and its type exposes exchange_rate/fee_amount
+        # that mean nothing for a savings row. Savings rows have their own
+        # query (cusdPlusConversionsInFlight) and the unified feed.
+        base = Conversion.objects.exclude(
+            conversion_type__in=Conversion.SAVINGS_TYPES)
         if active_account.account_type == 'business':
-            conversions = Conversion.objects.filter(
+            conversions = base.filter(
                 actor_business=active_account.business,
                 is_deleted=False
             )
         else:
-            conversions = Conversion.objects.filter(
+            conversions = base.filter(
                 actor_user=user,
                 is_deleted=False
             )

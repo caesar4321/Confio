@@ -270,14 +270,6 @@ class UnifiedTransactionTable(models.Model):
     # ("Conversión: 2.99 USDC → 2.99 cUSD") with a regex that knew only the
     # Algorand pair — which is how savings rows ended up untyped, with no
     # tokens and no title.
-    CONVERSION_TOKENS = {
-        'usdc_to_cusd': ('USDC', 'cUSD'),
-        'cusd_to_usdc': ('cUSD', 'USDC'),
-        'usdc_to_algo': ('USDC', 'ALGO'),
-        'to_savings': ('USDT', 'cUSD+'),
-        'from_savings': ('cUSD+', 'USDT'),
-    }
-
     def get_conversion_type(self):
         if self.transaction_type == 'conversion' and self.conversion_id:
             return self.conversion.conversion_type
@@ -294,12 +286,14 @@ class UnifiedTransactionTable(models.Model):
         return None
 
     def get_from_token(self):
-        pair = self.CONVERSION_TOKENS.get(self.get_conversion_type())
-        return pair[0] if pair else None
+        if self.transaction_type == 'conversion' and self.conversion_id:
+            return self.conversion.from_token
+        return None
 
     def get_to_token(self):
-        pair = self.CONVERSION_TOKENS.get(self.get_conversion_type())
-        return pair[1] if pair else None
+        if self.transaction_type == 'conversion' and self.conversion_id:
+            return self.conversion.to_token
+        return None
 
     @property
     def internal_id(self):

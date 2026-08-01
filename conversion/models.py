@@ -36,6 +36,30 @@ class Conversion(models.Model):
 
     SAVINGS_TYPES = frozenset({'to_savings', 'from_savings'})
 
+    # The token pair each type moves, in display form. Single source of truth:
+    # the unified ledger and the GraphQL type both read it. Every reader used
+    # to keep its own copy that fell through to USDC->cUSD for anything it did
+    # not recognise, which mislabelled usdc_to_algo from the day it was added
+    # and every savings row from the day they merged in.
+    TOKEN_PAIRS = {
+        'usdc_to_cusd': ('USDC', 'cUSD'),
+        'cusd_to_usdc': ('cUSD', 'USDC'),
+        'usdc_to_algo': ('USDC', 'ALGO'),
+        'to_savings': ('USDT', 'cUSD+'),
+        'from_savings': ('cUSD+', 'USDT'),
+    }
+
+    @property
+    def from_token(self):
+        """Source token, or None for an unrecognised type — never a guess."""
+        pair = self.TOKEN_PAIRS.get(self.conversion_type)
+        return pair[0] if pair else None
+
+    @property
+    def to_token(self):
+        pair = self.TOKEN_PAIRS.get(self.conversion_type)
+        return pair[1] if pair else None
+
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('PENDING_SIG', 'Pending Signature'),

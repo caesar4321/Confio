@@ -9,7 +9,6 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from conversion.models import Conversion
-from users.models_unified import UnifiedTransactionTable
 
 
 class RailSeparationTests(SimpleTestCase):
@@ -23,7 +22,7 @@ class RailSeparationTests(SimpleTestCase):
         # A type with no pair renders as a bare amount with no denomination,
         # which is exactly how the savings rows used to look.
         for value, _label in Conversion.CONVERSION_TYPES:
-            self.assertIn(value, UnifiedTransactionTable.CONVERSION_TOKENS, value)
+            self.assertIn(value, Conversion.TOKEN_PAIRS, value)
 
     def test_saga_transitions_are_monotonic(self):
         conv = Conversion(conversion_type='to_savings', status='DEST_ARRIVED')
@@ -49,6 +48,7 @@ class MirrorRoutingTests(SimpleTestCase):
             from_amount='1.00', to_amount='1.00',
             actor_type='user', actor_display_name='X',
         )
+        from users.models_unified import UnifiedTransactionTable
         with mock.patch('cusd_plus.unified.sync_unified_from_cusd_plus_conversion') as savings, \
              mock.patch.object(UnifiedTransactionTable, 'objects') as legacy:
             signals.create_unified_transaction_from_conversion(conv)
@@ -62,3 +62,24 @@ class MirrorRoutingTests(SimpleTestCase):
     def test_algorand_row_does_not_use_the_savings_mirror(self):
         savings_called, _ = self._mirror('usdc_to_cusd')
         self.assertFalse(savings_called)
+
+
+class TokenPairTests(SimpleTestCase):
+    """Codex audit 2026-08-01: every reader kept a private pair table that fell
+    through to USDC->cUSD, so usdc_to_algo was mislabelled from the day it was
+    added and savings rows would have been the moment they merged in."""
+
+    def test_no_type_falls_through_to_a_guess(self):
+        for value, _label in Conversion.CONVERSION_TYPES:
+            conv = Conversion(conversion_type=value)
+            self.assertIsNotNone(conv.from_token, value)
+            self.assertIsNotNone(conv.to_token, value)
+
+    def test_usdc_to_algo_is_not_labelled_cusd(self):
+        conv = Conversion(conversion_type='usdc_to_algo')
+        self.assertEqual((conv.from_token, conv.to_token), ('USDC', 'ALGO'))
+
+    def test_unknown_type_returns_none_rather_than_lying(self):
+        conv = Conversion(conversion_type='not_a_real_type')
+        self.assertIsNone(conv.from_token)
+        self.assertIsNone(conv.to_token)

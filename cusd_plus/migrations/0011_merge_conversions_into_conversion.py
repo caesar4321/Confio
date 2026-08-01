@@ -49,24 +49,18 @@ def forwards(apps, schema_editor):
         )
 
 
-def backwards(apps, schema_editor):
-    """Move the savings rows back out. Mirrors point back at the old rows."""
-    Old = apps.get_model('cusd_plus', 'CusdPlusConversion')
-    Conversion = apps.get_model('conversion', 'Conversion')
-    Unified = apps.get_model('users', 'UnifiedTransactionTable')
-
-    reverse_map = {v: k for k, v in FIELD_MAP.items()}
-    for conv in Conversion.objects.filter(
-        conversion_type__in=('to_savings', 'from_savings')
-    ).iterator():
-        fields = {old_name: getattr(conv, new_name)
-                  for new_name, old_name in reverse_map.items()}
-        fields.update({name: getattr(conv, name) for name in CARRIED})
-        old = Old.objects.create(**fields)
-        Unified.objects.filter(conversion_id=conv.id).update(
-            conversion=None, cusd_plus_conversion_id=old.id,
-        )
-        conv.delete()
+# NO backwards(). The forward direction is a merge; a faithful reverse would
+# have to unpick every reference that now points at the merged row, and the
+# obvious implementation (recreate + delete the merged Conversion) is worse
+# than no reverse at all:
+#   - usdc_transactions.UnifiedUSDCTransactionTable.conversion is CASCADE, so
+#     deleting the merged row DELETES an unrelated ledger row;
+#   - ramps.RampTransaction.conversion and blockchain.PendingAutoSwap.conversion
+#     are SET_NULL, so the links are silently severed;
+#   - recreated rows get new primary keys and lose updated_at.
+# Omitting reverse_code makes Django raise IrreversibleError instead of
+# running a rollback that quietly corrupts three other apps. Restore from a
+# backup if this ever needs undoing.
 
 
 class Migration(migrations.Migration):
@@ -78,5 +72,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(forwards, backwards),
+        migrations.RunPython(forwards),  # irreversible by design — see above
     ]

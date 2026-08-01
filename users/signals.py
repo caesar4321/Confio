@@ -256,8 +256,20 @@ def create_unified_transaction_from_conversion(conversion):
             description = f"Conversión: {conversion.from_amount} cUSD → {conversion.to_amount} USDC"
             amount = str(conversion.from_amount)
         else:
-            token_type = 'USDC'
-            description = f"Conversión: {conversion.from_amount} USDC → {conversion.to_amount} cUSD"
+            # Route by the declared pair rather than assuming USDC->cUSD.
+            # choices are not a DB constraint, so an unknown value is possible;
+            # label it honestly instead of mislabelling it as a USDC swap.
+            pair = conversion.TOKEN_PAIRS.get(conversion.conversion_type)
+            if pair:
+                token_type = pair[0].upper()
+                description = (f"Conversión: {conversion.from_amount} {pair[0]} "
+                               f"→ {conversion.to_amount} {pair[1]}")
+            else:
+                logger.warning(
+                    'unified mirror: unknown conversion_type %r on %s',
+                    conversion.conversion_type, conversion.internal_id)
+                token_type = 'USDC'
+                description = f"Conversión: {conversion.from_amount} → {conversion.to_amount}"
             amount = str(conversion.from_amount)
         
         # Map status
