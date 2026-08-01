@@ -18,11 +18,8 @@ import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
 import { SellScreen } from '../screens/SellScreen';
-import { SavingsScreen } from '../screens/SavingsScreen';
 import { ConvertSavingsScreen } from '../screens/ConvertSavingsScreen';
 import { WithdrawSavingsScreen } from '../screens/WithdrawSavingsScreen';
-import { SavingsMovementsScreen } from '../screens/SavingsMovementsScreen';
-import { SavingsMovementDetailScreen } from '../screens/SavingsMovementDetailScreen';
 import { ReceiveSavingsScreen } from '../screens/ReceiveSavingsScreen';
 import { SendUsdtScreen } from '../screens/SendUsdtScreen';
 import { StocksListScreen } from '../screens/StocksListScreen';
@@ -266,13 +263,6 @@ export const MainNavigator = () => {
           }}
         />
         <Stack.Screen
-          name="Savings"
-          component={SavingsScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
           name="ConvertSavings"
           component={ConvertSavingsScreen}
           options={{
@@ -282,20 +272,6 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="WithdrawSavings"
           component={WithdrawSavingsScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="SavingsMovements"
-          component={SavingsMovementsScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="SavingsMovementDetail"
-          component={SavingsMovementDetailScreen}
           options={{
             headerShown: false,
           }}

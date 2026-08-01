@@ -22,6 +22,7 @@ import { ProcessingHero } from '../components/common/ProcessingHero';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -59,12 +60,7 @@ export const PaymentProcessingScreen = () => {
   const ranRef = useRef(false);
 
   // Helper function to format currency for display
-  const formatCurrency = (currency: string): string => {
-    if (currency === 'CUSD') return 'cUSD';
-    if (currency === 'CONFIO') return 'CONFIO';
-    if (currency === 'USDC') return 'USDC';
-    return currency; // fallback
-  };
+  const formatCurrency = formatTokenLabel;
 
   const { transactionData } = route.params;
   const prepared = (transactionData as any)?.prepared || null;

@@ -6,27 +6,41 @@ import RNQRGenerator from 'rn-qr-generator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import {
+  AddressNetwork,
+  NETWORK_LABEL,
+  findAddress,
+} from '../utils/addressNetwork';
 
-// Accepts raw 58-char addresses and algorand:// payment URIs.
-const ALGORAND_ADDRESS = /[A-Z2-7]{58}/;
+export type { AddressNetwork };
 
 interface AddressScannerModalProps {
   visible: boolean;
   onClose: () => void;
-  /** Called with the extracted 58-char Algorand address; modal closes itself. */
+  /** Called with the extracted address; modal closes itself. */
   onScanned: (address: string) => void;
+  /**
+   * Which chain the caller is about to send on. REQUIRED on purpose: sending
+   * to an address from the wrong chain burns the funds, so every call site
+   * has to state its network rather than inherit a default.
+   */
+  network: AddressNetwork;
 }
 
 /**
  * Minimal QR scanner for address entry (SendWithAddress and friends).
  * Unlike the Scan tab (payment invoices, server cross-checked), this only
- * extracts an Algorand address from the code and hands it back.
+ * extracts an address for the requested network and hands it back — and
+ * says so explicitly when the code holds the OTHER chain's address.
  */
-export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visible, onClose, onScanned }) => {
+export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visible, onClose, onScanned, network }) => {
   const insets = useSafeAreaInsets();
   const device = useCameraDevice('back');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [badCode, setBadCode] = useState(false);
+  // Scanned fine, but it's the other chain's address — a different problem
+  // from an unreadable code, and the one most likely to lose someone's money.
+  const [wrongNetwork, setWrongNetwork] = useState(false);
   // Guard against the scanner firing multiple times for the same frame burst.
   const handledRef = useRef(false);
 
@@ -34,6 +48,7 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
     if (!visible) {
       handledRef.current = false;
       setBadCode(false);
+      setWrongNetwork(false);
       return;
     }
     (async () => {
@@ -60,14 +75,26 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
   }, [visible, onClose]);
 
   const acceptValue = (value: string): boolean => {
-    const match = value.toUpperCase().match(ALGORAND_ADDRESS);
-    if (match && !handledRef.current) {
+    const address = findAddress(value, network);
+    if (address && !handledRef.current) {
       handledRef.current = true;
-      onScanned(match[0]);
+      setWrongNetwork(false);
+      onScanned(address);
       onClose();
       return true;
     }
     return false;
+  };
+
+  /** Name the failure: wrong chain reads very differently from unreadable. */
+  const reportRejection = (value: string) => {
+    const other: AddressNetwork = network === 'bsc' ? 'algorand' : 'bsc';
+    if (findAddress(value, other)) {
+      setWrongNetwork(true);
+      setBadCode(false);
+    } else {
+      setBadCode(true);
+    }
   };
 
   const codeScanner = useCodeScanner({
@@ -76,7 +103,7 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
       if (handledRef.current) return;
       const value = codes[0]?.value || '';
       if (!acceptValue(value) && value) {
-        setBadCode(true);
+        reportRejection(value);
       }
     },
   });
@@ -98,7 +125,7 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
       for (const value of values) {
         if (acceptValue(value)) return;
       }
-      setBadCode(true);
+      reportRejection(values[0] || '');
     } catch (e: any) {
       // A TypeError here means the native module isn't in this binary yet
       // (app needs a full rebuild after adding the dependency) — say so
@@ -139,10 +166,13 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
         {/* Frame overlay */}
         <View style={styles.overlay} pointerEvents="none">
           <View style={styles.frame} />
-          <Text style={styles.hint}>
-            {badCode
-              ? 'No se encontró una dirección Algorand en el código'
-              : 'Apunta al código QR de la dirección'}
+          <Text style={[styles.hint, wrongNetwork && styles.hintWarning]}>
+            {wrongNetwork
+              ? `Ese código tiene una dirección de ${NETWORK_LABEL[network === 'bsc' ? 'algorand' : 'bsc']}. `
+                + `Para este envío necesitas una de ${NETWORK_LABEL[network]}.`
+              : badCode
+                ? `No se encontró una dirección de ${NETWORK_LABEL[network]} en el código`
+                : `Apunta al código QR de la dirección (${NETWORK_LABEL[network]})`}
           </Text>
         </View>
 
@@ -195,6 +225,12 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 3,
     borderColor: colors.primary,
+  },
+  hintWarning: {
+    // Literal, not colors.warning.*: those are tuned for light surfaces
+    // (yellow-800 text on yellow-50). This sits on a live camera feed, so it
+    // needs the light end of the ramp to stay legible.
+    color: '#FDE68A',
   },
   hint: {
     marginTop: 20,

@@ -15,9 +15,9 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@apollo/client';
+import { gql, useMutation, useQuery } from '@apollo/client';
 
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
@@ -43,12 +43,26 @@ import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
-import { tryFundKoyweOffRampInBackground } from '../services/koyweOffRampService';
+import {
+  tryFundKoyweOffRampInBackground,
+  tryFundKoyweSavingsOffRampInBackground,
+} from '../services/koyweOffRampService';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
+
+// Savings off-ramp needs the vault (proxy) address to redeem shares before
+// funding; served, never hardcoded. Skipped entirely on the default rail.
+const SAVINGS_SELL_PARAMS = gql`
+  query KoyweSavingsSellParams {
+    cusdPlusConvertParams {
+      vaultAddress
+    }
+  }
+`;
 
 type RampMethod = {
   paymentMethodId?: string | null;
@@ -104,6 +118,7 @@ const currencyNames: Record<string, string> = {
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
 export const SellScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute();
   const { width } = useWindowDimensions();
   const { activeAccount } = useAccount();
   const { userProfile } = useAuth() as any;
@@ -124,6 +139,10 @@ export const SellScreen = () => {
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
 
   const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
+  // Which ASSET this sell spends — not which provider. Koywe and Guardarian
+  // both settle it on their own rail (Koywe pays out USDT-BSC in local
+  // currency; Guardarian redeems to its deposit address).
+  const isSavingsSell = (route.params as any)?.destination === 'cusd_plus';
 
   const { data: meData } = useQuery(GET_ME);
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
@@ -183,7 +202,20 @@ export const SellScreen = () => {
     );
   }, [bankAccountsData?.userBankAccounts, methods]);
 
-  const availableCusdBalance = useMemo(() => Number(balancesData?.myBalances?.cusd || 0), [balancesData?.myBalances?.cusd]);
+  // The sellable balance depends on the RAIL, not the screen: the savings
+  // sell spends the BSC position (minted cUSD+ plus raw USDT that hasn't
+  // minted yet — the funding leg redeems whichever part it needs), the
+  // default sell spends Algorand cUSD.
+  const { savings: savingsPosition, usdtBalanceUsd } = useSavingsPortfolio();
+  const { data: savingsSellParams } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavingsSell });
+  const savingsVaultAddress: string = savingsSellParams?.cusdPlusConvertParams?.vaultAddress || '';
+  const sellUnitLabel = isSavingsSell ? 'US$' : 'cUSD';
+  const availableCusdBalance = useMemo(
+    () => (isSavingsSell
+      ? (savingsPosition?.balanceUsd ?? 0) + (usdtBalanceUsd ?? 0)
+      : Number(balancesData?.myBalances?.cusd || 0)),
+    [isSavingsSell, savingsPosition?.balanceUsd, usdtBalanceUsd, balancesData?.myBalances?.cusd],
+  );
   const selectedMethodMin = Number(selectedMethod?.offRampMinAmount || 0);
   const selectedMethodMax = Number(selectedMethod?.offRampMaxAmount || 0);
   const effectiveSellMax = useMemo(() => {
@@ -208,16 +240,16 @@ export const SellScreen = () => {
     enabled: isKoyweMapped,
   });
   const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, fiatCurrency)}` : '';
-  const quoteRateLine = quote ? `1 cUSD = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const quoteRateLine = quote ? `1 ${sellUnitLabel} = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
   const isCompact = width < 380;
   const isBelowSellMin = amountReady && selectedMethodMin > 0 && parsedAmount < selectedMethodMin;
   const isAboveSellMax = amountReady && effectiveSellMax > 0 && parsedAmount > effectiveSellMax;
   const sellAmountError = isBelowSellMin
-    ? `El mínimo por operación es ${formatRampMoney(String(selectedMethodMin), 'cUSD')}.`
+    ? `El mínimo por operación es ${formatRampMoney(String(selectedMethodMin), sellUnitLabel)}.`
     : isAboveSellMax
       ? availableCusdBalance > 0 && effectiveSellMax === availableCusdBalance && selectedMethodMax >= availableCusdBalance
-        ? `Tu saldo disponible es ${formatRampMoney(String(availableCusdBalance), 'cUSD')}.`
-        : `El máximo permitido es ${formatRampMoney(String(effectiveSellMax), 'cUSD')}.`
+        ? `Tu saldo disponible es ${formatRampMoney(String(availableCusdBalance), sellUnitLabel)}.`
+        : `El máximo permitido es ${formatRampMoney(String(effectiveSellMax), sellUnitLabel)}.`
       : null;
 
   const compatibleSavedMethods = useMemo(() => {
@@ -349,6 +381,7 @@ export const SellScreen = () => {
           fiatCurrency,
           paymentMethodCode: selectedMethod.code,
           bankInfoId: selectedSavedMethod.id,
+          ...(isSavingsSell ? { destination: 'cusd_plus' } : {}),
         },
       });
 
@@ -360,19 +393,29 @@ export const SellScreen = () => {
 
       let autoFundingWarning: string | null = null;
       if (String(result.nextStep || '').toUpperCase() === 'WAIT_FOR_USDC_TRANSFER') {
-        const fundingResult = await tryFundKoyweOffRampInBackground({
-          amount: exactRequestedAmount,
-          paymentDetails: result.paymentDetails,
-          providerOrderId: result.orderId,
-          activeAccount,
-        });
+        // Same provider and order, different settlement chain: the savings
+        // rail pays Koywe in USDT-BSC, the default rail in Algorand cUSD.
+        const fundingResult = isSavingsSell
+          ? await tryFundKoyweSavingsOffRampInBackground({
+            amount: exactRequestedAmount,
+            paymentDetails: result.paymentDetails,
+            vaultAddress: savingsVaultAddress,
+          })
+          : await tryFundKoyweOffRampInBackground({
+            amount: exactRequestedAmount,
+            paymentDetails: result.paymentDetails,
+            providerOrderId: result.orderId,
+            activeAccount,
+          });
 
         if (fundingResult.status === 'failed') {
           autoFundingWarning = fundingResult.reason === 'invalid_amount'
             ? 'No pudimos iniciar el envío automático del retiro.'
             : `No pudimos iniciar el envío automático del retiro: ${fundingResult.reason}.`;
         } else if (fundingResult.status === 'skipped') {
-          autoFundingWarning = 'No pudimos iniciar el envío automático porque Koywe no devolvió un destino compatible con Algorand.';
+          autoFundingWarning = isSavingsSell
+            ? 'No pudimos iniciar el envío automático porque Koywe no devolvió un destino compatible con BNB Smart Chain.'
+            : 'No pudimos iniciar el envío automático porque Koywe no devolvió un destino compatible con Algorand.';
         }
       }
 
@@ -399,6 +442,11 @@ export const SellScreen = () => {
     }
   };
 
+  // Provider is a COUNTRY decision, full stop: Koywe country -> Koywe,
+  // everyone else -> Guardarian. The asset (USDT-BSC vs Algorand cUSD) is a
+  // separate axis handled inside each screen via `destination`, and never
+  // moves a user to the other provider. Bolivia stays on Koywe and falls
+  // through to its own paused-off-ramp screen below.
   if (!isKoyweCountry) {
     // Rendered INLINE on purpose: the legacy screen reads useRoute() itself,
     // so it sees this screen's route and honors `destination: 'cusd_plus'`
@@ -532,7 +580,7 @@ export const SellScreen = () => {
                 </View>
                 <Text style={styles.helperText}>Verás cuánto recibirías y el tipo de cambio estimado antes de confirmar.</Text>
                 <Text style={styles.limitText}>
-                  Saldo disponible: {balancesLoading ? 'Cargando...' : formatRampMoney(String(availableCusdBalance), 'cUSD')}
+                  Saldo disponible: {balancesLoading ? 'Cargando...' : formatRampMoney(String(availableCusdBalance), sellUnitLabel)}
                 </Text>
                 <Text style={styles.limitText}>
                   Mínimo: {selectedMethodMin > 0 ? formatRampMoney(String(selectedMethodMin), 'cUSD') : '--'} · Máximo por operación: {effectiveSellMax > 0 ? formatRampMoney(String(effectiveSellMax), 'cUSD') : '--'}

@@ -44,6 +44,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import USDTLogo from '../assets/png/USDT.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { isAddressForNetwork, wrongNetworkMessage } from '../utils/addressNetwork';
 
 type BscToken = 'usdt' | 'cusd_plus' | 'confio';
 
@@ -96,13 +97,14 @@ export const SendUsdtScreen = () => {
   const route = useRoute();
   const token: BscToken = (route.params as any)?.token || 'usdt';
   const config = TOKEN_CONFIG[token];
-  const { usdtBalanceUsd, savings } = useSavingsPortfolio();
+  const { usdtBalanceUsd, savings, loading: portfolioLoading } = useSavingsPortfolio();
 
   // CONFIO-BSC balance via its OWN query (cusdPlusSummary.confioBalance is
   // newer than the portfolio query — bundling it there would invalidate
   // the whole money query against a server that doesn't serve it yet).
   // Any failure → 0, never a broken portfolio.
   const [confioBalance, setConfioBalance] = useState(0);
+  const [confioLoading, setConfioLoading] = useState(token === 'confio');
   useEffect(() => {
     if (token !== 'confio') return;
     let alive = true;
@@ -123,6 +125,8 @@ export const SendUsdtScreen = () => {
         if (alive) setConfioBalance(data?.cusdPlusSummary?.confioBalance ?? 0);
       } catch {
         // Older server: field not deployed yet — show 0, never break.
+      } finally {
+        if (alive) setConfioLoading(false);
       }
     })();
     return () => { alive = false; };
@@ -174,7 +178,15 @@ export const SendUsdtScreen = () => {
     : token === 'cusd_plus'
       ? savings.balanceUsd
       : Math.max(savings.balanceUsd, usdtBalanceUsd);
-  const isValidAddress = /^0x[0-9a-fA-F]{40}$/.test(destination.trim());
+  // Every balance here starts at 0 while its query is in flight, so "0" is
+  // ambiguous. Without this the button asserts "Saldo insuficiente" against a
+  // balance it hasn't read yet, and MAX silently does nothing.
+  const balanceReady = token === 'confio' ? !confioLoading : !portfolioLoading;
+  const isValidAddress = isAddressForNetwork(destination, 'bsc');
+  // Well-formed, but for the OTHER chain — the mistake that burns funds, so
+  // it gets named explicitly wherever an address is entered, pasted or
+  // scanned, not folded into a generic "formato inválido".
+  const wrongChainMessage = wrongNetworkMessage(destination, 'bsc');
 
   const formatFixedFloor = (value: number, decimals = 2) => {
     const m = Math.pow(10, decimals);
@@ -207,9 +219,10 @@ export const SendUsdtScreen = () => {
     }
     if (!isValidAddress) {
       setErrorMessage(
-        destination.startsWith('0x')
+        wrongChainMessage
+        || (destination.startsWith('0x')
           ? 'La dirección BEP-20 debe tener 40 caracteres hexadecimales después de 0x.'
-          : 'Formato inválido. Usa una dirección BNB Smart Chain (empieza con 0x).',
+          : 'Formato inválido. Usa una dirección BNB Smart Chain (empieza con 0x).'),
       );
       setShowError(true);
       return;
@@ -230,36 +243,36 @@ export const SendUsdtScreen = () => {
         return;
       }
       if (dollarRail) {
-        // Server rail: prepare/submit against send/bsc_flow.py. The server
-        // resolves the address (it may belong to a Confío user), builds
-        // the call shape for the requested token (or picks the funding
-        // source for a dollar send) and stores the exact batch — we only
-        // sign it.
-        const { installBscServerTransport: installTransport } = await import('../services/bscServerRpc');
-        installTransport();
-        const { sendBscDollar } = await import('../services/bscSend');
+        // Server rail: hand the validated intent to the shared processing
+        // screen — the same biometric gate, step animation and success
+        // screen the contact send and the Algorand rail already use. It
+        // owns the wait (prepare → sign → submit → receipt, which is
+        // seconds, not instant), so this screen must never sit on an
+        // awaited send with no spinner. The server resolves the address
+        // (it may belong to a Confío user), picks the call shape and
+        // stores the exact batch; we only sign it.
         const minuteTimestamp = Math.floor(Date.now() / 60000);
         const idempotencyKey =
           `sendext_${token}_${destination.trim().slice(-8)}_${amount.replace('.', '')}_${minuteTimestamp}`;
-        const res = await sendBscDollar({
-          amount: String(amountNum),
-          recipientAddress: destination.trim(),
-          idempotencyKey,
-          tokenType: token === 'cusd_plus' ? 'CUSD_PLUS'
-            : token === 'confio' ? 'CONFIO'
-              : undefined,
+        (navigation as any).replace('TransactionProcessing', {
+          transactionData: {
+            type: 'sent',
+            action: 'Enviando',
+            amount: String(amountNum),
+            currency: config.name,
+            recipient: `${destination.trim().slice(0, 10)}…`,
+            recipientAddress: destination.trim(),
+            memo: '',
+            idempotencyKey,
+            bscSend: true,
+            // Explicit token shapes only. A `usdt` send names NO token so
+            // the server keeps its funding-source choice (and delivers
+            // cUSD+ if that address turns out to be a Confío user).
+            bscTokenType: token === 'cusd_plus' ? 'CUSD_PLUS'
+              : token === 'confio' ? 'CONFIO'
+                : undefined,
+          },
         });
-        Alert.alert(
-          'Enviado',
-          token === 'confio'
-            ? `Enviaste ${formatFixedFloor(amountNum, 2)} CONFIO por la red BNB Smart Chain.`
-            : token === 'cusd_plus'
-              ? `Enviaste $${formatFixedFloor(amountNum, 2)} en cUSD+ por la red BNB Smart Chain.`
-              : res.tokenType === 'CUSD_PLUS'
-                ? `Enviaste $${formatFixedFloor(amountNum, 2)} — esa dirección es de un usuario de Confío, le llegó como Confío Dollar+.`
-                : `Enviaste $${formatFixedFloor(amountNum, 2)} USDT por la red BNB Smart Chain.`,
-          [{ text: 'Listo', onPress: () => navigation.goBack() }],
-        );
         return;
       }
 
@@ -458,6 +471,10 @@ export const SendUsdtScreen = () => {
                 <Icon name="check-circle" size={13} color={colors.success} />
                 <Text style={styles.addressValidText}>Dirección válida</Text>
               </View>
+            ) : wrongChainMessage ? (
+              <Text style={[styles.addressHelp, styles.addressWrongChain]}>
+                {wrongChainMessage}
+              </Text>
             ) : (
               <Text style={styles.addressHelp}>
                 {destination.length}/42 caracteres · empieza con 0x
@@ -479,9 +496,15 @@ export const SendUsdtScreen = () => {
       {/* Send Button */}
       <View style={[styles.footer, { paddingBottom: 20 }]}>
         <Button
-          title={sending ? 'Enviando…' : amountNum > available ? 'Saldo insuficiente' : 'Enviar'}
+          title={sending ? 'Enviando…'
+            : !balanceReady ? 'Cargando saldo…'
+              : amountNum > available ? 'Saldo insuficiente' : 'Enviar'}
           onPress={handleSend}
-          disabled={sending || !amount || !destination || amountNum > available}
+          // Rail sends leave for the processing screen immediately; the
+          // legacy path signs and broadcasts HERE, so the spinner is the
+          // only sign the tap registered.
+          loading={sending}
+          disabled={sending || !balanceReady || !amount || !destination || amountNum > available}
           accessibilityLabel="Enviar"
           icon={<Icon name="send" size={20} color="#ffffff" />}
           style={{ backgroundColor: config.color }}
@@ -489,6 +512,7 @@ export const SendUsdtScreen = () => {
       </View>
 
       <AddressScannerModal
+        network="bsc"
         visible={showScanner}
         onClose={() => setShowScanner(false)}
         onScanned={(addr) => {
@@ -600,6 +624,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   addressHelp: { fontSize: 12, color: colors.text.light, marginTop: 8, lineHeight: 17 },
+  addressWrongChain: { color: colors.warning.text, fontWeight: '600' },
   addressValidRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
   addressValidText: { fontSize: 12, fontWeight: '600', color: colors.success },
 

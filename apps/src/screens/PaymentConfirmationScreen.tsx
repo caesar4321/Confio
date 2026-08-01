@@ -30,6 +30,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { APP_LAYOUT } from '../config/layout';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -490,7 +491,7 @@ export const PaymentConfirmationScreen = () => {
             </View>
 
             <Text style={styles.amountText}>
-              ${formatAmount(currentPayment.amount)} {currentPayment.currency}
+              ${formatAmount(currentPayment.amount)} {formatTokenLabel(currentPayment.currency)}
             </Text>
 
             <Text style={styles.recipientText}>
@@ -556,7 +557,7 @@ export const PaymentConfirmationScreen = () => {
           {/* Balance Check */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>
-              Pagar desde tu cuenta {currentPayment.currency}
+              Pagar desde tu cuenta {formatTokenLabel(currentPayment.currency)}
             </Text>
 
             <View style={[styles.balanceCard, { backgroundColor: colors.primaryLight }]}>

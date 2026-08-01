@@ -13,6 +13,9 @@ import Icon from 'react-native-vector-icons/Feather';
 interface PreFlightModalProps {
     visible: boolean;
     type: 'buy' | 'sell';
+    /** Asset being sold. Defaults to USDC (the Algorand cUSD rail); the BSC
+     *  savings withdrawal passes USDT, which is what actually moves there. */
+    ticker?: string;
     onContinue: () => void;
     onCancel: () => void;
 }
@@ -20,12 +23,13 @@ interface PreFlightModalProps {
 const PreFlightModal: React.FC<PreFlightModalProps> = ({
     visible,
     type,
+    ticker = 'USDC',
     onContinue,
     onCancel,
 }) => {
     const isBuy = type === 'buy';
 
-    const title = isBuy ? 'Solo toma 2 minutos' : 'Para vender tus USDC';
+    const title = isBuy ? 'Solo toma 2 minutos' : `Para vender tus ${ticker}`;
     const subtitle = isBuy
         ? 'Ten esto a mano antes de continuar:'
         : 'Ten esto en cuenta antes de seguir:';
@@ -62,7 +66,7 @@ const PreFlightModal: React.FC<PreFlightModalProps> = ({
             {
                 emoji: '📱',
                 title: 'Regresa aquí',
-                description: 'Vuelve a Confío para enviar los USDC.',
+                description: `Vuelve a Confío para enviar los ${ticker}.`,
             },
         ];
 

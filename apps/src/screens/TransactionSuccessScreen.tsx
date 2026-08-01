@@ -15,6 +15,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
+import { formatTokenAmount, formatTokenLabel } from '../utils/tokenDisplay';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -67,12 +68,8 @@ export const TransactionSuccessScreen = () => {
   const viewShotRef = useRef<ViewShot>(null);
 
   // Helper function to format currency for display
-  const formatCurrency = (currency: string): string => {
-    if (currency === 'CUSD') return 'cUSD';
-    if (currency === 'CONFIO') return 'CONFIO';
-    if (currency === 'USDC') return 'USDC';
-    return currency; // fallback
-  };
+  const formatCurrency = formatTokenLabel;
+  const formatAmount = formatTokenAmount;
 
   // Prevent back navigation
   useFocusEffect(
@@ -288,7 +285,7 @@ export const TransactionSuccessScreen = () => {
       const typeLabel = transactionData.type === 'payment' ? 'Pago' : 'Transferencia';
       await RNShare.open({
         title: `Comprobante de ${typeLabel}`,
-        message: `${typeLabel} de $${transactionData.amount} ${formatCurrency(transactionData.currency)} por Confío`,
+        message: `${typeLabel} de ${formatAmount(String(transactionData.amount), transactionData.currency)} por Confío`,
         url: uri,
         type: 'image/jpeg',
         filename: `Confio_${typeLabel}_${displayId.slice(0, 8)}`,
@@ -332,7 +329,7 @@ export const TransactionSuccessScreen = () => {
             <SuccessHero
               title={transactionData.type === 'sent' ? '¡Enviado con éxito!' :
                 transactionData.type === 'payment' ? '¡Pago realizado!' : '¡Recibido con éxito!'}
-              amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
+              amount={formatAmount(String(transactionData.amount), transactionData.currency)}
               hint={transactionData.type === 'sent'
                 ? `Enviado a ${transactionData.recipient}`
                 : transactionData.type === 'payment'

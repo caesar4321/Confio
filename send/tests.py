@@ -469,27 +469,26 @@ class ConfirmTaskTests(SimpleTestCase):
         )
         batch = SimpleNamespace(id=9, status=batch_status, tx_hash=s.transaction_hash,
                                 kind='send_cusd_plus', source_id=s.id)
-        movements = []
         with mock.patch('send.models.SendTransaction.objects') as sobjs, \
              mock.patch('cusd_plus.models.SponsoredBatch.objects') as bobjs, \
              mock.patch.object(send_tasks, '_account_for_bsc_address',
                                side_effect=lambda a: SimpleNamespace(addr=a)), \
-             mock.patch.object(send_tasks, '_movement',
-                               side_effect=lambda *a, **k: movements.append(a)), \
              mock.patch.object(send_tasks, '_notify_send_parties') as notify:
             sobjs.get.return_value = s
             bobjs.get.return_value = batch
             send_tasks.confirm_bsc_send(7, 9)
-        return s, movements, notify
+        return s, notify
 
-    def test_confirmed_writes_both_sides_and_notifies(self):
-        s, movements, notify = self._run('confirmed')
+    def test_confirmed_sets_status_and_notifies(self):
+        # The ledger row is NOT this task's job any more: the unified
+        # transaction is written by SendTransaction's post_save signal, so a
+        # cUSD+ send lands in the same history as every other rail rather
+        # than in a second, savings-only ledger.
+        s, notify = self._run('confirmed')
         self.assertEqual(s.status, 'CONFIRMED')
-        self.assertEqual(len(movements), 2)  # sender out + recipient in
         notify.assert_called_once()
 
-    def test_reverted_fails_without_ledger(self):
-        s, movements, notify = self._run('reverted')
+    def test_reverted_fails_and_stays_silent(self):
+        s, notify = self._run('reverted')
         self.assertEqual(s.status, 'FAILED')
-        self.assertEqual(movements, [])
         notify.assert_not_called()

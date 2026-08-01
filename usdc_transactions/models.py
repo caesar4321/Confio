@@ -289,6 +289,19 @@ class GuardarianTransaction(models.Model):
         related_name='guardarian_transactions',
         help_text='User who initiated the top-up'
     )
+    # WHICH account placed the order. `user` alone is not enough for
+    # authorization: a user with a pending PERSONAL order could otherwise have
+    # business funds redeemed to that personal deposit address while acting in
+    # a business context (the sponsored-redeem recipient check looks the order
+    # up to decide if a recipient is allowed). Nullable for rows written before
+    # this field existed — those are only honored for personal contexts.
+    account = models.ForeignKey(
+        'users.Account',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='guardarian_transactions',
+        help_text='Account context that created the order (authorization scope)',
+    )
     
     # Transaction Details
     from_currency = models.CharField(max_length=20, help_text='Fiat currency (e.g., USD, EUR)')

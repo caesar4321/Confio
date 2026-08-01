@@ -811,6 +811,11 @@ def guardarian_transaction_proxy(request):
                         guardarian_id=str(g_id),
                         external_id=external_id,
                         user=user,
+                        # Authorization scope, not bookkeeping: the sponsored
+                        # redeem consults this row to decide whether a deposit
+                        # address may receive funds, and `user` alone would let
+                        # a personal order authorize a business redeem.
+                        account=account,
                         from_amount=Decimal(str(guardarian_payload['from_amount'])),
                         from_currency=guardarian_payload['from_currency'],
                         to_currency=guardarian_payload['to_currency'],

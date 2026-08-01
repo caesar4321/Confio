@@ -32,8 +32,11 @@ import { Header } from '../navigation/Header';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { EmptyState } from '../components/EmptyState';
 import cUSDLogo from '../assets/png/cUSD.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import OndoLogo from '../assets/png/Ondo.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
@@ -55,6 +58,7 @@ import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 // Color palette
 // Keychain constants for storing balance visibility
@@ -274,11 +278,43 @@ export const AccountDetailScreen = () => {
 
   // Fetch balances in one query to avoid UI flicker (live + presale-locked)
   const isCusd = route.params.accountType === 'cusd';
-  const isConfio = route.params.accountType !== 'cusd';
+  // The savings account (Confío Dollar+ / raw USDT on BSC) is a THIRD variant,
+  // merged in from the old standalone SavingsScreen so both live in one
+  // detail surface with one history, one receipt path and one set of rows.
+  const isSavingsAccount = route.params.accountType === 'cusd_plus';
+  const isConfio = !isCusd && !isSavingsAccount;
+  // Which ledger rows belong to this account. Was an inline ternary repeated
+  // at five call sites; a third account type made that untenable.
+  const accountTokenTypes = React.useMemo(() => {
+    if (isSavingsAccount) return ['CUSD_PLUS', 'USDT'];
+    if (isCusd) return activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'];
+    return ['CONFIO'];
+  }, [isCusd, isSavingsAccount, activeAccount?.isEmployee]);
   // cUSD phase-out: while deposits are paused (server flag, singleton is
   // already cached by Home) this screen goes retiro-only — no Recargar.
-  const { savings: ahorrosSavings } = useSavingsPortfolio();
+  const { savings: ahorrosSavings, usdtBalanceUsd: ahorrosUsdt } = useSavingsPortfolio();
+  // Savings variant figures. The headline is ONE account number (vault
+  // position + raw wallet USDT): money must never look like it vanished
+  // between landing on-chain and minting into the vault.
+  const savingsIsYield = ahorrosSavings.enabled;
+  const savingsAccountTotal = ahorrosSavings.balanceUsd + (ahorrosUsdt || 0);
+  // Adaptive precision (2 dp, 3 dp under 1¢) so small savers still see the
+  // daily tick; below display resolution the part is omitted entirely —
+  // "+$0.00" reads as broken. Savings-only: stocks report in their own row.
+  const savingsTickerParts: string[] = [];
+  {
+    const hoy = formatUsdDeltaAbs(ahorrosSavings.earnedTodayUsd);
+    if (hoy) {
+      savingsTickerParts.push(
+        `Hoy ${ahorrosSavings.earnedTodayUsd >= 0 ? '+' : '\u2212'}${hoy}`);
+    }
+    const mes = formatUsdDeltaAbs(ahorrosSavings.earnedMonthUsd);
+    if (mes && ahorrosSavings.earnedMonthUsd > 0) {
+      savingsTickerParts.push(`Este mes +${mes}`);
+    }
+  }
   const isCusdRetiroOnly = isCusd && ahorrosSavings.cusdDepositsPaused;
+
   const { data: balancesData, refetch: refetchBalances, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'no-cache',
   });
@@ -289,6 +325,10 @@ export const AccountDetailScreen = () => {
   const cusdLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
 
   const currentBalance = React.useMemo(() => {
+    // Savings reads its own live portfolio, not a route param: the number
+    // moves on its own (yield accrues, deposits mint) so a value captured at
+    // navigation time would be stale the moment the screen opened.
+    if (isSavingsAccount) return savingsAccountTotal.toFixed(2);
     if (isCusd) {
       const v = cusdLive;
       if (!isFinite(v)) return route.params.accountBalance;
@@ -297,7 +337,8 @@ export const AccountDetailScreen = () => {
     const v = confioLive + confioLocked;
     if (!isFinite(v)) return route.params.accountBalance;
     return v.toFixed(2);
-  }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance]);
+  }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance,
+      isSavingsAccount, savingsAccountTotal]);
 
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';
@@ -306,15 +347,19 @@ export const AccountDetailScreen = () => {
     symbol: route.params.accountSymbol,
     balance: currentBalance,
     balanceHidden: "•••••••",
-    color: route.params.accountType === 'cusd' ? colors.primary : colors.secondary,
-    colorDark: route.params.accountType === 'cusd' ? colors.primaryDark : colors.secondaryDark,
-    textColor: route.params.accountType === 'cusd' ? colors.primaryText : colors.secondaryText,
+    color: isConfio ? colors.secondary : colors.primary,
+    colorDark: isConfio ? colors.secondaryDark : colors.primaryDark,
+    textColor: isConfio ? colors.secondaryText : colors.primaryText,
     address: accountAddress,
     addressShort: accountAddress ? `${accountAddress.slice(0, 6)}...${accountAddress.slice(-6)}` : '',
     exchangeRate: "1 USDC = 1 cUSD",
-    description: route.params.accountType === 'cusd'
-      ? "Dólar digital estable respaldado 1:1 por USDC"
-      : "Moneda de gobernanza de Confío"
+    description: isSavingsAccount
+      ? (savingsIsYield
+        ? "Tu dinero crece mientras duerme, respaldado por bonos del Tesoro"
+        : "Dólares digitales, siempre tuyos")
+      : isCusd
+        ? "Dólar digital estable respaldado 1:1 por USDC"
+        : "Moneda de gobernanza de Confío"
   };
 
   // Debug logging
@@ -402,9 +447,7 @@ export const AccountDetailScreen = () => {
   const queryVariables = {
     limit: transactionLimit,
     offset: 0, // Always start with offset 0 for initial query
-    tokenTypes: route.params.accountType === 'cusd'
-      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'])
-      : ['CONFIO']
+    tokenTypes: accountTokenTypes
   };
 
 
@@ -462,9 +505,7 @@ export const AccountDetailScreen = () => {
   useEffect(() => {
     if (!canQueryTransactions || !activeAccount) return;
 
-    const tokenTypes = route.params.accountType === 'cusd'
-      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'])
-      : ['CONFIO'];
+    const tokenTypes = accountTokenTypes;
 
     setTransactionLimit(20);
     setTransactionOffset(0);
@@ -488,9 +529,7 @@ export const AccountDetailScreen = () => {
       refetchUnified({
         limit: transactionLimit,
         offset: 0,
-        tokenTypes: route.params.accountType === 'cusd'
-          ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'])
-          : ['CONFIO']
+        tokenTypes: accountTokenTypes
       });
     }
   }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, canQueryTransactions]);
@@ -547,9 +586,7 @@ export const AccountDetailScreen = () => {
           accountIndex: activeAccount?.index || 0,
           limit: 20,
           offset: 0,
-          tokenTypes: route.params.accountType === 'cusd' ?
-            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO']) :
-            ['CONFIO']
+          tokenTypes: accountTokenTypes
         })
       ];
       // Add USDC refresh if applicable
@@ -1459,7 +1496,7 @@ export const AccountDetailScreen = () => {
       }
     };
 
-    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${formatTransactionAmount(transaction.amount)} ${transaction.currency}. ${formattedDate} ${formattedTime}.`;
+    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${formatTransactionAmount(transaction.amount)} ${formatTokenLabel(transaction.currency)}. ${formattedDate} ${formattedTime}.`;
     const isCounterpartyTheSender =
       transaction.type === 'received' ||
       (transaction.type === 'payment' && transaction.amount.startsWith('+')) ||
@@ -1561,7 +1598,7 @@ export const AccountDetailScreen = () => {
             styles.transactionAmountText,
             transaction.amount.startsWith('-') ? styles.negativeAmount : styles.positiveAmount
           ]}>
-            {formatTransactionAmount(transaction.amount)} {transaction.currency}
+            {formatTransactionAmount(transaction.amount)} {formatTokenLabel(transaction.currency)}
           </Text>
           {/* Status only when it carries information — completed is the
               normal case and stays silent. */}
@@ -1684,8 +1721,8 @@ export const AccountDetailScreen = () => {
       );
       return;
     }
-    (navigation as any).navigate('Sell');
-  }, [navigation, userProfile?.phoneCountry]);
+    (navigation as any).navigate('Sell', isSavingsAccount ? { destination: 'cusd_plus' } : undefined);
+  }, [isSavingsAccount, navigation, userProfile?.phoneCountry]);
 
   const hasActiveFilters = useCallback(() => {
     const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
@@ -1826,9 +1863,7 @@ export const AccountDetailScreen = () => {
           accountIndex: activeAccount?.index || 0,
           limit: transactionLimit,
           offset: newOffset,
-          tokenTypes: route.params.accountType === 'cusd' ?
-            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO']) :
-            ['CONFIO']
+          tokenTypes: accountTokenTypes
         },
         updateQuery: (prev, { fetchMoreResult }) => {
 
@@ -1910,7 +1945,7 @@ export const AccountDetailScreen = () => {
         <View style={styles.balanceInner}>
         <View style={styles.balanceIconContainer}>
           <Image
-            source={route.params.accountType === 'cusd' ? cUSDLogo : CONFIOLogo}
+            source={isSavingsAccount ? cUSDPlusLogo : isCusd ? cUSDLogo : CONFIOLogo}
             style={styles.balanceLogo}
           />
         </View>
@@ -1935,6 +1970,43 @@ export const AccountDetailScreen = () => {
           )}
         </View>
 
+        {/* Savings hero extras (merged from SavingsScreen): the rate is the
+            reason this account exists, and landed-but-unminted USDT gets
+            named so the headline total is never mistaken for a discrepancy.
+            Rate is server-derived and live — never hardcoded in copy. */}
+        {isSavingsAccount && canViewBalance && showBalance && (
+          <>
+            {savingsIsYield && ahorrosSavings.netApyPct > 0 && savingsAccountTotal > 0 && (
+              <Text style={styles.savingsRateLine}>
+                Rindiendo ~{ahorrosSavings.netApyPct.toFixed(1)}% anual
+              </Text>
+            )}
+            {savingsIsYield && savingsTickerParts.length > 0 && (
+              <View style={styles.savingsTickerRow}>
+                <Icon name="trending-up" size={14} color={colors.white} />
+                <Text style={styles.savingsTicker}>{savingsTickerParts.join('  ·  ')}</Text>
+              </View>
+            )}
+            {savingsIsYield && (ahorrosUsdt || 0) > 0 && (
+              <Text style={styles.savingsSplitLine}>
+                En camino a tu ahorro ${formatBalanceDisplay(String(ahorrosUsdt))}
+              </Text>
+            )}
+            {!savingsIsYield && ahorrosSavings.balanceUsd > 0 && (
+              <Text style={styles.savingsSplitLine}>
+                Ahorro por retirar ${formatBalanceDisplay(String(ahorrosSavings.balanceUsd))}
+              </Text>
+            )}
+            {savingsAccountTotal <= 0 && (
+              <Text style={styles.savingsEmptyHint}>
+                {savingsIsYield
+                  ? 'Tu dinero puede crecer mientras duerme'
+                  : 'Dólares digitales, siempre tuyos'}
+              </Text>
+            )}
+          </>
+        )}
+
         {/* Show locked status for CONFIO tokens - only if balance > 0 */}
         {route.params.accountType === 'confio' && canViewBalance && showBalance && (parseFloat(account.balance) > 0 || confioLocked > 0) && (
           <View style={styles.lockedStatusContainer}>
@@ -1956,7 +2028,9 @@ export const AccountDetailScreen = () => {
           </View>
         )}
 
-        <Text style={styles.balanceDescription}>{account.description}</Text>
+        <Text style={[styles.balanceDescription, isSavingsAccount && styles.savingsDescriptionSpacing]}>
+          {account.description}
+        </Text>
         {/* Hide address for employees without viewBusinessAddress permission */}
         {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBusinessAddress) && account.address && (
           <View style={styles.addressContainer}>
@@ -2052,9 +2126,14 @@ export const AccountDetailScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
-                  // Navigate to USDCDeposit screen with proper token type
+                  // Same verb, per-account destination: the savings account
+                  // receives USDT-BSC on its own address, not an Algorand asset.
+                  if (isSavingsAccount) {
+                    (navigation as any).navigate('ReceiveSavings', { destination: 'cusd_plus' });
+                    return;
+                  }
                   navigation.navigate('USDCDeposit', {
-                    tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio'
+                    tokenType: isCusd ? 'cusd' : 'confio'
                   });
                 }}
                 accessibilityRole="button"
@@ -2107,7 +2186,10 @@ export const AccountDetailScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
-                  navigation.navigate('TopUp');
+                  // "Ahorrar" was never a separate verb — recharging the
+                  // savings account IS this button, pointed at the BSC rail.
+                  (navigation as any).navigate('TopUp',
+                    isSavingsAccount ? { destination: 'cusd_plus' } : undefined);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Recargar"
@@ -2127,8 +2209,10 @@ export const AccountDetailScreen = () => {
               </TouchableOpacity>
             )}
 
-            {/* Retirar — cUSD only: the Sell flow settles from cUSD */}
-            {route.params.accountType === 'cusd' && !activeAccount?.isEmployee && (
+            {/* Retirar — the dollar accounts only (CONFIO has no off-ramp).
+                Both settle through the same Sell flow; `destination` picks
+                the rail. */}
+            {(isCusd || isSavingsAccount) && !activeAccount?.isEmployee && (
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleRetirar}
@@ -2368,6 +2452,41 @@ export const AccountDetailScreen = () => {
                   </TouchableOpacity>
                 </View>
               </View>
+            )}
+
+            {/* Savings education + partnership (merged from SavingsScreen).
+                ONE education door rather than inline sections: respaldo,
+                tasa, costos and retiros all live in ProtectedSavings. */}
+            {isSavingsAccount && (
+              <>
+                <TouchableOpacity
+                  style={styles.howItWorksRow}
+                  onPress={() => (navigation as any).navigate('ProtectedSavings')}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cómo funciona tu ahorro"
+                >
+                  <View style={styles.howItWorksIconWrap}>
+                    <Icon name="shield" size={16} color={colors.primaryDark} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.howItWorksTitle}>¿Cómo funciona?</Text>
+                    <Text style={styles.howItWorksSub}>
+                      {savingsIsYield
+                        ? 'Respaldo, rendimiento y costos — sin letra chica'
+                        : 'Respaldo verificable y costos — sin letra chica'}
+                    </Text>
+                  </View>
+                  <Icon name="chevron-right" size={18} color={colors.text.light} />
+                </TouchableOpacity>
+
+                {/* Partnership: real logo, nominative use. */}
+                <View style={styles.partnerRow}>
+                  <Text style={styles.partnerText}>En alianza con</Text>
+                  <Image source={OndoLogo} style={styles.partnerLogo} />
+                  <Text style={styles.partnerBrand}>Ondo Finance</Text>
+                </View>
+              </>
             )}
 
             {/* Enhanced Transactions Section */}
@@ -2616,6 +2735,7 @@ export const AccountDetailScreen = () => {
         mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
         onClose={dismissWalletRecovery}
       />
+
     </View>
   );
 };
@@ -2673,6 +2793,73 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     marginBottom: 4,
   },
+  howItWorksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+  },
+  howItWorksIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+  },
+  howItWorksTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  howItWorksSub: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
+  partnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 16,
+  },
+  partnerText: { fontSize: 12, color: colors.text.secondary },
+  partnerLogo: { width: 16, height: 16, resizeMode: 'contain' },
+  partnerBrand: { fontSize: 12, fontWeight: '700', color: colors.text.primary },
+  savingsActionIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  savingsActionIconOff: { opacity: 0.4 },
+  // Mirrors SavingsScreen's hero rhythm verbatim — that screen's calm comes
+  // from consistent 6/8pt steps at one type size, not from tighter packing.
+  savingsRateLine: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.white,
+    opacity: 0.95,
+    marginTop: 6,
+  },
+  savingsSplitLine: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.white,
+    opacity: 0.9,
+    marginTop: 6,
+  },
+  savingsTickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  savingsTicker: { fontSize: 13, color: colors.white, opacity: 0.9 },
+  savingsEmptyHint: {
+    fontSize: 13,
+    color: colors.white,
+    opacity: 0.85,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
+  // balanceDescription has no marginTop, so it collides with whatever the
+  // savings hero adds above it. Give the savings variant a real gap.
+  savingsDescriptionSpacing: { marginTop: 14 },
   lockedStatusContainer: {
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
     borderRadius: 12,

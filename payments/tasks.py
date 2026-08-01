@@ -19,23 +19,6 @@ logger = logging.getLogger(__name__)
 TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT'}
 
 
-def _movement(account, movement_type, title, amount_usd, tx_hash, reference):
-    from cusd_plus.models import CusdPlusMovement
-    if account is None:
-        return
-    try:
-        CusdPlusMovement.objects.get_or_create(
-            reference=reference,
-            defaults={
-                'account': account,
-                'movement_type': movement_type,
-                'title': title,
-                'amount_usd': amount_usd,
-                'tx_hash': tx_hash or '',
-            },
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception('movement write failed for %s', reference)
 
 
 @shared_task(name='payments.confirm_bsc_payment', bind=True, max_retries=20)
@@ -96,17 +79,6 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
     merchant_name = p.merchant_display_name or (
         p.merchant_business.name if p.merchant_business_id else 'Comercio')
     payer_name = p.payer_display_name or 'Cliente'
-
-    _movement(
-        p.payer_account, 'payment',
-        f'Pagaste a {merchant_name}',
-        -gross, p.transaction_hash, f'payment_transaction:{p.id}:out',
-    )
-    _movement(
-        p.merchant_account, 'receive',
-        f'Cobro de {payer_name}',
-        net, p.transaction_hash, f'payment_transaction:{p.id}:in',
-    )
 
     token = TOKEN_DISPLAY.get((p.token_type or '').upper(), p.token_type)
     amount_str = f'{gross:.2f}'.rstrip('0').rstrip('.')

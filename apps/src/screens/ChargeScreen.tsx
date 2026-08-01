@@ -34,6 +34,7 @@ import { useRef } from 'react';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -161,12 +162,7 @@ const ChargeScreen = () => {
 
   const currentCurrency = currencies[selectedCurrency as keyof typeof currencies];
 
-  const formatCurrency = (currency: string): string => {
-    if (currency === 'CUSD') return 'cUSD';
-    if (currency === 'CONFIO') return 'CONFIO';
-    if (currency === 'USDC') return 'USDC';
-    return currency;
-  };
+  const formatCurrency = formatTokenLabel;
 
   const handleGenerateQR = async () => {
 
@@ -295,8 +291,8 @@ const ChargeScreen = () => {
       try {
         await Share.open({
           message: Platform.OS === 'ios'
-            ? `Paga mi factura de ${invoice.amount} ${invoice.tokenType} usando este enlace: https://confio.lat/pay/${id}`
-            : `Paga mi factura de ${invoice.amount} ${invoice.tokenType} usando este enlace:`, // Android concatenates 'url' automatically
+            ? `Paga mi factura de ${invoice.amount} ${formatTokenLabel(invoice.tokenType)} usando este enlace: https://confio.lat/pay/${id}`
+            : `Paga mi factura de ${invoice.amount} ${formatTokenLabel(invoice.tokenType)} usando este enlace:`, // Android concatenates 'url' automatically
           url: `https://confio.lat/pay/${id}`,
           title: 'Pago'
         });

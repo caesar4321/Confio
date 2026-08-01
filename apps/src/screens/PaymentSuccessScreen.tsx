@@ -22,6 +22,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 type PaymentSuccessRouteProp = RouteProp<{
   PaymentSuccess: {
@@ -61,12 +62,7 @@ export const PaymentSuccessScreen = () => {
   }, []);
 
   // Helper function to format currency for display
-  const formatCurrency = (currency: string): string => {
-    if (currency === 'CUSD') return 'cUSD';
-    if (currency === 'CONFIO') return 'CONFIO';
-    if (currency === 'USDC') return 'USDC';
-    return currency; // fallback
-  };
+  const formatCurrency = formatTokenLabel;
 
   const handleDone = () => {
     // Navigate back to home screen

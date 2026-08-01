@@ -42,6 +42,7 @@ import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -966,9 +967,11 @@ export const TransactionDetailScreen = () => {
       merchantIsReferralVerified: transactionData.merchantIsReferralVerified ?? transactionData.recipientIsReferralVerified ?? transactionData.recipientUser?.isReferralVerified ?? false,
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
       // For withdrawals: always negative (money out)
-      amount: transactionData.conversion_type === 'cusd_to_usdc'
+      amount: (transactionData.conversion_type === 'cusd_to_usdc'
+        || transactionData.conversion_type === 'from_savings')
         ? `-${transactionData.from_amount || transactionData.amount || '0'}`
-        : transactionData.conversion_type === 'usdc_to_cusd'
+        : (transactionData.conversion_type === 'usdc_to_cusd'
+          || transactionData.conversion_type === 'to_savings')
           ? `+${transactionData.to_amount || transactionData.amount || '0'}`
           : type === 'withdrawal'
             ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
@@ -981,8 +984,11 @@ export const TransactionDetailScreen = () => {
       date: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('YYYY-MM-DD') : transactionData.date,
       time: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('HH:mm') : transactionData.time,
       // Format conversion title
+      // Both conversion families, named in the user's own product terms.
       formattedTitle: transactionData.conversion_type === 'usdc_to_cusd' ? 'Conversión USDC → cUSD' :
-        transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' : null,
+        transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' :
+          transactionData.conversion_type === 'to_savings' ? 'Conversión USDT → cUSD+' :
+            transactionData.conversion_type === 'from_savings' ? 'Conversión cUSD+ → USDT' : null,
       // For withdrawals
       destinationAddress: transactionData.destination_address || transactionData.destinationAddress,
       toAddress: transactionData.destination_address || transactionData.destinationAddress || transactionData.toAddress,
@@ -1004,6 +1010,10 @@ export const TransactionDetailScreen = () => {
       normalizedTransactionData.currency = 'cUSD';
     } else if (transactionData.conversion_type === 'cusd_to_usdc') {
       normalizedTransactionData.currency = 'USDC';
+    } else if (transactionData.conversion_type === 'to_savings') {
+      normalizedTransactionData.currency = 'cUSD+';
+    } else if (transactionData.conversion_type === 'from_savings') {
+      normalizedTransactionData.currency = 'USDT';
     }
 
     // For ramp detail screens, prefer direction-aware display data over provider rail labels.
@@ -1306,10 +1316,14 @@ export const TransactionDetailScreen = () => {
       transactionData?.conversionType;
     const fallbackFrom =
       typeHint === 'usdc_to_cusd' ? 'USDC' :
+        typeHint === 'to_savings' ? 'USDT' :
+        typeHint === 'from_savings' ? 'cUSD+' :
         typeHint === 'cusd_to_usdc' ? 'cUSD' :
           undefined;
     const fallbackTo =
       typeHint === 'usdc_to_cusd' ? 'cUSD' :
+        typeHint === 'to_savings' ? 'cUSD+' :
+        typeHint === 'from_savings' ? 'USDT' :
         typeHint === 'cusd_to_usdc' ? 'USDC' :
           undefined;
     const fromToken =
@@ -1477,7 +1491,7 @@ export const TransactionDetailScreen = () => {
   // hero badge doesn't already (confirming, ramp progress, failure).
   const receiptItems = (() => {
     const items: ReceiptItem[] = [];
-    const currency = currentTx.currency || 'cUSD';
+    const currency = formatTokenLabel(currentTx.currency) || 'cUSD';
     const isPaymentDebit = currentTx.type === 'payment' && !!currentTx.amount?.startsWith('-');
 
     const amountLabel = currentTx.type === 'payment'
@@ -1636,7 +1650,7 @@ export const TransactionDetailScreen = () => {
               // direction; tinting outgoing pink read as an alert.
               return (
                 <Text style={styles.amountText}>
-                  {sign ? `${sign} ` : ''}{abs} {currentTx.currency || 'cUSD'}
+                  {sign ? `${sign} ` : ''}{abs} {formatTokenLabel(currentTx.currency) || 'cUSD'}
                 </Text>
               );
             })()}
@@ -2062,7 +2076,7 @@ export const TransactionDetailScreen = () => {
                     const phoneRaw = recipientPhone || currentTx.recipient_phone;
                     const cleanPhone = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';
                     const amount = formatAmount(currentTx.amount);
-                    const currency = currentTx.currency || 'cUSD';
+                    const currency = formatTokenLabel(currentTx.currency) || 'cUSD';
                     const invitationId = (currentTx as any).invitationId
                       || (currentTx as any).invitation_id
                       || (currentTx as any).idempotencyKey
@@ -2163,7 +2177,7 @@ export const TransactionDetailScreen = () => {
                       });
                       const fallbackMessage = buildSendAndInviteShareMessage({
                         amount: formatAmount(currentTx.amount),
-                        currency: currentTx.currency || 'cUSD',
+                        currency: formatTokenLabel(currentTx.currency) || 'cUSD',
                         inviteLink,
                       });
                       await Share.share({ message: fallbackMessage });
@@ -2370,7 +2384,7 @@ export const TransactionDetailScreen = () => {
                 )}
                 <View style={styles.technicalRow}>
                   <Text style={styles.technicalLabel}>Monto</Text>
-                  <Text style={styles.technicalValue}>{formatAmount(currentTx.amount)} {currentTx.currency || 'cUSD'}</Text>
+                  <Text style={styles.technicalValue}>{formatAmount(currentTx.amount)} {formatTokenLabel(currentTx.currency) || 'cUSD'}</Text>
                 </View>
               </View>
 

@@ -262,10 +262,19 @@ class UnifiedTransactionTable(models.Model):
             }
 
     def get_conversion_type(self):
-        """Resolve conversion type from related Conversion first, then description fallback."""
+        """Resolve conversion type from the related row first, then description.
+
+        Two conversion families share this type: the Algorand pair
+        (usdc_to_cusd / cusd_to_usdc) and the BSC savings pair
+        (to_savings / from_savings). Reading only `conversion` left every
+        cUSD+ conversion with a null type, which downstream renders as an
+        untyped row with no tokens and no title."""
         if self.transaction_type == 'conversion':
             if self.conversion_id and self.conversion:
                 return self.conversion.conversion_type
+            if self.cusd_plus_conversion_id and self.cusd_plus_conversion:
+                # 'to_savings' | 'from_savings'
+                return self.cusd_plus_conversion.direction
         if self.transaction_type == 'conversion' and self.description:
             if 'USDC → cUSD' in self.description:
                 return 'usdc_to_cusd'
@@ -297,6 +306,10 @@ class UnifiedTransactionTable(models.Model):
                 return 'USDC'
             elif conversion_type == 'cusd_to_usdc':
                 return 'cUSD'
+            elif conversion_type == 'to_savings':
+                return 'USDT'
+            elif conversion_type == 'from_savings':
+                return 'cUSD+'
         return None
     
     def get_to_token(self):
@@ -307,6 +320,10 @@ class UnifiedTransactionTable(models.Model):
                 return 'cUSD'
             elif conversion_type == 'cusd_to_usdc':
                 return 'USDC'
+            elif conversion_type == 'to_savings':
+                return 'cUSD+'
+            elif conversion_type == 'from_savings':
+                return 'USDT'
         return None
     
     @property

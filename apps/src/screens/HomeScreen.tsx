@@ -51,7 +51,7 @@ import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { useCountry } from '../contexts/CountryContext';
-import { isRampBlockedCountry, isKoyweRoutingEnabledForCountry } from '../config/env';
+import { isRampBlockedCountry } from '../config/env';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
@@ -772,7 +772,7 @@ export const HomeScreen = () => {
   const rampCountryCode =
     userProfile?.phoneCountry || selectedCountry?.[2] || userCountry?.[2] || '';
   const navigateToRampOrEfectivo = React.useCallback(
-    (screen: 'TopUp' | 'Sell') => {
+    (screen: 'TopUp' | 'Sell', params?: { destination?: string }) => {
       if (isRampBlockedCountry(rampCountryCode)) {
         Alert.alert(
           'No disponible en tu país',
@@ -786,7 +786,7 @@ export const HomeScreen = () => {
         );
         return;
       }
-      navigation.navigate(screen);
+      navigation.navigate(screen, params as any);
     },
     [rampCountryCode, navigation],
   );
@@ -798,11 +798,10 @@ export const HomeScreen = () => {
   const [rechargeSheetVisible, setRechargeSheetVisible] = useState(false);
   const [withdrawSheetVisible, setWithdrawSheetVisible] = useState(false);
 
-  // cUSD phase-out (cusdDepositsPaused, server-flipped): while paused there
-  // is exactly ONE door for EVERYONE — the USDT-BSC rail. Eligibility only
-  // decides what the delivered USDT becomes (silent mint to cUSD+ vs raw
-  // "Confío Dollar"), so the copy varies but the destination doesn't.
-  // Unpaused restores both doors with savings first.
+  // cUSD phase-out (cusdDepositsPaused, server-flipped): the promoted door
+  // for EVERYONE is the USDT-BSC rail. Eligibility only decides what the
+  // delivered USDT becomes (silent mint to cUSD+ vs raw "Confío Dollar"),
+  // so the copy varies but the destination doesn't.
   const savingsRechargeOption: RouteOption = {
     icon: 'trending-up',
     title: savingsPortfolio.savings.enabled
@@ -812,21 +811,39 @@ export const HomeScreen = () => {
       ? 'Gana rendimiento mientras decides · cUSD+'
       : 'Se acreditan en tu Confío Dollar',
     onPress: () => {
-      // USDT-BSC rail: Koywe delivers USDT to the user's own address.
-      navigation.navigate('TopUp', { destination: 'cusd_plus' });
+      // USDT-BSC rail: Koywe delivers USDT to the user's own address. Goes
+      // through the shared helper so the blocked-country check (VE/NI/PA/CU)
+      // applies here too — this row used to navigate straight past it.
+      navigateToRampOrEfectivo('TopUp', { destination: 'cusd_plus' });
     },
   };
   const cusdRechargeOption: RouteOption = {
     icon: 'dollar-sign',
-    title: 'Para usar día a día',
-    subtitle: 'Enviar, pagar y comprar CONFIO · cUSD',
+    // While paused this door exists to UNBLOCK A DRAIN, not to sell cUSD:
+    // an off-ramp has a per-method minimum, so a leftover balance below it
+    // is stranded unless the user can top it back up to the threshold.
+    title: savingsPortfolio.savings.cusdDepositsPaused
+      ? 'Al antiguo Confío Dollar'
+      : 'Para usar día a día',
+    subtitle: savingsPortfolio.savings.cusdDepositsPaused
+      ? 'Completa el mínimo para poder retirarlo · cUSD'
+      : 'Enviar, pagar y comprar CONFIO · cUSD',
     onPress: () => navigateToRampOrEfectivo('TopUp'),
   };
-  const rechargeOptions: RouteOption[] = savingsPortfolio.savings.cusdDepositsPaused
-    ? [savingsRechargeOption]
-    : (savingsPortfolio.savings.enabled
-        ? [savingsRechargeOption, cusdRechargeOption]
-        : [cusdRechargeOption]);
+  // The BSC rail is offered whether or not the user is Ondo-eligible: an
+  // ineligible user's top-up lands as plain Confío Dollar (USDT) instead of
+  // minting yield, which is exactly what savingsRechargeOption's subtitle
+  // already promises.
+  //
+  // The cUSD door follows the SAME rule as the legacy wallet row below
+  // (`!paused || cUSDBalance > 0`): hidden from people with nothing to
+  // drain, kept for holders — otherwise a balance under the off-ramp
+  // minimum can never be withdrawn at all.
+  const showLegacyCusdDoor =
+    !savingsPortfolio.savings.cusdDepositsPaused || cUSDBalance > 0;
+  const rechargeOptions: RouteOption[] = showLegacyCusdDoor
+    ? [savingsRechargeOption, cusdRechargeOption]
+    : [savingsRechargeOption];
   // A one-option sheet is pure friction: go straight to the flow. Read via
   // a ref because the quickActions useMemo (narrow deps) would otherwise
   // capture a stale options array.
@@ -841,79 +858,67 @@ export const HomeScreen = () => {
     setRechargeSheetVisible(true);
   }, []);
 
+  // What the BSC withdrawal rail can actually move in ONE operation: it
+  // redeems the vault OR transfers raw USDT, never both, so max() is the
+  // honest headline (matching SendUsdtScreen and the sell screen itself).
+  const bscWithdrawableUsd = Math.max(
+    savingsPortfolio.savings.balanceUsd,
+    savingsPortfolio.usdtBalanceUsd,
+  );
+
   // Both options land in the user's bank — the differentiator is where the
   // money sits NOW, so subtitles show live balances instead of destinations.
+  // The legacy cUSD row is OMITTED (not merely disabled) once drained, so a
+  // user with no cUSD sees a single door and skips the sheet entirely —
+  // same rule as the recharge sheet and the legacy wallet row.
   const withdrawOptions: RouteOption[] = [
-    {
-      icon: 'dollar-sign',
-      title: 'Desde mi cUSD',
-      subtitle: `$${formatFixedFloor(cUSDBalance, 2)} disponibles`,
-      disabled: cUSDBalance <= 0,
-      onPress: () => navigateToRampOrEfectivo('Sell'),
-    },
+    ...(showLegacyCusdDoor
+      ? [{
+        icon: 'dollar-sign',
+        title: 'Desde mi cUSD',
+        subtitle: `$${formatFixedFloor(cUSDBalance, 2)} disponibles`,
+        disabled: cUSDBalance <= 0,
+        onPress: () => navigateToRampOrEfectivo('Sell'),
+      } as RouteOption]
+      : []),
     {
       icon: 'trending-up',
       title: 'Desde mis ahorros',
-      // savings.balanceUsd, not totalUsd: this rail redeems the VAULT only —
-      // stocks can't exit through it, so advertising the combined figure
-      // would overstate what's withdrawable here.
-      subtitle:
-        savingsPortfolio.savings.balanceUsd > 0
-          ? `$${formatFixedFloor(savingsPortfolio.savings.balanceUsd, 2)} en ${savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'ahorro por retirar'}`
+      // Vault position OR raw USDT — the rail now exits either leg, which is
+      // the only way an Ondo-ineligible user (who never mints shares) can
+      // reach a bank. Stocks stay excluded: they can't exit through here, so
+      // totalUsd would overstate what's withdrawable.
+      subtitle: bscWithdrawableUsd > 0
+          ? `$${formatFixedFloor(bscWithdrawableUsd, 2)} en ${savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}`
           : 'Aún no tienes ahorros',
-      disabled: savingsPortfolio.savings.balanceUsd <= 0,
+      disabled: bscWithdrawableUsd <= 0,
       onPress: () => {
-        // Same country split as SavingsScreen's retirar: Guardarian countries
-        // redeem the vault directly (cUSD+ → USDT-BSC → bank, no Algorand
-        // hop); the Koywe SellScreen branch ignores `destination` and would
-        // silently sell cUSD, so those countries keep the stub until the
-        // Koywe savings off-ramp lands.
-        if (!isKoyweRoutingEnabledForCountry(rampCountryCode)) {
-          navigation.navigate('Sell', { destination: 'cusd_plus' });
-          return;
-        }
-        Alert.alert('Muy pronto', 'El retiro directo desde tu ahorro abre en breve.');
+        // Savings sells ride Guardarian everywhere (SellScreen routes on
+        // `destination`, not on the country), so the only gate left is the
+        // one that applies to every ramp: countries where NO provider
+        // operates go to the Efectivo directory instead.
+        navigateToRampOrEfectivo('Sell', { destination: 'cusd_plus' });
       },
     },
   ];
-
-  // Quick actions configuration - filter based on permissions
-  const quickActionsData: QuickAction[] = [
-    {
-      id: 'send',
-      label: 'Enviar',
-      icon: 'send',
-      color: colors.primary,
-      route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
-    },
-    {
-      id: 'receive',
-      label: 'Recibir',
-      icon: 'download',
-      color: colors.primary,
-      route: () => navigation.navigate('USDCDeposit', { tokenType: 'cusd' }),
-    },
-    {
-      id: 'pay',
-      label: 'Pagar',
-      icon: 'shopping-bag',
-      color: colors.secondary,
-      route: () => {
-        // For business accounts, navigate to Charge screen instead of Scan
-        const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-        navigation.navigate('BottomTabs', {
-          screen: isBusinessAccount ? 'Charge' : 'Scan'
-        } as any);
-      },
-    },
-    {
-      id: 'exchange',
-      label: 'Recargar',
-      icon: 'dollar-sign',
-      color: colors.accent,
-      route: () => navigateToRampOrEfectivo('TopUp'),
-    },
-  ];
+  // Same one-option rule as Recargar: a sheet that only ever offers one door
+  // is pure friction. Ref for the same reason — quickActionsData's useMemo
+  // has narrow deps and would otherwise capture a stale options array.
+  const withdrawOptionsRef = React.useRef(withdrawOptions);
+  withdrawOptionsRef.current = withdrawOptions;
+  const openWithdrawFlow = React.useCallback(() => {
+    const opts = withdrawOptionsRef.current;
+    // Skip the sheet only when exactly one door is actually USABLE. Unlike
+    // the recharge options, a withdraw row can be disabled (nothing to
+    // withdraw from that leg), and onPress() would happily fire anyway —
+    // dropping the user into an empty Sell screen.
+    const usable = opts.filter((o) => !o.disabled);
+    if (usable.length === 1) {
+      usable[0].onPress();
+      return;
+    }
+    setWithdrawSheetVisible(true);
+  }, []);
 
   // Filter quick actions based on employee permissions
   const quickActions = React.useMemo(() => {
@@ -951,20 +956,6 @@ export const HomeScreen = () => {
           },
         },
         {
-          id: 'exchange',
-          label: 'Recargar',
-          icon: 'dollar-sign',
-          color: colors.accent,
-          route: () => navigateToRampOrEfectivo('TopUp'),
-        },
-        {
-          id: 'withdraw',
-          label: 'Retirar',
-          icon: 'bank',
-          color: colors.offRampIcon,
-          route: () => navigateToRampOrEfectivo('Sell'),
-        },
-        {
           id: 'efectivo',
           label: 'Efectivo',
           icon: 'cash',
@@ -978,12 +969,13 @@ export const HomeScreen = () => {
           // 'receive' removed
           case 'pay':
             return permissions.sendFunds === true;
-          case 'exchange':
-            return (permissions as any).manageP2p === true;
-          case 'withdraw':
-            // Assuming withdraw requires sendFunds or manageP2p? 
-            // Currently Retirar (Sell) lets you send USDC to bank. It involves sending funds.
-            return permissions.sendFunds === true;
+          // Recargar/Retirar are deliberately absent from the list above:
+          // moving business money to or from a BANK is the owner's alone.
+          // They were previously gated on manageP2p and sendFunds, which
+          // are operational permissions and grant no banking authority —
+          // any employee who could pay a supplier could also drain the
+          // account to a bank. CreateRampOrder now refuses employees
+          // server-side too (_employee_ramp_denial).
           default:
             return true;
         }
@@ -1023,7 +1015,7 @@ export const HomeScreen = () => {
         label: 'Retirar',
         icon: 'bank',
         color: colors.offRampIcon,
-        route: () => setWithdrawSheetVisible(true),
+        route: () => openWithdrawFlow(),
       },
       {
         id: 'efectivo',
@@ -1033,7 +1025,9 @@ export const HomeScreen = () => {
         route: () => navigation.navigate('Financieras'),
       }
     ];
-  }, [activeAccount, navigation, navigateToRampOrEfectivo]);
+    // Both flows are useCallback([]) and read their options through refs, so
+    // they're referentially stable and can't go stale here.
+  }, [activeAccount, navigation, openRechargeFlow, openWithdrawFlow]);
 
   // Entrance animation - only run after initialization
   React.useEffect(() => {
@@ -1635,7 +1629,14 @@ export const HomeScreen = () => {
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={() => navigation.navigate('Savings')}
+                  onPress={() => navigation.navigate('AccountDetail', {
+                    accountType: 'cusd_plus',
+                    accountName: 'Confío Dollar+',
+                    accountSymbol: '$cUSD+',
+                    // Live figures come from the portfolio inside the screen;
+                    // this is only the first paint.
+                    accountBalance: '0.00',
+                  })}
                 >
                   <View style={styles.walletCardContent}>
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>

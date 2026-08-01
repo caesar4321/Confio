@@ -222,3 +222,110 @@ export const tryFundKoyweOffRampInBackground = async ({
     };
   }
 };
+
+// ── Savings rail (cUSD+ / USDT-BSC) ─────────────────────────────────────────
+// Koywe's savings off-ramp is the SAME provider and order flow; only the
+// funding chain differs. Koywe returns a BSC deposit address instead of an
+// Algorand one, and we pay it with USDT-BSC.
+//
+// Two legs can hold the money: minted cUSD+ shares and raw USDT that landed
+// but hasn't minted. When shares are needed, they are redeemed to the USER'S
+// OWN address first and only then transferred out in a single payment. That
+// ordering is deliberate: a failure between the two steps leaves everything in
+// the user's wallet, never a partial deposit sitting in Koywe's order.
+const EVM_ADDRESS_REGEX = /\b0x[0-9a-fA-F]{40}\b/;
+
+const extractEvmAddress = (paymentDetails: unknown): string | null => {
+  const parsed = parsePaymentDetails(paymentDetails);
+  if (!parsed) return null;
+  const candidates: string[] = [];
+  collectStringValues(parsed, candidates);
+  for (const candidate of candidates) {
+    const match = candidate.match(EVM_ADDRESS_REGEX);
+    if (match) return match[0];
+  }
+  return null;
+};
+
+export const tryFundKoyweSavingsOffRampInBackground = async ({
+  amount,
+  paymentDetails,
+  vaultAddress,
+}: {
+  amount: string | number;
+  paymentDetails: unknown;
+  /** cUSD+ vault proxy; omit when the user holds only raw USDT. */
+  vaultAddress?: string | null;
+}): Promise<FundingResult> => {
+  const destinationAddress = extractEvmAddress(paymentDetails);
+  if (!destinationAddress) {
+    return { status: 'skipped', reason: 'missing_bsc_destination' };
+  }
+
+  const parsedAmount = parseFloat(String(amount));
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return { status: 'failed', reason: 'invalid_amount', destinationAddress };
+  }
+
+  try {
+    const { installBscServerTransport } = await import('./bscServerRpc');
+    installBscServerTransport();
+    const {
+      transferUsdt, redeemSavingsToUsdt, getVaultShares, USDT_BSC,
+    } = await import('./cusdPlusVault');
+    const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
+    const { selector, encodeAddress, bscEthCall } = await import('./evmWallet');
+
+    const wallet = await getActiveEvmWallet();
+    const readUsdtWei = async (): Promise<bigint> => {
+      const hex = await bscEthCall(
+        USDT_BSC, selector('balanceOf(address)') + encodeAddress(wallet.address),
+      );
+      return BigInt(hex === '0x' ? '0x0' : hex);
+    };
+
+    // SIX-decimal precision scaled to 18dp, because that is exactly the
+    // grain the order was created at (SellScreen's formatExactTokenAmount
+    // does toFixed(6)). Rounding to cents here would fund an order for
+    // 2.995 with 3.00 — paying the provider a different number than the one
+    // it quoted, in whichever direction the rounding fell.
+    const amountWei = BigInt(Math.round(parsedAmount * 1e6)) * 10n ** 12n;
+    let usdtWei = await readUsdtWei();
+
+    if (usdtWei < amountWei) {
+      // Short on raw USDT: redeem the gap out of the vault, to OURSELVES.
+      if (!vaultAddress) {
+        return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
+      }
+      const shares = await getVaultShares(vaultAddress, wallet.address);
+      if (shares <= 0n) {
+        return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
+      }
+      // Redeem everything: the remainder re-mints on the next savings resume,
+      // and a share-slice computed off a display balance is what previously
+      // let the funded amount drift from the ordered amount.
+      const minUsdtOut = amountWei - usdtWei;
+      await redeemSavingsToUsdt({
+        vaultAddress,
+        shares,
+        minUsdtOut: (minUsdtOut * 99n) / 100n, // 1% slippage floor, as elsewhere
+        recipient: wallet.address,
+        wallet,
+      });
+      usdtWei = await readUsdtWei();
+      if (usdtWei < amountWei) {
+        return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
+      }
+    }
+
+    // ONE payment to Koywe, only once the full amount is provably in hand.
+    const res = await transferUsdt({ to: destinationAddress, amountWei, wallet });
+    return { status: 'submitted', transactionId: res.txHash, destinationAddress };
+  } catch (error: any) {
+    return {
+      status: 'failed',
+      reason: error?.message || 'unexpected_funding_error',
+      destinationAddress,
+    };
+  }
+};

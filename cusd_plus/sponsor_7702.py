@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from django.conf import settings
+from django.db.models import Q
 from django.core.cache import cache
 
 from eth_abi import encode as abi_encode
@@ -269,14 +270,19 @@ def redeem_recipient_allowed(user, recipient: str, signer: str) -> bool:
     recipient = recipient.lower()
     if recipient == signer.lower():
         return True
-    deposit_address = _guardarian_savings_deposit_address(user)
+    deposit_address = _guardarian_savings_deposit_address(user, signer)
     return bool(deposit_address) and deposit_address.lower() == recipient
 
 
-def _guardarian_savings_deposit_address(user):
-    """Deposit address of the user's newest Guardarian USDT sell still
-    awaiting funds — fetched live from Guardarian's API, never from the
-    client. (Moved from schema.py so both rails share one implementation.)"""
+def _guardarian_savings_deposit_address(user, signer: str | None = None):
+    """Deposit address of the newest Guardarian USDT sell still awaiting
+    funds — fetched live from Guardarian's API, never from the client.
+
+    Scoped to the ACCOUNT that is signing, not just the user: a user with a
+    pending personal order could otherwise authorize a redeem of BUSINESS
+    funds to that personal deposit address simply by switching account
+    context. Rows written before `account` existed carry NULL and are honored
+    only when the signer is the account that owns them."""
     try:
         from datetime import timedelta
 
@@ -285,12 +291,31 @@ def _guardarian_savings_deposit_address(user):
 
         from usdc_transactions.models import GuardarianTransaction
 
-        tx = GuardarianTransaction.objects.filter(
+        qs = GuardarianTransaction.objects.filter(
             user=user,
             from_currency__in=['USDT'],
             status__in=['new', 'waiting', 'waiting_for_deposit', 'waiting_for_customer'],
             created_at__gte=timezone.now() - timedelta(hours=24),
-        ).order_by('-created_at').first()
+        )
+        if signer:
+            # The signing account is identified by its on-chain address, which
+            # is exactly what the order's account holds. A legacy NULL-account
+            # row only counts when it belongs to that same account.
+            from users.models import Account
+            acct = Account.objects.filter(bsc_address__iexact=signer).first()
+            if acct is None:
+                return None
+            if getattr(acct, 'account_type', 'personal') == 'personal':
+                # Legacy rows (NULL account) predate attribution. Honor them
+                # only for personal signers, where user-scope and account-scope
+                # are the same thing anyway.
+                qs = qs.filter(Q(account=acct) | Q(account__isnull=True, user=acct.user))
+            else:
+                # A BUSINESS redeem needs an order explicitly attributed to
+                # that business account. Falling back to user-scope here is
+                # precisely how a personal order could drain business funds.
+                qs = qs.filter(account=acct)
+        tx = qs.order_by('-created_at').first()
         if not tx:
             return None
         api_key = getattr(settings, 'GUARDARIAN_API_KEY', None)

@@ -5,9 +5,9 @@
 // gmHoldings returns the account's tokenized-stock positions (server-side
 // Multicall3 scan of the GM universe — the chain is the registry — priced
 // from the cached GM market payload).
-// Movements LIVE since 2026-07-31: cusdPlusMovements is the server-side
-// display ledger (CusdPlusMovement rows written by confirm tasks and the
-// inbound scanner, idempotent on reference).
+// Movements are NOT here: cUSD+/USDT activity lives in the unified
+// transaction ledger like every other rail, and renders through
+// AccountDetailScreen's Historial. There is no second ledger.
 //
 // Notes:
 // - savings.netApyPct is SERVER-derived LIVE from Ondo's on-chain oracle:
@@ -44,13 +44,6 @@ const GET_AHORRO_PORTFOLIO = gql`
       valueUsd
       dayChangePct
     }
-    cusdPlusMovements(limit: 20) {
-      id
-      movementType
-      title
-      amountUsd
-      createdAt
-    }
   }
 `;
 
@@ -62,25 +55,6 @@ export interface StockPosition {
   units: number;
   valueUsd: number;
   dayChangePct: number;
-}
-
-// Every type here is a real money movement with a row behind it. Yield is
-// deliberately absent: it accrues passively and continuously, so it surfaces
-// as balance growth (and the "hoy +$X" delta), never as a ledger row.
-export type SavingsMovementType =
-  | 'deposit' // Recargaste (Ahorrar — conversion into the vault)
-  | 'withdraw' // Retiraste (→ USDT or bank)
-  | 'send' // Enviaste (cUSD+/USDT to someone)
-  | 'receive' // Recibiste (internal rail, or an external on-chain deposit)
-  | 'payment' // Pagaste (a business)
-  | 'payroll'; // Nómina
-
-export interface SavingsMovement {
-  id: string;
-  type: SavingsMovementType;
-  title: string; // e.g. 'Ahorraste', 'Recibiste de Ana'
-  amountUsd: number; // signed: inflows to savings positive
-  createdAt: string; // ISO
 }
 
 export interface SavingsPortfolio {
@@ -101,7 +75,6 @@ export interface SavingsPortfolio {
     earnedTodayUsd: number;
     positions: StockPosition[];
   };
-  movements: SavingsMovement[];
   /** Raw wallet USDT-BSC: landed-but-not-minted money (eligible users,
    *  transient) or the whole "Confío Dollar" balance (geo-ineligible users).
    *  TOP-LEVEL on purpose — never part of savings.balanceUsd, which caps the
@@ -116,10 +89,15 @@ export interface SavingsPortfolio {
   /** Force a network refetch (pull-to-refresh). Server-side balance caches
    *  are ~30s, so this is "as fresh as the server will serve". */
   refetch: () => Promise<unknown>;
+  /** True until the FIRST result lands. Every balance above defaults to 0,
+   *  so callers that must tell "loaded and empty" from "not loaded yet" —
+   *  a send button choosing between "Saldo insuficiente" and "Cargando…" —
+   *  have to read this rather than test for 0. */
+  loading: boolean;
 }
 
 export const useSavingsPortfolio = (): SavingsPortfolio => {
-  const { data, refetch } = useQuery(GET_AHORRO_PORTFOLIO, {
+  const { data, refetch, loading } = useQuery(GET_AHORRO_PORTFOLIO, {
     fetchPolicy: 'cache-and-network',
     pollInterval: 60_000, // matches the server-side GM cache TTL
   });
@@ -172,23 +150,18 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
     };
     // Server display ledger, newest first. Unknown future types render as
     // neutral rows rather than crashing an old client.
-    const movements: SavingsMovement[] = (data?.cusdPlusMovements ?? []).map((m: any) => ({
-      id: m.id,
-      type: m.movementType as SavingsMovementType,
-      title: m.title,
-      amountUsd: m.amountUsd,
-      createdAt: m.createdAt,
-    }));
     return {
       savings,
       stocks,
-      movements,
       usdtBalanceUsd: summary?.usdtBalanceUsd ?? 0,
       usdtBalanceWei: summary?.usdtBalanceWei ?? '0',
       totalUsd: savings.balanceUsd + stocks.totalUsd,
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
       refetch,
+      // cache-and-network keeps `loading` true on background refreshes, so
+      // anchor on "no data yet" — a cached balance is a usable balance.
+      loading: loading && !data,
     };
-  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch]);
+  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch, loading]);
 };

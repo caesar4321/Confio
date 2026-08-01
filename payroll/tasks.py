@@ -11,23 +11,6 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
-def _movement(account, movement_type, title, amount_usd, tx_hash, reference):
-    from cusd_plus.models import CusdPlusMovement
-    if account is None:
-        return
-    try:
-        CusdPlusMovement.objects.get_or_create(
-            reference=reference,
-            defaults={
-                'account': account,
-                'movement_type': movement_type,
-                'title': title,
-                'amount_usd': amount_usd,
-                'tx_hash': tx_hash or '',
-            },
-        )
-    except Exception:  # noqa: BLE001 — ledger failure must not fail the payout
-        logger.exception('payroll movement write failed for %s', reference)
 
 
 def _notify_parties(item) -> None:
@@ -123,17 +106,6 @@ def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
             bsc_address__iexact=payout.get('business') or '',
             deleted_at__isnull=True).first()
         gross = Decimal(item.net_amount) + Decimal(item.fee_amount or 0)
-        _movement(
-            business_account, 'payroll',
-            f'Nómina a {item.recipient_user.get_full_name() or "empleado"}',
-            -gross, item.transaction_hash, f'payroll_item:{item.id}:out',
-        )
-        _movement(
-            item.recipient_account, 'payroll',
-            f'Nómina de {business.name}',
-            Decimal(item.net_amount), item.transaction_hash,
-            f'payroll_item:{item.id}:in',
-        )
         _notify_parties(item)
         _settle_run(item.run)
         logger.info('[PAYROLL][BSC] %s confirmed: %s', item.internal_id,

@@ -124,6 +124,13 @@ export const SendToFriendScreen = () => {
     }).catch(() => { }).finally(() => mounted && setBalanceLoading(false));
     return () => { mounted = false; };
   }, [tokenType]);
+  // Readiness must follow the BALANCE SOURCE, not one hardcoded query:
+  // cusd_plus reads the savings portfolio and deliberately never fills
+  // balanceSnapshot, so gating the button on that snapshot left it stuck on
+  // "Cargando saldo…" forever.
+  const balanceReady = tokenType === 'cusd_plus'
+    ? !savingsPortfolio.loading
+    : balanceSnapshot != null;
   const availableBalance = React.useMemo(() => {
     if (tokenType === 'cusd_plus') {
       // max(), not sum: the server funds a send from ONE leg (vault shares
@@ -379,12 +386,12 @@ export const SendToFriendScreen = () => {
           </View>
 
           <Button
-            title={balanceSnapshot == null ? 'Cargando saldo…' :
+            title={!balanceReady ? 'Cargando saldo…' :
               parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' :
                 `Enviar a ${friend.name}`}
             onPress={handleSend}
             loading={isProcessing}
-            disabled={!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance}
+            disabled={!balanceReady || !amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance}
             accessibilityLabel={`Enviar ${amount || ''} a ${friend.name}`}
             style={{ backgroundColor: config.color }}
           />

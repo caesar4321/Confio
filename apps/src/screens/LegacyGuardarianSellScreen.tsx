@@ -104,8 +104,19 @@ export const SellScreen = () => {
     // (redeemToUsdt pays Guardarian's deposit address — no intermediate hop).
     // Default mode sells USDC-Algorand from the day-to-day balance.
     const isSavings = route.params?.destination === 'cusd_plus';
-    const { savings } = useSavingsPortfolio();
+    const { savings, usdtBalanceUsd } = useSavingsPortfolio();
     const savingsBalanceUsd = savings?.balanceUsd ?? 0;
+    // Ondo-ineligible users hold the plain dollar as RAW USDT and never mint
+    // vault shares — their money must still reach a bank. max(), not sum:
+    // one withdrawal moves ONE leg (redeem shares, or transfer USDT), so
+    // summing would promise a figure no single operation can deliver.
+    const rawUsdtUsd = usdtBalanceUsd ?? 0;
+    const withdrawableUsd = Math.max(savingsBalanceUsd, rawUsdtUsd);
+    // Copy has to match the product the money actually IS. An Ondo-ineligible
+    // user holds plain Confío Dollar (USDT) and has no vault at all, so
+    // "ahorro"/"bóveda" would be a lie on every screen of this flow.
+    const isYieldUser = Boolean(savings?.enabled);
+    const balanceNoun = isYieldUser ? 'ahorro' : 'saldo';
     const { data: savingsParamsData } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavings });
     const vaultAddress: string = savingsParamsData?.cusdPlusConvertParams?.vaultAddress || '';
     const [sendingFromSavings, setSendingFromSavings] = useState(false);
@@ -215,8 +226,8 @@ export const SellScreen = () => {
     const [depositMemo, setDepositMemo] = useState('');
     const [orderId, setOrderId] = useState<number | undefined>(undefined);
 
-    // Whitelist of currencies that Guardarian supports for USDC-ALGO sells
-    // Based on testing and Guardarian's API limitations
+    // Whitelist of currencies that Guardarian supports for sells.
+    // Based on testing and Guardarian's API limitations.
     const SELL_SUPPORTED = ['EUR', 'MXN', 'CLP', 'COP', 'ARS', 'BRL'];
     const isCountrySupportedForSell = SELL_SUPPORTED.includes(derivedCurrencyCode);
 
@@ -258,10 +269,10 @@ export const SellScreen = () => {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
             return;
         }
-        if (isSavings && parsedAmount > savingsBalanceUsd) {
+        if (isSavings && parsedAmount > withdrawableUsd) {
             Alert.alert(
                 'Saldo insuficiente',
-                `Tu ahorro disponible es $${savingsBalanceUsd.toFixed(2)}.`,
+                `Tu saldo disponible es $${withdrawableUsd.toFixed(2)}.`,
             );
             return;
         }
@@ -379,7 +390,10 @@ export const SellScreen = () => {
         if (!depositAddress || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
             return;
         }
-        if (!vaultAddress) {
+        // No vault address is only fatal when there's nothing else to send:
+        // an Ondo-ineligible user has no vault at all, and their raw USDT
+        // withdrawal never touches one.
+        if (!vaultAddress && !(rawUsdtUsd > 0)) {
             Alert.alert('Error', 'No pudimos cargar tu bóveda de ahorro. Cierra y vuelve a intentar.');
             return;
         }
@@ -394,33 +408,77 @@ export const SellScreen = () => {
         setSendingFromSavings(true);
         try {
             const wallet = await getActiveEvmWallet();
-            const shares = await getVaultShares(vaultAddress, wallet.address);
-            if (shares <= 0n) {
-                throw new Error('Tu ahorro no tiene saldo en la bóveda todavía.');
+            const shares = vaultAddress
+                ? await getVaultShares(vaultAddress, wallet.address)
+                : 0n;
+            // Two legs, one withdrawal. Vault shares are the yield position;
+            // raw USDT is what Ondo-ineligible users hold (and what an
+            // eligible user's deposit looks like before it mints). Pick the
+            // leg on a STRICT comparison: an epsilon here would let a $10.01
+            // order pick a $10.00 vault and then fund only $10.00, so the
+            // order and the transfer would disagree by up to a cent.
+            const useVault = shares > 0n && savingsBalanceUsd > 0
+                && parsedAmount <= savingsBalanceUsd;
+            if (!useVault && !(rawUsdtUsd > 0)) {
+                throw new Error(`No tienes ${balanceNoun} disponible para retirar.`);
             }
-            if (!(savingsBalanceUsd > 0)) {
-                throw new Error('No pudimos leer tu saldo de ahorro. Intenta de nuevo.');
+            if (useVault) {
+                // Proportional share slice; a near-full amount redeems
+                // everything so rounding dust never strands in the vault.
+                // Safe in this direction only: it sends slightly MORE than
+                // the order, never less.
+                const sharesToRedeem = parsedAmount >= savingsBalanceUsd - 0.01
+                    ? shares
+                    : (shares * BigInt(Math.round(parsedAmount * 1e6)))
+                        / BigInt(Math.round(savingsBalanceUsd * 1e6));
+                if (sharesToRedeem <= 0n) {
+                    throw new Error('El monto es demasiado pequeño.');
+                }
+                // USDT-BSC is 18 decimals; floor the payout 1% under the quote.
+                const minUsdtOut = BigInt(Math.round(parsedAmount * 0.99 * 1e6)) * 10n ** 12n;
+                await redeemSavingsToUsdt({
+                    vaultAddress,
+                    shares: sharesToRedeem,
+                    minUsdtOut,
+                    recipient: depositAddress,
+                    wallet,
+                });
+            } else {
+                // LIVE balance, not the cached display figure: cusdPlusSummary
+                // is explicitly display-grade, and funding an order off a stale
+                // or cent-rounded number either underpays Guardarian or reverts
+                // on-chain AFTER the order exists. Same pattern SendUsdtScreen
+                // uses before an exact transfer.
+                const { transferUsdt, USDT_BSC } = await import('../services/cusdPlusVault');
+                const { selector, encodeAddress, bscEthCall } = await import('../services/evmWallet');
+                const balHex = await bscEthCall(
+                    USDT_BSC,
+                    selector('balanceOf(address)') + encodeAddress(wallet.address),
+                );
+                const balWei = BigInt(balHex === '0x' ? '0x0' : balHex);
+                // SIX decimals scaled to 18dp — the grain the Guardarian
+                // order was created at. Cent rounding here would send a
+                // different amount than the order says (the vault leg above
+                // already uses 1e6 for exactly this reason).
+                let amountWei = BigInt(Math.round(parsedAmount * 1e6)) * 10n ** 12n;
+                if (amountWei > balWei) {
+                    // Only a sub-cent shortfall is dust to absorb; anything
+                    // larger means the order was quoted against money that
+                    // isn't there, so refuse instead of underfunding it.
+                    if (amountWei - balWei > 10n ** 16n) {
+                        throw new Error(
+                            `Tu saldo disponible es $${(Number(balWei / 10n ** 14n) / 100).toFixed(2)}.`,
+                        );
+                    }
+                    amountWei = balWei;
+                }
+                if (amountWei <= 0n) {
+                    throw new Error('El monto es demasiado pequeño.');
+                }
+                await transferUsdt({ to: depositAddress, amountWei, wallet });
             }
-            // Proportional share slice; a near-full amount redeems everything
-            // so rounding dust never strands in the vault.
-            const sharesToRedeem = parsedAmount >= savingsBalanceUsd - 0.01
-                ? shares
-                : (shares * BigInt(Math.round(parsedAmount * 1e6)))
-                    / BigInt(Math.round(savingsBalanceUsd * 1e6));
-            if (sharesToRedeem <= 0n) {
-                throw new Error('El monto es demasiado pequeño.');
-            }
-            // USDT-BSC is 18 decimals; floor the payout 1% under the quote.
-            const minUsdtOut = BigInt(Math.round(parsedAmount * 0.99 * 1e6)) * 10n ** 12n;
-            await redeemSavingsToUsdt({
-                vaultAddress,
-                shares: sharesToRedeem,
-                minUsdtOut,
-                recipient: depositAddress,
-                wallet,
-            });
             Alert.alert(
-                'Enviado desde tu ahorro',
+                `Enviado desde tu ${balanceNoun}`,
                 'Guardarian recibirá tus fondos en unos minutos y depositará en tu banco. Puedes seguir el estado en tu historial.',
             );
             navigation.navigate('RampHistory', { initialFilter: 'off_ramp' });
@@ -466,11 +524,11 @@ export const SellScreen = () => {
                     </View>
 
                     <Text style={styles.successTitle}>
-                        {isSavings ? 'Retira desde tu ahorro' : 'Envía tus USDC'}
+                        {isSavings ? `Retira desde tu ${balanceNoun}` : 'Envía tus USDC'}
                     </Text>
                     <Text style={styles.successSubtitle}>
                         {isSavings
-                            ? `Enviaremos ${amount} US$ directo desde tu bóveda de ahorro a la orden de Guardarian:`
+                            ? `Enviaremos ${amount} US$ directo desde tu ${balanceNoun} a la orden de Guardarian:`
                             : `Enviaremos ${amount} USDC por ti a la orden de Guardarian:`}
                     </Text>
 
@@ -494,7 +552,7 @@ export const SellScreen = () => {
                         <Icon name="alert-triangle" size={20} color={colors.offRampIcon} style={styles.warningIcon} />
                         <Text style={styles.warningText}>
                             {isSavings
-                                ? 'Completa primero tus datos bancarios en Guardarian; luego toca "Enviar desde mi ahorro" y confirmamos el envío por ti.'
+                                ? `Completa primero tus datos bancarios en Guardarian; luego toca "Enviar desde mi ${balanceNoun}" y confirmamos el envío por ti.`
                                 : 'Completa primero tus datos bancarios en Guardarian; luego toca "Enviar mis fondos" y lo enviamos por ti — sin copiar direcciones.'}
                         </Text>
                     </View>
@@ -509,7 +567,7 @@ export const SellScreen = () => {
                                 <ActivityIndicator color={colors.white} />
                             ) : (
                                 <>
-                                    <Text style={styles.ctaButtonText}>Enviar desde mi ahorro</Text>
+                                    <Text style={styles.ctaButtonText}>{`Enviar desde mi ${balanceNoun}`}</Text>
                                     <Icon name="arrow-right" size={20} color={colors.white} />
                                 </>
                             )}
@@ -539,7 +597,7 @@ export const SellScreen = () => {
         <View style={styles.container}>
             <Header
                 navigation={navigation as any}
-                title={isSavings ? 'Retirar mi ahorro' : 'Vender USDC'}
+                title={isSavings ? `Retirar mi ${balanceNoun}` : 'Vender USDC'}
                 backgroundColor={colors.primary}
                 isLight
                 showBackButton
@@ -630,7 +688,7 @@ export const SellScreen = () => {
                         <Icon name="arrow-down" size={14} color={colors.offRampIcon} />
                         <Text style={styles.conversionText}>
                             {isSavings
-                                ? `Disponible en tu ahorro: $${savingsBalanceUsd.toFixed(2)}`
+                                ? `Disponible para retirar: $${withdrawableUsd.toFixed(2)}`
                                 : 'Recibirás moneda local en tu banco'}
                         </Text>
                     </View>
@@ -698,6 +756,7 @@ export const SellScreen = () => {
             <PreFlightModal
                 visible={showPreFlightModal}
                 type="sell"
+                ticker={sellTicker}
                 onCancel={() => setShowPreFlightModal(false)}
                 onContinue={handleProceedToGuardarian}
             />
@@ -705,6 +764,7 @@ export const SellScreen = () => {
             {/* Guardarian Return Modal */}
             <GuardarianReturnModal
                 visible={showGuardarianReturnModal}
+                ticker={sellTicker}
                 onContinueSend={async () => {
                     setShowGuardarianReturnModal(false);
                     setAwaitingGuardarianReturn(false);

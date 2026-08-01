@@ -39,58 +39,9 @@ class CusdPlusSummaryType(graphene.ObjectType):
     confio_balance = graphene.Float(description="BEP-20 CONFIO held by the account (token count, not USD) — display-grade; 0 until the token address is configured")
 
 
-class CusdPlusMovementType(graphene.ObjectType):
-    """One row of savings history — Recargar/Retirar (conversions) plus the
-    money rails that settle in cUSD+/USDT (send, receive, payment, payroll).
-    Yield is passive and automatic: it shows up as balance growth, never as
-    a row."""
-    id = graphene.ID()
-    movement_type = graphene.String(
-        description="deposit | withdraw | send | receive | payment | payroll")
-    title = graphene.String()
-    amount_usd = graphene.Float(description="Signed: inflows to savings positive")
-    created_at = graphene.DateTime()
-    tx_hash = graphene.String(description="BSC transaction hash, '' when the row predates hash capture")
-    source_type = graphene.String(
-        description="Rail that produced this row (conversion | send | payment | payroll), "
-                    "null for externally-scanned inbound deposits which have no source record")
-    source_id = graphene.String(description="Primary key / internal id of the source row, null when source_type is null")
 
 
-# reference is written as '<rail>:<id>[:<leg>]' by the confirm tasks, or
-# 'scan_cusdp:<txhash>:<logIndex>' by the inbound scanner (external deposit —
-# no source row exists, so it stays unlinked). Parsing here keeps the raw
-# idempotency string server-side; the client only ever sees the resolved pair.
-_MOVEMENT_SOURCE_RAILS = {
-    'conversion': 'conversion',
-    'send_transaction': 'send',
-    'payment_transaction': 'payment',
-    'payroll_item': 'payroll',
-}
 
-
-def _movement_source(reference):
-    """('conversion', '<id>') for rail rows, (None, None) for scanner rows."""
-    prefix, _, rest = (reference or '').partition(':')
-    rail = _MOVEMENT_SOURCE_RAILS.get(prefix)
-    if rail is None or not rest:
-        return None, None
-    # Strip the ':out'/':in' leg suffix; ids themselves never contain ':'.
-    return rail, rest.split(':', 1)[0] or None
-
-
-def _movement_type(m):
-    source_type, source_id = _movement_source(m.reference)
-    return CusdPlusMovementType(
-        id=str(m.id),
-        movement_type=m.movement_type,
-        title=m.title,
-        amount_usd=float(m.amount_usd),
-        created_at=m.created_at,
-        tx_hash=m.tx_hash or '',
-        source_type=source_type,
-        source_id=source_id,
-    )
 
 
 class CusdPlusConvertParamsType(graphene.ObjectType):
@@ -186,16 +137,6 @@ def _sparkline(history: list, points: int = 24) -> list:
 
 class Query(graphene.ObjectType):
     cusd_plus_summary = graphene.Field(CusdPlusSummaryType)
-    cusd_plus_movements = graphene.List(
-        graphene.NonNull(CusdPlusMovementType),
-        limit=graphene.Int(default_value=20),
-        offset=graphene.Int(default_value=0),
-    )
-    cusd_plus_movement = graphene.Field(
-        CusdPlusMovementType,
-        id=graphene.ID(required=True),
-        description="One ledger row for the JWT account — backs the movement detail screen",
-    )
     cusd_plus_convert_params = graphene.Field(CusdPlusConvertParamsType)
     cusd_plus_conversions_in_flight = graphene.List(
         graphene.NonNull(lambda: CusdPlusConversionType),
@@ -418,37 +359,6 @@ class Query(graphene.ObjectType):
             usdt_balance_wei=str(usdt_wei_int),
             confio_balance=confio_wei_int / (10 ** 18),
         )
-
-    def resolve_cusd_plus_movements(self, info, limit=20, offset=0):
-        """Paginated ledger rows for the JWT account, newest first — the
-        display ledger behind SavingsScreen's Movimientos (CusdPlusMovement:
-        rows written by confirm tasks/scanner, idempotent on reference)."""
-        from .models import CusdPlusMovement
-        user = getattr(info.context, 'user', None)
-        if not user or not user.is_authenticated:
-            return []
-        account = _active_account(info)
-        if account is None:
-            return []
-        limit = max(1, min(int(limit or 20), 100))
-        offset = max(0, int(offset or 0))
-        rows = CusdPlusMovement.objects.filter(account=account)[offset:offset + limit]
-        return [_movement_type(m) for m in rows]
-
-    def resolve_cusd_plus_movement(self, info, id):
-        """One ledger row, scoped to the JWT account — backs the movement
-        detail screen. Isolated from cusdPlusMovements on purpose: the hub's
-        portfolio query must never gain fields that would fail it wholesale
-        against a server that predates them."""
-        from .models import CusdPlusMovement
-        user = getattr(info.context, 'user', None)
-        if not user or not user.is_authenticated:
-            return None
-        account = _active_account(info)
-        if account is None:
-            return None
-        m = CusdPlusMovement.objects.filter(account=account, id=id).first()
-        return _movement_type(m) if m is not None else None
 
     def resolve_cusd_plus_conversions_in_flight(self, info):
         from .models import CusdPlusConversion
@@ -676,33 +586,6 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
             # the next summary shows the new position, not a 30s-old one.
             from . import vault
             vault.invalidate_position(conv.user_bsc_address)
-            # Display-ledger row (Movimientos). Idempotent on the
-            # conversion reference: replays/retries of this mutation can
-            # never duplicate. Signed amounts: into savings positive.
-            try:
-                from users.models import Account
-                from .models import CusdPlusMovement
-                account = Account.objects.filter(
-                    bsc_address__iexact=conv.user_bsc_address,
-                    deleted_at__isnull=True,
-                ).first()
-                if account is not None:
-                    into_savings = conv.direction == 'to_savings'
-                    CusdPlusMovement.objects.get_or_create(
-                        reference=f'conversion:{conv.internal_id}',
-                        defaults={
-                            'account': account,
-                            'movement_type': 'deposit' if into_savings else 'withdraw',
-                            'title': 'Ahorraste' if into_savings else 'Retiraste',
-                            'amount_usd': (conv.quoted_receive_usd
-                                           if into_savings else -conv.quoted_receive_usd),
-                            'tx_hash': conv.dest_tx_hash or '',
-                        },
-                    )
-            except Exception:  # noqa: BLE001 — ledger must not fail the mint report
-                import logging
-                logging.getLogger(__name__).exception(
-                    'movement write failed for conversion %s', conv.internal_id)
         conv.save(update_fields=update)
         from .unified import sync_unified_from_cusd_plus_conversion
         sync_unified_from_cusd_plus_conversion(conv)
@@ -927,6 +810,25 @@ class SponsorBscBatch(graphene.Mutation):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return SponsorBscBatch(success=False, error='auth_required')
+
+        # Business accounts: this batch MOVES MONEY, so it must clear the same
+        # permission the send rail requires (send/schema.py asks for
+        # 'send_funds'). Without this the generic batch was a hole straight
+        # through both that check and the owner-only ramp rule: _active_bsc_address
+        # resolves the BUSINESS address for any employee's JWT (via
+        # _active_account, which validates with required_permission=None), and
+        # the policy's USDT.transfer recipient is deliberately unrestricted
+        # ("exits are never gated" — true of GEOGRAPHY, not of authority). An
+        # employee could redeem business shares and transfer the USDT out in
+        # one batch. Personal contexts are unaffected: the permission check in
+        # get_jwt_business_context_with_validation only applies to business ones.
+        from users.jwt_context import get_jwt_business_context_with_validation
+        _ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+        if _ctx and _ctx.get('account_type') == 'business':
+            if not get_jwt_business_context_with_validation(
+                    info, required_permission='send_funds'):
+                return SponsorBscBatch(success=False, error='permission_denied')
+
         if not getattr(settings, 'CUSD_PLUS_7702_ENABLED', False):
             return SponsorBscBatch(success=False, error='disabled')
         if not sponsor_7702.delegate_address():

@@ -41,6 +41,7 @@ import { AddressScannerModal } from '../components/AddressScannerModal';
 import { evmAccountKey, getEvmAddressForDisplay, getActiveEvmWallet } from '../services/secureDeterministicWallet';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { emergencyStore } from '../services/emergencyExit/store';
+import { wrongNetworkMessage } from '../utils/addressNetwork';
 import {
   RosterAccount, rosterAccountKey, getAccountRoster, exitableAccounts,
 } from '../services/emergencyExit/accountRoster';
@@ -654,6 +655,14 @@ export const EmergencyExitScreen: React.FC = () => {
                   <Icon name="camera" size={15} color={colors.primaryDark} />
                 </TouchableOpacity>
               </View>
+              {!!bscDest && !bscDestValid && wrongNetworkMessage(bscDest, 'bsc') && (
+                <View style={styles.chainWarnRow}>
+                  <Icon name="alert-triangle" size={13} color={colors.warning.text} />
+                  <Text style={styles.chainWarnText}>
+                    {wrongNetworkMessage(bscDest, 'bsc')}
+                  </Text>
+                </View>
+              )}
               {bscDestValid && (
                 <View style={styles.chainWarnRow}>
                   <Icon name="check-circle" size={13} color={colors.primaryDark} />
@@ -769,6 +778,7 @@ export const EmergencyExitScreen: React.FC = () => {
       </KeyboardAvoidingView>
 
       <AddressScannerModal
+        network="bsc"
         visible={scanVisible}
         onClose={() => setScanVisible(false)}
         onScanned={(addr: string) => {

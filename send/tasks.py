@@ -3,7 +3,7 @@ Celery tasks for BSC sends — the receipt-resolution half of send/bsc_flow.
 
 confirm_bsc_send follows the SponsoredBatch row (whose own receipt task
 handles revert and the 7702 silent no-op) and settles the SendTransaction:
-CONFIRMED → ledger movements (CusdPlusMovement) + SEND_SENT/SEND_RECEIVED
+CONFIRMED → SEND_SENT/SEND_RECEIVED notifications
 pushes (payload parity with the Algorand sweeper in blockchain/tasks.py);
 reverted/noop_failed → FAILED (funds untouched; the client retries).
 """
@@ -29,24 +29,6 @@ def _account_for_bsc_address(addr: str):
     return Account.objects.filter(bsc_address__iexact=addr).first()
 
 
-def _movement(account, movement_type, title, amount_usd, tx_hash, reference):
-    """Idempotent ledger write (unique reference) — display ledger only."""
-    from cusd_plus.models import CusdPlusMovement
-    if account is None:
-        return
-    try:
-        CusdPlusMovement.objects.get_or_create(
-            reference=reference,
-            defaults={
-                'account': account,
-                'movement_type': movement_type,
-                'title': title,
-                'amount_usd': amount_usd,
-                'tx_hash': tx_hash or '',
-            },
-        )
-    except Exception:  # noqa: BLE001 — ledger failure must not fail the send
-        logger.exception('movement write failed for %s', reference)
 
 
 def _notify_send_parties(s) -> None:
@@ -137,22 +119,6 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
         s.save(update_fields=['status', 'updated_at'])
         # unified row updates via the post_save signal
         token = TOKEN_DISPLAY.get((s.token_type or '').upper(), s.token_type)
-        # CusdPlusMovement is the DOLLAR display ledger (amount_usd) — a
-        # CONFIO send is a token count, not USD, so it never writes there.
-        if s.token_type != 'CONFIO':
-            sender_account = _account_for_bsc_address(s.sender_address)
-            _movement(
-                sender_account, 'send',
-                f'Enviaste a {s.recipient_display_name or "un contacto"}',
-                -s.amount, s.transaction_hash, f'send_transaction:{s.id}:out',
-            )
-            if s.recipient_user_id or s.recipient_business_id:
-                recipient_account = _account_for_bsc_address(s.recipient_address)
-                _movement(
-                    recipient_account, 'receive',
-                    f'Recibiste de {s.sender_display_name or "un contacto"}',
-                    s.amount, s.transaction_hash, f'send_transaction:{s.id}:in',
-                )
         _notify_send_parties(s)
         logger.info('[SEND][BSC] %s confirmed (%s %s): %s',
                     s.internal_id, s.amount, token, s.transaction_hash)

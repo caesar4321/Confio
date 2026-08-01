@@ -15,6 +15,7 @@ import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { AddressScannerModal } from '../components/AddressScannerModal';
+import { isAddressForNetwork, wrongNetworkMessage } from '../utils/addressNetwork';
 
 type TokenType = 'cusd' | 'confio' | 'usdc';
 
@@ -151,7 +152,11 @@ export const SendWithAddressScreen = () => {
     } catch { }
   };
 
-  const isValidAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
+  const isValidAddress = isAddressForNetwork(destination, 'algorand');
+  // A 0x paste here used to be explained as a "Sui (legacy)" address. Sui is
+  // gone; today it means the user grabbed their BNB Smart Chain address by
+  // mistake, which is worth saying plainly.
+  const wrongChainMessage = wrongNetworkMessage(destination, 'algorand');
 
   // Background preflight via WS when valid Algorand address and amount provided
   useEffect(() => {
@@ -205,13 +210,13 @@ export const SendWithAddressScreen = () => {
     const isSuiAddress = destination.startsWith('0x') && destination.match(/^0x[0-9a-f]{64}$/); // Legacy Sui support
 
     if (!isAlgorandAddress && !isSuiAddress) {
-      if (destination.startsWith('0x')) {
-        // Attempted legacy Sui address
-        if (destination.length < 66) {
-          setErrorMessage('La dirección Sui (legacy) debe tener 64 caracteres hexadecimales después de 0x');
-        } else {
-          setErrorMessage('La dirección contiene caracteres inválidos. Use solo 0-9 y a-f');
-        }
+      if (wrongChainMessage) {
+        setErrorMessage(wrongChainMessage);
+      } else if (destination.startsWith('0x')) {
+        setErrorMessage(
+          'Esa parece una dirección BNB Smart Chain incompleta. '
+          + 'Para este envío necesitas una de Algorand (58 caracteres, A–Z y 2–7).',
+        );
       } else if (destination.length === 58) {
         // Attempted Algorand address
         setErrorMessage('La dirección Algorand debe contener solo letras mayúsculas y números 2-7');
@@ -411,6 +416,10 @@ export const SendWithAddressScreen = () => {
                 <Icon name="check-circle" size={13} color={colors.success} />
                 <Text style={styles.addressValidText}>Dirección válida</Text>
               </View>
+            ) : wrongChainMessage ? (
+              <Text style={[styles.addressHelp, styles.addressWrongChain]}>
+                {wrongChainMessage}
+              </Text>
             ) : (
               <Text style={styles.addressHelp}>
                 {destination.length}/58 caracteres · solo A–Z y 2–7
@@ -443,6 +452,7 @@ export const SendWithAddressScreen = () => {
       </View>
 
       <AddressScannerModal
+        network="algorand"
         visible={showScanner}
         onClose={() => setShowScanner(false)}
         onScanned={(address) => setDestination(address)}
@@ -639,6 +649,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  addressWrongChain: { color: colors.warning.text, fontWeight: '600' },
   addressHelp: {
     fontSize: 12,
     color: colors.text.secondary,

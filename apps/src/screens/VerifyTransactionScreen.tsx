@@ -7,6 +7,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { technicalFontFamily } from '../utils/fontFamily';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 type VerifyScreenRouteProp = RouteProp<MainStackParamList, 'VerifyTransaction'>;
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'VerifyTransaction'>;
@@ -167,7 +168,7 @@ export const VerifyTransactionScreen = () => {
                                 <Text style={styles.amountLabel}>Monto</Text>
                                 <Text style={styles.amountValue}>
                                     {result.amount} <Text style={styles.currency}>
-                                        {result.currency === 'CUSD' ? 'cUSD' : result.currency}
+                                        {formatTokenLabel(result.currency)}
                                     </Text>
                                 </Text>
                                 <Text style={styles.date}>{new Date(result.timestamp).toLocaleString()}</Text>

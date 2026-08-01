@@ -128,6 +128,13 @@ interface TransactionData {
   idempotencyKey?: string; // Pass idempotency key from calling screen
   transactionId?: string; // Store transaction ID after successful processing
   tokenType?: string; // For blockchain transactions (CUSD, CONFIO)
+  // BSC sponsored rail (send/bsc_flow.py). `bscSend` routes to the 7702
+  // batch instead of the Algorand path. `bscTokenType` names an EXPLICIT
+  // token shape (D/E) and must stay undefined for a dollar-value send —
+  // that's what lets the server keep its eligibility fork (cUSD+ to an
+  // eligible Confío recipient, atomic redeem-to-USDT for everyone else).
+  bscSend?: boolean;
+  bscTokenType?: 'CUSD_PLUS' | 'CONFIO';
   senderName?: string;
   sender?: string;
   recipientName?: string;
@@ -285,11 +292,20 @@ export const TransactionProcessingScreen = () => {
 
   useEffect(() => {
     if (!bioChecked) return;
-    // Watchdog: fail fast if processing stalls
+    // Watchdog: fail fast if processing stalls. It must sit ABOVE the rail's
+    // own timeout, never below it — declaring failure while the send is still
+    // in flight is worse than waiting, because the user goes back, retries,
+    // and the minute-keyed idempotency key has rolled by then: two sends.
+    // Algorand settles in seconds. A BSC sponsored send legitimately runs
+    // much longer (prepare + sign + submit + bscWaitForReceipt, which alone
+    // polls 60x2s = 120s before throwing its own, better-worded error), so
+    // the backstop only fires once that has had its chance.
+    const watchdogMs = (transactionData as any)?.bscSend ? 180000 : 20000;
     const watchdog = setTimeout(() => {
-      if (isComplete) return;      setTransactionError('La transacción tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
+      if (isComplete) return;
+      setTransactionError('La transacción tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
       setIsComplete(true);
-    }, 20000);
+    }, watchdogMs);
 
     return () => clearTimeout(watchdog);
   }, [bioChecked, isComplete]);
@@ -734,15 +750,23 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
-    // BSC dollar send (cUSD+/USDT via sponsored 7702) — server picks the
-    // call shape; this screen just signs and reports. Only offered for
-    // recipients already on Confío (invites stay on the Algorand rail).
+    // BSC send (cUSD+/USDT/CONFIO via sponsored 7702) — the server picks the
+    // call shape; this screen just signs and reports. Reached from the
+    // contact send (dollar value, recipient on Confío) and from the
+    // address send (which may also name an explicit token). Invites still
+    // stay on the Algorand rail.
     const processBscSponsoredSend = async () => {
       const { sendBscDollar, BSC_SEND_ERRORS } = await import('../services/bscSend');
+      // Every BSC RPC (nonce reads, receipt polling) goes through our server,
+      // never a public node — the transport is a module-level singleton, so
+      // installing here covers entries that reached this screen without
+      // passing through a savings flow first.
+      const { installBscServerTransport } = await import('../services/bscServerRpc');
+      installBscServerTransport();
       try {
         setCurrentStep(1);
         setCurrentStep(2);
-        await sendBscDollar({
+        const res = await sendBscDollar({
           amount: transactionData.amount,
           recipientUserId: transactionData.recipientUserId,
           recipientPhone: transactionData.recipientUserId
@@ -751,7 +775,19 @@ export const TransactionProcessingScreen = () => {
           recipientAddress: (transactionData as any).recipientAddress,
           memo: transactionData.memo || '',
           idempotencyKey: transactionData.idempotencyKey,
+          tokenType: transactionData.bscTokenType,
         });
+        // On a dollar send the server picks the funding source, so what
+        // LANDED can differ from what was asked (an eligible Confío
+        // recipient receives cUSD+, an external address receives USDT).
+        // Name the delivered token so the success screen can't claim the
+        // wrong one.
+        const delivered: Record<string, string> = {
+          CUSD_PLUS: 'cUSD+', USDT: 'USDT', CONFIO: 'CONFIO',
+        };
+        if (res?.tokenType && delivered[res.tokenType]) {
+          transactionData.currency = delivered[res.tokenType];
+        }
         setTransactionSuccess(true);
         setIsComplete(true);
       } catch (e: any) {

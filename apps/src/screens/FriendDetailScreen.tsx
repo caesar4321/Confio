@@ -30,6 +30,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 // Color palette
 type FriendDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -409,7 +410,7 @@ export function FriendDetailScreen() {
             styles.transactionAmountText,
             transaction.amount.startsWith('-') ? styles.negativeAmount : styles.positiveAmount
           ]}>
-            {transaction.amount} {transaction.currency}
+            {transaction.amount} {formatTokenLabel(transaction.currency)}
           </Text>
           {transaction.status !== 'completed' && (
             <View style={styles.transactionStatus}>

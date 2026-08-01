@@ -23,6 +23,7 @@ import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import { formatTokenLabel } from '../utils/tokenDisplay';
 
 const { width } = Dimensions.get('window');
 
@@ -103,12 +104,7 @@ export const BusinessPaymentSuccessScreen = () => {
   const netAmount = amount - merchantFee;
 
   // Format currency for display
-  const formatCurrency = (currency: string): string => {
-    if (currency === 'CUSD') return 'cUSD';
-    if (currency === 'CONFIO') return 'CONFIO';
-    if (currency === 'USDC') return 'USDC';
-    return currency;
-  };
+  const formatCurrency = formatTokenLabel;
 
   // Get customer name - prefer business name if payment was made from business account
   const initialCustomerName = paymentData.payerDisplayName ||

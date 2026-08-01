@@ -12,6 +12,9 @@ import Icon from 'react-native-vector-icons/Feather';
 
 interface GuardarianReturnModalProps {
     visible: boolean;
+    /** Asset being sent. Defaults to USDC (the Algorand cUSD rail); the BSC
+     *  savings withdrawal passes USDT, which is what actually moves there. */
+    ticker?: string;
     onContinueSend: () => void;
     onCancel: () => void;
 }
@@ -20,6 +23,7 @@ const { width } = Dimensions.get('window');
 
 const GuardarianReturnModal: React.FC<GuardarianReturnModalProps> = ({
     visible,
+    ticker = 'USDC',
     onContinueSend,
     onCancel,
 }) => {
@@ -40,7 +44,7 @@ const GuardarianReturnModal: React.FC<GuardarianReturnModalProps> = ({
                         </View>
                         <Text style={styles.title}>¡Listo para continuar!</Text>
                         <Text style={styles.subtitle}>
-                            Envía tus USDC a la dirección de Guardarian
+                            {`Envía tus ${ticker} a la dirección de Guardarian`}
                         </Text>
                     </View>
 
@@ -66,7 +70,7 @@ const GuardarianReturnModal: React.FC<GuardarianReturnModalProps> = ({
                             <View style={styles.buttonContent}>
                                 <Icon name="send" size={18} color="#fff" />
                                 <View style={styles.buttonTextWrap}>
-                                    <Text style={styles.convertButtonTitle}>Continuar a enviar USDC</Text>
+                                    <Text style={styles.convertButtonTitle}>{`Continuar a enviar ${ticker}`}</Text>
                                     <Text style={styles.convertButtonSubtitle}>La conversión se hace automáticamente</Text>
                                 </View>
                             </View>

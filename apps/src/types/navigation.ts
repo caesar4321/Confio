@@ -1,7 +1,4 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
-// Type-only: keeps the Apollo-bearing hook module out of this file's runtime
-// graph (navigation types are imported almost everywhere).
-import type { SavingsMovement } from '../hooks/useSavingsPortfolio';
 
 // Auth Stack - Handles authentication flow
 export type AuthStackParamList = {
@@ -160,7 +157,7 @@ export type MainStackParamList = {
     };
   };
   AccountDetail: {
-    accountType: 'cusd' | 'confio' | 'usdc';
+    accountType: 'cusd' | 'confio' | 'usdc' | 'cusd_plus';
     accountName: string;
     accountSymbol: string;
     accountBalance: string;
@@ -168,11 +165,8 @@ export type MainStackParamList = {
   };
   TopUp: { destination?: 'cusd' | 'cusd_plus' } | undefined;
   Sell: { destination?: 'cusd' | 'cusd_plus' } | undefined;
-  Savings: undefined;
   ConvertSavings: undefined;
   WithdrawSavings: undefined;
-  SavingsMovements: undefined;
-  SavingsMovementDetail: { movement: SavingsMovement };
   ReceiveSavings: { destination?: 'cusd_plus' | 'usdt' } | undefined;
   SendUsdt: { token?: 'usdt' | 'cusd_plus' | 'confio' } | undefined;
   StocksList: undefined;
@@ -479,7 +473,7 @@ export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList>;
   Main: NavigatorScreenParams<MainStackParamList>;
   AccountDetail: {
-    accountType: 'cusd' | 'confio' | 'usdc';
+    accountType: 'cusd' | 'confio' | 'usdc' | 'cusd_plus';
     accountName: string;
     accountSymbol: string;
     accountBalance: string;

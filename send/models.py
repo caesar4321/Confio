@@ -186,6 +186,20 @@ class SendTransaction(SoftDeleteModel):
         ]
         constraints = [
             # Prevent duplicate transactions with same idempotency key from same user
+            # Externally-originated inbounds (the cUSD+ scanner) have NO
+            # sender_user, and Postgres treats NULLs as distinct — so the
+            # constraint below does NOT dedupe them. Rescans would then create
+            # a second row for the same log. This replaces the uniqueness the
+            # old CusdPlusMovement.reference used to provide.
+            models.UniqueConstraint(
+                fields=['idempotency_key'],
+                condition=models.Q(
+                    sender_user__isnull=True,
+                    idempotency_key__isnull=False,
+                    deleted_at__isnull=True,
+                ),
+                name='unique_external_inbound_idempotency',
+            ),
             models.UniqueConstraint(
                 fields=['sender_user', 'idempotency_key'],
                 condition=models.Q(idempotency_key__isnull=False, deleted_at__isnull=True),

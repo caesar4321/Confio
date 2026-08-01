@@ -270,7 +270,14 @@ export const ProtectedSavingsScreen = () => {
 
           <TouchableOpacity
             style={styles.savingsLink}
-            onPress={() => navigation.navigate('Savings')}
+            onPress={() => navigation.navigate('AccountDetail', {
+                    accountType: 'cusd_plus',
+                    accountName: 'Confío Dollar+',
+                    accountSymbol: '$cUSD+',
+                    // Live figures come from the portfolio inside the screen;
+                    // this is only the first paint.
+                    accountBalance: '0.00',
+                  })}
             activeOpacity={0.85}
           >
             <Text style={styles.savingsLinkText}>Conocer Confío Dollar+</Text>

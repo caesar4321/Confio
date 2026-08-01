@@ -1162,9 +1162,18 @@ def scan_outbound_confirmations(max_batch: int = 50):
         # Aggressive cutoff: 2 mins. If not in pool/rounds by then, it's gone.
         cutoff_time = timezone.now() - timedelta(minutes=2)
 
+        # ALGORAND ONLY, same reason as the sends below: check_tx() asks an
+        # algod node, so a BSC payment hash looks "missing" and gets marked
+        # FAILED even after it settled. That is not cosmetic here — the BSC
+        # confirmer (payments/tasks.py) only accepts SUBMITTED, so once the
+        # reaper flips a row to FAILED the invoice can stay unpaid forever
+        # despite the money having moved. BSC payments carry bsc_calls in
+        # blockchain_data (payments/bsc_flow.py).
         pay_qs = PaymentTransaction.objects.filter(
             status__in=['SUBMITTED', 'FAILED'],
             updated_at__gte=recovery_cutoff
+        ).exclude(
+            blockchain_data__has_key='bsc_calls'
         ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for p in pay_qs:
             cr, pe = check_tx(p.transaction_hash)
@@ -1195,10 +1204,21 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 processed += 1
                 continue
 
-        # Cleanup stale PENDING_BLOCKCHAIN payments (never submitted to blockchain)
+        # Cleanup stale PENDING_BLOCKCHAIN payments (never submitted to blockchain).
+        # The 2-minute cutoff is tuned to Algorand's prepare->submit window. A
+        # BSC payment rides the sponsored 7702 path (biometric, signing, then a
+        # receipt poll that alone runs to 120s), so the same cutoff would fail
+        # rows while the user is still legitimately mid-flight and land their
+        # successful submit on an already-FAILED row. Give BSC a window that
+        # matches its own lifecycle rather than excluding it, so stale rows
+        # still get cleaned up eventually.
+        bsc_pending_cutoff = timezone.now() - timedelta(minutes=30)
         pending_blockchain_qs = PaymentTransaction.objects.filter(
-            status='PENDING_BLOCKCHAIN',
-            updated_at__lt=cutoff_time
+            Q(status='PENDING_BLOCKCHAIN')
+            & (
+                Q(blockchain_data__has_key='bsc_calls', updated_at__lt=bsc_pending_cutoff)
+                | ~Q(blockchain_data__has_key='bsc_calls') & Q(updated_at__lt=cutoff_time)
+            )
         )[:max_batch]
         for p in pending_blockchain_qs:
             p.status = 'FAILED'

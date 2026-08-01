@@ -258,13 +258,20 @@ export const BuyStockScreen = () => {
                 Tu ahorro disponible es {fmtUsd(available)}.
               </Text>
               <TouchableOpacity
-                onPress={() =>
-                  // Conversion UI hidden: route to the Ahorros hub (bank/USDT
-                  // funding) instead of the cUSD→cUSD+ convert flow.
-                  navigation.navigate(
-                    CUSD_CONVERSION_UI_ENABLED ? 'ConvertSavings' : 'Savings',
-                  )
-                }
+                onPress={() => {
+                  // Conversion UI hidden: route to the savings ACCOUNT
+                  // (bank/USDT funding) instead of the cUSD→cUSD+ flow.
+                  if (CUSD_CONVERSION_UI_ENABLED) {
+                    (navigation as any).navigate('ConvertSavings');
+                    return;
+                  }
+                  (navigation as any).navigate('AccountDetail', {
+                    accountType: 'cusd_plus',
+                    accountName: 'Confío Dollar+',
+                    accountSymbol: '$cUSD+',
+                    accountBalance: '0.00',
+                  });
+                }}
               >
                 <Text style={styles.fundLink}>Ahorrar primero →</Text>
               </TouchableOpacity>

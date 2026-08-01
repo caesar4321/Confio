@@ -319,7 +319,6 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
                              min_deposit) -> None:
     from decimal import ROUND_DOWN as _RD
 
-    from .models import CusdPlusMovement
     from . import vault as cp_vault
 
     vault_addr = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
@@ -352,15 +351,39 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
             Decimal('0.000001'), rounding=_RD)
         if amount_usd < min_deposit:
             continue  # dust — strangers must not spam rows/notifications
+        # Externally-originated cUSD+ arriving at a registered address is a
+        # RECEIVE with an external sender — that is exactly what a
+        # SendTransaction models, and writing one gives this deposit the same
+        # unified row, detail screen and comprobante every other receipt has.
+        # Idempotency key carries the log identity so a rescan can't double it.
+        from send.models import SendTransaction
+        from users.models import Account
         reference = f"scan_cusdp:{log['transactionHash']}:{int(log.get('logIndex', '0x0'), 16)}"
-        _, created = CusdPlusMovement.objects.get_or_create(
-            reference=reference,
+        account = Account.objects.filter(id=account_id).select_related(
+            'user', 'business').first()
+        if account is None:
+            continue
+        _, created = SendTransaction.objects.get_or_create(
+            idempotency_key=reference,
             defaults={
-                'account_id': account_id,
-                'movement_type': 'receive',
-                'title': 'Recibiste Confío Dollar+',
-                'amount_usd': amount_usd,
-                'tx_hash': log['transactionHash'],
+                'recipient_user': account.user,
+                'recipient_business': account.business,
+                'recipient_type': 'business' if account.business_id else 'user',
+                'recipient_display_name': (
+                    account.business.name if account.business_id
+                    else (account.user.get_full_name() or account.user.username or '')
+                ),
+                'recipient_address': key,
+                # No Confío row on the sending side: the money came from
+                # outside, so the sender is the raw address and nothing else.
+                'sender_type': 'external',
+                'sender_display_name': '',
+                'sender_address': sender,
+                'amount': amount_usd,
+                'token_type': 'CUSD_PLUS',
+                'status': 'CONFIRMED',
+                'transaction_hash': log['transactionHash'],
+                'memo': '',
             },
         )
         if not created:
