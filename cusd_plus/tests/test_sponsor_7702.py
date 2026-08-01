@@ -285,7 +285,7 @@ class SponsorBscBatchTests(SimpleTestCase):
         rpc = _rpc_factory(rpc_overrides, delegated=delegated, sent_raws=sent_raws)
         with mock.patch.object(sponsor_7702, '_rpc', side_effect=rpc), \
              mock.patch('cusd_plus.schema._active_bsc_address', return_value=user_addr), \
-             mock.patch('cusd_plus.models.SponsoredBatch.objects') as ledger, \
+             mock.patch('blockchain.models.SponsoredBatch.objects') as ledger, \
              mock.patch('cusd_plus.tasks.check_sponsored_batch_receipt') as receipt_task, \
              mock.patch('blockchain.evm_kms_signer.get_bsc_sponsor_signer_from_settings',
                         return_value=self._StubSigner(SPONSOR_KEY)):
@@ -473,7 +473,7 @@ class ReceiptCheckerTests(SimpleTestCase):
             if method == 'eth_getBlockByNumber':
                 return {'hash': canonical_hash}
             return '0x'
-        with mock.patch('cusd_plus.models.SponsoredBatch.objects') as objs, \
+        with mock.patch('blockchain.models.SponsoredBatch.objects') as objs, \
              mock.patch.object(tasks, '_rpc', side_effect=_rpc):
             objs.get.return_value = batch
             try:
@@ -530,7 +530,7 @@ class ReceiptCheckerTests(SimpleTestCase):
                 return {'hash': '0x' + 'ee' * 32}  # different hash = reorged
             return '0x'
         from cusd_plus import tasks
-        with mock.patch('cusd_plus.models.SponsoredBatch.objects') as objs, \
+        with mock.patch('blockchain.models.SponsoredBatch.objects') as objs, \
              mock.patch.object(tasks, '_rpc', side_effect=_rpc):
             objs.get.return_value = batch
             tasks.check_sponsored_batch_receipt(99)
@@ -566,7 +566,7 @@ class ReconcileSignedBatchesTests(SimpleTestCase):
 
         qs = mock.MagicMock()
         qs.order_by.return_value.__getitem__.return_value = [batch]
-        with mock.patch('cusd_plus.models.SponsoredBatch.objects') as objs, \
+        with mock.patch('blockchain.models.SponsoredBatch.objects') as objs, \
              mock.patch.object(tasks, '_rpc', side_effect=_rpc), \
              mock.patch.object(tasks, 'check_sponsored_batch_receipt') as receipt_task, \
              mock.patch.object(tasks, 'current_app') as capp:

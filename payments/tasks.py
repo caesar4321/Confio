@@ -23,7 +23,7 @@ TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT'}
 
 @shared_task(name='payments.confirm_bsc_payment', bind=True, max_retries=20)
 def confirm_bsc_payment(self, payment_id: int, batch_id: int):
-    from cusd_plus.models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
     from notifications import utils as notif_utils
     from notifications.models import NotificationType as NotifType
     from .models import PaymentTransaction

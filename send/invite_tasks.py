@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @shared_task(name='send.confirm_bsc_invite_reclaim', bind=True, max_retries=20)
 def confirm_bsc_invite_reclaim(self, invite_id: int, batch_id: int):
-    from cusd_plus.models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
 
     from .models import PhoneInvite
 

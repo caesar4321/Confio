@@ -90,7 +90,7 @@ def _notify_send_parties(s) -> None:
 
 @shared_task(name='send.confirm_bsc_send', bind=True, max_retries=20)
 def confirm_bsc_send(self, send_id: int, batch_id: int):
-    from cusd_plus.models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
     from .models import SendTransaction
 
     try:

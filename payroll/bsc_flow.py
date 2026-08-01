@@ -458,7 +458,7 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
         acquire_sponsor_nonce_lock,
         release_sponsor_nonce_lock,
     )
-    from cusd_plus.models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
 
     err = _flags_error()
     if err:

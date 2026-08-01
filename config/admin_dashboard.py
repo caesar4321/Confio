@@ -1913,7 +1913,6 @@ confio_admin_site.register(Financiera, FinancieraAdmin)
 confio_admin_site.register(FinancieraReview, FinancieraReviewAdmin)
 confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 
-from cusd_plus.models import BnbAutoConvert, SponsoredBatch
-from cusd_plus.admin import BnbAutoConvertAdmin, SponsoredBatchAdmin
-confio_admin_site.register(BnbAutoConvert, BnbAutoConvertAdmin)
+from blockchain.models import SponsoredBatch
+from blockchain.admin import SponsoredBatchAdmin
 confio_admin_site.register(SponsoredBatch, SponsoredBatchAdmin)

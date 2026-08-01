@@ -115,7 +115,7 @@ class ReclaimConfirmTests(SimpleTestCase):
         batch = SimpleNamespace(id=9, status=batch_status, kind=kind,
                                 source_id=source_id, tx_hash='0x' + 'ab' * 32)
         with mock.patch('send.models.PhoneInvite.objects') as iobjs, \
-             mock.patch('cusd_plus.models.SponsoredBatch.objects') as bobjs:
+             mock.patch('blockchain.models.SponsoredBatch.objects') as bobjs:
             iobjs.get.return_value = invite
             bobjs.get.return_value = batch
             invite_tasks.confirm_bsc_invite_reclaim(3, 9)

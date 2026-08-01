@@ -504,7 +504,7 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     by hash — never a chain tx attached to no DB state, and never a lost row
     that a retry would double-send."""
     from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
-    from .models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
 
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
     signer = get_bsc_sponsor_signer_from_settings()

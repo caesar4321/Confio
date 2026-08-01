@@ -7,6 +7,7 @@ outbound BNB a deterministic farming signal).
 Runs without a database (ledger write is mocked):
     myvenv/bin/python manage.py test cusd_plus.tests.test_bnb_autoconvert_relay
 """
+from types import SimpleNamespace
 from unittest import mock
 
 import rlp
@@ -57,13 +58,20 @@ class RelayRouterGuardTests(SimpleTestCase):
 
     def test_swap_to_router_is_relayed_and_ledgered(self):
         raw = _legacy_tx(ROUTER, 10 ** 16, SWAP_SELECTOR + b'\x00' * 128)
+        acct = SimpleNamespace(id=1, bsc_address='0x' + '11' * 20)
         with mock.patch('cusd_plus.tasks._rpc', return_value='0xabc') as rpc, \
-             mock.patch('cusd_plus.models.BnbAutoConvert.objects') as ledger:
+             mock.patch('cusd_plus.schema._active_account', return_value=acct), \
+             mock.patch('blockchain.models.PendingAutoSwap.objects') as ledger:
             res = self._submit(raw)
         self.assertTrue(res.success, res.error)
         rpc.assert_called_once()
-        ledger.create.assert_called_once_with(
-            user=_Info.context.user, value_wei=str(10 ** 16), tx_hash='0xabc')
+        # Now a PendingAutoSwap row alongside its ALGO/USDC twins.
+        kwargs = ledger.create.call_args.kwargs
+        self.assertEqual(kwargs['asset_type'], 'BNB')
+        self.assertEqual(kwargs['source_tx_hash'], '0xabc')
+        self.assertEqual(kwargs['actor_user'], _Info.context.user)
+        self.assertEqual(kwargs['amount_micro'], 10 ** 16 // 10 ** 12)   # 0.01 BNB
+        self.assertEqual(str(kwargs['amount_decimal']), '0.01')
 
     def test_router_with_other_selector_is_rejected(self):
         transfer = bytes.fromhex('a9059cbb') + b'\x00' * 64  # ERC-20 transfer
@@ -84,7 +92,7 @@ class RelayRouterGuardTests(SimpleTestCase):
     def test_vault_destination_still_relays_without_selector_check(self):
         raw = _legacy_tx(VAULT, 0, bytes.fromhex('deadbeef'))
         with mock.patch('cusd_plus.tasks._rpc', return_value='0xdef'), \
-             mock.patch('cusd_plus.models.BnbAutoConvert.objects') as ledger:
+             mock.patch('blockchain.models.PendingAutoSwap.objects') as ledger:
             res = self._submit(raw)
         self.assertTrue(res.success, res.error)
         ledger.create.assert_not_called()  # vault txs are not BNB converts

@@ -155,7 +155,7 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
     confirmed → purchase completed + per-user limit + unified row.
     reverted/noop_failed → purchase failed (funds untouched; user retries).
     """
-    from cusd_plus.models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
     from users.models_unified import UnifiedTransactionTable
 
     from .models import PresalePurchase, UserPresaleLimit

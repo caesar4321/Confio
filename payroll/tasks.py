@@ -73,7 +73,7 @@ def _settle_run(run) -> None:
 
 @shared_task(name='payroll.confirm_bsc_payroll_payout', bind=True, max_retries=20)
 def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
-    from cusd_plus.models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
     from users.models import Account
     from .models import PayrollItem
 

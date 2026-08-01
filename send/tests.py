@@ -509,7 +509,7 @@ class ConfirmTaskTests(SimpleTestCase):
         batch = SimpleNamespace(id=9, status=batch_status, tx_hash=s.transaction_hash,
                                 kind='send_cusd_plus', source_id=s.id)
         with mock.patch('send.models.SendTransaction.objects') as sobjs, \
-             mock.patch('cusd_plus.models.SponsoredBatch.objects') as bobjs, \
+             mock.patch('blockchain.models.SponsoredBatch.objects') as bobjs, \
              mock.patch.object(send_tasks, '_account_for_bsc_address',
                                side_effect=lambda a: SimpleNamespace(addr=a)), \
              mock.patch.object(send_tasks, '_notify_send_parties') as notify:

@@ -741,15 +741,36 @@ class SubmitBscTransaction(graphene.Mutation):
                 # Ledger row = this outbound BNB is a Confío-recorded convert.
                 # Outbound native transfers absent from this table are dust
                 # extraction and disqualify the user from further subsidies.
-                from .models import BnbAutoConvert
+                from decimal import Decimal
+
+                from blockchain.models import PendingAutoSwap
                 try:
-                    BnbAutoConvert.objects.create(
-                        user=user,
-                        value_wei=str(int.from_bytes(fields[4], 'big')),
-                        tx_hash=tx_hash or '',
+                    wei = int.from_bytes(fields[4], 'big')
+                    acct = _active_account(info)
+                    if acct is None:
+                        # The row is the ALLOWLIST for outbound native BNB, so
+                        # a missing one makes a legitimate convert look like
+                        # dust extraction. Never let that pass silently.
+                        raise RuntimeError('no JWT account to attribute the convert to')
+                    PendingAutoSwap.objects.create(
+                        account=acct,
+                        actor_user=user,
+                        actor_type='user',
+                        actor_address=acct.bsc_address or '',
+                        asset_type='BNB',
+                        # micro-BNB and BNB: the same units convention the
+                        # ALGO/USDC rows use. Exact wei is not needed — the
+                        # allowlist is keyed by tx hash, the value is context.
+                        amount_micro=wei // 10 ** 12,
+                        amount_decimal=Decimal(wei) / Decimal(10 ** 18),
+                        source_tx_hash=tx_hash or '',
+                        status='SUBMITTED',
                     )
                 except Exception:  # noqa: BLE001 — ledger write must not fail the relay
-                    logger.exception('BnbAutoConvert ledger write failed for %s', tx_hash)
+                    logger.error(
+                        'BNB auto-convert ledger write FAILED for %s — this outbound '
+                        'BNB will look unledgered to the farming check', tx_hash,
+                        exc_info=True)
             # Balance caches (vault position + wallet USDT) just changed for
             # vault/USDT-touching relays — drop the fresh-read keys so the
             # next summary re-reads the chain instead of showing a 30s-stale

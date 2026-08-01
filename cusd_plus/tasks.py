@@ -710,7 +710,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
          is resolved the same way: if it never mined, reconciliation will
          re-broadcast; here we just read the chain by the deterministic hash.
     """
-    from .models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
 
     try:
         batch = SponsoredBatch.objects.get(id=batch_id)
@@ -839,7 +839,7 @@ def reconcile_signed_batches():
 
     from django.utils import timezone
 
-    from .models import SponsoredBatch
+    from blockchain.models import SponsoredBatch
 
     grace_min = int(getattr(settings, 'CUSD_PLUS_SIGNED_GRACE_MIN', 3))
     cutoff = timezone.now() - timedelta(minutes=grace_min)
