@@ -75,6 +75,11 @@ class Conversion(models.Model):
         ('STUCK', 'Bridge exceeded timeout - ops attention'),
         ('DEST_ARRIVED', 'Funds at user destination address'),
         ('ABANDONED', 'Never signed - expired'),
+        # Terminal, and NOT a failure: the money arrived and the holder keeps
+        # it as raw USDT because the mint gate refuses them (a blocked IP
+        # after leg A/B committed). Without this a saga sat at DEST_ARRIVED
+        # forever — the exact stranding this rail keeps producing.
+        ('DELIVERED_USDT', 'Delivered as USDT - holder cannot mint'),
     ]
 
     # Allowed saga transitions (enforced in the Advance mutation and tasks).
@@ -85,9 +90,10 @@ class Conversion(models.Model):
         'CREATED': {'SRC_COMMITTED', 'ABANDONED'},
         'SRC_COMMITTED': {'DEST_ARRIVED', 'STUCK'},
         'STUCK': {'DEST_ARRIVED'},  # late delivery resolves a stuck bridge
-        'DEST_ARRIVED': {'COMPLETED'},
+        'DEST_ARRIVED': {'COMPLETED', 'DELIVERED_USDT'},
         'COMPLETED': set(),
         'ABANDONED': set(),
+        'DELIVERED_USDT': set(),
     }
 
     IN_FLIGHT_STATUSES = ('CREATED', 'SRC_COMMITTED', 'STUCK', 'DEST_ARRIVED')

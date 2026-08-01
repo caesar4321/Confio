@@ -1,0 +1,143 @@
+"""What may be auto-minted, and what must be left alone.
+
+Nothing on BSC escrows a prepared send or an in-flight off-ramp — both are
+just database rows — so this subtraction is the only thing stopping the
+savings auto-mint from moving funds out from under them. It is also why the
+balance must be read FRESH: the cached one is display-grade (30s TTL with a
+last-known fallback), and minting a stale figure either misses a deposit or
+reverts for insufficient funds.
+"""
+import json
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest import mock
+
+from django.test import SimpleTestCase
+
+from cusd_plus import vault
+
+WAD = 10 ** 18
+ADDR = '0x' + 'ab' * 20
+
+
+def _send(amount, kind='send_usdt'):
+    return SimpleNamespace(amount=Decimal(str(amount)),
+                           bsc_calls_json=json.dumps({'kind': kind}))
+
+
+def _qs(rows):
+    """A queryset stub supporting .only(...)[:n] and iteration."""
+    q = mock.Mock()
+    q.only.return_value = rows
+    q.exclude.return_value = q
+    return q
+
+
+class ReservedUsdtTests(SimpleTestCase):
+    def _reserved(self, sends=(), ramps=(), sagas=()):
+        with mock.patch('send.models.SendTransaction.objects') as s_objs, \
+             mock.patch('ramps.models.RampTransaction.objects') as r_objs, \
+             mock.patch('conversion.models.Conversion.objects') as c_objs:
+            s_objs.filter.return_value.exclude.return_value.only.return_value = list(sends)
+            r_objs.filter.return_value.only.return_value = list(ramps)
+            c_objs.filter.return_value.only.return_value = list(sagas)
+            return vault.reserved_usdt_wei(SimpleNamespace(id=1), ADDR)
+
+    def test_nothing_committed_reserves_nothing(self):
+        self.assertEqual(self._reserved(), 0)
+
+    def test_a_prepared_usdt_send_is_reserved(self):
+        self.assertEqual(self._reserved(sends=[_send('2.50')]), int(Decimal('2.5') * WAD))
+
+    def test_a_vault_funded_send_reserves_nothing(self):
+        # send_redeem spends VAULT shares, not wallet USDT.
+        self.assertEqual(self._reserved(sends=[_send('2.50', 'send_redeem')]), 0)
+
+    def test_an_in_flight_offramp_is_reserved(self):
+        order = SimpleNamespace(crypto_amount_estimated=Decimal('10'))
+        self.assertEqual(self._reserved(ramps=[order]), 10 * WAD)
+
+    def test_an_in_flight_saga_is_reserved(self):
+        # Its delivered USDT belongs to that mint, not to a deposit sweep —
+        # otherwise a saga whose own mint just failed gets swept out from
+        # under itself and strands.
+        saga = SimpleNamespace(to_amount=Decimal('3'))
+        self.assertEqual(self._reserved(sagas=[saga]), 3 * WAD)
+
+    def test_reservations_accumulate(self):
+        total = self._reserved(
+            sends=[_send('1')],
+            ramps=[SimpleNamespace(crypto_amount_estimated=Decimal('2'))],
+            sagas=[SimpleNamespace(to_amount=Decimal('3'))])
+        self.assertEqual(total, 6 * WAD)
+
+    def test_an_unreadable_reservation_raises_rather_than_vanishing(self):
+        # Swallowing this would silently make committed funds spendable.
+        with mock.patch('send.models.SendTransaction.objects') as s_objs:
+            s_objs.filter.side_effect = RuntimeError('db down')
+            with self.assertRaises(RuntimeError):
+                vault.reserved_usdt_wei(SimpleNamespace(id=1), ADDR)
+
+    def test_no_address_reserves_nothing(self):
+        self.assertEqual(vault.reserved_usdt_wei(SimpleNamespace(id=1), ''), 0)
+
+
+class SweepableUsdtTests(SimpleTestCase):
+    def _sweepable(self, balance, reserved):
+        with mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=balance) as bal, \
+             mock.patch('cusd_plus.vault.reserved_usdt_wei', return_value=reserved):
+            out = vault.sweepable_usdt_wei(SimpleNamespace(id=1), ADDR)
+        return out, bal
+
+    def test_balance_minus_reservations(self):
+        out, _ = self._sweepable(10 * WAD, 4 * WAD)
+        self.assertEqual(out, 6 * WAD)
+
+    def test_never_negative(self):
+        out, _ = self._sweepable(1 * WAD, 5 * WAD)
+        self.assertEqual(out, 0)
+
+    def test_balance_is_read_FRESH(self):
+        # The cached read is display-grade; minting it reverts or misses.
+        _, bal = self._sweepable(WAD, 0)
+        self.assertEqual(bal.call_args.kwargs.get('fresh'), True)
+
+
+class SweepableResolverTests(SimpleTestCase):
+    def test_any_failure_reports_zero_not_the_balance(self):
+        from cusd_plus.schema import _sweepable_usdt_usd
+        with mock.patch('cusd_plus.vault.sweepable_usdt_wei',
+                        side_effect=RuntimeError('rpc down')):
+            self.assertEqual(_sweepable_usdt_usd(SimpleNamespace(id=1), ADDR), 0.0)
+
+    def test_no_address_is_zero(self):
+        from cusd_plus.schema import _sweepable_usdt_usd
+        self.assertEqual(_sweepable_usdt_usd(SimpleNamespace(id=1), ''), 0.0)
+
+
+class DeliveredAsUsdtTests(SimpleTestCase):
+    """A saga the mint gate will never allow must reach a TERMINAL state."""
+
+    def test_refused_holder_closes_their_in_flight_sagas(self):
+        from cusd_plus.tasks import mark_saga_delivered_as_usdt
+        with mock.patch('conversion.models.Conversion.objects') as convs:
+            convs.filter.return_value.update.return_value = 2
+            self.assertEqual(mark_saga_delivered_as_usdt(ADDR), 2)
+            self.assertEqual(
+                convs.filter.return_value.update.call_args.kwargs['status'],
+                'DELIVERED_USDT')
+
+    def test_delivered_usdt_is_terminal(self):
+        from conversion.models import Conversion
+        self.assertEqual(Conversion.TRANSITIONS['DELIVERED_USDT'], set())
+        self.assertIn('DELIVERED_USDT', Conversion.TRANSITIONS['DEST_ARRIVED'])
+
+    def test_it_is_not_counted_as_in_flight(self):
+        from conversion.models import Conversion
+        self.assertNotIn('DELIVERED_USDT', Conversion.IN_FLIGHT_STATUSES)
+
+    def test_failure_never_breaks_the_refusal_path(self):
+        from cusd_plus.tasks import mark_saga_delivered_as_usdt
+        with mock.patch('conversion.models.Conversion.objects') as convs:
+            convs.filter.side_effect = RuntimeError('db down')
+            self.assertEqual(mark_saga_delivered_as_usdt(ADDR), 0)

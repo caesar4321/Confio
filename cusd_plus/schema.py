@@ -24,6 +24,23 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def _sweepable_usdt_usd(user, bsc_address) -> float:
+    """Sweepable amount for the summary, in USD.
+
+    Any failure degrades to 0 — mint NOTHING. The alternative is falling back
+    to the displayed balance, which is exactly the stale/over-committed figure
+    this field exists to replace.
+    """
+    if not bsc_address:
+        return 0.0
+    try:
+        from . import vault as _v
+        return _v.sweepable_usdt_wei(user, bsc_address) / (10 ** 18)
+    except Exception:  # noqa: BLE001
+        logger.warning('sweepable usdt unavailable for %s — reporting 0', bsc_address)
+        return 0.0
+
+
 class CusdPlusSummaryType(graphene.ObjectType):
     """Savings position for the active account (JWT context)."""
     balance_usd = graphene.Float(description="USD value of the position; share counts are never exposed")
@@ -31,6 +48,8 @@ class CusdPlusSummaryType(graphene.ObjectType):
     gross_apy_pct = graphene.Float(description="USDY gross APY before Confío's share — for the transparency split (gross / fee / net)")
     earned_today_usd = graphene.Float()
     earned_month_usd = graphene.Float()
+    sweepable_usdt_usd = graphene.Float(
+        description='Raw USDT that may be auto-minted: a FRESH balance minus everything already committed (prepared sends, in-flight off-ramps, in-flight sagas). The client mints this, never the displayed balance.')
     savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo): phone country AND request IP country, the same full set the mint gate enforces. Gates ENTRY only — exits are never gated")
     stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
     cusd_deposits_paused = graphene.Boolean(description="cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)")
@@ -356,6 +375,7 @@ class Query(graphene.ObjectType):
             # lands as a considered follow-up; the ticker renders Hoy alone.
             earned_month_usd=0.0,
             savings_enabled=eligible,
+            sweepable_usdt_usd=_sweepable_usdt_usd(user, bsc_address),
             # Dark until the demand signal (decision 2dcfada5) AND geo-eligible.
             stocks_enabled=eligible and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False),
             cusd_deposits_paused=getattr(settings, 'CUSD_DEPOSITS_PAUSED', True),
@@ -739,6 +759,10 @@ class SubmitBscTransaction(graphene.Mutation):
             if data_hex.startswith(_SEL_SUBSCRIBE_AND_MINT):
                 from .eligibility import check_savings_mint_eligibility
                 if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
+                    # Close any saga waiting on this mint: it can never happen
+                    # for this holder, and DEST_ARRIVED would retry forever.
+                    from .tasks import mark_saga_delivered_as_usdt
+                    mark_saga_delivered_as_usdt(_active_bsc_address(info) or '')
                     return SubmitBscTransaction(success=False, error='mint_not_available')
                 # subscribeAndMint(uint256 usdtAmount, uint256 minUsdyOut,
                 # address recipient) — first word, from calldata we validated,
@@ -937,6 +961,8 @@ class SponsorBscBatch(graphene.Mutation):
         if mint_call is not None:
             from .eligibility import check_savings_mint_eligibility
             if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
+                from .tasks import mark_saga_delivered_as_usdt
+                mark_saga_delivered_as_usdt(user_addr)
                 return SponsorBscBatch(success=False, error='mint_not_available')
 
         chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))

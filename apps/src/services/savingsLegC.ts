@@ -31,7 +31,7 @@ const ELIGIBILITY = gql`
   query SavingsMintEligibility {
     cusdPlusSummary {
       savingsEnabled
-      usdtBalanceUsd
+      sweepableUsdtUsd
     }
   }
 `;
@@ -102,7 +102,7 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         fetchPolicy: 'network-only',
       });
       if (elig?.cusdPlusSummary?.savingsEnabled === false) return;
-      usdtOnHandUsd = Number(elig?.cusdPlusSummary?.usdtBalanceUsd ?? 0);
+      usdtOnHandUsd = Number(elig?.cusdPlusSummary?.sweepableUsdtUsd ?? 0);
     } catch {}
     const { data } = await apolloClient.query({
       query: IN_FLIGHT,
@@ -148,24 +148,18 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         const { data: fresh } = await apolloClient.query({
           query: ELIGIBILITY, fetchPolicy: 'network-only',
         });
-        usdtOnHandUsd = Number(fresh?.cusdPlusSummary?.usdtBalanceUsd ?? 0);
+        usdtOnHandUsd = Number(fresh?.cusdPlusSummary?.sweepableUsdtUsd ?? 0);
       } catch { usdtOnHandUsd = 0; }
     }
-    // SWEEP DISABLED pending a server-computed sweepable amount (audit
-    // 2026-08-01). Minting the whole raw balance is wrong three ways:
-    //   1. it can consume USDT already committed to something else — a
-    //      prepared-but-unsubmitted send, or a Koywe off-ramp about to move
-    //      the wallet's raw USDT — because neither escrows its funds;
-    //   2. usdtBalanceUsd comes from a 30s cache (no fresh=True), so it can
-    //      be stale in both directions: a missed deposit or a reverting mint;
-    //   3. a bridge row whose own mint just failed leaves its USDT in this
-    //      same balance, where the sweep would take it while the row stays
-    //      DEST_ARRIVED forever.
-    // The fix is a server-side `sweepableUsdtUsd` — fresh read minus live
-    // reservations — not a client guess. Until then a deposit stays raw USDT,
-    // which is the correct fallback rather than a wrong transfer.
-    const SWEEP_ENABLED = false;
-    if (SWEEP_ENABLED && usdtOnHandUsd >= 1) {
+    // sweepableUsdtUsd, never the displayed balance. The server reads the
+    // chain fresh and subtracts what is already committed — prepared sends,
+    // in-flight off-ramps, in-flight sagas — none of which escrow on chain,
+    // so this subtraction is the only thing keeping an auto-mint from moving
+    // funds out from under them. It reports 0 on any failure, which mints
+    // nothing (audit 2026-08-01).
+    // Ondo's InstantManager rejects sub-$1 amounts on this side too, so a
+    // smaller balance is left alone rather than burned on a reverting mint.
+    if (usdtOnHandUsd >= 1) {
       if (!announced) { announced = true; setMinting(true); }
       try {
         await subscribeUsdtToSavings({

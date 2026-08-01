@@ -671,6 +671,34 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         logger.exception('deposit notification failed for %s', tx_ref)
 
 
+def mark_saga_delivered_as_usdt(bsc_address: str) -> int:
+    """Close in-flight sagas for a holder the mint gate has refused.
+
+    Called by the relays when they answer mint_not_available: THEY have both
+    the row and the request's IP, which is the only place both are known. The
+    money did arrive — the holder simply keeps it as raw USDT — so this is a
+    terminal DELIVERED_USDT, not a failure, and not a pending row that retries
+    forever on every foreground.
+    """
+    from conversion.models import Conversion
+
+    if not bsc_address:
+        return 0
+    try:
+        rows = Conversion.objects.filter(
+            conversion_type='to_savings', user_bsc_address__iexact=bsc_address,
+            status='DEST_ARRIVED', is_deleted=False,
+        )
+        n = rows.update(status='DELIVERED_USDT', updated_at=timezone.now())
+        if n:
+            logger.info('%d savings saga(s) for %s closed as DELIVERED_USDT '
+                        '(holder refused by the mint gate)', n, bsc_address)
+        return n
+    except Exception:  # noqa: BLE001 — must not break the refusal path
+        logger.exception('delivered-as-usdt transition failed for %s', bsc_address)
+        return 0
+
+
 def settle_savings_mint(tx_hash: str, outcome: str) -> None:
     """Promote or fail the mint row once its receipt is final.
 

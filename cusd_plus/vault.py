@@ -91,6 +91,84 @@ def last_oracle_price_wad() -> int:
     return cached
 
 
+def reserved_usdt_wei(user, bsc_address: str) -> int:
+    """Raw USDT the wallet holds but has already committed elsewhere.
+
+    Nothing on BSC escrows these — a prepared send is a database row and an
+    off-ramp order is a promise to a provider — so the only thing standing
+    between them and an auto-mint is this subtraction. Sweeping the whole
+    balance moved funds out from under both (audit 2026-08-01).
+
+    Counted:
+      - PENDING send rows whose call batch spends WALLET USDT. A send funded
+        from the VAULT (send_redeem / send_cusd_plus) reserves nothing here.
+      - in-flight off-ramp orders on the savings rail, which transfer raw
+        USDT to the provider's deposit address.
+      - in-flight savings sagas: their delivered USDT belongs to that mint,
+        not to a deposit sweep.
+    """
+    from decimal import Decimal
+
+    total = Decimal(0)
+    addr = (bsc_address or '').lower()
+    if not addr:
+        return 0
+
+    try:
+        from send.models import SendTransaction
+        pending = SendTransaction.objects.filter(
+            sender_user=user, status='PENDING', token_type='USDT',
+        ).exclude(bsc_calls_json='')
+        for row in pending.only('amount', 'bsc_calls_json')[:100]:
+            import json
+            try:
+                if json.loads(row.bsc_calls_json or '{}').get('kind') == 'send_usdt':
+                    total += Decimal(str(row.amount))
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001 — a reservation we cannot read must not
+        logger.exception('reserved usdt: pending sends unreadable')
+        raise      # ...silently become spendable
+
+    try:
+        from ramps.models import RampTransaction
+        orders = RampTransaction.objects.filter(
+            direction='off_ramp', destination='cusd_plus',
+            status__in=('PENDING', 'PROCESSING'), actor_address__iexact=bsc_address,
+        ).only('crypto_amount_estimated')[:50]
+        for order in orders:
+            total += Decimal(str(order.crypto_amount_estimated or 0))
+    except Exception:  # noqa: BLE001
+        logger.exception('reserved usdt: ramp orders unreadable')
+        raise
+
+    try:
+        from conversion.models import Conversion
+        sagas = Conversion.objects.filter(
+            conversion_type='to_savings', user_bsc_address__iexact=bsc_address,
+            status__in=Conversion.IN_FLIGHT_STATUSES, is_deleted=False,
+        ).only('to_amount')[:50]
+        for saga in sagas:
+            total += Decimal(str(saga.to_amount or 0))
+    except Exception:  # noqa: BLE001
+        logger.exception('reserved usdt: in-flight sagas unreadable')
+        raise
+
+    return int(total * (10 ** 18))
+
+
+def sweepable_usdt_wei(user, bsc_address: str) -> int:
+    """USDT that may be auto-minted into savings: a FRESH balance minus
+    everything already committed. Never negative.
+
+    fresh=True on purpose — the cached balance is display-grade (30s TTL with
+    a last-known fallback), and minting a stale figure either misses a deposit
+    or reverts for insufficient funds.
+    """
+    balance = usdt_balance_raw(bsc_address, fresh=True)
+    return max(0, balance - reserved_usdt_wei(user, bsc_address))
+
+
 def redeem_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:
     """USDT a redeemToUsdt(shares) would actually deliver.
 
