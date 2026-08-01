@@ -31,7 +31,7 @@ class CusdPlusSummaryType(graphene.ObjectType):
     gross_apy_pct = graphene.Float(description="USDY gross APY before Confío's share — for the transparency split (gross / fee / net)")
     earned_today_usd = graphene.Float()
     earned_month_usd = graphene.Float()
-    savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo) by phone country; gates ENTRY only — exits are never gated")
+    savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo): phone country AND request IP country, the same full set the mint gate enforces. Gates ENTRY only — exits are never gated")
     stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
     cusd_deposits_paused = graphene.Boolean(description="cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)")
     usdt_balance_usd = graphene.Float(description="Raw wallet USDT-BSC (pre-mint, or held as 'Confío Dollar' by geo-ineligible users) — display-grade, cached")
@@ -302,12 +302,16 @@ class Query(graphene.ObjectType):
 
     def resolve_cusd_plus_summary(self, info):
         from django.conf import settings
-        from .eligibility import is_ondo_eligible
+        from .eligibility import ONDO_POLICY
         from . import vault
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return None
-        eligible = is_ondo_eligible(user)
+        # The FULL set (phone AND IP), because a request exists here. Checking
+        # phone alone told users behind a blocked IP that they could save while
+        # the relay refused them, so their deposits stranded. Same answer the
+        # mint gate will give.
+        eligible = ONDO_POLICY.evaluate(user, getattr(info.context, 'META', {})).allowed
         # Real position: shares × pPlus, read live from the deployed vault
         # for the JWT account's bsc_address (0 until PP whitelisting + a
         # first mint; the ledger for earned_today/month lands with leg C).

@@ -30,6 +30,8 @@ ONDO_QUALIFIED_ONLY = _EEA | frozenset({'BR', 'GB', 'CH', 'HK', 'SG', 'MY'})
 
 ONDO_BLOCKED = ONDO_PROHIBITED | ONDO_QUALIFIED_ONLY
 
+from security.geo import GeoPolicy
+
 # Shown to blocked users by the app; also returned from gated mutations.
 INELIGIBLE_MESSAGE = (
     'El ahorro con rendimiento y las acciones no están disponibles en tu '
@@ -37,18 +39,34 @@ INELIGIBLE_MESSAGE = (
 )
 
 
-def is_ondo_eligible(user) -> bool:
-    """Whether the user may ENTER cUSD+ / stocks positions.
+# The policy; the mechanism lives in security/geo.py, shared with presale.
+# Ondo's IP list is the same as its phone list, and a missing phone country
+# fails CLOSED — every active user completes phone verification, so an empty
+# value means we cannot attest a jurisdiction.
+ONDO_POLICY = GeoPolicy(
+    name='ondo',
+    phone_blocked=ONDO_BLOCKED,
+    message=INELIGIBLE_MESSAGE,
+    allow_missing_phone=False,
+    ip_blocked=None,              # same list as phone
+    ip_fails_open_on_error=True,  # a resolver outage must not strand an
+                                  # attested-eligible user's mint
+)
 
-    Missing phone country fails closed: every active user goes through phone
-    verification, so an empty value means we cannot attest a jurisdiction.
+
+def is_ondo_eligible(user) -> bool:
+    """Phone country ONLY — the half-check.
+
+    Correct where no request exists: a Celery scanner, or a payroll/send
+    RECIPIENT (who is not the one making the call). Anywhere a request IS
+    available use ONDO_POLICY.evaluate() — checking phone alone with a request
+    in hand is what told users behind a blocked IP that they could save while
+    the relay refused them.
+
     Exits (from_savings, sells) must NEVER be gated on this — funds are
     always withdrawable.
     """
-    country = (getattr(user, 'phone_country', None) or '').strip().upper()
-    if not country:
-        return False
-    return country not in ONDO_BLOCKED
+    return ONDO_POLICY.phone_eligible(user)
 
 
 def check_savings_mint_eligibility(user, request_meta) -> bool:
@@ -59,26 +77,11 @@ def check_savings_mint_eligibility(user, request_meta) -> bool:
     subscribeAndMint relayed through SubmitBscTransaction / SponsorBscBatch.
     Ineligible users simply keep raw USDT ("Confío Dollar" in the app).
 
-    Posture mirrors the presale geo stack (presale/geo_utils.py): the phone
-    country fails CLOSED (is_ondo_eligible), the IP country fails OPEN when
-    unresolvable — Cloudflare fronts prod so CF-IPCountry dominates, and an
-    unresolvable IP shouldn't strand an attested-eligible user's mint.
+    Phone fails CLOSED, IP fails OPEN when unresolvable — Cloudflare fronts
+    prod so CF-IPCountry dominates, and an unresolvable IP shouldn't strand an
+    attested-eligible user's mint. Both encoded in ONDO_POLICY above.
 
     Gates the MINT only. Exits (redeemToUsdt, raw USDT transfers, off-ramps)
     are NEVER gated on this.
     """
-    if not is_ondo_eligible(user):
-        return False
-    try:
-        # Import-only reuse: geo_utils is presale-owned (shared home is a
-        # flagged follow-up); a resolver crash counts as unresolvable.
-        from presale.geo_utils import get_country_for_ip
-        from security.request_utils import extract_client_ip_from_meta
-        meta = request_meta or {}
-        ip_country = get_country_for_ip(
-            extract_client_ip_from_meta(meta),
-            meta.get('HTTP_CF_IPCOUNTRY'),
-        )
-    except Exception:  # noqa: BLE001 — unresolvable IP fails open
-        return True
-    return ip_country is None or ip_country not in ONDO_BLOCKED
+    return ONDO_POLICY.evaluate(user, request_meta or {}).allowed

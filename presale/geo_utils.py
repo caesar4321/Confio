@@ -31,70 +31,30 @@ def is_presale_test_account(user) -> bool:
         return False
 
 
-def _is_public_ip(ip: str) -> bool:
-    try:
-        return ipaddress.ip_address(ip).is_global
-    except ValueError:
-        return False
+# The IP resolver moved to security/geo.py — it was never presale-specific,
+# and cusd_plus had to reach across app boundaries for it. Re-exported here so
+# every existing presale call site keeps working unchanged.
+from security.geo import (  # noqa: E402,F401
+    GeoPolicy,
+    get_country_for_ip,
+    normalize_country as _normalize_country,
+)
 
-
-def _normalize_country(code) -> str | None:
-    """Return an upper-cased ISO-3166 alpha-2 code, or None for unknowns.
-    Cloudflare uses 'XX' for unknown and 'T1' for Tor."""
-    if not code:
-        return None
-    code = str(code).strip().upper()
-    if len(code) != 2 or code in ('XX', 'T1'):
-        return None
-    return code
-
-
-def get_country_for_ip(client_ip: str | None, header_country: str | None = None) -> str | None:
-    """Resolve the ISO country for a request. Cheap paths first."""
-    country = _normalize_country(header_country)
-    if country:
-        return country
-
-    if not client_ip or not _is_public_ip(client_ip):
-        return None
-
-    try:
-        from security.models import IPAddress
-        row = IPAddress.objects.filter(ip_address=client_ip).only('country_code').first()
-        if row and row.country_code:
-            return _normalize_country(row.country_code)
-    except Exception:
-        row = None
-
-    # Last resort: live lookup (same free service the security middleware
-    # uses manually), persisted back onto the IPAddress row as a cache.
-    try:
-        import requests
-        response = requests.get(
-            f'https://ipapi.co/{client_ip}/json/',
-            timeout=4,
-            headers={'User-Agent': 'Confio Security/1.0'},
-        )
-        if response.status_code == 200:
-            data = response.json()
-            country = _normalize_country(data.get('country_code'))
-            if country:
-                try:
-                    from security.models import IPAddress
-                    IPAddress.objects.update_or_create(
-                        ip_address=client_ip,
-                        defaults={
-                            'country_code': country,
-                            'country_name': (data.get('country_name') or '')[:100],
-                        },
-                    )
-                except Exception:
-                    pass
-                return country
-    except Exception as e:
-        logger.info(f"[PRESALE][GEO] live IP lookup failed for {client_ip}: {e}")
-
-    return None
+PRESALE_POLICY = GeoPolicy(
+    name='presale',
+    phone_blocked=frozenset({'US', 'KR'}),
+    message=US_BLOCK_MSG,
+    phone_messages={'US': US_BLOCK_MSG, 'KR': KR_BLOCK_MSG},
+    # Preserved: a user with no phone country falls through to eligible here,
+    # where Ondo fails closed. Now explicit rather than accidental.
+    allow_missing_phone=True,
+    # A SEPARATE list from the phone one, read at call time so the setting
+    # stays live.
+    ip_blocked=lambda: getattr(settings, 'PRESALE_IP_BLOCKED_COUNTRIES', ['US']),
+    # Preserved: presale never swallowed a resolver raise.
+    ip_fails_open_on_error=False,
+    bypass=is_presale_test_account,
+)
 
 
 def check_presale_eligibility(user, client_ip: str | None = None, ip_country_hint: str | None = None):
@@ -102,22 +62,6 @@ def check_presale_eligibility(user, client_ip: str | None = None, ip_country_hin
     Check presale eligibility by phone country and (when available) IP country.
     Returns: (is_eligible: bool, error_message: str|None)
     """
-    if is_presale_test_account(user):
-        return True, None
-
-    code = getattr(user, 'phone_country', None)
-    if code == 'US':
-        return False, US_BLOCK_MSG
-    if code == 'KR':
-        return False, KR_BLOCK_MSG
-
-    blocked_countries = getattr(settings, 'PRESALE_IP_BLOCKED_COUNTRIES', ['US'])
-    if blocked_countries:
-        ip_country = get_country_for_ip(client_ip, ip_country_hint)
-        if ip_country in blocked_countries:
-            logger.warning(
-                f"[PRESALE][GEO] blocked by IP country={ip_country} ip={client_ip} user_id={getattr(user, 'id', None)}"
-            )
-            return False, US_BLOCK_MSG
-
-    return True, None
+    decision = PRESALE_POLICY.evaluate(
+        user, client_ip=client_ip, ip_country_hint=ip_country_hint)
+    return decision.allowed, decision.message
