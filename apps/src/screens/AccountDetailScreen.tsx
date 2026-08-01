@@ -220,11 +220,11 @@ export const AccountDetailScreen = () => {
       ramp: true,
       humanitarian: true,
     },
-    currencies: {
-      cUSD: true,
-      CONFIO: true,
-      USDC: !activeAccount?.isEmployee,
-    },
+    // Empty means "no currency filter applied" — the filter below treats an
+    // absent key as visible. The selectable set comes from accountTokenTypes
+    // (see currencyChips), so the chips can never drift from the tokens this
+    // account's history actually queries for.
+    currencies: {},
     status: {
       completed: true,
       pending: true,
@@ -292,6 +292,13 @@ export const AccountDetailScreen = () => {
     if (isCusd) return activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'];
     return ['CONFIO'];
   }, [isCusd, isSavingsAccount, activeAccount?.isEmployee]);
+  // Filter chips = the account's own tokens, in display form. ALGO is dropped:
+  // it appears only as an auto-conversion artifact, never as money the user
+  // holds, so it is not something to filter a statement by.
+  const currencyChips = React.useMemo(
+    () => accountTokenTypes.filter(t => t !== 'ALGO').map(t => formatTokenLabel(t)),
+    [accountTokenTypes],
+  );
   // cUSD phase-out: while deposits are paused (server flag, singleton is
   // already cached by Home) this screen goes retiro-only — no Recargar.
   const { savings: ahorrosSavings, usdtBalanceUsd: ahorrosUsdt } = useSavingsPortfolio();
@@ -1100,10 +1107,13 @@ export const AccountDetailScreen = () => {
       return transactionFilters.types[tx.type as keyof typeof transactionFilters.types] ?? true;
     });
 
-    // Apply currency filters
+    // Apply currency filters. Rows carry the raw wire token ('CUSD_PLUS')
+    // while the chips are display labels ('cUSD+'), so both sides are
+    // normalised — comparing them raw silently matched nothing and made the
+    // toggles inert. An unlisted token stays visible rather than vanishing.
     filtered = filtered.filter(tx => {
-      const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
-      return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
+      const currency = formatTokenLabel(tx.currency);
+      return transactionFilters.currencies[currency] ?? true;
     });
 
     // Apply status filters
@@ -2698,6 +2708,7 @@ export const AccountDetailScreen = () => {
         onClose={() => setShowFilterModal(false)}
         onApply={setTransactionFilters}
         currentFilters={transactionFilters}
+        availableCurrencies={currencyChips}
         theme={{
           primary: account.color,
           secondary: colors.secondary,

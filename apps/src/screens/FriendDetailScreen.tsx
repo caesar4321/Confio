@@ -131,11 +131,8 @@ export function FriendDetailScreen() {
       ramp: true,
       humanitarian: true,
     },
-    currencies: {
-      cUSD: true,
-      CONFIO: true,
-      USDC: true,
-    },
+    // Empty = no currency filter; the chips come from the tokens present.
+    currencies: {},
     status: {
       completed: true,
       pending: true,
@@ -203,7 +200,7 @@ export function FriendDetailScreen() {
       // Determine transaction direction from current user perspective
       const isCurrentUserSender = tx.direction === 'sent';
       
-      const uiCurrency = (tx.tokenType || '').toUpperCase() === 'CUSD' ? 'cUSD' : (tx.tokenType || 'CONFIO');
+      const uiCurrency = formatTokenLabel(tx.tokenType) || 'CONFIO';
       allTransactions.push({
         id: tx.id,
         type: transactionType === 'exchange' ? 'exchange' : 
@@ -240,6 +237,16 @@ export function FriendDetailScreen() {
   }, [friendTransactions, friend.name]);
   
   const transactions = formatTransactions();
+  // This screen is not scoped to one token — it shows everything exchanged
+  // with this person — so the chips are the tokens actually present, in a
+  // stable order. A hardcoded list here went stale at every chain migration.
+  const CURRENCY_ORDER = ['cUSD+', 'USDT', 'cUSD', 'CONFIO', 'USDC'];
+  const currencyChips = useMemo(() => {
+    const present = new Set(transactions.map(t => formatTokenLabel(t.currency)).filter(Boolean));
+    const known = CURRENCY_ORDER.filter(c => present.has(c));
+    const rest = [...present].filter(c => !CURRENCY_ORDER.includes(c));
+    return [...known, ...rest];
+  }, [transactions]);
   
   // Filter transactions based on search query and filters
   const filteredTransactions = useMemo(() => {
@@ -275,11 +282,11 @@ export function FriendDetailScreen() {
       });
     }
     
-    // Apply currency filters
+    // Apply currency filters (chips are display labels; rows may carry the
+    // raw wire token, so normalise both sides)
     if (transactionFilters.currencies) {
       filtered = filtered.filter(tx => {
-        const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
-        return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
+        return transactionFilters.currencies[formatTokenLabel(tx.currency)] ?? true;
       });
     }
     
@@ -341,7 +348,7 @@ export function FriendDetailScreen() {
         ramp: true,
         humanitarian: true,
       },
-      currencies: { cUSD: true, CONFIO: true, USDC: true },
+      currencies: {},
       status: { completed: true, pending: true },
       timeRange: 'all',
       amountRange: { min: '', max: '' }
@@ -756,11 +763,12 @@ export function FriendDetailScreen() {
         onApply={setTransactionFilters}
         currentFilters={transactionFilters || {
           types: { sent: true, received: true, payment: true, exchange: true, conversion: true },
-          currencies: { cUSD: true, CONFIO: true, USDC: true },
+          currencies: {},
           status: { completed: true, pending: true },
           timeRange: 'all',
           amountRange: { min: '', max: '' }
         }}
+        availableCurrencies={currencyChips}
       />
     </View>
   );

@@ -24,11 +24,11 @@ export interface TransactionFilters {
     ramp: boolean;
     humanitarian: boolean;
   };
-  currencies: {
-    cUSD: boolean;
-    CONFIO: boolean;
-    USDC: boolean;
-  };
+  // Keyed by DISPLAY label ('cUSD+', not 'CUSD_PLUS'), open-ended: each screen
+  // filters over a different token set, and the set changes as the app
+  // migrates chains. A fixed three-key shape is what left this stuck on
+  // cUSD/CONFIO/USDC with no way to filter the BSC tokens.
+  currencies: Record<string, boolean>;
   status: {
     completed: boolean;
     pending: boolean;
@@ -45,11 +45,29 @@ interface TransactionFilterModalProps {
   onClose: () => void;
   onApply: (filters: TransactionFilters) => void;
   currentFilters: TransactionFilters;
+  /**
+   * Display labels of the tokens this list can contain, in chip order.
+   * Defaults to the keys already present in `currentFilters`, so a caller
+   * that scopes its own filters needs no extra wiring.
+   */
+  availableCurrencies?: string[];
   theme?: {
     primary: string;
     secondary: string;
   };
 }
+
+/**
+ * Chip colour per token. USDT uses Tether's brand teal (nominative use, as in
+ * SendUsdtScreen); everything else stays in the house palette.
+ */
+const CURRENCY_COLORS: Record<string, string> = {
+  'cUSD': colors.primary,
+  'cUSD+': colors.primary,
+  'CONFIO': colors.secondary,
+  'USDC': colors.accent,
+  'USDT': '#26A17B',
+};
 
 const defaultTheme = {
   primary: colors.primary,
@@ -61,9 +79,21 @@ export const TransactionFilterModal = ({
   onClose,
   onApply,
   currentFilters,
+  availableCurrencies,
   theme = defaultTheme,
 }: TransactionFilterModalProps) => {
   const [filters, setFilters] = useState<TransactionFilters>(currentFilters);
+
+  const currencyChips = availableCurrencies ?? Object.keys(currentFilters.currencies);
+
+  // The modal is mounted once and reused, so without this the chips keep the
+  // state captured at first mount — switching accounts would show the previous
+  // account's tokens. Resync on OPEN only: one caller passes an inline object,
+  // so depending on `currentFilters` would reset the user's toggles mid-edit.
+  React.useEffect(() => {
+    if (visible) setFilters(currentFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const handleReset = () => {
     const resetFilters: TransactionFilters = {
@@ -79,11 +109,8 @@ export const TransactionFilterModal = ({
         ramp: true,
         humanitarian: true,
       },
-      currencies: {
-        cUSD: true,
-        CONFIO: true,
-        USDC: true,
-      },
+      // Reset means "everything this list can show", not a fixed token trio.
+      currencies: Object.fromEntries(currencyChips.map(c => [c, true])),
       status: {
         completed: true,
         pending: true,
@@ -112,7 +139,7 @@ export const TransactionFilterModal = ({
     });
   };
 
-  const toggleCurrency = (currency: keyof typeof filters.currencies) => {
+  const toggleCurrency = (currency: string) => {
     setFilters({
       ...filters,
       currencies: {
@@ -298,45 +325,38 @@ export const TransactionFilterModal = ({
               </View>
             </View>
 
-            {/* Currencies */}
+            {/* Currencies — hidden when there is nothing to choose between:
+                a single-token account, or a list with no transactions yet. */}
+            {currencyChips.length > 1 && (
             <View style={styles.filterSection}>
               <Text style={styles.sectionTitle}>Moneda</Text>
               <View style={styles.filterOptions}>
-                <TouchableOpacity
-                  style={[
-                    styles.filterChip,
-                    filters.currencies.cUSD && { backgroundColor: theme.primary + '20', borderColor: theme.primary }
-                  ]}
-                  onPress={() => toggleCurrency('cUSD')}
-                >
-                  <Text style={[styles.filterChipText, filters.currencies.cUSD && { color: theme.primary }]}>
-                    cUSD
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.filterChip,
-                    filters.currencies.CONFIO && { backgroundColor: theme.secondary + '20', borderColor: theme.secondary }
-                  ]}
-                  onPress={() => toggleCurrency('CONFIO')}
-                >
-                  <Text style={[styles.filterChipText, filters.currencies.CONFIO && { color: theme.secondary }]}>
-                    CONFIO
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.filterChip,
-                    filters.currencies.USDC && { backgroundColor: colors.accent + '20', borderColor: colors.accent }
-                  ]}
-                  onPress={() => toggleCurrency('USDC')}
-                >
-                  <Text style={[styles.filterChipText, filters.currencies.USDC && { color: colors.accent }]}>
-                    USDC
-                  </Text>
-                </TouchableOpacity>
+                {currencyChips.map(currency => {
+                  const selected = filters.currencies[currency] ?? true;
+                  // theme.primary/secondary are per-account overrides, so they
+                  // win over the static table for the tokens they name.
+                  const tint =
+                    currency === 'CONFIO' ? theme.secondary :
+                    currency === 'cUSD' || currency === 'cUSD+' ? theme.primary :
+                    CURRENCY_COLORS[currency] || colors.accent;
+                  return (
+                    <TouchableOpacity
+                      key={currency}
+                      style={[
+                        styles.filterChip,
+                        selected && { backgroundColor: tint + '20', borderColor: tint }
+                      ]}
+                      onPress={() => toggleCurrency(currency)}
+                    >
+                      <Text style={[styles.filterChipText, selected && { color: tint }]}>
+                        {currency}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
+            )}
 
             {/* Status */}
             <View style={styles.filterSection}>
