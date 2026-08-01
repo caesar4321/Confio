@@ -1060,15 +1060,15 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             
             # Priority 2: Phone number lookup
             elif recipient_phone:
-                from django.contrib.auth import get_user_model
-                User = get_user_model()
-                # Clean phone number - remove all non-digits (normalized format)
-                cleaned_phone = ''.join(filter(str.isdigit, recipient_phone))
-                logger.info(f"Looking up user by phone: original='{recipient_phone}', cleaned='{cleaned_phone}'")
-                
-                # Exact match only - phones should be stored normalized (digits only, with country code)
-                found_user = User.objects.filter(phone_number=cleaned_phone).first()
-                
+                from users.phone_utils import find_user_by_phone, phone_lookup_key
+                # A recipient is identified by the FULL number only: the
+                # canonical key ("57:3132587634") or E.164. A local number
+                # without a calling code names no one country, so it resolves
+                # to nothing rather than to a stranger.
+                logger.info(f"Looking up user by phone: original='{recipient_phone}', key='{phone_lookup_key(recipient_phone)}'")
+
+                found_user = find_user_by_phone(recipient_phone)
+
                 if found_user:
                     recipient_user = found_user
                     # Get recipient's personal account

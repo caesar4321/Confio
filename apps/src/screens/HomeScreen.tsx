@@ -203,6 +203,11 @@ export const HomeScreen = () => {
   // Ahorros e Inversiones portfolio total for the wallet-row entry (stubbed
   // until the cUSD+/stocks backend lands; single wiring point in the hook).
   const savingsPortfolio = useSavingsPortfolio();
+  // Reached through a ref so focus/pull-to-refresh can refresh the BSC
+  // dollar row without either callback taking a dependency on it. Null
+  // until auth is ready — refetch would bypass the hook's own gate.
+  const refetchSavingsPortfolioRef = useRef<(() => Promise<unknown>) | null>(null);
+  refetchSavingsPortfolioRef.current = isAuthReady ? savingsPortfolio.refetch : null;
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrerMutation] = useMutation(SET_REFERRER);
 
@@ -294,6 +299,11 @@ export const HomeScreen = () => {
       }
       refetchMyBalances();
       refetchPendingPayroll();
+      // The BSC dollar row lives in its own query (JWT-scoped, 60s poll).
+      // Home never remounts, so without this the slot keeps whatever it
+      // read a minute ago while the legacy cUSD row updates instantly —
+      // coming back from a deposit/receive, the money looks missing.
+      refetchSavingsPortfolioRef.current?.().catch(() => {});
     }, [refetchMyBalances, refetchPendingPayroll])
   );
 
@@ -728,7 +738,14 @@ export const HomeScreen = () => {
         refreshAccounts(),
         refreshAccountBalance(), // Force blockchain sync
       ]);
-      await refetchMyBalances();
+      await Promise.all([
+        refetchMyBalances(),
+        // Pull-to-refresh has to move the BSC dollar row too, otherwise the
+        // gesture visibly does nothing for the balance most users came to
+        // check. (Server-side read cache is 30s, so this is as fresh as the
+        // server will serve.)
+        refetchSavingsPortfolioRef.current?.() ?? Promise.resolve(),
+      ]);
       setStatsRefreshNonce((nonce) => nonce + 1);
     } catch (error) {
     } finally {
@@ -1600,7 +1617,9 @@ export const HomeScreen = () => {
         <View style={styles.walletsSection}>
           <Text style={styles.walletsTitle}>Mis Billeteras</Text>
 
-          {myBalancesLoading ? (
+          {/* Both queries feed rows here, so wait for both: a $0.00 dollar
+              row that fills in a beat later reads as "my money is gone". */}
+          {(myBalancesLoading || savingsPortfolio.loading) ? (
             <>
               <WalletCardSkeleton />
               <WalletCardSkeleton />

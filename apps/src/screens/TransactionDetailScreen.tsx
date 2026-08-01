@@ -45,6 +45,7 @@ import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/invite
 import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
 import { formatTokenLabel, explorerFor, conversionPair, isConversionIncoming, sendTokenParamFor } from '../utils/tokenDisplay';
+import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -108,6 +109,11 @@ const normalizeRampDirection = (value: unknown, amount?: unknown, title?: unknow
 // Helper function to format phone numbers for display
 const formatPhoneNumber = (phone: string | undefined): string => {
   if (!phone) return '';
+
+  // The server's canonical key ("57:3132587634") carries the calling code
+  // already — hand back a dialable number instead of the storage key.
+  const parsedKey = parsePhoneKey(phone);
+  if (parsedKey) return `+${parsedKey.callingCode} ${parsedKey.localDigits}`;
 
   // Extract country code and phone number
   // Format: "AS9293993619" where AS = American Samoa, DO = Dominican Republic, etc.
@@ -778,9 +784,18 @@ export const TransactionDetailScreen = () => {
     && Boolean(routeInvitationExpiresAt)
     && moment(routeInvitationExpiresAt).isBefore(moment())
     && !routeHasInvitationId;
+  // Notification payloads carry phones but no counterparty user ids (see
+  // send/tasks.py), so without this the "Enviar a" shortcut would fall back to
+  // resolving the recipient by phone — the exact ambiguity the user id exists
+  // to avoid. Fetch whenever the counterparty id is missing on a send-type row.
+  const routeCounterpartyUserId = (transactionData as any)?.senderUser?.id
+    || (transactionData as any)?.counterpartyUser?.id
+    || (transactionData as any)?.recipientUser?.id;
+  const lacksCounterpartyUserId = (routeTypeLower === 'sent' || routeTypeLower === 'received')
+    && !routeCounterpartyUserId;
   const needsFetch = Boolean(
     (transactionData?.id || transactionData?.transaction_id) &&
-    (lacksPhonesForSend || !hasValidInternalId || routeInviteNeedsId)
+    (lacksPhonesForSend || !hasValidInternalId || routeInviteNeedsId || lacksCounterpartyUserId)
   );
   const transactionId = transactionData?.id || transactionData?.transaction_id;
 
@@ -892,6 +907,10 @@ export const TransactionDetailScreen = () => {
       invitationReverted: isInvite ? (tx.invitationReverted || revertedFromRoute) : false,
       transaction_type: 'send',
       internalId: tx.internalId || (transactionData as any)?.internalId || (transactionData as any)?.internal_id,
+      // Counterparty user ids — the only recipient identifier a send can
+      // resolve without guessing at phone shapes.
+      senderUserId: tx.senderUser?.id || (transactionData as any)?.senderUser?.id,
+      recipientUserId: tx.recipientUser?.id || (transactionData as any)?.counterpartyUser?.id || (transactionData as any)?.recipientUser?.id,
       // Add phone keys from fetched data (prefer user.phoneKey over legacy fields)
       sender_phone: (tx.senderUser as any)?.phoneKey || (tx.senderPhone || undefined),
       recipient_phone: (tx.recipientUser as any)?.phoneKey || (tx.recipientPhone || undefined),
@@ -1127,6 +1146,17 @@ export const TransactionDetailScreen = () => {
   // MUST be called before any early returns to follow React hooks rules
   const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || (transactionData as any)?.sender_phone || (transactionData as any)?.fromPhone;
   const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || (transactionData as any)?.recipient_phone || (transactionData as any)?.toPhone || (transactionData as any)?.counterpartyPhone;
+
+  // Is the counterparty a business? A send to a business account stores BOTH
+  // the business and its owning user (send/bsc_flow.py resolves an address to
+  // match.user + match.business), so the user id on this transaction is the
+  // owner's personal identity, not the business. Anything that re-sends from
+  // here would pay the wrong account.
+  const counterpartyIsBusiness = Boolean(
+    currentTx?.type === 'received'
+      ? (currentTx?.senderBusiness || currentTx?.payerBusiness)
+      : (currentTx?.recipientBusiness || currentTx?.merchantBusiness || (currentTx as any)?.counterpartyBusiness)
+  );
 
   // Detect external wallet counterparties to label them as "Billetera externa"
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
@@ -2248,16 +2278,27 @@ export const TransactionDetailScreen = () => {
             <Text style={styles.supportFootnote}>{supportCopy.merchantLine}</Text>
           )}
 
-          {/* Actions — primary CTA + utility rows in one card */}
-          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
+          {/* Actions — primary CTA + utility rows in one card.
+              Hidden when the counterparty is a BUSINESS: the transaction
+              carries both the business and its owning user, and every
+              recipient path here (userId, and the phone that resolves to a
+              user) lands on that person's PERSONAL wallet — not the business
+              account the button names. Rather than pay the wrong account, we
+              don't offer the shortcut. */}
+          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll')
+            && !counterpartyIsBusiness && (
                 <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {
                     // Navigate to SendToFriend screen
-                    const friendName = currentTx.type === 'received' ? displayFromName : displayToName;
-                    const friendPhone = currentTx.type === 'received' ? senderPhone : recipientPhone;
-
-                    // Debug logging to understand the data
+                    const isFromCounterparty = currentTx.type === 'received';
+                    const friendName = isFromCounterparty ? displayFromName : displayToName;
+                    // These carry the server's canonical key ("57:3132587634"),
+                    // which is neither displayable nor sendable — convert it.
+                    const friendPhone = phoneKeyToE164(isFromCounterparty ? senderPhone : recipientPhone);
+                    const friendUserId = isFromCounterparty
+                      ? (currentTx.senderUserId || (currentTx as any).senderUser?.id)
+                      : (currentTx.recipientUserId || (currentTx as any).recipientUser?.id || (currentTx as any).counterpartyUser?.id);
 
                     // For navigation, we need to determine if this is a Confío user
                     // If it's an invited friend (non-Confío user), we shouldn't navigate
@@ -2270,14 +2311,15 @@ export const TransactionDetailScreen = () => {
                         [{ text: 'Entendido' }]
                       );
                     } else {
-                      // This is a Confío user - we just need their phone number
-                      // The server will look up their current active Algorand address
+                      // This is a Confío user. Prefer the user id when we have
+                      // it; the phone is the fallback the server resolves.
                       const friendData = {
                         name: friendName || 'Amigo',
                         avatar: currentTx.avatar || friendName?.charAt(0) || 'A',
                         isOnConfio: true,
-                        phone: friendPhone || '',
-                        // No userId here, but server can look up by phone
+                        phone: friendPhone,
+                        normalizedPhones: friendPhone ? [friendPhone] : undefined,
+                        ...(friendUserId ? { userId: String(friendUserId), id: String(friendUserId) } : {}),
                       };
 
 

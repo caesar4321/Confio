@@ -144,8 +144,8 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
         return recipient_user, None, (addr or None), None
 
     if recipient_phone:
-        # Any shape the client may send: canonical key "57:313…", E.164, or
-        # bare local digits. `phone_number` stores local digits only.
+        # Full number only — canonical key "57:313…" or E.164. A local number
+        # without a calling code identifies no one and resolves to nothing.
         from users.phone_utils import find_user_by_phone
         found = find_user_by_phone(recipient_phone)
         if not found:

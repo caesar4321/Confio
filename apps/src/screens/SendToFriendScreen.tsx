@@ -17,6 +17,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { inviteSendService } from '../services/inviteSendService';
+import { formatPhoneForDisplay } from '../hooks/useContactName';
 
 type TokenType = 'cusd' | 'confio' | 'cusd_plus';
 
@@ -84,6 +85,14 @@ export const SendToFriendScreen = () => {
   const supportCopy = getSupportCopy(userProfile?.phoneCountry);
 
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
+
+  // The server identifies a recipient by the FULL number, so always hand it
+  // the international form when we have one. A bare local number resolves to
+  // nobody — deliberately, since it names no country.
+  const friendInternationalPhone = friend.normalizedPhones?.find(p => p.startsWith('+'))
+    || (friend.phone?.startsWith('+') ? friend.phone : '')
+    || friend.phone
+    || '';
 
   // Debug log to check friend data
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
@@ -175,7 +184,7 @@ export const SendToFriendScreen = () => {
           amount: amt,
           assetType,
           recipientUserId: friend.userId || friend.id,
-          recipientPhone: friend.phone,
+          recipientPhone: friendInternationalPhone,
         });
         if (!alive) return;
         if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length >= 2) {
@@ -245,7 +254,7 @@ export const SendToFriendScreen = () => {
           amount: amount,
           currency: config.name,
           recipient: friend.name,
-          recipientPhone: friend.normalizedPhones?.find(phone => phone.startsWith('+')) || friend.phone,
+          recipientPhone: friendInternationalPhone,
           recipientUserId: friend.userId || friend.id, // Pass user ID if available
           action: 'Enviando',
           isOnConfio: friend.isOnConfio,
@@ -304,7 +313,7 @@ export const SendToFriendScreen = () => {
                 </View>
                 <Text style={styles.headerSubtitle}>{friend.name}</Text>
                 {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
-                  <Text style={styles.headerPhone}>{friend.phone}</Text>
+                  <Text style={styles.headerPhone}>{formatPhoneForDisplay(friend.phone)}</Text>
                 )}
               </View>
             </View>

@@ -10,8 +10,11 @@ Goals:
   or a calling code string ("+1" or "1").
 """
 
+import logging
 from typing import Optional
 from .country_codes import COUNTRY_CODES
+
+logger = logging.getLogger(__name__)
 
 _ISO_TO_CC: dict[str, str] | None = None
 
@@ -103,3 +106,88 @@ def normalize_any_phone(full_phone: str) -> Optional[str]:
                 return f"{cc}:{rest}"
     # Fallback: treat entire digits as local without code
     return digits
+
+
+def phone_lookup_key(raw_phone: str) -> str:
+    """The one canonical key a caller-supplied phone names, or ''.
+
+    A recipient is identified by the FULL number — calling code plus
+    subscriber digits — and nothing else. A partial number is not a weaker
+    identifier, it is a different number: "3009998877" is a valid local
+    number in the US, in Colombia, and elsewhere, so matching it would pick
+    a country at random and pay whoever that landed on.
+
+    Accepted, because all three carry the full number:
+
+    - the canonical key "57:3132587634" (what the `phoneKey` GraphQL field
+      and the transaction list hand the app),
+    - E.164 "+573132587634", in any punctuation.
+
+    Rejected (returns ''): bare local digits with no calling code. The
+    caller gets a clean miss and the send fails loudly as "not registered",
+    which is correct — we genuinely do not know who they meant.
+
+    The key is built exactly the way `User.save()` builds the stored one:
+    `normalize_phone(all_digits, calling_code)`, routed through
+    `canonicalize_phone_digits`, so country quirks line up with storage —
+    notably Argentina, where "+54 9 223 1234567" and the stored
+    "54:2231234567" have to collapse to the same key.
+    """
+    raw = (raw_phone or '').strip()
+    if not raw:
+        return ''
+
+    digits = ''.join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return ''
+
+    # The calling code the caller named. An explicit key is authoritative;
+    # otherwise infer the split, which only a '+' prefix licenses.
+    calling_code = ''
+    if ':' in raw:
+        cc, _, rest = raw.partition(':')
+        cc_digits = ''.join(ch for ch in cc if ch.isdigit())
+        rest_digits = ''.join(ch for ch in rest if ch.isdigit())
+        if cc_digits and rest_digits:
+            calling_code = cc_digits
+    elif raw.startswith('+'):
+        guess = normalize_any_phone(digits)
+        if guess and ':' in guess:
+            calling_code = guess.split(':', 1)[0]
+
+    if not calling_code:
+        return ''
+
+    key = normalize_phone(digits, calling_code)
+    return key if ':' in key else ''
+
+
+def find_user_by_phone(raw_phone: str):
+    """Resolve a Confío user from a FULL phone number (with calling code).
+
+    Returns None when the input names no complete number, when nothing
+    matches, or when the number is AMBIGUOUS. `phone_key` carries a partial
+    unique index in production, but that index lives in no migration, so a
+    freshly-migrated environment has no such guarantee — and paying an
+    arbitrary one of several matching users is worse than refusing.
+
+    Callers surface a None as "not registered", the safe, loud failure.
+    See `phone_lookup_key` for the shapes accepted.
+    """
+    from django.contrib.auth import get_user_model
+
+    key = phone_lookup_key(raw_phone)
+    if not key:
+        if raw_phone:
+            logger.warning(
+                'phone lookup refused: %r carries no calling code', raw_phone)
+        return None
+
+    User = get_user_model()
+    # Soft-deleted users are already excluded by the default manager;
+    # deactivated ones are not, and their wallet should not receive.
+    matches = list(User.objects.filter(is_active=True, phone_key=key)[:2])
+    if len(matches) > 1:
+        logger.error('phone lookup refused: phone_key=%r matches multiple active users', key)
+        return None
+    return matches[0] if matches else None

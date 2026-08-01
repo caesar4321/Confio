@@ -18,6 +18,7 @@
 
 import { useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
+import { useAuthReady } from '../contexts/AuthContext';
 
 // Flags gate surfaces (savingsEnabled gates ENTRY only — Ahorrar CTA,
 // Convert; exits are never gated. The deposit mutation enforces
@@ -97,9 +98,16 @@ export interface SavingsPortfolio {
 }
 
 export const useSavingsPortfolio = (): SavingsPortfolio => {
+  // Every field here is JWT-account-scoped (the query takes no account
+  // argument), so firing before the token is synced to the active account
+  // answers for the WRONG account — or for none, which returns a null
+  // summary the balance rows would print as a confident $0.00. Same gate
+  // GET_MY_BALANCES uses.
+  const isAuthReady = useAuthReady();
   const { data, refetch, loading } = useQuery(GET_AHORRO_PORTFOLIO, {
     fetchPolicy: 'cache-and-network',
     pollInterval: 60_000, // matches the server-side GM cache TTL
+    skip: !isAuthReady,
   });
   const summary = data?.cusdPlusSummary;
   // Fail-open before the server answers (most users are eligible LATAM —
@@ -161,7 +169,9 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
       refetch,
       // cache-and-network keeps `loading` true on background refreshes, so
       // anchor on "no data yet" — a cached balance is a usable balance.
-      loading: loading && !data,
+      // While the auth gate holds the query, Apollo reports loading=false;
+      // that is still "not loaded yet", not "loaded and empty".
+      loading: !isAuthReady || (loading && !data),
     };
-  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch, loading]);
+  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch, loading, isAuthReady]);
 };

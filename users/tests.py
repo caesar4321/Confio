@@ -6,6 +6,7 @@ from graphql_jwt.exceptions import PermissionDenied
 from graphql_jwt.utils import jwt_encode
 import json
 from users.jwt import jwt_payload_handler, verify_auth_token_version
+from users.phone_utils import find_user_by_phone, phone_lookup_key
 from users.migration_safety import (
     MATERIAL_SPENDABLE_ALGO_MICROS,
     get_address_reassignment_blocker,
@@ -176,3 +177,124 @@ class MigrationSafetyTestCase(TestCase):
 
         blocker = get_address_reassignment_blocker(algod, 'legacy', 'new')
         self.assertIsNone(blocker)
+
+
+class PhoneLookupTestCase(TestCase):
+    """A send identifies its recipient by the FULL number — calling code plus
+    subscriber digits. Every spelling of a full number lands on the same user;
+    anything less than a full number lands on nobody."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='phoneuser',
+            email='phone@example.com',
+            password='testpass123',
+            firebase_uid='phone-firebase-uid',
+            phone_country='CO',
+            phone_number='3132587634',
+        )
+
+    def test_canonical_key_resolves(self):
+        # What `phoneKey` hands the app, and what the transaction list passes
+        # through as fromPhone/toPhone.
+        self.assertEqual(find_user_by_phone('57:3132587634'), self.user)
+
+    def test_e164_resolves(self):
+        self.assertEqual(find_user_by_phone('+573132587634'), self.user)
+
+    def test_formatted_e164_resolves(self):
+        self.assertEqual(find_user_by_phone('+57 313 258 7634'), self.user)
+
+    def test_bare_local_digits_never_resolve(self):
+        # A local number names no country. "3132587634" is dialable in
+        # Colombia and elsewhere, so matching it would pick a country at
+        # random. Refusing is correct even though this user's local digits
+        # are exactly that.
+        self.assertEqual(phone_lookup_key('3132587634'), '')
+        self.assertIsNone(find_user_by_phone('3132587634'))
+
+    def test_unknown_number_returns_none(self):
+        self.assertIsNone(find_user_by_phone('57:3009998877'))
+
+    def test_blank_input_returns_none(self):
+        self.assertIsNone(find_user_by_phone(''))
+        self.assertIsNone(find_user_by_phone(None))
+
+    def test_bare_digits_never_guess_a_calling_code(self):
+        # "3132587634" also reads as +31 (Netherlands) 32587634. Guessing a
+        # split on an unprefixed number could pay the wrong person.
+        self.assertEqual(phone_lookup_key('3132587634'), '')
+
+    def test_partial_number_never_matches_a_full_one(self):
+        # The wrong-payment path: +57 3009998877 has no Colombian user, but a
+        # US user's LOCAL number is 3009998877. Matching on anything less than
+        # the full number would pay them.
+        us_user = User.objects.create_user(
+            username='ususer',
+            email='us@example.com',
+            password='testpass123',
+            firebase_uid='us-firebase-uid',
+            phone_country='US',
+            phone_number='3009998877',
+        )
+        self.assertEqual(phone_lookup_key('+573009998877'), '57:3009998877')
+        self.assertIsNone(find_user_by_phone('+573009998877'))
+        # ...and the bare local digits don't reach the US user either.
+        self.assertIsNone(find_user_by_phone('3009998877'))
+        # Only the full US number does.
+        self.assertEqual(find_user_by_phone('+13009998877'), us_user)
+
+    def test_argentina_mobile_nine_collapses_to_stored_key(self):
+        # canonicalize_phone_digits drops the optional mobile 9, so every
+        # spelling of the same AR number must reach the one stored key.
+        ar_user = User.objects.create_user(
+            username='aruser',
+            email='ar@example.com',
+            password='testpass123',
+            firebase_uid='ar-firebase-uid',
+            phone_country='AR',
+            phone_number='2231234567',
+        )
+        self.assertEqual(ar_user.phone_key, '54:2231234567')
+        for shape in ('+54 9 223 1234567', '+542231234567', '54:92231234567', '54:2231234567'):
+            self.assertEqual(find_user_by_phone(shape), ar_user, shape)
+
+    def test_ambiguous_number_is_refused_not_guessed(self):
+        # Production carries a partial unique index on phone_key, but it lives
+        # in no migration — so a freshly-migrated environment (including this
+        # test DB) can hold duplicates. Paying an arbitrary one of two matching
+        # users is worse than refusing.
+        from django.db import IntegrityError, transaction
+        try:
+            with transaction.atomic():
+                User.objects.create_user(
+                    username='dupe',
+                    email='dupe@example.com',
+                    password='testpass123',
+                    firebase_uid='dupe-firebase-uid',
+                    phone_country='CO',
+                    phone_number='3132587634',
+                )
+        except IntegrityError:
+            self.skipTest('this database enforces phone_key uniqueness; nothing to refuse')
+        self.assertIsNone(find_user_by_phone('57:3132587634'))
+
+    def test_deactivated_user_does_not_receive(self):
+        self.user.is_active = False
+        self.user.save()
+        self.assertIsNone(find_user_by_phone('57:3132587634'))
+
+    def test_full_digits_of_one_number_are_not_another_users_local_number(self):
+        # A US user whose stored local digits spell out the Colombian user's
+        # full international number must not be reachable as that number.
+        collider = User.objects.create_user(
+            username='collider',
+            email='collider@example.com',
+            password='testpass123',
+            firebase_uid='collider-firebase-uid',
+            phone_country='US',
+            phone_number='573132587634',
+        )
+        self.assertEqual(collider.phone_number, '573132587634')
+        self.assertEqual(find_user_by_phone('57:3132587634'), self.user)
+        self.assertEqual(find_user_by_phone('+573132587634'), self.user)
