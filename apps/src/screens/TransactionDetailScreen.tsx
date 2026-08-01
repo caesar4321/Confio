@@ -23,6 +23,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import USDTLogo from '../assets/png/USDT.png';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import moment from 'moment';
 import 'moment/locale/es';
@@ -223,6 +225,19 @@ const normalizeStatusForDisplay = (status: string | undefined): string => {
   if (normalized === 'submitted') return 'pending';
   return normalized;
 };
+
+// Token → logo. This was a binary `USDC ? USDC : cUSD` guess, so every BSC
+// conversion (USDT → cUSD+) drew the cUSD mark on BOTH sides. Unknown tokens
+// keep the cUSD fallback rather than rendering nothing.
+const TOKEN_LOGOS: Record<string, any> = {
+  USDC: USDCLogo,
+  CUSD: cUSDLogo,
+  'CUSD+': cUSDPlusLogo,
+  CUSD_PLUS: cUSDPlusLogo,
+  USDT: USDTLogo,
+};
+const tokenLogo = (label?: string | null) =>
+  TOKEN_LOGOS[String(label ?? '').trim().toUpperCase()] || cUSDLogo;
 
 export const TransactionDetailScreen = () => {
   const navigation = useNavigation<TransactionDetailScreenNavigationProp>();
@@ -1765,19 +1780,11 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.exchangeInfo}>
                   <View style={styles.exchangeIcons}>
                     <View style={[styles.exchangeIcon, { backgroundColor: colors.white }]}>
-                      {conversionFromCurrencyLabel.toUpperCase() === 'USDC' ? (
-                        <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
-                      ) : (
-                        <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
-                      )}
+                      <Image source={tokenLogo(conversionFromCurrencyLabel)} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                     </View>
                     <Icon name="arrow-right" size={16} color={colors.text.secondary} style={styles.exchangeArrow} />
                     <View style={[styles.exchangeIcon, { backgroundColor: colors.white }]}>
-                      {conversionToCurrencyLabel.toUpperCase() === 'USDC' ? (
-                        <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
-                      ) : (
-                        <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
-                      )}
+                      <Image source={tokenLogo(conversionToCurrencyLabel)} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                     </View>
                   </View>
                   {currentTx.exchangeRate && (

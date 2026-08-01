@@ -220,13 +220,24 @@ class UnifiedTransactionTable(models.Model):
 
     def get_direction_for_address(self, address):
         """
-        Determine if this transaction is incoming or outgoing for a given address
+        Determine if this transaction is incoming or outgoing for a given address.
+
+        Case-INSENSITIVE on purpose. An EVM address is the same address in any
+        case — the mixed case is only an EIP-55 checksum — and the two sides
+        genuinely disagree here: accounts store the checksummed form while the
+        send flow lower-cases what it writes. An exact == made every BSC row
+        resolve to 'unknown', which renders as an "Unknown" counterparty and an
+        unsigned amount. Algorand's base32 is upper-case by convention, so
+        folding is harmless there.
         """
         if not address:
             return 'unknown'
-        if self.from_address and self.from_address == address:
+        target = str(address).strip().lower()
+        if not target:
+            return 'unknown'
+        if self.from_address and str(self.from_address).strip().lower() == target:
             return 'sent'
-        if self.to_address and self.to_address == address:
+        if self.to_address and str(self.to_address).strip().lower() == target:
             return 'received'
         return 'unknown'
             

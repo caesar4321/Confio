@@ -183,8 +183,18 @@ class UnifiedTransactionType(DjangoObjectType):
     def resolve_display_counterparty(self, info):
         """Resolve counterparty name based on direction"""
         try:
-            # Handle conversions (no counterparty)
+            # Conversions have no counterparty — they are one account moving
+            # between its own products. Name the MOVE, not a fake party.
             if self.transaction_type == 'conversion':
+                ctype = self.get_conversion_type()
+                if ctype == 'to_savings':
+                    return 'USDT → cUSD+'
+                if ctype == 'from_savings':
+                    return 'cUSD+ → USDT'
+                if ctype == 'usdc_to_cusd':
+                    return 'USDC → cUSD'
+                if ctype == 'cusd_to_usdc':
+                    return 'cUSD → USDC'
                 return 'Confío System'
             
             # Handle P2P exchanges
@@ -200,10 +210,16 @@ class UnifiedTransactionType(DjangoObjectType):
             user_address = getattr(self, '_user_address', None)
             if user_address and hasattr(self, 'get_direction_for_address'):
                 direction = self.get_direction_for_address(user_address)
+                # An EXTERNAL party has no display name by definition (money
+                # to/from a raw address), so falling through to "Unknown" was
+                # guaranteed for every external send and every inbound
+                # deposit. The address IS the name in that case.
                 if direction == 'sent':
-                    return self.counterparty_display_name or 'Unknown'
+                    return (self.counterparty_display_name
+                            or _short_addr(self.to_address) or 'Unknown')
                 elif direction == 'received':
-                    return self.sender_display_name or 'Unknown'
+                    return (self.sender_display_name
+                            or _short_addr(self.from_address) or 'Unknown')
         except Exception as e:
             print(f"Error in resolve_display_counterparty: {e}")
         return 'Unknown'
@@ -340,6 +356,30 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         description="Get unified transactions between current user and a specific friend"
     )
     
+def _short_addr(addr):
+    """A raw address is a usable NAME when there is no person behind it."""
+    a = (addr or '').strip()
+    if not a:
+        return ''
+    return f'{a[:6]}…{a[-4:]}' if len(a) > 12 else a
+
+
+def _viewer_address_for(transaction, account):
+    """The account address on the SAME CHAIN as this transaction.
+
+    Direction ("did I send or receive this?") is decided by comparing the
+    row's from/to against the viewer's address. Those columns hold a BSC
+    address for the BSC tokens and an Algorand address for the rest, so
+    handing back algorand_address unconditionally made every cUSD+/USDT row
+    match neither side: direction came out 'unknown', which in turn renders
+    the counterparty as "Unknown" and the amount without a +/- sign.
+    """
+    token = (getattr(transaction, 'token_type', '') or '').upper()
+    if token in ('CUSD_PLUS', 'USDT'):
+        return getattr(account, 'bsc_address', None) or ''
+    return account.algorand_address
+
+
     def resolve_unified_transactions(self, info, account_type, account_index, 
                                    limit=50, offset=0, token_types=None):
         """Resolve unified transactions for the current user's account"""
@@ -421,7 +461,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         transactions = list(queryset[offset:offset + limit])
         for transaction in transactions:
             # Hints used by resolvers to compute perspective/direction correctly
-            transaction._user_address = account.algorand_address
+            transaction._user_address = _viewer_address_for(transaction, account)
             transaction._account_type = account.account_type
             transaction._account_business_id = getattr(account.business, 'id', None) if account.account_type == 'business' else None
         
@@ -536,7 +576,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         transactions = list(queryset[offset:offset + limit])
         print(f"Found {len(transactions)} transactions for account {account.id}")
         for transaction in transactions:
-            transaction._user_address = account.algorand_address
+            transaction._user_address = _viewer_address_for(transaction, account)
             transaction._account_type = account.account_type
             transaction._account_business_id = getattr(account.business, 'id', None) if account.account_type == 'business' else None
         
@@ -670,6 +710,6 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
-            transaction._user_address = account.algorand_address
+            transaction._user_address = _viewer_address_for(transaction, account)
             
         return transactions
