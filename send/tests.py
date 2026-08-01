@@ -266,6 +266,45 @@ class PrepareCallShapeTests(SimpleTestCase):
         self.assertTrue(result['success'], result)
         self.assertEqual(int(result['calls'][0]['data'][74:138], 16), confio_raw)
 
+    # ── Ondo's 1.00 USDT redemption floor ───────────────────────────────
+    # Verified against BSC mainnet on 2026-08-01 with the live vault state
+    # below: redeeming 998214106173270802 shares yields exactly 10**18 USDT
+    # and succeeds, one share-wei less yields 10**18 - 1 and reverts with
+    # Ondo's 0xd0022dba. The floor division picked the losing side.
+
+    PROD_PPS = 1001789088949639830
+    PROD_SHARES = 998456587689402305   # a position worth $1.00024
+    ONDO_OK_SHARES = 998214106173270802
+
+    def test_redeem_rounds_up_to_clear_ondo_minimum(self):
+        result, _ = self._prepare_raw(
+            '1', self.PROD_SHARES, pps=self.PROD_PPS)
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertTrue(call['data'][2:].startswith(SEL_REDEEM_TO_USDT))
+        shares = int(call['data'][10:74], 16)
+        self.assertEqual(shares, self.ONDO_OK_SHARES)
+        # the floored value is what production sent, and it reverts
+        self.assertEqual(shares - 1, (WAD * WAD) // self.PROD_PPS)
+
+    def test_redeem_under_one_dollar_refused_not_stranded(self):
+        # Ondo cannot serve it at any share count, so refuse at prepare
+        # rather than build a batch that only fails in simulation.
+        result, _ = self._prepare_raw('0.5', 10 * WAD)
+        self.assertEqual(result['error'], 'redeem_below_minimum')
+
+    def test_eligible_transfer_still_floors(self):
+        # The rounding-up is redeem-only: a share TRANSFER must never move
+        # more of the sender's position than the value they asked for.
+        result, _ = self._prepare_raw(
+            '1', self.PROD_SHARES, pps=self.PROD_PPS,
+            recipient_user=_recipient_user('VE'))
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
+        self.assertEqual(int(call['data'][74:138], 16),
+                         (WAD * WAD) // self.PROD_PPS)
+
     def test_shortfall_beyond_dust_still_refuses(self):
         pps = 11 * WAD // 10
         amount_wei = 299 * WAD // 100

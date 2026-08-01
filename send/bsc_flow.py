@@ -70,6 +70,13 @@ REDEEM_MIN_OUT_BPS = 9_950
 # real balance instead of refusing. 10**12 wei = $0.000001 — far above any
 # rounding dust, far below a spendable amount.
 MAX_SEND_DUST_WEI = 10 ** 12
+# Ondo's InstantManager rejects any redemption yielding under 1.00 USDT.
+# Verified on BSC mainnet 2026-08-01: usdtOut of exactly 10**18 succeeds,
+# 10**18 - 1 reverts with custom error 0xd0022dba. Nothing in our own
+# contracts enforces this — the vault's minUsdtOut floor (REDEEM_MIN_OUT_BPS)
+# sits BELOW it and so cannot catch it — and the revert only surfaces in
+# simulation, after the SendTransaction row already exists.
+ONDO_MIN_REDEEM_WEI = 10 ** 18
 EVM_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 
@@ -344,6 +351,25 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             else:
                 # Ineligible or external: deliver USDT atomically (burn + IM
                 # redeem + transfer in one vault call). An exit — never gated.
+                #
+                # Shares are re-derived by CEILING here. The floor above makes
+                # a redeem land up to a wei SHORT of the requested value, and
+                # Ondo rejects anything under 1.00 USDT — so sending exactly
+                # $1.00 produced 999999999999999999 and reverted. Rounding up
+                # burns at most one extra wei of the sender's position and
+                # makes "send $1.00" deliver $1.00.
+                shares = -(-amount_wei * WAD // pps_wad)
+                if shares > shares_raw:
+                    shares = shares_raw  # dust-short MAX → the whole position
+                if shares <= 0:
+                    return {'success': False, 'error': 'invalid_amount'}
+                # Ondo's floor applies to what the recipient RECEIVES, so it is
+                # checked on value, not shares. Refuse here with a specific
+                # code: the alternative is a batch that cannot succeed and a
+                # row stranded in PENDING.
+                redeem_value_wei = (shares * pps_wad) // WAD
+                if redeem_value_wei < ONDO_MIN_REDEEM_WEI:
+                    return {'success': False, 'error': 'redeem_below_minimum'}
                 kind = 'send_redeem'
                 token_type = 'USDT'
                 min_out = (amount_wei * REDEEM_MIN_OUT_BPS) // 10_000
@@ -525,6 +551,14 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}
+        if exc.code == 'simulation_reverted':
+            # The STORED batch cannot execute against current chain state, and
+            # nothing re-submits this row — the client always re-prepares a new
+            # one. Leaving it PENDING strands a send in the user's history
+            # forever (three such rows on 2026-08-01). Terminal, not retryable.
+            send_tx.status = 'FAILED'
+            send_tx.error_message = 'simulation_reverted'
+            send_tx.save(update_fields=['status', 'error_message', 'updated_at'])
         return {'success': False, 'error': exc.code}
     except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
         logger.exception('[SEND][BSC] sponsored send failed for %s', send_tx.internal_id)

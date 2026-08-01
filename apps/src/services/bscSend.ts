@@ -83,6 +83,10 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
   invalid_recipient_address: 'La dirección no es válida.',
   self_send_not_allowed: 'Esa dirección es tuya — elige otro destinatario.',
   insufficient_balance: 'Saldo insuficiente.',
+  // Ondo's redemption floor. Only reachable when the money must leave the
+  // savings position to reach this recipient — say what to do, not what broke.
+  redeem_below_minimum:
+    'El mínimo para enviar a este destinatario es $1.00.',
   bsc_send_disabled: 'Los envíos están en preparación. Inténtalo más tarde.',
   sponsor_busy: 'La red está ocupada. Inténtalo de nuevo en unos segundos.',
 };
