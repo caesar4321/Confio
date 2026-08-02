@@ -73,6 +73,10 @@ BPS = 10_000
 # ineligible merchant converts at least this much and leaves the change with
 # the payer as USDT.
 ONDO_MIN_REDEEM_WEI = 10 ** 18
+# Aim above the gap: the double flooring in redeemToUsdt makes an exact
+# target land short. Mirrors presale/bsc_flow.
+REDEEM_BUFFER_BPS = 50
+REDEEM_TARGET_FLOOR_WEI = 105 * 10 ** 16  # $1.05 at Ondo's $1.00 floor
 # The predicted redeem output is a prediction: pPlus only rises, but the chain
 # floors twice, so minOut sits just under it. Mirrors send/bsc_flow.
 REDEEM_SLIPPAGE_BPS = 50
@@ -376,15 +380,26 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
             # the payer's USDT — refusing a 50-cent payment because the floor
             # is a dollar would be the same dead end in a different place.
             shortfall = gross_wei - usdt_raw
-            target_out = max(shortfall, ONDO_MIN_REDEEM_WEI)
+            # Aim ABOVE the gap, never exactly at it. redeemToUsdt floors
+            # TWICE (shares -> USDY -> USDT), so converting exactly enough
+            # lands a wei or two short and the check below then reported
+            # "saldo insuficiente" to a payer holding nine times the invoice.
+            # Same buffer and floor the presale funding leg uses.
+            target_out = max(
+                shortfall * (10_000 + REDEEM_BUFFER_BPS) // 10_000,
+                REDEEM_TARGET_FLOOR_WEI,
+            )
             oracle_p_wad = cp_vault.last_oracle_price_wad()
             shares_needed = -(-(target_out * WAD) // pps_wad)  # ceil
             if shares_needed > shares_raw:
                 shares_needed = shares_raw
             predicted = cp_vault.redeem_usdt_out(shares_needed, pps_wad, oracle_p_wad)
-            if predicted < shortfall or predicted < ONDO_MIN_REDEEM_WEI:
-                # Not enough savings to clear the invoice or the Ondo floor.
-                # Ordinary insufficient funds, not a policy refusal.
+            if predicted < ONDO_MIN_REDEEM_WEI:
+                # The payer's whole position cannot clear Ondo's $1 minimum.
+                # Say so: calling it insufficient_balance sent a payer with
+                # enough money hunting for a top-up that would not help.
+                return {'success': False, 'error': 'redeem_below_minimum'}
+            if predicted < shortfall:
                 return {'success': False, 'error': 'insufficient_balance'}
             kind = 'pay_usdt'
             token_type = 'USDT'
