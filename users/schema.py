@@ -114,6 +114,26 @@ def _reward_claims_locked() -> bool:
 	return not bool(getattr(settings, 'REWARD_CLAIMS_UNLOCKED', False))
 
 
+def _breakdown_bsc_address(jwt_context, user):
+	"""The JWT account's bsc_address, from an ALREADY-validated context.
+
+	cusd_plus._active_bsc_address re-resolves the context with
+	required_permission=None, which would hand a balance to an employee whose
+	view_balance was revoked. The breakdown resolver validates once, up front,
+	and passes that context here.
+	"""
+	idx = jwt_context.get('account_index', 0)
+	if jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+		account = Account.objects.filter(
+			business_id=jwt_context['business_id'], account_type='business', account_index=idx,
+		).first()
+	else:
+		account = Account.objects.filter(
+			user=user, account_type='personal', account_index=idx,
+		).first()
+	return (account.bsc_address or None) if account else None
+
+
 def _referral_reward_totals(user):
 	"""(pending, earned) referral CONFIO for a user, across both roles.
 
@@ -2498,6 +2518,19 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
 
+		# This is a balance surface, so it answers to view_balance exactly like
+		# myBalances does. Validating once here (rather than letting the BSC
+		# address helper re-resolve with required_permission=None) is what keeps
+		# an employee whose balance access was revoked from reading the
+		# business wallet through a second door. No permission, no answer.
+		from .jwt_context import get_jwt_business_context_with_validation
+		try:
+			jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
+		except Exception:  # pylint: disable=broad-except
+			jwt_context = None
+		if not jwt_context:
+			return None
+
 		zero = "0.00"
 
 		def _fmt(value: Decimal) -> str:
@@ -2505,14 +2538,13 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			# would have to honor.
 			return f"{value.quantize(Decimal('0.01'), rounding=ROUND_DOWN):.2f}"
 
-		# Available: BEP-20 CONFIO for the JWT account. A dead RPC shows 0
-		# here rather than failing the whole breakdown — the locked figures
-		# come from the DB and are still worth showing.
+		# Available: BEP-20 CONFIO for the JWT account already validated above.
+		# A dead RPC shows 0 here rather than failing the whole breakdown — the
+		# locked figures come from the DB and are still worth showing.
 		available = Decimal('0')
 		try:
 			from cusd_plus import vault as cusd_plus_vault
-			from cusd_plus.schema import _active_bsc_address
-			bsc_address = _active_bsc_address(info)
+			bsc_address = _breakdown_bsc_address(jwt_context, user)
 			token = getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', None)
 			if bsc_address and token:
 				raw = cusd_plus_vault.erc20_balance_raw(token, bsc_address)
@@ -2524,14 +2556,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		# business they operate: on a business account both are somebody
 		# else's money and must not appear. Only `available` is account-scoped
 		# (the JWT account's own BEP-20 wallet).
-		try:
-			from .jwt_context import get_jwt_business_context_with_validation
-			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-			# No context = personal figures stay hidden. Account context comes
-			# from the JWT or not at all; defaulting would infer it instead.
-			is_personal = bool(jwt_context) and jwt_context.get('account_type') != 'business'
-		except Exception:  # pylint: disable=broad-except
-			is_personal = False
+		is_personal = jwt_context.get('account_type') != 'business'
 
 		# Presale: reuse the presale reader so this can never disagree with
 		# the presale screen — it owns the on-chain read, the migration-credit
