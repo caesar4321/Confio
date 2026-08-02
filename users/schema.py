@@ -269,11 +269,24 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 		balance, _ = ConfioRewardBalance.objects.get_or_create(user=user)
 		balance = ConfioRewardBalance.objects.select_for_update().get(pk=balance.pk)
 
-		tx_exists = ConfioRewardTransaction.objects.filter(
+		paid_qs = ConfioRewardTransaction.objects.filter(
 			reference_type='referral_claim',
 			reference_id=reference_key,
-		).exists()
-		if tx_exists:
+		)
+		if referral and user:
+			# Every ledger row written before the key changed uses the old
+			# "event:referral:user" format, so the new key matches none of them
+			# — and all 41 rows on production are in that format. Without this,
+			# reopening claims would credit each already-paid leg a second time.
+			#
+			# The suffix identifies the leg: the two legs of one referral belong
+			# to different users, so ":referral:user" cannot collide across
+			# roles.
+			paid_qs = paid_qs | ConfioRewardTransaction.objects.filter(
+				reference_type='referral_claim',
+				reference_id__endswith=f":{referral.id}:{user.id}",
+			)
+		if paid_qs.exists():
 			return
 
 		ConfioRewardBalance.objects.filter(pk=balance.pk).update(
