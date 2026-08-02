@@ -47,6 +47,9 @@ WAD = 10 ** 18
 REDEEM_MIN_OUT_BPS = 9_950  # same drift tolerance as send/bsc_flow.py
 PAYOUT_DEADLINE_S = 900
 
+# Ondo's Instant Manager refuses redemptions under $1.
+ONDO_MIN_REDEEM_WEI = 10 ** 18
+
 # ── EIP-712 (canonical strings shared with ConfioPayrollVault.sol and the
 #    client signer — parity anchored in test_payout_digest_parity + the
 #    contract's payoutDigest() view; never change one alone) ──────────────
@@ -416,8 +419,40 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     if escrow_shares_raw(business_addr) < net_shares + fee_shares:
         return {'success': False, 'error': 'insufficient_escrow'}
 
+    # Schedule and cap were decorative on this rail: neither BSC prepare nor
+    # submit consulted them and the contract carries no window or cap state.
+    # Enforced here so the normal path honours what the business configured.
+    #
+    # Honest about its reach: the payout authorization we sign is valid for
+    # PAYOUT_DEADLINE_S, so a delegate holding one could call the contract
+    # directly inside that window regardless. Real enforcement would need the
+    # cap in ConfioPayrollVault; this is the guardrail, not the lock.
+    from django.utils import timezone
+    run = item.run
+    scheduled_at = getattr(run, 'scheduled_at', None)
+    if scheduled_at and scheduled_at > timezone.now():
+        return {'success': False, 'error': 'run_not_due'}
+    cap_amount = getattr(run, 'cap_amount', None)
+    if cap_amount:
+        from django.db.models import Sum
+        paid = run.items.filter(
+            status__in=('SUBMITTED', 'CONFIRMED'), deleted_at__isnull=True,
+        ).exclude(id=item.id).aggregate(t=Sum('gross_amount'))['t'] or Decimal('0')
+        if paid + Decimal(item.gross_amount or 0) > Decimal(cap_amount):
+            logger.warning('[PAYROLL][BSC] run %s would exceed its cap %s (already %s)',
+                           run.id, cap_amount, paid)
+            return {'success': False, 'error': 'run_cap_exceeded'}
+
     recipient_eligible = is_ondo_eligible(item.recipient_user)
     redeem = not recipient_eligible
+    # Ondo refuses redemptions under $1. Unlike a payment there is no change
+    # to leave behind — the employee is owed an exact wage — so catch it here
+    # rather than letting the sponsored transaction revert on chain, burn gas
+    # and mark the item FAILED.
+    if redeem and net_wei < ONDO_MIN_REDEEM_WEI:
+        logger.info('[PAYROLL][BSC] %s: %s wage to an Ondo-ineligible recipient is '
+                    'below the $1 redemption floor', item.internal_id, item.net_amount)
+        return {'success': False, 'error': 'wage_below_redeem_minimum'}
     min_usdt_out = (net_wei * REDEEM_MIN_OUT_BPS) // 10_000 if redeem else 0
 
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
