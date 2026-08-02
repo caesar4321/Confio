@@ -705,9 +705,12 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                     recipient_user = instance.recipient_user
                     recipient_account = instance.recipient_account
                     
-                    # Normalize token type for display
+                    # Normalize token type for display. The hand-rolled
+                    # version here knew only CUSD, so every BSC token reached
+                    # the user as its wire value ("Enviaste 1.089 CUSD_PLUS").
+                    from notifications.token_display import amount_str as _amt, token_label
                     token_type = (instance.token_type or 'CUSD').upper()
-                    display_token = 'cUSD' if token_type == 'CUSD' else token_type
+                    display_token = token_label(token_type)
 
                     # Each side is told its own number. The employee is
                     # credited what actually landed — for a payout redeemed to
@@ -728,7 +731,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                         business=None,
                         notification_type=NotificationTypeChoices.PAYROLL_RECEIVED,
                         title="Pago de nómina recibido",
-                        message=f"Recibiste {_received} {display_token} de {business.name}",
+                        message=f"Recibiste {_amt(_received)} {display_token} de {business.name}",
                         data={
                             'transaction_id': instance.internal_id,
                             'transaction_hash': instance.transaction_hash,
@@ -759,7 +762,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                             business=business,
                             notification_type=NotificationTypeChoices.PAYROLL_SENT,
                             title="Nómina enviada",
-                            message=f"Enviaste {_gross} {display_token} a {recipient_name}",
+                            message=f"Enviaste {_amt(_gross)} {display_token} a {recipient_name}",
                             data={
                                 'transaction_id': instance.internal_id,
                                 'transaction_hash': instance.transaction_hash,

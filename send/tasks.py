@@ -21,7 +21,9 @@ from send.invite_tasks import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT', 'CONFIO': 'CONFIO'}
+# One shared table (notifications/token_display). The private copy here
+# omitted CUSD, so a legacy send read "Enviaste 5 CUSD a …".
+from notifications.token_display import token_label
 
 
 def _account_for_bsc_address(addr: str):
@@ -38,7 +40,7 @@ def _notify_send_parties(s) -> None:
     from notifications.models import NotificationType as NotifType
     from users.phone_utils import to_international
 
-    token = TOKEN_DISPLAY.get((s.token_type or '').upper(), s.token_type)
+    token = token_label(s.token_type)
     amount_str = f'{s.amount:.2f}'.rstrip('0').rstrip('.')
     # The stored columns hold LOCAL digits; a client can neither display nor
     # re-send to those. Send the full international number.
@@ -159,7 +161,7 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
         s.status = 'CONFIRMED'
         s.save(update_fields=['status', 'updated_at'])
         # unified row updates via the post_save signal
-        token = TOKEN_DISPLAY.get((s.token_type or '').upper(), s.token_type)
+        token = token_label(s.token_type)
         _notify_send_parties(s)
         logger.info('[SEND][BSC] %s confirmed (%s %s): %s',
                     s.internal_id, s.amount, token, s.transaction_hash)

@@ -44,7 +44,8 @@ class Command(BaseCommand):
 
                 # Normalize token type for display
                 token_type = (item.token_type or 'CUSD').upper()
-                display_token = 'cUSD' if token_type == 'CUSD' else token_type
+                from notifications.token_display import token_label
+                display_token = token_label(token_type)
 
                 recipient_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip() or recipient_user.username
 

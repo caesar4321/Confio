@@ -16,7 +16,9 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-TOKEN_DISPLAY = {'CUSD_PLUS': 'cUSD+', 'USDT': 'USDT', 'CONFIO': 'CONFIO'}
+# One shared table (notifications/token_display). The private copy here
+# omitted CUSD, so a legacy payment read "Pagaste 5 CUSD a …".
+from notifications.token_display import token_label
 
 # Batch kinds this task is allowed to settle (audit 2026-07-31 P2 isolation).
 PAY_KINDS = ('pay_cusd_plus', 'pay_usdt', 'pay_confio')
@@ -90,7 +92,7 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
         p.merchant_business.name if p.merchant_business_id else 'Comercio')
     payer_name = p.payer_display_name or 'Cliente'
 
-    token = TOKEN_DISPLAY.get((p.token_type or '').upper(), p.token_type)
+    token = token_label(p.token_type)
     amount_str = f'{gross:.2f}'.rstrip('0').rstrip('.')
     common = {
         'transaction_id': str(p.internal_id),

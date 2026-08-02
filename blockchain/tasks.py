@@ -1146,7 +1146,8 @@ def confirm_payment_transaction(self, internal_id: str, txid: str):
 
             amount_str = str(payment_tx.amount)
             token = payment_tx.token_type
-            display_token = 'cUSD' if str(token).upper() == 'CUSD' else str(token)
+            from notifications.token_display import token_label
+            display_token = token_label(token)
             # Derive friendly, privacy-safe display names
             def full_name(u):
                 try:
@@ -1509,7 +1510,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 try:
                     amount_str = str(s.amount)
                     token = s.token_type
-                    display_token = 'cUSD' if str(token).upper() == 'CUSD' else str(token)
+                    from notifications.token_display import token_label
+                    display_token = token_label(token)
                     def full_name_user(u):
                         try:
                             nm = f"{(u.first_name or '').strip()} {(u.last_name or '').strip()}".strip()
