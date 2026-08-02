@@ -442,14 +442,22 @@ def _record_referral_withdrawal(user, amount: Decimal, *, reference_id: str = ''
         delta = amount
         if existing:
             previous_amount = existing.amount or Decimal('0')
-            if existing.deleted_at is None and previous_amount == amount and existing.requires_review == requires_review:
+            was_reversed = existing.deleted_at is not None
+            if not was_reversed and previous_amount == amount and existing.requires_review == requires_review:
                 return
             existing.amount = amount
             existing.requires_review = requires_review
             existing.deleted_at = None
             existing.save(update_fields=['amount', 'requires_review', 'deleted_at', 'updated_at'])
             log = existing
-            delta = amount - previous_amount
+            # A reversed log carries the amount that was ALREADY given back, so
+            # the usual amount-minus-previous amendment maths yields 0 and the
+            # retry debits nothing. The balance would then keep the CONFIO that
+            # a successful retry moved on chain — and a second failure would
+            # credit the amount a second time, minting it.
+            #
+            # Restoring a reversed log is a fresh debit, not an amendment.
+            delta = amount if was_reversed else amount - previous_amount
         else:
             log = ReferralWithdrawalLog.objects.create(
                 user=user,
