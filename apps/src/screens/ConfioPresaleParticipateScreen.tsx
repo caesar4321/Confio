@@ -75,11 +75,19 @@ export const ConfioPresaleParticipateScreen = () => {
   const maxAmount = presale ? parseFloat(presale.maxPurchase) : 1000;
   // Spendable balance: Confío Dollar (raw USDT-BSC) on the BSC flow,
   // legacy cUSD (Algorand) otherwise.
+  // BSC: wallet Confío Dollar + savings (the buy batch redeems cUSD+ for any
+  // shortfall in the same transaction, so both are spendable here).
   const availableCusd = React.useMemo(
     () => isBscFlow
       ? (bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd ?? 0)
+        + (bscBalanceData?.cusdPlusSummary?.balanceUsd ?? 0)
       : parseFloat(balancesData?.myBalances?.cusd || '0'),
-    [isBscFlow, bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd, balancesData?.myBalances?.cusd]
+    [
+      isBscFlow,
+      bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd,
+      bscBalanceData?.cusdPlusSummary?.balanceUsd,
+      balancesData?.myBalances?.cusd,
+    ]
   );
 
   // Recaudado-axis progress with absolute milestones (never a % of goal)
@@ -488,7 +496,9 @@ export const ConfioPresaleParticipateScreen = () => {
                 Saldo: ${formatWithLocale(availableCusd)} • Mínimo: ${minAmount} • Máximo: ${formatWithLocale(maxAmount)}
               </Text>
               <Text style={styles.inputHelper}>
-                {isBscFlow ? 'Pagas con tu saldo de Confío Dollar' : 'Pagas con tu saldo de cUSD'}
+                {isBscFlow
+                  ? 'Pagas con tu Confío Dollar; si no alcanza, usamos tu ahorro'
+                  : 'Pagas con tu saldo de cUSD'}
               </Text>
             </View>
 

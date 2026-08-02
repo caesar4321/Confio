@@ -258,3 +258,105 @@ class BscPurchaseFlowTest(TestCase):
         with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True):
             rej2 = bsc_flow.submit_purchase(self.user, purchase, 0, deadline, sig_hex)
         self.assertEqual(rej2['error'], 'bad_calldata')
+
+
+@override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT, PRESALE_CHAIN='bsc')
+class BscRedeemFundingTest(TestCase):
+    """The cUSD+ redeem funding leg (presale/bsc_flow._plan_funding).
+    Chain reads are mocked; redeem_usdt_out runs for real so the share math
+    is checked against the contract's own formula."""
+
+    SAVINGS_VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+    WAD = 10 ** 18
+    PPS = 105 * 10 ** 16      # $1.05 per share
+    ORACLE_P = 114 * 10 ** 16  # USDY at $1.14
+
+    @classmethod
+    def setUpTestData(cls):
+        PresaleSettings.objects.update_or_create(id=1, defaults={'is_presale_active': True})
+        cls.phase = PresalePhase.objects.create(
+            phase_number=1, name='Fase 1', description='x',
+            price_per_token=Decimal('0.2'), goal_amount=Decimal('1000000'), status='active',
+        )
+
+    def setUp(self):
+        self.user = _mk_user('buyer', BSC_ADDR)
+        self.account = self.user.accounts.get(account_type='personal')
+
+    def _prepare(self, spendable_usd, shares_held_usd=Decimal('105'), amount='100'):
+        from presale import bsc_flow
+        from cusd_plus import vault as cplus
+
+        def fake_eth_call(to, data):
+            return {
+                bsc_flow.SEL_QUOTE_TOKENS: 498 * self.WAD,
+                bsc_flow.SEL_QUOTE_COST: 999 * self.WAD // 10,
+            }[data[:10]]
+
+        shares_held = int((Decimal(shares_held_usd) / Decimal('1.05')) * self.WAD)
+        with mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_eth_call), \
+             mock.patch.object(cplus, 'sweepable_usdt_wei', return_value=int(Decimal(spendable_usd) * self.WAD)), \
+             mock.patch.object(cplus, 'vault_address', return_value=self.SAVINGS_VAULT), \
+             mock.patch.object(cplus, 'erc20_balance_raw', return_value=shares_held), \
+             mock.patch.object(cplus, 'p_plus_wad', return_value=self.PPS), \
+             mock.patch.object(cplus, 'last_oracle_price_wad', return_value=self.ORACLE_P):
+            return bsc_flow.prepare_purchase(
+                self.user, self.account, amount, accepted_terms=True, not_us_attestation=True)
+
+    def test_wallet_covers_it_no_redeem_leg(self):
+        res = self._prepare(spendable_usd=Decimal('150'))
+        self.assertTrue(res['success'], res)
+        self.assertEqual(res['funding_source'], 'direct_cusd')
+        self.assertEqual(len(res['calls']), 2)
+
+    def test_shortfall_prepends_a_redeem_that_covers_the_gap(self):
+        from cusd_plus import vault as cplus
+        from cusd_plus.sponsor_7702 import SEL_REDEEM_TO_USDT
+
+        res = self._prepare(spendable_usd=Decimal('30'))
+        self.assertTrue(res['success'], res)
+        self.assertEqual(res['funding_source'], 'cusd_plus_redeem')
+        self.assertEqual(len(res['calls']), 3)
+
+        leg = res['calls'][0]
+        self.assertEqual(leg['to'], self.SAVINGS_VAULT.lower())
+        data = leg['data'][2:]
+        self.assertEqual(data[:8], SEL_REDEEM_TO_USDT)
+        shares, min_out = int(data[8:72], 16), int(data[72:136], 16)
+        self.assertEqual('0x' + data[136:][-40:], BSC_ADDR.lower())
+        # minUsdtOut is the exact gap; the redeem targets slightly more
+        self.assertEqual(min_out, 70 * self.WAD)
+        predicted = cplus.redeem_usdt_out(shares, self.PPS, self.ORACLE_P)
+        self.assertGreaterEqual(predicted, 70 * self.WAD)
+        self.assertLess(predicted, 70 * self.WAD * 102 // 100)
+
+    def test_wallet_plus_savings_below_amount_refuses(self):
+        res = self._prepare(spendable_usd=Decimal('30'), shares_held_usd=Decimal('10'))
+        self.assertEqual(res, {'success': False, 'error': 'insufficient_cusd_balance'})
+
+    def test_validate_rejects_redeem_tampering(self):
+        from presale import bsc_flow
+        from cusd_plus.sponsor_7702 import PolicyError
+
+        res = self._prepare(spendable_usd=Decimal('30'))
+        purchase = PresalePurchase.objects.get(internal_id=res['purchase_id'])
+        calls = res['calls']
+        bsc_flow._validate_presale_batch(calls, purchase)  # the real batch passes
+
+        with self.assertRaises(PolicyError) as ctx:
+            bsc_flow._validate_presale_batch(calls[1:], purchase)
+        self.assertEqual(ctx.exception.code, 'bad_batch_size')
+
+        tampered = [dict(c) for c in calls]
+        tampered[0]['data'] = tampered[0]['data'][:-40] + 'de' * 20
+        with self.assertRaises(PolicyError) as ctx:
+            bsc_flow._validate_presale_batch(tampered, purchase)
+        self.assertEqual(ctx.exception.code, 'bad_calldata')
+
+    def test_prepared_buy_reserves_its_usdt(self):
+        from cusd_plus import vault as cplus
+
+        self._prepare(spendable_usd=Decimal('150'))
+        with mock.patch.object(cplus, 'usdt_balance_raw', return_value=150 * self.WAD):
+            self.assertEqual(cplus.reserved_usdt_wei(self.user, BSC_ADDR), 100 * self.WAD)
+            self.assertEqual(cplus.sweepable_usdt_wei(self.user, BSC_ADDR), 50 * self.WAD)

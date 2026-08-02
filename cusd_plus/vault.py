@@ -159,6 +159,24 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
         logger.exception('reserved usdt: in-flight sagas unreadable')
         raise
 
+    try:
+        # Prepared-but-unsigned BSC presale buys: the batch spends wallet USDT
+        # (plus a savings redeem for any shortfall), so an auto-mint — or a
+        # second prepare — must not spend it first. Reserving the full amount
+        # slightly over-reserves a redeem-funded buy; that is the safe
+        # direction, and abandon_stale_bsc_purchases releases it after 24h.
+        from presale.bsc_flow import BSC_FUNDING_SOURCES
+        from presale.models import PresalePurchase
+        buys = PresalePurchase.objects.filter(
+            user=user, status='processing', transaction_hash__isnull=True,
+            funding_source__in=BSC_FUNDING_SOURCES,
+        ).only('cusd_amount')[:50]
+        for buy in buys:
+            total += Decimal(str(buy.cusd_amount or 0))
+    except Exception:  # noqa: BLE001
+        logger.exception('reserved usdt: in-flight presale buys unreadable')
+        raise
+
     return int(total * (10 ** 18))
 
 

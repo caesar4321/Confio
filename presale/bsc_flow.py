@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 
 ONE_CONFIO = 10 ** 18
 
+# Funding sources this module produces (legacy Algorand buys are 'algorand_cusd')
+BSC_FUNDING_SOURCES = ('direct_cusd', 'cusd_plus_redeem')
+
 SEL_QUOTE_TOKENS = '0x' + keccak(text='quoteTokens(uint256)')[:4].hex()
 SEL_QUOTE_COST = '0x' + keccak(text='quoteCost(uint256)')[:4].hex()
 SEL_BALANCE_OF = '0x' + keccak(text='balanceOf(address)')[:4].hex()
@@ -59,14 +62,99 @@ def _eth_call(to: str, data: str) -> int:
     return int(raw, 16) if raw and raw != '0x' else 0
 
 
-def _build_calls(vault: str, usdt: str, q_wei: int, cap_wei: int) -> list:
-    from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY
-    approve_data = '0x' + SEL_APPROVE + _addr_word(vault) + _uint_word(cap_wei)
-    buy_data = '0x' + SEL_PRESALE_BUY + _uint_word(q_wei) + _uint_word(cap_wei)
-    return [
-        {'to': usdt, 'value': '0', 'data': approve_data},
-        {'to': vault, 'value': '0', 'data': buy_data},
-    ]
+# Ondo's Instant Manager refuses redemptions under $1, and redeemToUsdt
+# floors TWICE (shares→USDY→USDT), so a redeem leg targets slightly more
+# than the gap it has to cover and never less than the floor.
+MIN_IM_REDEEM_WEI = 10 ** 18            # $1.00 — Ondo's hard floor
+REDEEM_TARGET_FLOOR_WEI = 105 * 10 ** 16  # $1.05 — what we aim for at the floor
+REDEEM_BUFFER_BPS = 50                   # +0.5% over the gap
+
+
+def _build_calls(vault: str, usdt: str, q_wei: int, cap_wei: int, redeem: dict | None = None) -> list:
+    """[ (redeemToUsdt) , approve(vault, cap), buy(q, cap) ] — one atomic batch.
+
+    When savings fund the purchase, the redeem leg runs FIRST inside the same
+    transaction, so the USDT it releases never sits in the wallet where the
+    savings auto-mint (or anything else) could take it back.
+    """
+    from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY, SEL_REDEEM_TO_USDT
+
+    calls = []
+    if redeem:
+        calls.append({
+            'to': redeem['savings_vault'],
+            'value': '0',
+            'data': ('0x' + SEL_REDEEM_TO_USDT + _uint_word(redeem['shares'])
+                     + _uint_word(redeem['min_usdt_out']) + _addr_word(redeem['to'])),
+        })
+    calls.append({
+        'to': usdt,
+        'value': '0',
+        'data': '0x' + SEL_APPROVE + _addr_word(vault) + _uint_word(cap_wei),
+    })
+    calls.append({
+        'to': vault,
+        'value': '0',
+        'data': '0x' + SEL_PRESALE_BUY + _uint_word(q_wei) + _uint_word(cap_wei),
+    })
+    return calls
+
+
+def _plan_funding(user, user_addr: str, amount_wei: int) -> dict:
+    """Decide what pays for `amount_wei`.
+
+    Spend raw Confío Dollar (USDT) first — it is idle money and every redeem
+    is an IM round trip — then cover any shortfall by redeeming cUSD+ savings
+    inside the same batch. Returns {'source', 'redeem'} or {'error'}.
+
+    The wallet figure is the SWEEPABLE balance (fresh, minus USDT already
+    committed to pending sends / off-ramp orders / in-flight sagas): spending
+    reserved money here would simply move the failure to whichever flow
+    reserved it.
+    """
+    from cusd_plus import vault as cusd_plus_vault
+
+    spendable = cusd_plus_vault.sweepable_usdt_wei(user, user_addr)
+    if spendable >= amount_wei:
+        return {'source': 'direct_cusd', 'redeem': None, 'spendable_wei': spendable}
+
+    savings_vault = (cusd_plus_vault.vault_address() or '').lower()
+    if not savings_vault:
+        return {'error': 'insufficient_cusd_balance'}
+    shares_held = cusd_plus_vault.erc20_balance_raw(savings_vault, user_addr)
+    if shares_held <= 0:
+        return {'error': 'insufficient_cusd_balance'}
+
+    shortfall = amount_wei - spendable
+    pps = cusd_plus_vault.p_plus_wad()
+    oracle_p = cusd_plus_vault.last_oracle_price_wad()
+    if pps <= 0 or oracle_p <= 0:
+        return {'error': 'quote_unavailable'}
+
+    target_out = max(
+        shortfall * (10_000 + REDEEM_BUFFER_BPS) // 10_000,
+        REDEEM_TARGET_FLOOR_WEI,
+    )
+    # usdtOut ≈ shares × pPlus / 1e18 → invert, round up, cap at what's held.
+    shares = min(-(-target_out * 10 ** 18 // pps), shares_held)
+    predicted_out = cusd_plus_vault.redeem_usdt_out(shares, pps, oracle_p)
+    if predicted_out < shortfall or predicted_out < MIN_IM_REDEEM_WEI:
+        # Either savings genuinely can't cover the gap, or what's left is
+        # dust below Ondo's $1 floor — both read the same to the user.
+        return {'error': 'insufficient_cusd_balance'}
+
+    return {
+        'source': 'cusd_plus_redeem',
+        'spendable_wei': spendable,
+        'redeem': {
+            'savings_vault': savings_vault,
+            'shares': shares,
+            # The functional floor: deliver at least the gap, or revert the
+            # whole batch rather than fail confusingly at the buy.
+            'min_usdt_out': shortfall,
+            'to': user_addr,
+        },
+    }
 
 
 def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attestation: bool,
@@ -131,20 +219,26 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         if q_wei <= 0:
             return {'success': False, 'error': 'sold_out'}
         cost_wei = _eth_call(vault, SEL_QUOTE_COST + _uint_word(q_wei))
-        balance_wei = _eth_call(USDT_BSC, SEL_BALANCE_OF + _addr_word(user_addr))
     except Exception as exc:  # noqa: BLE001
         logger.warning('[PRESALE][BSC] quote rpc failed: %s', exc)
         return {'success': False, 'error': 'quote_unavailable'}
 
+    # Funding: wallet Confío Dollar first, cUSD+ savings for the shortfall.
     # Execution-time cost can drift UP TO maxPayment (= the stated spend) if
-    # the curve moves first, so the balance must cover the cap, not just the
+    # the curve moves first, so funding must cover the CAP, not just the
     # quoted cost.
-    if balance_wei < amount_wei:
-        return {'success': False, 'error': 'insufficient_cusd_balance'}
+    try:
+        plan = _plan_funding(user, user_addr, amount_wei)
+    except Exception:  # noqa: BLE001 — reservations fail closed (vault.py)
+        logger.exception('[PRESALE][BSC] funding plan failed for user %s', user.id)
+        return {'success': False, 'error': 'funding_plan_failed'}
+    if plan.get('error'):
+        return {'success': False, 'error': plan['error']}
 
     confio_amount = (Decimal(q_wei) / Decimal(ONE_CONFIO)).quantize(Decimal('0.000001'))
     avg_price = (amount_usd / confio_amount).quantize(Decimal('0.0001'))
-    calls = _build_calls(vault, USDT_BSC, q_wei, amount_wei)
+    redeem = plan.get('redeem')
+    calls = _build_calls(vault, USDT_BSC, q_wei, amount_wei, redeem=redeem)
 
     # Race-safe per-user reservation (audit 2026-07-31 P2): total_purchased
     # only counts CONFIRMED purchases, so N concurrent prepares each read the
@@ -165,7 +259,7 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
             if phase.max_per_user:
                 in_flight = (PresalePurchase.objects.filter(
                     user=user, phase=phase, status='processing',
-                    funding_source='direct_cusd',
+                    funding_source__in=BSC_FUNDING_SOURCES,
                 ).aggregate(s=Sum('cusd_amount'))['s'] or Decimal('0'))
                 if locked.total_purchased + in_flight + amount_usd > phase.max_per_user:
                     return {'success': False, 'error': 'exceeds_user_limit'}
@@ -177,7 +271,7 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
                 price_per_token=avg_price,
                 status='processing',
                 from_address=user_addr,
-                funding_source='direct_cusd',
+                funding_source=plan['source'],
                 accepted_terms_version=TERMS['version'],
                 accepted_terms_at=timezone.now(),
                 accepted_terms_ip=client_ip,
@@ -185,7 +279,14 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
                 attested_not_us_resident=True,
                 attested_not_us_at=timezone.now(),
                 ip_country=(get_country_for_ip(client_ip, ip_country_hint) or ''),
-                notes=json.dumps({'bsc_calls': calls, 'quote_cost_wei': str(cost_wei), 'q_wei': str(q_wei)}),
+                notes=json.dumps({
+                    'bsc_calls': calls,
+                    'quote_cost_wei': str(cost_wei),
+                    'q_wei': str(q_wei),
+                    # Stored so submit can re-derive the redeem leg's exact
+                    # calldata instead of trusting the stored bytes alone.
+                    'redeem': ({k: str(v) for k, v in redeem.items()} if redeem else None),
+                }),
             )
     except Exception:  # noqa: BLE001
         logger.exception('[PRESALE][BSC] reservation/create failed for user %s', user.id)
@@ -236,26 +337,51 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         'cost': str((Decimal(cost_wei) / Decimal(10) ** 18).quantize(Decimal('0.000001'))),
         'max_payment': str(amount_usd),
         'avg_price': str(avg_price),
+        'funding_source': plan['source'],
         'intent_id': intent_id_hex('presale_buy', purchase.id),
     }
 
 
 def _validate_presale_batch(calls: list, purchase) -> None:
-    """Defense-in-depth on the stored batch: exactly [approve(vault, cap),
-    buy(q, cap)], with q/cap matching the purchase row."""
-    from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PRESALE_BUY, USDT_BSC
+    """Defense-in-depth on the stored batch: [approve(vault, cap), buy(q, cap)]
+    optionally preceded by redeemToUsdt(shares, minOut, buyer) — every field
+    re-derived from the purchase row, never trusted from the stored bytes."""
+    from cusd_plus.sponsor_7702 import (
+        PolicyError, SEL_APPROVE, SEL_PRESALE_BUY, SEL_REDEEM_TO_USDT, USDT_BSC,
+    )
 
     vault = presale_vault_address()
     meta = json.loads(purchase.notes or '{}')
     q_wei = int(meta.get('q_wei', '0'))
     cap_wei = int(purchase.cusd_amount * Decimal(10) ** 18)
-    if len(calls) != 2:
+    redeem = meta.get('redeem') or None
+
+    expected_len = 3 if redeem else 2
+    if len(calls) != expected_len:
         raise PolicyError('bad_batch_size')
-    approve, buy = calls[0], calls[1]
+    if any(int(c['value']) != 0 for c in calls):
+        raise PolicyError('value_not_allowed')
+
+    if redeem:
+        leg = calls[0]
+        # The recipient MUST be the buyer: a redeem paying anyone else would
+        # drain savings out of the purchase entirely.
+        if leg['to'] != (redeem.get('savings_vault') or '').lower():
+            raise PolicyError('destination_not_allowed')
+        if (redeem.get('to') or '').lower() != (purchase.from_address or '').lower():
+            raise PolicyError('redeem_recipient_not_allowed')
+        expected_redeem = (
+            SEL_REDEEM_TO_USDT
+            + _uint_word(int(redeem['shares']))
+            + _uint_word(int(redeem['min_usdt_out']))
+            + _addr_word(redeem['to'])
+        )
+        if leg['data'][2:].lower() != expected_redeem:
+            raise PolicyError('bad_calldata')
+
+    approve, buy = calls[-2], calls[-1]
     if approve['to'] != USDT_BSC or buy['to'] != vault:
         raise PolicyError('destination_not_allowed')
-    if int(approve['value']) != 0 or int(buy['value']) != 0:
-        raise PolicyError('value_not_allowed')
     if approve['data'][2:].lower() != (SEL_APPROVE + _addr_word(vault) + _uint_word(cap_wei)):
         raise PolicyError('bad_calldata')
     if buy['data'][2:].lower() != (SEL_PRESALE_BUY + _uint_word(q_wei) + _uint_word(cap_wei)):
@@ -268,7 +394,7 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
 
     from .geo_utils import check_presale_eligibility
 
-    if purchase.status != 'processing' or purchase.funding_source != 'direct_cusd':
+    if purchase.status != 'processing' or purchase.funding_source not in BSC_FUNDING_SOURCES:
         return {'success': False, 'error': 'purchase_not_pending'}
 
     meta = json.loads(purchase.notes or '{}')

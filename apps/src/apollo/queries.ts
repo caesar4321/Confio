@@ -3937,10 +3937,13 @@ export const GET_PRESALE_STATUS = gql`
   }
 `;
 
+// Presale spendable funds on BSC: wallet Confío Dollar plus savings, which
+// the buy batch can redeem in the same transaction (presale/bsc_flow.py).
 export const GET_BSC_CONFIO_DOLLAR_BALANCE = gql`
   query GetBscConfioDollarBalance {
     cusdPlusSummary {
       usdtBalanceUsd
+      balanceUsd
     }
   }
 `;

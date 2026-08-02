@@ -271,6 +271,9 @@ class PrepareBscPresalePurchase(graphene.Mutation):
     cost = graphene.String()
     max_payment = graphene.String()
     avg_price = graphene.String()
+    funding_source = graphene.String(
+        description="'direct_cusd' (wallet Confío Dollar) or 'cusd_plus_redeem' "
+                    "(savings redeemed inside the same batch)")
     intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     @login_required
@@ -314,6 +317,7 @@ class PrepareBscPresalePurchase(graphene.Mutation):
             cost=res['cost'],
             max_payment=res['max_payment'],
             avg_price=res['avg_price'],
+            funding_source=res.get('funding_source'),
             intent_id=res['intent_id'],
         )
 

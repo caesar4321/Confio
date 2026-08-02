@@ -36,6 +36,7 @@ const PREPARE = gql`
       cost
       maxPayment
       avgPrice
+      fundingSource
       intentId
     }
   }
@@ -58,6 +59,9 @@ export interface BscPresaleQuote {
   confioAmount: string;
   cost: string;
   avgPrice: string;
+  /** 'direct_cusd' = wallet Confío Dollar; 'cusd_plus_redeem' = savings
+   * redeemed to USDT inside the same atomic batch. */
+  fundingSource?: string;
 }
 
 export const buyPresaleBsc = async (
@@ -138,6 +142,7 @@ export const buyPresaleBsc = async (
         confioAmount: prep.confioAmount,
         cost: prep.cost,
         avgPrice: prep.avgPrice,
+        fundingSource: prep.fundingSource,
       },
     };
 
