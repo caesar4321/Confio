@@ -1269,14 +1269,20 @@ def scan_outbound_confirmations(max_batch: int = 50):
 
             # If pool error
             if pe:
-                p.status = 'FAILED'
-                p.error_message = str(pe)
-                p.save(update_fields=['status', 'error_message', 'updated_at'])
-                processed += 1
+                if p.status != 'FAILED' or p.error_message != str(pe):
+                    p.status = 'FAILED'
+                    p.error_message = str(pe)
+                    p.save(update_fields=['status', 'error_message', 'updated_at'])
+                    processed += 1
                 continue
-                
+
             # If missing from node (cr=0, pe='') and old, mark failed
             if cr == 0 and not pe and p.updated_at < cutoff_time:
+                if p.status == 'FAILED':
+                    # Same auto_now trap as the sends below: re-saving an
+                    # already-failed row only re-dates it, pinning it inside
+                    # the 24h recovery window permanently.
+                    continue
                 p.status = 'FAILED'
                 p.error_message = "Transaction expired or lost from pool"
                 p.save(update_fields=['status', 'error_message', 'updated_at'])
@@ -1323,14 +1329,28 @@ def scan_outbound_confirmations(max_batch: int = 50):
         for s in send_qs:
             cr, pe = check_tx(s.transaction_hash or '')
             if pe:
-                s.status = 'FAILED'
-                s.error_message = str(pe)
-                s.save(update_fields=['status', 'error_message', 'updated_at'])
-                processed += 1
+                # Only write on a real change. updated_at is auto_now, so an
+                # unconditional save re-dates the row (see below).
+                if s.status != 'FAILED' or s.error_message != str(pe):
+                    s.status = 'FAILED'
+                    s.error_message = str(pe)
+                    s.save(update_fields=['status', 'error_message', 'updated_at'])
+                    processed += 1
                 continue
-            
+
             # If missing from node (cr=0, pe='') and old, mark failed
             if cr == 0 and not pe and s.updated_at < cutoff_time:
+                if s.status == 'FAILED':
+                    # Already recorded — and re-saving would do real damage.
+                    # updated_at is auto_now, so the save re-dates the row to
+                    # now, which keeps it inside the 24h recovery window
+                    # FOREVER and makes it eligible again two minutes later.
+                    # That loop was re-failing 19 rows ~28 times an hour each
+                    # (532 log lines/hour), burning an algod call and a DB
+                    # write per row per sweep and burying real failures.
+                    # Leaving it alone lets it age out of the window as the
+                    # 24h bound intends.
+                    continue
                 s.status = 'FAILED'
                 s.error_message = "Transaction expired or lost from pool"
                 s.save(update_fields=['status', 'error_message', 'updated_at'])
