@@ -250,6 +250,16 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 			ref_key_parts.append(str(user.id))
 		reference_key = ":".join(ref_key_parts)
 
+		# Serialize on the user's balance row BEFORE the existence check.
+		# Unlocked, this was a classic check-then-act: two workers finalizing
+		# the same claim both saw no ledger row and both credited it. The lock
+		# is what makes the check meaningful, since every writer for this claim
+		# targets this same row; the unique constraint on
+		# (reference_type, reference_id) is the backstop for anything that
+		# reaches the ledger by another path.
+		balance, _ = ConfioRewardBalance.objects.get_or_create(user=user)
+		balance = ConfioRewardBalance.objects.select_for_update().get(pk=balance.pk)
+
 		tx_exists = ConfioRewardTransaction.objects.filter(
 			reference_type='referral_claim',
 			reference_id=reference_key,
@@ -257,7 +267,6 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 		if tx_exists:
 			return
 
-		balance, _ = ConfioRewardBalance.objects.get_or_create(user=user)
 		ConfioRewardBalance.objects.filter(pk=balance.pk).update(
 			total_unlocked=F('total_unlocked') + claim_amount,
 			total_earned=F('total_earned') + claim_amount,
@@ -369,15 +378,22 @@ def _sync_onchain_claim_if_needed(*, user, referral, event, user_address, claim_
 	actor_role = (event.actor_role or '').lower()
 
 	if actor_role == 'referrer':
-		# For referrer claims, check ref_amount and ref_claimed_flag
 		eligible_micro = box_state.get("ref_amount", 0)
 		claimed_flag = box_state.get("ref_claimed_flag", 0)
 	else:
-		# For referee claims, check amount and claimed
-		eligible_micro = box_state.get("amount", 0)
-		claimed_flag = box_state.get("claimed", 0)
+		# _read_user_box returns eligible_amount/claimed_flag. This branch used
+		# to ask for "amount"/"claimed", keys that do not exist, so both came
+		# back 0 for EVERY referee — and 0/0 fell through the check below as
+		# "already claimed", crediting total_unlocked for a payout that never
+		# happened.
+		eligible_micro = box_state.get("eligible_amount", 0)
+		claimed_flag = box_state.get("claimed_flag", 0)
 
-	if eligible_micro > 0 and claimed_flag == 0:
+	# Positive evidence only. The chain has to SAY this leg was claimed before
+	# we write a payout into the ledger. An empty or unreadable allocation is
+	# not proof of payment — under the old "not (eligible > 0 and unclaimed)"
+	# test, a user with no allocation at all was recorded as paid.
+	if claimed_flag != 1:
 		return False
 
 	logger.info(

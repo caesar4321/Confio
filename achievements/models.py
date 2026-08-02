@@ -1003,6 +1003,20 @@ class ConfioRewardTransaction(SoftDeleteModel):
         ordering = ['-created_at']
         verbose_name = "Reward Ledger Entry (Deprecated)"
         verbose_name_plural = "Reward Ledger Entries (Deprecated)"
+        constraints = [
+            # A referral claim may be credited exactly once. The application
+            # also locks the balance row before checking, but a constraint is
+            # the only guarantee that survives a code path which forgets to.
+            # Scoped to referral_claim on purpose: legacy 'achievement' rows
+            # contain a known duplicate and are not worth rewriting for a
+            # retired scheme. Soft-deleted rows are excluded so a reversed
+            # entry does not block a legitimate re-credit.
+            models.UniqueConstraint(
+                fields=['reference_type', 'reference_id'],
+                condition=models.Q(reference_type='referral_claim', deleted_at__isnull=True),
+                name='uniq_referral_claim_reference',
+            ),
+        ]
     
     def __str__(self):
         return f"{self.user.username} - {self.transaction_type}: {self.amount} CONFIO"
