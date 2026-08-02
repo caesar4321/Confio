@@ -403,12 +403,45 @@ export interface SetCodeAuthorization {
   s: string; // 0x…
 }
 
+/**
+ * Delegates this app will designate at the user's EOA — pinned in the BUILD,
+ * never taken from the server.
+ *
+ * Signing an EIP-7702 authorization is the most dangerous thing this wallet
+ * does: it installs code that executes AS the user's address. The tuple has
+ * NO expiry (chainId, address, nonce only), so a signature handed to a
+ * compromised server can be banked and broadcast whenever that account nonce
+ * comes up. Every flow here took the address from a server response, so one
+ * bad response reached the whole wallet, not one transaction.
+ * (Codex audit 2026-08-02, P1.)
+ *
+ * ROTATION — order matters, or you brick sponsorship for shipped builds:
+ *   1. ship a release that lists BOTH the old and new delegate,
+ *   2. only then point the server at the new one,
+ *   3. drop the old entry in a later release.
+ * Do NOT keep a superseded delegate here for convenience: an attacker who
+ * controls a response could otherwise force a downgrade to an older, weaker
+ * delegate (e.g. one without the intentId replay binding).
+ */
+export const TRUSTED_BATCH_DELEGATES: readonly string[] = [
+  // ConfioBatchDelegate (intentId-binding build), BSC mainnet
+  '0xc06bd197b34a587026615c6aed21301f5e99bc00',
+];
+
+export const isTrustedDelegate = (address: string): boolean =>
+  TRUSTED_BATCH_DELEGATES.includes((address || '').toLowerCase());
+
 export function signSetCodeAuthorization(
   delegateAddress: string,
   accountNonce: bigint,
   privKeyHex: string,
   chainId: bigint = BSC_NETWORK.chainId,
 ): SetCodeAuthorization {
+  // Enforced HERE, at the one function that can produce an authorization, so
+  // a new sponsored flow cannot forget the check.
+  if (!isTrustedDelegate(delegateAddress)) {
+    throw new Error(`untrusted_delegate:${delegateAddress}`);
+  }
   const payload = rlpEncode([
     bigintToMinimalBytes(chainId),
     hexToBytes0x(delegateAddress), // raw 20 bytes, NOT minimal-int
