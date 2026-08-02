@@ -294,6 +294,38 @@ def _amount_from_base(amount_base: int, decimals: int) -> Decimal:
     return (Decimal(amount_base) / q).quantize(Decimal('0.000001'))
 
 
+def _txid_owned_by_feature(txid: str) -> bool:
+    """Has some feature already recorded this Algorand transfer?
+
+    The inbound scanner's own dedupe asks only whether a SendTransaction
+    exists. Payouts made BY an application never have one and never look
+    internal (the app address is not a registered account), so without this
+    they are re-recorded as external deposits on top of the row the feature
+    already wrote — the recipient sees the same money twice, notified twice.
+    """
+    if not txid:
+        return False
+    try:
+        from humanitarian.models import HumanitarianRelease
+        if HumanitarianRelease.objects.filter(transaction_hash=txid).exists():
+            return True
+    except Exception:  # noqa: BLE001 — a scanner must not die on a lookup
+        logger.exception('humanitarian ownership check failed for %s', txid)
+    try:
+        from achievements.models import ReferralRewardEvent
+        if ReferralRewardEvent.objects.filter(reward_tx_id=txid).exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('referral ownership check failed for %s', txid)
+    try:
+        from presale.models import PresalePurchase
+        if PresalePurchase.objects.filter(transaction_hash=txid).exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('presale ownership check failed for %s', txid)
+    return False
+
+
 @shared_task(name='blockchain.scan_inbound_deposits')
 @ensure_db_connection_closed
 def scan_inbound_deposits():
@@ -510,6 +542,19 @@ def scan_inbound_deposits():
             xaid = inner.get('asset-id')
             aamt = inner.get('amount', 0)
             txid = axfer_tx.get('id')
+
+            # Some other feature may already own this transfer. The dedupe
+            # below only asks whether a SendTransaction exists, which is the
+            # wrong question for money paid out by an APPLICATION: a
+            # humanitarian release and a referral reward claim both move an
+            # ASA to the user from a contract address that is not a
+            # registered account, so neither looked internal and neither had
+            # a SendTransaction — and the recipient got the aid (or the
+            # reward) a second time as a deposit "from an external wallet",
+            # with a second push. Ask the owning models directly.
+            if txid and _txid_owned_by_feature(txid):
+                skipped += 1
+                return
 
             # Ignore zero-amount asset transfers (opt-ins, no-op clawbacks)
             try:

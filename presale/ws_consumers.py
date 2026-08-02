@@ -489,8 +489,16 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 presale_purchase=purchase,
                 defaults={
                     'transaction_type': 'presale',
-                    'amount': str(purchase.cusd_amount),
-                    'token_type': 'CUSD',
+                    # A presale row is CONFIO bought, not dollars spent. This
+                    # used to write CUSD/cusd_amount and rely on the
+                    # reconciler in blockchain/tasks.py to rewrite it as
+                    # CONFIO/confio_amount after confirmation — so between
+                    # prepare and confirm the row sat on the cUSD screen
+                    # claiming the user had RECEIVED the dollars they were
+                    # spending. Write the settled shape immediately; the
+                    # reconciler now only agrees with it.
+                    'amount': format(purchase.confio_amount.normalize(), 'f'),
+                    'token_type': 'CONFIO',
                     'status': 'PENDING_SIG',
                     'transaction_hash': purchase.transaction_hash or '',
                     'error_message': '',

@@ -294,7 +294,7 @@ def monitor_bridge_arrivals():
     now = timezone.now()
     min_deposit = Decimal(str(getattr(settings, 'CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD', 1)))
     arrived: dict[str, dict] = {}
-    savings_vault = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+    system_addrs = _system_addresses()
     for log in logs:
         key = ('0x' + log['topics'][2][-40:]).lower()
         sender = ('0x' + log['topics'][1][-40:]).lower()
@@ -310,11 +310,19 @@ def monitor_bridge_arrivals():
         # to_savings saga, which is why the check sits above conv_watch.
         # The cUSD+ pass below has always applied this rule to shares; the
         # USDT pass never did.
-        if sender and (sender == savings_vault or sender in registered):
-            logger.info(
-                'internal USDT movement to %s from %s (%s) — not a deposit',
-                key, sender, log['transactionHash'],
-            )
+        #
+        # A contract of ours is skipped outright — it only ever pays as the
+        # settlement leg of a flow that wrote its own row. A registered USER
+        # address is skipped only when something already recorded the
+        # transfer, because money moved outside the app (recovery tooling, an
+        # imported wallet) is a real deposit that still needs a receipt.
+        if sender and sender in system_addrs:
+            logger.info('internal USDT movement to %s from our %s (%s) — not a deposit',
+                        key, sender, log['transactionHash'])
+            continue
+        if sender and sender in registered and _has_source_row(log['transactionHash']):
+            logger.info('USDT send to %s from registered %s (%s) — already recorded',
+                        key, sender, log['transactionHash'])
             continue
         conv = conv_watch.get(key)
         if conv is not None:
@@ -444,9 +452,20 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
             logger.exception('mint ownership check failed for %s', tx_hash)
             return False
 
+    system_addrs = _system_addresses()
     for log in logs:
         sender = ('0x' + log['topics'][1][-40:]).lower()
-        if sender in registered:
+        # Our own contracts pay shares as the settlement leg of a flow that
+        # already wrote a row. The payroll vault is the live case: it
+        # transfers shares to an eligible employee, the PayrollItem signal
+        # writes the payroll row, and this pass — which only ever excluded
+        # REGISTERED senders, and no contract is registered — then wrote a
+        # second "Depósito recibido" row and a second push for the same
+        # money. The dedupe keys never met (cp:<hash>:<logIndex> here vs
+        # payroll_item there), so nothing caught it.
+        if sender in system_addrs:
+            continue
+        if sender in registered and _has_source_row(log['transactionHash']):
             continue  # internal send — recorded by the send confirm task
         key = ('0x' + log['topics'][2][-40:]).lower()
         account_id = registered.get(key)
@@ -560,6 +579,54 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
                 )
         except Exception:  # noqa: BLE001 — comms failure must not lose the row
             logger.exception('cUSD+ receive notification failed for %s', reference)
+
+
+def _system_addresses() -> set:
+    """Our own contracts — every address that pays users as part of a flow
+    that already writes its own ledger row.
+
+    A transfer OUT of one of these is never an inbound deposit: it is the
+    settlement leg of something the user already did. The payroll vault pays
+    an employee (payroll row + notification exist), the presale vault and the
+    cUSD+ vault pay a buyer mid-batch, the invite escrow and reward vault
+    release claimed funds. The scanners used to skip only REGISTERED senders,
+    which no contract is, so each of these produced a duplicate "Depósito
+    recibido" on top of the real record.
+    """
+    names = (
+        'CUSD_PLUS_VAULT_ADDRESS',
+        'BSC_PRESALE_VAULT_ADDRESS',
+        'BSC_PAYROLL_VAULT_ADDRESS',
+        'BSC_PAY_CONTRACT_ADDRESS',
+        'BSC_REWARD_VAULT_ADDRESS',
+        'BSC_VESTING_VAULT_ADDRESS',
+        'BSC_INVITE_ESCROW_ADDRESS',
+    )
+    out = set()
+    for n in names:
+        v = (getattr(settings, n, '') or '').strip().lower()
+        if v.startswith('0x') and len(v) == 42:
+            out.add(v)
+    return out
+
+
+def _has_source_row(tx_hash: str) -> bool:
+    """Does some feature already own this transaction?
+
+    Guards the sender exclusions below. Skipping every registered sender
+    assumes a durable row always exists for it, which is false for money
+    moved outside the app — recovery tooling, an imported wallet, a manually
+    signed transfer. Those are real inbound funds and must still be recorded,
+    so the exclusion is "internal sender AND someone already wrote it down",
+    never the sender alone.
+    """
+    if not tx_hash:
+        return False
+    from send.models import SendTransaction
+    from users.models_unified import UnifiedTransactionTable
+    if SendTransaction.all_objects.filter(transaction_hash__iexact=tx_hash).exists():
+        return True
+    return UnifiedTransactionTable.objects.filter(transaction_hash__iexact=tx_hash).exists()
 
 
 def _registered_bsc_addresses() -> dict:

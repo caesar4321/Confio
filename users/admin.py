@@ -518,6 +518,23 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
     )
     date_hierarchy = 'created_at'
     list_per_page = 50
+
+    # A retracted row must LOOK retracted here too. Every user-facing
+    # resolver hides deleted_at rows (users/graphql_views.py _visible_unified),
+    # so without this the principal ops ledger is the one place a row the
+    # product has disowned still reads as ordinary live money — and it is
+    # exactly the place someone goes to check whether a retraction worked.
+    # Kept visible rather than filtered out, with the state shown, so support
+    # can still find a row a user is asking about.
+    @admin.display(description='Retirada', boolean=True)
+    def is_retracted(self, obj):
+        return obj.deleted_at is not None
+
+    def get_list_display(self, request):
+        return tuple(super().get_list_display(request)) + ('is_retracted',)
+
+    def get_list_filter(self, request):
+        return tuple(super().get_list_filter(request)) + ('deleted_at',)
     
     # Now this is a table with foreign keys, we can edit some fields
     readonly_fields = (
