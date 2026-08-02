@@ -140,23 +140,14 @@ _PAY_TYPEHASH_V4 = keccak(
 
 
 def _pay_contract_v4() -> bool:
-    """NOT YET USABLE — the digest is only one third of the v4 switch.
+    """Whether the DEPLOYED pay contract carries signed merchant routing.
 
-    Codex audit 2026-08-02 [P2]: enabling this today is a deterministic BSC
-    payment outage, because prepare still ABI-encodes the six-argument v3
-    pay(), SEL_PAY is still the v3 selector, and _validate_payment_batch
-    still decodes the v3 shape. The typehash would flip while the calldata
-    did not. Those three must land with the flag; until they do this raises
-    rather than silently breaking every payment.
+    Flips three things together — the EIP-712 typehash, the pay() selector and
+    its calldata, and the batch validator's decoder — because flipping any one
+    alone signs or encodes for a contract that is not there. Must be set only
+    once BSC_PAY_CONTRACT_ADDRESS points at a v4 deployment.
     """
-    enabled = bool(getattr(settings, 'BSC_PAY_CONTRACT_V4', False))
-    if enabled:
-        raise RuntimeError(
-            'BSC_PAY_CONTRACT_V4 is set but the v4 calldata path is not built: '
-            'prepare still encodes the v3 pay() signature and SEL_PAY is the '
-            'v3 selector. Ship the selector, encoder and validator together '
-            'with this flag.')
-    return False
+    return bool(getattr(settings, 'BSC_PAY_CONTRACT_V4', False))
 _PAY_DOMAIN_TYPEHASH = keccak(
     text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 _PAY_NAME_HASH = keccak(text='ConfioPay')
@@ -239,9 +230,11 @@ def _notify_merchant_needs_app(invoice, payer_user) -> None:
 
 def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
     from cusd_plus import vault as cp_vault
-    from cusd_plus.sponsor_7702 import (SEL_APPROVE, SEL_PAY,
+    from cusd_plus.sponsor_7702 import (SEL_APPROVE, SEL_PAY, SEL_PAY_V4,
                                         SEL_REDEEM_TO_USDT, USDT_BSC)
     redeem_leg = None
+    v4_redeem = False
+    v4_min_out = 0
     from users.models import Account
     from .models import PaymentTransaction
 
@@ -354,6 +347,24 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
             token_type = 'CUSD_PLUS'
             token = vault_addr
             gross_units = (gross_wei * WAD) // pps_wad  # shares at the live price
+        elif (not merchant_eligible and _pay_contract_v4()
+                and shares_value_wei >= gross_wei):
+            # v4 routes INSIDE pay(): the payer spends cUSD+, the contract
+            # redeems and the merchant receives USDT. No sibling redeem leg,
+            # nothing for the batch validator to police, and the routing is
+            # covered by the authorization signature.
+            kind = 'pay_cusd_plus'
+            token_type = 'CUSD_PLUS'
+            token = vault_addr
+            gross_units = (gross_wei * WAD) // pps_wad
+            net_wei = gross_wei - payment_fee_wei(gross_wei)
+            oracle_p_wad = cp_vault.last_oracle_price_wad()
+            net_shares = (net_wei * WAD) // pps_wad
+            predicted = cp_vault.redeem_usdt_out(net_shares, pps_wad, oracle_p_wad)
+            if predicted < ONDO_MIN_REDEEM_WEI:
+                return {'success': False, 'error': 'redeem_below_minimum'}
+            v4_redeem = True
+            v4_min_out = predicted * (10_000 - REDEEM_SLIPPAGE_BPS) // 10_000
         elif not merchant_eligible and usdt_raw < gross_wei and shares_value_wei > 0:
             # The merchant cannot hold cUSD+, so the payer converts on the way
             # through: redeem to their OWN address, then pay in USDT. Same
@@ -406,21 +417,32 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     pay_deadline = int(time.time()) + PAY_AUTH_TTL
     digest = pay_authorization_digest(
         pay_contract, chain_id, invoice_id32, payer_addr, token,
-        gross_units, merchant_addr, pay_deadline)
+        gross_units, merchant_addr, pay_deadline,
+        redeem_to_usdt=v4_redeem, min_usdt_out=v4_min_out)
     try:
         auth_sig, signer_addr = _sign_pay_authorization(digest)
     except Exception:  # noqa: BLE001
         logger.exception('[PAY][BSC] authorization signing failed for %s', invoice.internal_id)
         return {'success': False, 'error': 'authorization_signing_failed'}
-    pay_args = _abi_encode(
-        ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
-        [bytes.fromhex(invoice_id32[2:]), to_checksum_address(token), int(gross_units),
-         to_checksum_address(merchant_addr), pay_deadline, bytes.fromhex(auth_sig[2:])])
+    if _pay_contract_v4():
+        pay_args = _abi_encode(
+            ['bytes32', 'address', 'uint256', 'address', 'bool', 'uint256',
+             'uint256', 'bytes'],
+            [bytes.fromhex(invoice_id32[2:]), to_checksum_address(token),
+             int(gross_units), to_checksum_address(merchant_addr), bool(v4_redeem),
+             int(v4_min_out), pay_deadline, bytes.fromhex(auth_sig[2:])])
+        pay_selector = SEL_PAY_V4
+    else:
+        pay_args = _abi_encode(
+            ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
+            [bytes.fromhex(invoice_id32[2:]), to_checksum_address(token), int(gross_units),
+             to_checksum_address(merchant_addr), pay_deadline, bytes.fromhex(auth_sig[2:])])
+        pay_selector = SEL_PAY
     calls = ([redeem_leg] if redeem_leg else []) + [
         {'to': token, 'value': '0',
          'data': '0x' + SEL_APPROVE + _addr_word(pay_contract) + _uint_word(gross_units)},
         {'to': pay_contract, 'value': '0',
-         'data': '0x' + SEL_PAY + pay_args.hex()},
+         'data': '0x' + pay_selector + pay_args.hex()},
     ]
 
     # Idempotent row per (invoice, payer): re-prepare refreshes the batch
@@ -465,7 +487,9 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     payment_tx.merchant_address = merchant_addr
     payment_tx.blockchain_data = {
         'bsc_calls': calls, 'kind': kind,
-        'pay_deadline': pay_deadline, 'pay_signer': signer_addr,
+        'pay_deadline': pay_deadline,
+        'v4_redeem': bool(v4_redeem),
+        'v4_min_out': int(v4_min_out), 'pay_signer': signer_addr,
     }
     payment_tx.status = 'PENDING_BLOCKCHAIN'
     payment_tx.save(update_fields=[
@@ -572,7 +596,7 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
     if not payer_addr:
         raise PolicyError('payer_address_missing')
     from cusd_plus.sponsor_7702 import (PolicyError, SEL_APPROVE, SEL_PAY,
-                                        SEL_REDEEM_TO_USDT, USDT_BSC)
+                                        SEL_PAY_V4, SEL_REDEEM_TO_USDT, USDT_BSC)
 
     vault = _vault_address()
     pay_contract = _pay_contract()
@@ -619,12 +643,21 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
     if (pay.get('to') or '').lower() != pay_contract:
         raise PolicyError('destination_not_allowed')
     p_data = pay['data'].lower()
-    if p_data[2:10] != SEL_PAY:
+    expected_sel = SEL_PAY_V4 if _pay_contract_v4() else SEL_PAY
+    if p_data[2:10] != expected_sel:
         raise PolicyError('bad_calldata')
+    d_redeem, d_min_out = False, 0
     try:
-        invoice_id_b, d_token, d_gross, d_merchant, d_deadline, auth_sig = _abi_decode(
-            ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
-            bytes.fromhex(p_data[10:]))
+        if _pay_contract_v4():
+            (invoice_id_b, d_token, d_gross, d_merchant, d_redeem, d_min_out,
+             d_deadline, auth_sig) = _abi_decode(
+                ['bytes32', 'address', 'uint256', 'address', 'bool', 'uint256',
+                 'uint256', 'bytes'],
+                bytes.fromhex(p_data[10:]))
+        else:
+            invoice_id_b, d_token, d_gross, d_merchant, d_deadline, auth_sig = _abi_decode(
+                ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
+                bytes.fromhex(p_data[10:]))
     except Exception:  # noqa: BLE001
         raise PolicyError('bad_calldata')
 
@@ -637,6 +670,12 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
         raise PolicyError('bad_calldata')
     if int(d_deadline) != int(meta.get('pay_deadline') or 0):
         raise PolicyError('bad_calldata')
+    # The routing is signed, so a client cannot flip it — but pin it to the
+    # stored decision anyway so a mismatch fails here rather than on chain.
+    if _pay_contract_v4():
+        if bool(d_redeem) != bool(meta.get('v4_redeem')) or \
+                int(d_min_out) != int(meta.get('v4_min_out') or 0):
+            raise PolicyError('bad_calldata')
     if int(d_deadline) <= int(time.time()):
         raise PolicyError('authorization_expired')
 
