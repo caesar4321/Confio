@@ -703,7 +703,19 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                     # Normalize token type for display
                     token_type = (instance.token_type or 'CUSD').upper()
                     display_token = 'cUSD' if token_type == 'CUSD' else token_type
-                    
+
+                    # Each side is told its own number. The employee is
+                    # credited what actually landed — for a payout redeemed to
+                    # USDT that is settled_amount, which can sit below the
+                    # nominal wage — while the business is billed the gross the
+                    # run really cost. Using net_amount for both told the
+                    # employee about money they had not received and the
+                    # business about a cost it had not paid.
+                    _received = (instance.settled_amount
+                                 if instance.settled_amount is not None
+                                 else instance.net_amount)
+                    _gross = instance.gross_amount or instance.net_amount
+
                     # Create notification for recipient
                     notif_utils.create_notification(
                         user=recipient_user,
@@ -711,7 +723,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                         business=None,
                         notification_type=NotificationTypeChoices.PAYROLL_RECEIVED,
                         title="Pago de nómina recibido",
-                        message=f"Recibiste {instance.net_amount} {display_token} de {business.name}",
+                        message=f"Recibiste {_received} {display_token} de {business.name}",
                         data={
                             'transaction_id': instance.internal_id,
                             'transaction_hash': instance.transaction_hash,
@@ -742,7 +754,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                             business=business,
                             notification_type=NotificationTypeChoices.PAYROLL_SENT,
                             title="Nómina enviada",
-                            message=f"Enviaste {instance.net_amount} {display_token} a {recipient_name}",
+                            message=f"Enviaste {_gross} {display_token} a {recipient_name}",
                             data={
                                 'transaction_id': instance.internal_id,
                                 'transaction_hash': instance.transaction_hash,

@@ -177,7 +177,11 @@ def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
             bsc_address__iexact=payout.get('business') or '',
             deleted_at__isnull=True).first()
         gross = Decimal(item.net_amount) + Decimal(item.fee_amount or 0)
-        _notify_parties(item)
+        # NOT _notify_parties(item): the PayrollItem post_save signal
+        # (users/signals.py) already notified both sides on the save above,
+        # with the same per-side amounts. Calling this too sent a SECOND pair
+        # claiming different figures — the employee was told both "recibiste
+        # 100.00" and "te pagó 98.60" for one wage. One sender, one number.
         _settle_run(item.run)
         logger.info('[PAYROLL][BSC] %s confirmed: %s', item.internal_id,
                     item.transaction_hash)

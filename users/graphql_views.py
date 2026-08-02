@@ -23,6 +23,12 @@ class UnifiedTransactionType(DjangoObjectType):
     # Computed fields for the current user's perspective
     direction = graphene.String(description="Transaction direction from current user perspective")
     display_amount = graphene.String(description="Formatted amount with +/- based on direction")
+    # The fee the recipient did NOT receive. Blank when there is none. The
+    # client currently derives this from a hardcoded 0.9%, which is wrong the
+    # moment the rate changes or a flow prices differently — read this
+    # instead, and net_amount below with it.
+    fee_amount = graphene.String(description="Fee deducted before the recipient was credited ('' if none)")
+    net_amount = graphene.String(description="What the recipient actually received (amount - fee)")
     display_counterparty = graphene.String(description="Name of the counterparty from user perspective")
     display_description = graphene.String(description="Transaction description")
     
@@ -188,15 +194,27 @@ class UnifiedTransactionType(DjangoObjectType):
                 if direction == 'sent':
                     return f'-{self.amount}'
                 elif direction == 'received':
-                    # Net of any fee: the recipient is credited what actually
-                    # reached them, not the invoice's face value. The app
-                    # prefers displayAmount over amount, so this corrects
-                    # every build already in the field.
-                    return f'+{self.amount_for_direction("received")}'
+                    # GROSS on purpose. Netting here looked like it fixed the
+                    # history card, but TransactionDetailScreen already
+                    # computes the 0.9% itself (computeConfioFee) and treats
+                    # this value as gross — so every shipped build subtracted
+                    # the fee a SECOND time and showed a merchant 98.21 on a
+                    # 100.00 payment. The truth now lives on the row as
+                    # fee_amount and is exposed as feeAmount; the client
+                    # should render from that instead of a hardcoded rate,
+                    # and only then can this become net.
+                    return f'+{self.amount}'
         except Exception as e:
             print(f"Error in resolve_display_amount: {e}")
         return str(self.amount)
     
+    def resolve_fee_amount(self, info):
+        return self.fee_amount or ''
+
+    def resolve_net_amount(self, info):
+        """What reached the recipient. Authoritative — not a client guess."""
+        return self.amount_for_direction('received')
+
     def resolve_display_counterparty(self, info):
         """Resolve counterparty name based on direction"""
         try:
