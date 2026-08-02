@@ -12,6 +12,7 @@ import {
   softClearInternetCredentials,
 } from '../utils/keychainInternetCredentials';
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
+import { extractFcmTransactionData } from '../utils/fcmData';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
@@ -746,14 +747,11 @@ class MessagingService {
     // Navigate based on notification data
     const { action_url, notification_type, related_type, related_id } = data;
 
-    // Extract transaction data from data_ prefixed fields
-    const transactionData: any = {};
-    Object.keys(data).forEach(key => {
-      if (key.startsWith('data_')) {
-        const actualKey = key.substring(5); // Remove 'data_' prefix
-        transactionData[actualKey] = data[key];
-      }
-    });
+    // Extract transaction data from data_ prefixed fields. Shared with
+    // pushNotificationService: this path used to copy the values raw, so a
+    // server-sent false arrived as the truthy string "False" and every boolean
+    // flag meant the opposite here than it did there.
+    const transactionData: any = extractFcmTransactionData(data);
 
     // Also include the notification_type in transaction data for type detection
     if (notification_type) {

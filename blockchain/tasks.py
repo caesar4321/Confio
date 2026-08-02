@@ -366,12 +366,24 @@ def scan_inbound_deposits():
             sponsor_address = None
 
         def resolve_sender_account(sender_addr: str):
+            """The account behind an address, or None when that is not a single
+            unambiguous answer. algorand_address carries no uniqueness
+            constraint, so .first() on a duplicated address would attribute the
+            transfer to an arbitrary one of them — better to fall back to the
+            external label than to name the wrong person."""
             if not sender_addr:
                 return None
             try:
-                return Account.objects.filter(
+                matches = list(Account.objects.filter(
                     algorand_address=sender_addr
-                ).select_related('user', 'business').first()
+                ).select_related('user', 'business')[:2])
+                if len(matches) != 1:
+                    if matches:
+                        logger.warning(
+                            'address %s maps to multiple accounts — treating as external',
+                            sender_addr)
+                    return None
+                return matches[0]
             except Exception:
                 return None
 
@@ -418,15 +430,49 @@ def scan_inbound_deposits():
                     created_at = datetime.fromtimestamp(round_time, tz=py_tz.utc)
 
                 idempotency_key = f"ALG:{txid}:{intra or 0}"
+                # This scan does NOT only see external deposits. Serverless
+                # internal transfers (emergency exit, P2P USDC withdrawal)
+                # have no SendTransaction of their own and are recorded here
+                # too — stamping every row 'external' made the history list
+                # call a real Confío user "Billetera externa" and show their
+                # wallet address to the recipient business's employees. The
+                # row is what the unified feed mirrors, so the truth has to
+                # live here, not only on the notification.
+                # sender_user / sender_business stay NULL on purpose. The
+                # unified feed scopes a personal account's history with
+                # Q(sender_user=user) | Q(counterparty_user=user), and a
+                # 'send' row's direction is derived from the ADDRESS — so
+                # linking the sender here would publish this row into their
+                # own history as an outgoing transfer they never had a row
+                # for, duplicating the P2P trade's exchange row for exactly
+                # the withdrawals this branch exists to catch. This row is the
+                # RECIPIENT's record of an inbound transfer; the sender's side
+                # belongs to whatever flow actually moved the money.
+                sender_account = resolve_sender_account(sender)
+                sender_is_business = bool(
+                    sender_account
+                    and sender_account.account_type == 'business'
+                    and sender_account.business_id
+                )
+                sender_is_personal = bool(sender_account and not sender_is_business)
                 send_kwargs = {
                     'sender_user': None,
                     'recipient_user': account.user if account.account_type == 'personal' else None,
                     'sender_business': None,
                     'recipient_business': account.business if account.account_type == 'business' else None,
-                    'sender_type': 'external',
+                    'sender_type': (
+                        'business' if sender_is_business
+                        else 'user' if sender_is_personal
+                        else 'external'
+                    ),
                     'recipient_type': 'business' if account.account_type == 'business' else 'user',
                     'sender_display_name': resolve_sender_name(sender),
                     'recipient_display_name': account.display_name,
+                    # Still blank, deliberately. The unified row is readable by
+                    # every employee of a business recipient, and the label is
+                    # already correct from sender_type alone — so there is no
+                    # reason to put a personal phone number in reach of them.
+                    # Same rule the notification payloads follow next door.
                     'sender_phone': '',
                     'recipient_phone': getattr(account.user, 'phone_number', '') if account.account_type == 'personal' else '',
                     'sender_address': sender or '',

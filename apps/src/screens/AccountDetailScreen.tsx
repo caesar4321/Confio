@@ -1244,8 +1244,17 @@ export const AccountDetailScreen = () => {
 
     // Determine if counterparty is an external wallet (no phone + address present + no user)
     const isExternalSent = transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
+    // senderType is the server's own answer about the SENDER, so it settles a
+    // received row on its own. The fallback below cannot: hasCounterpartyUser
+    // is derived from counterpartyUser, which on a send row is the RECIPIENT —
+    // null for a business account — so a business would read "an address, no
+    // phone, no user" and call a known Confío sender an external wallet.
+    const senderTypeKnown = typeof (transaction as any).senderType === 'string'
+      && !!(transaction as any).senderType;
     const isExternalReceived = transaction.type === 'received' && (
-      transaction.isExternalDeposit || (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
+      senderTypeKnown
+        ? (transaction as any).senderType.toLowerCase() === 'external'
+        : (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
     );
     // Get contact name for sender or recipient, falling back to "Billetera externa" for external wallets
     const phoneToCheck = (isRewardTransaction || isPresaleTransaction) ? undefined : (transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone);

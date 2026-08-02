@@ -7,6 +7,7 @@ import {
   clearPendingNotificationOpen,
   loadPendingNotificationOpen,
 } from './notificationOpenStore';
+import { extractFcmTransactionData } from '../utils/fcmData';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -294,34 +295,11 @@ export class PushNotificationService {
             ? action_url.split('transaction/')[1]
             : action_url.split('send/')[1];
 
-          // Reconstruct transaction data from notification data fields
-          const transactionData: any = {};
-
-          // Copy all data_ prefixed fields to transaction data
-          Object.keys(remoteMessage.data).forEach(key => {
-            if (key.startsWith('data_')) {
-              const fieldName = key.substring(5); // Remove 'data_' prefix
-              let value = remoteMessage.data[key];
-
-              // Parse boolean strings
-              if (value === 'true' || value === 'True') {
-                value = true;
-              } else if (value === 'false' || value === 'False') {
-                value = false;
-              }
-
-              transactionData[fieldName] = value;
-
-              // Log boolean fields for debugging
-              if (fieldName === 'is_external_address' || fieldName === 'is_invited_friend') {
-                console.log(`[PushNotificationService] Boolean field ${fieldName}:`, {
-                  original: remoteMessage.data[key],
-                  parsed: value,
-                  type: typeof value
-                });
-              }
-            }
-          });
+          // Reconstruct transaction data from notification data fields.
+          // Shared with messagingService so both delivery paths unpack an FCM
+          // payload by the same rules — they used to differ, and a boolean
+          // flag meant opposite things depending on which one ran.
+          const transactionData: any = extractFcmTransactionData(remoteMessage.data);
 
           // Determine transaction type
           let transactionType = extra_transactionType || extra_type || 'send';
