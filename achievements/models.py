@@ -564,6 +564,25 @@ class UserReferral(SoftDeleteModel):
         ordering = ['-created_at']
         verbose_name = "User Referral"
         verbose_name_plural = "User Referrals"
+        constraints = [
+            # "One referrer per referee" was only ever enforced by
+            # unique_together on (referred_user, deleted_at), which enforces
+            # nothing while a row is live: NULLs do not compare equal in a
+            # unique index, so any number of rows with deleted_at IS NULL are
+            # allowed. Two concurrent submissions therefore both inserted, and
+            # prod already had a case (user 3402, two identical rows one minute
+            # apart).
+            #
+            # That is not cosmetic. Reward lookup takes the newest row while
+            # identity-uniqueness picks a single winner_referral_id, so the
+            # loser is permanently answered with DUPLICATE_REFEREE_REWARD_ERROR
+            # and the referee's real bonus is blocked.
+            models.UniqueConstraint(
+                fields=['referred_user'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='uniq_live_referral_per_referee',
+            ),
+        ]
     
     def __str__(self):
         return f"{self.referred_user.username} referred by {self.referrer_identifier}"
@@ -1374,7 +1393,18 @@ class ReferralWithdrawalLog(SoftDeleteModel):
             models.Index(fields=['user', 'created_at']),
             models.Index(fields=['reference_type', 'reference_id']),
         ]
-    
+        constraints = [
+            # One log per source send. The writer takes select_for_update on a
+            # row that may not exist yet, which locks nothing, so a concurrent
+            # replay could insert twice and debit the balance twice. Excludes
+            # soft-deleted rows so a reversed log does not block a re-entry.
+            models.UniqueConstraint(
+                fields=['reference_type', 'reference_id'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='uniq_referral_withdrawal_reference',
+            ),
+        ]
+
     def __str__(self):
         return f"{self.user_id} - {self.amount} CONFIO ({self.reference_type}:{self.reference_id})"
 

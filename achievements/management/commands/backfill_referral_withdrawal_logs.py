@@ -44,7 +44,12 @@ class Command(BaseCommand):
                 token_type="CONFIO",
                 sender_user__isnull=False,
                 deleted_at__isnull=True,
-                status__in=["SUBMITTED", "CONFIRMED", "AML_REVIEW"],
+                # CONFIRMED only. A backfill writes permanent "spent" history,
+                # and SUBMITTED or AML_REVIEW sends can still fail or be
+                # rejected — recording those as spent debits a balance for
+                # CONFIO that never left. Anything that later confirms gets
+                # logged by the live path.
+                status__in=["CONFIRMED"],
             )
             .select_related("sender_user")
             .order_by("created_at", "id")

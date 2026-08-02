@@ -148,22 +148,33 @@ class SetReferrer(graphene.Mutation):
                     )
                 except Exception:
                     pass
-                referral = UserReferral.objects.create(
+                # get_or_create, not create: the existence check above is a
+                # separate statement, so two concurrent submissions both passed
+                # it and both inserted. Prod already carries one such pair.
+                # With the partial unique index on referred_user (live rows),
+                # the loser now collides here instead of creating a second row
+                # that would permanently block the referee's bonus — identity
+                # uniqueness picks one winner and answers the other with a
+                # duplicate error.
+                referral, _created = UserReferral.objects.get_or_create(
                     referred_user=user,
-                    referrer_identifier=referrer_identifier,
-                    referrer_user=referrer_user,
-                    status='pending',
-                    # Populate reward amounts based on current CONFIO price
-                    # so users can see what they're working toward
-                    reward_referee_confio=referee_confio,
-                    reward_referrer_confio=referrer_confio,
-                    attribution_data={
-                        'referral_type': 'friend',
-                        'identifier_used': referrer_identifier,
-                        'referral_code': referrer_identifier,
-                        'registered_at': timezone.now().isoformat(),
-                        **click_attribution,
-                    }
+                    deleted_at__isnull=True,
+                    defaults=dict(
+                        referrer_identifier=referrer_identifier,
+                        referrer_user=referrer_user,
+                        status='pending',
+                        # Populate reward amounts based on current CONFIO price
+                        # so users can see what they're working toward
+                        reward_referee_confio=referee_confio,
+                        reward_referrer_confio=referrer_confio,
+                        attribution_data={
+                            'referral_type': 'friend',
+                            'identifier_used': referrer_identifier,
+                            'referral_code': referrer_identifier,
+                            'registered_at': timezone.now().isoformat(),
+                            **click_attribution,
+                        },
+                    ),
                 )
                 try:
                     from users.funnel import emit_referral_signup_step
