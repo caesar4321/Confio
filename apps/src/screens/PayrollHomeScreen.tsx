@@ -6,7 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { useQuery } from '@apollo/client';
 import { GET_PAYROLL_RECIPIENTS, GET_PAYROLL_VAULT_BALANCE, GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
-import { usePayrollDelegates } from '../hooks/usePayrollDelegates';
+import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
@@ -29,8 +29,9 @@ export const PayrollHomeScreen = () => {
     fetchPolicy: 'cache-and-network',
     pollInterval: 5000,
   });
-  const { delegates, loading: delegatesLoading, isActivated, refetch: refetchDelegates } = usePayrollDelegates();
+  const { delegates, status, rail, loading: delegatesLoading, isActivated, refetch: refetchDelegates } = usePayrollDelegates();
   const [refreshing, setRefreshing] = useState(false);
+  const instrument = payrollInstrument(rail);
 
   useFocusEffect(
     useCallback(() => {
@@ -46,8 +47,12 @@ export const PayrollHomeScreen = () => {
     }, [refetchEmployees, refetchDelegates, refetchVault])
   );
 
-  // Log delegates changes
+  // How many PEOPLE can approve payroll. The server answers this in employee
+  // ids when it can — on BSC the allowlist holds EVM addresses the app has no
+  // copy of, so the old "count the addresses that aren't the business's
+  // Algorand one" could only ever count zero there.
   const delegateCount = useMemo(() => {
+    if (status) return status.delegateEmployeeIds.length;
     const businessAddrUpper = (
       activeAccount?.algorandAddress ||
       (activeAccount as any)?.address ||
@@ -61,7 +66,7 @@ export const PayrollHomeScreen = () => {
       if (norm && norm !== businessAddrUpper) unique.add(norm);
     });
     return unique.size;
-  }, [delegates, activeAccount]);
+  }, [status, delegates, activeAccount]);
 
   useEffect(() => {
   }, [delegates, activeAccount, delegateCount]);
@@ -71,11 +76,16 @@ export const PayrollHomeScreen = () => {
     const emps = employeesData?.currentBusinessEmployees || [];
     return emps;
   }, [employeesData]);
+  // null = we do not know (node unreachable, nothing cached). Rendered as
+  // "—", never as $0.00: a business reading "$0.00" concludes its payroll
+  // float is gone and starts a support ticket.
   const vaultBalance = useMemo(() => {
+    if (status) return status.vaultBalanceUsd;
     const raw = vaultData?.payrollVaultBalance;
-    const num = typeof raw === 'number' ? raw : parseFloat(raw || '0');
-    return Number.isFinite(num) ? num : 0;
-  }, [vaultData?.payrollVaultBalance]);
+    if (raw === null || raw === undefined) return null;
+    const parsed = typeof raw === 'number' ? raw : parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [status, vaultData?.payrollVaultBalance]);
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -189,14 +199,30 @@ export const PayrollHomeScreen = () => {
               <Icon name="lock" size={16} color={colors.primaryLight} />
               <Text style={styles.vaultLabel}>BÓVEDA DE NÓMINA</Text>
             </View>
-            {vaultLoading ? (
+            {vaultLoading && !status ? (
               <ActivityIndicator size="small" color={colors.white} />
             ) : (
-              <View style={styles.balanceRow}>
-                <Image source={require('../assets/png/cUSD.png')} style={styles.tokenLogo} />
-                <Text style={styles.vaultBalance}>{vaultBalance.toFixed(2)}</Text>
-                <Text style={styles.currencyLabel}>cUSD</Text>
-              </View>
+              <>
+                {/* Dollars, never share counts: cUSD+ is an accumulating
+                    share that drifts above $1, so it names the instrument
+                    beside the amount instead of denominating it. */}
+                <View style={styles.balanceRow}>
+                  <Text style={styles.vaultBalance}>
+                    {vaultBalance === null ? '—' : `$${vaultBalance.toFixed(2)}`}
+                  </Text>
+                </View>
+                {instrument.known ? (
+                  <View style={styles.instrumentRow}>
+                    <Image
+                      source={instrument.isPlus
+                        ? require('../assets/png/cUSDPlus.png')
+                        : require('../assets/png/cUSD.png')}
+                      style={styles.tokenLogo}
+                    />
+                    <Text style={styles.instrumentLabel}>{instrument.name}</Text>
+                  </View>
+                ) : null}
+              </>
             )}
             <TouchableOpacity
               style={styles.vaultButton}
@@ -388,20 +414,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
   vaultBalance: {
     fontSize: 28,
     fontWeight: '700',
     color: colors.white,
   },
+  instrumentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 12,
+  },
   tokenLogo: {
-    width: 28,
-    height: 28,
+    width: 18,
+    height: 18,
     resizeMode: 'contain',
   },
-  currencyLabel: {
-    fontSize: 18,
+  instrumentLabel: {
+    fontSize: 13,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.85)',
   },

@@ -24,6 +24,14 @@ DUPLICATE_REFERRER_REWARD_ERROR = (
     "Este referido fue bloqueado por identidad duplicada. No se otorga bono al referidor "
     "cuando la misma identidad verificada intenta reclamar más de una recompensa."
 )
+# Distinct from the duplicate errors on purpose. Telling someone their document
+# was already used, when the real problem is that their verification came back
+# without usable data, sends them to support with the wrong story — and it is a
+# hold they can clear by verifying again, not a permanent refusal.
+INCOMPLETE_IDENTITY_REWARD_ERROR = (
+    "No pudimos confirmar los datos de tu verificación de identidad. "
+    "Vuelve a verificarte para liberar este bono."
+)
 
 
 def get_referral_reward_transactions(user=None):
@@ -89,6 +97,33 @@ def normalize_person_name(value: str | None) -> str:
     return re.sub(r'[^A-Za-z]', '', folded).upper()
 
 
+# Values Didit leaves behind when a session has not produced real data. They
+# are non-empty, which is precisely why they slipped past "is this field set?"
+# checks: a didit:<session> document is unique per session, so it looked like a
+# perfectly good — and never-colliding — identity key.
+_PLACEHOLDER_DOCUMENT_PREFIXES = ('DIDIT:', 'SESSION:')
+_SENTINEL_NAMES = {'PENDING', 'PENDINGVERIFICATION', 'UNKNOWN', 'NA', 'NONE', 'TEST'}
+_SENTINEL_DOB_ISO = {'1900-01-01', '1000-01-01', '0001-01-01'}
+
+
+def has_usable_document_key(verification) -> bool:
+    """True when the document tuple identifies a real document.
+
+    An 'UNK' country, an empty number, or a Didit session placeholder are all
+    unusable — the placeholder especially, because it is unique per session and
+    therefore can never collide with anything.
+    """
+    if verification is None:
+        return False
+    country = (getattr(verification, 'document_issuing_country', '') or '').strip().upper()
+    number = (getattr(verification, 'document_number_normalized', '') or '').strip().upper()
+    if not country or country == 'UNK' or not number:
+        return False
+    if number.startswith(_PLACEHOLDER_DOCUMENT_PREFIXES):
+        return False
+    return True
+
+
 def person_key_for(verification) -> tuple[str, str, object] | None:
     """(first, last, dob) for a verification, or None when unusable.
 
@@ -107,6 +142,14 @@ def person_key_for(verification) -> tuple[str, str, object] | None:
     last = normalize_person_name(getattr(verification, 'verified_last_name', ''))
     dob = getattr(verification, 'verified_date_of_birth', None)
     if not first or not last or not dob:
+        return None
+    # 'Pending' is what the Didit parser writes when a name is missing, and
+    # 1900-01-01 is the usual placeholder birthday. Treating either as a real
+    # person key would group unrelated people together AND satisfy the
+    # fail-closed check with data that identifies nobody.
+    if first in _SENTINEL_NAMES or last in _SENTINEL_NAMES:
+        return None
+    if str(dob) in _SENTINEL_DOB_ISO:
         return None
     return (first, last, dob)
 
@@ -256,13 +299,17 @@ def get_duplicate_referee_reward_error(referral: UserReferral | None):
 
     from security.models import IdentityVerification
 
+    # Select the latest verified row WITHOUT filtering on its key. The previous
+    # .exclude(document_number_normalized='') dropped the malformed row before
+    # the fail-closed check could see it, so the function concluded "no verified
+    # identity" and returned no error — failing open in exactly the case the
+    # check exists for.
     verification = (
         IdentityVerification.objects.filter(
             user_id=referral.referred_user_id,
             status='verified',
         )
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .exclude(document_number_normalized='')
         .order_by('-verified_at', '-updated_at', '-created_at')
         .first()
     )
@@ -272,20 +319,13 @@ def get_duplicate_referee_reward_error(referral: UserReferral | None):
         return None
 
     person_key = person_key_for(verification)
-    has_document_key = bool(
-        verification.document_issuing_country
-        and verification.document_issuing_country != 'UNK'
-        and verification.document_number_normalized
-    )
+    has_document_key = has_usable_document_key(verification)
 
-    # Fail CLOSED. A verified row carrying neither a usable document tuple nor
-    # a person key cannot be deduplicated, and answering "no duplicate" there
-    # let the three malformed cases through as if they were clean: an empty
-    # normalized document, an 'UNK' issuing country, and a Didit sync that
-    # keeps its session placeholder on a verified row. Nobody in the current
-    # population is in this state, which is exactly why it is cheap to close.
+    # Fail CLOSED: a verified row carrying neither a usable document tuple nor
+    # a usable person key cannot be deduplicated, so it must not be answered
+    # with "no duplicate".
     if not has_document_key and not person_key:
-        return DUPLICATE_REFEREE_REWARD_ERROR
+        return INCOMPLETE_IDENTITY_REWARD_ERROR
 
     result = enforce_referee_reward_uniqueness_for_identity(
         verification.document_issuing_country,

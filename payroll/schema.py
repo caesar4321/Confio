@@ -25,7 +25,115 @@ from .models import PayrollRun, PayrollItem, PayrollRecipient
 from blockchain.payroll_transaction_builder import PayrollTransactionBuilder
 
 
+logger = logging.getLogger(__name__)
+
 DECIMAL_QUANT = Decimal('0.000001')  # 6 decimals for ASA amounts
+
+
+def _payroll_business_account(info, user):
+    """The business Account a payroll READ is about, or None.
+
+    Owners and active delegates both reach payroll screens, and a delegate
+    viewing from their PERSONAL account has no business JWT context — hence
+    the fallbacks. Reads only: every mutation still goes through
+    get_jwt_business_context_with_validation with its own permission.
+    """
+    biz_id = None
+    account_index = None
+    ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+    if ctx and ctx.get('account_type') == 'business' and ctx.get('business_id'):
+        emp_rec = ctx.get('employee_record')
+        if emp_rec and not emp_rec.is_active:
+            return None
+        biz_id = ctx['business_id']
+        # The write path (_business_context) pins the account by JWT
+        # account_index. Reading the lowest-index account instead meant a
+        # multi-account business could be shown one account's escrow while
+        # the buttons funded another's.
+        account_index = ctx.get('account_index', 0)
+    if not biz_id:
+        owned = Account.objects.filter(
+            user=user, account_type='business', deleted_at__isnull=True
+        ).order_by('account_index').first()
+        if owned and owned.business_id:
+            biz_id = owned.business_id
+    if not biz_id:
+        try:
+            from users.models_employee import BusinessEmployee
+            emp = BusinessEmployee.objects.filter(
+                user=user, is_active=True, deleted_at__isnull=True
+            ).order_by('business_id').first()
+            if emp:
+                biz_id = emp.business_id
+        except Exception:  # noqa: BLE001
+            biz_id = None
+    if not biz_id:
+        return None
+    qs = Account.objects.filter(
+        business_id=biz_id, account_type='business', deleted_at__isnull=True)
+    if account_index is not None:
+        pinned = qs.filter(account_index=account_index).first()
+        if pinned:
+            return pinned
+    return qs.order_by('account_index').first()
+
+
+def _caller_signer_address(user):
+    """The acting user's own personal EVM address — the key ConfioPayrollVault
+    checks when they sign a payout."""
+    acct = Account.objects.filter(
+        user=user, account_type='personal', account_index=0,
+        deleted_at__isnull=True).first()
+    return ((getattr(acct, 'bsc_address', None) or '') or '').lower() or None
+
+
+def _delegate_candidates(business_account):
+    """(employee_id, evm_address) for every active employee who could
+    plausibly be allowlisted on this business's vault.
+
+    The contract's allowlist is a mapping with no enumerator, so the answer
+    to "who are my delegates" is this set intersected with the chain. Callers
+    that also care about the business EOA prepend it themselves."""
+    from users.models_employee import BusinessEmployee
+
+    pairs = []
+    employees = BusinessEmployee.objects.filter(
+        business_id=business_account.business_id, is_active=True,
+        deleted_at__isnull=True).select_related('user')
+    user_ids = [e.user_id for e in employees]
+    personal = {
+        a.user_id: a for a in Account.objects.filter(
+            user_id__in=user_ids, account_type='personal', account_index=0,
+            deleted_at__isnull=True)
+    }
+    for emp in employees:
+        acct = personal.get(emp.user_id)
+        addr = (getattr(acct, 'bsc_address', None) or '').lower()
+        if addr:
+            pairs.append((str(emp.id), addr))
+    return pairs
+
+
+def _algorand_delegate_employee_ids(business_account, delegate_addrs_upper):
+    """Legacy-rail counterpart of _delegate_candidates: which employees own
+    one of the Algorand addresses in the allowlist boxes."""
+    from users.models_employee import BusinessEmployee
+
+    employees = list(BusinessEmployee.objects.filter(
+        business_id=business_account.business_id, is_active=True,
+        deleted_at__isnull=True))
+    personal = {
+        a.user_id: a for a in Account.objects.filter(
+            user_id__in=[e.user_id for e in employees], account_type='personal',
+            account_index=0, deleted_at__isnull=True)
+    }
+    out = []
+    for emp in employees:
+        acct = personal.get(emp.user_id)
+        addr = (getattr(acct, 'algorand_address', None) or '').strip().upper()
+        if addr and addr in delegate_addrs_upper:
+            out.append(str(emp.id))
+    return out
 
 
 class PayrollItemType(DjangoObjectType):
@@ -39,6 +147,11 @@ class PayrollItemType(DjangoObjectType):
             'recipient_account',
             'token_type',
             'net_amount',
+            # What actually LANDED. A payout to an Ondo-ineligible employee
+            # redeems shares to USDT with a slippage floor, so it can settle
+            # below the nominal wage — a receipt that prints net_amount for
+            # one of those is stating a number that never arrived.
+            'settled_amount',
             'gross_amount',
             'fee_amount',
             'status',
@@ -215,7 +328,9 @@ class PayrollItemInput(graphene.InputObjectType):
 
 class CreatePayrollRun(graphene.Mutation):
     class Arguments:
-        token_type = graphene.String(required=False, default_value='CUSD')
+        token_type = graphene.String(
+            required=False, default_value=None,
+            description="DEPRECATED — the rail decides the token; a mismatched value is ignored")
         period_seconds = graphene.Int(required=False)
         cap_amount = graphene.String(required=False, description="Optional gross cap per window")
         scheduled_at = graphene.String(required=False, description="ISO datetime or YYYY-MM-DD for scheduling")
@@ -228,7 +343,7 @@ class CreatePayrollRun(graphene.Mutation):
     @classmethod
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
-    def mutate(cls, root, info, items, token_type='CUSD', period_seconds=None, cap_amount=None, scheduled_at=None):
+    def mutate(cls, root, info, items, token_type=None, period_seconds=None, cap_amount=None, scheduled_at=None):
         # Firebase App Check
         from security.integrity_service import app_check_service
         ac_result = app_check_service.verify_request_header(info.context, action='payroll', should_enforce=True)
@@ -253,7 +368,27 @@ class CreatePayrollRun(graphene.Mutation):
         except Business.DoesNotExist:
             return CreatePayrollRun(run=None, success=False, errors=["Business not found"])
 
-        normalized_token = 'CUSD' if str(token_type).upper() == 'CUSD' else str(token_type).upper()
+        # The token is a property of the RAIL, not a client choice: payroll
+        # settles from one escrow and that escrow holds one token. The client
+        # used to hardcode 'cUSD', which is how a business on the cUSD+ vault
+        # ended up with runs labelled in the token being phased out. Whatever
+        # arrives is checked against the rail and otherwise ignored.
+        # Pinned by JWT account_index, exactly like _business_context does at
+        # payout time. Reading the lowest-index account instead let a
+        # multi-account business stamp a run from one account's rail and then
+        # execute it against another's — where the new rail guards strand it.
+        business_account = Account.objects.filter(
+            business_id=business_id, account_type='business',
+            account_index=ctx.get('account_index', 0),
+            deleted_at__isnull=True).first() or Account.objects.filter(
+            business_id=business_id, account_type='business',
+            deleted_at__isnull=True).order_by('account_index').first()
+        from . import bsc_flow
+        normalized_token = bsc_flow.rail_token(bsc_flow.execution_rail(business_account))
+        if token_type and str(token_type).upper() != normalized_token:
+            logger.info(
+                '[PAYROLL] client asked for %s; this business pays in %s — '
+                'using the rail token', token_type, normalized_token)
         # Model choices do not constrain writes, so an unrecognised token
         # used to travel all the way to the ledger — where it is now a
         # constraint violation that the unified signal swallows, leaving a
@@ -261,7 +396,7 @@ class CreatePayrollRun(graphene.Mutation):
         _allowed = {c[0] for c in PayrollRun.TOKEN_TYPES}
         if normalized_token not in _allowed:
             return cls(success=False, errors=[
-                f"token_type inválido: {token_type}. "
+                f"token_type inválido: {normalized_token}. "
                 f"Debe ser uno de: {', '.join(sorted(_allowed))}"], run=None)
 
         # Validate cap if provided
@@ -409,6 +544,17 @@ class PreparePayrollItemPayout(graphene.Mutation):
         # Ensure item belongs to a business the user can operate on
         if item.run.business_id not in allowed_business_ids:
             return PreparePayrollItemPayout(item=None, run=None, success=False, errors=["No access to this payroll item"])
+
+        # A run is denominated in the token of the escrow it will be paid
+        # FROM, so the run pins its rail — the live flag does not. Without
+        # this, flipping BSC_PAYROLL_ENABLED off between creation and payout
+        # let a cUSD+ run fall through to here and be paid out of the
+        # Algorand vault: a different pot of money than the run describes.
+        if item.run.token_type in ('CUSD_PLUS', 'USDT'):
+            return PreparePayrollItemPayout(
+                item=None, run=None, success=False,
+                errors=["Esta nómina se paga desde la bóveda en BNB Chain, "
+                        "no desde la bóveda de cUSD."])
 
         # Check delegate permission if employee
         employee_record = ctx.get('employee_record')
@@ -1672,12 +1818,40 @@ class VerifiedPayrollTransactionType(graphene.ObjectType):
     verification_message = graphene.String()
 
 
+class PayrollRailStatusType(graphene.ObjectType):
+    """Everything the payroll screens need to describe THIS business's rail
+    without guessing at it client-side.
+
+    It exists because the app was deriving all of this from an Algorand
+    address list: which token wages are paid in, whether payroll is
+    activated, who the delegates are. On BSC the delegate is an EVM address
+    the client has no copy of, so the question is answered here — in
+    employee ids, which the client already holds — instead of shipping
+    addresses to the phone to be string-matched."""
+
+    rail = graphene.String(
+        description="bsc | algorand — where this business's payroll money currently IS")
+    execution_rail = graphene.String(
+        description="bsc | algorand — where NEW work (funding, fresh runs) executes. "
+                    "Differs from `rail` only while the kill switch is on with money still parked.")
+    token_type = graphene.String(description="Token a run created now is denominated in (CUSD_PLUS on BSC)")
+    vault_balance_usd = graphene.Float(description="Payroll escrow, in USD")
+    fundable_balance_usd = graphene.Float(
+        description="Business balance a top-up can draw from, in USD — the cUSD+ position on BSC")
+    activated = graphene.Boolean(description="At least one signer is allowlisted, so a payout can be authorized")
+    delegate_employee_ids = graphene.List(
+        graphene.ID, description="BusinessEmployee ids whose signer is allowlisted on the rail")
+
+
 class Query(graphene.ObjectType):
     payroll_runs = graphene.List(PayrollRunType)
     pending_payroll_items = graphene.List(PayrollItemType, description="Pending payroll items for delegate user")
     payroll_recipients = graphene.List(PayrollRecipientType, description="Saved payroll recipients for the current business")
     payroll_delegates = graphene.List(graphene.String, description="Delegates for the current business account")
     payroll_vault_balance = graphene.Float(description="Balance of payroll vault for this business (token units)")
+    payroll_rail_status = graphene.Field(
+        PayrollRailStatusType,
+        description="Rail, token, escrow and delegate status for the current business")
 
     verify_payroll_transaction = graphene.Field(
         VerifiedPayrollTransactionType,
@@ -1825,7 +1999,20 @@ class Query(graphene.ObjectType):
             account_type='business',
             deleted_at__isnull=True
         ).order_by('account_index').first()
-        if not biz_acct or not biz_acct.algorand_address:
+        if not biz_acct:
+            return []
+
+        # On the BSC rail the allowlist lives in ConfioPayrollVault, not in
+        # Algorand boxes — an address list read off the wrong chain is the
+        # reason a business that had already delegated on BSC still saw
+        # "nómina no activada".
+        from . import bsc_flow
+        if bsc_flow.display_rail(biz_acct) == 'bsc':
+            biz_addr = (biz_acct.bsc_address or '').lower()
+            candidates = [addr for _eid, addr in _delegate_candidates(biz_acct)]
+            return bsc_flow.onchain_delegates(biz_addr, [biz_addr] + candidates)
+
+        if not biz_acct.algorand_address:
             return []
 
         logger = logging.getLogger(__name__)
@@ -1888,46 +2075,20 @@ class Query(graphene.ObjectType):
         if not ok:
             return 0
         try:
-            from users.models import Account
-            biz_id = None
-            # Primary: business context (no permission requirement; delegates/owners allowed)
-            ctx = get_jwt_business_context_with_validation(info, required_permission=None)
-            if ctx and ctx.get('account_type') == 'business' and ctx.get('business_id'):
-                emp_rec = ctx.get('employee_record')
-                # Only allow owners or active delegates (even if send_funds is false)
-                if emp_rec and not emp_rec.is_active:
-                    return 0
-                biz_id = ctx['business_id']
-            # Fallback: any active business account owned by this user
-            if not biz_id:
-                biz_acct_owned = Account.objects.filter(
-                    user=user,
-                    account_type='business',
-                    deleted_at__isnull=True
-                ).order_by('account_index').first()
-                if biz_acct_owned and biz_acct_owned.business_id:
-                    biz_id = biz_acct_owned.business_id
-            # Fallback: employee/delegate business
-            if not biz_id:
-                try:
-                    from users.models_employee import BusinessEmployee
-                    emp = BusinessEmployee.objects.filter(
-                        user=user,
-                        is_active=True,
-                        deleted_at__isnull=True
-                    ).order_by('business_id').first()
-                    if emp:
-                        biz_id = emp.business_id
-                except Exception:
-                    biz_id = None
-            if not biz_id:
+            biz_acct = _payroll_business_account(info, user)
+            if not biz_acct:
                 return 0
-            biz_acct = Account.objects.filter(
-                business_id=biz_id,
-                account_type='business',
-                deleted_at__isnull=True
-            ).order_by('account_index').first()
-            if not biz_acct or not biz_acct.algorand_address:
+
+            # The escrow the payout actually spends. Reading the Algorand box
+            # for a business funded on BSC reported $0.00 next to a working
+            # "Agregar fondos" button.
+            from . import bsc_flow
+            if bsc_flow.display_rail(biz_acct) == 'bsc':
+                # May be None (node unreachable, nothing cached). Null travels
+                # to the client as "—"; 0.0 would be a claim we cannot make.
+                return bsc_flow.escrow_usd((biz_acct.bsc_address or '').lower())
+
+            if not biz_acct.algorand_address:
                 return 0
 
             algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS, headers={"User-Agent": "py-algorand-sdk"})
@@ -1941,6 +2102,106 @@ class Query(graphene.ObjectType):
             return 0
         except Exception:
             return 0
+
+    def resolve_payroll_rail_status(self, info, **kwargs):
+        user = getattr(info.context, 'user', None)
+        ok, _ = Query._kyc_aml_ok(self, user, 'send_money')
+        if not ok:
+            return None
+        biz_acct = _payroll_business_account(info, user)
+        if not biz_acct:
+            return None
+
+        from . import bsc_flow
+        # Where the money IS drives the label and the balance; where new work
+        # RUNS drives the token a fresh run would carry. They differ only
+        # inside the kill-switch window, and there the honest answer is
+        # "your float is in cUSD+, but a new run would be created in cUSD".
+        rail = bsc_flow.display_rail(biz_acct)
+        exec_rail = bsc_flow.execution_rail(biz_acct)
+
+        # WHO the delegates are is the same question payrollDelegates answers,
+        # and it has always required send_funds in a real business context.
+        # Serving it here at KYC-only would have handed the employer's signer
+        # roster to any employee — a cashier included — purely because this
+        # field happened to be new.
+        may_see_delegates = bool(get_jwt_business_context_with_validation(
+            info, required_permission='send_funds'))
+        # Balances follow view_balance. The client masks them with "••••" for
+        # a revoked employee, but masking in the UI while the GraphQL response
+        # carries the number is not a permission — it is a curtain. In a
+        # personal (delegate) context there is no business JWT to check, which
+        # is the pre-existing shape of payrollVaultBalance; the NEW field
+        # (fundable) stays business-context-only regardless.
+        in_business_ctx = bool(get_jwt_business_context_with_validation(
+            info, required_permission=None)) and (
+                (get_jwt_business_context_with_validation(info, required_permission=None) or {})
+                .get('account_type') == 'business')
+        may_see_balance = (
+            bool(get_jwt_business_context_with_validation(
+                info, required_permission='view_balance'))
+            if in_business_ctx else True)
+        vault_usd = None
+        fundable_usd = None
+        delegate_ids = []
+
+        if rail == 'bsc':
+            biz_addr = (biz_acct.bsc_address or '').lower()
+            vault_usd = bsc_flow.escrow_usd(biz_addr)
+            try:
+                from cusd_plus import vault as cp_vault
+                # What a top-up spends: the business's own cUSD+ shares, the
+                # exact balance prepare_bsc_payroll_admin checks before it
+                # will build the approve+deposit batch.
+                fundable_usd = cp_vault.position_usd(biz_addr)
+            except Exception:  # noqa: BLE001
+                fundable_usd = None
+            # One eth_call per candidate, so only enumerate when the answer is
+            # actually going to be sent. When it is not, the two addresses that
+            # settle `activated` are enough.
+            candidates = _delegate_candidates(biz_acct) if may_see_delegates else []
+            probe = [biz_addr] + [addr for _e, addr in candidates]
+            if not may_see_delegates:
+                signer = _caller_signer_address(user)
+                if signer:
+                    probe.append(signer)
+            allowed, degraded = bsc_flow.onchain_delegates(
+                biz_addr, probe, with_status=True)
+            allowed = set(allowed)
+            delegate_ids = [eid for eid, addr in candidates if addr in allowed]
+            # The business EOA counts as a signer the contract accepts even
+            # though no employee row carries that address.
+            #
+            # None, not False, when the chain did not answer: `activated`
+            # drives the "Activar nómina" hero, and showing a working
+            # business the setup wizard because an RPC call timed out would
+            # invite them to re-run activation they already paid for.
+            activated = True if allowed else (None if degraded else False)
+        else:
+            vault_usd = Query.resolve_payroll_vault_balance(self, info)
+            # fundable_balance_usd stays null on the legacy rail: that number
+            # is the permission-gated accountBalance the client already asks
+            # for, and duplicating its view_balance check here would be a
+            # second place to get it wrong.
+            fundable_usd = None
+            addrs = {
+                (a or '').strip().upper()
+                for a in (Query.resolve_payroll_delegates(self, info) or [])
+            }
+            delegate_ids = (_algorand_delegate_employee_ids(biz_acct, addrs)
+                            if may_see_delegates else [])
+            activated = bool(addrs)
+
+        return PayrollRailStatusType(
+            rail=rail,
+            token_type=bsc_flow.rail_token(exec_rail),
+            execution_rail=exec_rail,
+            vault_balance_usd=vault_usd if may_see_balance else None,
+            fundable_balance_usd=(fundable_usd
+                                  if (may_see_balance and in_business_ctx) else None),
+            activated=activated,
+            delegate_employee_ids=delegate_ids,
+        )
 
 
 # ═══════════════════ BSC payroll (ConfioPayrollVault) ═══════════════════
@@ -1975,16 +2236,25 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
         action = graphene.String(required=True, description="fund | withdraw | set_delegate")
         amount = graphene.Decimal(required=False, description="USD, for fund/withdraw")
         delegate_user_id = graphene.ID(required=False)
+        delegate_user_ids = graphene.List(
+            graphene.ID, required=False,
+            description="Allowlist several delegates in ONE batch (activation)")
+        include_self = graphene.Boolean(
+            required=False,
+            description="Also allowlist the caller's own signer — activation does this")
         allowed = graphene.Boolean(required=False)
 
     success = graphene.Boolean()
     error = graphene.String()
+    error_name = graphene.String(description="Who the error is about, when it names someone")
     calls = graphene.List(BscPayrollCallType)
     shares = graphene.String()
     delegate_address = graphene.String()
+    delegate_addresses = graphene.List(graphene.String)
     intent_id = graphene.String()  # bytes32 the client binds into its signature
 
-    def mutate(self, info, action, amount=None, delegate_user_id=None, allowed=True):
+    def mutate(self, info, action, amount=None, delegate_user_id=None,
+               delegate_user_ids=None, include_self=False, allowed=True):
         from . import bsc_flow
 
         jwt_ctx = get_jwt_business_context_with_validation(
@@ -1993,9 +2263,13 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
             return PrepareBscPayrollAdmin(success=False, error='permission_denied')
         result = bsc_flow.prepare_bsc_payroll_admin(
             info.context.user, jwt_ctx, action, amount=amount,
-            delegate_user_id=delegate_user_id, allowed=bool(allowed))
+            delegate_user_id=delegate_user_id,
+            delegate_user_ids=delegate_user_ids,
+            include_self=bool(include_self), allowed=bool(allowed))
         if not result.get('success'):
-            return PrepareBscPayrollAdmin(success=False, error=result.get('error'))
+            return PrepareBscPayrollAdmin(
+                success=False, error=result.get('error'),
+                error_name=result.get('delegate_name'))
         return PrepareBscPayrollAdmin(
             success=True,
             calls=[
@@ -2004,6 +2278,7 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
             ],
             shares=result.get('shares'),
             delegate_address=result.get('delegate_address'),
+            delegate_addresses=result.get('delegate_addresses'),
             intent_id=result.get('intent_id'),
         )
 
@@ -2016,6 +2291,7 @@ class SubmitBscPayrollAdmin(graphene.Mutation):
         action = graphene.String(required=True)
         shares = graphene.String(required=False)
         delegate_address = graphene.String(required=False)
+        delegate_addresses = graphene.List(graphene.String, required=False)
         allowed = graphene.Boolean(required=False)
         nonce = graphene.String(required=True, description="Delegate intent nonce (nonces())")
         deadline = graphene.String(required=True, description="Unix seconds")
@@ -2028,7 +2304,8 @@ class SubmitBscPayrollAdmin(graphene.Mutation):
     transaction_hash = graphene.String()
 
     def mutate(self, info, action, nonce, deadline, intent_signature,
-               shares=None, delegate_address='', allowed=True, authorization=None):
+               shares=None, delegate_address='', delegate_addresses=None,
+               allowed=True, authorization=None):
         from . import bsc_flow
 
         jwt_ctx = get_jwt_business_context_with_validation(
@@ -2038,7 +2315,8 @@ class SubmitBscPayrollAdmin(graphene.Mutation):
         result = bsc_flow.submit_bsc_payroll_admin(
             info.context.user, jwt_ctx, action, nonce, deadline,
             intent_signature, authorization=authorization, shares=shares,
-            delegate_address=delegate_address or '', allowed=bool(allowed))
+            delegate_address=delegate_address or '',
+            delegate_addresses=delegate_addresses, allowed=bool(allowed))
         return SubmitBscPayrollAdmin(
             success=result.get('success', False),
             error=result.get('error'),

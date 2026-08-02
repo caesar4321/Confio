@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useQuery, useMutation } from '@apollo/client';
@@ -10,6 +10,7 @@ import { PREPARE_PAYROLL_ITEM_PAYOUT, SUBMIT_PAYROLL_ITEM_PAYOUT } from '../apol
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
+import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
@@ -48,6 +49,8 @@ export const PayrollPendingScreen = () => {
     fetchPolicy: 'cache-and-network',
     skip: false,
   });
+  const { status: railStatus, rail } = usePayrollDelegates();
+  const instrument = payrollInstrument(rail);
   const [preparePayrollItem] = useMutation(PREPARE_PAYROLL_ITEM_PAYOUT);
   const [submitPayrollItem] = useMutation(SUBMIT_PAYROLL_ITEM_PAYOUT);
   const [payingItemId, setPayingItemId] = useState<string | null>(null);
@@ -72,6 +75,14 @@ export const PayrollPendingScreen = () => {
   }, [refetch, refetchVault]));
 
   const items = useMemo(() => data?.pendingPayrollItems || [], [data]);
+  // Prefer the rail-aware escrow: the legacy query reads the Algorand box,
+  // which is $0.00 for a business whose float sits in ConfioPayrollVault.
+  // null = unknown, rendered "—". Never 0: see PayrollHomeScreen.
+  const vaultBalance = useMemo(() => {
+    if (railStatus) return railStatus.vaultBalanceUsd;
+    const raw = vaultData?.payrollVaultBalance;
+    return raw === null || raw === undefined ? null : Number(raw);
+  }, [railStatus, vaultData]);
 
   const handlePay = async (item: any) => {
     if (payingItemId) return;
@@ -80,7 +91,7 @@ export const PayrollPendingScreen = () => {
 
     // Require biometric authentication for approving payroll payment
     const recipientName = item.recipientUser?.firstName || item.recipientUser?.username || 'destinatario';
-    const authMessage = `Autoriza pagar ${item.netAmount} cUSD a ${recipientName}`;
+    const authMessage = `Autoriza pagar $${item.netAmount} a ${recipientName}`;
 
     let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
     if (!authenticated) {
@@ -126,7 +137,7 @@ export const PayrollPendingScreen = () => {
       // their OWN personal key (the on-chain delegate model). While the
       // rail ships dark the prepare answers `bsc_payroll_disabled` and we
       // fall through to the legacy Algorand flow below.
-      const { payBscPayrollItem, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+      const { payBscPayrollItem, bscPayrollErrorMessage } = await import('../services/bscPayroll');
       try {
         setProcessingMessage('Firmando pago…');
         await payBscPayrollItem(item.internalId);
@@ -138,9 +149,12 @@ export const PayrollPendingScreen = () => {
         const code = bscErr?.message || '';
         const fallThrough = code === 'bsc_payroll_disabled'
           || code === 'payroll_vault_not_configured'
-          || code === 'vault_not_configured';
+          || code === 'vault_not_configured'
+          // The run itself is a legacy cUSD run — the server refuses to pay
+          // it from the cUSD+ escrow no matter what the flag says.
+          || code === 'run_on_legacy_rail';
         if (!fallThrough) {
-          throw new Error(BSC_PAYROLL_ERRORS[code] || code || 'No se pudo pagar');
+          throw new Error(bscPayrollErrorMessage(code));
         }
         // Rail dark → legacy Algorand payout continues below.
       }
@@ -215,12 +229,23 @@ export const PayrollPendingScreen = () => {
           <Text style={styles.balanceLabel}>Saldo en bóveda de nómina</Text>
           {vaultError ? <Text style={styles.balanceError}>No se pudo cargar el saldo</Text> : null}
           <Text style={styles.balanceValue}>
-            {vaultLoading
+            {vaultLoading && !railStatus
               ? '...'
               : canViewVault
-                ? `${(vaultData?.payrollVaultBalance ?? 0).toFixed(2)} cUSD`
+                ? (vaultBalance === null ? '—' : `$${vaultBalance.toFixed(2)}`)
                 : '••••'}
           </Text>
+          {instrument.known && canViewVault ? (
+            <View style={styles.instrumentRow}>
+              <Image
+                source={instrument.isPlus
+                  ? require('../assets/png/cUSDPlus.png')
+                  : require('../assets/png/cUSD.png')}
+                style={styles.instrumentIcon}
+              />
+              <Text style={styles.instrumentLabel}>{instrument.name}</Text>
+            </View>
+          ) : null}
           <Text style={styles.balanceHint}>
             {isBusinessAccount
               ? 'Agrega fondos si ves rechazos por saldo insuficiente.'
@@ -265,7 +290,7 @@ export const PayrollPendingScreen = () => {
                   <Text style={[styles.statusText, badge.fg]}>{badge.label}</Text>
                 </View>
               </View>
-              <Text style={styles.amount}>{item.netAmount} {(item.run?.tokenType || 'cUSD') === 'CUSD' ? 'cUSD' : (item.run?.tokenType || 'cUSD')}</Text>
+              <Text style={styles.amount}>${item.netAmount}</Text>
               <Text style={styles.subtext}>Recibe: {item.recipientUser?.firstName} {item.recipientUser?.lastName}</Text>
               <Text style={styles.subtext}>Bruto: {item.grossAmount} · Comisión: {item.feeAmount}</Text>
               <View style={styles.ctaRow}>
@@ -320,6 +345,9 @@ const styles = StyleSheet.create({
   balanceLabel: { fontSize: 12, color: colors.muted, marginBottom: 4 },
   balanceValue: { fontSize: 18, fontWeight: '700', color: colors.textFlat },
   balanceHint: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  instrumentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  instrumentIcon: { width: 16, height: 16, resizeMode: 'contain' },
+  instrumentLabel: { fontSize: 12, fontWeight: '600', color: colors.muted },
   balanceError: { fontSize: 12, color: colors.error.icon, marginTop: 2 },
   topUpButton: {
     paddingHorizontal: 12,

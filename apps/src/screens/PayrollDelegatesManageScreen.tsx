@@ -56,7 +56,7 @@ export const PayrollDelegatesManageScreen = () => {
     variables: { includeInactive: false, first: 50 },
     fetchPolicy: 'cache-and-network',
   });
-  const { delegates, loading: delegatesLoading, refetch: refetchDelegates } = usePayrollDelegates();
+  const { delegates, status, loading: delegatesLoading, refetch: refetchDelegates } = usePayrollDelegates();
   const [mutateDelegates, { loading: mutating }] = useMutation(SET_BUSINESS_DELEGATES_BY_EMPLOYEE);
   const [delegateMap, setDelegateMap] = useState<Record<string, boolean>>({});
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
@@ -66,6 +66,20 @@ export const PayrollDelegatesManageScreen = () => {
   const employees = useMemo(() => data?.currentBusinessEmployees || [], [data]);
 
   useEffect(() => {
+    // Preferred answer: the server checked the on-chain allowlist and told us
+    // WHICH EMPLOYEES are on it. The address matching below only ever worked
+    // on Algorand — on BSC the allowlist holds EVM addresses this screen has
+    // no copy of, so every toggle would have read as "Delegar" no matter what
+    // the contract said.
+    if (status) {
+      const onchain = new Set(status.delegateEmployeeIds);
+      const map: Record<string, boolean> = {};
+      employees.forEach((e: any) => {
+        map[e.id] = onchain.has(String(e.id));
+      });
+      setDelegateMap(map);
+      return;
+    }
 
     const map: Record<string, boolean> = {};
     employees.forEach((e: any) => {
@@ -106,7 +120,7 @@ export const PayrollDelegatesManageScreen = () => {
       map[e.id] = !!isDelegate;
     });
     setDelegateMap(map);
-  }, [employees, delegates]);
+  }, [employees, delegates, status]);
 
   const toggleDelegate = useCallback(async (employeeId: string, name: string, current: boolean) => {
     const target = employees.find((e: any) => e.id === employeeId);
@@ -124,19 +138,19 @@ export const PayrollDelegatesManageScreen = () => {
       Alert.alert('Biometría requerida', 'No se pudo validar tu identidad.');
       return;
     }
-    const businessAddr = activeAccount?.algorandAddress || (activeAccount as any)?.address;
-    if (!businessAddr) {
-      setBanner({ variant: 'error', message: 'No se encontró la dirección de la cuenta de negocio.' });
-      return;
-    }
     setSigningModalVisible(true);
     try {
       // BSC rail first (W3): setDelegate on ConfioPayrollVault, signed by
       // the business EOA as a sponsored batch. The allowlisted address is
       // the employee's PERSONAL EVM address — the key they later sign
       // payouts with. Dark flag falls through to the Algorand box flow.
+      //
+      // This runs BEFORE the Algorand address check on purpose: gating it on
+      // an Algorand address meant a BSC-only business — which by design has
+      // none — bounced off "no se encontró la dirección" and never reached
+      // the mutation that would have worked.
       if (target?.user?.id) {
-        const { runBscPayrollAdmin, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+        const { runBscPayrollAdmin, bscPayrollErrorMessage } = await import('../services/bscPayroll');
         try {
           await runBscPayrollAdmin({
             action: 'set_delegate',
@@ -151,13 +165,23 @@ export const PayrollDelegatesManageScreen = () => {
           const code = bscErr?.message || '';
           const fallThrough = code === 'bsc_payroll_disabled'
             || code === 'payroll_vault_not_configured'
-            || code === 'vault_not_configured'
-            || code === 'sponsored_rail_unavailable';
+            || code === 'vault_not_configured';
+          // NOT sponsored_rail_unavailable: the server already confirmed this
+          // business is on BSC, so a relay outage means "retry", not "put the
+          // money in the Algorand vault instead".
           if (!fallThrough) {
-            setBanner({ variant: 'error', message: BSC_PAYROLL_ERRORS[code] || code || 'No se pudo actualizar la delegación.' });
+            setBanner({ variant: 'error', message: bscPayrollErrorMessage(code) });
             return;
           }
         }
+      }
+
+      // Legacy path only from here — and only this path needs an Algorand
+      // address to name the business account.
+      const businessAddr = activeAccount?.algorandAddress || (activeAccount as any)?.address;
+      if (!businessAddr) {
+        setBanner({ variant: 'error', message: 'No se encontró la dirección de la cuenta de negocio.' });
+        return;
       }
 
       // Step 1: Prepare transaction

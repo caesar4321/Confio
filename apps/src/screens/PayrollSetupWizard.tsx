@@ -9,6 +9,7 @@ import { GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
 import { CREATE_PAYROLL_RECIPIENT, SET_BUSINESS_DELEGATES_BY_EMPLOYEE } from '../apollo/mutations/payroll';
 import { useAccount } from '../contexts/AccountContext';
 import { useAlgorand } from '../hooks/useAlgorand';
+import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
@@ -30,6 +31,8 @@ export const PayrollSetupWizard = () => {
   const navigation = useNavigation<NavigationProp>();
   const { activeAccount } = useAccount();
   const { signTransactions } = useAlgorand();
+  const { activateOnBsc, rail } = usePayrollDelegates();
+  const instrument = payrollInstrument(rail);
   const [step, setStep] = useState(1);
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
@@ -90,6 +93,24 @@ export const PayrollSetupWizard = () => {
     }
   }, [step, navigation]);
 
+  const announceActivated = useCallback(() => {
+    Alert.alert(
+      '¡Nómina activada!',
+      'Tu sistema de nómina está listo. Ahora puedes crear pagos y tus delegados podrán aprobarlos.',
+      [
+        {
+          text: 'Ir a nómina',
+          onPress: () => {
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'BottomTabs', params: { screen: 'Employees' } }] as any,
+            });
+          },
+        },
+      ]
+    );
+  }, [navigation]);
+
   const handleActivate = useCallback(async () => {
     const authMessage = 'Autoriza la activación de nómina';
     let ok = await biometricAuthService.authenticate(authMessage, true, true);
@@ -135,12 +156,30 @@ export const PayrollSetupWizard = () => {
       await Promise.all(recipientPromises);
 
       // Step 2: Activate payroll with delegates
+      const delegateEmployeeIds = Array.from(selectedDelegates);
+
+      // BSC rail first: activation IS the allowlist on ConfioPayrollVault.
+      // Every signer goes in one sponsored batch; the person activating is
+      // added server-side from the JWT (includeSelf). Dark rail falls through
+      // to the Algorand box flow below.
+      const delegateUserIds = delegateEmployeeIds
+        .map((employeeId: string) => employees.find((e: any) => e.id === employeeId)?.user?.id)
+        .filter(Boolean)
+        .map(String);
+      const bsc = await activateOnBsc(delegateUserIds);
+      if (bsc) {
+        if (bsc.success) {
+          announceActivated();
+        } else {
+          setBanner({ variant: 'error', message: bsc.error || 'No se pudo activar nómina.' });
+        }
+        return;
+      }
+
       const businessAddress = activeAccount?.algorandAddress;
       if (!businessAddress) {
         throw new Error('Business account address not found');
       }
-
-      const delegateEmployeeIds = Array.from(selectedDelegates);
 
       const { data } = await setBusinessDelegatesByEmployee({
         variables: {
@@ -173,21 +212,7 @@ export const PayrollSetupWizard = () => {
       }
 
       if (res?.success) {
-        Alert.alert(
-          '¡Nómina activada!',
-          'Tu sistema de nómina está listo. Ahora puedes crear pagos y tus delegados podrán aprobarlos.',
-          [
-            {
-              text: 'Ir a nómina',
-              onPress: () => {
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'BottomTabs', params: { screen: 'Employees' } }] as any,
-                });
-              },
-            },
-          ]
-        );
+        announceActivated();
       } else {
         setBanner({ variant: 'error', message: res?.errors?.[0] || 'No se pudo activar nómina.' });
       }
@@ -196,7 +221,7 @@ export const PayrollSetupWizard = () => {
     } finally {
       setActivating(false);
     }
-  }, [selectedRecipients, selectedDelegates, employees, activeAccount, setBusinessDelegatesByEmployee, createRecipient, navigation, signTransactions]);
+  }, [selectedRecipients, selectedDelegates, employees, activeAccount, setBusinessDelegatesByEmployee, createRecipient, navigation, signTransactions, activateOnBsc, announceActivated]);
 
   const renderStep1 = () => (
     <View style={styles.stepContent}>
@@ -327,8 +352,12 @@ export const PayrollSetupWizard = () => {
         <View style={styles.summaryRow}>
           <Icon name="lock" size={20} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.summaryLabel}>Bóveda de nómina (cUSD)</Text>
-            <Text style={styles.summaryValue}>Se creará automáticamente</Text>
+            <Text style={styles.summaryLabel}>Bóveda de nómina</Text>
+            <Text style={styles.summaryValue}>
+              {instrument.known
+                ? `Se creará automáticamente · pagas desde tu ${instrument.name}`
+                : 'Se creará automáticamente'}
+            </Text>
           </View>
         </View>
       </View>

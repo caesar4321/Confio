@@ -98,7 +98,7 @@ const PayrollRunsHistoryScreen = () => {
           status: run.status,
           scheduledAt: run.scheduledAt,
           createdAt: run.createdAt,
-          tokenType: run.tokenType || 'cUSD',
+          tokenType: run.tokenType || 'CUSD',
           itemCount: items.length,
           completedItemCount: completedItems,
           totalAmount: total,
@@ -186,8 +186,7 @@ const PayrollRunsHistoryScreen = () => {
           <View style={styles.statItem}>
             <Icon name="dollar-sign" size={16} color={colors.text.secondary} />
             <Text style={styles.statLabel}>Total</Text>
-            <Text style={styles.statValue}>{formatCurrency(item.totalAmount)}</Text>
-            <Text style={styles.statSubtext}>cUSD</Text>
+            <Text style={styles.statValue}>${formatCurrency(item.totalAmount)}</Text>
           </View>
         </View>
 
@@ -263,7 +262,7 @@ const PayrollRunsHistoryScreen = () => {
               <Icon name="trending-up" size={20} color={colors.primaryDark} />
               <Text style={styles.totalPaidLabel}>Total pagado</Text>
             </View>
-            <Text style={styles.totalPaidValue}>{formatCurrency(statistics.totalPaid)} cUSD</Text>
+            <Text style={styles.totalPaidValue}>${formatCurrency(statistics.totalPaid)}</Text>
             <Text style={styles.totalPaidSubtext}>
               {statistics.totalPayments} pagos • {FILTERS.find(f => f.key === windowKey)?.label}
             </Text>

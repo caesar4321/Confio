@@ -43,6 +43,27 @@ const formatShortDate = (iso?: string | null) => {
   return d.toLocaleDateString('es', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
+/** What the employee actually RECEIVED. settledAmount is decoded from the
+ * contract's PaidOut event and can sit below the nominal wage when the payout
+ * redeemed shares to USDT under a slippage floor; it is null until the
+ * confirmer runs, and for an unsettled item the nominal figure is still the
+ * honest expectation. Never show net where settled exists and differs. */
+const deliveredAmount = (item: any): number =>
+  Number(item?.settledAmount ?? item?.netAmount ?? 0);
+
+/** Did this wage actually move? FAILED and CANCELLED items carry a
+ * netAmount that was never paid, so anything summing them into a "total
+ * pagado" is reporting money that never left. */
+const isPaid = (item: any) =>
+  ['confirmed', 'completed', 'submitted'].includes((item?.status || '').toLowerCase());
+
+/** What the RUN COST THE BUSINESS: gross, fee included, for the wages that
+ * actually went out. The employee-facing figure (deliveredAmount) is a
+ * different number and belongs on the employee's receipt, not on this one. */
+const businessCost = (items: any[]): number =>
+  items.filter(isPaid).reduce(
+    (acc, it) => acc + Number(it.grossAmount ?? it.netAmount ?? 0), 0);
+
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('es', {
     minimumFractionDigits: 2,
@@ -83,8 +104,10 @@ export const PayrollRunDetailScreen = () => {
   const fullRunRef = useRef<ViewShot>(null);
 
   const items = useMemo(() => run?.items || [], [run?.items]);
+  // Sum of what each employee actually received, so the run total agrees
+  // with the per-employee lines beside it.
   const total = useMemo(
-    () => items.reduce((acc: number, it: any) => acc + (Number(it.netAmount) || 0), 0),
+    () => items.reduce((acc: number, it: any) => acc + deliveredAmount(it), 0),
     [items]
   );
   const businessName = run?.business?.name || 'Negocio';
@@ -267,7 +290,7 @@ export const PayrollRunDetailScreen = () => {
 
           <View style={styles.totalAmountCard}>
             <Text style={styles.totalAmountLabel}>Total neto</Text>
-            <Text style={styles.totalAmountValue}>{formatCurrency(total)} cUSD</Text>
+            <Text style={styles.totalAmountValue}>${formatCurrency(total)}</Text>
             {stats.pending > 0 && (
               <Text style={styles.totalAmountSubtext}>
                 {stats.completed} de {stats.total} pagos completados
@@ -316,7 +339,7 @@ export const PayrollRunDetailScreen = () => {
                 <View style={styles.employeeDetailRow}>
                   <Icon name="dollar-sign" size={16} color={colors.text.secondary} />
                   <Text style={styles.employeeDetailLabel}>Monto</Text>
-                  <Text style={styles.employeeDetailValue}>{formatCurrency(Number(it.netAmount || 0))} cUSD</Text>
+                  <Text style={styles.employeeDetailValue}>${formatCurrency(deliveredAmount(it))}</Text>
                 </View>
 
                 {it.recipientAccount && (
@@ -385,8 +408,13 @@ export const PayrollRunDetailScreen = () => {
                   recipientName={name}
                   recipientLabel="Empleado"
                   recipientDetail={username ? `@${username}` : phone}
-                  amount={formatCurrency(Number(it.netAmount || 0)).replace('cUSD', '').trim()} // clean format
-                  currency="cUSD"
+                  // Both halves are the RECORD of what landed, not of what
+                  // we intended: an Ondo-ineligible employee is paid by
+                  // redeeming to USDT, which settles the token AND the amount
+                  // away from the nominal wage. Printing net beside "USDT"
+                  // made the receipt confidently wrong.
+                  amount={formatCurrency(deliveredAmount(it))}
+                  currency={it.tokenType || run?.tokenType || 'CUSD'}
                   date={run?.scheduledAt || run?.createdAt || new Date().toISOString()}
                   status={it.status || 'completed'}
                   transactionHash={it.transactionHash || ''}
@@ -409,8 +437,12 @@ export const PayrollRunDetailScreen = () => {
                 runId={run?.runId || run?.id?.slice(0, 6) || ''}
                 status={run?.status || 'completed'}
                 scheduledDate={run?.scheduledAt || run?.createdAt || new Date().toISOString()}
-                totalAmount={formatCurrency(total)}
-                currency="cUSD"
+                // "Total pagado" on this receipt is the BUSINESS's number:
+                // gross (fee included) for the wages that actually went out.
+                // Summing every listed item's net reported cancelled and
+                // failed wages as paid, and understated the real cost.
+                totalAmount={formatCurrency(businessCost(items))}
+                currency={run?.tokenType || 'CUSD'}
                 employeeCount={items.length}
                 completedCount={stats.completed}
                 employees={items.map((it: any) => {
@@ -421,7 +453,7 @@ export const PayrollRunDetailScreen = () => {
                   return {
                     name,
                     username,
-                    amount: formatCurrency(Number(it.netAmount || 0)),
+                    amount: formatCurrency(deliveredAmount(it)),
                     status: it.status || 'completed',
                   };
                 })}

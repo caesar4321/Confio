@@ -28,6 +28,7 @@ import {
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
+import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
@@ -49,22 +50,54 @@ const PayrollTopUpScreen = () => {
   const [processingMessage, setProcessingMessage] = useState('');
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
 
+  const { status: railStatus, rail, executionRail, refetch: refetchRail } = usePayrollDelegates();
+  // The vault hero describes where the money IS; every funding control
+  // describes where a top-up will GO. Using one rail for both showed the
+  // cUSD+ balance and logo while the dark-flag fall-through actually funded
+  // the Algorand vault.
+  const vaultInstrument = payrollInstrument(rail);
+  const instrument = payrollInstrument(executionRail);
   const { data: vaultData, loading: vaultLoading, refetch: refetchVault } = useQuery(GET_PAYROLL_VAULT_BALANCE, {
     fetchPolicy: 'cache-and-network',
     skip: !isBusinessAccount,
   });
+  // Legacy rail only: on BSC a top-up spends the business's cUSD+ position,
+  // and gating it on the Algorand cUSD balance refused funds the business
+  // actually had (or waved through funds it didn't).
   const { data: balanceData, loading: balanceLoading, refetch: refetchBalance } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'cUSD' },
     fetchPolicy: 'cache-and-network',
-    skip: !isBusinessAccount,
+    skip: !isBusinessAccount || executionRail === 'bsc',
   });
   const [prepareFunding] = useMutation(PREPARE_PAYROLL_VAULT_FUNDING);
   const [submitFunding] = useMutation(SUBMIT_PAYROLL_VAULT_FUNDING);
   const [prepareWithdraw] = useMutation(PREPARE_PAYROLL_VAULT_WITHDRAWAL);
   const [submitWithdraw] = useMutation(SUBMIT_PAYROLL_VAULT_WITHDRAWAL);
 
-  const availableBalance = useMemo(() => parseFloat(balanceData?.accountBalance ?? '0'), [balanceData]);
-  const vaultBalance = useMemo(() => vaultData?.payrollVaultBalance ?? 0, [vaultData]);
+  const availableBalance = useMemo(() => {
+    if (railStatus?.fundableBalanceUsd !== null && railStatus?.fundableBalanceUsd !== undefined) {
+      return railStatus.fundableBalanceUsd;
+    }
+    const legacy = parseFloat(balanceData?.accountBalance ?? '');
+    return Number.isFinite(legacy) ? legacy : null;
+  }, [railStatus?.fundableBalanceUsd, balanceData]);
+  // null = unknown, rendered "—". Never 0: see PayrollHomeScreen.
+  const vaultBalance = useMemo(() => {
+    if (railStatus) return railStatus.vaultBalanceUsd;
+    const raw = vaultData?.payrollVaultBalance;
+    return raw === null || raw === undefined ? null : Number(raw);
+  }, [railStatus, vaultData]);
+  // One refresh for both rails. refetchBalance is deliberately guarded: on
+  // BSC its query is skipped, and refetching a skipped query is not something
+  // a balance refresh should be able to throw on.
+  const refreshBalances = async () => {
+    await Promise.all([
+      refetchVault(),
+      executionRail === 'bsc' ? Promise.resolve() : refetchBalance().catch(() => undefined),
+      refetchRail(),
+    ]);
+  };
+
   const parseMinBalanceError = (msg?: string) => {
     if (!msg) return null;
     if (!msg.toLowerCase().includes('min')) return null;
@@ -90,13 +123,16 @@ const PayrollTopUpScreen = () => {
       setBanner({ variant: 'error', message: 'Ingresa un monto mayor a 0.' });
       return;
     }
-    if (availableBalance && parsed > availableBalance) {
+    // Explicitly not gating when the balance is unknown: the server checks
+    // the real balance before it will build the batch, and refusing here on a
+    // number we do not have would block a business that can afford it.
+    if (availableBalance !== null && parsed > availableBalance) {
       setBanner({ variant: 'error', message: 'El monto supera el saldo disponible de la cuenta de negocio.' });
       return;
     }
 
     // Require biometric authentication for funding the vault
-    const authMessage = `Autoriza fondear ${parsed.toFixed(2)} cUSD a la bóveda`;
+    const authMessage = `Autoriza fondear $${parsed.toFixed(2)} a la bóveda`;
 
     let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
     if (!authenticated) {
@@ -140,12 +176,12 @@ const PayrollTopUpScreen = () => {
       // ConfioPayrollVault, signed by the business EOA as one sponsored
       // batch. Dark flag falls through to the legacy Algorand vault.
       {
-        const { runBscPayrollAdmin, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+        const { runBscPayrollAdmin, bscPayrollErrorMessage } = await import('../services/bscPayroll');
         try {
           setProcessingMessage('Firmando transacción…');
           await runBscPayrollAdmin({ action: 'fund', amountUsd: String(parsed) });
           setProcessingMessage('Confirmando transacción…');
-          await Promise.all([refetchVault(), refetchBalance()]);
+          await refreshBalances();
           setProcessing(false);
           Alert.alert('Fondos enviados', 'Agregamos los fondos a la bóveda de nómina.', [
             { text: 'Entendido', onPress: () => navigation.goBack() },
@@ -155,10 +191,12 @@ const PayrollTopUpScreen = () => {
           const code = bscErr?.message || '';
           const fallThrough = code === 'bsc_payroll_disabled'
             || code === 'payroll_vault_not_configured'
-            || code === 'vault_not_configured'
-            || code === 'sponsored_rail_unavailable';
+            || code === 'vault_not_configured';
+          // NOT sponsored_rail_unavailable: the server already confirmed this
+          // business is on BSC, so a relay outage means "retry", not "put the
+          // money in the Algorand vault instead".
           if (!fallThrough) {
-            throw new Error(BSC_PAYROLL_ERRORS[code] || code || 'No se pudo fondear');
+            throw new Error(bscPayrollErrorMessage(code));
           }
         }
       }
@@ -226,7 +264,7 @@ const PayrollTopUpScreen = () => {
       }
 
       setProcessingMessage('Confirmando transacción…');
-      await Promise.all([refetchVault(), refetchBalance()]);
+      await refreshBalances();
 
       setProcessing(false);
 
@@ -254,12 +292,12 @@ const PayrollTopUpScreen = () => {
       setBanner({ variant: 'error', message: 'Ingresa un monto mayor a 0.' });
       return;
     }
-    if (vaultBalance && parsed > vaultBalance) {
+    if (vaultBalance !== null && parsed > vaultBalance) {
       Alert.alert('Saldo insuficiente', 'El monto supera el saldo en la bóveda.');
       return;
     }
 
-    const authMessage = `Autoriza retirar ${parsed.toFixed(2)} cUSD de la bóveda`;
+    const authMessage = `Autoriza retirar $${parsed.toFixed(2)} de la bóveda`;
     let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
     if (!authenticated) {
       const lockout = biometricAuthService.isLockout();
@@ -300,12 +338,12 @@ const PayrollTopUpScreen = () => {
       // server-side (exits never gated) — only an unconfigured vault
       // falls through to Algorand.
       {
-        const { runBscPayrollAdmin, BSC_PAYROLL_ERRORS } = await import('../services/bscPayroll');
+        const { runBscPayrollAdmin, bscPayrollErrorMessage } = await import('../services/bscPayroll');
         try {
           setProcessingMessage('Firmando retiro…');
           await runBscPayrollAdmin({ action: 'withdraw', amountUsd: String(parsed) });
           setProcessingMessage('Confirmando transacción…');
-          await Promise.all([refetchVault(), refetchBalance()]);
+          await refreshBalances();
           setProcessing(false);
           setWithdrawAmount('');
           Alert.alert('Retiro enviado', 'Retiramos fondos de la bóveda de nómina.', [
@@ -314,12 +352,15 @@ const PayrollTopUpScreen = () => {
           return;
         } catch (bscErr: any) {
           const code = bscErr?.message || '';
+          // insufficient_escrow stays: nothing parked on BSC means the money
+          // the business wants back is in the legacy vault. A relay outage
+          // does NOT — that would withdraw from a different pot than the one
+          // the screen is showing.
           const fallThrough = code === 'payroll_vault_not_configured'
             || code === 'vault_not_configured'
-            || code === 'sponsored_rail_unavailable'
             || code === 'insufficient_escrow';
           if (!fallThrough) {
-            throw new Error(BSC_PAYROLL_ERRORS[code] || code || 'No se pudo retirar');
+            throw new Error(bscPayrollErrorMessage(code));
           }
         }
       }
@@ -350,7 +391,7 @@ const PayrollTopUpScreen = () => {
       }
 
       setProcessingMessage('Confirmando transacción…');
-      await Promise.all([refetchVault(), refetchBalance()]);
+      await refreshBalances();
       setProcessing(false);
       setWithdrawAmount('');
       Alert.alert('Retiro enviado', 'Retiramos fondos de la bóveda de nómina.', [
@@ -381,7 +422,7 @@ const PayrollTopUpScreen = () => {
               onRefresh={async () => {
                 setRefreshing(true);
                 try {
-                  await Promise.all([refetchVault(), refetchBalance()]);
+                  await refreshBalances();
                 } finally {
                   setRefreshing(false);
                 }
@@ -405,10 +446,25 @@ const PayrollTopUpScreen = () => {
             <View style={styles.vaultHeroInner}>
               <Text style={styles.vaultHeroLabel}>BÓVEDA DE NÓMINA</Text>
               <Text style={styles.vaultHeroBalance}>
-                {vaultLoading ? '...' : `${vaultBalance?.toFixed?.(2) || '0.00'} cUSD`}
+                {vaultLoading && !railStatus
+                  ? '...'
+                  : vaultBalance === null ? '—' : `$${vaultBalance.toFixed(2)}`}
               </Text>
+              {vaultInstrument.known ? (
+                <View style={styles.instrumentRow}>
+                  <Image
+                    source={vaultInstrument.isPlus
+                      ? require('../assets/png/cUSDPlus.png')
+                      : require('../assets/png/cUSD.png')}
+                    style={styles.instrumentIcon}
+                  />
+                  <Text style={styles.instrumentLabel}>{vaultInstrument.name}</Text>
+                </View>
+              ) : null}
               <Text style={styles.vaultHeroHint}>
-                Disponible en tu cuenta de negocio: {balanceLoading ? '...' : `${availableBalance.toFixed(2)} cUSD`}
+                Disponible en tu cuenta de negocio: {balanceLoading && !railStatus
+                  ? '...'
+                  : availableBalance === null ? '—' : `$${availableBalance.toFixed(2)}`}
               </Text>
             </View>
           </View>
@@ -416,8 +472,13 @@ const PayrollTopUpScreen = () => {
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Monto a fondear</Text>
             <View style={styles.inputRow}>
-              <Image source={require('../assets/png/cUSD.png')} style={styles.tokenIcon} />
-              <Text style={styles.currency}>cUSD</Text>
+              <Image
+                source={instrument.isPlus
+                  ? require('../assets/png/cUSDPlus.png')
+                  : require('../assets/png/cUSD.png')}
+                style={styles.tokenIcon}
+              />
+              <Text style={styles.currency}>$</Text>
               <TextInput
                 style={styles.input}
                 keyboardType="decimal-pad"
@@ -426,7 +487,7 @@ const PayrollTopUpScreen = () => {
                 onChangeText={setAmount}
                 returnKeyType="done"
               />
-              {availableBalance > 0 && (
+              {availableBalance !== null && availableBalance > 0 && (
                 <TouchableOpacity
                   style={styles.maxChip}
                   onPress={() => setAmount(availableBalance.toFixed(2))}
@@ -461,8 +522,13 @@ const PayrollTopUpScreen = () => {
             <Text style={styles.cardLabel}>Retirar de la bóveda</Text>
             <Text style={styles.cardHint}>Recupera fondos de la bóveda de nómina hacia tu cuenta o a otra dirección.</Text>
             <View style={[styles.inputRow, { marginTop: 10 }]}>
-              <Image source={require('../assets/png/cUSD.png')} style={styles.tokenIcon} />
-              <Text style={styles.currency}>cUSD</Text>
+              <Image
+                source={instrument.isPlus
+                  ? require('../assets/png/cUSDPlus.png')
+                  : require('../assets/png/cUSD.png')}
+                style={styles.tokenIcon}
+              />
+              <Text style={styles.currency}>$</Text>
               <TextInput
                 style={styles.input}
                 keyboardType="decimal-pad"
@@ -471,10 +537,10 @@ const PayrollTopUpScreen = () => {
                 onChangeText={setWithdrawAmount}
                 returnKeyType="done"
               />
-              {vaultBalance > 0 && (
+              {vaultBalance !== null && vaultBalance > 0 && (
                 <TouchableOpacity
                   style={styles.maxChip}
-                  onPress={() => setWithdrawAmount(Number(vaultBalance).toFixed(2))}
+                  onPress={() => setWithdrawAmount(vaultBalance.toFixed(2))}
                   accessibilityRole="button"
                   accessibilityLabel="Retirar todo el saldo de la bóveda"
                 >
@@ -529,6 +595,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: 'rgba(255,255,255,0.85)',
     marginTop: 8,
+  },
+  instrumentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  instrumentIcon: { width: 18, height: 18, resizeMode: 'contain' },
+  instrumentLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
   },
   maxChip: {
     paddingHorizontal: 10,

@@ -46,7 +46,6 @@ const PayrollHistoryScreen = () => {
         return matchItems.map((it: any) => ({
           id: it.internalId,
           amount: it.netAmount,
-          token: run.tokenType || 'cUSD',
           status: it.status,
           runStatus: run.status,
           when: run.scheduledAt || run.createdAt,
@@ -59,7 +58,7 @@ const PayrollHistoryScreen = () => {
     return (
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.amount}>{item.token || 'cUSD'} {item.amount}</Text>
+          <Text style={styles.amount}>${item.amount}</Text>
           <Text style={styles.date}>{new Date(item.when).toLocaleDateString('es-ES')}</Text>
         </View>
         <View style={styles.badges}>

@@ -27,21 +27,23 @@ import {
 } from './sponsored7702';
 
 const PREPARE_ADMIN = gql`
-  mutation PrepareBscPayrollAdmin($action: String!, $amount: Decimal, $delegateUserId: ID, $allowed: Boolean) {
-    prepareBscPayrollAdmin(action: $action, amount: $amount, delegateUserId: $delegateUserId, allowed: $allowed) {
+  mutation PrepareBscPayrollAdmin($action: String!, $amount: Decimal, $delegateUserId: ID, $delegateUserIds: [ID], $includeSelf: Boolean, $allowed: Boolean) {
+    prepareBscPayrollAdmin(action: $action, amount: $amount, delegateUserId: $delegateUserId, delegateUserIds: $delegateUserIds, includeSelf: $includeSelf, allowed: $allowed) {
       success
       error
+      errorName
       calls { to valueWei data }
       intentId
       shares
       delegateAddress
+      delegateAddresses
     }
   }
 `;
 
 const SUBMIT_ADMIN = gql`
-  mutation SubmitBscPayrollAdmin($action: String!, $shares: String, $delegateAddress: String, $allowed: Boolean, $nonce: String!, $deadline: String!, $intentSignature: String!, $authorization: BscPayrollAuthorizationInput) {
-    submitBscPayrollAdmin(action: $action, shares: $shares, delegateAddress: $delegateAddress, allowed: $allowed, nonce: $nonce, deadline: $deadline, intentSignature: $intentSignature, authorization: $authorization) {
+  mutation SubmitBscPayrollAdmin($action: String!, $shares: String, $delegateAddress: String, $delegateAddresses: [String], $allowed: Boolean, $nonce: String!, $deadline: String!, $intentSignature: String!, $authorization: BscPayrollAuthorizationInput) {
+    submitBscPayrollAdmin(action: $action, shares: $shares, delegateAddress: $delegateAddress, delegateAddresses: $delegateAddresses, allowed: $allowed, nonce: $nonce, deadline: $deadline, intentSignature: $intentSignature, authorization: $authorization) {
       success
       error
       authorizationRequired
@@ -85,6 +87,29 @@ export const BSC_PAYROLL_ERRORS: Record<string, string> = {
   business_no_bsc_address: 'La cuenta del negocio aún no está activada para BSC.',
   delegate_no_bsc_address: 'Esa persona aún no tiene su cuenta activada.',
   simulation_reverted: 'No se pudo procesar el pago. Verifica el fondo de nómina.',
+  wage_below_redeem_minimum: 'Este pago es demasiado pequeño para enviarse a esta persona. Debe ser de al menos $1.',
+  run_not_due: 'Esta nómina está programada para más adelante.',
+  // This run can ONLY be paid from the cUSD+ vault, so a paused rail is not a
+  // reason to try the other chain — the money is where it is.
+  bsc_payroll_paused:
+    'Los pagos de nómina están pausados temporalmente. Tus fondos siguen en la bóveda.',
+  run_cap_exceeded: 'Esta nómina supera el límite que configuraste para el período.',
+  // Now user-facing: this used to reroute the operation to the legacy chain,
+  // which for a BSC business meant funding a vault its payouts never touch.
+  sponsored_rail_unavailable:
+    'La red está temporalmente fuera de servicio. Tus fondos están seguros — inténtalo de nuevo en unos minutos.',
+};
+
+/** Message for a thrown rail error, including the codes that carry a name
+ * after a colon (`delegate_no_bsc_address:Ana Pérez`). */
+export const bscPayrollErrorMessage = (raw?: string): string => {
+  const code = raw || '';
+  const [head, ...rest] = code.split(':');
+  const name = rest.join(':').trim();
+  if (head === 'delegate_no_bsc_address' && name) {
+    return `${name} aún no tiene su cuenta activada. Pídele que abra Confío una vez y vuelve a intentar.`;
+  }
+  return BSC_PAYROLL_ERRORS[head] || code || 'No se pudo completar la operación.';
 };
 
 const hexToBytes = (hex: string): Uint8Array => {
@@ -100,6 +125,12 @@ export interface BscPayrollAdminParams {
   action: 'fund' | 'withdraw' | 'set_delegate';
   amountUsd?: string;
   delegateUserId?: string;
+  /** Activation allowlists the owner plus every chosen delegate. One batch,
+   * not one per person — the sponsor's daily batch allowance is small. */
+  delegateUserIds?: string[];
+  /** Allowlist the acting user's own signer too (activation). Resolved from
+   * the JWT server-side, so it never depends on the client knowing who it is. */
+  includeSelf?: boolean;
   allowed?: boolean;
 }
 
@@ -111,23 +142,42 @@ export const runBscPayrollAdmin = async (
   const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
 
-  const sponsored = await fetchSponsored7702Params();
-  if (!sponsored.enabled || !sponsored.delegateAddress) {
-    throw new Error('sponsored_rail_unavailable');
-  }
-  const wallet = await getActiveEvmWallet();
-
+  // PREPARE FIRST, relay check second. The order matters: only the server
+  // knows whether this business is on the BSC rail. Checking the relay first
+  // meant a momentary 7702 outage threw `sponsored_rail_unavailable` before
+  // anyone asked, and the callers treated that as "use Algorand" — which for
+  // a BSC business deposits real money into the wrong vault, one the payouts
+  // never spend from. Prepare answering `bsc_payroll_disabled` is the ONLY
+  // legitimate signal to use the legacy rail.
   const { data } = await apolloClient.mutate({
     mutation: PREPARE_ADMIN,
     variables: {
       action: params.action,
       amount: params.amountUsd,
       delegateUserId: params.delegateUserId,
+      delegateUserIds: params.delegateUserIds,
+      includeSelf: params.includeSelf ?? false,
       allowed: params.allowed ?? true,
     },
   });
   const prep = data?.prepareBscPayrollAdmin;
-  if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
+  if (!prep?.success) {
+    // Name the person when the server named them: "activate" failing with a
+    // bare code told an owner nothing about WHICH delegate has to open the
+    // app first.
+    if (prep?.error === 'delegate_no_bsc_address' && prep?.errorName) {
+      throw new Error(`delegate_no_bsc_address:${prep.errorName}`);
+    }
+    throw new Error(prep?.error || 'prepare_failed');
+  }
+
+  // The server accepted, so this business IS on the BSC rail. A relay outage
+  // from here is a "try again", never a reason to move to another chain.
+  const sponsored = await fetchSponsored7702Params();
+  if (!sponsored.enabled || !sponsored.delegateAddress) {
+    throw new Error('sponsored_rail_unavailable');
+  }
+  const wallet = await getActiveEvmWallet();
 
   const calls: BatchCall[] = (prep.calls || []).map((c: any) => ({
     to: c.to,
@@ -161,6 +211,7 @@ export const runBscPayrollAdmin = async (
         action: params.action,
         shares: prep.shares,
         delegateAddress: prep.delegateAddress,
+        delegateAddresses: prep.delegateAddresses,
         allowed: params.allowed ?? true,
         nonce: execNonce.toString(),
         deadline: deadline.toString(),

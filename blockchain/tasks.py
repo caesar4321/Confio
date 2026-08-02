@@ -1300,6 +1300,56 @@ def confirm_payroll_item_payout(self, item_id: str, txid: str):
         raise
 
 
+def _fail_send_and_reverse(send, error_message: str) -> bool:
+    """Mark a send FAILED and give back its referral debit, atomically.
+
+    Returns True when this call performed the transition.
+
+    Two hazards this closes, both from doing the two writes separately:
+
+    A stranded debit. The reversal used to run after the status save with its
+    exception swallowed. One transient database error left the row FAILED with
+    the balance still spent, and no later scan would retry it: the pool-error
+    branch skips a row already FAILED, and the missing branch skips FAILED rows
+    outright. Now both writes share a transaction, so a failed reversal rolls
+    the status back too and the next scan tries again.
+
+    A reversal of money that actually moved. Rows were read without locking and
+    the scanner's cache lock is short, so an overlapping worker could confirm a
+    send while a stale worker overwrote it to FAILED and credited the CONFIO
+    back. The transition is now conditional on the row still being SUBMITTED,
+    checked inside the lock, so a confirmed send can no longer be un-spent.
+    """
+    from django.db import transaction as db_transaction
+    from send.models import SendTransaction
+
+    with db_transaction.atomic():
+        locked = (
+            SendTransaction.objects.select_for_update()
+            .filter(pk=send.pk, status='SUBMITTED')
+            .first()
+        )
+        if locked is None:
+            # Someone else already moved it — confirmed by another worker, or
+            # failed by an earlier pass. Not ours to transition or reverse.
+            return False
+
+        locked.status = 'FAILED'
+        locked.error_message = error_message
+        locked.save(update_fields=['status', 'error_message', 'updated_at'])
+
+        if (locked.token_type or '').upper() == 'CONFIO':
+            # Deliberately NOT wrapped in try/except: a reversal that cannot be
+            # written must undo the status change with it, so the work is
+            # retried rather than silently lost.
+            from blockchain.mutations import reverse_referral_withdrawal
+            reverse_referral_withdrawal(str(locked.id))
+
+    send.status = 'FAILED'
+    send.error_message = error_message
+    return True
+
+
 @shared_task(name='blockchain.scan_outbound_confirmations')
 @ensure_db_connection_closed
 def scan_outbound_confirmations(max_batch: int = 50):
@@ -1430,22 +1480,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 # Only write on a real change. updated_at is auto_now, so an
                 # unconditional save re-dates the row (see below).
                 if s.status != 'FAILED' or s.error_message != str(pe):
-                    s.status = 'FAILED'
-                    s.error_message = str(pe)
-                    s.save(update_fields=['status', 'error_message', 'updated_at'])
-                    # The referral debit was taken at submit. This send is not
-                    # landing, so give it back — otherwise the balance stays
-                    # spent for CONFIO that never moved.
-                    if (s.token_type or '').upper() == 'CONFIO':
-                        try:
-                            from blockchain.mutations import reverse_referral_withdrawal
-                            reverse_referral_withdrawal(str(s.id))
-                        except Exception:
-                            logger.warning(
-                                "Failed to reverse referral withdrawal for send %s", s.id,
-                                exc_info=True,
-                            )
-                    processed += 1
+                    if _fail_send_and_reverse(s, str(pe)):
+                        processed += 1
                 continue
 
             # If missing from node (cr=0, pe='') and old, mark failed
@@ -1461,22 +1497,9 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     # Leaving it alone lets it age out of the window as the
                     # 24h bound intends.
                     continue
-                s.status = 'FAILED'
-                s.error_message = "Transaction expired or lost from pool"
-                s.save(update_fields=['status', 'error_message', 'updated_at'])
-                # Same reversal as the explicit-error path above: an expired
-                # send spent nothing, so the referral debit has to come back.
-                if (s.token_type or '').upper() == 'CONFIO':
-                    try:
-                        from blockchain.mutations import reverse_referral_withdrawal
-                        reverse_referral_withdrawal(str(s.id))
-                    except Exception:
-                        logger.warning(
-                            "Failed to reverse referral withdrawal for send %s", s.id,
-                            exc_info=True,
-                        )
-                logger.warning(f"Marking stuck send {s.internal_id} as FAILED (missing from node)")
-                processed += 1
+                if _fail_send_and_reverse(s, "Transaction expired or lost from pool"):
+                    logger.warning(f"Marking stuck send {s.internal_id} as FAILED (missing from node)")
+                    processed += 1
                 continue
 
             if cr > 0:

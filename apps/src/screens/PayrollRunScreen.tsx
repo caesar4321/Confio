@@ -14,6 +14,7 @@ import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { EmptyState } from '../components/EmptyState';
+import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -38,7 +39,8 @@ export const PayrollRunScreen = () => {
   const [schedule, setSchedule] = useState<ScheduleOption>('now');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
-  const tokenType = 'cUSD'; // Only cUSD supported for payroll
+  const { rail } = usePayrollDelegates();
+  const instrument = payrollInstrument(rail);
 
   const selectedSchedule = SCHEDULE_OPTIONS.find(s => s.key === schedule);
 
@@ -126,7 +128,11 @@ export const PayrollRunScreen = () => {
       setIsProcessing(true);
       setProcessingMessage('Creando nómina en blockchain…');
 
-      const variables: any = { items, tokenType };
+      // No tokenType: payroll settles from ONE escrow, so the token is a
+      // property of the rail and the server picks it. Hardcoding 'cUSD' here
+      // is how businesses paying from the cUSD+ vault ended up with runs
+      // labelled in the token being phased out.
+      const variables: any = { items };
 
       // Add periodSeconds for recurring schedules
       if (selectedSchedule?.periodSeconds) {
@@ -173,8 +179,15 @@ export const PayrollRunScreen = () => {
       )}
 
       <View style={styles.tokenBadge}>
-        <Image source={require('../assets/png/cUSD.png')} style={styles.tokenLogo} />
-        <Text style={styles.tokenText}>Pagar en cUSD</Text>
+        <Image
+          source={instrument.isPlus
+            ? require('../assets/png/cUSDPlus.png')
+            : require('../assets/png/cUSD.png')}
+          style={styles.tokenLogo}
+        />
+        <Text style={styles.tokenText}>
+          {instrument.known ? `Pagar desde tu ${instrument.name}` : 'Pagar desde tu saldo'}
+        </Text>
       </View>
 
       {/* Schedule Selection */}
@@ -237,7 +250,7 @@ export const PayrollRunScreen = () => {
                 ) : null}
               </View>
               <View style={styles.amountInputWrap}>
-                <Text style={styles.amountPrefix}>cUSD</Text>
+                <Text style={styles.amountPrefix}>$</Text>
                 <TextInput
                   style={styles.amountInput}
                   keyboardType="decimal-pad"
@@ -256,7 +269,7 @@ export const PayrollRunScreen = () => {
           <Text style={styles.totalLabel}>
             Total · {payeeCount} {payeeCount === 1 ? 'persona' : 'personas'}
           </Text>
-          <Text style={styles.totalValue}>{totalAmount.toFixed(2)} cUSD</Text>
+          <Text style={styles.totalValue}>${totalAmount.toFixed(2)}</Text>
         </View>
       )}
 

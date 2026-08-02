@@ -1276,6 +1276,12 @@ type UnifiedTransactionType {
   """Formatted amount with +/- based on direction"""
   displayAmount: String
 
+  """Fee deducted before the recipient was credited ('' if none)"""
+  feeAmount: String
+
+  """What the recipient actually received (amount - fee)"""
+  netAmount: String
+
   """Name of the counterparty from user perspective"""
   displayCounterparty: String
 
@@ -1578,6 +1584,9 @@ type InvoiceType {
   merchantAccount: AccountType!
   amount: Decimal!
   tokenType: PaymentsInvoiceTokenTypeChoices!
+
+  """The only chain allowed to settle this invoice"""
+  settlementChain: PaymentsInvoiceSettlementChainChoices!
   description: String!
   status: PaymentsInvoiceStatusChoices!
   paidByUser: Web3AuthUserType
@@ -1603,14 +1612,26 @@ enum PaymentsInvoiceMerchantTypeChoices {
 
 """An enumeration."""
 enum PaymentsInvoiceTokenTypeChoices {
-  """Confío Dollar"""
-  CUSD
+  """Confío Dollar Plus"""
+  CUSD_PLUS
 
   """Confío Token"""
   CONFIO
 
-  """USD Coin"""
+  """Confío Dollar (legacy)"""
+  CUSD
+
+  """USD Coin (legacy)"""
   USDC
+}
+
+"""An enumeration."""
+enum PaymentsInvoiceSettlementChainChoices {
+  """BNB Smart Chain"""
+  BSC
+
+  """Algorand (legacy)"""
+  ALGORAND
 }
 
 """An enumeration."""
@@ -1956,6 +1977,9 @@ enum BlockchainPendingAutoSwapAssetTypeChoices {
 
   """ALGO"""
   ALGO
+
+  """BNB"""
+  BNB
 }
 
 """
@@ -2559,6 +2583,12 @@ enum ConversionConversionConversionTypeChoices {
 
   """USDC to ALGO"""
   USDC_TO_ALGO
+
+  """USDT -> cUSD+ (Ahorrar)"""
+  TO_SAVINGS
+
+  """cUSD+ -> USDT (Retirar)"""
+  FROM_SAVINGS
 }
 
 """An enumeration."""
@@ -2580,6 +2610,24 @@ enum ConversionConversionStatusChoices {
 
   """Failed"""
   FAILED
+
+  """Created (quote accepted, nothing signed)"""
+  CREATED
+
+  """Source leg committed - bridge in flight"""
+  SRC_COMMITTED
+
+  """Bridge exceeded timeout - ops attention"""
+  STUCK
+
+  """Funds at user destination address"""
+  DEST_ARRIVED
+
+  """Never signed - expired"""
+  ABANDONED
+
+  """Delivered as USDT - holder cannot mint"""
+  DELIVERED_USDT
 }
 
 """GraphQL type for USDCDeposit model"""
@@ -3244,6 +3292,9 @@ type PayrollItemType {
   """Blockchain transaction hash"""
   transactionHash: String!
 
+  """Amount actually delivered, decoded from PaidOut"""
+  settledAmount: Decimal
+
   """Unsigned transactions and metadata"""
   blockchainData: JSONString
 
@@ -3389,7 +3440,6 @@ type Query {
   usdcWithdrawals(limit: Int): [USDCWithdrawalType]
   unifiedUsdcTransactions(limit: Int, offset: Int, transactionType: String): [UnifiedUSDCTransactionType]
   cusdPlusSummary: CusdPlusSummaryType
-  cusdPlusMovements(limit: Int = 20, offset: Int = 0): [CusdPlusMovementType!]
   cusdPlusConvertParams: CusdPlusConvertParamsType
   cusdPlusConversionsInFlight: [CusdPlusConversionType!]
   gmMarket: GmMarketType
@@ -3439,6 +3489,9 @@ type Query {
 
   """Balance of payroll vault for this business (token units)"""
   payrollVaultBalance: Float
+
+  """Rail, token, escrow and delegate status for the current business"""
+  payrollRailStatus: PayrollRailStatusType
   verifyPayrollTransaction(transactionHash: String!): VerifiedPayrollTransactionType
 
   """Public, unauthenticated; cached 10 min"""
@@ -3532,6 +3585,16 @@ type Query {
   userTiktokShares(status: String): [TikTokViralShareType]
   myReferralRewards(status: String): [ReferralRewardEventType]
   myReferrals(status: String, first: Int, offset: Int): [InfluencerReferralType]
+
+  """
+  $CONFIO split by when each pot becomes movable: available now, waiting on presale claims, or waiting on the launch.
+  """
+  myConfioBreakdown: ConfioBreakdownType
+
+  """
+  Whether earned $CONFIO rewards can be moved out of the DB yet. False before the DEX launch: rewards accrue in the DB and no claim path may run. A reward's 'eligible' status means EARNED, never claimable — this flag is the only thing that says a claim is possible.
+  """
+  rewardsClaimsUnlocked: Boolean
   statsSummary: StatsSummaryType
   verifyTransaction(transactionHash: String!): VerifiedTransactionType
 }
@@ -4744,7 +4807,12 @@ type CusdPlusSummaryType {
   earnedMonthUsd: Float
 
   """
-  Issuer geo-eligibility (Ondo) by phone country; gates ENTRY only — exits are never gated
+  Raw USDT that may be auto-minted: a FRESH balance minus everything already committed (prepared sends, in-flight off-ramps, in-flight sagas). The client mints this, never the displayed balance.
+  """
+  sweepableUsdtUsd: Float
+
+  """
+  Issuer geo-eligibility (Ondo): phone country AND request IP country, the same full set the mint gate enforces. Gates ENTRY only — exits are never gated
   """
   savingsEnabled: Boolean
 
@@ -4765,22 +4833,11 @@ type CusdPlusSummaryType {
 
   """Same balance in exact wei (string; 18dp) for MAX-send and mint math"""
   usdtBalanceWei: String
-}
 
-"""
-One row of savings history (deposits, withdrawals, stock buys/sells
-settling against cUSD+, and weekly yield summary rows — never per-day).
-"""
-type CusdPlusMovementType {
-  id: ID
-
-  """deposit | withdraw | buy | sell | yield"""
-  movementType: String
-  title: String
-
-  """Signed: inflows to savings positive"""
-  amountUsd: Float
-  createdAt: DateTime
+  """
+  BEP-20 CONFIO held by the account (token count, not USD) — display-grade; 0 until the token address is configured
+  """
+  confioBalance: Float
 }
 
 """
@@ -4835,6 +4892,11 @@ type CusdPlusConvertParamsType {
 
   """ConfioBatchDelegate the EOA designates via 7702"""
   batchDelegateAddress: String
+
+  """
+  send/bsc_flow.py master gate — full-dollar sends (cUSD+ redeemed server-side when wallet USDT doesn't cover)
+  """
+  bscSendEnabled: Boolean
 }
 
 """
@@ -4926,6 +4988,44 @@ type PayrollRecipientType {
   isEmployee: Boolean
   employeeRole: String
   employeeEffectivePermissions: JSONString
+}
+
+"""
+Everything the payroll screens need to describe THIS business's rail
+without guessing at it client-side.
+
+It exists because the app was deriving all of this from an Algorand
+address list: which token wages are paid in, whether payroll is
+activated, who the delegates are. On BSC the delegate is an EVM address
+the client has no copy of, so the question is answered here — in
+employee ids, which the client already holds — instead of shipping
+addresses to the phone to be string-matched.
+"""
+type PayrollRailStatusType {
+  """bsc | algorand — where this business's payroll money currently IS"""
+  rail: String
+
+  """
+  bsc | algorand — where NEW work (funding, fresh runs) executes. Differs from `rail` only while the kill switch is on with money still parked.
+  """
+  executionRail: String
+
+  """Token a run created now is denominated in (CUSD_PLUS on BSC)"""
+  tokenType: String
+
+  """Payroll escrow, in USD"""
+  vaultBalanceUsd: Float
+
+  """
+  Business balance a top-up can draw from, in USD — the cUSD+ position on BSC
+  """
+  fundableBalanceUsd: Float
+
+  """At least one signer is allowlisted, so a payout can be authorized"""
+  activated: Boolean
+
+  """BusinessEmployee ids whose signer is allowlisted on the rail"""
+  delegateEmployeeIds: [ID]
 }
 
 type VerifiedPayrollTransactionType {
@@ -5487,6 +5587,29 @@ enum AchievementsReferralRewardEventRewardStatusChoices {
   CLAIMED
 }
 
+"""
+The user's $CONFIO split by WHEN it becomes movable, not by chain.
+
+Before the token launches nothing a user does makes $CONFIO transferable,
+so the old locked/unlocked pair (where their own deposit flipped a bonus
+into a transferable balance) no longer describes anything real. Each field
+here names a different unlock event:
+
+  available      — BEP-20 in the wallet; movable today.
+  presale_locked — bought in the presale; waits on presale claims opening.
+  earned_bonuses — earned and recorded; waits on the launch.
+  pending_bonuses— NOT earned yet (the deposit condition is unmet). Never
+                   part of the balance: counting it would show the user
+                   money they do not have. Exposed only so the referral
+                   surfaces can show what is still in play.
+"""
+type ConfioBreakdownType {
+  available: String
+  presaleLocked: String
+  earnedBonuses: String
+  pendingBonuses: String
+}
+
 """Lightweight real-time stats for the $CONFIO info screen"""
 type StatsSummaryType {
   totalUsers: Int
@@ -5724,17 +5847,19 @@ type Mutation {
   Returns unsigned user transactions and signed sponsor transaction for atomic group.
   """
   createSponsoredPayment(
-    """Amount to send (before fees)"""
+    """Amount to send (before fees); the invoice overrides it"""
     amount: Float!
 
-    """CUSD or CONFIO"""
+    """Ignored — taken from the invoice"""
     assetType: String = "CUSD"
 
     """Store payment receipt on-chain"""
     createReceipt: Boolean = false
 
-    """Optional payment ID for tracking"""
-    internalId: String
+    """
+    Invoice internal_id. REQUIRED: every payment settles an invoice, and the invoice is what pins the chain, amount, token and merchant.
+    """
+    internalId: String!
 
     """Optional transaction note"""
     note: String
@@ -5745,8 +5870,10 @@ type Mutation {
   Accepts the full transaction group with user signatures.
   """
   submitSponsoredPayment(
-    """Payment ID for database update"""
-    internalId: String
+    """
+    PaymentTransaction internal_id. REQUIRED: it is how the server verifies the invoice's rail before broadcasting.
+    """
+    internalId: String!
 
     """Array of base64 encoded signed transactions in group order"""
     signedTransactions: JSONString!
@@ -5988,7 +6115,9 @@ type Mutation {
 
     """ISO datetime or YYYY-MM-DD for scheduling"""
     scheduledAt: String
-    tokenType: String = "CUSD"
+
+    """DEPRECATED — the rail decides the token; a mismatched value is ignored"""
+    tokenType: String = null
   ): CreatePayrollRun
   preparePayrollItemPayout(
     note: String
@@ -6076,6 +6205,12 @@ type Mutation {
     """USD, for fund/withdraw"""
     amount: Decimal
     delegateUserId: ID
+
+    """Allowlist several delegates in ONE batch (activation)"""
+    delegateUserIds: [ID]
+
+    """Also allowlist the caller's own signer — activation does this"""
+    includeSelf: Boolean
   ): PrepareBscPayrollAdmin
 
   """
@@ -6090,6 +6225,7 @@ type Mutation {
     """Unix seconds"""
     deadline: String!
     delegateAddress: String
+    delegateAddresses: [String]
 
     """65-byte r‖s‖v hex"""
     intentSignature: String!
@@ -6184,7 +6320,19 @@ type Mutation {
   call shape server-side, store the exact batch. Returns the calls the
   client must sign as one EIP-712 intent (ConfioBatchDelegate.execute).
   """
-  prepareBscSend(amount: Decimal!, idempotencyKey: String, memo: String, recipientAddress: String, recipientPhone: String, recipientUserId: ID): PrepareBscSend
+  prepareBscSend(
+    amount: Decimal!
+    idempotencyKey: String
+    memo: String
+    recipientAddress: String
+    recipientPhone: String
+    recipientUserId: ID
+
+    """
+    Explicit token request: CUSD_PLUS (the token itself) or CONFIO. Absent = dollar-value send (server picks the shape).
+    """
+    tokenType: String
+  ): PrepareBscSend
 
   """
   Step 2: the sender's signature over the server-stored batch. The
@@ -6887,6 +7035,20 @@ type PrepareBscPresalePurchase {
   cost: String
   maxPayment: String
   avgPrice: String
+
+  """
+  'direct_cusd' (wallet Confío Dollar) or 'cusd_plus_redeem' (savings redeemed inside the same batch)
+  """
+  fundingSource: String
+  intentId: String
+  delegateNonce: String
+  isDelegated: Boolean
+
+  """
+  EOA nonce for the 7702 authorization; only meaningful when isDelegated is false
+  """
+  accountNonce: String
+  delegateAddress: String
 }
 
 """
@@ -6908,7 +7070,13 @@ type SubmitBscPresalePurchase {
   success: Boolean
   error: String
   authorizationRequired: Boolean
+  delegateNonce: String
+  isDelegated: Boolean
+  accountNonce: String
   transactionHash: String
+
+  """Sponsor-observed execution: executed | reverted | noop; null=unknown"""
+  execution: String
 }
 
 """
@@ -7017,6 +7185,9 @@ type SponsorBscBatch {
   txHash: String
   authorizationRequired: Boolean
   error: String
+
+  """Sponsor-observed execution: executed | reverted | noop; null=unknown"""
+  execution: String
 }
 
 """A signed EIP-7702 authorization tuple (client-signed, first use only)."""
@@ -7392,9 +7563,14 @@ canonical batch for the BUSINESS EOA to sign as one 7702 intent.
 type PrepareBscPayrollAdmin {
   success: Boolean
   error: String
+
+  """Who the error is about, when it names someone"""
+  errorName: String
   calls: [BscPayrollCallType]
   shares: String
   delegateAddress: String
+  delegateAddresses: [String]
+  intentId: String
 }
 
 """One call of a business admin batch (server-built)."""
@@ -7467,14 +7643,21 @@ input InvoiceInput {
   """Amount to request (e.g., '10.50')"""
   amount: String!
 
-  """Type of token to request (e.g., 'cUSD', 'CONFIO')"""
+  """
+  Token to charge in: 'CUSD_PLUS' or 'CONFIO' (legacy clients send 'cUSD')
+  """
   tokenType: String!
 
   """Optional description for the invoice"""
   description: String
 
-  """Hours until expiration (default: 24)"""
+  """Hours until expiration (default and max: 24)"""
   expiresInHours: Int
+
+  """
+  Chain that may settle this invoice: 'BSC' or 'ALGORAND'. Omit only from pre-migration clients — the server then infers the legacy rail from the token.
+  """
+  settlementChain: String
 }
 
 """Mutation for getting an invoice by ID"""
@@ -7512,6 +7695,7 @@ type PrepareBscInvoicePayment {
   tokenType: String
   net: String
   fee: String
+  intentId: String
 }
 
 """
@@ -7534,6 +7718,9 @@ type SubmitBscInvoicePayment {
   error: String
   authorizationRequired: Boolean
   transactionHash: String
+
+  """Sponsor-observed execution: executed | reverted | noop; null=unknown"""
+  execution: String
 }
 
 """A signed EIP-7702 authorization tuple (first use only)."""
@@ -7558,6 +7745,7 @@ type PrepareBscSend {
   sendId: String
   calls: [BscSendCallType]
   tokenType: String
+  intentId: String
 }
 
 """
@@ -7580,6 +7768,9 @@ type SubmitBscSend {
   error: String
   authorizationRequired: Boolean
   transactionHash: String
+
+  """Sponsor-observed execution: executed | reverted | noop; null=unknown"""
+  execution: String
 }
 
 """A signed EIP-7702 authorization tuple (first use only)."""
@@ -7597,6 +7788,7 @@ type PrepareBscInvite {
   error: String
   inviteId: String
   calls: [BscSendCallType]
+  intentId: String
 }
 
 type SubmitBscInvite {
@@ -7614,6 +7806,7 @@ type ReclaimInviteCalls {
   success: Boolean
   error: String
   calls: [BscSendCallType]
+  intentId: String
 }
 
 type SubmitBscReclaimInvite {

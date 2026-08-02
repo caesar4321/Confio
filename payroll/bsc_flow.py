@@ -38,6 +38,7 @@ import time
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.cache import cache
 from eth_abi import encode as abi_encode
 from eth_utils import keccak
 
@@ -149,6 +150,213 @@ def is_onchain_delegate(business_addr: str, delegate_addr: str) -> bool:
     return bool(int(out, 16)) if out and out != '0x' else False
 
 
+# ── Read side — what the payroll screens actually display ────────────────
+#
+# The WRITE path moved to ConfioPayrollVault first and the reads stayed on
+# the Algorand boxes, so a business that had funded the BSC vault and
+# allowlisted its delegates still opened an empty, "not activated" payroll
+# hub: escrow read as $0.00 and the delegate list came back empty, which is
+# also what the client derives activation from. These are the BSC answers to
+# the same two questions the Algorand resolvers answer.
+
+ESCROW_TTL = 30              # matches cusd_plus.vault.POSITION_TTL
+ESCROW_LAST_TTL = 7 * 24 * 3600
+DELEGATES_TTL = 30
+
+
+def _bump(key: str) -> None:
+    try:
+        cache.incr(key)
+    except ValueError:  # not set yet
+        cache.set(key, 1, None)
+
+
+def invalidate_escrow(business_addr: str) -> None:
+    """Drop the cached escrow read after a fund/withdraw/payout moves it.
+
+    Versioned rather than deleted for the same reason as the delegate cache:
+    a read that started before the write must not be able to land afterwards
+    and re-publish the pre-transaction number."""
+    if business_addr:
+        key = business_addr.lower()
+        cache.delete(f'payroll_escrow:{key}')
+        _bump(f'payroll_escrow_ver:{key}')
+
+
+def invalidate_delegates(business_addr: str) -> None:
+    """Bump the version so every cached (business, delegate) answer for this
+    business is bypassed at once — the set of candidates is not known here,
+    and a toggle must be visible on the next read."""
+    if business_addr:
+        _bump(f'payroll_delegates_ver:{business_addr.lower()}')
+
+
+def escrow_usd(business_addr: str):
+    """USD value of a business's payroll escrow = shares × pPlus, or None
+    when we genuinely do not know.
+
+    Degradation contract, stricter than cusd_plus.vault.position_usd: a
+    flaky node falls back to the last successfully read value, and if there
+    is no last-known value it returns **None**, not 0.0. Returning 0.0 for
+    "the node did not answer" is the same sentence to a business as "your
+    payroll float is gone" — the screens render None as "—" instead."""
+    if not business_addr or not _payroll_address():
+        return None
+    key = business_addr.lower()
+    cached = cache.get(f'payroll_escrow:{key}')
+    if cached is not None:
+        return cached
+    ver = cache.get(f'payroll_escrow_ver:{key}') or 0
+    try:
+        from cusd_plus import vault as cp_vault
+        shares = escrow_shares_raw(key)
+        value = 0.0 if shares == 0 else (shares * cp_vault.p_plus_wad()) / (WAD * WAD)
+    except Exception:  # noqa: BLE001 — a read failure must not break the screen
+        logger.warning('[PAYROLL][BSC] escrow read failed for %s', business_addr,
+                       exc_info=True)
+        return cache.get(f'payroll_escrow_last:{key}')
+    # Narrow, not atomic: if a fund/withdraw invalidated while this read was
+    # in flight, drop the answer rather than publish a pre-transaction number
+    # (and rather than poison the outage fallback with it).
+    if (cache.get(f'payroll_escrow_ver:{key}') or 0) != ver:
+        return value
+    cache.set(f'payroll_escrow:{key}', value, ESCROW_TTL)
+    cache.set(f'payroll_escrow_last:{key}', value, ESCROW_LAST_TTL)
+    return value
+
+
+def onchain_delegates(business_addr: str, candidate_addrs, with_status: bool = False):
+    """The subset of `candidate_addrs` the contract actually allowlists.
+    Returns the list, or `(list, degraded)` when `with_status` is set —
+    `degraded` meaning at least one candidate could not be resolved at all,
+    so an empty result must NOT be read as "this business has no delegates".
+
+    isDelegate is a mapping with no enumerator, so the candidate set comes
+    from our own records (the business EOA plus every active employee's
+    personal address) and the chain decides which of them are real. That
+    ordering matters: the DB proposes, the contract disposes — an address
+    we no longer know about simply stops being listed, and one we know
+    about but never allowlisted never appears."""
+    def _out(allowed_map, degraded):
+        result = [a for a in wanted if allowed_map.get(a)]
+        return (result, degraded) if with_status else result
+
+    wanted = []
+    if not business_addr or not _payroll_address():
+        return _out({}, True)
+    key = business_addr.lower()
+    seen = set()
+    for addr in candidate_addrs:
+        low = (addr or '').lower()
+        if low and low not in seen:
+            seen.add(low)
+            wanted.append(low)
+    if not wanted:
+        return _out({}, False)
+
+    # Cached PER PAIR, not per business: keying the whole answer on the
+    # business meant an employee who registered their address inside the TTL
+    # was reported "not a delegate" without the chain ever being asked about
+    # them. The version prefix lets a toggle drop every pair at once.
+    ver = cache.get(f'payroll_delegates_ver:{key}') or 0
+    live = {a: f'payroll_delegate:{ver}:{key}:{a}' for a in wanted}
+    last = {a: f'payroll_delegate_last:{key}:{a}' for a in wanted}
+    known = cache.get_many(list(live.values()))
+
+    allowed = {}
+    unknown = []
+    for a in wanted:
+        hit = known.get(live[a])
+        if hit is None:
+            unknown.append(a)
+        else:
+            allowed[a] = hit
+
+    degraded = False
+    if unknown:
+        # One eth_call PER address, each in its own try. Wrapping the whole
+        # comprehension meant a single dead call discarded every other
+        # candidate's successful answer along with it.
+        stale = cache.get_many([last[a] for a in unknown])
+        fresh = {}
+        for a in unknown:
+            try:
+                fresh[a] = is_onchain_delegate(key, a)
+            except Exception:  # noqa: BLE001
+                # A node outage is not a revocation: fall back to what the
+                # chain last said about THIS pair. With nothing last-known we
+                # have no answer at all, which is not the same as "no".
+                logger.warning('[PAYROLL][BSC] delegate read failed for %s/%s',
+                               business_addr, a, exc_info=True)
+                remembered = stale.get(last[a])
+                if remembered is None:
+                    degraded = True
+                else:
+                    allowed[a] = remembered
+        if fresh:
+            cache.set_many({live[a]: v for a, v in fresh.items()}, DELEGATES_TTL)
+            # Only if no invalidation raced us. `_last` is deliberately
+            # unversioned so it survives a bump, which also means a reader
+            # that started before a revoke could otherwise write the revoked
+            # delegate back into the outage fallback.
+            if (cache.get(f'payroll_delegates_ver:{key}') or 0) == ver:
+                cache.set_many({last[a]: v for a, v in fresh.items()}, ESCROW_LAST_TTL)
+            allowed.update(fresh)
+
+    return _out(allowed, degraded)
+
+
+def execution_rail(business_account) -> str:
+    """Where NEW payroll work will execute: 'bsc' or 'algorand'.
+
+    Deliberately the same condition the write path falls through on — the
+    client's BSC-first branches treat `bsc_payroll_disabled`,
+    `payroll_vault_not_configured` and `vault_not_configured` as "use the
+    legacy rail", so this must agree or a run would be denominated in a token
+    its payout never touches. This is what CreatePayrollRun asks."""
+    if not getattr(settings, 'BSC_PAYROLL_ENABLED', False):
+        return 'algorand'
+    if not _payroll_address() or not _vault_address():
+        return 'algorand'
+    if not (business_account and (business_account.bsc_address or '')):
+        return 'algorand'
+    return 'bsc'
+
+
+def display_rail(business_account) -> str:
+    """Where this business's payroll money actually IS — what the screens
+    must describe.
+
+    Not the same question as execution_rail, and the difference is load-
+    bearing during the kill switch. `withdraw` deliberately survives
+    BSC_PAYROLL_ENABLED=False (exits are never gated), so with the flag off
+    and escrow still parked in ConfioPayrollVault the execution rail says
+    'algorand' while the withdraw button drains BSC. Reporting the Algorand
+    box balance there shows a business one number beside a button that moves
+    a different one. Follow the money instead; the escrow read is cached, so
+    the extra probe costs at most one RPC per TTL."""
+    if not _payroll_address() or not _vault_address():
+        return 'algorand'
+    addr = (business_account.bsc_address or '') if business_account else ''
+    if not addr:
+        return 'algorand'
+    if getattr(settings, 'BSC_PAYROLL_ENABLED', False):
+        return 'bsc'
+    parked = escrow_usd(addr.lower())
+    if parked is None:
+        # We could not read the escrow. Coercing that to 0 picked 'algorand'
+        # and served the legacy vault's balance and activation state as fact —
+        # the same unknown-as-zero mistake, one layer up. Stay on BSC: the
+        # screen then honestly shows "—" instead of another chain's number.
+        return 'bsc'
+    return 'bsc' if parked > 0 else 'algorand'
+
+
+def rail_token(rail: str) -> str:
+    """The token a run created on this rail is denominated in."""
+    return 'CUSD_PLUS' if rail == 'bsc' else 'CUSD'
+
+
 # ── Shared context resolution ────────────────────────────────────────────
 
 def _business_context(user, jwt_ctx):
@@ -187,9 +395,16 @@ def _flags_error():
 # ── Admin ops (business EOA via 7702) ────────────────────────────────────
 
 def build_admin_calls(action: str, shares: int = 0, delegate_addr: str = '',
-                      allowed: bool = True, business_addr: str = '') -> list:
+                      allowed: bool = True, business_addr: str = '',
+                      delegate_addrs=None) -> list:
     """Canonical batches for the three business ops. Deterministic from
-    integer/address params — submit rebuilds and the signature must match."""
+    integer/address params — submit rebuilds and the signature must match.
+
+    set_delegate takes either one address or a LIST: activation allowlists
+    the owner plus every delegate they picked in the wizard, and one 7702
+    batch of N setDelegate calls costs one sponsored batch instead of N —
+    which matters directly, since the sponsor's daily batch cap is small
+    enough that a five-delegate activation would otherwise exhaust it."""
     payroll = _payroll_address()
     vault = _vault_address()
     if action == 'fund':
@@ -206,14 +421,21 @@ def build_admin_calls(action: str, shares: int = 0, delegate_addr: str = '',
                  'data': '0x' + SEL_PAYROLL_WITHDRAW + _uint_word(shares)
                          + _addr_word(business_addr)}]
     if action == 'set_delegate':
+        addrs = list(delegate_addrs) if delegate_addrs else (
+            [delegate_addr] if delegate_addr else [])
+        if not addrs:
+            raise ValueError('set_delegate needs at least one delegate address')
         return [{'to': payroll, 'value': '0',
-                 'data': '0x' + SEL_PAYROLL_SET_DELEGATE + _addr_word(delegate_addr)
-                         + _uint_word(1 if allowed else 0)}]
+                 'data': '0x' + SEL_PAYROLL_SET_DELEGATE + _addr_word(a)
+                         + _uint_word(1 if allowed else 0)}
+                for a in addrs]
     raise ValueError(f'unknown admin action {action}')
 
 
 def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
-                              delegate_user_id=None, allowed: bool = True) -> dict:
+                              delegate_user_id=None, allowed: bool = True,
+                              delegate_user_ids=None,
+                              include_self: bool = False) -> dict:
     from cusd_plus import vault as cp_vault
     from django.contrib.auth import get_user_model
 
@@ -225,7 +447,7 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
     if action == 'withdraw' and not _payroll_address():
         return {'success': False, 'error': 'payroll_vault_not_configured'}
 
-    business, business_account, business_addr, _signer, err = _business_context(user, jwt_ctx)
+    business, business_account, business_addr, signer_addr, err = _business_context(user, jwt_ctx)
     if err:
         return {'success': False, 'error': err}
 
@@ -258,18 +480,41 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
 
     if action == 'set_delegate':
         User = get_user_model()
-        delegate_user = User.objects.filter(id=delegate_user_id).first()
-        if not delegate_user:
+        wanted_ids = list(delegate_user_ids) if delegate_user_ids else (
+            [delegate_user_id] if delegate_user_id else [])
+        addrs = []
+        if include_self and allowed:
+            # Activation must allowlist the person doing it. Payouts are
+            # signed with a PERSONAL key, so an owner who allowlisted only
+            # their employees could not pay their own payroll — and resolving
+            # "me" from the JWT here means it does not depend on the owner
+            # having a BusinessEmployee row for the client to find.
+            if not signer_addr:
+                return {'success': False, 'error': 'no_bsc_address'}
+            addrs.append(signer_addr)
+        if not wanted_ids and not addrs:
             return {'success': False, 'error': 'delegate_not_found'}
-        d_account = delegate_user.accounts.filter(
-            account_type='personal', account_index=0, deleted_at__isnull=True).first()
-        delegate_addr = ((getattr(d_account, 'bsc_address', None) or '') or '').lower()
-        if not delegate_addr:
-            return {'success': False, 'error': 'delegate_no_bsc_address'}
-        calls = build_admin_calls('set_delegate', delegate_addr=delegate_addr,
+        for uid in wanted_ids:
+            delegate_user = User.objects.filter(id=uid).first()
+            if not delegate_user:
+                return {'success': False, 'error': 'delegate_not_found'}
+            d_account = delegate_user.accounts.filter(
+                account_type='personal', account_index=0,
+                deleted_at__isnull=True).first()
+            delegate_addr = ((getattr(d_account, 'bsc_address', None) or '') or '').lower()
+            if not delegate_addr:
+                # Named, so the app can say WHO still has to open the app
+                # rather than failing the whole activation anonymously.
+                return {'success': False, 'error': 'delegate_no_bsc_address',
+                        'delegate_name': (delegate_user.get_full_name()
+                                          or delegate_user.username or '')}
+            if delegate_addr not in addrs:
+                addrs.append(delegate_addr)
+        calls = build_admin_calls('set_delegate', delegate_addrs=addrs,
                                   allowed=allowed)
         from cusd_plus.sponsor_7702 import intent_id_hex
-        return {'success': True, 'calls': calls, 'delegate_address': delegate_addr,
+        return {'success': True, 'calls': calls, 'delegate_address': addrs[0],
+                'delegate_addresses': addrs,
                 'intent_id': intent_id_hex(f'payroll_{action}', business_account.id)}
 
     return {'success': False, 'error': 'unknown_action'}
@@ -278,7 +523,7 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
 def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
                              intent_signature, authorization=None,
                              shares=None, delegate_address='',
-                             allowed: bool = True) -> dict:
+                             allowed: bool = True, delegate_addresses=None) -> dict:
     """Rebuild the canonical batch from integer params and relay it. The
     signature only verifies against the server's own bytes."""
     from cusd_plus import sponsor_7702
@@ -299,15 +544,19 @@ def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
             calls = build_admin_calls(action, shares=shares_int,
                                       business_addr=business_addr)
         elif action == 'set_delegate':
-            delegate_addr = (delegate_address or '').lower()
-            from users.models import Account
-            if not Account.objects.filter(
-                    bsc_address__iexact=delegate_addr,
-                    deleted_at__isnull=True).exists():
-                # Only addresses of real Confío accounts can enter the
-                # allowlist through this rail.
+            addrs = [(a or '').lower() for a in (delegate_addresses or [])] or (
+                [(delegate_address or '').lower()] if delegate_address else [])
+            if not addrs:
                 return {'success': False, 'error': 'delegate_not_found'}
-            calls = build_admin_calls('set_delegate', delegate_addr=delegate_addr,
+            from users.models import Account
+            for addr in addrs:
+                if not Account.objects.filter(
+                        bsc_address__iexact=addr,
+                        deleted_at__isnull=True).exists():
+                    # Only addresses of real Confío accounts can enter the
+                    # allowlist through this rail.
+                    return {'success': False, 'error': 'delegate_not_found'}
+            calls = build_admin_calls('set_delegate', delegate_addrs=addrs,
                                       allowed=allowed)
         else:
             return {'success': False, 'error': 'unknown_action'}
@@ -346,6 +595,19 @@ def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
     try:
         from cusd_plus.vault import invalidate_position
         invalidate_position(business_addr)
+        # The two numbers this op just changed and the hub reads back
+        # immediately after it returns.
+        invalidate_escrow(business_addr)
+        if action == 'set_delegate':
+            invalidate_delegates(business_addr)
+        # ...and again once the transaction has had time to land. Invalidating
+        # only here, at BROADCAST, means the next read re-caches PRE-transaction
+        # chain state for a full TTL — so the business refreshes, sees the old
+        # balance or the delegate they just revoked, and concludes nothing
+        # happened.
+        from .tasks import refresh_payroll_chain_caches
+        refresh_payroll_chain_caches.apply_async(
+            args=[business_addr], countdown=25)
     except Exception:  # noqa: BLE001
         pass
     return {'success': True, 'transaction_hash': tx_hash}
@@ -377,9 +639,20 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     from cusd_plus import vault as cp_vault
     from cusd_plus.eligibility import is_ondo_eligible
 
+    # The run pins the rail, not the live flag — and this is checked BEFORE
+    # the flags, on purpose. A run created while payroll was on Algorand is
+    # denominated in cUSD and must be paid from THAT vault even if BSC has
+    # been enabled since; a cUSD+ run can only ever be paid from here.
+    if item.run.token_type not in ('CUSD_PLUS', 'USDT'):
+        return {'success': False, 'error': 'run_on_legacy_rail'}
+
     err = _flags_error()
     if err:
-        return {'success': False, 'error': err}
+        # Answering `bsc_payroll_disabled` here sent the client to the legacy
+        # path, which then refused the same cUSD+ run — leaving a wage that
+        # NEITHER path would pay and an error naming the wrong chain. This run
+        # has exactly one rail; if that rail is paused, say that.
+        return {'success': False, 'error': 'bsc_payroll_paused'}
 
     business, business_account, business_addr, signer_addr, err = _business_context(user, jwt_ctx)
     if err:

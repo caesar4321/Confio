@@ -293,6 +293,9 @@ export const GET_PAYROLL_RUNS = gql`
         internalId
         status
         netAmount
+        settledAmount
+        grossAmount
+        tokenType
         recipientAccount {
           id
           accountType

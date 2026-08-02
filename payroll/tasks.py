@@ -183,6 +183,14 @@ def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
         # claiming different figures — the employee was told both "recibiste
         # 100.00" and "te pagó 98.60" for one wage. One sender, one number.
         _settle_run(item.run)
+        # The escrow just shrank by net+fee; drop the cached read so the
+        # payroll hub shows the post-payout float rather than the pre-payout
+        # one for another half minute.
+        try:
+            from .bsc_flow import invalidate_escrow
+            invalidate_escrow(payout.get('business') or '')
+        except Exception:  # noqa: BLE001
+            pass
         logger.info('[PAYROLL][BSC] %s confirmed: %s', item.internal_id,
                     item.transaction_hash)
     else:  # reverted / noop_failed
@@ -226,3 +234,23 @@ def reconcile_stranded_bsc_payroll():
     if settled:
         logger.info('[PAYROLL][BSC] re-queued %s stranded payout(s)', settled)
     return settled
+
+
+@shared_task(name='payroll.refresh_payroll_chain_caches')
+def refresh_payroll_chain_caches(business_addr: str):
+    """Drop the cached escrow and delegate reads once an admin batch has had
+    time to land.
+
+    submit_bsc_payroll_admin invalidates at BROADCAST, which is too early:
+    the very next screen refresh re-reads pre-transaction chain state and
+    caches it again for the full TTL, so a business that just funded the
+    vault or revoked a delegate sees the old answer for another 30 seconds
+    and reasonably concludes the operation did nothing. This second pass runs
+    after the transaction has had time to confirm.
+    """
+    from .bsc_flow import invalidate_delegates, invalidate_escrow
+
+    if not business_addr:
+        return
+    invalidate_escrow(business_addr)
+    invalidate_delegates(business_addr)

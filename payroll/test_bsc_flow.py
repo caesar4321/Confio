@@ -106,12 +106,180 @@ class AdminBatchTests(SimpleTestCase):
         self.assertEqual(calls[0]['data'][10:74], SIGNER_ADDR[2:].rjust(64, '0'))
         self.assertEqual(int(calls[0]['data'][74:138], 16), 0)
 
+    def test_activation_allowlists_everyone_in_one_batch(self):
+        """Wizard activation is N delegates; N sponsored batches would eat
+        the sponsor's whole daily allowance, so it must be ONE batch."""
+        second = '0x' + '44' * 20
+        calls = bsc_flow.build_admin_calls(
+            'set_delegate', delegate_addrs=[SIGNER_ADDR, second])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([c['to'] for c in calls], [PAYROLL_VAULT] * 2)
+        self.assertEqual(calls[0]['data'][10:74], SIGNER_ADDR[2:].rjust(64, '0'))
+        self.assertEqual(calls[1]['data'][10:74], second[2:].rjust(64, '0'))
+        self.assertTrue(all(int(c['data'][74:138], 16) == 1 for c in calls))
 
-def _item(net='100', fee='0.9', recipient_addr=RECIPIENT_ADDR):
+    def test_set_delegate_without_any_address_is_refused(self):
+        with self.assertRaises(ValueError):
+            bsc_flow.build_admin_calls('set_delegate')
+
+
+@override_settings(
+    BSC_PAYROLL_VAULT_ADDRESS=PAYROLL_VAULT,
+    CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    BSC_PAYROLL_ENABLED=True,
+)
+class ActivationTests(SimpleTestCase):
+    """Activation on BSC = allowlisting signers. The owner signs payouts with
+    their PERSONAL key, so leaving them out locks them out of their own
+    payroll — and the client must not have to know who they are."""
+
+    def _prepare(self, **kwargs):
+        business_account = SimpleNamespace(
+            id=5, bsc_address=BUSINESS_ADDR,
+            business=SimpleNamespace(id=77, name='Bodega'))
+        with mock.patch('users.models.Account.objects') as acct_objs:
+            acct_objs.filter.return_value.select_related.return_value.first.return_value = \
+                business_account
+            return bsc_flow.prepare_bsc_payroll_admin(
+                _user(), _jwt_ctx(), 'set_delegate', **kwargs)
+
+    def test_include_self_allowlists_the_caller_from_the_jwt(self):
+        result = self._prepare(include_self=True, delegate_user_ids=[])
+        self.assertTrue(result['success'], result.get('error'))
+        self.assertEqual(result['delegate_addresses'], [SIGNER_ADDR.lower()])
+        self.assertEqual(len(result['calls']), 1)
+
+    def test_a_lone_toggle_still_needs_a_named_delegate(self):
+        result = self._prepare(delegate_user_ids=[])
+        self.assertFalse(result['success'])
+        self.assertEqual(result['error'], 'delegate_not_found')
+
+
+@override_settings(
+    BSC_PAYROLL_VAULT_ADDRESS=PAYROLL_VAULT,
+    CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    BSC_PAYROLL_ENABLED=True,
+)
+class ReadSideTests(SimpleTestCase):
+    """The half that shipped late: the screens read the Algorand boxes while
+    the money lived in ConfioPayrollVault, so a funded business saw $0.00 and
+    an allowlisted delegate saw "nómina no activada"."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_escrow_usd_is_shares_times_price(self):
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=50 * WAD), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10):
+            self.assertAlmostEqual(bsc_flow.escrow_usd(BUSINESS_ADDR), 55.0, places=6)
+
+    def test_escrow_read_failure_keeps_the_last_known_value(self):
+        """A flaky node must not tell a business its payroll float is gone."""
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=50 * WAD), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD):
+            self.assertEqual(bsc_flow.escrow_usd(BUSINESS_ADDR), 50.0)
+        bsc_flow.invalidate_escrow(BUSINESS_ADDR)
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw',
+                               side_effect=RuntimeError('node down')):
+            self.assertEqual(bsc_flow.escrow_usd(BUSINESS_ADDR), 50.0)
+
+    def test_delegates_are_the_chain_s_answer_not_ours(self):
+        """The DB proposes candidates; isDelegate decides."""
+        other = '0x' + '55' * 20
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate',
+                               side_effect=lambda _b, d: d == SIGNER_ADDR.lower()):
+            got = bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR, other])
+        self.assertEqual(got, [SIGNER_ADDR.lower()])
+
+    def test_a_new_candidate_is_asked_about_even_inside_the_ttl(self):
+        """Caching the whole answer per business reported an employee who
+        registered their address seconds ago as "not a delegate" without the
+        chain ever being asked about them."""
+        newcomer = '0x' + '66' * 20
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+            self.assertEqual(bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR]),
+                             [SIGNER_ADDR.lower()])
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True) as call:
+            got = bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR, newcomer])
+            call.assert_called_once_with(BUSINESS_ADDR.lower(), newcomer.lower())
+        self.assertEqual(got, [SIGNER_ADDR.lower(), newcomer.lower()])
+
+    def test_revoking_is_visible_on_the_next_read(self):
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+            bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR])
+        bsc_flow.invalidate_delegates(BUSINESS_ADDR)
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=False):
+            self.assertEqual(bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR]), [])
+
+    def test_delegate_read_failure_is_not_a_revocation(self):
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+            self.assertEqual(bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR]),
+                             [SIGNER_ADDR.lower()])
+        bsc_flow.invalidate_delegates(BUSINESS_ADDR)
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate',
+                               side_effect=RuntimeError('node down')):
+            self.assertEqual(bsc_flow.onchain_delegates(BUSINESS_ADDR, [SIGNER_ADDR]),
+                             [SIGNER_ADDR.lower()])
+
+    def test_execution_rail_follows_the_conditions_the_write_path_falls_through_on(self):
+        biz = SimpleNamespace(bsc_address=BUSINESS_ADDR)
+        self.assertEqual(bsc_flow.execution_rail(biz), 'bsc')
+        self.assertEqual(bsc_flow.rail_token('bsc'), 'CUSD_PLUS')
+        # No BSC address for the business — funding could not be signed.
+        self.assertEqual(bsc_flow.execution_rail(SimpleNamespace(bsc_address='')), 'algorand')
+        with override_settings(BSC_PAYROLL_ENABLED=False):
+            self.assertEqual(bsc_flow.execution_rail(biz), 'algorand')
+        with override_settings(BSC_PAYROLL_VAULT_ADDRESS=''):
+            self.assertEqual(bsc_flow.execution_rail(biz), 'algorand')
+        self.assertEqual(bsc_flow.rail_token('algorand'), 'CUSD')
+
+    def test_display_rail_follows_the_money_through_the_kill_switch(self):
+        """withdraw deliberately survives BSC_PAYROLL_ENABLED=False, so a
+        business with escrow still parked on BSC must keep SEEING it — the
+        alternative is an Algorand balance beside a button that drains BSC."""
+        biz = SimpleNamespace(bsc_address=BUSINESS_ADDR)
+        with override_settings(BSC_PAYROLL_ENABLED=False), \
+                mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=5 * WAD), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD):
+            self.assertEqual(bsc_flow.display_rail(biz), 'bsc')
+        bsc_flow.invalidate_escrow(BUSINESS_ADDR)
+        # Nothing parked there: the legacy vault is the honest answer.
+        with override_settings(BSC_PAYROLL_ENABLED=False), \
+                mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=0), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD):
+            self.assertEqual(bsc_flow.display_rail(biz), 'algorand')
+
+    def test_a_first_read_failure_is_unknown_not_zero(self):
+        """$0.00 and "we could not reach the node" are different sentences;
+        only one of them makes a business think its payroll float is gone."""
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw',
+                               side_effect=RuntimeError('node down')):
+            self.assertIsNone(bsc_flow.escrow_usd(BUSINESS_ADDR))
+
+    def test_one_dead_call_does_not_discard_the_other_candidates(self):
+        other = '0x' + '77' * 20
+
+        def flaky(_b, d):
+            if d == other:
+                raise RuntimeError('node down')
+            return True
+
+        with mock.patch.object(bsc_flow, 'is_onchain_delegate', side_effect=flaky):
+            got, degraded = bsc_flow.onchain_delegates(
+                BUSINESS_ADDR, [SIGNER_ADDR, other], with_status=True)
+        # The healthy answer survives, and the caller is told the set is partial.
+        self.assertEqual(got, [SIGNER_ADDR.lower()])
+        self.assertTrue(degraded)
+
+
+def _item(net='100', fee='0.9', recipient_addr=RECIPIENT_ADDR,
+          run_token='CUSD_PLUS'):
     recipient_user = SimpleNamespace(id=9, get_full_name=lambda: 'Empleado')
     return SimpleNamespace(
         id=42, internal_id='item42', status='PENDING',
-        run=SimpleNamespace(business_id=77,
+        run=SimpleNamespace(business_id=77, token_type=run_token,
                             business=SimpleNamespace(id=77, name='Bodega')),
         recipient_user=recipient_user,
         recipient_account=SimpleNamespace(bsc_address=recipient_addr),
@@ -155,6 +323,14 @@ class PreparePayoutTests(SimpleTestCase):
                 business_account
             result = bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
         return result, pps
+
+    def test_a_legacy_cusd_run_is_never_paid_from_the_cusd_plus_escrow(self):
+        """Enabling the flag must not retroactively move where already-booked
+        wages are settled from. The run's own token pins its rail; the
+        fall-through code sends the client to the Algorand path."""
+        result, _ = self._prepare(_item(run_token='CUSD'))
+        self.assertFalse(result['success'])
+        self.assertEqual(result['error'], 'run_on_legacy_rail')
 
     def test_eligible_recipient_transfer_branch(self):
         item = _item()
@@ -200,9 +376,17 @@ class PreparePayoutTests(SimpleTestCase):
         self.assertEqual(result['error'], 'not_your_payroll')
 
     @override_settings(BSC_PAYROLL_ENABLED=False)
-    def test_dark_flag_blocks(self):
+    def test_a_paused_rail_blocks_without_sending_the_client_elsewhere(self):
+        """A cUSD+ run has exactly ONE rail. Answering `bsc_payroll_disabled`
+        here sent the client to the Algorand path, which refused the same run —
+        stranding the wage with an error naming the wrong chain."""
         result, _ = self._prepare(_item())
-        self.assertEqual(result['error'], 'bsc_payroll_disabled')
+        self.assertEqual(result['error'], 'bsc_payroll_paused')
+
+    @override_settings(BSC_PAYROLL_ENABLED=False)
+    def test_a_paused_rail_still_routes_a_legacy_run_to_algorand(self):
+        result, _ = self._prepare(_item(run_token='CUSD'))
+        self.assertEqual(result['error'], 'run_on_legacy_rail')
 
 
 @override_settings(
