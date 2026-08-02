@@ -95,6 +95,25 @@ def _referral_claim_cache_key(token: str) -> str:
 	return f"{REFERRAL_CLAIM_CACHE_PREFIX}{token}"
 
 
+# Shown when a client asks to move a reward out of the DB before claims open.
+# Deliberately not an error about wallets or chains: the reward is safe and
+# recorded, it simply has nowhere to go until CONFIO has a market.
+REWARD_CLAIMS_LOCKED_MESSAGE = (
+	"Tus $CONFIO ya están guardados en tu cuenta. Podrás retirarlos cuando "
+	"$CONFIO se lance al mercado."
+)
+
+
+def _reward_claims_locked() -> bool:
+	"""True while rewards live only in the DB (pre-DEX).
+
+	Older app builds still call the Algorand claim mutations, so the refusal
+	has to live on the server: it is what keeps a stale client from failing
+	with a message about an Algorand wallet the user never had.
+	"""
+	return not bool(getattr(settings, 'REWARD_CLAIMS_UNLOCKED', False))
+
+
 def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id):
 	reward_timestamp = timezone.now()
 	with db_transaction.atomic():
@@ -1252,6 +1271,15 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
 	my_referral_rewards = graphene.List(ReferralRewardEventType, status=graphene.String())
 	my_referrals = graphene.List(InfluencerReferralType, status=graphene.String(), first=graphene.Int(), offset=graphene.Int())
+
+	rewards_claims_unlocked = graphene.Boolean(
+		description=(
+			"Whether earned $CONFIO rewards can be moved out of the DB yet. False "
+			"before the DEX launch: rewards accrue in the DB and no claim path may "
+			"run. A reward's 'eligible' status means EARNED, never claimable — this "
+			"flag is the only thing that says a claim is possible."
+		)
+	)
 
 	# Real-time stats for $CONFIO info screen
 	stats_summary = graphene.Field(StatsSummaryType)
@@ -2430,6 +2458,10 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			queryset = queryset[:limit]
 			
 		return queryset
+
+	def resolve_rewards_claims_unlocked(self, info):
+		"""Mirror of the reward vault's one-way unlockClaims(); see settings."""
+		return bool(getattr(settings, 'REWARD_CLAIMS_UNLOCKED', False))
 
 	def resolve_my_referral_rewards(self, info, status=None):
 		user = getattr(info.context, 'user', None)
@@ -4387,6 +4419,11 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return PrepareReferralRewardClaim(success=False, error="Necesitas iniciar sesión para desbloquear.")
 
+		# Rewards live in the DB until the DEX opens claims. Refuse before
+		# touching any chain state: an 'eligible' reward is earned, not payable.
+		if _reward_claims_locked():
+			return PrepareReferralRewardClaim(success=False, error=REWARD_CLAIMS_LOCKED_MESSAGE)
+
 		try:
 			event = ReferralRewardEvent.objects.select_related('referral').get(id=event_id, user=user)
 		except ReferralRewardEvent.DoesNotExist:
@@ -4699,6 +4736,12 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return SubmitReferralRewardClaim(success=False, error="Necesitas iniciar sesión para desbloquear.")
+
+		# Same gate as prepare: a claim session minted before the flag flipped
+		# must not be able to settle after it.
+		if _reward_claims_locked():
+			return SubmitReferralRewardClaim(success=False, error=REWARD_CLAIMS_LOCKED_MESSAGE)
+
 		if not user.is_identity_verified:
 			return SubmitReferralRewardClaim(
 				success=False,

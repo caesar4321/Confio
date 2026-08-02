@@ -23,17 +23,20 @@ export const ReferralActionPromptScreen: React.FC = () => {
 
   const stepOptions = useMemo(() => ({
     top_up: {
-      title: 'Desbloquea tu bono de 5 $CONFIO',
+      title: 'Gana tu bono de 5 $CONFIO',
       steps: [
-        'Tienes 5 $CONFIO bloqueados en tu cuenta',
+        'Tienes 5 $CONFIO reservados en tu cuenta',
         paused
-          ? 'Haz una recarga de $20 o más para activarlos'
-          : 'Haz una recarga de 20 cUSD o más para activarlos',
-        '¡Listo! El bono se desbloquea al instante',
+          ? 'Haz una recarga de $20 o más para ganarlos'
+          : 'Haz una recarga de 20 cUSD o más para ganarlos',
+        '¡Listo! El bono queda guardado en tu cuenta al instante',
       ],
+      // "Ganar" ≠ "retirar": the bonus is recorded in the account and only
+      // becomes withdrawable when $CONFIO launches, so nothing here may
+      // promise the user can spend it today.
       requirement: paused
-        ? 'El bono está reservado para ti. Solo necesitas completar tu primera recarga de $20 o más para desbloquearlo y usarlo.'
-        : 'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 cUSD para desbloquearlo y usarlo.',
+        ? 'El bono está reservado para ti. Solo necesitas completar tu primera recarga de $20 o más para ganarlo.'
+        : 'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 cUSD para ganarlo.',
       actions: [
         {
           label: 'Recargar en Confío',

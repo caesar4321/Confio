@@ -307,29 +307,11 @@ export const REFRESH_ACCOUNT_BALANCE = gql`
   }
 `;
 
-export const PREPARE_REFERRAL_REWARD_CLAIM = gql`
-  mutation PrepareReferralRewardClaim($eventId: ID!) {
-    prepareReferralRewardClaim(eventId: $eventId) {
-      success
-      error
-      claimToken
-      unsignedTransaction
-      groupId
-      amount
-      expiresAt
-    }
-  }
-`;
-
-export const SUBMIT_REFERRAL_REWARD_CLAIM = gql`
-  mutation SubmitReferralRewardClaim($claimToken: String!, $signedTransaction: String!) {
-    submitReferralRewardClaim(claimToken: $claimToken, signedTransaction: $signedTransaction) {
-      success
-      error
-      txId
-    }
-  }
-`;
+// Removed: the Algorand referral-claim pair (prepare/submit). Rewards are
+// earned in the DB and stay there until $CONFIO launches, so the client has
+// no claim flow to drive; the server refuses both mutations while claims are
+// locked. The post-launch payout is an EIP-712 signature claim against the
+// BSC reward vault — a different shape entirely, not these.
 
 // SEND_TOKENS removed - all sends now go through CREATE_SEND_TRANSACTION
 

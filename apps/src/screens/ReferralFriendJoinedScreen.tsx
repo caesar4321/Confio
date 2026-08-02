@@ -28,11 +28,11 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
           <Text style={styles.eyebrow}>Referidos Confío</Text>
           <Text style={styles.title}>¡{friendName} ya se unió!</Text>
           <Text style={styles.subtitle}>
-            Tu amigo ya recibió sus 5 $CONFIO (bloqueados). Ahora solo falta desbloquearlos.
+            Tu amigo ya tiene sus 5 $CONFIO reservados. Ahora solo falta ganarlos.
           </Text>
 
           <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>¿Cómo desbloquear el bono?</Text>
+            <Text style={styles.stepTitle}>¿Cómo ganar el bono?</Text>
             <View style={styles.stepRow}>
               <Icon name="lock" size={18} color={colors.primaryDark} />
               <Text style={styles.stepText}>
@@ -47,7 +47,7 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
             </View>
             <View style={styles.stepRow}>
               <Icon name="check-circle" size={18} color={colors.primaryDark} />
-              <Text style={styles.stepText}>¡Listo! El bono se desbloquea automáticamente para ambos.</Text>
+              <Text style={styles.stepText}>¡Listo! El bono queda guardado automáticamente para ambos.</Text>
             </View>
           </View>
 

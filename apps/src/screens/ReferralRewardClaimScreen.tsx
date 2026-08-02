@@ -6,25 +6,16 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
-  Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
-import { useQuery, useMutation } from '@apollo/client';
-import { Buffer } from 'buffer';
+import { useQuery } from '@apollo/client';
 import { Header } from '../navigation/Header';
 
-import { GET_MY_REFERRALS } from '../apollo/queries';
-import {
-  PREPARE_REFERRAL_REWARD_CLAIM,
-  SUBMIT_REFERRAL_REWARD_CLAIM,
-} from '../apollo/mutations';
-import algorandService from '../services/algorandService';
+import { GET_MY_REFERRALS, GET_REWARDS_CLAIMS_UNLOCKED } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
-import LoadingOverlay from '../components/LoadingOverlay';
 import { EmptyState } from '../components/EmptyState';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { colors } from '../config/theme';
@@ -62,12 +53,17 @@ export const ReferralRewardClaimScreen: React.FC = () => {
     fetchPolicy: 'cache-and-network',
     variables: { first: PAGE_SIZE, offset: 0 },
   });
-  const [prepareClaim] = useMutation(PREPARE_REFERRAL_REWARD_CLAIM);
-  const [submitClaim] = useMutation(SUBMIT_REFERRAL_REWARD_CLAIM);
-  const [busyId, setBusyId] = React.useState<string | null>(null);
-  const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' } | null>(null);
-  const dismissBanner = React.useCallback(() => setBanner(null), []);
-  const [loadingMessage, setLoadingMessage] = React.useState<string>('');
+  // Before the launch, $CONFIO has no market and nothing is written on-chain
+  // when a reward is earned: the bonus is recorded in the user's account and
+  // paid out only once claims open. So this screen is a LEDGER of what the
+  // user has earned, not a payout surface. Any failure to read the flag
+  // (older server, no network) must read as locked — never offer a withdrawal
+  // we cannot honor.
+  const { data: claimsData } = useQuery(GET_REWARDS_CLAIMS_UNLOCKED, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+  const claimsUnlocked = claimsData?.rewardsClaimsUnlocked === true;
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [hasMore, setHasMore] = React.useState(true);
 
@@ -119,8 +115,10 @@ export const ReferralRewardClaimScreen: React.FC = () => {
     [currentUserId],
   );
 
-  // Filter referrals by status based on current user's role
-  const claimable = referrals.filter((ref) => {
+  // Filter referrals by status based on current user's role. 'eligible' means
+  // the bonus is EARNED and recorded — the condition was met — not that it can
+  // be withdrawn today.
+  const earned = referrals.filter((ref) => {
     const role = getViewerRole(ref);
     const status =
       role === 'referrer' ? ref.referrerRewardStatus : ref.refereeRewardStatus;
@@ -144,7 +142,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       : toNumber(referral.rewardRefereeConfio);
   };
 
-  const totalClaimable = claimable.reduce(
+  const totalEarned = earned.reduce(
     (sum, ref) => sum + getReferralAmount(ref),
     0,
   );
@@ -192,25 +190,26 @@ export const ReferralRewardClaimScreen: React.FC = () => {
   );
 
   type ListSection =
-    | { type: 'summary'; totalClaimable: number }
+    | { type: 'summary'; totalEarned: number }
     | { type: 'empty' }
-    | { type: 'claimableHeader' }
-    | { type: 'claimable'; referral: Referral }
+    | { type: 'earnedHeader' }
+    | { type: 'earned'; referral: Referral }
     | { type: 'pendingHeader' }
     | { type: 'pending'; referral: Referral };
 
   const listData = React.useMemo<ListSection[]>(() => {
     const sections: ListSection[] = [];
-    sections.push({ type: 'summary', totalClaimable });
+    sections.push({ type: 'summary', totalEarned });
 
-    if (claimable.length === 0 && pendingReferrals.length === 0) {
+    if (earned.length === 0 && pendingReferrals.length === 0) {
       sections.push({ type: 'empty' });
       return sections;
     }
 
-    if (claimable.length > 0) {
-      claimable.forEach((referral) => {
-        sections.push({ type: 'claimable', referral });
+    if (earned.length > 0) {
+      sections.push({ type: 'earnedHeader' });
+      earned.forEach((referral) => {
+        sections.push({ type: 'earned', referral });
       });
     }
 
@@ -222,73 +221,16 @@ export const ReferralRewardClaimScreen: React.FC = () => {
     }
 
     return sections;
-  }, [claimable, pendingReferrals, totalClaimable]);
+  }, [earned, pendingReferrals, totalEarned]);
 
 
   const keyExtractor = React.useCallback((item: ListSection, index: number) => {
-    if (item.type === 'claimable' || item.type === 'pending') {
+    if (item.type === 'earned' || item.type === 'pending') {
       return `${item.type}-${item.referral.id}`;
     }
     return `${item.type}-${index}`;
   }, []);
 
-  const handleClaim = React.useCallback(
-    async (referral: Referral) => {
-      if (busyId) return;
-      setBusyId(referral.id);
-
-      try {
-        const eventId = referral.viewerRewardEventId || null;
-        if (!eventId) {
-          throw new Error('No pudimos encontrar la recompensa para este rol.');
-        }
-        setLoadingMessage('Desbloqueando...');
-        const prepareRes = await prepareClaim({
-          variables: { eventId },
-        });
-        const payload = prepareRes.data?.prepareReferralRewardClaim;
-        if (!payload?.success) {
-          throw new Error(payload?.error || 'No pudimos preparar la transacción.');
-        }
-
-        const unsigned = payload.unsignedTransaction;
-        const token = payload.claimToken;
-
-        setLoadingMessage('Firmando transacción...');
-        const unsignedBytes = Buffer.from(unsigned, 'base64');
-        const signedBytes = await algorandService.signTransactionBytes(
-          Uint8Array.from(unsignedBytes),
-        );
-        const signedB64 = Buffer.from(signedBytes).toString('base64');
-
-        setLoadingMessage('Enviando transacción...');
-        const submitRes = await submitClaim({
-          variables: {
-            claimToken: token,
-            signedTransaction: signedB64,
-          },
-        });
-        const submitPayload = submitRes.data?.submitReferralRewardClaim;
-        if (!submitPayload?.success) {
-          throw new Error(
-            submitPayload?.error || 'No pudimos enviar la transacción.',
-          );
-        }
-
-        setBanner({ variant: 'success', message: 'Tus $CONFIO fueron desbloqueados con éxito.' });
-        setHasMore(true);
-        await refetch({ first: PAGE_SIZE, offset: 0 });
-      } catch (err: any) {
-        const message =
-          err?.message || 'Ocurrió un error al desbloquear la recompensa.';
-        setBanner({ variant: 'error', message });
-      } finally {
-        setLoadingMessage('');
-        setBusyId(null);
-      }
-    },
-    [busyId, prepareClaim, submitClaim, refetch],
-  );
 
   const renderListItem = React.useCallback(
     ({ item }: { item: ListSection }) => {
@@ -300,26 +242,37 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         return (
           <EmptyState
             icon="gift"
-            title="Sin recompensas pendientes"
-            subtitle="Invita a un amigo y, cuando haga su primer depósito, ambos reciben $CONFIO."
+            title="Aún no tienes bonos"
+            subtitle="Invita a un amigo y, cuando haga su primer depósito, ambos ganan $CONFIO."
             actionLabel="Invitar amigos"
             onAction={() => navigation.navigate('ConfioAddress')}
           />
         );
       }
 
-      if (item.type === 'pendingHeader') {
+      if (item.type === 'earnedHeader') {
         return (
-          <View style={styles.pendingSection}>
-            <Text style={styles.pendingTitle}>Bonos en progreso</Text>
-            <Text style={styles.pendingSubtitle}>
-              Completa tu primera recarga o ahorro de US$20 para desbloquear estos bonos.
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Bonos ganados</Text>
+            <Text style={styles.sectionSubtitle}>
+              Ya son tuyos y están guardados en tu cuenta.
             </Text>
           </View>
         );
       }
 
-      if (item.type === 'claimable') {
+      if (item.type === 'pendingHeader') {
+        return (
+          <View style={[styles.sectionHeader, styles.sectionHeaderSpaced]}>
+            <Text style={styles.sectionTitle}>Bonos en progreso</Text>
+            <Text style={styles.sectionSubtitle}>
+              Completa tu primera recarga o ahorro de US$20 para ganar estos bonos.
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'earned') {
         const referral = item.referral;
         const amount = getReferralAmount(referral);
         const isReferrer = getViewerRole(referral) === 'referrer';
@@ -340,22 +293,10 @@ export const ReferralRewardClaimScreen: React.FC = () => {
                   {getUserDisplayName(otherUser)}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={[
-                  styles.claimButton,
-                  busyId === referral.id && styles.claimButtonDisabled,
-                ]}
-                disabled={busyId === referral.id}
-                onPress={() => handleClaim(referral)}>
-                {busyId === referral.id ? (
-                  <ActivityIndicator color={colors.white} size="small" />
-                ) : (
-                  <>
-                    <Icon name="unlock" size={16} color={colors.white} />
-                    <Text style={styles.claimButtonText}>Desbloquear</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              <View style={styles.earnedBadge}>
+                <Icon name="check" size={14} color={colors.secondary} />
+                <Text style={styles.earnedBadgeText}>Ganado</Text>
+              </View>
             </View>
             <View style={styles.rewardMetaRow}>
               <View style={styles.rewardMetaItem}>
@@ -381,8 +322,8 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         const otherUserDisplay = getUserDisplayName(otherUser);
 
         const requirementText = isReferrer
-          ? `Ayuda a ${otherUserDisplay} a completar su primera recarga o ahorro de US$20 para liberar el bono para ambos.`
-          : 'Completa tu primera recarga o ahorro de al menos US$20 para desbloquear el bono.';
+          ? `Ayuda a ${otherUserDisplay} a completar su primera recarga o ahorro de US$20 para ganar el bono los dos.`
+          : 'Completa tu primera recarga o ahorro de al menos US$20 para ganar el bono.';
 
         return (
           <TouchableOpacity
@@ -431,17 +372,16 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
       return null;
     },
-    [busyId, getReferralAmount, getUserDisplayName, handleClaim, handlePendingPress, getViewerRole],
+    [getReferralAmount, getUserDisplayName, handlePendingPress, getViewerRole],
   );
 
 
 
   return (
     <View style={styles.container}>
-      <LoadingOverlay visible={!!loadingMessage} message={loadingMessage} />
       <Header
         navigation={navigation as any}
-        title="Desbloquear $CONFIO"
+        title="Tus bonos $CONFIO"
         backgroundColor={colors.secondary}
         isLight
         showBackButton
@@ -463,20 +403,22 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           <Circle cx="104%" cy="30%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
         </Svg>
         <View style={styles.fieldInner}>
-          <Text style={styles.fieldLabel}>LISTO PARA DESBLOQUEAR</Text>
-          <Text style={styles.fieldValue}>{totalClaimable.toFixed(2)} $CONFIO</Text>
+          <Text style={styles.fieldLabel}>GANADO EN BONOS</Text>
+          <Text style={styles.fieldValue}>{totalEarned.toFixed(2)} $CONFIO</Text>
           <Text style={styles.fieldSubtext}>
-            Recompensas confirmadas on-chain. Firma para liberarlas en tu billetera.
+            Guardados en tu cuenta. Se podrán retirar cuando $CONFIO se lance al
+            mercado.
           </Text>
         </View>
       </View>
 
-      {banner && (
+      {/* Claims opened while this build is installed: the withdrawal itself
+          ships in a newer version, so point there instead of leaving the
+          screen silently unchanged. */}
+      {claimsUnlocked && (
         <InlineBanner
-          message={banner.message}
-          variant={banner.variant}
-          onDismiss={dismissBanner}
-          autoHideMs={banner.variant === 'success' ? 3000 : undefined}
+          message="El retiro de $CONFIO ya está disponible. Actualiza la app para retirar tus bonos."
+          variant="success"
           style={{ marginHorizontal: 20, marginTop: 12, marginBottom: 0 }}
         />
       )}
@@ -485,7 +427,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={colors.secondary} />
           <Text style={styles.loadingText}>
-            Buscando recompensas disponibles...
+            Buscando tus bonos...
           </Text>
         </View>
       ) : error ? (
@@ -602,19 +544,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pendingSection: {
-    marginTop: 24,
-    marginBottom: 8,
+  sectionHeader: {
+    marginBottom: 12,
   },
-  pendingTitle: {
+  sectionHeaderSpaced: {
+    marginTop: 16,
+  },
+  sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.textFlat,
   },
-  pendingSubtitle: {
+  sectionSubtitle: {
     fontSize: 14,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  earnedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: colors.violetLight,
+  },
+  earnedBadgeText: {
+    marginLeft: 6,
+    color: colors.secondaryText,
+    fontWeight: '600',
+    fontSize: 13,
   },
   pendingBadge: {
     flexDirection: 'row',
@@ -675,22 +633,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
-  },
-  claimButton: {
-    backgroundColor: colors.secondary,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  claimButtonDisabled: {
-    opacity: 0.5,
-  },
-  claimButtonText: {
-    color: colors.white,
-    fontWeight: '600',
-    marginLeft: 6,
   },
 });
 

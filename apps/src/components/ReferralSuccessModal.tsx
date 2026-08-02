@@ -8,7 +8,7 @@ interface ReferralSuccessModalProps {
     autoClose?: boolean;
 }
 
-const DEFAULT_MESSAGE = "Tienes US$5 en $CONFIO bloqueados. Completa tu primera recarga de 20 cUSD para desbloquearlos.";
+const DEFAULT_MESSAGE = "Tienes US$5 en $CONFIO reservados. Completa tu primera recarga de 20 cUSD para ganarlos.";
 
 export const ReferralSuccessModal: React.FC<ReferralSuccessModalProps> = ({
     visible,

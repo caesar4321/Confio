@@ -204,20 +204,22 @@ export const AchievementsScreen: React.FC = () => {
             />
           )}
 
-          {/* Claim entry — tinted promo card, Home promo grammar */}
+          {/* Bonus ledger entry — tinted promo card, Home promo grammar. Reads
+              as a record of what's been earned, not a payout: $CONFIO bonuses
+              are held in the account until the token launches. */}
           <TouchableOpacity
             style={styles.claimCard}
             activeOpacity={0.8}
             onPress={() => navigation.navigate('ReferralRewardClaim')}
             accessibilityRole="button"
-            accessibilityLabel="Desbloquear recompensas"
+            accessibilityLabel="Ver tus bonos $CONFIO"
           >
             <View style={styles.claimIconWrap}>
-              <Icon name="unlock" size={18} color={colors.secondary} />
+              <Icon name="gift" size={18} color={colors.secondary} />
             </View>
             <View style={styles.claimCardText}>
-              <Text style={styles.claimCardTitle}>Desbloquear recompensas</Text>
-              <Text style={styles.claimCardSubtitle}>Revisa si tienes $CONFIO listos para reclamar</Text>
+              <Text style={styles.claimCardTitle}>Tus bonos $CONFIO</Text>
+              <Text style={styles.claimCardSubtitle}>Mira cuánto llevas ganado y qué falta</Text>
             </View>
             <Icon name="chevron-right" size={18} color={colors.secondary} />
           </TouchableOpacity>
@@ -241,7 +243,7 @@ export const AchievementsScreen: React.FC = () => {
 
           {/* How it works */}
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Cómo desbloquear los US$5</Text>
+            <Text style={styles.sectionTitle}>Cómo ganar los US$5</Text>
             {steps.map((step, index) => (
               <View key={step.title} style={[styles.stepRow, index === steps.length - 1 && { marginBottom: 0 }]}>
                 <View style={styles.stepNumberWrap}>

@@ -64,7 +64,7 @@ EVENT_NOTIFICATION_TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
         "notification_type": NotificationTypeChoices.REFERRAL_EVENT_TOP_UP,
         "referee": {
             "title": "Recarga confirmada 🎉",
-            "message": "Ya tienes saldo para explorar Confío. Haz tu primera conversión o envío para desbloquear tus CONFIO.",
+            "message": "Ya tienes saldo para explorar Confío. Haz tu primera conversión o envío para ganar tus CONFIO.",
         },
         "referrer": {
             "title": "Tu referido recargó su billetera",
@@ -108,7 +108,7 @@ EVENT_NOTIFICATION_TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
         "notification_type": NotificationTypeChoices.REFERRAL_EVENT_P2P_TRADE,
         "referee": {
             "title": "Primer trade P2P completado",
-            "message": "Ya dominas el intercambio. Invita a otro amigo para desbloquear más CONFIO.",
+            "message": "Ya dominas el intercambio. Invita a otro amigo para ganar más CONFIO.",
         },
         "referrer": {
             "title": "Tu referido cerró su primer trade",
@@ -271,7 +271,7 @@ def notify_referral_joined(referral: UserReferral) -> None:
             user=referral.referrer_user,
             notification_type=NotificationTypeChoices.REFERRAL_FRIEND_JOINED,
             title="Tu referido ya está en Confío",
-            message=f"{referred_name} se registró con tu invitación. Ayúdale a completar su primera transacción para desbloquear las recompensas.",
+            message=f"{referred_name} se registró con tu invitación. Ayúdale a completar su primera transacción para que ambos ganen las recompensas.",
             data={
                 'referral_id': referral.id,
                 'referred_user_id': referral.referred_user_id,
@@ -283,8 +283,8 @@ def notify_referral_joined(referral: UserReferral) -> None:
         create_notification(
             user=referral.referred_user,
             notification_type=NotificationTypeChoices.REFERRAL_ACTION_REMINDER,
-            title="¡Tienes una recompensa bloqueada!",
-            message="Recibiste US$5 en $CONFIO. Completa tu primera transacción para desbloquearlos.",
+            title="¡Tienes US$5 en $CONFIO por ganar!",
+            message="Completa tu primera transacción y los US$5 en $CONFIO quedan guardados en tu cuenta.",
             data={
                 'referral_id': referral.id,
                 'referrer_user_id': referral.referrer_user_id,
@@ -294,7 +294,11 @@ def notify_referral_joined(referral: UserReferral) -> None:
 
 
 def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None:
-    """Let the referred user know their CONFIO can be claimed."""
+    """Let the referred user know they earned their CONFIO.
+
+    The bonus is recorded in their account, not paid out: nothing moves until
+    $CONFIO launches, so this must not promise a withdrawal they can't make.
+    """
     if not referral.referred_user or referee_confio <= Decimal("0"):
         return
 
@@ -303,8 +307,8 @@ def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None
     create_notification(
         user=referral.referred_user,
         notification_type=NotificationTypeChoices.REFERRAL_REWARD_READY,
-        title="¡Has desbloqueado tus $CONFIO!",
-        message=f"Tienes {amount_str} $CONFIO desbloqueados de tu bono por referidos. Reclámalos ahora.",
+        title="¡Ganaste tus $CONFIO!",
+        message=f"Ganaste {amount_str} $CONFIO de tu bono por referidos. Ya están guardados en tu cuenta.",
         data={
             "referral_id": referral.id,
             "amount": amount_str,

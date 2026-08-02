@@ -354,11 +354,11 @@ export const ProfileScreen = () => {
   });
 
   const referralStats = React.useMemo(() => {
-    if (!referralData?.myReferrals || !userProfile?.id) return { pending: 0, claimable: 0, isReferred: false };
+    if (!referralData?.myReferrals || !userProfile?.id) return { pending: 0, earned: 0, isReferred: false };
 
     const currentUserId = String(userProfile.id);
     let pending = 0;
-    let claimable = 0;
+    let earned = 0;
     let isReferred = false;
 
     referralData.myReferrals.forEach((ref: any) => {
@@ -368,17 +368,23 @@ export const ProfileScreen = () => {
       if (isReferee) isReferred = true;
 
       const frameworkStatus = isReferrer ? ref.referrerRewardStatus : ref.refereeRewardStatus;
-      const amount = isReferrer ? (ref.rewardReferrerConfio || 0) : (ref.rewardRefereeConfio || 0);
+      // The Decimal scalar arrives as a STRING: without Number() these sums
+      // concatenate ("5.00" + "5.00" = "5.005.00") instead of adding.
+      const amount = Number(
+        (isReferrer ? ref.rewardReferrerConfio : ref.rewardRefereeConfio) ?? 0,
+      ) || 0;
 
-      // 'pending' or 'locked' count as pending. 'eligible' counts as claimable.
+      // 'pending'/'locked' = the condition isn't met yet. 'eligible' = the
+      // bonus is EARNED and held in the account — not withdrawable until
+      // $CONFIO launches.
       if (frameworkStatus === 'pending' || frameworkStatus === 'locked') {
         pending += amount;
       } else if (frameworkStatus === 'eligible') {
-        claimable += amount;
+        earned += amount;
       }
     });
 
-    return { pending, claimable, isReferred };
+    return { pending, earned, isReferred };
   }, [referralData, userProfile]);
 
   return (
@@ -498,34 +504,36 @@ export const ProfileScreen = () => {
             <TouchableOpacity
               style={[
                 styles.referralClaimButton,
-                // Change style if claimable
-                referralStats.claimable > 0 && { backgroundColor: colors.primarySoft, borderColor: colors.primaryDark, borderLeftWidth: 4 }
+                // Highlight once there is something earned to show
+                referralStats.earned > 0 && { backgroundColor: colors.primarySoft, borderColor: colors.primaryDark, borderLeftWidth: 4 }
               ]}
               onPress={() => navigation.navigate('ReferralRewardClaim')}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                {referralStats.claimable > 0 ? (
+                {referralStats.earned > 0 ? (
                   <View style={[styles.referralStatusDot, { backgroundColor: colors.primaryDark }]} />
                 ) : referralStats.pending > 0 ? (
                   <View style={[styles.referralStatusDot, { backgroundColor: colors.warning.icon }]} />
                 ) : (
-                  <Icon name="unlock" size={16} color={colors.primaryDark} style={{ marginRight: 8 }} />
+                  <Icon name="gift" size={16} color={colors.primaryDark} style={{ marginRight: 8 }} />
                 )}
 
                 <Text style={[
                   styles.referralClaimText,
-                  referralStats.claimable > 0 && { color: colors.successText, fontWeight: '700' },
+                  referralStats.earned > 0 && { color: colors.successText, fontWeight: '700' },
                   // pending = waiting on the friend's deposit, not an error
                   referralStats.pending > 0 && { color: colors.warning.text },
                 ]}>
-                  {referralStats.claimable > 0
-                    ? `${referralStats.claimable} $CONFIO Listos para Desbloquear`
+                  {/* Earned, not withdrawable: the bonus is held in the
+                      account until $CONFIO launches. */}
+                  {referralStats.earned > 0
+                    ? `${referralStats.earned.toFixed(2)} $CONFIO ganados`
                     : referralStats.pending > 0
-                      ? `${referralStats.pending} $CONFIO Pendientes`
-                      : 'Ver mis recompensas ($CONFIO)'}
+                      ? `${referralStats.pending.toFixed(2)} $CONFIO pendientes`
+                      : 'Ver mis bonos ($CONFIO)'}
                 </Text>
               </View>
-              <Icon name="chevron-right" size={16} color={referralStats.claimable > 0 ? colors.primaryDark : colors.primaryDark} />
+              <Icon name="chevron-right" size={16} color={colors.primaryDark} />
             </TouchableOpacity>
 
             {/* Tier progress indicator */}

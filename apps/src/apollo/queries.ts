@@ -3668,6 +3668,18 @@ export const GET_MY_REFERRAL_REWARDS = gql`
   }
 `;
 
+// Whether earned $CONFIO can leave the DB yet (server mirror of the reward
+// vault's one-way unlockClaims). A reward's 'eligible' status means EARNED,
+// never claimable — this flag is the only thing that says a claim is possible.
+// Its OWN query on purpose: against a server that predates the field, one
+// unknown field would fail the whole document, and the referral ledger must
+// still render. Treat any failure as locked.
+export const GET_REWARDS_CLAIMS_UNLOCKED = gql`
+  query GetRewardsClaimsUnlocked {
+    rewardsClaimsUnlocked
+  }
+`;
+
 export const GET_MY_REFERRALS = gql`
   query GetMyReferrals($status: String, $first: Int, $offset: Int) {
     myReferrals(status: $status, first: $first, offset: $offset) {
