@@ -230,17 +230,6 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     # Algorand group. One authority, checked on both rails.
     if getattr(invoice, 'settlement_chain', 'ALGORAND') != 'BSC':
         return {'success': False, 'error': 'invoice_not_bsc'}
-    # The invoice can be edited between prepare and submit; only the rail was
-    # re-checked. Everything the payer agreed to is re-checked here.
-    if not _invoice_terms_unchanged(invoice, payment_tx):
-        logger.warning('[PAY][BSC] invoice %s changed after preparation — refusing',
-                       invoice.internal_id)
-        return {'success': False, 'error': 'invoice_terms_changed'}
-    # And the payer's authority can be revoked in that same window.
-    if not _payer_still_authorized(user, payment_tx):
-        logger.warning('[PAY][BSC] user %s no longer authorized to spend from the '
-                       'payer account for invoice %s', user.id, invoice.internal_id)
-        return {'success': False, 'error': 'not_authorized'}
     invoice_token = (invoice.token_type or '').upper()
     if invoice_token not in DOLLAR_INVOICE_TOKENS and invoice_token != 'CONFIO':
         return {'success': False, 'error': 'unsupported_token'}
@@ -645,6 +634,17 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     # to point a prepared invoice at the other chain (Codex audit [P1]).
     if getattr(invoice, 'settlement_chain', 'ALGORAND') != 'BSC':
         return {'success': False, 'error': 'invoice_not_bsc'}
+    # The invoice can be edited between prepare and submit; only the rail was
+    # re-checked. Everything the payer agreed to is re-checked here.
+    if not _invoice_terms_unchanged(invoice, payment_tx):
+        logger.warning('[PAY][BSC] invoice %s changed after preparation — refusing',
+                       invoice.internal_id)
+        return {'success': False, 'error': 'invoice_terms_changed'}
+    # And the payer's authority can be revoked in that same window.
+    if not _payer_still_authorized(user, payment_tx):
+        logger.warning('[PAY][BSC] user %s no longer authorized to spend from the '
+                       'payer account for invoice %s', user.id, invoice.internal_id)
+        return {'success': False, 'error': 'not_authorized'}
 
     payer_addr = (payment_tx.payer_address or '').lower()
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
