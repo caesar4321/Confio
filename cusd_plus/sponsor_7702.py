@@ -90,7 +90,9 @@ GAS_PER_SELECTOR = {
     SEL_PAY: 240_000,  # 2 transferFroms + invoice write + accrual + ecrecover/EIP712 auth
     # v4's redeem branch adds a vault call: Ondo redemption dominates
     # (ConfioPayrollVault fork test measured 566k for the same shape).
-    SEL_PAY_V4: 950_000,
+    # v4 covers TWO very different executions under one selector, so the
+    # budget is chosen from the ROUTING (see _pay_v4_gas), not from here.
+    SEL_PAY_V4: 240_000,
     _sel('createInvitation(bytes32,address,uint256)'): 140_000,  # transferFrom + struct write
     _sel('reclaimInvitation(bytes32)'): 90_000,                  # transfer + settle
 }
@@ -426,10 +428,35 @@ def execute_calldata(calls: list, nonce: int, deadline: int, signature_hex: str,
     return '0x' + SEL_EXECUTE + encoded.hex()
 
 
+def _pay_v4_gas(data: str) -> int:
+    """v4 pay() is two executions behind one selector.
+
+    A transfer settlement costs about what v3 did; a redeem adds an Ondo
+    redemption that dominates everything else. Budgeting for the worst case
+    on both made a plain transfer reserve the whole 1.1m cap and fail
+    sponsor_balance_low with ample BNB for its real cost, while the redeem
+    branch still lost its headroom to that same cap. Read the routing out of
+    the calldata and budget for what will actually run.
+
+    ABI layout after the selector: invoiceId, token, gross, merchant,
+    redeemToUsdt — so the bool is the fifth 32-byte word.
+    """
+    try:
+        body = data[10:]
+        redeem = int(body[4 * 64:5 * 64], 16) == 1
+    except Exception:  # noqa: BLE001 — budget for the worst case if unreadable
+        return 950_000
+    return 950_000 if redeem else 240_000
+
+
 def gas_budget(calls: list, num_authorizations: int) -> int:
     total = GAS_BASE + GAS_PER_AUTHORIZATION * num_authorizations + GAS_EXECUTE_OVERHEAD
     for c in calls:
-        total += GAS_PER_SELECTOR.get(c['data'][2:10].lower(), 100_000)
+        sel = c['data'][2:10].lower()
+        if sel == SEL_PAY_V4:
+            total += _pay_v4_gas(c['data'])
+        else:
+            total += GAS_PER_SELECTOR.get(sel, 100_000)
     total = (total * 12) // 10
     return min(total, int(getattr(settings, 'CUSD_PLUS_7702_GAS_LIMIT', 1_100_000)))
 
