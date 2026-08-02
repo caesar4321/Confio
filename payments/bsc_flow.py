@@ -25,12 +25,22 @@ Two charge denominations (2026-08-01, ChargeScreen migration off Algorand):
       the re-issued BEP-20 moves directly, and `amount` is a token COUNT,
       not USD. Same 0.9% fee and the same on-chain invoice guard.
 
-Merchant token note (v1 divergence from the send flow's redeem-to-
-ineligible rule): the merchant receives the SAME token the payer spent.
-Holding cUSD+ is compliant secondary-market acquisition regardless of geo
-(the deemed-representations model; only MINTING is geo-gated), a business
-"geo" is ill-defined (eligibility is a personal-phone attribute), and the
-merchant's account screen already shows and redeems vault balances.
+Merchant token rule: the merchant receives the same token the payer spent,
+EXCEPT that an Ondo-ineligible merchant is never handed cUSD+.
+
+The v1 rule allowed it, reasoning that holding cUSD+ is compliant
+secondary-market acquisition (only MINTING is geo-gated) and that the
+merchant's own screen shows and redeems vault balances. The second half was
+false: for an ineligible holder the home screen renders only the USDT figure
+and drops the vault balance, so a real payment landed as an invisible
+position its owner could not operate. Product decision 2026-08-02: an
+ineligible merchant should not receive or handle cUSD+ at all.
+
+The pay contract moves ONE token and has no redeem path, so this is enforced
+by refusing the cUSD+ rail rather than converting. A payer funded only from
+savings gets `merchant_requires_usdt`; carrying them requires a redeem leg in
+the batch (the presale flow's shape) and an auth signed over USDT, which is
+the follow-up, not a bolt-on.
 """
 import json
 import logging
@@ -263,11 +273,38 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
             logger.warning('[PAY][BSC] balance rpc failed: %s', exc)
             return {'success': False, 'error': 'balance_unavailable'}
 
-        if shares_value_wei >= gross_wei:
+        # An ineligible merchant must never be handed cUSD+. The pay contract
+        # moves ONE token — payer's token straight through to merchant, no
+        # redeem leg — so the only way to keep shares away from them is to
+        # refuse the cUSD+ rail for this payment entirely.
+        #
+        # Phone-only on purpose: this is the RECIPIENT, not the caller, so
+        # there is no request of theirs to read an IP from (see
+        # cusd_plus/eligibility.is_ondo_eligible).
+        #
+        # This reverses the v1 "merchant receives the same token the payer
+        # spent" rule for ineligible merchants only. That rule assumed the
+        # merchant's account screen shows and redeems vault balances; for an
+        # ineligible holder it does neither, so the money looked stuck.
+        from cusd_plus.eligibility import is_ondo_eligible
+        merchant_user = getattr(merchant_account, 'user', None)
+        merchant_eligible = bool(merchant_user) and is_ondo_eligible(merchant_user)
+
+        if merchant_eligible and shares_value_wei >= gross_wei:
             kind = 'pay_cusd_plus'
             token_type = 'CUSD_PLUS'
             token = vault_addr
             gross_units = (gross_wei * WAD) // pps_wad  # shares at the live price
+        elif not merchant_eligible and usdt_raw < gross_wei and shares_value_wei >= gross_wei:
+            # The payer could cover this from savings, but only in the token
+            # this merchant cannot hold. Redeeming for them needs a redeem leg
+            # in the batch (the presale flow's shape) plus an auth signed over
+            # USDT — deliberately not bolted on here. Refuse with a reason the
+            # client can act on rather than settling shares on them.
+            logger.info('[PAY][BSC] invoice %s: merchant %s is Ondo-ineligible and the '
+                        'payer holds only cUSD+ — refusing rather than settling shares',
+                        invoice.internal_id, merchant_addr[:12])
+            return {'success': False, 'error': 'merchant_requires_usdt'}
         elif usdt_raw >= gross_wei:
             kind = 'pay_usdt'
             token_type = 'USDT'
