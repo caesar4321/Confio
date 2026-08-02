@@ -70,7 +70,7 @@ export const ConfioTokenInfoScreen = () => {
     ? `+${formatWholeNumber(usersNew7d)} esta semana`
     : 'acumulado';
   const presaleGrowth = presaleRaised7d > 0
-    ? `+${formatWholeNumber(presaleRaised7d)} cUSD esta semana`
+    ? `+$${formatWholeNumber(presaleRaised7d)} esta semana`
     : 'acumulado';
   const stats: Array<{
     label: string;
@@ -90,17 +90,17 @@ export const ConfioTokenInfoScreen = () => {
     },
     {
       label: 'Ahorros Protegidos',
-      value: `${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`,
+      value: `$${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)}`,
       growth: liveLabel,
-      description: 'Reservas verificables que respaldan tus dólares: USDC para cUSD (siempre $1) y USDY para cUSD+ (tu ahorro con rendimiento).',
+      description: 'Reservas verificables que respaldan tus dólares: USDY para cUSD+ (tu ahorro con rendimiento) y USDC para cUSD.',
       route: 'ProtectedSavings',
     },
     {
       label: 'Preventa de $CONFIO',
-      value: `${formatWholeNumber(s?.presaleCusdRaised ?? 0)} cUSD`,
+      value: `$${formatWholeNumber(s?.presaleCusdRaised ?? 0)}`,
       growth: presaleGrowth,
       growthHighlight: presaleRaised7d > 0,
-      description: 'cUSD aportados por la comunidad en la preventa.',
+      description: 'Dólares aportados por la comunidad en la preventa.',
       route: 'ConfioPresale',
     },
   ];

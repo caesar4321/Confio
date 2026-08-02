@@ -309,11 +309,11 @@ export const ConfioPresaleParticipateScreen = () => {
     }
 
     if (!isValidAmount) {
-      Alert.alert('Error', `Monto debe estar entre ${minAmount} y ${formatWithLocale(maxAmount)} cUSD`);
+      Alert.alert('Error', `Monto debe estar entre $${minAmount} y $${formatWithLocale(maxAmount)}`);
       return;
     }
     if (exceedsBalance) {
-      Alert.alert('Saldo insuficiente', 'No tienes suficiente cUSD para esta compra.');
+      Alert.alert('Saldo insuficiente', 'No tienes saldo suficiente para esta compra.');
       return;
     }
     if (!hasAcceptedTerms) {
@@ -327,7 +327,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
     Alert.alert(
       'Confirmar compra',
-      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por ${amount} cUSD?`,
+      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por $${amount}?`,
       [
         {
           text: 'Cancelar',
@@ -417,7 +417,7 @@ export const ConfioPresaleParticipateScreen = () => {
           </Text>
 
           <View style={styles.priceBadge}>
-            <Text style={styles.priceText}>Precio actual: {formatPrice(presalePrice)} cUSD por $CONFIO</Text>
+            <Text style={styles.priceText}>Precio actual: ${formatPrice(presalePrice)} por $CONFIO</Text>
           </View>
           </View>
         </View>
@@ -433,7 +433,7 @@ export const ConfioPresaleParticipateScreen = () => {
             <View style={styles.progressContainer}>
               <Text style={styles.progressLabel}>Recaudado</Text>
               <Text style={styles.progressAmount}>
-                {formatWithLocale(presaleData.raised, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
+                ${formatWithLocale(presaleData.raised, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </Text>
 
               {presaleData.nextMilestone > 0 && (
@@ -472,7 +472,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
           <View style={styles.swapCard}>
             <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Cantidad de cUSD</Text>
+              <Text style={styles.inputLabel}>Cantidad en dólares</Text>
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.textInput}
@@ -482,10 +482,13 @@ export const ConfioPresaleParticipateScreen = () => {
                   keyboardType="numeric"
                   placeholderTextColor={colors.text.light}
                 />
-                <Text style={styles.inputSuffix}>cUSD</Text>
+                <Text style={styles.inputSuffix}>USD</Text>
               </View>
               <Text style={styles.inputHelper}>
-                Saldo: {formatWithLocale(availableCusd)} cUSD • Mínimo: {minAmount} cUSD • Máximo: {formatWithLocale(maxAmount)} cUSD
+                Saldo: ${formatWithLocale(availableCusd)} • Mínimo: ${minAmount} • Máximo: ${formatWithLocale(maxAmount)}
+              </Text>
+              <Text style={styles.inputHelper}>
+                {isBscFlow ? 'Pagas con tu saldo de Confío Dollar' : 'Pagas con tu saldo de cUSD'}
               </Text>
             </View>
 
@@ -499,16 +502,16 @@ export const ConfioPresaleParticipateScreen = () => {
                 </View>
                 <View style={styles.resultRow}>
                   <Text style={styles.resultLabel}>Precio actual:</Text>
-                  <Text style={styles.resultValue}>{formatPrice(presalePrice)} cUSD</Text>
+                  <Text style={styles.resultValue}>${formatPrice(presalePrice)}</Text>
                 </View>
                 {!isValidAmount && (
                   <Text style={styles.errorText}>
-                    Monto debe estar entre {minAmount} y {formatWithLocale(maxAmount)} cUSD
+                    Monto debe estar entre ${minAmount} y ${formatWithLocale(maxAmount)}
                   </Text>
                 )}
                 {exceedsBalance && (
                   <Text style={styles.errorText}>
-                    Saldo insuficiente: tienes {formatWithLocale(availableCusd)} cUSD.
+                    Saldo insuficiente: tienes ${formatWithLocale(availableCusd)}.
                   </Text>
                 )}
               </View>

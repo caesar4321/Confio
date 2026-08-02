@@ -119,7 +119,9 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         key: 'presale',
         icon: 'zap',
         value: fmt(s?.presaleCusdRaised),
-        unit: 'cUSD',
+        // Dollars, like the savings tile: the presale now charges on BSC and
+        // the raise spans cUSD (legacy) and Confío Dollar contributions.
+        unit: 'USD',
         label: 'Preventa',
         descriptor: '$CONFIO',
         descriptorColor: colors.violet,

@@ -302,7 +302,7 @@ export const ConfioPresaleScreen = () => {
             <Text style={styles.sectionTitle}>¿Cómo funciona el precio?</Text>
             <View style={styles.curveCard}>
               <Text style={styles.curvePriceLabel}>Precio actual</Text>
-              <Text style={styles.curvePriceValue}>{formatPrice(currentPrice)} cUSD</Text>
+              <Text style={styles.curvePriceValue}>${formatPrice(currentPrice)}</Text>
               <Text style={styles.curvePriceUnit}>por $CONFIO</Text>
 
               <Text style={styles.curveExplainer}>
