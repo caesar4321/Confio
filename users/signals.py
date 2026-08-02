@@ -346,6 +346,34 @@ def create_unified_transaction_from_conversion(conversion):
         return None
 
 
+def _payroll_fee_amount(payroll_item) -> str:
+    """Everything the business paid that the employee did not receive.
+
+    Two components, and the second is why this is not just `fee_amount`:
+
+    the platform fee (gross - net), and — for a recipient who cannot hold
+    cUSD+ — the redemption slippage. That payout redeems shares to USDT with
+    a floor of 99.5%, so a nominal 1000 wage can settle as 995 USDT. The
+    contract reports the real figure in PaidOut.usdtOut, which the confirmer
+    records on settled_amount; without it the ledger credited the employee
+    with a wage they never fully received.
+    """
+    try:
+        from decimal import Decimal
+        gross = Decimal(str(payroll_item.gross_amount or payroll_item.net_amount or 0))
+        received = payroll_item.settled_amount
+        if received is None:
+            received = payroll_item.net_amount
+        delta = gross - Decimal(str(received or 0))
+        if delta <= 0:
+            return ''
+        return format(delta.quantize(Decimal('0.000001')).normalize(), 'f')
+    except Exception:  # noqa: BLE001 — never block the ledger row on this
+        logger.exception('payroll fee derivation failed for %s',
+                         getattr(payroll_item, 'id', '?'))
+        return ''
+
+
 def create_unified_transaction_from_payroll(payroll_item):
     """Create or update UnifiedTransactionTable from PayrollItem"""
     # Only create unified transaction when payroll is confirmed
@@ -384,7 +412,12 @@ def create_unified_transaction_from_payroll(payroll_item):
             payroll_item=payroll_item,
             defaults={
                 'transaction_type': 'payroll',
-                'amount': str(payroll_item.net_amount),
+                # Gross + fee, so each side sees its own number: the business
+                # is debited what the run actually costs them, the employee is
+                # credited what lands in their wallet. Recording net for both
+                # understated the employer's outlay by the fee on every wage.
+                'amount': str(payroll_item.gross_amount or payroll_item.net_amount),
+                'fee_amount': _payroll_fee_amount(payroll_item),
                 'token_type': token_type,
                 'status': payroll_item.status,
                 'transaction_hash': payroll_item.transaction_hash or '',

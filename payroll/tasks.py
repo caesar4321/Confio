@@ -18,7 +18,16 @@ def _notify_parties(item) -> None:
     from notifications.models import NotificationType as NotifType
 
     business = item.run.business
-    amount_str = f'{item.net_amount:.2f}'.rstrip('0').rstrip('.')
+    # Each side is told its own number, matching the ledger row: the employee
+    # what landed in their wallet (the settled figure, which for a redeemed
+    # payout can sit below the nominal wage), the business what the run cost
+    # them (gross, fee included). One shared figure told both of them
+    # something false.
+    received = item.settled_amount if item.settled_amount is not None else item.net_amount
+    gross = Decimal(item.gross_amount or 0) or (
+        Decimal(item.net_amount or 0) + Decimal(item.fee_amount or 0))
+    amount_str = f'{received:.2f}'.rstrip('0').rstrip('.')
+    gross_str = f'{gross:.2f}'.rstrip('0').rstrip('.')
     common = {
         'transaction_id': str(item.internal_id),
         'internal_id': str(item.internal_id),
@@ -48,10 +57,10 @@ def _notify_parties(item) -> None:
                 notification_type=NotifType.PAYROLL_SENT,
                 title='Nómina pagada',
                 message=(
-                    f'Pagaste {amount_str} dólares a '
+                    f'Pagaste {gross_str} dólares a '
                     f'{item.recipient_user.get_full_name() or "tu empleado"}'
                 ),
-                data=dict(common),
+                data=dict(common, amount=gross_str, received_amount=amount_str),
                 related_object_type='PayrollItem',
                 related_object_id=str(item.internal_id),
             )
@@ -77,6 +86,55 @@ def _settle_run(run) -> None:
     else:
         return
     run.save(update_fields=['status', 'updated_at'])
+
+
+def _decode_settled_amount(tx_hash: str, item):
+    """PaidOut.usdtOut when the payout redeemed, else the nominal net.
+
+    PaidOut(address business, address recipient, bytes32 itemId, address
+    signer, uint256 netShares, uint256 feeShares, bool redeemedToUsdt,
+    uint256 usdtOut) — business/recipient/itemId are indexed, so the four
+    remaining values sit in `data` in that order, 32 bytes each.
+
+    Returns net_amount unchanged when the payout was in cUSD+ shares (no
+    slippage there) or when the log cannot be read: never guess a number
+    lower than what we promised without evidence for it.
+    """
+    from decimal import Decimal
+    nominal = Decimal(str(item.net_amount or 0))
+    try:
+        from cusd_plus.tasks import _rpc
+        from django.conf import settings
+        from eth_hash.auto import keccak
+
+        vault = (getattr(settings, 'BSC_PAYROLL_VAULT_ADDRESS', '') or '').lower()
+        topic = '0x' + keccak(
+            b'PaidOut(address,address,bytes32,address,uint256,uint256,bool,uint256)'
+        ).hex()
+        receipt = _rpc('eth_getTransactionReceipt', [tx_hash]) or {}
+        for log in receipt.get('logs') or []:
+            if (log.get('address') or '').lower() != vault:
+                continue
+            if not log.get('topics') or log['topics'][0].lower() != topic:
+                continue
+            data = (log.get('data') or '0x')[2:]
+            if len(data) < 4 * 64:
+                break
+            redeemed = int(data[2 * 64:3 * 64], 16) == 1
+            usdt_out = int(data[3 * 64:4 * 64], 16)
+            if not redeemed:
+                return nominal  # paid in shares — nominal is what moved
+            settled = (Decimal(usdt_out) / Decimal(10) ** 18).quantize(Decimal('0.000001'))
+            if settled != nominal:
+                logger.info(
+                    '[PAYROLL][BSC] %s settled at %s USDT against a nominal %s '
+                    '(redemption slippage)', item.internal_id, settled, nominal)
+            return settled
+        logger.warning('[PAYROLL][BSC] no PaidOut log for %s — recording the nominal amount',
+                       item.internal_id)
+    except Exception:  # noqa: BLE001 — settlement must not fail on a decode
+        logger.exception('[PAYROLL][BSC] PaidOut decode failed for %s', item.internal_id)
+    return nominal
 
 
 @shared_task(name='payroll.confirm_bsc_payroll_payout', bind=True, max_retries=20)
@@ -106,7 +164,12 @@ def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
 
     if batch.status == 'confirmed':
         item.status = 'CONFIRMED'
-        item.save(update_fields=['status', 'updated_at'])
+        # Read what was ACTUALLY delivered off the chain instead of assuming
+        # the nominal wage. An Ondo-ineligible recipient is paid by redeeming
+        # shares to USDT with a 99.5% floor, so a 1000 wage can settle as 995
+        # — and the ledger and the push both used to claim the full 1000.
+        item.settled_amount = _decode_settled_amount(batch.tx_hash, item)
+        item.save(update_fields=['status', 'settled_amount', 'updated_at'])
 
         business = item.run.business
         payout = (item.blockchain_data or {}).get('bsc_payout') or {}

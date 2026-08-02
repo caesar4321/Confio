@@ -123,6 +123,14 @@ class PayrollItem(SoftDeleteModel):
     recipient_address = models.CharField(
         max_length=66, blank=True, default='', db_index=True,
         help_text="Recipient address at broadcast time (ledger ownership proof)")
+    # What the employee ACTUALLY received, read from the chain rather than
+    # assumed. For a recipient who cannot hold cUSD+ the payout redeems to
+    # USDT with a 99.5% floor, so the settled figure can sit below net_amount;
+    # the contract reports it in PaidOut.usdtOut. Null until the confirmer
+    # decodes the receipt, and for the cUSD+ branch it equals net_amount.
+    settled_amount = models.DecimalField(
+        max_digits=19, decimal_places=6, null=True, blank=True,
+        help_text="Amount actually delivered, decoded from PaidOut")
     blockchain_data = models.JSONField(null=True, blank=True, help_text="Unsigned transactions and metadata")
     error_message = models.TextField(blank=True)
     executed_by_user = models.ForeignKey(
