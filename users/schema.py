@@ -114,6 +114,31 @@ def _reward_claims_locked() -> bool:
 	return not bool(getattr(settings, 'REWARD_CLAIMS_UNLOCKED', False))
 
 
+def _referral_reward_totals(user):
+	"""(pending, earned) referral CONFIO for a user, across both roles.
+
+	'pending' means the qualifying deposit hasn't happened — the user does not
+	own it. 'eligible' means earned and recorded. One place decides which
+	bucket a status falls in, so the balance surfaces cannot disagree.
+	"""
+	def _sum(role_field, status_field, amount_field, statuses):
+		total = UserReferral.objects.filter(
+			deleted_at__isnull=True,
+			**{role_field: user, f"{status_field}__in": statuses},
+		).aggregate(total=Sum(amount_field))['total']
+		return total or Decimal('0')
+
+	pending = (
+		_sum('referred_user', 'referee_reward_status', 'reward_referee_confio', ['pending'])
+		+ _sum('referrer_user', 'referrer_reward_status', 'reward_referrer_confio', ['pending'])
+	)
+	earned = (
+		_sum('referred_user', 'referee_reward_status', 'reward_referee_confio', ['eligible'])
+		+ _sum('referrer_user', 'referrer_reward_status', 'reward_referrer_confio', ['eligible'])
+	)
+	return pending, earned
+
+
 def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id):
 	reward_timestamp = timezone.now()
 	with db_transaction.atomic():
@@ -1272,6 +1297,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	my_referral_rewards = graphene.List(ReferralRewardEventType, status=graphene.String())
 	my_referrals = graphene.List(InfluencerReferralType, status=graphene.String(), first=graphene.Int(), offset=graphene.Int())
 
+	my_confio_breakdown = graphene.Field(
+		lambda: ConfioBreakdownType,
+		description=(
+			"$CONFIO split by when each pot becomes movable: available now, "
+			"waiting on presale claims, or waiting on the launch."
+		),
+	)
+
 	rewards_claims_unlocked = graphene.Boolean(
 		description=(
 			"Whether earned $CONFIO rewards can be moved out of the DB yet. False "
@@ -1452,21 +1485,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			confio_lock_val = Decimal(all_balances.get('confio_presale', {}).get('amount', 0))
 			
 			if account_type == 'personal':
-				# 1. As Referee: My reward for being invited (if not claimed)
-				referee_pending = UserReferral.objects.filter(
-					referred_user=user,
-					referee_reward_status__in=['pending', 'eligible'],
-					deleted_at__isnull=True
-				).aggregate(total=Sum('reward_referee_confio'))['total'] or Decimal('0')
-
-				# 2. As Referrer: My rewards for inviting others (if not claimed)
-				referrer_pending = UserReferral.objects.filter(
-					referrer_user=user,
-					referrer_reward_status__in=['pending', 'eligible'],
-					deleted_at__isnull=True
-				).aggregate(total=Sum('reward_referrer_confio'))['total'] or Decimal('0')
-				
-				pending_referral_amount = referee_pending + referrer_pending
+				# Unearned + earned, the way builds before the launch taxonomy
+				# expect it. Newer clients read myConfioBreakdown, which keeps
+				# the two apart instead of showing unearned CONFIO as balance.
+				unearned, earned_bonuses = _referral_reward_totals(user)
+				pending_referral_amount = unearned + earned_bonuses
 
 				if pending_referral_amount > 0:
 					confio_lock_val += pending_referral_amount
@@ -2462,6 +2485,88 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	def resolve_rewards_claims_unlocked(self, info):
 		"""Mirror of the reward vault's one-way unlockClaims(); see settings."""
 		return bool(getattr(settings, 'REWARD_CLAIMS_UNLOCKED', False))
+
+	def resolve_my_confio_breakdown(self, info):
+		"""$CONFIO split by unlock event. See ConfioBreakdownType.
+
+		Deliberately NOT folded into myBalances: that query is Algorand-shaped
+		(one account_info snapshot) and every balance surface depends on it, so
+		a new field there would fail the whole document against an older server
+		and take Home down with it. This one can fail alone.
+		"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+
+		zero = "0.00"
+
+		def _fmt(value: Decimal) -> str:
+			# Floor, never round up: an overstated balance is a promise we
+			# would have to honor.
+			return f"{value.quantize(Decimal('0.01'), rounding=ROUND_DOWN):.2f}"
+
+		# Available: BEP-20 CONFIO for the JWT account. A dead RPC shows 0
+		# here rather than failing the whole breakdown — the locked figures
+		# come from the DB and are still worth showing.
+		available = Decimal('0')
+		try:
+			from cusd_plus import vault as cusd_plus_vault
+			from cusd_plus.schema import _active_bsc_address
+			bsc_address = _active_bsc_address(info)
+			token = getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', None)
+			if bsc_address and token:
+				raw = cusd_plus_vault.erc20_balance_raw(token, bsc_address)
+				available = Decimal(raw) / Decimal(10 ** 18)
+		except Exception:  # pylint: disable=broad-except
+			logger.warning("[confio_breakdown] BEP-20 read failed for user %s", user.id)
+
+		# Presale allocations and bonuses belong to the PERSON, not to a
+		# business they operate: on a business account both are somebody
+		# else's money and must not appear. Only `available` is account-scoped
+		# (the JWT account's own BEP-20 wallet).
+		try:
+			from .jwt_context import get_jwt_business_context_with_validation
+			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+			# No context = personal figures stay hidden. Account context comes
+			# from the JWT or not at all; defaulting would infer it instead.
+			is_personal = bool(jwt_context) and jwt_context.get('account_type') != 'business'
+		except Exception:  # pylint: disable=broad-except
+			is_personal = False
+
+		# Presale: reuse the presale reader so this can never disagree with
+		# the presale screen — it owns the on-chain read, the migration-credit
+		# rule, and the last-known-good cache.
+		presale_locked = Decimal('0')
+		earned = Decimal('0')
+		pending = Decimal('0')
+
+		if is_personal:
+			try:
+				from presale.schema import presale_onchain_info
+				onchain = presale_onchain_info(user)
+				if onchain:
+					owed = Decimal(str(onchain.purchased or 0)) - Decimal(str(onchain.claimed or 0))
+					presale_locked = max(owed, Decimal('0'))
+			except Exception:  # pylint: disable=broad-except
+				logger.warning("[confio_breakdown] presale read failed for user %s", user.id)
+
+			pending, earned = _referral_reward_totals(user)
+			# Achievement rewards already moved into the DB ledger. Their
+			# total_unlocked counterpart is deliberately excluded: that is
+			# historical Algorand claims, which live in the wallet, not here.
+			try:
+				balance = ConfioRewardBalance.objects.filter(user=user).first()
+				if balance and balance.total_locked:
+					earned += Decimal(balance.total_locked)
+			except Exception:  # pylint: disable=broad-except
+				logger.warning("[confio_breakdown] reward balance read failed for user %s", user.id)
+
+		return ConfioBreakdownType(
+			available=_fmt(available) if available else zero,
+			presale_locked=_fmt(presale_locked) if presale_locked else zero,
+			earned_bonuses=_fmt(earned) if earned else zero,
+			pending_bonuses=_fmt(pending) if pending else zero,
+		)
 
 	def resolve_my_referral_rewards(self, info, status=None):
 		user = getattr(info.context, 'user', None)
@@ -4167,6 +4272,28 @@ class BalancesType(graphene.ObjectType):
     confioLocked = graphene.String()
     pendingReferralReward = graphene.String()
     usdc = graphene.String()
+
+
+class ConfioBreakdownType(graphene.ObjectType):
+	"""The user's $CONFIO split by WHEN it becomes movable, not by chain.
+
+	Before the token launches nothing a user does makes $CONFIO transferable,
+	so the old locked/unlocked pair (where their own deposit flipped a bonus
+	into a transferable balance) no longer describes anything real. Each field
+	here names a different unlock event:
+
+	  available      — BEP-20 in the wallet; movable today.
+	  presale_locked — bought in the presale; waits on presale claims opening.
+	  earned_bonuses — earned and recorded; waits on the launch.
+	  pending_bonuses— NOT earned yet (the deposit condition is unmet). Never
+	                   part of the balance: counting it would show the user
+	                   money they do not have. Exposed only so the referral
+	                   surfaces can show what is still in play.
+	"""
+	available = graphene.String()
+	presale_locked = graphene.String()
+	earned_bonuses = graphene.String()
+	pending_bonuses = graphene.String()
 
 class RefreshAccountBalance(graphene.Mutation):
 	"""Force refresh balance from blockchain for the current account"""

@@ -3668,6 +3668,22 @@ export const GET_MY_REFERRAL_REWARDS = gql`
   }
 `;
 
+// $CONFIO split by WHEN each pot becomes movable. Its own query, like
+// GET_REWARDS_CLAIMS_UNLOCKED and for the same reason: myBalances backs every
+// balance surface, so this must be able to fail without taking Home with it.
+// pendingBonuses is NOT part of any balance — it is CONFIO the user has not
+// earned yet, shown only where we talk about what's still in play.
+export const GET_MY_CONFIO_BREAKDOWN = gql`
+  query GetMyConfioBreakdown {
+    myConfioBreakdown {
+      available
+      presaleLocked
+      earnedBonuses
+      pendingBonuses
+    }
+  }
+`;
+
 // Whether earned $CONFIO can leave the DB yet (server mirror of the reward
 // vault's one-way unlockClaims). A reward's 'eligible' status means EARNED,
 // never claimable — this flag is the only thing that says a claim is possible.

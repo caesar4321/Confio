@@ -207,89 +207,95 @@ class PresaleQueries(graphene.ObjectType):
 
     @login_required
     def resolve_my_presale_onchain_info(self, info):
-        """Purchased / claimed / claimable, read from the chain that actually
-        pays: BSC.
+        return presale_onchain_info(info.context.user)
 
-        $CONFIO exists only on BSC, so the Algorand presale app's local state
-        is NOT the answer — reading it would show a claimable balance on a
-        rail whose claim path never opens (presale/ws_consumers
-        ALGORAND_CLAIMS_NEVER_OPEN), and would double-count a buyer whose
-        allocation has already been carried over by creditMigrated.
 
-        Before a user enrolls a BSC address, the honest answer is the DB: they
-        own what they bought, and nothing is claimable yet because their
-        allocation cannot be assigned on-chain until they update the app.
-        """
-        from decimal import Decimal
+def presale_onchain_info(user):
+    """Purchased / claimed / claimable, read from the chain that actually
+    pays: BSC.
 
-        from django.conf import settings as dj_settings
+    $CONFIO exists only on BSC, so the Algorand presale app's local state
+    is NOT the answer — reading it would show a claimable balance on a
+    rail whose claim path never opens (presale/ws_consumers
+    ALGORAND_CLAIMS_NEVER_OPEN), and would double-count a buyer whose
+    allocation has already been carried over by creditMigrated.
 
-        from users.models import Account
-        from .models import PresalePurchase
+    Before a user enrolls a BSC address, the honest answer is the DB: they
+    own what they bought, and nothing is claimable yet because their
+    allocation cannot be assigned on-chain until they update the app.
 
-        user = info.context.user
+    Takes a user, not a ResolveInfo: the CONFIO breakdown in users/schema
+    needs the same numbers, and reaching through the decorated resolver
+    would have coupled it to graphql_jwt's arg inspection.
+    """
+    from decimal import Decimal
 
-        def _db_owned() -> float:
-            # Aggregate in the DB: a user with a long purchase history would
-            # otherwise pull every row into Python for a sum (Codex audit
-            # 2026-08-02, P2).
-            from django.db.models import Sum
-            total = PresalePurchase.objects.filter(
-                user=user, status='completed',
-            ).aggregate(s=Sum('confio_amount'))['s']
-            return float(total or 0)
+    from django.conf import settings as dj_settings
 
-        try:
-            vault = (getattr(dj_settings, 'BSC_PRESALE_VAULT_ADDRESS', '') or '').lower()
-            account = Account.objects.filter(
-                user=user, account_type='personal', deleted_at__isnull=True).first()
-            bsc_address = (getattr(account, 'bsc_address', None) or '').lower()
+    from users.models import Account
+    from .models import PresalePurchase
 
-            if not vault or not bsc_address:
-                # Not enrolled (or vault unset): show what they own, locked.
-                return PresaleOnchainInfo(
-                    purchased=_db_owned(), claimed=0.0, claimable=0.0, locked=True)
+    def _db_owned() -> float:
+        # Aggregate in the DB: a user with a long purchase history would
+        # otherwise pull every row into Python for a sum (Codex audit
+        # 2026-08-02, P2).
+        from django.db.models import Sum
+        total = PresalePurchase.objects.filter(
+            user=user, status='completed',
+        ).aggregate(s=Sum('confio_amount'))['s']
+        return float(total or 0)
 
-            from eth_utils import keccak
+    try:
+        vault = (getattr(dj_settings, 'BSC_PRESALE_VAULT_ADDRESS', '') or '').lower()
+        account = Account.objects.filter(
+            user=user, account_type='personal', deleted_at__isnull=True).first()
+        bsc_address = (getattr(account, 'bsc_address', None) or '').lower()
 
-            from .bsc_flow import _addr_word, _eth_call
-
-            def call(sig: str) -> int:
-                return _eth_call(vault, '0x' + keccak(text=sig)[:4].hex() + _addr_word(bsc_address))
-
-            from django.core.cache import cache
-
-            cache_key = f'presale:onchain_info:{bsc_address}'
-            try:
-                purchased = call('purchased(address)') / 10 ** 18
-                claimed = call('claimed(address)') / 10 ** 18
-                claimable = call('claimableOf(address)') / 10 ** 18
-                unlocked = bool(_eth_call(vault, '0x' + keccak(text='claimsUnlocked()')[:4].hex()))
-                # Keep the last GOOD read: an RPC blip used to report
-                # claimable=0, which the app renders as "nothing to claim" and
-                # disables the button — hiding real funds instead of showing a
-                # transient error (Codex audit 2026-08-02, P2).
-                cache.set(cache_key, (purchased, claimed, claimable, unlocked), 24 * 3600)
-            except Exception:
-                logger.warning('[PRESALE] onchain read failed for %s; serving last known', bsc_address)
-                last = cache.get(cache_key)
-                if last is None:
-                    raise
-                purchased, claimed, claimable, unlocked = last
-
-            # A migration credit that hasn't been assigned on-chain yet still
-            # belongs to the user — show the DB figure so nobody thinks their
-            # purchase vanished while the Safe batch is pending.
-            return PresaleOnchainInfo(
-                purchased=max(purchased, _db_owned()),
-                claimed=claimed,
-                claimable=claimable,
-                locked=not unlocked,
-            )
-        except Exception:
-            logger.exception('[PRESALE] onchain info read failed for user %s', getattr(user, 'id', None))
+        if not vault or not bsc_address:
+            # Not enrolled (or vault unset): show what they own, locked.
             return PresaleOnchainInfo(
                 purchased=_db_owned(), claimed=0.0, claimable=0.0, locked=True)
+
+        from eth_utils import keccak
+
+        from .bsc_flow import _addr_word, _eth_call
+
+        def call(sig: str) -> int:
+            return _eth_call(vault, '0x' + keccak(text=sig)[:4].hex() + _addr_word(bsc_address))
+
+        from django.core.cache import cache
+
+        cache_key = f'presale:onchain_info:{bsc_address}'
+        try:
+            purchased = call('purchased(address)') / 10 ** 18
+            claimed = call('claimed(address)') / 10 ** 18
+            claimable = call('claimableOf(address)') / 10 ** 18
+            unlocked = bool(_eth_call(vault, '0x' + keccak(text='claimsUnlocked()')[:4].hex()))
+            # Keep the last GOOD read: an RPC blip used to report
+            # claimable=0, which the app renders as "nothing to claim" and
+            # disables the button — hiding real funds instead of showing a
+            # transient error (Codex audit 2026-08-02, P2).
+            cache.set(cache_key, (purchased, claimed, claimable, unlocked), 24 * 3600)
+        except Exception:
+            logger.warning('[PRESALE] onchain read failed for %s; serving last known', bsc_address)
+            last = cache.get(cache_key)
+            if last is None:
+                raise
+            purchased, claimed, claimable, unlocked = last
+
+        # A migration credit that hasn't been assigned on-chain yet still
+        # belongs to the user — show the DB figure so nobody thinks their
+        # purchase vanished while the Safe batch is pending.
+        return PresaleOnchainInfo(
+            purchased=max(purchased, _db_owned()),
+            claimed=claimed,
+            claimable=claimable,
+            locked=not unlocked,
+        )
+    except Exception:
+        logger.exception('[PRESALE] onchain info read failed for user %s', getattr(user, 'id', None))
+        return PresaleOnchainInfo(
+            purchased=_db_owned(), claimed=0.0, claimable=0.0, locked=True)
 
 
 class BscPresaleCallType(graphene.ObjectType):
