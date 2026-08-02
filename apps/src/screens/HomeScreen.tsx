@@ -42,6 +42,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import {
   GET_PRESALE_STATUS,
   GET_MY_BALANCES,
+  GET_MY_CONFIO_BREAKDOWN,
   GET_ACTIVE_PRESALE,
   GET_ALL_PRESALE_PHASES,
   CHECK_REFERRAL_STATUS,
@@ -50,9 +51,8 @@ import {
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
-import { useCountry } from '../contexts/CountryContext';
-import { isRampBlockedCountry } from '../config/env';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { useRampCountry } from '../hooks/useRampCountry';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -123,7 +123,6 @@ export const HomeScreen = () => {
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const { signOut, userProfile, isAuthenticated, profileData } = useAuth() as any;
   const isAuthReady = useAuthReady();
-  const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
   const [algorandAddress, setAlgorandAddress] = React.useState<string>('');
@@ -197,6 +196,14 @@ export const HomeScreen = () => {
     fetchPolicy: 'network-only',
     nextFetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
+    skip: !isAuthReady,
+  });
+  // $CONFIO by unlock event. Isolated from GET_MY_BALANCES on purpose: that
+  // query feeds every row on this screen and must not fail over a field an
+  // older server doesn't know.
+  const { data: confioBreakdownData } = useQuery(GET_MY_CONFIO_BREAKDOWN, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
     skip: !isAuthReady,
   });
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
@@ -526,7 +533,22 @@ export const HomeScreen = () => {
     [myBalancesData?.myBalances?.confioLocked, myBalancesData?.myBalances?.confioPresaleLocked]
   );
 
-  const confioTotal = React.useMemo(() => confioLive + confioLocked, [confioLive, confioLocked]);
+  // What the user OWNS: available + presale + earned bonuses. Bonuses still
+  // waiting on a deposit are excluded — the home number is my money, and this
+  // row used to count CONFIO that had not been earned yet, which also inflated
+  // the portfolio headline below. Falls back to the myBalances pair when the
+  // breakdown query didn't answer (older server, offline).
+  const confioTotal = React.useMemo(() => {
+    const b = confioBreakdownData?.myConfioBreakdown;
+    if (b) {
+      const num = (v: string | null | undefined) => {
+        const parsed = parseFloat(v ?? '0');
+        return isFinite(parsed) ? parsed : 0;
+      };
+      return num(b.available) + num(b.presaleLocked) + num(b.earnedBonuses);
+    }
+    return confioLive + confioLocked;
+  }, [confioBreakdownData, confioLive, confioLocked]);
 
   const confioUsdValue = React.useMemo(() => confioTotal * confioPriceUsd, [confioTotal, confioPriceUsd]);
 
@@ -797,29 +819,12 @@ export const HomeScreen = () => {
   }, [claimingInvite, userProfile?.phoneNumber, userProfile?.phoneCountry]);
 
   // Recargar/Retirar run through ramp providers (Koywe/Guardarian). Where
-  // neither operates (VE, NI, PA, CU, ...), block up front and point to the
-  // Efectivo directory instead of failing deep inside the provider flow.
-  const rampCountryCode =
-    userProfile?.phoneCountry || selectedCountry?.[2] || userCountry?.[2] || '';
-  const navigateToRampOrEfectivo = React.useCallback(
-    (screen: 'TopUp' | 'Sell', params?: { destination?: string }) => {
-      if (isRampBlockedCountry(rampCountryCode)) {
-        Alert.alert(
-          'No disponible en tu país',
-          screen === 'TopUp'
-            ? 'Las recargas con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.'
-            : 'Los retiros con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.',
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            { text: 'Ir a Efectivo', onPress: () => navigation.navigate('Financieras') },
-          ],
-        );
-        return;
-      }
-      navigation.navigate(screen, params as any);
-    },
-    [rampCountryCode, navigation],
-  );
+  // neither operates (VE, NI, PA, CU, ...), the shared hook blocks up front
+  // and points to the Efectivo directory instead of failing deep inside the
+  // provider flow. It lives in the hook so every entry point gets the guard —
+  // this check used to be local to Home, which is how the referral CTAs
+  // walked blocked-country users straight into the ramp screen.
+  const { navigateToRampOrEfectivo } = useRampCountry();
 
   // World pickers: Recargar/Retirar route money between the two settlement
   // worlds — spend (cUSD · Algorand) vs grow (cUSD+ · savings chain). Two
@@ -1655,8 +1660,12 @@ export const HomeScreen = () => {
                   cares about the legacy row below, which is an
                   independent overlay driven only by cUSD-Algorand
                   balance. */}
-              {!activeAccount?.isEmployee && (
-                <Pressable
+              {/* Shown to employees too. Balance VISIBILITY is a permission
+                  (viewBalance) and it hides the NUMBER — it does not remove
+                  the wallet from the account. Hiding the whole card here was
+                  the outlier: the legacy row below, and every other balance
+                  surface, mask the figure and keep the row. */}
+              <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
@@ -1691,7 +1700,9 @@ export const HomeScreen = () => {
                         {/* Eligible: vault + landed-not-yet-minted USDT.
                             Ineligible: the row IS the USDT balance — a
                             mere wallet, nothing vault-flavored. */}
-                        {showBalance
+                        {/* Same rule as the legacy row: an employee without
+                            viewBalance sees the wallet, not the figure. */}
+                        {(canViewBalance && showBalance)
                           ? `$${formatFixedFloor(
                               savingsPortfolio.savings.enabled
                                 ? savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd
@@ -1704,7 +1715,6 @@ export const HomeScreen = () => {
                     </View>
                   </View>
                 </Pressable>
-              )}
 
               {/* Legacy cUSD — demoted row. While deposits are paused the
                   row exists only to drain (send/pay/retirar), so hide it
@@ -1780,8 +1790,10 @@ export const HomeScreen = () => {
                   from the old combined Ahorros hub): stocks have red days
                   and belong visually apart from the payment dollar. Shown
                   for stocks-enabled users and anyone still holding. */}
-              {!activeAccount?.isEmployee &&
-                (savingsPortfolio.stocks.enabled || savingsPortfolio.stocks.totalUsd > 0) && (
+              {/* Same rule as the savings row: the employee check belongs on
+                  the NUMBER, not the wallet. What remains here is the
+                  genuine emptiness test — no stocks and none enabled. */}
+              {(savingsPortfolio.stocks.enabled || savingsPortfolio.stocks.totalUsd > 0) && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
@@ -1799,7 +1811,9 @@ export const HomeScreen = () => {
                     </View>
                     <View style={styles.walletBalanceContainer}>
                       <Text style={styles.walletBalanceText}>
-                        {showBalance ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}` : '••••'}
+                        {(canViewBalance && showBalance)
+                          ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}`
+                          : '••••'}
                       </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
