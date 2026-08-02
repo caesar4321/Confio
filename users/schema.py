@@ -4482,7 +4482,21 @@ class ClaimAchievementReward(graphene.Mutation):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return ClaimAchievementReward(success=False, error="Authentication required")
-		
+
+		# The achievement scheme is retired: the live one is invite + a first
+		# deposit over the threshold, nothing else. No app surface calls this
+		# any more, but the endpoint stayed reachable with only a valid token
+		# while ~9.6K users still hold an unclaimed 'pionero_beta' row. Each
+		# call credited ConfioRewardBalance.total_locked, which the CONFIO
+		# breakdown counts as an earned bonus — so a dead scheme could still
+		# mint live obligations that the reward vault would be asked to pay.
+		# Already-claimed rows keep their credit; this only stops new ones.
+		if not getattr(settings, 'ACHIEVEMENT_CLAIMS_ENABLED', False):
+			return ClaimAchievementReward(
+				success=False,
+				error="Los logros ya no otorgan $CONFIO. Ahora ganas invitando amigos.",
+			)
+
 		# Check if user is using a business account - achievements are only for personal accounts
 		from .jwt_context import get_jwt_business_context_with_validation
 		jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
