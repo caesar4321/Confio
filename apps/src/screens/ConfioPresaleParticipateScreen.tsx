@@ -41,9 +41,13 @@ export const ConfioPresaleParticipateScreen = () => {
   const { data, loading, error, refetch } = useQuery(GET_ACTIVE_PRESALE, {
     fetchPolicy: 'cache-and-network',
   });
-  const { data: curveData } = useQuery(GET_PRESALE_CURVE_STATS, {
+  const { data: curveData, error: curveError } = useQuery(GET_PRESALE_CURVE_STATS, {
     fetchPolicy: 'cache-and-network',
   });
+  // Until the server answers we do NOT know which chain settles a purchase.
+  // Acting on the default (Algorand) here would fire the whole opt-in
+  // ceremony on a BSC user for nothing, so the init effect waits for this.
+  const chainKnown = !!curveData || !!curveError;
   // Purchase-flow chain: 'bsc' = sponsored 7702 buys against the curve
   // vault (no Algorand session/opt-in at all); 'algorand' = legacy WS flow.
   const isBscFlow = curveData?.presaleChain === 'bsc';
@@ -149,13 +153,19 @@ export const ConfioPresaleParticipateScreen = () => {
   const [loadingMessage, setLoadingMessage] = React.useState('');
   React.useEffect(() => {
     (async () => {
+      // Outside the try on purpose: the `finally` must NOT clear the spinner
+      // while the chain is still unknown, or we'd flash the form and then
+      // start an opt-in behind it. The effect re-runs when the answer lands.
+      if (!chainKnown) return;
       try {
         const allowed = await checkBackupEnforcement('presale');
         if (!allowed) {
           navigation.goBack();
           return;
         }
-        if (isBscFlow) return; // no opt-in concept on BSC
+        // BSC: nothing to opt into (no app opt-in, no ASA, no MBR) — the
+        // Algorand pre-flight below is pure latency for these users.
+        if (isBscFlow) return;
 
         setLoadingMessage('Preparando preventa...');
         const s = new PresaleWsSession();
@@ -175,7 +185,7 @@ export const ConfioPresaleParticipateScreen = () => {
         setLoadingMessage('');
       }
     })();
-  }, [checkBackupEnforcement, navigation, isBscFlow]);
+  }, [checkBackupEnforcement, navigation, isBscFlow, chainKnown]);
 
   const executeSwap = async () => {
     try {

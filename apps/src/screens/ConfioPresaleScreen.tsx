@@ -42,6 +42,9 @@ export const ConfioPresaleScreen = () => {
 
   // Use server data — the contract is the authority; nothing is hardcoded
   const curve = data?.presaleCurveStats;
+  // Which chain settles a purchase. Drives whether the Algorand opt-in
+  // pre-flight runs at all (it does not exist on BSC).
+  const isBscFlow = data?.presaleChain === 'bsc';
   const currentPrice = curve ? parseFloat(curve.currentPrice) : 0;
   const startPrice = curve ? parseFloat(curve.startPrice) : 0;
   const finalPrice = curve ? parseFloat(curve.finalPrice) : 0;
@@ -359,26 +362,17 @@ export const ConfioPresaleScreen = () => {
             <Button
               title="Participar en la Preventa"
               loading={busy}
-              onPress={async () => {
+              onPress={() => {
                 if (!checkEligibility()) return;
-
-                // Check presale eligibility via WebSocket (backup check, V1 migration, etc.)
-                try {
-                  setBusy(true);
-                  const { PresaleWsSession } = await import('../services/presaleWs');
-                  const session = new PresaleWsSession();
-                  await session.open();
-                  const pack = await session.optinPrepare();
-                  setBusy(false);
-
-                  // If no transactions, user is eligible - proceed with navigation
-                  navigation.navigate('ConfioPresaleParticipate');
-                } catch (e: any) {
-                  setBusy(false);
-                  // Server returned an error (e.g., backup check failure)
-                  const errorMessage = e?.message || 'No se pudo verificar elegibilidad';
-                  Alert.alert('No disponible', errorMessage);
-                }
+                // Navigate immediately. This button used to run the ENTIRE
+                // Algorand opt-in pre-flight first (open a socket, and on the
+                // server possibly send an MBR funding tx and wait for its
+                // confirmation) — and then the destination screen ran the very
+                // same ensureOptedIn again. That double round trip is the wait
+                // users feel here; the destination owns it, with a real
+                // spinner and the same error alert. On BSC there is nothing to
+                // opt into at all, so the wait is pure waste.
+                navigation.navigate('ConfioPresaleParticipate');
               }}
               icon={<Icon name="star" size={20} color={colors.white} />}
               style={{ backgroundColor: colors.secondary, borderRadius: 24, paddingHorizontal: 32, marginBottom: 16 }}

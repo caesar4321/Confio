@@ -19,6 +19,14 @@ class _DummyInfo:
         self.context = context
 
 
+def _bsc_presale_active() -> bool:
+    """True once purchases moved to the BSC curve vault. The legacy Algorand
+    purchase/opt-in paths in this consumer MUST refuse from that moment on —
+    they price from the mutable DB phase row and skip every BSC-side gate."""
+    from django.conf import settings as dj_settings
+    return getattr(dj_settings, 'PRESALE_CHAIN', 'algorand') == 'bsc'
+
+
 class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
     """
     WebSocket for CONFIO Presale (prepare + submit, fully sponsored).
@@ -297,13 +305,28 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         user = self.scope.get("user")
 
+        # CUTOVER GATE (Codex audit 2026-08-02, P1). Everything the BSC flow
+        # enforces — the immutable on-chain curve, funding rules, race-safe
+        # limit reservation, mandatory attestations — lives on the GraphQL
+        # path. This legacy path sells at the MUTABLE DB phase price, so
+        # leaving it open after the switch would make it the cheapest way to
+        # bypass all of it. Claims stay open (see _claim_prepare): buyers must
+        # always be able to get what they already paid for.
+        if _bsc_presale_active():
+            return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
+
         # Geo-blocking check (phone country + IP country; test accounts bypass)
         from .geo_utils import check_presale_eligibility, get_country_for_ip
         is_eligible, error_msg = check_presale_eligibility(user, client_ip=client_ip, ip_country_hint=ip_country_hint)
         if not is_eligible:
             return {"success": False, "error": error_msg}
 
-        if require_terms and not accepted_terms:
+        # Terms are required unconditionally: every shipped client sends
+        # accepted_terms=true, so `require_terms` (which a client could switch
+        # off simply by OMITTING the field) is not a gate an attacker gets to
+        # opt out of. The not-US attestation below stays tolerant until the
+        # build carrying its checkbox is live.
+        if not accepted_terms:
             return {"success": False, "error": "terms_acceptance_required"}
 
         # Self-attestation "No vivo en Estados Unidos" — required for updated
@@ -546,6 +569,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import logging as _log
 
         user = self.scope.get("user")
+
+        # Opting into the Algorand presale app is meaningless once buys run on
+        # BSC — and this call funds MBR from the sponsor, so leaving it open
+        # after cutover is free sponsor drain. (Codex audit 2026-08-02, P1.)
+        if _bsc_presale_active():
+            return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
 
         # Geo-blocking check (same gate as purchase prepare; test accounts bypass)
         from .geo_utils import check_presale_eligibility

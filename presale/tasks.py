@@ -55,24 +55,57 @@ def _vault_address() -> str | None:
 
 @shared_task(name='presale.sync_migration_credits')
 def sync_presale_migration_credits() -> dict:
-    """Create pending credit rows for enrolled users (bsc_address present)."""
+    """Create pending credit rows for enrolled users (bsc_address present).
+
+    ONLY legacy Algorand purchases are migratable. A BSC purchase already
+    credited `purchased[buyer]` on-chain when it settled, so including it
+    here would hand the same CONFIO out twice — the second time from
+    migratedPool, i.e. out of backing reserved for genuine Algorand buyers
+    (Codex audit 2026-08-02, P1).
+
+    Amounts are re-synced, not snapshotted: a user who buys again on
+    Algorand before cutover would otherwise keep the stale total forever.
+    A row that is already queued/credited can't be topped up in place
+    (one row per user), so the delta is logged loudly for a manual credit.
+    """
     from users.models import Account
     from presale.models import PresalePurchase, PresaleMigrationCredit
 
     totals = (
-        PresalePurchase.objects.filter(status='completed')
+        PresalePurchase.objects.filter(
+            status='completed', funding_source='algorand_cusd',
+        )
         .values('user_id')
         .annotate(total=Sum('confio_amount'))
     )
-    existing = set(
-        PresaleMigrationCredit.objects.values_list('user_id', flat=True)
-    )
+    existing = {
+        row.user_id: row for row in PresaleMigrationCredit.objects.all()
+    }
 
-    created, skipped_unlinked = 0, 0
+    created, updated, skipped_unlinked, needs_manual = 0, 0, 0, 0
     for row in totals:
         user_id, total = row['user_id'], row['total'] or Decimal('0')
-        if user_id in existing or total <= 0:
+        if total <= 0:
             continue
+
+        credit = existing.get(user_id)
+        if credit:
+            if credit.confio_amount >= total:
+                continue
+            if credit.status == 'pending':
+                credit.confio_amount = total
+                credit.save(update_fields=['confio_amount', 'updated_at'])
+                updated += 1
+            else:
+                needs_manual += 1
+                logger.warning(
+                    '[PRESALE][MIGRATION] user %s bought %s more CONFIO after its '
+                    'credit was %s (row has %s, DB total %s) — needs a manual '
+                    'top-up credit', user_id, total - credit.confio_amount,
+                    credit.status, credit.confio_amount, total,
+                )
+            continue
+
         account = Account.objects.filter(
             user_id=user_id,
             account_type='personal',
@@ -89,9 +122,13 @@ def sync_presale_migration_credits() -> dict:
         created += 1
 
     logger.info(
-        f"[PRESALE][MIGRATION] sync: created={created} awaiting_bsc_address={skipped_unlinked}"
+        f"[PRESALE][MIGRATION] sync: created={created} updated={updated} "
+        f"awaiting_bsc_address={skipped_unlinked} needs_manual_topup={needs_manual}"
     )
-    return {'created': created, 'awaiting_bsc_address': skipped_unlinked}
+    return {
+        'created': created, 'updated': updated,
+        'awaiting_bsc_address': skipped_unlinked, 'needs_manual_topup': needs_manual,
+    }
 
 
 def build_presale_credit_batch(limit: int = 100, batch_id: str | None = None) -> dict:
@@ -172,14 +209,24 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
         raise self.retry(countdown=15)
 
     if batch.status == 'confirmed':
-        purchase.complete_purchase(batch.tx_hash)
-        upl, _ = UserPresaleLimit.objects.get_or_create(user=purchase.user, phase=purchase.phase)
-        upl.total_purchased += purchase.cusd_amount
-        upl.last_purchase_at = timezone.now()
-        upl.save(update_fields=['total_purchased', 'last_purchase_at'])
-        UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
-            status='CONFIRMED', transaction_hash=batch.tx_hash,
-        )
+        # Serialize the limit increment: two purchases confirming at once would
+        # otherwise both read the same total and the later save would erase the
+        # earlier one, understating the ledger the per-user cap is built on
+        # (Codex audit 2026-08-02, P1). The row lock also makes this task's
+        # completion atomic with the increment, so a worker dying mid-way can't
+        # leave a completed purchase that never counted.
+        from django.db import transaction
+        with transaction.atomic():
+            upl, _ = UserPresaleLimit.objects.get_or_create(
+                user=purchase.user, phase=purchase.phase)
+            upl = UserPresaleLimit.objects.select_for_update().get(pk=upl.pk)
+            purchase.complete_purchase(batch.tx_hash)
+            upl.total_purchased += purchase.cusd_amount
+            upl.last_purchase_at = timezone.now()
+            upl.save(update_fields=['total_purchased', 'last_purchase_at'])
+            UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
+                status='CONFIRMED', transaction_hash=batch.tx_hash,
+            )
         logger.info('[PRESALE][BSC] purchase %s confirmed: %s', purchase.id, batch.tx_hash)
     else:  # reverted / noop_failed
         purchase.status = 'failed'
@@ -203,9 +250,16 @@ def abandon_stale_bsc_purchases() -> dict:
     from users.models_unified import UnifiedTransactionTable
 
     cutoff = timezone.now() - timedelta(hours=24)
+    # Every BSC funding source, not just direct_cusd. cusd_plus.vault
+    # reserved_usdt_wei() reserves prepared-but-unsigned buys for BOTH sources
+    # and documents THIS reaper as what releases them — so reaping only one
+    # left an unsigned cusd_plus_redeem row 'processing' forever, permanently
+    # subtracting its amount from sweepableUsdtUsd. The auto-mint then finds
+    # nothing to sweep and the user's deposits silently stop converting.
+    from .bsc_flow import BSC_FUNDING_SOURCES
     stale = PresalePurchase.objects.filter(
         status='processing',
-        funding_source='direct_cusd',
+        funding_source__in=BSC_FUNDING_SOURCES,
         transaction_hash__isnull=True,
         created_at__lt=cutoff,
     )
