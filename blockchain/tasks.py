@@ -294,35 +294,88 @@ def _amount_from_base(amount_base: int, decimals: int) -> Decimal:
     return (Decimal(amount_base) / q).quantize(Decimal('0.000001'))
 
 
-def _txid_owned_by_feature(txid: str) -> bool:
-    """Has some feature already recorded this Algorand transfer?
+def _transfer_owned_by_feature(txid, to_addr, amount, round_time=None) -> bool:
+    """Has some feature already recorded THIS transfer?
 
-    The inbound scanner's own dedupe asks only whether a SendTransaction
-    exists. Payouts made BY an application never have one and never look
-    internal (the app address is not a registered account), so without this
-    they are re-recorded as external deposits on top of the row the feature
-    already wrote — the recipient sees the same money twice, notified twice.
+    Matching on the transaction id alone did not work and never could: a
+    humanitarian release and a legacy presale purchase both store the id
+    returned by send_raw_transaction, which for a GROUP is the FIRST
+    transaction — the sponsor payment — while the scanner sees the inner
+    AXFER's own id. A referral claim stores the application-call id and the
+    reward moves in an inner transaction. So the stored hash and the observed
+    hash are, by construction, different transactions.
+
+    Match what is actually comparable: the recipient and the amount, inside a
+    window. This is the same shape the internal-send dedupe below already
+    uses for the 8391a16a group-txid failure, applied to the features that
+    pay OUT.
     """
-    if not txid:
+    from datetime import datetime, timedelta, timezone as py_tz
+    from decimal import Decimal
+
+    if not to_addr:
         return False
     try:
+        amt = Decimal(str(amount))
+    except Exception:  # noqa: BLE001
+        return False
+
+    when = None
+    if round_time:
+        try:
+            when = datetime.fromtimestamp(int(round_time), tz=py_tz.utc)
+        except Exception:  # noqa: BLE001
+            when = None
+    window = timedelta(minutes=30)
+
+    def _recent(qs, field='created_at'):
+        if when is None:
+            return qs
+        return qs.filter(**{f'{field}__gte': when - window,
+                            f'{field}__lte': when + window})
+
+    # Humanitarian: recipient_address and amount are both stored.
+    try:
         from humanitarian.models import HumanitarianRelease
-        if HumanitarianRelease.objects.filter(transaction_hash=txid).exists():
+        qs = HumanitarianRelease.objects.filter(
+            recipient_address__iexact=to_addr, amount=amt)
+        if txid:
+            if HumanitarianRelease.objects.filter(transaction_hash=txid).exists():
+                return True
+        if _recent(qs).exists():
             return True
     except Exception:  # noqa: BLE001 — a scanner must not die on a lookup
-        logger.exception('humanitarian ownership check failed for %s', txid)
-    try:
-        from achievements.models import ReferralRewardEvent
-        if ReferralRewardEvent.objects.filter(reward_tx_id=txid).exists():
-            return True
-    except Exception:  # noqa: BLE001
-        logger.exception('referral ownership check failed for %s', txid)
+        logger.exception('humanitarian ownership check failed for %s', to_addr)
+
+    # Legacy presale: the buyer's address and the CONFIO bought.
     try:
         from presale.models import PresalePurchase
-        if PresalePurchase.objects.filter(transaction_hash=txid).exists():
+        if txid and PresalePurchase.objects.filter(transaction_hash=txid).exists():
+            return True
+        if _recent(PresalePurchase.objects.filter(
+                from_address__iexact=to_addr, confio_amount=amt)).exists():
             return True
     except Exception:  # noqa: BLE001
-        logger.exception('presale ownership check failed for %s', txid)
+        logger.exception('presale ownership check failed for %s', to_addr)
+
+    # Referral rewards carry no address, so resolve the recipient to a user
+    # first and match the CONFIO figure that was awarded.
+    try:
+        from achievements.models import ReferralRewardEvent
+        from users.models import Account
+        if txid and ReferralRewardEvent.objects.filter(reward_tx_id=txid).exists():
+            return True
+        user_ids = list(Account.objects.filter(
+            algorand_address__iexact=to_addr).values_list('user_id', flat=True)[:5])
+        if user_ids:
+            from django.db.models import Q
+            if _recent(ReferralRewardEvent.objects.filter(
+                    Q(referee_confio=amt) | Q(referrer_confio=amt),
+                    user_id__in=user_ids), field='occurred_at').exists():
+                return True
+    except Exception:  # noqa: BLE001
+        logger.exception('referral ownership check failed for %s', to_addr)
+
     return False
 
 
@@ -543,18 +596,6 @@ def scan_inbound_deposits():
             aamt = inner.get('amount', 0)
             txid = axfer_tx.get('id')
 
-            # Some other feature may already own this transfer. The dedupe
-            # below only asks whether a SendTransaction exists, which is the
-            # wrong question for money paid out by an APPLICATION: a
-            # humanitarian release and a referral reward claim both move an
-            # ASA to the user from a contract address that is not a
-            # registered account, so neither looked internal and neither had
-            # a SendTransaction — and the recipient got the aid (or the
-            # reward) a second time as a deposit "from an external wallet",
-            # with a second push. Ask the owning models directly.
-            if txid and _txid_owned_by_feature(txid):
-                skipped += 1
-                return
 
             # Ignore zero-amount asset transfers (opt-ins, no-op clawbacks)
             try:
@@ -639,6 +680,18 @@ def scan_inbound_deposits():
 
             account = addr_to_account.get(to_addr)
             if not account:
+                return
+
+            # Some other feature may already own this transfer. Asking only
+            # whether a SendTransaction exists is the wrong question for money
+            # paid out by an APPLICATION: a humanitarian release and a
+            # referral claim both move an ASA from a contract address that is
+            # not a registered account, so neither looks internal and neither
+            # has a SendTransaction — the recipient got the aid a second time
+            # as a deposit "from an external wallet", with a second push.
+            if _transfer_owned_by_feature(txid, to_addr, human_amt,
+                                          axfer_tx.get('round-time')):
+                skipped += 1
                 return
 
             if xaid == USDC_ID:
