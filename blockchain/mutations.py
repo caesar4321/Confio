@@ -402,9 +402,32 @@ def _record_referral_withdrawal(user, amount: Decimal, *, reference_id: str = ''
             return
 
         balance, _ = ConfioRewardBalance.objects.get_or_create(user=user)
+        balance = ConfioRewardBalance.objects.select_for_update().get(pk=balance.pk)
+
+        # Debit the pot the tokens actually left. Only total_unlocked has ever
+        # been on chain: referral claims credit it (_record_referral_claim_payout),
+        # while achievement rewards live in total_locked and were never minted to
+        # a wallet, so they cannot be what is being sent. Debiting total_locked
+        # unconditionally — as this did — let a referral send silently eat an
+        # unrelated achievement balance, which myConfioBreakdown then reports as
+        # the user's earned bonuses.
+        #
+        # Spilling to locked when unlocked is short is deliberate: it means the
+        # ledger already drifted from the chain, and eating the remainder is
+        # closer to the truth than pretending the spend didn't happen.
+        if delta > 0:
+            unlocked_now = balance.total_unlocked or Decimal('0')
+            from_unlocked = min(delta, unlocked_now)
+            from_locked = delta - from_unlocked
+        else:
+            # Amended downward: give it back where wallet tokens live.
+            from_unlocked = delta
+            from_locked = Decimal('0')
+
         ConfioRewardBalance.objects.filter(pk=balance.pk).update(
-            total_spent=F('total_spent') + delta,
-            total_locked=Greatest(F('total_locked') - delta, Decimal('0')),
+            total_spent=Greatest(F('total_spent') + delta, Decimal('0')),
+            total_unlocked=Greatest(F('total_unlocked') - from_unlocked, Decimal('0')),
+            total_locked=Greatest(F('total_locked') - from_locked, Decimal('0')),
         )
         balance.refresh_from_db()
 
@@ -413,7 +436,7 @@ def _record_referral_withdrawal(user, amount: Decimal, *, reference_id: str = ''
                 user=user,
                 transaction_type='spent',
                 amount=delta,
-                balance_after=balance.total_locked,
+                balance_after=balance.total_unlocked,
                 reference_type='referral_withdrawal',
                 reference_id=reference_id,
                 description='Retiro de recompensas por referidos',

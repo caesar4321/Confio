@@ -494,13 +494,25 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         return referral
 
     referrer_address: Optional[str] = None
+    # What the referrer is OWED, kept separate from what we can assign on chain
+    # right now. These diverge when they have no address yet.
+    referrer_confio_owed = referrer_confio
+    referrer_address_missing = False
     if referrer_confio > 0 and referral.referrer_user:
         referrer_address = resolve_address(referral.referrer_user)
         if not referrer_address:
-            # The referee is still paid; the referrer's share needs their
-            # address. Drop it here (a later resync re-records it once the
-            # referrer registers).
+            # The referee is still paid; the referrer's share can't be assigned
+            # on chain without their address. Drop ONLY the chain leg — the
+            # allocation stays in the DB and their status stays 'pending'.
+            #
+            # Zeroing the stored amount (the old behavior) erased the
+            # obligation for good: this referral is marked eligible, sync
+            # returns early for an eligible referral, and the management resync
+            # then reads back the zero. A referrer who simply hadn't opened an
+            # EVM-capable build lost their bonus permanently — the exact case
+            # the BSC migration makes common.
             referrer_confio = Decimal("0")
+            referrer_address_missing = True
 
     try:
         if use_bsc:
@@ -546,7 +558,9 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             event.reward_status = "eligible"
             event.reward_tx_id = result.tx_id
             event.referee_confio = referee_confio
-            event.referrer_confio = referrer_confio
+            # The owed amount, not the chain-assignable one: this row is the
+            # record of what was earned.
+            event.referrer_confio = referrer_confio_owed
             event.error = ""
             event.save(
                 update_fields=[
@@ -565,7 +579,7 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             referral.reward_error = ""
             referral.reward_event = referral.reward_event or event_ctx.event
             referral.reward_referee_confio = referee_confio
-            referral.reward_referrer_confio = referrer_confio
+            referral.reward_referrer_confio = referrer_confio_owed
             
             # Robust metadata update
             if referral.reward_metadata is None:
@@ -577,6 +591,11 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             referral.referee_reward_status = "eligible"
             if referrer_confio > Decimal("0") and referral.referrer_user:
                 referral.referrer_reward_status = "eligible"
+            elif referrer_address_missing and referral.referrer_user:
+                # Owed but not assignable yet. 'pending' is the honest state:
+                # the amount is on the row, and it stays claimable once they
+                # register an address, instead of vanishing.
+                referral.referrer_reward_status = "pending"
             referral.save(
                 update_fields=[
                     "reward_status",
