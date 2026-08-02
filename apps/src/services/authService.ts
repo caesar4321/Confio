@@ -28,6 +28,71 @@ import algorandService from './algorandService';
 // waiting for a savings screen. A success marker (keyed by address) makes
 // retries free; failures leave no marker and retry later.
 // Never blocks sign-in or rendering.
+// Head+tail only. Enough for a human to match an address they already have,
+// not enough to be an identifier sitting in a log file.
+function redactAddress(address?: string | null): string {
+  const value = String(address || '');
+  return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : '(none)';
+}
+
+// Register the derived Algorand address with the server AND actually read the
+// answer. The mutation reports refusals in `success`/`error` — a rejected
+// registration resolves the promise normally, so a bare `await mutate()` in a
+// try/catch treats "the server said no" as "done". That is how a device whose
+// keychain was wiped (MIUI invalidates the Android Keystore on first
+// screen-lock enrollment) ends up derivating a new wallet, being refused by the
+// reassignment guard, and pointing at a different address than the server
+// forever, with nothing logged anywhere. Callers decide whether a refusal is
+// fatal; none of them may assume it didn't happen.
+export async function registerAlgorandAddressChecked(
+  algorandAddress: string,
+  opts?: { isV2Wallet?: boolean; context?: string },
+): Promise<{ success: boolean; error?: string; payload?: any }> {
+  const context = opts?.context || 'unknown';
+  const reportFailure = async (reason: string) => {
+    try {
+      const { AnalyticsService } = await import('./analyticsService');
+      void AnalyticsService.logEvent('wallet_address_registration_failed', {
+        context,
+        reason: String(reason).slice(0, 100),
+      });
+    } catch (_e) {
+      // Telemetry must never mask the failure it is reporting.
+    }
+  };
+
+  try {
+    const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
+    const { apolloClient } = await import('../apollo/client');
+    const res = await apolloClient.mutate({
+      mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+      variables:
+        opts?.isV2Wallet === undefined
+          ? { algorandAddress }
+          : { algorandAddress, isV2Wallet: opts.isV2Wallet },
+    });
+    const payload = res?.data?.updateAccountAlgorandAddress;
+    if (payload?.success) {
+      return { success: true, payload };
+    }
+    const error = payload?.error || 'unknown_error';
+    console.error(
+      `[AuthService] Server REFUSED Algorand address registration (${context}):`,
+      error,
+      // Truncated: production silences console.log but NOT console.error, so a
+      // full address here ships to release logs against the No-PII policy.
+      // Head+tail stays greppable for support without logging the identifier.
+      { address: redactAddress(algorandAddress) },
+    );
+    await reportFailure(error);
+    return { success: false, error, payload };
+  } catch (e: any) {
+    console.error(`[AuthService] Algorand address registration failed (${context}):`, e);
+    await reportFailure(e?.message || 'exception');
+    return { success: false, error: e?.message || 'exception' };
+  }
+}
+
 export async function ensureBscAddressRegistered(addressOverride?: string) {
   try {
     const Keychain = await import('react-native-keychain');
@@ -971,13 +1036,17 @@ export class AuthService {
 
         // Update server with derived address (pass isV2Wallet if V2 sync succeeded)
         try {
-          const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-          const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress, isV2Wallet: driveSyncSucceeded } });
-          console.log('Updated server with Algorand address');
+          const registration = await registerAlgorandAddressChecked(algorandAddress, {
+            isV2Wallet: driveSyncSucceeded,
+            context: 'google_sign_in',
+          });
+          if (registration.success) {
+            console.log('Updated server with Algorand address');
+          }
           registerBscAddressBestEffort();
           // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
           try {
-            const payload = updRes?.data?.updateAccountAlgorandAddress;
+            const payload = registration.payload;
             const needsOptIn = payload?.needsOptIn as number[] | undefined;
             const txns = payload?.optInTransactions as string | any[] | undefined;
             if (needsOptIn && needsOptIn.length > 0 && txns) {
@@ -1364,13 +1433,16 @@ export class AuthService {
 
       // Update server with derived address
       try {
-        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-        const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress } });
-        console.log('Updated server with Algorand address (Apple)');
+        const registration = await registerAlgorandAddressChecked(algorandAddress, {
+          context: 'apple_sign_in',
+        });
+        if (registration.success) {
+          console.log('Updated server with Algorand address (Apple)');
+        }
         registerBscAddressBestEffort();
         // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
         try {
-          const payload = updRes?.data?.updateAccountAlgorandAddress;
+          const payload = registration.payload;
           const needsOptIn = payload?.needsOptIn as number[] | undefined;
           const txns = payload?.optInTransactions as string | any[] | undefined;
           if (needsOptIn && needsOptIn.length > 0 && txns) {
@@ -1717,16 +1789,13 @@ export class AuthService {
       await (await import('./algorandService')).default.setCurrentAddress(walletAddress);
 
       // Also update on server
-      try {
-        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-        await apolloClient.mutate({
-          mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-          variables: { algorandAddress: walletAddress }
-        });
+      // This is the self-heal path a wiped keychain lands on. A refusal here is
+      // precisely the split-brain condition, so it must not pass silently.
+      const registration = await registerAlgorandAddressChecked(walletAddress, {
+        context: 'compute_and_store',
+      });
+      if (registration.success) {
         console.log('Updated server with new address');
-      } catch (error) {
-        console.error('Failed to update server with address:', error);
-        // Continue even if server update fails
       }
 
       return walletAddress;
@@ -2547,12 +2616,12 @@ export class AuthService {
         // Update the backend with the final address (stored or migrated)
         if (apolloClient) {
           try {
-            const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-            await apolloClient.mutate({
-              mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-              variables: { algorandAddress: finalAddress }
+            const registration = await registerAlgorandAddressChecked(finalAddress, {
+              context: 'stored_address_sync',
             });
-            console.log('AuthService - Updated backend with stored/migrated Algorand address');
+            if (registration.success) {
+              console.log('AuthService - Updated backend with stored/migrated Algorand address');
+            }
           } catch (updateError) {
             console.error('AuthService - Error updating backend with Algorand address:', updateError);
           }
@@ -2653,12 +2722,12 @@ export class AuthService {
       // Update the current account's Algorand address in the backend if needed
       if (apolloClient) {
         try {
-          const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-          await apolloClient.mutate({
-            mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-            variables: { algorandAddress: walletAddress }
+          const registration = await registerAlgorandAddressChecked(walletAddress, {
+            context: 'account_switch',
           });
-          console.log('AuthService - Updated backend with new Algorand address');
+          if (registration.success) {
+            console.log('AuthService - Updated backend with new Algorand address');
+          }
         } catch (updateError) {
           console.error('AuthService - Error updating backend with Algorand address:', updateError);
           // Non-fatal error - continue

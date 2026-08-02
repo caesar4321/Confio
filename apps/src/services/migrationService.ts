@@ -5,15 +5,6 @@ import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { gql } from '@apollo/client';
 import { oauthStorage } from './oauthStorageService';
 
-const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
-    mutation UpdateAccountAlgorandAddress($algorandAddress: String!) {
-        updateAccountAlgorandAddress(algorandAddress: $algorandAddress) {
-            success
-            error
-        }
-    }
-`;
-
 const MARK_WALLET_MIGRATED = gql`
     mutation MarkWalletMigrated($migratedFromAddress: String) {
         markWalletMigrated(migratedFromAddress: $migratedFromAddress) {
@@ -33,7 +24,7 @@ const PREPARE_ATOMIC_MIGRATION = gql`
     }
 `;
 import { secureDeterministicWallet, retrieveClientSecret, getOrCreateMasterSecret, storeClientSecret, deriveWalletV2 } from './secureDeterministicWallet';
-import authService from './authService';
+import authService, { registerAlgorandAddressChecked } from './authService';
 import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, GOOGLE_CLIENT_IDS, USDC_ASSET_ID } from '../config/env';
 
 // Legacy CONFÍO asset ID from before token migration
@@ -72,12 +63,15 @@ class WalletMigrationService {
 
     private async finalizeSelfHealedV2Address(v2Address: string, accountIndex: number, businessId?: string, migratedFromAddress?: string): Promise<void> {
         // Keep backend, local storage, and migration status aligned once V1 is proven empty.
-        await apolloClient.mutate({
-            mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-            variables: {
-                algorandAddress: v2Address,
-            }
+        // "Aligned" is the whole point, so a refused registration must abort here:
+        // forcing the local address afterwards is what pins a device to a wallet
+        // the server never accepted. The caller catches and falls through.
+        const registration = await registerAlgorandAddressChecked(v2Address, {
+            context: 'self_heal_v2',
         });
+        if (!registration.success) {
+            throw new Error(`address_registration_refused: ${registration.error || 'unknown'}`);
+        }
 
         try {
             const markRes = await apolloClient.mutate({
@@ -376,13 +370,16 @@ class WalletMigrationService {
             if (!rawTransactions || rawTransactions.length === 0) {
                 // Nothing to migrate or already done
                 console.log('[MigrationService] No transactions returned (nothing to migrate?). Marking complete.');
-                await apolloClient.mutate({
-                    mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-                    variables: {
-                        algorandAddress: v2Address,
-                        isV2Wallet: true
-                    }
+                const registration = await registerAlgorandAddressChecked(v2Address, {
+                    isV2Wallet: true,
+                    context: 'migration_nothing_to_move',
                 });
+                if (!registration.success) {
+                    // Reporting migration complete while the server still points
+                    // at V1 is the false-success this whole change exists to stop.
+                    console.error('[MigrationService] Server refused the V2 address; migration is NOT complete:', registration.error);
+                    return false;
+                }
                 return true;
             }
 
@@ -485,14 +482,16 @@ class WalletMigrationService {
                 // 5. Success! Update address AND mark as migrated via dedicated mutation
                 // Step A: Update the Algorand address on the backend
                 console.log('[MigrationService] Updating backend with V2 address...');
-                try {
-                    await apolloClient.mutate({
-                        mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-                        variables: { algorandAddress: v2Address }
-                    });
+                const addrRegistration = await registerAlgorandAddressChecked(v2Address, {
+                    context: 'migration_post_sweep',
+                });
+                if (addrRegistration.success) {
                     console.log('[MigrationService] Backend address updated to V2.');
-                } catch (addrErr) {
-                    console.error('[MigrationService] Failed to update address:', addrErr);
+                } else {
+                    // Funds already moved to V2 while the server still points at
+                    // V1. Marking migrated on top of that would bury it.
+                    console.error('[MigrationService] Funds are on V2 but the server refused the address update:', addrRegistration.error);
+                    return false;
                 }
 
                 // Step B: Mark as migrated via the dedicated MarkWalletMigrated mutation
@@ -501,15 +500,23 @@ class WalletMigrationService {
                 let markedSuccess = false;
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
-                        await apolloClient.mutate({
+                        const markRes = await apolloClient.mutate({
                             mutation: MARK_WALLET_MIGRATED,
                             variables: {
                                 migratedFromAddress: v1Address,
                             }
                         });
-                        markedSuccess = true;
-                        console.log(`[MigrationService] Marked as V2 migrated on backend.`);
-                        break;
+                        const markPayload = markRes?.data?.markWalletMigrated;
+                        if (markPayload?.success) {
+                            markedSuccess = true;
+                            console.log(`[MigrationService] Marked as V2 migrated on backend.`);
+                            break;
+                        }
+                        // The backend refuses with a normal GraphQL payload, not
+                        // an exception. Without this branch every attempt counted
+                        // as a success and the retry loop was decoration.
+                        console.warn(`[MigrationService] Attempt ${attempt} to mark migration was REFUSED:`, markPayload?.error);
+                        if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
                     } catch (err) {
                         console.warn(`[MigrationService] Attempt ${attempt} to mark migration failed:`, err);
                         if (attempt < 3) await new Promise(r => setTimeout(r, 1000));

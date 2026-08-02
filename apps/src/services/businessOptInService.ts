@@ -240,6 +240,15 @@ class BusinessOptInService {
                 });
                 const ok2 = upd2?.data?.updateAccountAlgorandAddress?.success;
                 const err2 = upd2?.data?.updateAccountAlgorandAddress?.error;
+                if (!ok2) {
+                  // Reading `success` into a variable and never branching on it
+                  // is the same defect as not reading it. The whole point of
+                  // this block is to register the derived business address; if
+                  // the server refused, retrying the opt-in check underneath it
+                  // just hides the refusal behind a second error.
+                  console.error('BusinessOptInService - Server refused the business address registration:', err2);
+                  return false;
+                }
                 // Retry the opt-in check once after updating address
                 const retry = await apolloClient.mutate({ mutation: CHECK_BUSINESS_OPT_IN });
                 const retryErr = retry?.data?.checkBusinessOptIn?.error as string | undefined;
