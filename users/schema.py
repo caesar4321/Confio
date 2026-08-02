@@ -3493,6 +3493,27 @@ class UpdateAccountBscAddress(graphene.Mutation):
                 success=False,
                 error="Esta cuenta ya tiene una dirección BSC registrada distinta.",
             )
+        # An address belongs to exactly one account. Without this, two accounts
+        # could register the same address: the inbound deposit scanner keys a
+        # dict on the lowercased address and would credit deposits to whichever
+        # account it happened to keep, and reward entitlements aggregated by
+        # address would lose per-user attribution. The DB constraint enforces
+        # this too; checking here is what turns a 500 into an answer.
+        taken = (
+            Account.objects.filter(bsc_address__iexact=addr, deleted_at__isnull=True)
+            .exclude(pk=account.pk)
+            .exists()
+        )
+        if taken:
+            logger.warning(
+                "[bsc_address] rejected already-registered address for account=%s user=%s",
+                account.pk,
+                user.id,
+            )
+            return UpdateAccountBscAddress(
+                success=False,
+                error="Esa dirección BSC ya está registrada en otra cuenta.",
+            )
         account.bsc_address = addr
         account.save(update_fields=['bsc_address'])
         return UpdateAccountBscAddress(success=True, error=None)

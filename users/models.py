@@ -2,6 +2,7 @@ from django.contrib.auth.models import AbstractUser, UserManager
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxLengthValidator, MinValueValidator, MaxValueValidator
 from django.db import models
+from django.db.models.functions import Lower
 from django.db.models import Q
 from django.conf import settings
 from .country_codes import COUNTRY_CODES
@@ -518,6 +519,28 @@ class Account(SoftDeleteModel):
     class Meta:
         unique_together = ['user', 'account_type', 'account_index']
         ordering = ['user', 'account_type', 'account_index']
+        constraints = [
+            # One BSC address, one account. The inbound deposit scanner keys a
+            # dict on bsc_address.lower() (cusd_plus/tasks.py), so two accounts
+            # sharing an address silently collapse to whichever one the dict
+            # kept — deposits to that address would be credited to the wrong
+            # user. Reward payouts have the same problem: entitlements
+            # aggregated by address lose per-user attribution.
+            #
+            # Addresses are derived per account from the client's master
+            # secret, so a collision is a derivation bug or an attempt to claim
+            # someone else's address; neither should be storable. Compared
+            # case-insensitively because callers register EIP-55 mixed case
+            # while the scanner lowercases. Soft-deleted accounts are excluded
+            # so a closed account does not lock an address forever.
+            models.UniqueConstraint(
+                Lower('bsc_address'),
+                condition=models.Q(bsc_address__isnull=False)
+                & ~models.Q(bsc_address='')
+                & models.Q(deleted_at__isnull=True),
+                name='uniq_account_bsc_address_ci',
+            ),
+        ]
         
     def get_ordering_key(self):
         """Get a key for custom ordering: personal accounts first, then business accounts by index"""
