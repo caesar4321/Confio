@@ -27,16 +27,25 @@ DEFAULT_EVENT_REWARD_CONFIG: Dict[str, Dict[str, Any]] = {
     #   referee_confio: CONFIO tokens to award the referred user (Decimal)
     #   referrer_confio: CONFIO tokens to award the referrer (Decimal)
     #   reward_cusd: cUSD notion used for vault accounting (Decimal, optional)
+    # The scheme is a DEPOSIT: the invited friend puts money in, and both sides
+    # earn. A deposit used to record a checkpoint and nothing else — the reward
+    # only landed if a to_savings conversion followed — so a user who deposited
+    # US$20 and left it as USDC earned nothing while the app told them the bonus
+    # was theirs. The deposit now carries the reward itself.
+    #
+    # The conversion keeps its own reward for money that arrives that way
+    # without a tracked deposit. Both cannot pay twice: sync returns early once
+    # the referral is 'eligible'.
     "top_up": {
         "threshold": Decimal("19"),
-        "records_checkpoint": "conversion_usdc_to_cusd",
+        "reward_cusd": Decimal("5"),
+        # Referrer reward mirrors the referee's CONFIO
+        "referrer_confio": None,
     },
     "conversion_usdc_to_cusd": {
         "threshold": Decimal("19"),
         "reward_cusd": Decimal("5"),
-        # Referrer reward mirrors the referee's CONFIO once conversion happens
         "referrer_confio": None,
-        "requires_checkpoint": "top_up",
     },
     # "send": {
     #     "reward_cusd": Decimal("5"),
