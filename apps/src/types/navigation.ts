@@ -206,6 +206,8 @@ export type MainStackParamList = {
     paymentMethodDisplay?: string;
     amountOut?: string;
     fiatCurrency?: string;
+    // Unit of amountOut on an on-ramp — `US$` on the savings rail, else cUSD.
+    assetUnit?: string;
     destinationSummary?: string;
     nextActionUrl?: string;
     paymentDetails?: any;

@@ -29,7 +29,7 @@ import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampCard } from '../components/ramps/RampCard';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
-import { formatRampMoney } from '../hooks/useRampQuoteFlow';
+import { formatRampMoney } from '../utils/rampFormat';
 import { buildRampInstructionView } from '../utils/rampInstructions';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
@@ -143,6 +143,7 @@ export const RampInstructionsScreen = () => {
     paymentMethodDisplay,
     amountOut,
     fiatCurrency,
+    assetUnit = 'cUSD',
     destinationSummary,
     nextActionUrl,
     paymentDetails,
@@ -344,7 +345,7 @@ export const RampInstructionsScreen = () => {
           <View style={styles.row}>
             <Text style={styles.label}>{summaryLabel}</Text>
             <Text style={styles.valueHighlight}>
-              {formatRampMoney(liveAmountOut, direction === 'ON_RAMP' ? 'cUSD' : fiatCurrency || '')}
+              {formatRampMoney(liveAmountOut, direction === 'ON_RAMP' ? assetUnit : fiatCurrency || '')}
             </Text>
           </View>
           {destinationSummary ? (

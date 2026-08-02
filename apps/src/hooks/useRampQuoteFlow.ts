@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@apollo/client';
 
 import { GET_RAMP_QUOTE } from '../apollo/queries';
+import { formatRampMoney } from '../utils/rampFormat';
 
 type UseRampQuoteFlowParams = {
   direction: 'ON_RAMP' | 'OFF_RAMP';
@@ -12,29 +13,8 @@ type UseRampQuoteFlowParams = {
   enabled: boolean;
   minAmount?: number;
   maxAmount?: number;
-};
-
-export const formatRampMoney = (value?: string | number | null, code?: string | null) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) {
-    return '--';
-  }
-  const displayCode = ['USDC-a', 'USDC Algorand'].includes(code || '') ? 'cUSD' : code;
-  return `${parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })} ${displayCode || ''}`.trim();
-};
-
-export const formatRampRate = (value?: string | number | null, code?: string | null) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) {
-    return '--';
-  }
-  return `${parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 2 : 4,
-    maximumFractionDigits: 4,
-  })} ${code || ''}`.trim();
+  // The unit the user spends on an off-ramp — `US$` on the savings rail.
+  assetUnit?: string;
 };
 
 export const useRampQuoteFlow = ({
@@ -46,6 +26,7 @@ export const useRampQuoteFlow = ({
   enabled,
   minAmount = 0,
   maxAmount = 0,
+  assetUnit = 'cUSD',
 }: UseRampQuoteFlowParams) => {
   const parsedAmount = useMemo(() => Number((amount || '').replace(',', '.')), [amount]);
   const amountReady = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!countryCode;
@@ -66,10 +47,11 @@ export const useRampQuoteFlow = ({
   const quote = data?.rampQuote;
   const isBelowMin = amountReady && minAmount > 0 && parsedAmount < minAmount;
   const isAboveMax = amountReady && maxAmount > 0 && parsedAmount > maxAmount;
+  const spendUnit = direction === 'ON_RAMP' ? fiatCurrency : assetUnit;
   const amountError = isBelowMin
-    ? `El mínimo por operación es ${formatRampMoney(minAmount, direction === 'ON_RAMP' ? fiatCurrency : 'cUSD')}.`
+    ? `El mínimo por operación es ${formatRampMoney(minAmount, spendUnit)}.`
     : isAboveMax
-      ? `El máximo permitido es ${formatRampMoney(maxAmount, direction === 'ON_RAMP' ? fiatCurrency : 'cUSD')}.`
+      ? `El máximo permitido es ${formatRampMoney(maxAmount, spendUnit)}.`
       : null;
 
   return {

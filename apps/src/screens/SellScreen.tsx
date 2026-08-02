@@ -37,7 +37,8 @@ import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { getCountryByIso } from '../utils/countries';
 import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
-import { formatRampMoney, formatRampRate, useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
@@ -209,7 +210,7 @@ export const SellScreen = () => {
   const { savings: savingsPosition, usdtBalanceUsd } = useSavingsPortfolio();
   const { data: savingsSellParams } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavingsSell });
   const savingsVaultAddress: string = savingsSellParams?.cusdPlusConvertParams?.vaultAddress || '';
-  const sellUnitLabel = isSavingsSell ? 'US$' : 'cUSD';
+  const sellUnitLabel = isSavingsSell ? USD_UNIT : 'cUSD';
   const availableCusdBalance = useMemo(
     () => (isSavingsSell
       ? (savingsPosition?.balanceUsd ?? 0) + (usdtBalanceUsd ?? 0)
@@ -240,7 +241,7 @@ export const SellScreen = () => {
     enabled: isKoyweMapped,
   });
   const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, fiatCurrency)}` : '';
-  const quoteRateLine = quote ? `1 ${sellUnitLabel} = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const quoteRateLine = quote ? `1 ${rampUnitCode(sellUnitLabel)} = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
   const isCompact = width < 380;
   const isBelowSellMin = amountReady && selectedMethodMin > 0 && parsedAmount < selectedMethodMin;
   const isAboveSellMax = amountReady && effectiveSellMax > 0 && parsedAmount > effectiveSellMax;
@@ -352,7 +353,8 @@ export const SellScreen = () => {
     }
     const authenticated = await requestRampCriticalAuth({
       amount: parsedAmount,
-      assetLabel: 'cUSD',
+      assetUnit: sellUnitLabel,
+      assetNote: isSavingsSell ? 'ahorro' : undefined,
       actionLabel: 'retiro',
     });
     if (!authenticated) {
@@ -583,7 +585,7 @@ export const SellScreen = () => {
                   Saldo disponible: {balancesLoading ? 'Cargando...' : formatRampMoney(String(availableCusdBalance), sellUnitLabel)}
                 </Text>
                 <Text style={styles.limitText}>
-                  Mínimo: {selectedMethodMin > 0 ? formatRampMoney(String(selectedMethodMin), 'cUSD') : '--'} · Máximo por operación: {effectiveSellMax > 0 ? formatRampMoney(String(effectiveSellMax), 'cUSD') : '--'}
+                  Mínimo: {selectedMethodMin > 0 ? formatRampMoney(String(selectedMethodMin), sellUnitLabel) : '--'} · Máximo por operación: {effectiveSellMax > 0 ? formatRampMoney(String(effectiveSellMax), sellUnitLabel) : '--'}
                 </Text>
                 {sellAmountError ? <Text style={styles.errorText}>{sellAmountError}</Text> : null}
               </View>
@@ -705,7 +707,7 @@ export const SellScreen = () => {
                     <View style={styles.quoteDivider} />
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Envías</Text>
-                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountIn, 'cUSD')}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountIn, sellUnitLabel)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Recibes aprox.</Text>
@@ -713,7 +715,7 @@ export const SellScreen = () => {
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Tipo de cambio</Text>
-                      <Text style={styles.quoteValue}>{`${formatRampRate(quote.exchangeRate)} ${fiatCurrency}/cUSD`}</Text>
+                      <Text style={styles.quoteValue}>{`${formatRampRate(quote.exchangeRate)} ${fiatCurrency}/${rampUnitCode(sellUnitLabel)}`}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>

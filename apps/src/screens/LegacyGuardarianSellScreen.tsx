@@ -38,6 +38,7 @@ import GuardarianReturnModal from '../components/GuardarianReturnModal';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
+import { USD_UNIT } from '../utils/rampFormat';
 import { getVaultShares, redeemSavingsToUsdt } from '../services/cusdPlusVault';
 import { getActiveEvmWallet } from '../services/secureDeterministicWallet';
 import algorandService from '../services/algorandService';
@@ -353,7 +354,7 @@ export const SellScreen = () => {
         const parsedAmount = parseFloat(amount);
         const authenticated = await requestRampCriticalAuth({
             amount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
-            assetLabel: 'USDC',
+            assetUnit: 'USDC',
             actionLabel: 'retiro',
         });
         if (!authenticated) {
@@ -401,7 +402,8 @@ export const SellScreen = () => {
         }
         const authenticated = await requestRampCriticalAuth({
             amount: parsedAmount,
-            assetLabel: 'US$ (ahorro)',
+            assetUnit: USD_UNIT,
+            assetNote: 'ahorro',
             actionLabel: 'retiro',
         });
         if (!authenticated) {

@@ -1,18 +1,22 @@
 import { Alert } from 'react-native';
 
 import { biometricAuthService } from '../services/biometricAuthService';
+import { formatRampMoney } from './rampFormat';
 
 export const requestRampCriticalAuth = async ({
   amount,
-  assetLabel,
+  assetUnit,
+  assetNote,
   actionLabel,
 }: {
   amount: number;
-  assetLabel: string;
+  assetUnit: string;
+  // Where the money lands, when the unit alone doesn't say it ("ahorro").
+  assetNote?: string;
   actionLabel: 'compra' | 'retiro';
 }) => {
   const authMessage = amount > 0
-    ? `Autoriza ${actionLabel === 'compra' ? 'la compra' : 'el retiro'} de ${amount.toFixed(2)} ${assetLabel}`
+    ? `Autoriza ${actionLabel === 'compra' ? 'la compra' : 'el retiro'} de ${formatRampMoney(amount, assetUnit)}${assetNote ? ` (${assetNote})` : ''}`
     : `Autoriza ${actionLabel === 'compra' ? 'esta compra' : 'este retiro'}`;
 
   let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
