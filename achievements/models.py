@@ -9,7 +9,10 @@ from django.db.models import F, Q, Sum
 from datetime import timedelta
 from decimal import Decimal
 from users.models import SoftDeleteModel
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 def generate_reward_transaction_id():
     return uuid.uuid4().hex
@@ -216,6 +219,24 @@ class UserAchievement(SoftDeleteModel):
     
     def claim_reward(self):
         """Claim the reward for this achievement"""
+        # The gate belongs HERE, at the boundary where value is created. Gating
+        # only the GraphQL mutation and the admin action left the management
+        # commands (populate_achievements_for_user, populate_mock_achievements,
+        # setup_test_achievements) able to credit ConfioRewardBalance for a
+        # retired scheme — and 9.6K rows still sit in 'earned' whose reward
+        # amount is an editable admin field.
+        #
+        # Returns False rather than raising: every caller already branches on
+        # the return value, so a command run against the wrong environment
+        # stops cleanly instead of crashing mid-loop with rows half-written.
+        if not getattr(settings, 'ACHIEVEMENT_CLAIMS_ENABLED', False):
+            logger.warning(
+                "[achievements] refusing to claim %s: the scheme is retired "
+                "(ACHIEVEMENT_CLAIMS_ENABLED=False)",
+                self.pk,
+            )
+            return False
+
         if self.status != 'earned':
             raise ValidationError("Solo se pueden desbloquear logros ganados")
         
