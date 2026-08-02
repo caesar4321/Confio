@@ -652,9 +652,13 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
         logger.exception('presale ownership check failed for %s', tx_hash)
     try:
         from payroll.models import PayrollItem
+        # recipient_address is the snapshot taken at broadcast. Resolving
+        # through recipient_account.bsc_address would read the account's
+        # CURRENT address, so changing it would break ownership for every
+        # past payout and resurrect them as external deposits.
         if PayrollItem.objects.filter(
                 transaction_hash__iexact=tx_hash,
-                recipient_account__bsc_address__iexact=r).exists():
+                recipient_address__iexact=r).exists():
             return True
     except Exception:  # noqa: BLE001
         logger.exception('payroll ownership check failed for %s', tx_hash)

@@ -360,6 +360,22 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
 def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTransactionTable:
     actor_address = _derive_actor_address(ramp_tx)
     final_amount, final_currency = _derive_final_amount(ramp_tx)
+
+    # With no crypto amount anywhere, `amount` below falls back to
+    # fiat_amount — and the row is then labelled in a CRYPTO token. That is
+    # how production came to hold rows reading "100000 cUSD" for 100,000 CLP
+    # (about $100) and "2000 cUSD" for €2,000: the ledger overstates what the
+    # user has, by up to ~3800x for COP at the on-ramp maximum. There is no
+    # honest token for a fiat figure, so write nothing. The RampTransaction
+    # itself is still saved and still visible to support; the ledger simply
+    # waits until the provider tells us what actually landed on chain.
+    if final_amount is None:
+        logger.info(
+            'ramp %s: no crypto amount yet (fiat %s %s) — deferring the ledger row',
+            getattr(ramp_tx, 'id', '?'), ramp_tx.fiat_amount, ramp_tx.fiat_currency,
+        )
+        return None
+
     status = ramp_tx.status
     if status == 'PROCESSING':
         unified_status = 'PENDING'
@@ -379,6 +395,10 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
         'transaction_type': 'ramp',
         'amount': str(final_amount if final_amount is not None else ramp_tx.fiat_amount or Decimal('0')),
         'token_type': _ledger_token(ramp_tx, final_currency),
+        # A row retracted while it was still fiat-only comes back the moment
+        # the provider tells us what actually landed. Without this the
+        # correction would be permanent and a real on-ramp would stay hidden.
+        'deleted_at': None,
         'status': unified_status,
         'transaction_hash': '',
         'error_message': ramp_tx.status_detail or '',

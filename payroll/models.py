@@ -113,6 +113,16 @@ class PayrollItem(SoftDeleteModel):
     fee_amount = models.DecimalField(max_digits=19, decimal_places=6)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     transaction_hash = models.CharField(max_length=66, blank=True, help_text="Blockchain transaction hash")
+    # The address the shares were actually PAID TO, snapshotted at broadcast.
+    # The ledger scanner proves ownership of an inbound transfer by matching
+    # (transaction_hash, recipient); resolving the recipient through
+    # recipient_account.bsc_address instead reads the account's CURRENT
+    # address, so a user who changes or re-registers one silently breaks the
+    # match on historical payouts and the salary re-appears as an external
+    # deposit. What was paid then cannot be re-derived later — store it.
+    recipient_address = models.CharField(
+        max_length=66, blank=True, default='', db_index=True,
+        help_text="Recipient address at broadcast time (ledger ownership proof)")
     blockchain_data = models.JSONField(null=True, blank=True, help_text="Unsigned transactions and metadata")
     error_message = models.TextField(blank=True)
     executed_by_user = models.ForeignKey(

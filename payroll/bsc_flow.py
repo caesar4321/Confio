@@ -547,7 +547,14 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
             max_fee_wei=str(fee_per_gas),
             status='signed',
         )
-        _rpc('eth_sendRawTransaction', [raw])
+        # Keep the node's answer: `sent` is read below and was never assigned,
+        # so every successful payout raised NameError AFTER the money moved —
+        # item stuck at PREPARED with no hash, confirmer refusing it (it takes
+        # only SUBMITTED), run never completing, and the scanner recording the
+        # salary as a generic external deposit because no PayrollItem carried
+        # the hash to prove ownership. For a correctly signed transaction this
+        # equals tx_hash; the fallback covers a node that answers with null.
+        sent = _rpc('eth_sendRawTransaction', [raw])
         batch.status = 'sent'
         batch.save(update_fields=['status', 'updated_at'])
     except Exception as exc:  # noqa: BLE001
@@ -564,8 +571,9 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
     item.status = 'SUBMITTED'
     item.executed_by_user = user
     item.executed_at = timezone.now()
+    item.recipient_address = (payout.get('recipient') or '').lower()
     item.save(update_fields=['transaction_hash', 'status', 'executed_by_user',
-                             'executed_at', 'updated_at'])
+                             'executed_at', 'recipient_address', 'updated_at'])
 
     try:
         from cusd_plus.vault import invalidate_position
