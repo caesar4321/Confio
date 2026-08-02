@@ -197,8 +197,21 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
                 # deferring wholesale to employee_record.has_permission() would
                 # silently change what 221 call sites permit. An explicit False
                 # is unambiguous; an explicit True is left to the role matrix.
+                # NEVER against an owner. Owners hold authority through
+                # Account ownership, and check_role_permission grants them
+                # everything unconditionally — so a False in their permissions
+                # dict was historically inert. Honouring it turned
+                # SetBusinessDelegatesByEmployee (payroll/schema.py, gated on
+                # send_funds alone and accepting ANY employee row of the
+                # business) into a privilege-revocation primitive: one manager
+                # could lock the real owner out of every send_funds-gated
+                # payment, payroll, transfer, conversion and P2P operation.
+                # Every business creates an active role='owner' employee row,
+                # and this gate finds it before the ownership fallthrough.
                 overrides = employee_record.permissions or {}
-                if required_permission in overrides and not overrides[required_permission]:
+                if (employee_record.role != 'owner'
+                        and required_permission in overrides
+                        and not overrides[required_permission]):
                     logger.warning(
                         "User %s has an explicit revocation of '%s' for business %s",
                         user.id, required_permission, biz_id)

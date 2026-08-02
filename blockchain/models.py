@@ -406,8 +406,16 @@ class SponsoredBatch(models.Model):
             # mismatch) and the reverting one marked the payment FAILED — a
             # merchant paid, an invoice still PENDING, and a payer told it
             # failed. One live batch per payment, whatever the token.
+            # Keyed on source_id ALONE, not (kind, source_id): the funding
+            # token is part of `kind`, so keying on both let one payment hold a
+            # live pay_cusd_plus batch AND a live pay_usdt batch at once — a
+            # re-prepare after changed balances picks a different token and
+            # slips straight past the index. Both broadcast; the contract stops
+            # the second payout, but the losing batch can still be the hash the
+            # database adopts, leaving the invoice FAILED after the merchant
+            # was paid. The condition keeps this scoped to payment batches.
             models.UniqueConstraint(
-                fields=['kind', 'source_id'],
+                fields=['source_id'],
                 condition=models.Q(
                     kind__in=('pay_cusd_plus', 'pay_usdt', 'pay_confio'),
                     status__in=('signed', 'sent', 'confirmed'),

@@ -1381,6 +1381,16 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
                 be = employees.get(str(emp_id))
                 if not be:
                     continue
+                # An owner's sending authority is not a delegate flag. This
+                # mutation is gated on send_funds alone, so without this any
+                # manager could aim it at the owner's employee row — every
+                # business has one — and revoke the owner's authority across
+                # the whole product. The gate ignores owner overrides too;
+                # this is the second lock on the same door.
+                if be.role == 'owner':
+                    errors.append(
+                        "No se puede quitar el permiso de envío al dueño del negocio.")
+                    continue
                 perms = be.permissions or {}
                 perms['send_funds'] = False
                 be.permissions = perms

@@ -173,7 +173,19 @@ def reconcile_stranded_bsc_payments():
         if p is None:
             continue
         if p.status == 'PENDING_BLOCKCHAIN':
-            # The lost save. Adopt the batch's hash — it is what executed.
+            # Only adopt a batch belonging to the CURRENT preparation. A
+            # payment that failed and was legitimately re-prepared goes back
+            # to PENDING_BLOCKCHAIN with its updated_at refreshed, while its
+            # old terminal batch keeps an earlier created_at — matching on
+            # source_id alone let that dead batch hijack the fresh attempt and
+            # fail it again, permanently. In the real lost-save case the batch
+            # is created after the payment's last save, so this ordering is
+            # exactly the discriminator.
+            if batch.created_at is None or batch.created_at < p.updated_at:
+                logger.info(
+                    '[PAY][BSC] batch %s predates payment %s current preparation '
+                    '— not adopting', batch.id, p.internal_id)
+                continue
             p.transaction_hash = batch.tx_hash
             p.status = 'SUBMITTED'
             p.save(update_fields=['transaction_hash', 'status', 'updated_at'])
