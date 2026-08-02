@@ -342,8 +342,17 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
             presale_purchase=purchase,
             defaults={
                 'transaction_type': 'presale',
-                'amount': str(purchase.cusd_amount),
-                'token_type': 'CUSD',
+                # A presale row is CONFIO RECEIVED, not dollars spent. The
+                # CONFIO account's history queries token_type='CONFIO' only
+                # (AccountDetailScreen accountTokenTypes), so a row tagged
+                # CUSD silently vanishes from the one screen it belongs on —
+                # which is why BSC buys stopped showing a card while the
+                # Algorand ones still had theirs. blockchain/tasks.py's
+                # reconciler has always written the legacy rail this way
+                # (token CONFIO, amount = confio_amount); match it exactly so
+                # both rails produce one indistinguishable card.
+                'amount': format(purchase.confio_amount.normalize(), 'f'),
+                'token_type': 'CONFIO',
                 'status': 'PENDING_SIG',
                 'transaction_hash': '',
                 'error_message': '',
