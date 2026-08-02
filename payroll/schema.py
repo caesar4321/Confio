@@ -1387,7 +1387,15 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
                 # business has one — and revoke the owner's authority across
                 # the whole product. The gate ignores owner overrides too;
                 # this is the second lock on the same door.
-                if be.role == 'owner':
+                #
+                # Tested by ACCOUNT ownership, not by be.role: the role string
+                # is delegation, so keying on it protected a non-owner who had
+                # merely been handed 'owner' while leaving a real owner whose
+                # row was demoted wide open to exactly this revocation.
+                from users.models import Account as _Account
+                if _Account.objects.filter(
+                        user=be.user, business_id=be.business_id,
+                        account_type='business', deleted_at__isnull=True).exists():
                     errors.append(
                         "No se puede quitar el permiso de envío al dueño del negocio.")
                     continue

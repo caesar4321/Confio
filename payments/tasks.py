@@ -173,18 +173,25 @@ def reconcile_stranded_bsc_payments():
         if p is None:
             continue
         if p.status == 'PENDING_BLOCKCHAIN':
-            # Only adopt a batch belonging to the CURRENT preparation. A
-            # payment that failed and was legitimately re-prepared goes back
-            # to PENDING_BLOCKCHAIN with its updated_at refreshed, while its
-            # old terminal batch keeps an earlier created_at — matching on
-            # source_id alone let that dead batch hijack the fresh attempt and
-            # fail it again, permanently. In the real lost-save case the batch
-            # is created after the payment's last save, so this ordering is
-            # exactly the discriminator.
-            if batch.created_at is None or batch.created_at < p.updated_at:
-                logger.info(
-                    '[PAY][BSC] batch %s predates payment %s current preparation '
-                    '— not adopting', batch.id, p.internal_id)
+            # Adopt only a LIVE batch — one that was broadcast and has not
+            # failed. Two rules had to hold at once and wall-clock ordering
+            # could not express either:
+            #
+            #   a dead batch must never hijack a re-prepared payment (a
+            #   reverted/dropped batch means that attempt failed, so the fresh
+            #   attempt owns the row), and
+            #
+            #   a genuinely broadcast batch must still be adopted even when a
+            #   concurrent re-prepare has since touched the payment — which is
+            #   what the created_at >= updated_at test got wrong, because
+            #   prepare_bsc_payment re-saves the row and auto_now moves
+            #   updated_at past the batch, permanently skipping the very case
+            #   this sweep exists to repair.
+            #
+            # 'sent'/'confirmed' says exactly "this one went out and did not
+            # fail", and cpsb_unique_active_payment guarantees at most one of
+            # them per payment, so there is nothing to disambiguate.
+            if batch.status not in ('sent', 'confirmed'):
                 continue
             p.transaction_hash = batch.tx_hash
             p.status = 'SUBMITTED'

@@ -163,6 +163,20 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         if _should_log_jwt_context_details():
             logger.info("Validating business access: user_id=%s, business_id=%s", user.id, biz_id)
         
+        # OWNERSHIP FIRST, and proven by the Account — not by a role string.
+        # BusinessEmployee.role is client-supplied delegation: an owner can
+        # hand 'owner' to someone who owns nothing (making them permanently
+        # irrevocable), and can demote their OWN row to cashier (locking
+        # themselves out, because the employee row is found before any
+        # ownership check ever runs). Both directions were live. The Account
+        # is the authoritative proof of who owns this business, so it decides.
+        is_account_owner = Account.objects.filter(
+            user=user,
+            business_id=biz_id,
+            account_type='business',
+            deleted_at__isnull=True,
+        ).exists()
+
         # Check employee relationship
         # is_active is the deactivation signal — BusinessEmployee.deactivate()
         # sets it and does NOT soft-delete the row, so filtering on deleted_at
@@ -187,7 +201,15 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
             jwt_context['employee_record'] = employee_record
             # If a specific permission is required, check it
             if required_permission:
-                allowed = check_role_permission(employee_record.role, required_permission)
+                # Account ownership grants unconditionally. Without this the
+                # employee row preempts the ownership proof entirely: an owner
+                # who set their own row to 'cashier' (UpdateBusinessEmployee
+                # permits exactly that — it blocks only self-deactivation) was
+                # evaluated as a cashier and denied payments, payroll,
+                # transfers, conversions and P2P, while still owning the
+                # business.
+                allowed = is_account_owner or check_role_permission(
+                    employee_record.role, required_permission)
                 # Honour an explicit per-employee revocation. Previously only
                 # the role matrix was consulted, so revoking send_funds on one
                 # manager did nothing — their ROLE still said yes.
@@ -197,19 +219,21 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
                 # deferring wholesale to employee_record.has_permission() would
                 # silently change what 221 call sites permit. An explicit False
                 # is unambiguous; an explicit True is left to the role matrix.
-                # NEVER against an owner. Owners hold authority through
-                # Account ownership, and check_role_permission grants them
-                # everything unconditionally — so a False in their permissions
-                # dict was historically inert. Honouring it turned
+                # NEVER against the Account owner. check_role_permission
+                # grants them everything unconditionally, so a False in their
+                # permissions dict was historically inert. Honouring it turned
                 # SetBusinessDelegatesByEmployee (payroll/schema.py, gated on
                 # send_funds alone and accepting ANY employee row of the
                 # business) into a privilege-revocation primitive: one manager
                 # could lock the real owner out of every send_funds-gated
                 # payment, payroll, transfer, conversion and P2P operation.
-                # Every business creates an active role='owner' employee row,
-                # and this gate finds it before the ownership fallthrough.
+                #
+                # Keyed on is_account_owner, NOT on role == 'owner'. The role
+                # is delegation and the Account is ownership: keying on the
+                # string both protected a non-owner delegate permanently and
+                # failed to protect a real owner who had demoted their own row.
                 overrides = employee_record.permissions or {}
-                if (employee_record.role != 'owner'
+                if (not is_account_owner
                         and required_permission in overrides
                         and not overrides[required_permission]):
                     logger.warning(
