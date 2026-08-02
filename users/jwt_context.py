@@ -164,9 +164,16 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
             logger.info("Validating business access: user_id=%s, business_id=%s", user.id, biz_id)
         
         # Check employee relationship
+        # is_active is the deactivation signal — BusinessEmployee.deactivate()
+        # sets it and does NOT soft-delete the row, so filtering on deleted_at
+        # alone let a fired employee keep full business authority. This gate
+        # guards 221 call sites across payments, payroll, send, conversion,
+        # ramps and invites, so that was authority over every business money
+        # movement, not just one flow.
         employee_record = BusinessEmployee.objects.filter(
             user=user,
             business_id=biz_id,
+            is_active=True,
             deleted_at__isnull=True
         ).first()
         
@@ -179,9 +186,26 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
                 )
             jwt_context['employee_record'] = employee_record
             # If a specific permission is required, check it
-            if required_permission and not check_role_permission(employee_record.role, required_permission):
-                logger.warning(f"User {user.id} with role {employee_record.role} lacks permission '{required_permission}'")
-                return None
+            if required_permission:
+                allowed = check_role_permission(employee_record.role, required_permission)
+                # Honour an explicit per-employee revocation. Previously only
+                # the role matrix was consulted, so revoking send_funds on one
+                # manager did nothing — their ROLE still said yes.
+                #
+                # Deny-only on purpose. This module's ROLE_PERMISSIONS and the
+                # model's DEFAULT_PERMISSIONS are two different tables, so
+                # deferring wholesale to employee_record.has_permission() would
+                # silently change what 221 call sites permit. An explicit False
+                # is unambiguous; an explicit True is left to the role matrix.
+                overrides = employee_record.permissions or {}
+                if required_permission in overrides and not overrides[required_permission]:
+                    logger.warning(
+                        "User %s has an explicit revocation of '%s' for business %s",
+                        user.id, required_permission, biz_id)
+                    allowed = False
+                if not allowed:
+                    logger.warning(f"User {user.id} with role {employee_record.role} lacks permission '{required_permission}'")
+                    return None
         else:
             # Allow business owners (have an Account record for this business)
             is_owner = Account.objects.filter(
