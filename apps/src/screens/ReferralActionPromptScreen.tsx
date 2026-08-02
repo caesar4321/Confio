@@ -11,6 +11,27 @@ import { useRampCountry } from '../hooks/useRampCountry';
 
 type ReferralActionRouteProp = RouteProp<MainStackParamList, 'ReferralActionPrompt'>;
 
+type PromptAction = {
+  label: string;
+  icon: string;
+  onPress: () => void;
+};
+
+/** One prompt variant. `actions` is optional — the conversion variant renders a
+ *  single CTA instead of a button row — and declaring it here is what lets
+ *  renderActions read it. Inferred from the object literal, the two variants
+ *  formed a union with no common `actions`, so every access failed to compile. */
+type PromptStep = {
+  title: string;
+  steps: string[];
+  requirement: string;
+  actions?: PromptAction[];
+  ctaLabel: string;
+  action: () => void;
+};
+
+type PromptEvent = 'top_up' | 'conversion_usdc_to_cusd';
+
 export const ReferralActionPromptScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const route = useRoute<ReferralActionRouteProp>();
@@ -26,7 +47,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
   const paused = savingsInfo.cusdDepositsPaused;
   const receiveDest = savingsInfo.enabled ? ('cusd_plus' as const) : ('usdt' as const);
 
-  const stepOptions = useMemo(() => ({
+  const stepOptions = useMemo<Record<PromptEvent, PromptStep>>(() => ({
     top_up: {
       // "US$5 en $CONFIO", never "5 $CONFIO": the bonus is five dollars WORTH
       // of the token, which at the current curve is about 25 of them. Same

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
-import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
+import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
@@ -10,7 +10,10 @@ import { Header } from '../navigation/Header';
 type ReferralFriendJoinedRouteProp = RouteProp<MainStackParamList, 'ReferralFriendJoined'>;
 
 export const ReferralFriendJoinedScreen: React.FC = () => {
-  const navigation = useNavigation();
+  // Typed like every other screen in this stack: a bare useNavigation() gives
+  // navigate() a params type of `never`, so every call site here failed to
+  // compile.
+  const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const route = useRoute<ReferralFriendJoinedRouteProp>();
   const friendName = route.params?.friendName || 'tu amigo';
   const suggestedEvent = route.params?.event || 'top_up';
