@@ -58,6 +58,13 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
+interface ICusdPlusVault {
+    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to)
+        external
+        returns (uint256 usdtOut);
+}
+
+
 contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, EIP712 {
     using SafeERC20 for IERC20;
 
@@ -85,7 +92,7 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
     mapping(bytes32 => bool) public invoiceDone;
 
     bytes32 private constant PAY_TYPEHASH = keccak256(
-        "Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,uint256 deadline)"
+        "Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,bool redeemToUsdt,uint256 minUsdtOut,uint256 deadline)"
     );
 
     event PaymentMade(
@@ -94,7 +101,9 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         address indexed merchant,
         address token,
         uint256 gross,
-        uint256 fee
+        uint256 fee,
+        bool redeemedToUsdt,
+        uint256 usdtOut
     );
     event FeesCollected(address indexed token, address indexed to, uint256 amount);
     event PaymentSignerChanged(address indexed previous, address indexed current);
@@ -130,10 +139,13 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         address token,
         uint256 gross,
         address merchant,
+        bool redeemToUsdt,
+        uint256 minUsdtOut,
         uint256 deadline
     ) public view returns (bytes32) {
         return _hashTypedDataV4(keccak256(abi.encode(
-            PAY_TYPEHASH, invoiceId, payer, token, gross, merchant, deadline
+            PAY_TYPEHASH, invoiceId, payer, token, gross, merchant,
+            redeemToUsdt, minUsdtOut, deadline
         )));
     }
 
@@ -145,6 +157,8 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         address token,
         uint256 gross,
         address merchant,
+        bool redeemToUsdt,
+        uint256 minUsdtOut,
         uint256 deadline,
         bytes calldata authSig
     )
@@ -163,7 +177,8 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         require(!invoiceDone[invoiceId], "invoice done");
 
         // The backend must have authorized THESE exact terms for THIS payer.
-        bytes32 digest = payDigest(invoiceId, msg.sender, token, gross, merchant, deadline);
+        bytes32 digest = payDigest(invoiceId, msg.sender, token, gross, merchant,
+                                   redeemToUsdt, minUsdtOut, deadline);
         require(
             SignatureChecker.isValidSignatureNow(paymentSigner, digest, authSig),
             "bad authorization"
@@ -176,11 +191,28 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         require(gross > fee, "amount too small");
 
         invoiceDone[invoiceId] = true;
-        IERC20(token).safeTransferFrom(msg.sender, merchant, gross - fee);
         IERC20(token).safeTransferFrom(msg.sender, address(this), fee);
         accruedFees[token] += fee;
 
-        emit PaymentMade(invoiceId, msg.sender, merchant, token, gross, fee);
+        // Merchant leg. Mirrors ConfioPayrollVault.payout(): the routing is a
+        // SIGNED parameter, so the backend decides eligibility and the chain
+        // enforces that the decision was authorized. A merchant who cannot
+        // hold cUSD+ is paid in USDT atomically, in this one call — no
+        // sibling redeem in the caller's batch, nothing for a validator to
+        // police.
+        uint256 net = gross - fee;
+        uint256 usdtOut;
+        if (redeemToUsdt) {
+            require(token == address(CUSD_PLUS), "redeem needs cUSD+");
+            IERC20(token).safeTransferFrom(msg.sender, address(this), net);
+            usdtOut = ICusdPlusVault(address(CUSD_PLUS)).redeemToUsdt(net, minUsdtOut, merchant);
+        } else {
+            require(minUsdtOut == 0, "minOut without redeem");
+            IERC20(token).safeTransferFrom(msg.sender, merchant, net);
+        }
+
+        emit PaymentMade(invoiceId, msg.sender, merchant, token, gross, fee,
+                         redeemToUsdt, usdtOut);
     }
 
     // ═════════════════════════ Admin ════════════════════════════════════

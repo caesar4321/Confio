@@ -129,8 +129,18 @@ def payment_fee_wei(gross_wei: int) -> int:
 from eth_utils import keccak, to_checksum_address  # noqa: E402
 from eth_abi import encode as _abi_encode, decode as _abi_decode  # noqa: E402
 
-_PAY_TYPEHASH = keccak(
+# The DEPLOYED contract decides which of these is correct, so the backend must
+# not switch until the new one is live. BSC_PAY_CONTRACT_V4 is the flag that
+# flips both together; signing v4 against the v3 contract reverts every
+# payment with "bad authorization".
+_PAY_TYPEHASH_V3 = keccak(
     text='Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,uint256 deadline)')
+_PAY_TYPEHASH_V4 = keccak(
+    text='Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,bool redeemToUsdt,uint256 minUsdtOut,uint256 deadline)')
+
+
+def _pay_contract_v4() -> bool:
+    return bool(getattr(settings, 'BSC_PAY_CONTRACT_V4', False))
 _PAY_DOMAIN_TYPEHASH = keccak(
     text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 _PAY_NAME_HASH = keccak(text='ConfioPay')
@@ -152,14 +162,24 @@ def _pay_domain_separator(pay_contract: str, chain_id: int) -> bytes:
 
 def pay_authorization_digest(pay_contract: str, chain_id: int, invoice_id32: str,
                              payer: str, token: str, gross: int, merchant: str,
-                             deadline: int) -> bytes:
+                             deadline: int, redeem_to_usdt: bool = False,
+                             min_usdt_out: int = 0) -> bytes:
     """The EIP-712 digest ConfioPayContract.pay() verifies against
     paymentSigner. Recomputed byte-for-byte here and in the validator."""
-    struct_hash = keccak(_abi_encode(
-        ['bytes32', 'bytes32', 'address', 'address', 'uint256', 'address', 'uint256'],
-        [_PAY_TYPEHASH, bytes.fromhex(invoice_id32[2:]),
-         to_checksum_address(payer), to_checksum_address(token), int(gross),
-         to_checksum_address(merchant), int(deadline)]))
+    if _pay_contract_v4():
+        struct_hash = keccak(_abi_encode(
+            ['bytes32', 'bytes32', 'address', 'address', 'uint256', 'address',
+             'bool', 'uint256', 'uint256'],
+            [_PAY_TYPEHASH_V4, bytes.fromhex(invoice_id32[2:]),
+             to_checksum_address(payer), to_checksum_address(token), int(gross),
+             to_checksum_address(merchant), bool(redeem_to_usdt),
+             int(min_usdt_out), int(deadline)]))
+    else:
+        struct_hash = keccak(_abi_encode(
+            ['bytes32', 'bytes32', 'address', 'address', 'uint256', 'address', 'uint256'],
+            [_PAY_TYPEHASH_V3, bytes.fromhex(invoice_id32[2:]),
+             to_checksum_address(payer), to_checksum_address(token), int(gross),
+             to_checksum_address(merchant), int(deadline)]))
     return keccak(b'\x19\x01' + _pay_domain_separator(pay_contract, chain_id) + struct_hash)
 
 
