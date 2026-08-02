@@ -339,12 +339,17 @@ def flag_duplicate_personal_identity_verifications(sender, instance: 'IdentityVe
             updated_at=timezone.now(),
         )
 
-        from achievements.referral_security import enforce_referee_reward_uniqueness_for_identity
+        from achievements.referral_security import (
+            enforce_referee_reward_uniqueness_for_identity,
+            person_key_for,
+        )
 
+        person_key = person_key_for(instance)
         transaction.on_commit(
             lambda: enforce_referee_reward_uniqueness_for_identity(
                 instance.document_issuing_country,
                 instance.document_number_normalized,
+                person_key,
             )
         )
 

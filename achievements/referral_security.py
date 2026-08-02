@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from decimal import Decimal
 
 from django.db import transaction
@@ -81,26 +83,88 @@ def get_referral_reward_summary(user=None):
     }
 
 
-def _get_verified_identity_user_ids(document_issuing_country: str, document_number_normalized: str):
+def normalize_person_name(value: str | None) -> str:
+    """Accent-folded, letters-only, uppercase. 'José Ramírez' -> 'JOSERAMIREZ'."""
+    folded = unicodedata.normalize('NFKD', value or '').encode('ascii', 'ignore').decode()
+    return re.sub(r'[^A-Za-z]', '', folded).upper()
+
+
+def person_key_for(verification) -> tuple[str, str, object] | None:
+    """(first, last, dob) for a verification, or None when unusable.
+
+    The person layer of the identity key. A document tuple identifies a
+    DOCUMENT; the same human holding a national ID and a passport produces two
+    of them and passed uniqueness twice. Name plus date of birth is the same
+    person across both.
+
+    Not infallible — people share names, and two strangers can share a birthday
+    — so this widens the net rather than replacing the document match. Both
+    layers must be present for a key to count.
+    """
+    if verification is None:
+        return None
+    first = normalize_person_name(getattr(verification, 'verified_first_name', ''))
+    last = normalize_person_name(getattr(verification, 'verified_last_name', ''))
+    dob = getattr(verification, 'verified_date_of_birth', None)
+    if not first or not last or not dob:
+        return None
+    return (first, last, dob)
+
+
+def _personal_context_filter(qs):
+    return qs.filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+
+
+def _get_verified_identity_user_ids(
+    document_issuing_country: str,
+    document_number_normalized: str,
+    person_key: tuple | None = None,
+):
+    """Users who are the same person as this identity, by EITHER layer.
+
+    Matching on either the document tuple or the person key is deliberate: one
+    human with two documents is caught by the person layer, and one document
+    reused under a different spelling of a name is caught by the document
+    layer.
+    """
     from security.models import IdentityVerification
 
-    if not document_issuing_country or not document_number_normalized:
-        return []
+    base = _personal_context_filter(IdentityVerification.objects.filter(status='verified'))
 
-    return list(
-        IdentityVerification.objects.filter(
-            status='verified',
-            document_issuing_country=document_issuing_country,
-            document_number_normalized=document_number_normalized,
+    user_ids: set = set()
+
+    if document_issuing_country and document_number_normalized:
+        user_ids.update(
+            base.filter(
+                document_issuing_country=document_issuing_country,
+                document_number_normalized=document_number_normalized,
+            ).values_list('user_id', flat=True)
         )
-        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
-        .values_list('user_id', flat=True)
-        .distinct()
+
+    if person_key:
+        first, last, dob = person_key
+        # Name normalization happens in Python, so the DOB narrows the scan and
+        # the names are compared after folding.
+        for candidate in base.filter(verified_date_of_birth=dob).only(
+            'user_id', 'verified_first_name', 'verified_last_name'
+        ):
+            if (
+                normalize_person_name(candidate.verified_first_name) == first
+                and normalize_person_name(candidate.verified_last_name) == last
+            ):
+                user_ids.add(candidate.user_id)
+
+    return list(user_ids)
+
+
+def _get_identity_referrals(
+    document_issuing_country: str,
+    document_number_normalized: str,
+    person_key: tuple | None = None,
+):
+    user_ids = _get_verified_identity_user_ids(
+        document_issuing_country, document_number_normalized, person_key
     )
-
-
-def _get_identity_referrals(document_issuing_country: str, document_number_normalized: str):
-    user_ids = _get_verified_identity_user_ids(document_issuing_country, document_number_normalized)
     if not user_ids:
         return []
 
@@ -112,8 +176,14 @@ def _get_identity_referrals(document_issuing_country: str, document_number_norma
     )
 
 
-def enforce_referee_reward_uniqueness_for_identity(document_issuing_country: str, document_number_normalized: str):
-    referrals = _get_identity_referrals(document_issuing_country, document_number_normalized)
+def enforce_referee_reward_uniqueness_for_identity(
+    document_issuing_country: str,
+    document_number_normalized: str,
+    person_key: tuple | None = None,
+):
+    referrals = _get_identity_referrals(
+        document_issuing_country, document_number_normalized, person_key
+    )
     if len(referrals) <= 1:
         return {'winner_referral_id': referrals[0].id if referrals else None, 'blocked_referral_ids': []}
 
@@ -127,6 +197,9 @@ def enforce_referee_reward_uniqueness_for_identity(document_issuing_country: str
             reward_metadata['duplicate_identity_referee_block'] = {
                 'document_issuing_country': document_issuing_country,
                 'document_number_normalized': document_number_normalized,
+                # Which layer caught it, so a support review can tell a
+                # reused document from a second document for one person.
+                'matched_person_key': bool(person_key),
                 'winner_referral_id': winner.id,
                 'blocked_at': now.isoformat(),
             }
@@ -194,11 +267,30 @@ def get_duplicate_referee_reward_error(referral: UserReferral | None):
         .first()
     )
     if not verification:
+        # No verified identity yet. Not a duplicate question — the payout gate
+        # is what requires verification, and this must not block accrual.
         return None
+
+    person_key = person_key_for(verification)
+    has_document_key = bool(
+        verification.document_issuing_country
+        and verification.document_issuing_country != 'UNK'
+        and verification.document_number_normalized
+    )
+
+    # Fail CLOSED. A verified row carrying neither a usable document tuple nor
+    # a person key cannot be deduplicated, and answering "no duplicate" there
+    # let the three malformed cases through as if they were clean: an empty
+    # normalized document, an 'UNK' issuing country, and a Didit sync that
+    # keeps its session placeholder on a verified row. Nobody in the current
+    # population is in this state, which is exactly why it is cheap to close.
+    if not has_document_key and not person_key:
+        return DUPLICATE_REFEREE_REWARD_ERROR
 
     result = enforce_referee_reward_uniqueness_for_identity(
         verification.document_issuing_country,
         verification.document_number_normalized,
+        person_key,
     )
     if result['winner_referral_id'] and result['winner_referral_id'] != referral.id:
         return DUPLICATE_REFEREE_REWARD_ERROR
