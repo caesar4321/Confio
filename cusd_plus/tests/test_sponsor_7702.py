@@ -328,11 +328,18 @@ class SponsorBscBatchTests(SimpleTestCase):
         res, *_ = self._mutate(deadline=int(time.time()) + 4000)
         self.assertEqual(res.error, 'bad_deadline')
 
-    def test_daily_cap(self):
+    def test_no_daily_cap(self):
+        """A stale day counter must not block anything.
+
+        The per-day cap was removed: it counted every sponsored operation, so
+        a few ordinary sends starved the savings mint for the rest of the day.
+        Cache keys from before the change can still be live, so assert they
+        are simply ignored rather than that the key is absent.
+        """
         from django.core.cache import cache
-        cache.set(f'cusd_plus_7702_day_{USER}', 20, 3600)
+        cache.set(f'cusd_plus_7702_day_{USER}', 9999, 3600)
         res, *_ = self._mutate()
-        self.assertEqual(res.error, 'daily_cap')
+        self.assertNotEqual(res.error, 'daily_cap')
 
     # ── signatures & authorization ──
 

@@ -290,7 +290,6 @@ export const AccountDetailScreen = () => {
   // SavingsScreen and was dropped when that screen merged in here (808b7abc),
   // which left every arrived deposit stuck at DEST_ARRIVED. Scoped to the
   // savings account, as it was before.
-  const { mintingSavings } = useSavingsResume(isSavingsAccount);
   // Which ledger rows belong to this account. Was an inline ternary repeated
   // at five call sites; a third account type made that untenable.
   const accountTokenTypes = React.useMemo(() => {
@@ -308,6 +307,11 @@ export const AccountDetailScreen = () => {
   // cUSD phase-out: while deposits are paused (server flag, singleton is
   // already cached by Home) this screen goes retiro-only — no Recargar.
   const { savings: ahorrosSavings, usdtBalanceUsd: ahorrosUsdt } = useSavingsPortfolio();
+  // Moved below useSavingsPortfolio so it can take the polled USDT balance as
+  // its arrival trigger: mounting fires the sweep when the user OPENS this
+  // screen, but a deposit landing while they sit here needs the balance to
+  // say so. Unconditional and permanently ordered, so hook order is stable.
+  const { mintingSavings } = useSavingsResume(isSavingsAccount, ahorrosUsdt);
   // Savings variant figures. The headline is ONE account number (vault
   // position + raw wallet USDT): money must never look like it vanished
   // between landing on-chain and minting into the vault.

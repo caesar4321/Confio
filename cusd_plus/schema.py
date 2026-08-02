@@ -922,15 +922,17 @@ class SponsorBscBatch(graphene.Mutation):
             return SponsorBscBatch(success=False, error='no_bsc_address')
         user_addr = user_addr.lower()
 
-        # Per-address cooldown + daily cap (dust-rail discipline).
+        # Per-address cooldown. There is NO daily cap: it was a canary guard
+        # that counted every sponsored operation, so a few ordinary sends or
+        # redeems used up the budget and the user's savings mint — the one
+        # thing they were waiting on — got refused for the rest of the day.
+        # Sponsor gas on BSC is a fraction of a cent and the address is
+        # JWT-bound to the caller's own registered key, so there is nothing
+        # here worth farming. The 30s per-address cooldown and the per-user
+        # rate limit above still bound the request rate.
         rl_key = f'cusd_plus_7702_cooldown_{user_addr}'
         if cache.get(rl_key):
             return SponsorBscBatch(success=False, error='rate_limited')
-        day_key = f'cusd_plus_7702_day_{user_addr}'
-        day_count = cache.get(day_key, 0)
-        if day_count >= int(getattr(settings, 'CUSD_PLUS_7702_MAX_PER_DAY', 20)):
-            logger.warning('7702 daily cap hit for %s', user_addr)
-            return SponsorBscBatch(success=False, error='daily_cap')
 
         # Normalize + structural caps.
         if not calls or len(calls) > 4:
@@ -1049,7 +1051,6 @@ class SponsorBscBatch(graphene.Mutation):
             return SponsorBscBatch(success=False, error=str(exc)[:200])
 
         cache.set(rl_key, 1, 30)  # 30s per-address cooldown
-        cache.set(day_key, day_count + 1, 24 * 3600)
         return SponsorBscBatch(success=True, tx_hash=tx_hash,
                                execution=getattr(batch, 'executed_early', None))
 

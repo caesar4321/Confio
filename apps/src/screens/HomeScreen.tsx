@@ -218,7 +218,14 @@ export const HomeScreen = () => {
   // Finish any cUSD+ mint whose USDT already arrived. Home carries it for the
   // same reason it carries the USDC→cUSD auto-swap: this is where users land,
   // and a deposit shouldn't wait for them to open the savings account.
-  const { mintingSavings } = useSavingsResume(isAuthenticated);
+  // The polled raw-USDT balance is the arrival trigger: mount and
+  // re-foreground only fire when the user arrives, so a deposit landing while
+  // they were already sitting here used to wait for them to open the savings
+  // account before anything swept it.
+  const { mintingSavings } = useSavingsResume(
+    isAuthenticated,
+    savingsPortfolio.usdtBalanceUsd,
+  );
 
   // Use the auto-swap hook for both ALGO and USDC detection
   const { swapModalAsset, walletRecoveryRequired, dismissWalletRecovery } = useAutoSwap({
