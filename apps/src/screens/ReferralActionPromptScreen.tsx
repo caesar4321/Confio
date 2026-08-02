@@ -7,6 +7,7 @@ import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { useRampCountry } from '../hooks/useRampCountry';
 
 type ReferralActionRouteProp = RouteProp<MainStackParamList, 'ReferralActionPrompt'>;
 
@@ -18,14 +19,21 @@ export const ReferralActionPromptScreen: React.FC = () => {
   // the USDT-BSC top-up and receive. Copy softened to "$20" — the reward
   // criteria vs the new rail is a flagged product decision, not a UI one.
   const { savings: savingsInfo } = useSavingsPortfolio();
+  // Recargar is a ramp entry point like any other: it has to honor the
+  // blocked-country guard (VE/NI/PA/CU -> Efectivo) instead of dropping the
+  // user into a provider flow their country cannot use.
+  const { navigateToRampOrEfectivo } = useRampCountry();
   const paused = savingsInfo.cusdDepositsPaused;
   const receiveDest = savingsInfo.enabled ? ('cusd_plus' as const) : ('usdt' as const);
 
   const stepOptions = useMemo(() => ({
     top_up: {
-      title: 'Gana tu bono de 5 $CONFIO',
+      // "US$5 en $CONFIO", never "5 $CONFIO": the bonus is five dollars WORTH
+      // of the token, which at the current curve is about 25 of them. Same
+      // phrasing as Logros and the referral modal.
+      title: 'Gana tu bono de US$5 en $CONFIO',
       steps: [
-        'Tienes 5 $CONFIO reservados en tu cuenta',
+        'Tienes US$5 en $CONFIO reservados en tu cuenta',
         paused
           ? 'Haz una recarga de $20 o más para ganarlos'
           : 'Haz una recarga de 20 cUSD o más para ganarlos',
@@ -43,8 +51,8 @@ export const ReferralActionPromptScreen: React.FC = () => {
           icon: 'credit-card',
           onPress: () =>
             paused
-              ? navigation.navigate('TopUp', { destination: 'cusd_plus' })
-              : navigation.navigate('TopUp'),
+              ? navigateToRampOrEfectivo('TopUp', { destination: 'cusd_plus' })
+              : navigateToRampOrEfectivo('TopUp'),
         },
         {
           label: paused ? 'Recibir dólares' : 'Depositar cUSD',
@@ -72,7 +80,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
       ctaLabel: 'Ir a Convertir',
       action: () => navigation.navigate('USDCConversion'),
     },
-  }), [navigation, paused, receiveDest]);
+  }), [navigateToRampOrEfectivo, navigation, paused, receiveDest]);
 
   const nextSteps = stepOptions[event as keyof typeof stepOptions] || stepOptions.top_up;
 

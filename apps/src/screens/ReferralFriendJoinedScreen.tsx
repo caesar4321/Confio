@@ -28,7 +28,7 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
           <Text style={styles.eyebrow}>Referidos Confío</Text>
           <Text style={styles.title}>¡{friendName} ya se unió!</Text>
           <Text style={styles.subtitle}>
-            Tu amigo ya tiene sus 5 $CONFIO reservados. Ahora solo falta ganarlos.
+            Tu amigo ya tiene sus US$5 en $CONFIO reservados. Ahora solo falta ganarlos.
           </Text>
 
           <View style={styles.stepCard}>
