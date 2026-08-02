@@ -479,6 +479,27 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         reward_cusd = referee_confio or Decimal("0")
 
     referee_confio = referee_confio or Decimal("0")
+
+    # A reward that is owed must never be finalized at zero. Pricing degrades
+    # through several fallbacks (live curve -> last known -> phase price ->
+    # floor), so reaching zero means every one of them failed — and the row
+    # below would be written 'eligible' with nothing in it, after which sync
+    # returns early forever and the US$5 is gone with no error anyone sees.
+    # 'failed' keeps it retryable: it is not in the early-return set, and the
+    # resync command picks it up.
+    if reward_cusd and referee_confio <= Decimal("0"):
+        logger.error(
+            "[referral_reward] refusing to finalize a zero allocation "
+            "(user=%s referral=%s reward_cusd=%s)",
+            getattr(user, "id", None),
+            getattr(referral, "id", None),
+            reward_cusd,
+        )
+        event.reward_status = "failed"
+        event.error = "No pudimos calcular el monto en $CONFIO; se reintentará."
+        event.save(update_fields=["reward_status", "error", "updated_at"])
+        return referral
+
     if mirror_referee_confio:
         referrer_confio = referee_confio
 
