@@ -18,26 +18,69 @@ def _relevant_asset_ids():
     return {int(asset_id) for asset_id in asset_ids if asset_id}
 
 
+def redact_address(address):
+    """Head+tail only. Enough for a human to match an address they already have,
+    not enough to leave the identifier itself sitting in a log file."""
+    value = str(address or '')
+    return f"{value[:6]}…{value[-4:]}" if len(value) > 14 else '(none)'
+
+
+# algod's own wording for "this address holds nothing". Anything else that
+# arrives with a 404 came from somewhere between us and the node.
+_MISSING_ACCOUNT_PHRASES = ('no accounts found', 'account does not exist')
+
+
+def _looks_like_missing_account(exc):
+    """Algod answers 404 with one of these bodies for an address that was never
+    funded or was closed out. That is a CONFIRMED-empty answer.
+
+    The BODY is required, not just the status: `.code` carries any HTTP response
+    from the provider, so a proxy or routing 404 would otherwise be read as proof
+    the account is empty and restore the fail-open this function exists to close.
+    A bare `not found` match would do the same to a DNS error ("host not found").
+    An unrecognised 404 costs the user a retry; a misread transport error costs
+    them the guard."""
+    message = str(exc).lower()
+    return any(phrase in message for phrase in _MISSING_ACCOUNT_PHRASES)
+
+
 def inspect_address_migration_risk(algod_client, address):
     """
     Return a summary of funds that would be hidden if we reassign the account away
     from this address before migration is actually complete.
+
+    `inspection_failed` separates "the chain says this address is empty" from "we
+    could not read the chain". Callers that gate a security decision must treat
+    the second as unknown, never as empty.
     """
     if not address:
         return {
             'has_material_risk': False,
             'relevant_assets': {},
             'spendable_algo': 0,
+            'inspection_failed': False,
         }
 
     try:
         account_info = algod_client.account_info(address)
     except Exception as exc:
-        logger.info("Treating missing address %s as no migration risk: %s", address, exc)
+        if _looks_like_missing_account(exc):
+            logger.info("Treating missing address %s as no migration risk: %s", redact_address(address), exc)
+            return {
+                'has_material_risk': False,
+                'relevant_assets': {},
+                'spendable_algo': 0,
+                'inspection_failed': False,
+            }
+        # A node timeout, outage, or malformed response tells us nothing about
+        # the balance. Reporting it as "no risk" is what lets a transient blip
+        # authorize moving the pointer away from a wallet that still holds funds.
+        logger.warning("Could not inspect %s for migration risk: %s", redact_address(address), exc)
         return {
             'has_material_risk': False,
             'relevant_assets': {},
             'spendable_algo': 0,
+            'inspection_failed': True,
         }
 
     relevant_ids = _relevant_asset_ids()
@@ -57,6 +100,7 @@ def inspect_address_migration_risk(algod_client, address):
         'has_material_risk': bool(relevant_assets) or spendable_algo >= MATERIAL_SPENDABLE_ALGO_MICROS,
         'relevant_assets': relevant_assets,
         'spendable_algo': spendable_algo,
+        'inspection_failed': False,
     }
 
 
@@ -74,6 +118,20 @@ def get_address_reassignment_blocker(algod_client, current_address, new_address,
 
     risk = inspect_address_migration_risk(algod_client, current_address)
 
+    if risk.get('inspection_failed'):
+        # Fail CLOSED: an unreadable address is unknown, not empty. Refusing a
+        # reassignment costs the user a retry; allowing one on an unverified
+        # address can strand real funds on a wallet we stop pointing at.
+        logger.warning(
+            "Blocking account address reassignment %s -> %s: the old address could not be inspected",
+            redact_address(current_address),
+            redact_address(new_address),
+        )
+        return (
+            "No pudimos verificar tu billetera anterior en este momento. "
+            "Revisa tu conexion e intentalo de nuevo en unos minutos."
+        )
+
     if not risk['has_material_risk']:
         return None
 
@@ -85,8 +143,8 @@ def get_address_reassignment_blocker(algod_client, current_address, new_address,
 
     logger.warning(
         "Blocking account address reassignment %s -> %s because the old address still holds value: assets=%s spendable_algo=%s",
-        current_address,
-        new_address,
+        redact_address(current_address),
+        redact_address(new_address),
         risk['relevant_assets'],
         risk['spendable_algo'],
     )

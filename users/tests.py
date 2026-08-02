@@ -179,6 +179,93 @@ class MigrationSafetyTestCase(TestCase):
         self.assertIsNone(blocker)
 
 
+class MigrationSafetyInspectionFailureTestCase(TestCase):
+    """An address algod cannot be read is UNKNOWN, not empty. Reporting the two
+    as the same thing let a node blip authorize moving the account pointer away
+    from a wallet that may still hold funds."""
+
+    class RaisingAlgodClient:
+        def __init__(self, exc):
+            self.exc = exc
+
+        def account_info(self, address):
+            raise self.exc
+
+    class AlgodHTTPErrorLike(Exception):
+        def __init__(self, message, code=None):
+            super().__init__(message)
+            self.code = code
+
+    def test_404_is_a_confirmed_empty_answer(self):
+        algod = self.RaisingAlgodClient(
+            self.AlgodHTTPErrorLike('no accounts found for address', code=404)
+        )
+
+        risk = inspect_address_migration_risk(algod, 'legacy')
+        self.assertFalse(risk['inspection_failed'])
+        self.assertFalse(risk['has_material_risk'])
+        self.assertIsNone(get_address_reassignment_blocker(algod, 'legacy', 'new'))
+
+    def test_generic_404_is_not_an_empty_answer(self):
+        """`.code` carries any HTTP response from the provider. A proxy or
+        routing 404 says nothing about the balance, so status alone must not
+        stand in for algod's own 'no accounts found' body."""
+        for exc in (
+            self.AlgodHTTPErrorLike('404 page not found', code=404),
+            self.AlgodHTTPErrorLike('', code=404),
+            Exception('gaierror: host not found'),
+        ):
+            with self.subTest(message=str(exc)):
+                algod = self.RaisingAlgodClient(exc)
+
+                self.assertTrue(inspect_address_migration_risk(algod, 'legacy')['inspection_failed'])
+                self.assertIsNotNone(get_address_reassignment_blocker(algod, 'legacy', 'new'))
+
+    def test_logs_never_carry_a_full_address(self):
+        from users.migration_safety import redact_address
+
+        address = 'A2GJGRKRABIUOCGXQKKR4YBTWUQPATJKNSH2CAUL2GG2U4MRLFSXUPT744'
+        redacted = redact_address(address)
+
+        self.assertNotIn(redacted, (address,))
+        self.assertNotEqual(redacted, address)
+        self.assertTrue(address.startswith(redacted.split('…')[0]))
+        self.assertTrue(address.endswith(redacted.split('…')[1]))
+        self.assertEqual(redact_address(None), '(none)')
+        self.assertEqual(redact_address(''), '(none)')
+
+    def test_unreadable_address_blocks_reassignment(self):
+        for exc in (
+            Exception('HTTPSConnectionPool: Read timed out'),
+            self.AlgodHTTPErrorLike('502 Bad Gateway', code=502),
+            ValueError('Expecting value: line 1 column 1 (char 0)'),
+        ):
+            with self.subTest(exc=type(exc).__name__):
+                algod = self.RaisingAlgodClient(exc)
+
+                risk = inspect_address_migration_risk(algod, 'legacy')
+                self.assertTrue(risk['inspection_failed'])
+
+                blocker = get_address_reassignment_blocker(algod, 'legacy', 'new')
+                self.assertIsNotNone(blocker)
+                # The user is told to retry, not that they hold funds they don't.
+                self.assertIn('verificar', blocker)
+                self.assertNotIn('activos pendientes', blocker)
+
+    def test_same_address_noop_survives_an_outage(self):
+        algod = self.RaisingAlgodClient(Exception('Read timed out'))
+
+        self.assertIsNone(get_address_reassignment_blocker(algod, 'legacy', 'legacy'))
+
+    def test_inspection_failure_does_not_flip_has_material_risk(self):
+        """MarkWalletMigrated reads has_material_risk only. Keeping it False on
+        an unreadable address leaves those callers on their existing behavior;
+        opting them into fail-closed is a separate, deliberate change."""
+        algod = self.RaisingAlgodClient(Exception('Read timed out'))
+
+        self.assertFalse(inspect_address_migration_risk(algod, 'legacy')['has_material_risk'])
+
+
 class PhoneLookupTestCase(TestCase):
     """A send identifies its recipient by the FULL number — calling code plus
     subscriber digits. Every spelling of a full number lands on the same user;
