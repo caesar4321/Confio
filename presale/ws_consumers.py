@@ -19,12 +19,15 @@ class _DummyInfo:
         self.context = context
 
 
-def _bsc_presale_active() -> bool:
-    """True once purchases moved to the BSC curve vault. The legacy Algorand
-    purchase/opt-in paths in this consumer MUST refuse from that moment on —
-    they price from the mutable DB phase row and skip every BSC-side gate."""
+def _algorand_presale_closed() -> bool:
+    """True when the LEGACY rail is shut server-side.
+
+    Deliberately NOT tied to whether BSC is live: both rails run at once
+    during the migration so an old build keeps working untouched while new
+    builds buy on the curve. This flag (and, authoritatively, pausing the
+    Algorand presale contract on-chain) is what ends the window."""
     from django.conf import settings as dj_settings
-    return getattr(dj_settings, 'PRESALE_CHAIN', 'algorand') == 'bsc'
+    return bool(getattr(dj_settings, 'PRESALE_ALGORAND_CLOSED', False))
 
 
 class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
@@ -305,14 +308,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         user = self.scope.get("user")
 
-        # CUTOVER GATE (Codex audit 2026-08-02, P1). Everything the BSC flow
-        # enforces — the immutable on-chain curve, funding rules, race-safe
-        # limit reservation, mandatory attestations — lives on the GraphQL
-        # path. This legacy path sells at the MUTABLE DB phase price, so
-        # leaving it open after the switch would make it the cheapest way to
-        # bypass all of it. Claims stay open (see _claim_prepare): buyers must
-        # always be able to get what they already paid for.
-        if _bsc_presale_active():
+        # Legacy rail stays OPEN during the migration so old builds keep
+        # working; it closes when the window ends (flag here, and the
+        # authoritative pause on the Algorand contract itself). Claims are
+        # never gated (see _claim_prepare) — buyers must always be able to
+        # get what they already paid for.
+        if _algorand_presale_closed():
             return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
 
         # Geo-blocking check (phone country + IP country; test accounts bypass)
@@ -570,10 +571,10 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         user = self.scope.get("user")
 
-        # Opting into the Algorand presale app is meaningless once buys run on
-        # BSC — and this call funds MBR from the sponsor, so leaving it open
-        # after cutover is free sponsor drain. (Codex audit 2026-08-02, P1.)
-        if _bsc_presale_active():
+        # Same window as the purchase path. This call funds MBR from the
+        # sponsor, so once the legacy rail closes, leaving it open would be
+        # free sponsor drain. (Codex audit 2026-08-02, P1.)
+        if _algorand_presale_closed():
             return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
 
         # Geo-blocking check (same gate as purchase prepare; test accounts bypass)

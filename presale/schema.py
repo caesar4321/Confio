@@ -123,7 +123,14 @@ class PresaleQueries(graphene.ObjectType):
     def resolve_presale_chain(self, info):
         """Purchase-flow chain switch - no login required"""
         from django.conf import settings as dj_settings
-        return getattr(dj_settings, 'PRESALE_CHAIN', 'algorand')
+        # Which rail THIS client should use. Only a build that ships the BSC
+        # mutations asks (and can act on) this — an old build never queries
+        # the field and keeps using the WebSocket, which stays open. So the
+        # answer is simply "is the BSC rail live", not a global cutover.
+        if (getattr(dj_settings, 'PRESALE_BSC_ENABLED', False)
+                and getattr(dj_settings, 'BSC_PRESALE_VAULT_ADDRESS', None)):
+            return 'bsc'
+        return 'algorand'
 
     def resolve_presale_curve_stats(self, info):
         """Curve stats for the presale screens - no login required"""
@@ -286,7 +293,7 @@ class PrepareBscPresalePurchase(graphene.Mutation):
         from . import bsc_flow
 
         user = info.context.user
-        if getattr(dj_settings, 'PRESALE_CHAIN', 'algorand') != 'bsc':
+        if not getattr(dj_settings, 'PRESALE_BSC_ENABLED', False):
             return PrepareBscPresalePurchase(success=False, error='bsc_presale_disabled')
         if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
             return PrepareBscPresalePurchase(success=False, error='disabled')
@@ -353,7 +360,7 @@ class SubmitBscPresalePurchase(graphene.Mutation):
         from .models import PresalePurchase
 
         user = info.context.user
-        if getattr(dj_settings, 'PRESALE_CHAIN', 'algorand') != 'bsc':
+        if not getattr(dj_settings, 'PRESALE_BSC_ENABLED', False):
             return SubmitBscPresalePurchase(success=False, error='bsc_presale_disabled')
         if not getattr(dj_settings, 'CUSD_PLUS_7702_ENABLED', False):
             return SubmitBscPresalePurchase(success=False, error='disabled')

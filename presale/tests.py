@@ -141,7 +141,7 @@ class PresaleMigrationCreditPipelineTest(TestCase):
         self.assertIsNotNone(row.credited_at)
 
 
-@override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT, PRESALE_CHAIN='bsc')
+@override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT, PRESALE_BSC_ENABLED=True)
 class BscPurchaseFlowTest(TestCase):
     """presale/bsc_flow.py with the chain mocked (RPC-free).
     Run: myvenv/bin/python manage.py test presale.tests.BscPurchaseFlowTest
@@ -260,7 +260,7 @@ class BscPurchaseFlowTest(TestCase):
         self.assertEqual(rej2['error'], 'bad_calldata')
 
 
-@override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT, PRESALE_CHAIN='bsc')
+@override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT, PRESALE_BSC_ENABLED=True)
 class BscRedeemFundingTest(TestCase):
     """The cUSD+ redeem funding leg (presale/bsc_flow._plan_funding).
     Chain reads are mocked; redeem_usdt_out runs for real so the share math
