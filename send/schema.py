@@ -381,7 +381,8 @@ class PrepareBscInvite(graphene.Mutation):
             return PrepareBscInvite(success=False, error='permission_denied')
         phone_key = InviteSendTransactionBuilder.normalize_phone(phone, phone_country)
         result = invite_bsc_flow.prepare_create(
-            info.context.user, jwt_ctx, phone_key, token_type, amount)
+            info.context.user, jwt_ctx, phone_key, token_type, amount,
+            phone_display=phone)
         if not result.get('success'):
             return PrepareBscInvite(success=False, error=result.get('error'))
         return PrepareBscInvite(
@@ -410,8 +411,8 @@ class SubmitBscInvite(graphene.Mutation):
         from . import invite_bsc_flow
 
         invite = PhoneInvite.objects.filter(
-            invitation_id=invite_id.replace('0x', ''), status='pending',
-            deleted_at__isnull=True).first()
+            invitation_id=invite_id.replace('0x', ''), inviter_user=info.context.user,
+            status='pending', deleted_at__isnull=True).first()
         if not invite:
             return SubmitBscInvite(success=False, error='invite_not_found')
         result = invite_bsc_flow.submit_create(

@@ -14,6 +14,8 @@ from send import invite_bsc_flow as f
 ESCROW = '0x' + 'ee' * 20
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
 CONFIO = '0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8'
+INVITER = '0x' + '11' * 20
+INVITER2 = '0x' + '22' * 20
 WAD = 10 ** 18
 
 
@@ -25,15 +27,26 @@ WAD = 10 ** 18
 )
 class InviteBatchTests(SimpleTestCase):
     def test_invite_id_is_deterministic(self):
-        a = f.invite_id_bytes32('58:412555')
-        b = f.invite_id_bytes32('58:412555')
-        c = f.invite_id_bytes32('57:300111')
+        a = f.invite_id_bytes32('58:412555', INVITER)
+        b = f.invite_id_bytes32('58:412555', INVITER)
+        c = f.invite_id_bytes32('57:300111', INVITER)
         self.assertEqual(a, b)
         self.assertNotEqual(a, c)
         self.assertTrue(a.startswith('0x') and len(a) == 66)
 
+    def test_invite_id_case_insensitive_in_inviter(self):
+        self.assertEqual(f.invite_id_bytes32('58:412555', INVITER),
+                         f.invite_id_bytes32('58:412555', INVITER.upper()))
+
+    def test_two_inviters_same_phone_get_distinct_ids(self):
+        """PhoneInvite.invitation_id is unique, so a phone-only id would make
+        the second inviter collide on insert — the escrow namespaces by
+        (inviter, inviteId) precisely so both can coexist."""
+        self.assertNotEqual(f.invite_id_bytes32('58:412555', INVITER),
+                            f.invite_id_bytes32('58:412555', INVITER2))
+
     def test_create_batch_shape_cusd_plus(self):
-        inv = f.invite_id_bytes32('58:412555')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_create_calls('CUSD_PLUS', 5 * WAD, inv)
         self.assertEqual(len(calls), 2)
         # approve(escrow, amount) on the vault token
@@ -48,18 +61,18 @@ class InviteBatchTests(SimpleTestCase):
         self.assertEqual(int(calls[1]['data'][138:202], 16), 5 * WAD)
 
     def test_create_batch_confio(self):
-        inv = f.invite_id_bytes32('58:412555')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_create_calls('CONFIO', 20 * WAD, inv)
         self.assertEqual(calls[0]['to'], CONFIO.lower())
         self.assertEqual(calls[1]['data'][74:138], CONFIO[2:].lower().rjust(64, '0'))
 
     def test_validator_accepts_matching_batch(self):
-        inv = f.invite_id_bytes32('58:412555')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_create_calls('CUSD_PLUS', 5 * WAD, inv)
         f._validate_create_batch(calls, 'CUSD_PLUS', inv)
 
     def test_validator_rejects_amount_mismatch(self):
-        inv = f.invite_id_bytes32('58:412555')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_create_calls('CUSD_PLUS', 5 * WAD, inv)
         # approve 5, but create 6 → residual allowance; reject
         bad = f.build_create_calls('CUSD_PLUS', 6 * WAD, inv)
@@ -68,14 +81,14 @@ class InviteBatchTests(SimpleTestCase):
             f._validate_create_batch(mixed, 'CUSD_PLUS', inv)
 
     def test_validator_rejects_wrong_invite_id(self):
-        inv = f.invite_id_bytes32('58:412555')
-        other = f.invite_id_bytes32('57:300111')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
+        other = f.invite_id_bytes32('57:300111', INVITER)
         calls = f.build_create_calls('CUSD_PLUS', 5 * WAD, inv)
         with self.assertRaises(PolicyError):
             f._validate_create_batch(calls, 'CUSD_PLUS', other)
 
     def test_validator_rejects_foreign_token(self):
-        inv = f.invite_id_bytes32('58:412555')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_create_calls('CUSD_PLUS', 5 * WAD, inv)
         alien = '0x' + 'ab' * 20
         calls[0]['to'] = alien
@@ -85,7 +98,7 @@ class InviteBatchTests(SimpleTestCase):
             f._validate_create_batch(calls, 'CUSD_PLUS', inv)
 
     def test_reclaim_batch_shape(self):
-        inv = f.invite_id_bytes32('58:412555')
+        inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_reclaim_calls(inv)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]['to'], ESCROW.lower())
@@ -94,7 +107,7 @@ class InviteBatchTests(SimpleTestCase):
 
     def test_unescrowable_token_rejected(self):
         with self.assertRaises(ValueError):
-            f.build_create_calls('USDT', 5 * WAD, f.invite_id_bytes32('58:1'))
+            f.build_create_calls('USDT', 5 * WAD, f.invite_id_bytes32('58:1', INVITER))
 
     @override_settings(BSC_INVITE_ENABLED=False)
     def test_disabled_flag(self):

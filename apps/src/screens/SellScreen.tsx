@@ -21,8 +21,6 @@ import { gql, useMutation, useQuery } from '@apollo/client';
 
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
-import { useAuth } from '../contexts/AuthContext';
-import { useCountry } from '../contexts/CountryContext';
 import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
 import {
   GET_ME,
@@ -38,6 +36,7 @@ import { getCountryByIso } from '../utils/countries';
 import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { useRampCountry } from '../hooks/useRampCountry';
 import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -122,8 +121,6 @@ export const SellScreen = () => {
   const route = useRoute();
   const { width } = useWindowDimensions();
   const { activeAccount } = useAccount();
-  const { userProfile } = useAuth() as any;
-  const { selectedCountry, userCountry } = useCountry();
 
   const [amount, setAmount] = useState('');
   const [selectedMethodCode, setSelectedMethodCode] = useState<string | null>(null);
@@ -133,11 +130,9 @@ export const SellScreen = () => {
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [amountFocused, setAmountFocused] = useState(false);
 
-  const countryCode = useMemo(() => {
-    const selectedIso = selectedCountry?.[2];
-    const userIso = userCountry?.[2];
-    return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
-  }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
+  // The user's OWN country, or null. Never a picker, never Argentina by
+  // default — see useRampCountry.
+  const { countryCode, loading: countryLoading } = useRampCountry();
 
   const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
   // Which ASSET this sell spends — not which provider. Koywe and Guardarian
@@ -174,7 +169,10 @@ export const SellScreen = () => {
 
   const availability = availabilityData?.rampAvailability;
   const methods: RampMethod[] = availability?.offRampMethods || [];
-  const derivedCountryTuple = useMemo(() => getCountryByIso(countryCode), [countryCode]);
+  const derivedCountryTuple = useMemo(
+    () => (countryCode ? getCountryByIso(countryCode) : undefined),
+    [countryCode],
+  );
   const fiatCurrency = availability?.fiatCurrency || 'USD';
   const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.offRampEnabled && methods.length > 0;
@@ -449,6 +447,43 @@ export const SellScreen = () => {
   // separate axis handled inside each screen via `destination`, and never
   // moves a user to the other provider. Bolivia stays on Koywe and falls
   // through to its own paused-off-ramp screen below.
+  // Country unknown: the provider, the currency and the payout methods are
+  // all decided by it, so there is nothing honest to render yet. Waiting (or
+  // saying so) beats defaulting into another country's rail.
+  if (!countryCode) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <RampReveal delay={0}>
+            <RampHero
+              eyebrow="Retirar saldo"
+              title="Retira a tu banco"
+              subtitle="Los métodos de retiro dependen de tu país."
+              onBack={() => navigation.goBack()}
+              compact={isCompact}
+            />
+          </RampReveal>
+          <RampReveal delay={80}>
+            <View style={styles.loadingCard}>
+              {countryLoading ? (
+                <>
+                  <ActivityIndicator color={colors.primary} size="small" />
+                  <Text style={styles.loadingText}>Cargando tus opciones...</Text>
+                </>
+              ) : (
+                <Text style={styles.loadingText}>
+                  Todavía no sabemos hacia qué país retiras, así que no podemos mostrarte
+                  métodos de retiro. Vuelve a intentarlo en un momento.
+                </Text>
+              )}
+            </View>
+          </RampReveal>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   if (!isKoyweCountry) {
     // Rendered INLINE on purpose: the legacy screen reads useRoute() itself,
     // so it sees this screen's route and honors `destination: 'cusd_plus'`

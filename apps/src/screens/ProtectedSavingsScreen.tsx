@@ -15,6 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { gql, useQuery } from '@apollo/client';
 import { colors } from '../config/theme';
 import { useCurrency } from '../hooks/useCurrency';
+import { useRampCountry } from '../hooks/useRampCountry';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
@@ -66,6 +67,9 @@ const formatWhole = (n: number | null | undefined, sep: string) => {
 
 export const ProtectedSavingsScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  // Same guard as Home: blocked countries go to Efectivo, not into a ramp
+  // flow their country cannot complete.
+  const { navigateToRampOrEfectivo } = useRampCountry();
   const { currency } = useCurrency();
   const { data } = useQuery(GET_STATS_SUMMARY, {
     fetchPolicy: 'cache-and-network',
@@ -367,8 +371,8 @@ export const ProtectedSavingsScreen = () => {
             style={styles.ctaButton}
             onPress={() =>
               steerToSavings
-                ? navigation.navigate('TopUp', { destination: 'cusd_plus' })
-                : navigation.navigate('TopUp')
+                ? navigateToRampOrEfectivo('TopUp', { destination: 'cusd_plus' })
+                : navigateToRampOrEfectivo('TopUp')
             }
             activeOpacity={0.9}
           >

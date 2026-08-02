@@ -750,7 +750,7 @@ export function FriendDetailScreen() {
           // Same option set, gating and copy as the Contacts sheet the Enviar
           // button on Home/AccountDetail leads to — this screen offers the
           // same action and must not disagree about which dollars exist.
-          ...(savingsExitVisible && friend.isOnConfio !== false ? [{
+          ...(savingsExitVisible ? [{
             icon: 'dollar-sign',
             image: cUSDPlusLogo,
             title: 'Confío Dollar+ · $cUSD+',
@@ -770,7 +770,7 @@ export function FriendDetailScreen() {
             icon: 'zap',
             image: CONFIOLogo,
             title: 'Confío · $CONFIO',
-            subtitle: 'Moneda de gobernanza y utilidad',
+            subtitle: 'Moneda de gobernanza y utilidad · red BNB Smart Chain',
             onPress: () => handleTokenSelect('confio'),
           },
         ]}

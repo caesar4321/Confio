@@ -1627,10 +1627,11 @@ export const ContactsScreen = () => {
           title={`¿Qué moneda quieres enviar a ${selectedFriend?.name || 'tu contacto'}?`}
           onClose={() => setShowFriendTokenSelection(false)}
           options={[
-            // The BSC dollar leads (phase-out: cUSD+ IS the primary dollar)
-            // — but only for friends already on Confío (invites stay on the
-            // Algorand rail) and only when the sender holds BSC dollars.
-            ...(savingsExitVisible && selectedFriend?.isOnConfio !== false ? [{
+            // The BSC dollar leads (phase-out: cUSD+ IS the primary dollar).
+            // Offered for friends who aren't on Confío yet too — a send to
+            // them locks cUSD+ in the BSC invite escrow until they join.
+            // Still gated on the sender actually holding BSC dollars.
+            ...(savingsExitVisible ? [{
               icon: 'dollar-sign',
               image: cUSDPlusLogo,
               title: 'Confío Dollar+ · $cUSD+',
@@ -1650,7 +1651,7 @@ export const ContactsScreen = () => {
               icon: 'zap',
               image: CONFIOLogo,
               title: 'Confío · $CONFIO',
-              subtitle: 'Moneda de gobernanza y utilidad',
+              subtitle: 'Moneda de gobernanza y utilidad · red BNB Smart Chain',
               onPress: () => handleFriendTokenSelection('confio'),
             },
           ]}

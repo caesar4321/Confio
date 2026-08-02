@@ -35,6 +35,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { HumanitarianWsSession } from '../services/humanitarianWs';
 import { countryInfo } from '../utils/humanitarianCountry';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { useRampCountry } from '../hooks/useRampCountry';
 
 const DEFAULT_CAMPAIGN_SLUG = 'venezuela-2026-earthquake';
 const SUGGESTED_AMOUNTS = ['5', '10', '25', '50'];
@@ -117,6 +118,7 @@ function openTransaction(hash?: string | null) {
 
 export const HumanitarianAidScreen = () => {
   const navigation = useNavigation<Navigation>();
+  const { navigateToRampOrEfectivo } = useRampCountry();
   const route = useRoute<RouteProp<MainStackParamList, 'HumanitarianAid'>>();
   const campaignSlug = route.params?.slug || DEFAULT_CAMPAIGN_SLUG;
   const [serviceArea, setServiceArea] = useState('');
@@ -314,7 +316,9 @@ export const HumanitarianAidScreen = () => {
   };
 
   const onTopUp = () => {
-    navigation.navigate('TopUp');
+    // Same guard as Home: blocked countries go to Efectivo, not into a ramp
+    // flow their country cannot complete.
+    navigateToRampOrEfectivo('TopUp');
   };
 
   const goBack = () => {

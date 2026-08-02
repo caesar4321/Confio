@@ -67,11 +67,20 @@ def _addr_word(addr: str) -> str:
     return addr.lower().replace('0x', '').rjust(64, '0')
 
 
-def invite_id_bytes32(phone_key: str) -> str:
-    """Deterministic bytes32 invite id from the canonical phone key. The
-    escrow namespaces by (inviter, inviteId), so this need not include the
-    inviter."""
-    return '0x' + keccak(text=phone_key).hex()
+def invite_id_bytes32(phone_key: str, inviter_addr: str) -> str:
+    """Deterministic bytes32 invite id from the canonical phone key AND the
+    inviter.
+
+    The escrow namespaces storage by (inviter, inviteId), so on-chain the
+    inviter is redundant here. Off-chain it is not: PhoneInvite.invitation_id
+    is unique, so a phone-only id makes the SECOND person to invite the same
+    number collide on insert. Bind the inviter and both rows coexist, which is
+    the behaviour the escrow was designed for.
+
+    Nothing looks an invite up by phone alone — the invitee's auto-claim scans
+    PhoneInvite rows by phone_key and reads the id off the row.
+    """
+    return '0x' + keccak(text=f'{phone_key}:{inviter_addr.lower()}').hex()
 
 
 def _enabled() -> bool:
@@ -93,7 +102,8 @@ def build_create_calls(token_type: str, amount_wei: int, invite_id32: str) -> li
     ]
 
 
-def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount) -> dict:
+def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
+                   phone_display: str = '') -> dict:
     """Build + store the create batch on a PhoneInvite row."""
     from cusd_plus import sponsor_7702
     from users.models import Account
@@ -126,26 +136,78 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount) -> di
         return {'success': False, 'error': 'invalid_amount'}
     amount_wei = int(amount_usd * WAD)
 
-    invite_id32 = invite_id_bytes32(phone_key)
+    invite_id32 = invite_id_bytes32(phone_key, inviter_addr)
+    digits = ''.join(ch for ch in (phone_display or '') if ch.isdigit())
+
     # One active invite per (inviter, phone): the escrow rejects a duplicate
-    # storage key, so mirror that off-chain.
+    # storage key, so mirror that off-chain — but only once the escrow is
+    # actually funded. A prepare the user abandoned, or one whose submit was
+    # rejected, leaves a 'pending' row whose history row never left PENDING;
+    # treating that as an active invite would lock the inviter out of ever
+    # inviting that person again. Reuse it instead — same id, same escrow slot.
     existing = PhoneInvite.objects.filter(
-        phone_key=phone_key, inviter_user=user, status='pending',
-        deleted_at__isnull=True).first()
-    if existing and existing.invitation_id == invite_id32[2:]:
-        return {'success': False, 'error': 'invite_already_pending'}
+        invitation_id=invite_id32[2:], status='pending',
+        deleted_at__isnull=True).select_related('send_transaction').first()
+    if existing is not None:
+        stx = existing.send_transaction
+        if stx is None or stx.status != 'PENDING':
+            return {'success': False, 'error': 'invite_already_pending'}
 
     calls = build_create_calls(token_type, amount_wei, invite_id32)
 
-    invite = PhoneInvite.objects.create(
-        invitation_id=invite_id32[2:],  # 64-hex, fits the field
-        phone_key=phone_key,
-        phone_number='',
-        inviter_user=user,
-        amount=amount_usd,
-        token_type=token_type.upper(),
-        status='pending',
-    )
+    # The history row, created BEFORE the batch is signed (bsc_flow.py does the
+    # same for sends). Without it the money leaves for the escrow and the
+    # sender sees nothing in their history — and the reclaim button, which the
+    # app renders off this row's is_invitation/invitation_expires_at, could
+    # never appear, so an unclaimed invite would be unrecoverable.
+    if existing is not None:
+        invite = existing
+        send_tx = invite.send_transaction
+        send_tx.amount = amount_usd
+        send_tx.token_type = token_type.upper()
+        send_tx.recipient_display_name = phone_display or phone_key
+        send_tx.recipient_phone = phone_display or ''
+        send_tx.sender_address = inviter_addr
+        send_tx.recipient_address = _escrow()
+        send_tx.save(update_fields=[
+            'amount', 'token_type', 'recipient_display_name', 'recipient_phone',
+            'sender_address', 'recipient_address', 'updated_at'])
+        invite.amount = amount_usd
+        invite.token_type = token_type.upper()
+        invite.phone_number = digits
+        invite.inviter_address = inviter_addr
+        invite.save(update_fields=['amount', 'token_type', 'phone_number',
+                                   'inviter_address', 'updated_at'])
+    else:
+        send_tx = SendTransaction.objects.create(
+            sender_user=user,
+            sender_type='user',
+            sender_display_name=user.get_full_name() or user.username,
+            sender_phone=user.phone_number or '',
+            recipient_type='external',
+            recipient_display_name=phone_display or phone_key,
+            recipient_phone=phone_display or '',
+            sender_address=inviter_addr,
+            recipient_address=_escrow(),
+            amount=amount_usd,
+            token_type=token_type.upper(),
+            status='PENDING',
+            is_invitation=True,
+            invitation_claimed=False,
+            invitation_reverted=False,
+            idempotency_key=invite_id32[2:],
+        )
+        invite = PhoneInvite.objects.create(
+            invitation_id=invite_id32[2:],  # 64-hex, fits the field
+            phone_key=phone_key,
+            phone_number=digits,
+            inviter_user=user,
+            inviter_address=inviter_addr,
+            send_transaction=send_tx,
+            amount=amount_usd,
+            token_type=token_type.upper(),
+            status='pending',
+        )
     invite.blockchain_calls = json.dumps({'calls': calls, 'kind': 'invite_create',
                                           'inviter': inviter_addr})
     # blockchain_calls is a transient attr the mutation reads; the row's
@@ -186,9 +248,12 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     if phone_invite.inviter_user_id != user.id or phone_invite.status != 'pending':
         return {'success': False, 'error': 'invite_not_pending'}
 
-    acct = user.accounts.filter(
-        account_type='personal', account_index=0, deleted_at__isnull=True).first()
-    inviter_addr = ((getattr(acct, 'bsc_address', None) or '') or '').lower()
+    # The address prepare escrowed FROM, not a re-derived one: prepare honours
+    # the JWT's business context, so re-resolving personal/0 here would check
+    # the signature against the wrong account and reject every business invite.
+    inviter_addr = (phone_invite.inviter_address or '').lower()
+    if not inviter_addr:
+        return {'success': False, 'error': 'no_bsc_address'}
     invite_id32 = '0x' + phone_invite.invitation_id
     calls = build_create_calls(phone_invite.token_type, int(Decimal(phone_invite.amount) * WAD), invite_id32)
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
@@ -220,8 +285,22 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
 
     from django.utils import timezone
     from datetime import timedelta
-    phone_invite.expires_at = timezone.now() + timedelta(days=7)
+    expires_at = timezone.now() + timedelta(days=7)
+    phone_invite.expires_at = expires_at
     phone_invite.save(update_fields=['expires_at', 'updated_at'])
+
+    send_tx = phone_invite.send_transaction
+    if send_tx is not None:
+        send_tx.status = 'SUBMITTED'
+        send_tx.transaction_hash = tx_hash
+        # The 7-day window starts when the escrow is actually funded, not when
+        # the batch was prepared — a prepare the user never signed must not
+        # shorten a later invite's reclaim clock.
+        send_tx.invitation_expires_at = expires_at
+        send_tx.save(update_fields=['status', 'transaction_hash',
+                                    'invitation_expires_at', 'updated_at'])
+        from .invite_tasks import confirm_bsc_invite_create
+        confirm_bsc_invite_create.apply_async(args=[send_tx.pk, batch.id], countdown=5)
     return {'success': True, 'transaction_hash': tx_hash}
 
 
@@ -240,9 +319,11 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     if phone_invite.status != 'pending':
         return {'success': False, 'error': 'invite_not_pending'}
 
-    inviter_acct = phone_invite.inviter_user.accounts.filter(
-        account_type='personal', account_index=0, deleted_at__isnull=True).first()
-    inviter_addr = ((getattr(inviter_acct, 'bsc_address', None) or '') or '').lower()
+    # The escrow keys funds by (inviter, inviteId). Re-deriving the inviter
+    # from their personal account would look up a slot that was never funded
+    # when the invite came from a business account — the claim would revert and
+    # the money would sit in escrow until expiry. Use the address we recorded.
+    inviter_addr = (phone_invite.inviter_address or '').lower()
     rec_acct = recipient_user.accounts.filter(
         account_type='personal', account_index=0, deleted_at__isnull=True).first()
     recipient_addr = ((getattr(rec_acct, 'bsc_address', None) or '') or '').lower()
@@ -293,6 +374,13 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     phone_invite.claimed_txid = sent or tx_hash
     phone_invite.claimed_at = timezone.now()
     phone_invite.save(update_fields=['status', 'claimed_by', 'claimed_txid', 'claimed_at', 'updated_at'])
+
+    # Mirror onto the history row, or the inviter keeps seeing an expiry
+    # warning and a reclaim button for money that is already the invitee's.
+    send_tx = phone_invite.send_transaction
+    if send_tx is not None:
+        send_tx.invitation_claimed = True
+        send_tx.save(update_fields=['invitation_claimed', 'updated_at'])
     return {'success': True, 'transaction_hash': sent or tx_hash}
 
 
@@ -306,10 +394,14 @@ def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
     if not _enabled() or not phone_key:
         return 0
     claimed = 0
+    # inviter_address is the rail discriminator, NOT token_type: the Algorand
+    # invite flow writes PhoneInvite rows too, and its CONFIO rows would
+    # otherwise be handed to the BSC sponsor, which would try to release an
+    # escrow slot that only exists on Algorand.
     pending = PhoneInvite.objects.filter(
         phone_key=phone_key, status='pending',
         token_type__in=('CUSD_PLUS', 'CONFIO'), deleted_at__isnull=True,
-    )
+    ).exclude(inviter_address='')
     for inv in pending:
         try:
             res = claim_for_recipient(inv, recipient_user)
@@ -335,9 +427,9 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
     if phone_invite.inviter_user_id != user.id or phone_invite.status != 'pending':
         return {'success': False, 'error': 'invite_not_reclaimable'}
 
-    acct = user.accounts.filter(
-        account_type='personal', account_index=0, deleted_at__isnull=True).first()
-    inviter_addr = ((getattr(acct, 'bsc_address', None) or '') or '').lower()
+    inviter_addr = (phone_invite.inviter_address or '').lower()
+    if not inviter_addr:
+        return {'success': False, 'error': 'no_bsc_address'}
     calls = build_reclaim_calls('0x' + phone_invite.invitation_id)
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
     now = int(time.time())

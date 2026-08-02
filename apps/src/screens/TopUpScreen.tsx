@@ -20,7 +20,6 @@ import { useMutation, useQuery } from '@apollo/client';
 
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
-import { useCountry } from '../contexts/CountryContext';
 import {
   GET_ME,
   GET_RAMP_AVAILABILITY,
@@ -33,6 +32,7 @@ import { getCountryByIso } from '../utils/countries';
 import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { useRampCountry } from '../hooks/useRampCountry';
 import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -87,7 +87,6 @@ const TopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { width } = useWindowDimensions();
   const { userProfile } = useAuth() as any;
-  const { selectedCountry, userCountry } = useCountry();
   const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const [amount, setAmount] = useState('');
@@ -99,11 +98,9 @@ const TopUpScreen = () => {
   const [authEmailInput, setAuthEmailInput] = useState('');
   const [authEmailError, setAuthEmailError] = useState<string | null>(null);
 
-  const countryCode = useMemo(() => {
-    const selectedIso = selectedCountry?.[2];
-    const userIso = userCountry?.[2];
-    return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
-  }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
+  // The user's OWN country, or null. Never a picker, never Argentina by
+  // default — see useRampCountry.
+  const { countryCode, loading: countryLoading } = useRampCountry();
 
   const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
 
@@ -122,7 +119,10 @@ const TopUpScreen = () => {
 
   const availability = availabilityData?.rampAvailability;
   const methods: RampMethod[] = availability?.onRampMethods || [];
-  const derivedCountryTuple = useMemo(() => getCountryByIso(countryCode), [countryCode]);
+  const derivedCountryTuple = useMemo(
+    () => (countryCode ? getCountryByIso(countryCode) : undefined),
+    [countryCode],
+  );
   const fiatCurrency = availability?.fiatCurrency || 'USD';
   const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.onRampEnabled && methods.length > 0;
@@ -393,6 +393,43 @@ const TopUpScreen = () => {
     }
     await submitRampOrder();
   };
+
+  // Country unknown: the provider, the currency and the payment methods are
+  // all decided by it, so there is nothing honest to render yet. Waiting (or
+  // saying so) beats defaulting into another country's rail.
+  if (!countryCode) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <RampReveal delay={0}>
+            <RampHero
+              eyebrow={isSavingsRail ? 'Ahorrar' : 'Ingresar saldo'}
+              title={isSavingsRail ? 'Recarga tu ahorro' : 'Compra Confío Dollar'}
+              subtitle="Los medios de pago dependen de tu país."
+              onBack={() => navigation.goBack()}
+              compact={isCompact}
+            />
+          </RampReveal>
+          <RampReveal delay={60}>
+            <View style={styles.loadingCard}>
+              {countryLoading ? (
+                <>
+                  <ActivityIndicator color={colors.primary} size="small" />
+                  <Text style={styles.loadingText}>Cargando tus opciones...</Text>
+                </>
+              ) : (
+                <Text style={styles.loadingText}>
+                  Todavía no sabemos desde qué país recargas, así que no podemos mostrarte
+                  medios de pago. Vuelve a intentarlo en un momento.
+                </Text>
+              )}
+            </View>
+          </RampReveal>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   if (!isKoyweCountry) {
     return <LegacyGuardarianTopUpScreen />;

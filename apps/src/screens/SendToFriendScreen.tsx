@@ -45,7 +45,7 @@ const tokenConfig = {
     chipText: colors.secondaryDark,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía CONFIO a cualquier dirección Algorand',
+    description: 'Envía CONFIO por BNB Smart Chain',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
   // The BSC dollar (Phase 2): displayed as cUSD+; the server decides what
@@ -98,6 +98,21 @@ export const SendToFriendScreen = () => {
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
   const config = tokenConfig[tokenType];
 
+  // Which rail this token rides. CONFIO joined cUSD+ on BSC when the token was
+  // re-issued as a BEP-20 (phase-out, 2026-07-31); only legacy cUSD is still
+  // an Algorand ASA. This drives the balance source, the preflight, and
+  // whether a send to a non-user goes to the BSC escrow or the Algorand one.
+  const isBscToken = tokenType === 'cusd_plus' || tokenType === 'confio';
+  // The escrow must be told exactly which token it holds. A SEND must not be:
+  // leaving bscTokenType unset for cUSD+ is what keeps it a dollar-value send,
+  // where the server picks the funding leg (vault shares vs wallet USDT).
+  // CONFIO has no such choice — it is always the BEP-20, amount = token count.
+  const bscEscrowToken: 'CUSD_PLUS' | 'CONFIO' | undefined =
+    tokenType === 'cusd_plus' ? 'CUSD_PLUS'
+    : tokenType === 'confio' ? 'CONFIO'
+    : undefined;
+  const bscTokenType = tokenType === 'confio' ? 'CONFIO' as const : undefined;
+
   const [amount, setAmount] = useState('');
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -111,8 +126,42 @@ export const SendToFriendScreen = () => {
   const savingsPortfolio = useSavingsPortfolio();
   const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
+
+  // CONFIO-BSC balance via its OWN query (cusdPlusSummary.confioBalance is
+  // newer than the shared money queries — bundling it into one of those would
+  // invalidate the whole query against a server that doesn't serve it yet).
+  // Same isolation as SendUsdtScreen. Any failure → 0, never a broken screen.
+  const [confioBalance, setConfioBalance] = useState(0);
+  const [confioLoading, setConfioLoading] = useState(tokenType === 'confio');
   useEffect(() => {
-    if (tokenType === 'cusd_plus') return;
+    if (tokenType !== 'confio') return;
+    let alive = true;
+    setConfioLoading(true);
+    (async () => {
+      try {
+        const { gql } = await import('@apollo/client');
+        const { data } = await apolloClient.query({
+          query: gql`
+            query ConfioBscBalance {
+              cusdPlusSummary {
+                confioBalance
+              }
+            }
+          `,
+          fetchPolicy: 'network-only',
+        });
+        if (alive) setConfioBalance(data?.cusdPlusSummary?.confioBalance ?? 0);
+      } catch {
+        // Older server: field not deployed yet — show 0, never break.
+      } finally {
+        if (alive) setConfioLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [tokenType]);
+
+  useEffect(() => {
+    if (isBscToken) return;
     let mounted = true;
     const tok = tokenType.toUpperCase();
     try {
@@ -139,6 +188,8 @@ export const SendToFriendScreen = () => {
   // "Cargando saldo…" forever.
   const balanceReady = tokenType === 'cusd_plus'
     ? !savingsPortfolio.loading
+    : tokenType === 'confio'
+    ? !confioLoading
     : balanceSnapshot != null;
   const availableBalance = React.useMemo(() => {
     if (tokenType === 'cusd_plus') {
@@ -148,8 +199,9 @@ export const SendToFriendScreen = () => {
       return Math.max(
         savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd);
     }
+    if (tokenType === 'confio') return confioBalance;
     return parseFloat(balanceSnapshot || '0');
-  }, [tokenType, balanceSnapshot,
+  }, [tokenType, balanceSnapshot, confioBalance,
       savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd]);
 
   // Prevent overstatement: floor display to 2 decimals
@@ -175,7 +227,7 @@ export const SendToFriendScreen = () => {
     (async () => {
       try {
         setPrepared(null);
-        if (tokenType === 'cusd_plus') return;
+        if (isBscToken) return;
         const amt = parseFloat(String(amount || '0'));
         if (!(isFinite(amt) && amt > 0 && friend && friend.isOnConfio !== false)) return;
         const assetType = (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO');
@@ -220,12 +272,15 @@ export const SendToFriendScreen = () => {
       // server-side idempotency guard.
       let invitePrepared: any | null = null;
       let idempotencyKey: string;
-      if (tokenType === 'cusd_plus' && friend.isOnConfio === false) {
-        // Invites stay on the Algorand rail for now — the BSC invite escrow
-        // is a follow-up. Honest error instead of a silent rail switch.
-        throw new Error('Para invitar a alguien nuevo, envía cUSD por ahora.');
-      }
-      if (friend.isOnConfio === false && friend.phone) {
+      const isBscInvite = isBscToken && friend.isOnConfio === false;
+      if (isBscInvite) {
+        // BSC invites prepare inside the processing screen — unlike the
+        // Algorand rail there is nothing to sign until the escrow batch comes
+        // back, and the server's own invite id is the retry key. Fall through
+        // with a local key; the processing screen overwrites it with the
+        // inviteId once prepare answers.
+        idempotencyKey = `bscinvite_${friendInternationalPhone}_${amount.replace('.', '')}_${config.name}`;
+      } else if (friend.isOnConfio === false && friend.phone) {
         const invitePhone = friend.normalizedPhones?.find(phone => phone.startsWith('+')) || friend.phone;
         const prep = await inviteSendService.prepareInvite(
           invitePhone,
@@ -250,7 +305,13 @@ export const SendToFriendScreen = () => {
       (navigation as any).replace('TransactionProcessing', {
         transactionData: {
           type: 'sent',
-          bscSend: tokenType === 'cusd_plus',
+          // A BSC send and a BSC invite are different batches against
+          // different contracts, so they are separate flags — never infer one
+          // from the other.
+          bscSend: isBscToken && !isBscInvite,
+          bscInvite: isBscInvite,
+          bscTokenType,
+          bscInviteToken: isBscInvite ? bscEscrowToken : undefined,
           amount: amount,
           currency: config.name,
           recipient: friend.name,

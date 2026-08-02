@@ -286,6 +286,12 @@ class PhoneInvite(SoftDeleteModel):
         related_name='phone_invites_sent'
     )
 
+    # The BSC address the escrow holds the funds under. Recorded rather than
+    # re-derived: the escrow keys by (inviter, inviteId), and a user's invite
+    # may come from a personal OR a business account, so guessing at claim time
+    # can look up a slot that was never funded.
+    inviter_address = models.CharField(max_length=42, blank=True, default='')
+
     # Optional reference to the persisted send transaction row
     send_transaction = models.ForeignKey(
         'send.SendTransaction',

@@ -1385,11 +1385,20 @@ export const TransactionDetailScreen = () => {
     && isInvitationExpired
     && Boolean(currentInvitationId);
 
+  // Which escrow holds this invite. The two rails mint ids in shapes that
+  // cannot be confused: Algorand's is "ph:" + 56 hex (a box key), BSC's is a
+  // bare bytes32 keccak. Routing on the id rather than on the token keeps
+  // historical Algorand CONFIO invites — minted before CONFIO moved to the
+  // BEP-20 — going back to the escrow that actually holds them.
+  const isBscInviteId = /^(0x)?[0-9a-f]{64}$/i.test(String(currentInvitationId || '').trim());
+
   const handleReclaimInvite = async () => {
     if (!currentInvitationId || reclaimingInvite) return;
     setReclaimingInvite(true);
     try {
-      const result = await inviteSendService.reclaimInvite(currentInvitationId);
+      const result = isBscInviteId
+        ? await (await import('../services/inviteBsc')).reclaimBscInvite(currentInvitationId)
+        : await inviteSendService.reclaimInvite(currentInvitationId);
       if (!result.success) {
         Alert.alert('No se pudo devolver', result.error || 'Inténtalo nuevamente.');
         return;

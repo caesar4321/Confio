@@ -135,6 +135,13 @@ interface TransactionData {
   // eligible Confío recipient, atomic redeem-to-USDT for everyone else).
   bscSend?: boolean;
   bscTokenType?: 'CUSD_PLUS' | 'CONFIO';
+  // Sending to someone who is NOT on Confío yet: the money goes into the BSC
+  // invite escrow instead of to an address (send/invite_bsc_flow.py). A
+  // different contract and a different batch from `bscSend`, so it is its own
+  // flag — and here the token IS explicit, because the escrow must be told
+  // what it is holding.
+  bscInvite?: boolean;
+  bscInviteToken?: 'CUSD_PLUS' | 'CONFIO';
   senderName?: string;
   sender?: string;
   recipientName?: string;
@@ -302,7 +309,8 @@ export const TransactionProcessingScreen = () => {
     // the backstop only fires once that has had its chance. The common case
     // is now far quicker — the sponsor usually reports the execution it saw
     // and the client never polls — but the watchdog sizes the WORST case.
-    const watchdogMs = (transactionData as any)?.bscSend ? 180000 : 20000;
+    const watchdogMs = ((transactionData as any)?.bscSend || (transactionData as any)?.bscInvite)
+      ? 180000 : 20000;
     const watchdog = setTimeout(() => {
       if (isComplete) return;
       setTransactionError('La transacción tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
@@ -755,8 +763,8 @@ export const TransactionProcessingScreen = () => {
     // BSC send (cUSD+/USDT/CONFIO via sponsored 7702) — the server picks the
     // call shape; this screen just signs and reports. Reached from the
     // contact send (dollar value, recipient on Confío) and from the
-    // address send (which may also name an explicit token). Invites still
-    // stay on the Algorand rail.
+    // address send (which may also name an explicit token). A send to someone
+    // NOT on Confío goes to processBscInvite instead.
     const processBscSponsoredSend = async () => {
       const { sendBscDollar, BSC_SEND_ERRORS } = await import('../services/bscSend');
       // Every BSC RPC (nonce reads, receipt polling) goes through our server,
@@ -821,13 +829,54 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
+    // BSC invite (cUSD+/CONFIO locked in ConfioInviteEscrow for a phone that
+    // isn't a Confío user yet). The sponsor releases it when they join; the
+    // inviter can reclaim after 7 days from the transaction detail screen.
+    const processBscInvite = async () => {
+      const { createBscInvite, BSC_INVITE_ERRORS } = await import('../services/inviteBsc');
+      // Every BSC RPC (nonce reads, receipt polling) goes through our server,
+      // never a public node.
+      const { installBscServerTransport } = await import('../services/bscServerRpc');
+      installBscServerTransport();
+      try {
+        setCurrentStep(1);
+        const res = await createBscInvite({
+          phone: transactionData.recipientPhone as string,
+          amount: transactionData.amount,
+          tokenType: (transactionData as any).bscInviteToken || 'CUSD_PLUS',
+        });
+        setCurrentStep(2);
+        (transactionData as any).transactionHash = res.txHash;
+        (transactionData as any).transactionId = res.txHash;
+        // The server's invite id is the stable retry key AND what the reclaim
+        // button needs later, so it replaces the local key the send screen
+        // guessed before prepare had answered.
+        (transactionData as any).invitationId = res.inviteId;
+        (transactionData as any).idempotencyKey = res.inviteId;
+        // Always SUBMITTED: on BSC a block isn't final until the validator set
+        // has voted, so 'Confirmado' is the server confirm task's word to say.
+        (transactionData as any).status = 'SUBMITTED';
+        setTransactionSuccess(true);
+        setIsComplete(true);
+      } catch (e: any) {
+        const code = e?.message || '';
+        setTransactionError(
+          BSC_INVITE_ERRORS[code]
+          || 'No se pudo enviar la invitación. Revisa tu conexión e inténtalo de nuevo.',
+        );
+        setIsComplete(true);
+      }
+    };
+
     const processUnifiedSend = async () => {
       try {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        if ((transactionData as any)?.bscSend) {
+        if ((transactionData as any)?.bscInvite && transactionData.recipientPhone) {
+          await processBscInvite();
+        } else if ((transactionData as any)?.bscSend) {
           await processBscSponsoredSend();
         } else if (transactionData.isOnConfio === false && transactionData.recipientPhone) {
           // If recipient is not on Confío and we have a phone, route to Invite flow
