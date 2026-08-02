@@ -55,24 +55,21 @@ export interface PayrollRailStatus {
   delegateEmployeeIds: string[];
 }
 
-/** cUSD+ is an instrument, not a currency unit — an accumulating share that
- * drifts above $1 — so payroll amounts are always dollars and the rail is
- * signalled payment-method style (logo + name) beside them.
+/** Payroll is denominated in cUSD+. Full stop — not conditional on which rail
+ * a given business happens to resolve to today.
  *
- * `known: false` when the rail hasn't resolved (first paint, a transient
- * status error, an older server). Callers must HIDE the instrument row then
- * rather than print a guess: defaulting the unknown case to cUSD+ labelled
- * legacy balances with the wrong instrument, which is worse than saying
- * nothing while the dollar amount stays correct either way. */
-export const payrollInstrument = (rail?: PayrollRail | null) => {
-  if (rail === 'algorand') {
-    return { name: 'Confío Dollar', short: 'cUSD', isPlus: false, known: true };
-  }
-  if (rail === 'bsc') {
-    return { name: 'Confío Dollar+', short: 'cUSD+', isPlus: true, known: true };
-  }
-  return { name: '', short: '', isPlus: true, known: false };
-};
+ * This started out rail-conditional, labelling a business on the legacy
+ * Algorand vault "Confío Dollar". Julian's call, and it is the right one:
+ * nómina IS the cUSD+ product, and a screen that renames itself based on
+ * migration plumbing teaches the user that Confío has two dollars. The
+ * Algorand vault is scaffolding on its way out, not a second brand.
+ *
+ * cUSD+ is an instrument, not a currency unit — an accumulating share that
+ * drifts above $1 — so amounts stay in dollars and this names the instrument
+ * beside them, payment-method style. The NUMBER still comes from whichever
+ * escrow actually holds the money, and still shows "—" when unknown. */
+export const payrollInstrument = (_rail?: PayrollRail | null) =>
+  ({ name: 'Confío Dollar+', short: 'cUSD+', isPlus: true, known: true });
 
 const SET_BUSINESS_DELEGATES = gql`
   mutation SetBusinessDelegates($businessAccount: String!, $add: [String!]!, $remove: [String!]!, $signedTransaction: String) {
