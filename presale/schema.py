@@ -1,3 +1,5 @@
+import logging
+
 import graphene
 from graphene_django import DjangoObjectType
 from graphql_jwt.decorators import login_required
@@ -8,6 +10,8 @@ from graphql import GraphQLError
 
 from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist
 from users.models import Account
+
+logger = logging.getLogger(__name__)
 
 
 class PresalePhaseType(DjangoObjectType):
@@ -203,41 +207,71 @@ class PresaleQueries(graphene.ObjectType):
 
     @login_required
     def resolve_my_presale_onchain_info(self, info):
-        """Get purchased/claimed/claimable and locked status from on-chain state"""
-        try:
-            from users.models import Account
-            from django.conf import settings as dj_settings
-            from algosdk.v2client import algod
-            from blockchain.algorand_account_manager import AlgorandAccountManager
-            from contracts.presale.state_utils import decode_state, decode_local_state
+        """Purchased / claimed / claimable, read from the chain that actually
+        pays: BSC.
 
-            app_id = getattr(dj_settings, 'ALGORAND_PRESALE_APP_ID', None)
-            if not app_id:
-                return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
+        $CONFIO exists only on BSC, so the Algorand presale app's local state
+        is NOT the answer — reading it would show a claimable balance on a
+        rail whose claim path never opens (presale/ws_consumers
+        ALGORAND_CLAIMS_NEVER_OPEN), and would double-count a buyer whose
+        allocation has already been carried over by creditMigrated.
 
-            user = info.context.user
-            account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
-            if not account or not account.algorand_address:
-                return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
+        Before a user enrolls a BSC address, the honest answer is the DB: they
+        own what they bought, and nothing is claimable yet because their
+        allocation cannot be assigned on-chain until they update the app.
+        """
+        from decimal import Decimal
 
-            algod_client = algod.AlgodClient(
-                AlgorandAccountManager.ALGOD_TOKEN,
-                AlgorandAccountManager.ALGOD_ADDRESS,
+        from django.conf import settings as dj_settings
+
+        from users.models import Account
+        from .models import PresalePurchase
+
+        user = info.context.user
+
+        def _db_owned() -> float:
+            total = sum(
+                (p.confio_amount for p in PresalePurchase.objects.filter(
+                    user=user, status='completed').only('confio_amount')),
+                Decimal('0'),
             )
-            # Global locked flag
-            app_info = algod_client.application_info(int(app_id))
-            global_state = decode_state(app_info['params']['global-state'])
-            locked = bool(global_state.get('locked', 1) == 1)
+            return float(total)
 
-            # Local state
-            acct_info = algod_client.account_info(account.algorand_address)
-            local = decode_local_state(acct_info, int(app_id)) or {}
-            purchased = float((local.get('user_confio', 0) or 0) / 10**6)
-            claimed = float((local.get('claimed', 0) or 0) / 10**6)
-            claimable = max(purchased - claimed, 0.0)
-            return PresaleOnchainInfo(purchased=purchased, claimed=claimed, claimable=claimable, locked=locked)
+        try:
+            vault = (getattr(dj_settings, 'BSC_PRESALE_VAULT_ADDRESS', '') or '').lower()
+            account = Account.objects.filter(
+                user=user, account_type='personal', deleted_at__isnull=True).first()
+            bsc_address = (getattr(account, 'bsc_address', None) or '').lower()
+
+            if not vault or not bsc_address:
+                # Not enrolled (or vault unset): show what they own, locked.
+                return PresaleOnchainInfo(
+                    purchased=_db_owned(), claimed=0.0, claimable=0.0, locked=True)
+
+            from eth_utils import keccak
+
+            from .bsc_flow import _addr_word, _eth_call
+
+            def call(sig: str) -> int:
+                return _eth_call(vault, '0x' + keccak(text=sig)[:4].hex() + _addr_word(bsc_address))
+
+            purchased = call('purchased(address)') / 10 ** 18
+            claimed = call('claimed(address)') / 10 ** 18
+            claimable = call('claimableOf(address)') / 10 ** 18
+            unlocked = _eth_call(vault, '0x' + keccak(text='claimsUnlocked()')[:4].hex())
+            # A migration credit that hasn't been assigned on-chain yet still
+            # belongs to the user — show the DB figure so nobody thinks their
+            # purchase vanished while the Safe batch is pending.
+            return PresaleOnchainInfo(
+                purchased=max(purchased, _db_owned()),
+                claimed=claimed,
+                claimable=claimable,
+                locked=not bool(unlocked),
+            )
         except Exception:
-            return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
+            logger.exception('[PRESALE] onchain info read failed for user %s', getattr(user, 'id', None))
+            return PresaleOnchainInfo(
+                purchased=_db_owned(), claimed=0.0, claimable=0.0, locked=True)
 
 
 class BscPresaleCallType(graphene.ObjectType):

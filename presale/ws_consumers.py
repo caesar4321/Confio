@@ -30,6 +30,19 @@ def _algorand_presale_closed() -> bool:
     return bool(getattr(dj_settings, 'PRESALE_ALGORAND_CLOSED', False))
 
 
+# $CONFIO only ever exists on BSC: circulation, liquidity and any listing
+# happen there, so the Algorand presale contract's claim path is NEVER opened.
+# Algorand is a PURCHASE rail for the transition only — an Algorand buyer's
+# allocation is carried to BSC by migratedPool/creditMigrated and claimed
+# there. Refusing here is not a kill switch (no flag): if this path ever ran
+# alongside a BSC claim, a migrated buyer would receive the same paid
+# allocation twice — once from each chain (Codex audit 2026-08-02, P1), and
+# nothing on-chain revokes the Algorand entitlement when the credit lands.
+# Nobody loses anything by this: to claim, a user updates the app, which is
+# also what mints their bsc_address and lets the credit be assigned at all.
+ALGORAND_CLAIMS_NEVER_OPEN = "Actualiza tu app para reclamar tus $CONFIO."
+
+
 class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
     """
     WebSocket for CONFIO Presale (prepare + submit, fully sponsored).
@@ -756,6 +769,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         from users.models import Account
         from blockchain.presale_transaction_builder import PresaleTransactionBuilder
 
+        # Claims live on BSC only — see ALGORAND_CLAIMS_NEVER_OPEN. Deliberately
+        # BEFORE the is_presale_claims_unlocked check: that flag exists to open
+        # BSC claims, and if it also opened this path a migrated buyer could
+        # claim twice.
+        return {"success": False, "error": ALGORAND_CLAIMS_NEVER_OPEN}
+
         # Check global switch for claims
         settings_obj = PresaleSettings.get_settings()
         if not settings_obj.is_presale_claims_unlocked:
@@ -799,6 +818,10 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _claim_submit(self, signed_transactions, sponsor_transactions):
+        # Same rule as _claim_prepare: nothing signed against the Algorand
+        # claim path is ever broadcast.
+        return {"success": False, "error": ALGORAND_CLAIMS_NEVER_OPEN}
+
         from algosdk.v2client import algod
         from blockchain.algorand_account_manager import AlgorandAccountManager
         import base64, json
