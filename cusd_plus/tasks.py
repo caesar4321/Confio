@@ -316,12 +316,16 @@ def monitor_bridge_arrivals():
         # address is skipped only when something already recorded the
         # transfer, because money moved outside the app (recovery tooling, an
         # imported wallet) is a real deposit that still needs a receipt.
-        if sender and sender in system_addrs:
-            logger.info('internal USDT movement to %s from our %s (%s) — not a deposit',
-                        key, sender, log['transactionHash'])
-            continue
-        if sender and sender in registered and _has_source_row(log['transactionHash']):
-            logger.info('USDT send to %s from registered %s (%s) — already recorded',
+        # ONE rule for both: an internal sender is skipped only when a
+        # feature already recorded this exact transfer. Giving our own
+        # contracts an unconditional pass was wrong — not every outflow has
+        # a feature row. payroll.withdraw returns escrowed cUSD+ to the
+        # business's own address with no PayrollItem behind it, as do
+        # collectFees and rescueSurplus, and skipping those made real money
+        # arrive with no receipt and no notification.
+        if sender and (sender in system_addrs or sender in registered) \
+                and _source_row_covers(log['transactionHash'], key):
+            logger.info('USDT to %s from internal %s (%s) — already recorded',
                         key, sender, log['transactionHash'])
             continue
         conv = conv_watch.get(key)
@@ -455,19 +459,19 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
     system_addrs = _system_addresses()
     for log in logs:
         sender = ('0x' + log['topics'][1][-40:]).lower()
-        # Our own contracts pay shares as the settlement leg of a flow that
-        # already wrote a row. The payroll vault is the live case: it
-        # transfers shares to an eligible employee, the PayrollItem signal
-        # writes the payroll row, and this pass — which only ever excluded
-        # REGISTERED senders, and no contract is registered — then wrote a
-        # second "Depósito recibido" row and a second push for the same
-        # money. The dedupe keys never met (cp:<hash>:<logIndex> here vs
-        # payroll_item there), so nothing caught it.
-        if sender in system_addrs:
-            continue
-        if sender in registered and _has_source_row(log['transactionHash']):
-            continue  # internal send — recorded by the send confirm task
+        # Skip a transfer only when a feature already recorded it. This pass
+        # used to exclude REGISTERED senders alone, and no contract of ours
+        # is registered — so the payroll vault's share transfer to an
+        # employee produced a second "Depósito recibido" row and push on top
+        # of the payroll row, the dedupe keys never meeting
+        # (cp:<hash>:<logIndex> here vs payroll_item there). Excluding our
+        # contracts outright was the opposite error: payroll.withdraw returns
+        # escrow to the business with no row behind it, and that money then
+        # vanished from the ledger. Ownership, not the address, is the test.
         key = ('0x' + log['topics'][2][-40:]).lower()
+        if (sender in system_addrs or sender in registered) \
+                and _source_row_covers(log['transactionHash'], key):
+            continue  # already recorded by whichever feature moved it
         account_id = registered.get(key)
         if account_id is None:
             continue
@@ -610,23 +614,51 @@ def _system_addresses() -> set:
     return out
 
 
-def _has_source_row(tx_hash: str) -> bool:
-    """Does some feature already own this transaction?
+def _source_row_covers(tx_hash: str, recipient: str) -> bool:
+    """Does a feature already own THIS transfer — same tx AND same recipient?
 
-    Guards the sender exclusions below. Skipping every registered sender
-    assumes a durable row always exists for it, which is false for money
-    moved outside the app — recovery tooling, an imported wallet, a manually
-    signed transfer. Those are real inbound funds and must still be recorded,
-    so the exclusion is "internal sender AND someone already wrote it down",
-    never the sender alone.
+    Two things this must get right, both learned the hard way:
+
+    The hash alone is not enough. One 7702 batch carries several transfers
+    under a single hash, so matching on the hash lets a row written for
+    recipient A suppress the record for recipient B — B receives real money
+    and gets no ledger line. Scope by recipient.
+
+    And the feature models must be asked directly, not just SendTransaction
+    and the unified table. A presale purchase and a payroll item both record
+    their hash at BROADCAST, while their unified row only receives it when
+    the confirmer runs seconds later — so in that window the settlement leg
+    looks unowned and would be recorded as an inbound deposit.
     """
     if not tx_hash:
         return False
+    r = (recipient or '').lower()
+    if not r:
+        return False
     from send.models import SendTransaction
     from users.models_unified import UnifiedTransactionTable
-    if SendTransaction.all_objects.filter(transaction_hash__iexact=tx_hash).exists():
+    if SendTransaction.all_objects.filter(
+            transaction_hash__iexact=tx_hash, recipient_address__iexact=r).exists():
         return True
-    return UnifiedTransactionTable.objects.filter(transaction_hash__iexact=tx_hash).exists()
+    if UnifiedTransactionTable.objects.filter(
+            transaction_hash__iexact=tx_hash, to_address__iexact=r).exists():
+        return True
+    try:
+        from presale.models import PresalePurchase
+        if PresalePurchase.objects.filter(
+                transaction_hash__iexact=tx_hash, from_address__iexact=r).exists():
+            return True
+    except Exception:  # noqa: BLE001 — a scanner must not die on a lookup
+        logger.exception('presale ownership check failed for %s', tx_hash)
+    try:
+        from payroll.models import PayrollItem
+        if PayrollItem.objects.filter(
+                transaction_hash__iexact=tx_hash,
+                recipient_account__bsc_address__iexact=r).exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('payroll ownership check failed for %s', tx_hash)
+    return False
 
 
 def _registered_bsc_addresses() -> dict:

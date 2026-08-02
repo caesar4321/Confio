@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from users.funnel import emit_event
 from users.models_unified import UnifiedTransactionTable
 from users.utils import touch_user_activity
 from send.models import PhoneInvite
+
+logger = logging.getLogger(__name__)
 
 GUARDARIAN_CONVERSION_LINK_WINDOW = timedelta(days=14)
 GUARDARIAN_WAITING_FOR_AUTOSWAP = 'deposit_confirmed_waiting_for_user_autoswap'
@@ -126,6 +129,30 @@ def _derive_actor_address(ramp_tx: RampTransaction) -> str:
     if ramp_tx.usdc_withdrawal_id and ramp_tx.usdc_withdrawal:
         return ramp_tx.usdc_withdrawal.actor_address or ''
     return ramp_tx.actor_address or ''
+
+
+def _ledger_token(ramp_tx: RampTransaction, final_currency: str) -> str:
+    """A canonical ledger token, never a provider's product name.
+
+    final_currency is whatever the provider (or an admin editing the row)
+    put there — 'CUSD+', 'USDT BSC', a KOYWE_CRYPTO_SYMBOL override, even a
+    fiat symbol like 'PEN' when no crypto amount was derived. The ledger now
+    enforces a canonical token, so passing that straight through turns an
+    unexpected provider string into an IntegrityError on a ramp save that
+    used to succeed. Fold what we can, and fall back to the token the RAIL
+    settles in rather than failing the write or inventing a currency.
+    """
+    from users.models_unified import CANONICAL_TOKEN_TYPES, canonical_token_type
+
+    token = canonical_token_type(final_currency)
+    if token in CANONICAL_TOKEN_TYPES:
+        return token
+    fallback = 'CUSD_PLUS' if ramp_tx.destination == 'cusd_plus' else 'CUSD'
+    logger.warning(
+        'ramp %s: final_currency %r is not a ledger token — recording as %s',
+        getattr(ramp_tx, 'id', '?'), final_currency, fallback,
+    )
+    return fallback
 
 
 def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]:
@@ -351,7 +378,7 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
     defaults = {
         'transaction_type': 'ramp',
         'amount': str(final_amount if final_amount is not None else ramp_tx.fiat_amount or Decimal('0')),
-        'token_type': (final_currency or 'CUSD').upper(),
+        'token_type': _ledger_token(ramp_tx, final_currency),
         'status': unified_status,
         'transaction_hash': '',
         'error_message': ramp_tx.status_detail or '',

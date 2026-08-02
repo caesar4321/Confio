@@ -36,7 +36,19 @@ TOKEN_TYPE_ALIASES = {
 def canonical_token_type(value):
     """Fold a writer's spelling into the token the app actually queries."""
     raw = (value or '').strip().upper()
-    return TOKEN_TYPE_ALIASES.get(raw, raw)
+    if raw in TOKEN_TYPE_ALIASES:
+        return TOKEN_TYPE_ALIASES[raw]
+    if raw in CANONICAL_TOKEN_TYPES:
+        return raw
+    # Providers name a product, not a ledger token: "USDC Polygon",
+    # "USDT BSC", "USDC BSC". Where the first word is already the token and
+    # the rest is a chain, keep the token. The explicit alias table is
+    # consulted first, so 'CUSD PLUS' still folds to CUSD_PLUS rather than
+    # being truncated to CUSD here.
+    head = raw.split(' ', 1)[0]
+    if head in CANONICAL_TOKEN_TYPES:
+        return head
+    return raw
 
 
 class UnifiedTransactionTable(models.Model):

@@ -254,6 +254,15 @@ class CreatePayrollRun(graphene.Mutation):
             return CreatePayrollRun(run=None, success=False, errors=["Business not found"])
 
         normalized_token = 'CUSD' if str(token_type).upper() == 'CUSD' else str(token_type).upper()
+        # Model choices do not constrain writes, so an unrecognised token
+        # used to travel all the way to the ledger — where it is now a
+        # constraint violation that the unified signal swallows, leaving a
+        # real payroll run with no ledger row at all. Refuse it at the door.
+        _allowed = {c[0] for c in PayrollRun.TOKEN_TYPES}
+        if normalized_token not in _allowed:
+            return cls(success=False, errors=[
+                f"token_type inválido: {token_type}. "
+                f"Debe ser uno de: {', '.join(sorted(_allowed))}"], run=None)
 
         # Validate cap if provided
         if cap_amount:
