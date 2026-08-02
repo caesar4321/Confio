@@ -4065,6 +4065,44 @@ export const GET_PRESALE_TELEGRAM_GROUP = gql`
   }
 `;
 
+// Everything the participate screen needs from the presale app, in ONE round
+// trip. It used to fire three separate queries on entry (phase + curve +
+// telegram) on top of the balance reads; each was a full HTTP request with
+// its own auth and middleware pass. Deliberately does NOT absorb myBalances
+// or cusdPlusSummary: the first is shared app-wide and already cached, the
+// second is an expensive vault read that only the BSC rail needs.
+export const GET_PRESALE_PARTICIPATE_DATA = gql`
+  query GetPresaleParticipateData {
+    activePresalePhase {
+      phaseNumber
+      name
+      description
+      pricePerToken
+      totalRaised
+      totalParticipants
+      tokensSold
+      progressPercentage
+      minPurchase
+      maxPurchase
+      goalAmount
+      status
+    }
+    presaleCurveStats {
+      currentPrice
+      startPrice
+      finalPrice
+      totalRaisedUsd
+      nextMilestoneUsd
+      participants
+    }
+    presaleChain
+    presaleTelegramGroup {
+      enabled
+      url
+    }
+  }
+`;
+
 export const INVITE_RECEIPT_FOR_PHONE = gql`
   query InviteReceiptForPhone($phone: String!, $phoneCountry: String) {
     inviteReceiptForPhone(phone: $phone, phoneCountry: $phoneCountry) {

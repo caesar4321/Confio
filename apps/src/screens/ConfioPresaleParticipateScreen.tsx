@@ -9,7 +9,7 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
-import { GET_ACTIVE_PRESALE, GET_PRESALE_CURVE_STATS, GET_BSC_CONFIO_DOLLAR_BALANCE, GET_MY_BALANCES, GET_PRESALE_TELEGRAM_GROUP } from '../apollo/queries';
+import { GET_PRESALE_PARTICIPATE_DATA, GET_BSC_CONFIO_DOLLAR_BALANCE, GET_MY_BALANCES } from '../apollo/queries';
 import { TelegramGroupModal } from '../components/TelegramGroupModal';
 import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -37,29 +37,29 @@ export const ConfioPresaleParticipateScreen = () => {
   const formatWithLocale = (num: number, options = {}) =>
     formatNumber(num, countryCode, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...options });
 
-  // Fetch presale data
-  const { data, loading, error, refetch } = useQuery(GET_ACTIVE_PRESALE, {
+  // Phase + curve + chain + telegram in ONE request (was three).
+  const { data, loading, error, refetch } = useQuery(GET_PRESALE_PARTICIPATE_DATA, {
     fetchPolicy: 'cache-and-network',
   });
-  const { data: curveData, error: curveError } = useQuery(GET_PRESALE_CURVE_STATS, {
-    fetchPolicy: 'cache-and-network',
-  });
+  const curveData = data;
+  const telegramData = data;
   // Until the server answers we do NOT know which chain settles a purchase.
   // Acting on the default (Algorand) here would fire the whole opt-in
   // ceremony on a BSC user for nothing, so the init effect waits for this.
-  const chainKnown = !!curveData || !!curveError;
+  const chainKnown = !!data || !!error;
   // Purchase-flow chain: 'bsc' = sponsored 7702 buys against the curve
   // vault (no Algorand session/opt-in at all); 'algorand' = legacy WS flow.
-  const isBscFlow = curveData?.presaleChain === 'bsc';
+  const isBscFlow = data?.presaleChain === 'bsc';
+  // Expensive vault reads — only the BSC rail spends them.
   const { data: bscBalanceData } = useQuery(GET_BSC_CONFIO_DOLLAR_BALANCE, {
     fetchPolicy: 'cache-and-network',
     skip: !isBscFlow,
   });
+  // Legacy cUSD only funds the Algorand rail; shared app-wide, so this is
+  // usually a cache hit rather than a request.
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
-  });
-  const { data: telegramData } = useQuery(GET_PRESALE_TELEGRAM_GROUP, {
-    fetchPolicy: 'cache-and-network',
+    skip: isBscFlow,
   });
 
   const [busy, setBusy] = useState(false);

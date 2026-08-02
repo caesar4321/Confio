@@ -70,6 +70,13 @@ export const buyPresaleBsc = async (
   const { apolloClient } = await import('../apollo/client');
   const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
 
+  // Route chain reads through OUR server (bscRpc), like every other BSC money
+  // flow. Presale was the one path still calling a public node straight from
+  // the device: that leaks the user's address and their activity to a third
+  // party, and gets no failover when that node is down or rate-limiting.
+  const { installBscServerTransport } = await import('./bscServerRpc');
+  installBscServerTransport();
+
   const sponsored = await fetchSponsored7702Params();
   if (!sponsored.enabled || !sponsored.delegateAddress) {
     throw new Error('sponsored_rail_unavailable');
