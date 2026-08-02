@@ -361,6 +361,27 @@ class SponsoredBatch(models.Model):
                 condition=models.Q(tx_hash__gt=''),
                 name='cpsb_unique_tx_hash',
             ),
+            # ONE live batch per presale purchase. The application-level guard
+            # in presale.bsc_flow.submit_purchase can be beaten: two requests
+            # can both pass its existence check before either writes a row,
+            # and the cache claim backing it is not a correctness boundary (a
+            # flush, per-worker LocMemCache, or a TTL expiring during a stall
+            # all drop it). Without this a prepared batch could be re-signed
+            # with a fresh delegate nonce and executed twice — redeeming the
+            # user's savings and calling buy() again while the database books
+            # one purchase.
+            #
+            # Scoped to the LIVE statuses on purpose: reverted / noop_failed /
+            # reorged / dropped are exactly the cases a user must be able to
+            # retry, and leaving those states frees the slot automatically.
+            models.UniqueConstraint(
+                fields=['kind', 'source_id'],
+                condition=models.Q(
+                    kind='presale_buy',
+                    status__in=('signed', 'sent', 'confirmed'),
+                ),
+                name='cpsb_unique_active_presale_buy',
+            ),
         ]
 
     def __str__(self):

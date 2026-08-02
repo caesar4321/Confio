@@ -57,6 +57,10 @@ const usdToWeiFloor = (usd: number): bigint =>
   BigInt(Math.floor(usd * 1e6)) * 10n ** 12n;
 
 let running = false;
+// Set when a caller arrives mid-run (a deposit landing during a pass). The
+// finally block below drains it exactly once, so N arrivals during one run
+// cost one extra pass, not N.
+let rerunRequested = false;
 
 // "Is a mint in flight" is MODULE state, not per-screen state. Several
 // surfaces mount the resume (Home and the savings account), and `running`
@@ -85,7 +89,16 @@ export const subscribeSavingsMinting = (fn: MintingListener): (() => void) => {
  * concurrent runs. Requires the vault address (from server config).
  */
 export const resumeSavingsMints = async (vaultAddress: string): Promise<void> => {
-  if (running || !vaultAddress) return;
+  if (!vaultAddress) return;
+  // Coalesce, don't drop. A deposit landing WHILE a run is in flight used to
+  // be discarded by this guard: the running pass had already read a zero
+  // balance and, with no DEST_ARRIVED rows, never re-read it, so the arrival
+  // waited for the next foreground or remount. Remember that someone asked
+  // and re-run once at the end instead.
+  if (running) {
+    rerunRequested = true;
+    return;
+  }
   running = true;
   let announced = false;
   try {
@@ -182,5 +195,12 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     // Always clear, including on the query-failure path above — a modal that
     // outlives its work is worse than no modal.
     if (announced) setMinting(false);
+    // Drain a coalesced request. Cleared BEFORE the re-run so the re-run can
+    // set it again for anything that arrives during IT; not awaited, so this
+    // never recurses on the stack.
+    if (rerunRequested) {
+      rerunRequested = false;
+      void resumeSavingsMints(vaultAddress);
+    }
   }
 };

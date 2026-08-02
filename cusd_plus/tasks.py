@@ -1167,9 +1167,24 @@ def reconcile_signed_batches():
                            batch.tx_hash, exc)
             continue
 
+        # COMPARE-AND-SET, not save(). `batch` was read before the RPC above;
+        # a receipt worker can have terminalised it meanwhile, and an
+        # unconditional save would resurrect a stale 'signed' verdict over the
+        # newer one. For presale that is not cosmetic: writing 'dropped' over
+        # an already-advanced row frees the uniqueness slot and lets a retry
+        # execute a second buy. Only the worker whose UPDATE matches
+        # status='signed' owns the transition and does the follow-up work.
         if tx is not None:
+            won = SponsoredBatch.objects.filter(
+                pk=batch.pk, status='signed').update(
+                    status='sent', updated_at=timezone.now())
+            if not won:
+                logger.info('reconcile: batch %s advanced by another worker — skipping',
+                            batch.id)
+                continue
+            # Keep the in-memory row in step with the write we just won —
+            # everything below (and the caller's assertions) reads this object.
             batch.status = 'sent'
-            batch.save(update_fields=['status', 'updated_at'])
             check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=3)
             task_name = _DOMAIN_CONFIRM_TASKS.get(batch.kind)
             if task_name and batch.source_id is not None:
@@ -1182,9 +1197,15 @@ def reconcile_signed_batches():
                         batch.id, batch.tx_hash)
             out['promoted'] += 1
         else:
+            won = SponsoredBatch.objects.filter(
+                pk=batch.pk, status='signed').update(
+                    status='dropped', updated_at=timezone.now())
+            if not won:
+                logger.info('reconcile: batch %s advanced by another worker — skipping',
+                            batch.id)
+                continue
             batch.status = 'dropped'
             settle_savings_mint(batch.tx_hash, 'dropped')
-            batch.save(update_fields=['status', 'updated_at'])
             task_name = _DOMAIN_CONFIRM_TASKS.get(batch.kind)
             if task_name and batch.source_id is not None:
                 # Let the domain flow observe the terminal 'dropped' and fail
@@ -1194,6 +1215,196 @@ def reconcile_signed_batches():
             logger.warning('reconcile: batch %s (%s) never reached the chain — dropped',
                            batch.id, batch.tx_hash)
             out['dropped'] += 1
+
+    out.update(_converge_presale_buys(grace_min))
+    return out
+
+
+def _converge_presale_buys(grace_min: int) -> dict:
+    """Make every purchase agree with its LIVE batch, and keep that batch moving.
+
+    This is where the invariant is repaired after a crash. submit_purchase
+    commits the batch, broadcasts, and only THEN takes the purchase lock to
+    record the hash and undo any stale failure — so a crash (or an ambiguous
+    RPC error) anywhere in that gap leaves the forbidden state: a purchase
+    that is 'failed', or carries a previous attempt's hash, while a live and
+    possibly already-confirmed batch exists and its buy has executed. Matching
+    only on "processing with a null hash" could not see either case.
+
+    So the rule here is the invariant itself, not one symptom of breaking it:
+    a live batch means the purchase is processing and carries THAT batch's
+    hash. Convergence is a durable write, so a converged row stops matching —
+    no loop, no starvation.
+
+    A 'sent' batch also needs its RECEIPT task, not just the domain confirm:
+    the domain task only retries while the batch is 'sent', so if the receipt
+    enqueue was lost (crash, broker failure, retries exhausted) nothing would
+    ever advance it. Re-enqueueing bumps updated_at, which spaces the retries
+    by grace_min through this pass's own cutoff instead of every cycle.
+    """
+    from datetime import timedelta
+
+    from django.conf import settings
+    from django.db import transaction
+    from django.db.models import Exists, OuterRef
+    from django.utils import timezone
+
+    from blockchain.models import SponsoredBatch
+
+    out = {'converged': 0, 'confirm_requeued': 0, 'receipt_requeued': 0, 'abandoned': 0}
+    try:
+        from presale.models import PresalePurchase
+    except Exception:  # noqa: BLE001 — never let this break the reconciler
+        logger.exception('reconcile: presale models unavailable')
+        return out
+
+    # Interval, not the signed grace. The receipt task retries for ~9 minutes
+    # (5 tries at 3s then 35 at 15s), so re-driving on the 3-minute grace would
+    # stack overlapping chains on the same batch during a long RPC outage.
+    interval = max(int(getattr(settings, 'CUSD_PLUS_RECOVERY_INTERVAL_MIN', 15)),
+                   grace_min)
+    give_up_h = int(getattr(settings, 'CUSD_PLUS_RECOVERY_GIVE_UP_HOURS', 6))
+    cutoff = timezone.now() - timedelta(minutes=interval)
+
+    # Selection is driven by UNRESOLVED, not by age alone. A settled purchase
+    # never changes its batch, so age-ordered paging let 100 historical
+    # confirmed rows occupy the window forever and silently starve every newer
+    # one. Filtering in SQL before the slice — and bumping updated_at on each
+    # row we touch — makes the page rotate instead.
+    unresolved = PresalePurchase.objects.filter(
+        id=OuterRef('source_id')).exclude(status='completed')
+    live = list(
+        SponsoredBatch.objects.filter(
+            kind='presale_buy',
+            status__in=('sent', 'confirmed'),
+            updated_at__lt=cutoff,
+            source_id__isnull=False,
+        ).exclude(tx_hash='')
+        .annotate(_open=Exists(unresolved)).filter(_open=True)
+        .order_by('updated_at')[:100]
+    )
+    if not live:
+        return out
+
+    # Purchases that DISAGREE with THEIR OWN live batch: failed despite it, or
+    # holding a different (older) attempt's hash, or holding none.
+    #
+    # Compared per row, not with transaction_hash__in=<every hash on the page>.
+    # That set form asks "does this purchase hold ANY live hash", so a row
+    # carrying a DIFFERENT batch's hash reads as agreeing and its convergence
+    # is skipped — exactly the mismatched-hash case this exists to repair. The
+    # page is bounded at 100, so pairing each purchase with its own batch in
+    # Python costs nothing. The unique constraint guarantees one live batch per
+    # source_id, so this mapping is unambiguous.
+    by_id = {b.source_id: b for b in live}
+    disagreeing = [
+        p.id for p in PresalePurchase.objects.filter(id__in=list(by_id)).only(
+            'id', 'status', 'transaction_hash')
+        if not (p.status == 'processing'
+                and p.transaction_hash == by_id[p.id].tx_hash)
+    ]
+
+    disagreeing = set(disagreeing)
+    terminal_handoff: list[int] = []
+    for batch in live:
+        purchase_id = batch.source_id
+        was = None
+        try:
+            with transaction.atomic():
+                purchase = PresalePurchase.objects.select_for_update().get(id=purchase_id)
+                # REVALIDATE the batch under the lock. It was read before this
+                # lock, and a receipt worker can have terminalised it since —
+                # in which case its own confirmer owns the outcome, and
+                # restoring 'processing' here would overwrite a settled verdict
+                # with a stale one.
+                fresh = SponsoredBatch.objects.filter(
+                    pk=batch.pk, status__in=('sent', 'confirmed')).first()
+                if fresh is None:
+                    # Terminal now — not ours to converge, but not ours to
+                    # abandon either. The receipt task writes reverted /
+                    # noop_failed / reorged and returns WITHOUT enqueueing the
+                    # domain confirmer, so if the previous chain was lost or
+                    # exhausted while the batch was still 'sent', nothing else
+                    # will ever settle this purchase and it sits 'processing'
+                    # forever. Terminal rows never match this pass again, so
+                    # this is the last chance to hand it off.
+                    terminal_handoff.append(purchase_id)
+                    continue
+                batch.status = fresh.status
+                if purchase.status == 'completed':
+                    continue  # settled; nothing to do
+                if purchase_id in disagreeing and not (
+                        purchase.status == 'processing'
+                        and purchase.transaction_hash == batch.tx_hash):
+                    was = purchase.status
+                    purchase.status = 'processing'
+                    purchase.transaction_hash = batch.tx_hash
+                    purchase.save(update_fields=['status', 'transaction_hash'])
+        except PresalePurchase.DoesNotExist:
+            continue
+        except Exception:  # noqa: BLE001 — one bad row must not stop the rest
+            logger.exception('reconcile: could not converge purchase %s', purchase_id)
+            continue
+
+        if was is not None:
+            logger.warning(
+                'reconcile: purchase %s was %s while batch %s (%s) is live — '
+                'converged to processing on %s', purchase_id, was, batch.id,
+                batch.status, batch.tx_hash)
+            out['converged'] += 1
+
+        # GIVE UP FIRST, before either enqueue. Both the confirmer and the
+        # receipt task retry up to 40 times, so a row that can never resolve
+        # amplifies from BOTH — bounding only the receipt still left the
+        # confirmer chain unbounded (Codex audit 2026-08-02). A hundred such
+        # rows is hundreds of executions a minute, forever, achieving nothing.
+        #
+        # Only a 'sent' row can be dead this way: 'confirmed' has a real
+        # outcome and always deserves its confirmer, however old it is.
+        # created_at is the clock, not updated_at — updated_at is rotated by
+        # this very pass, so it would never age.
+        if (batch.status == 'sent'
+                and timezone.now() - batch.created_at > timedelta(hours=give_up_h)):
+            logger.error(
+                'reconcile: batch %s has been sent and unresolved for over %sh '
+                '(purchase %s, tx %s) — NOT re-driving further. This needs a '
+                'human: check whether the transaction mined. The purchase stays '
+                'processing with a live batch, which is the safe state, and the '
+                'reaper will not fail it.',
+                batch.id, give_up_h, purchase_id, batch.tx_hash)
+            out['abandoned'] += 1
+            SponsoredBatch.objects.filter(pk=batch.pk).update(updated_at=timezone.now())
+            continue
+
+        # Re-drive the domain confirmer for EVERY unresolved live batch, not
+        # only rows we changed. submit_purchase saves the hash and THEN
+        # enqueues; a crash in that gap leaves a purchase that already agrees
+        # with its batch, so a convergence-only re-drive would never look at it
+        # again and a confirmed buy would stay unbooked forever. These tasks
+        # are idempotent and now verify kind/source_id before acting.
+        current_app.send_task('presale.confirm_bsc_purchase',
+                              args=[purchase_id, batch.id])
+        out['confirm_requeued'] += 1
+
+        # A 'sent' batch also needs its RECEIPT task: the domain confirmer only
+        # retries while the batch stays 'sent', so nothing else advances it.
+        if batch.status == 'sent':
+            check_sponsored_batch_receipt.apply_async(args=[batch.id])
+            out['receipt_requeued'] += 1
+
+        # Bump last. This both spaces the next attempt by `interval` and
+        # rotates the page, so a permanently unresolved row cannot re-occupy
+        # the window ahead of newer work.
+        SponsoredBatch.objects.filter(pk=batch.pk).update(updated_at=timezone.now())
+
+    for purchase_id in terminal_handoff:
+        batch = by_id[purchase_id]
+        logger.warning(
+            'reconcile: batch %s terminalised with purchase %s still open — '
+            'handing it to the domain confirmer', batch.id, purchase_id)
+        current_app.send_task('presale.confirm_bsc_purchase',
+                              args=[purchase_id, batch.id])
+        out['confirm_requeued'] += 1
     return out
 
 

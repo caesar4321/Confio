@@ -1,5 +1,9 @@
+import logging
+
 from django.contrib import admin
 from .models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor
+
+logger = logging.getLogger(__name__)
 
 
 @admin.register(Balance)
@@ -57,3 +61,15 @@ class SponsoredBatchAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    # NO terminalize/clear action here, deliberately. An operator button that
+    # moves a 'sent' batch to 'dropped' looks like the obvious escape hatch for
+    # a receipt that never resolves, but 'sent' only says the DATABASE has not
+    # seen an outcome — it cannot say the broadcast transaction will never
+    # mine. Marking it dropped frees the presale uniqueness slot and fails the
+    # domain row, so the user retries; if the original then mines, the buy or
+    # send executes TWICE (Codex audit 2026-08-02, P1). Doing this safely needs
+    # authoritative proof the original is impossible — replacing the sponsor
+    # nonce and waiting for finality — which is a piece of infrastructure, not
+    # an admin action. Until that exists, a stuck batch is escalated by the
+    # reconciler's give-up ERROR and resolved by engineering, not by a button.

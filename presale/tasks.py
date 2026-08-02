@@ -202,6 +202,16 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
         batch = SponsoredBatch.objects.get(id=batch_id)
     except (PresalePurchase.DoesNotExist, SponsoredBatch.DoesNotExist):
         return
+    # Isolation: this batch must actually belong to this purchase. Without it a
+    # mis-scheduled or replayed task could settle a purchase from a STRANGER's
+    # batch — completing it on someone else's tx hash and making its real
+    # confirmation return early on a non-processing row. The other domain
+    # confirmers already assert this (Codex audit 2026-08-02).
+    if batch.kind != 'presale_buy' or batch.source_id != purchase.id:
+        logger.error(
+            '[PRESALE][BSC] batch %s (%s/%s) does not belong to purchase %s — refusing',
+            batch.id, batch.kind, batch.source_id, purchase.id)
+        return
     if purchase.status != 'processing':
         return  # already resolved
 
@@ -236,32 +246,40 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
                 status='CONFIRMED', transaction_hash=batch.tx_hash,
             )
         logger.info('[PRESALE][BSC] purchase %s confirmed: %s', purchase.id, batch.tx_hash)
-    else:  # reverted / noop_failed / dropped
-        # A terminal batch frees this purchase's uniqueness slot, so the user
-        # may already have retried and be mid-flight on a NEW batch. This task
-        # is scheduled after the terminalisation (reconcile_signed_batches
-        # marks 'dropped' and enqueues us ten seconds later), so by the time we
-        # run the replacement can exist — and failing the purchase here would
-        # book an executing buy as failed, while the replacement's own confirm
-        # would then see a non-processing row and return. Defer to the live
-        # batch; whichever one settles resolves the purchase.
+    else:  # reverted / noop_failed / dropped / reorged
+        # THE INVARIANT (mirror of presale.bsc_flow.submit_purchase): a
+        # purchase is 'failed' only while it has no live batch. A terminal
+        # batch frees the uniqueness slot, so the user may already have
+        # retried — and failing the purchase then would book an executing buy
+        # as failed while the replacement's own confirm returns early on a
+        # non-processing row.
+        #
+        # Decided UNDER THE PURCHASE LOCK, the same one submit_purchase takes
+        # before recording its batch. Reading it outside the lock was a
+        # check-then-act: a submit that had passed its status guard but not
+        # yet created its row was invisible here (Codex audit 2026-08-02).
+        from django.db import transaction
+
         from blockchain.models import SponsoredBatch
-        newer = SponsoredBatch.objects.filter(
-            kind='presale_buy', source_id=purchase.id,
-            status__in=('signed', 'sent', 'confirmed'),
-        ).exclude(pk=batch.pk).exists()
-        if newer:
-            logger.info(
-                '[PRESALE][BSC] batch %s is %s but purchase %s has a live '
-                'replacement — leaving it processing',
-                batch.id, batch.status, purchase.id)
-            return
-        purchase.status = 'failed'
-        purchase.notes = (purchase.notes or '') + f'\n[Error] batch {batch.status}: {batch.tx_hash}'
-        purchase.save(update_fields=['status', 'notes'])
-        UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
-            status='FAILED', error_message=f'batch_{batch.status}',
-        )
+        with transaction.atomic():
+            purchase = PresalePurchase.objects.select_for_update().get(id=purchase.id)
+            if purchase.status != 'processing':
+                return  # resolved by someone else while we waited for the lock
+            if SponsoredBatch.objects.filter(
+                kind='presale_buy', source_id=purchase.id,
+                status__in=('signed', 'sent', 'confirmed'),
+            ).exclude(pk=batch.pk).exists():
+                logger.info(
+                    '[PRESALE][BSC] batch %s is %s but purchase %s has a live '
+                    'replacement — leaving it processing',
+                    batch.id, batch.status, purchase.id)
+                return
+            purchase.status = 'failed'
+            purchase.notes = (purchase.notes or '') + f'\n[Error] batch {batch.status}: {batch.tx_hash}'
+            purchase.save(update_fields=['status', 'notes'])
+            UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
+                status='FAILED', error_message=f'batch_{batch.status}',
+            )
         logger.warning('[PRESALE][BSC] purchase %s failed: batch %s %s',
                        purchase.id, batch.id, batch.status)
 

@@ -28,6 +28,7 @@ import time
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import IntegrityError
 from django.utils import timezone
 
 from eth_utils import keccak
@@ -498,33 +499,41 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
         # the database books one purchase, which also walks past the per-user
         # presale limits.
         #
-        # Two layers because they cover different races: SponsoredBatch is
-        # written BEFORE broadcast (durable, survives a cache flush) and
-        # cache.add is atomic (covers two requests in flight at once).
+        # The DURABLE claim is the SponsoredBatch row (written 'signed' before
+        # broadcast) plus cpsb_unique_active_presale_buy. This existence check
+        # is only the cheap path that turns the common case into a clean error
+        # instead of an IntegrityError; it is NOT the boundary, and nothing
+        # here may depend on it winning a race.
+        #
         # Terminal-FAILED batches are deliberately not counted — reverted /
-        # noop_failed / dropped are exactly the cases the user must retry,
-        # and the delegate's monotonic nonce makes that safe.
-        from django.core.cache import cache
-
+        # noop_failed / dropped are exactly the cases the user must retry, and
+        # the delegate's monotonic nonce makes that safe.
         from blockchain.models import SponsoredBatch
         if SponsoredBatch.objects.filter(
             kind='presale_buy', source_id=purchase.id,
             status__in=('signed', 'sent', 'confirmed'),
         ).exists():
             return {'success': False, 'error': 'purchase_already_submitted'}
-        claim_key = f'presale_bsc_submit_{purchase.id}'
-        if not cache.add(claim_key, 1, 600):
-            return {'success': False, 'error': 'purchase_already_submitting'}
 
         try:
             tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, calls, int(nonce), int(deadline),
                 intent_signature, auth_dict, 'presale_buy', source_id=purchase.id)
-        except Exception:
-            # Nothing was broadcast (or it failed outright) — let the user
-            # retry rather than stranding the purchase behind a stale claim.
-            cache.delete(claim_key)
-            raise
+        except IntegrityError as exc:
+            # ONLY our constraint means "someone else already has this
+            # purchase". Any other integrity failure — the tx-hash uniqueness,
+            # an FK, a check — is a real defect, and reporting it as a
+            # duplicate submit would hide it behind a plausible-looking
+            # message. Read the constraint name and re-raise anything else.
+            diag = getattr(getattr(exc, '__cause__', None), 'diag', None)
+            if getattr(diag, 'constraint_name', None) != 'cpsb_unique_active_presale_buy':
+                raise
+            # Nothing was broadcast by us: another request lost the race and
+            # this one already has a live batch for the purchase.
+            logger.warning(
+                '[PRESALE][BSC] duplicate submit blocked by constraint for purchase %s',
+                purchase.id)
+            return {'success': False, 'error': 'purchase_already_submitted'}
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True,
@@ -534,8 +543,27 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
         logger.exception('[PRESALE][BSC] sponsored buy failed for purchase %s', purchase.id)
         return {'success': False, 'error': str(exc)[:200]}
 
+    # THE INVARIANT: a purchase is 'failed' only while it has no live batch.
+    # One now exists and has been broadcast, so anything that concluded
+    # otherwise in the meantime concluded wrongly. A terminal task for a
+    # PREVIOUS batch can have failed this row in the window between our status
+    # check above and this batch existing — it saw no replacement because ours
+    # was not created yet. Under the same lock it takes, restore the truth
+    # rather than leave an executing buy booked as failed.
+    from django.db import transaction as _tx
+
+    from .models import PresalePurchase as _PP
+    with _tx.atomic():
+        locked = _PP.objects.select_for_update().get(pk=purchase.pk)
+        if locked.status == 'failed':
+            logger.warning(
+                '[PRESALE][BSC] purchase %s was failed by a stale terminal task '
+                'while this batch was being broadcast — restoring to processing '
+                '(batch %s, tx %s)', purchase.id, batch.id, tx_hash)
+            locked.status = 'processing'
+        locked.transaction_hash = tx_hash
+        locked.save(update_fields=['status', 'transaction_hash'])
     purchase.transaction_hash = tx_hash
-    purchase.save(update_fields=['transaction_hash'])
 
     from .tasks import confirm_bsc_presale_purchase
     confirm_bsc_presale_purchase.apply_async(args=[purchase.id, batch.id], countdown=8)
