@@ -233,7 +233,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             # Build admin address from KMS signer
             from blockchain.kms_manager import get_kms_signer_from_settings
             try:
-                signer = get_kms_signer_from_settings()
+                signer = get_kms_signer_from_settings(role="admin")
                 admin_addr = signer.address
                 admin_sk = signer.sign_transaction
             except Exception:
@@ -295,7 +295,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
                     try:
                         from blockchain.kms_manager import get_kms_signer_from_settings
-                        sponsor_signer = get_kms_signer_from_settings()
+                        sponsor_signer = get_kms_signer_from_settings(role="admin")
                         sponsor_signer.assert_matches_address(sponsor_addr)
                     except Exception:
                         self.message_user(request, 'Sponsor signer not configured; cannot auto-fund app', level='error')
@@ -361,7 +361,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
                     try:
                         from blockchain.kms_manager import get_kms_signer_from_settings
-                        sponsor_signer = get_kms_signer_from_settings()
+                        sponsor_signer = get_kms_signer_from_settings(role="admin")
                         sponsor_signer.assert_matches_address(sponsor_addr)
                     except Exception:
                         self.message_user(request, 'Sponsor signer not configured; cannot opt-in assets', level='error')
@@ -430,8 +430,25 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             if price <= 0:
                 self.message_user(request, 'Phase price must be positive', level='error')
                 return
+            # Both rails sell concurrently right now: Algorand at this flat
+            # round price, BSC on the rising curve. A phase row edited by
+            # mistake would reprice the legacy rail with no other check in the
+            # path, and the sale that follows cannot be undone. Sanity-check
+            # against the curve before signing.
+            from presale.price_utils import get_confio_current_price
+            curve = get_confio_current_price()
+            if curve > 0 and not (curve / 4 <= price <= curve * 4):
+                self.message_user(
+                    request,
+                    f'Refusing to set the on-chain price to {price:.4f}: the BSC curve is '
+                    f'currently at {curve:.6f}, so this is {price / curve:.2f}x off. Both '
+                    f'rails are selling — repricing the legacy rail this far from the curve '
+                    f'would sell CONFIO at the wrong rate irreversibly. Fix the phase price '
+                    f'if this was not deliberate.',
+                    level='ERROR')
+                return
             from blockchain.kms_manager import get_kms_signer_from_settings
-            signer = get_kms_signer_from_settings()
+            signer = get_kms_signer_from_settings(role="admin")
             admin_addr = signer.address
         except Exception as exc:
             self.message_user(request, f"Failed to prepare signer or price: {exc}", level='error')
@@ -468,7 +485,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
 
             from blockchain.kms_manager import get_kms_signer_from_settings
             try:
-                signer = get_kms_signer_from_settings()
+                signer = get_kms_signer_from_settings(role="admin")
             except Exception:
                 self.message_user(request, 'Admin signer not configured', level='error')
                 return
@@ -489,13 +506,21 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     return int(v.get('uint') or 0) if v else 0
                 except Exception:
                     return 0
-            # Keys are base64; we don't strictly need decode for active snapshot, just attempt to toggle regardless.
-
-            # Send toggle_round (sets active=0 if currently 1; if already 0, it will attempt to re-activate and may assert).
-            # To avoid activation path, we enforce a one-way: only send when active.
-            # Read active value via dryrun of global state: we know 'active' was set in contract; but decoding base64 key here is verbose.
-            # Simpler: attempt toggle; if round was inactive, Tx will try to activate and may fail inventory assertion. We can guard by checking suggested param dry-run not available.
-            # Instead, issue a read via indexer-like API is out of scope; proceed with toggle and surface errors.
+            # toggle_round is a TOGGLE, not a stop: the contract sets active=0
+            # only when it is currently 1, and otherwise takes the RE-ACTIVATE
+            # branch (confio_presale.py toggle_round). So sending it blindly —
+            # a double-click, a stale page, this action run twice — reopens a
+            # sale we meant to close, and the inventory assert does not
+            # necessarily stop that. Decode `active` and refuse unless the
+            # round is actually running, so this action is one-way.
+            import base64 as _b64
+            _active_key = _b64.b64encode(b'active').decode()
+            if _get_uint(_active_key) != 1:
+                msg = ('Round is already inactive on chain. Refusing to send toggle_round: '
+                       'it would RE-ACTIVATE the sale, not close it. Use "Resume current round" '
+                       'if reopening is what you want.')
+                self.message_user(request, msg, level='ERROR')
+                return
 
             from algosdk.transaction import ApplicationCallTxn as _AppCall, OnComplete as _OC
             # Resolve assets for foreign list
@@ -536,7 +561,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
 
             from blockchain.kms_manager import get_kms_signer_from_settings
             try:
-                signer = get_kms_signer_from_settings()
+                signer = get_kms_signer_from_settings(role="admin")
             except Exception:
                 self.message_user(request, 'Admin signer not configured', level='error')
                 return
@@ -631,7 +656,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         # Build admin credentials via KMS
         from blockchain.kms_manager import get_kms_signer_from_settings
         try:
-            signer = get_kms_signer_from_settings()
+            signer = get_kms_signer_from_settings(role="admin")
             admin_addr = signer.address
         except Exception:
             self.message_user(request, 'Admin signer not configured', level='error')
@@ -698,6 +723,42 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                         amt_micro = int((Decimal(amt_dec) * (10**6)).to_integral_value(ROUND_DOWN))
                     except Exception:
                         amt_micro = None
+                def _reject(msg):
+                    self.message_user(request, msg, level='ERROR')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw unsold CONFIO',
+                        available_confio=available/10**6,
+                        app_confio=app_confio/10**6,
+                        outstanding_confio=outstanding/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_unsold_confio',
+                        queryset=queryset,
+                        result_message=msg,
+                        result_level='error',
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+
+                # A typed amount is INTENT. The contract treats BOTH 0 and
+                # "more than available" as "withdraw everything" (see
+                # confio_presale.py withdraw_confio: it falls back to
+                # available.load() in both cases). So a fat-fingered zero and
+                # an extra digit both drain the app to `receiver`, silently,
+                # and the receipt would report the amount we asked for rather
+                # than the amount that moved. Refuse both before signing;
+                # blank still means all, because blank is unambiguous intent.
+                if amt_micro is not None:
+                    if amt_micro <= 0:
+                        return _reject(
+                            'Amount must be greater than zero. The contract reads 0 as '
+                            '"withdraw everything" — leave the field blank if that is what you want.')
+                    if amt_micro > available:
+                        return _reject(
+                            f'Amount exceeds available: requested {amt_micro/10**6:,.6f} CONFIO, '
+                            f'available {available/10**6:,.6f} CONFIO. The contract would silently '
+                            f'withdraw ALL available instead of failing. Nothing was sent.')
+
                 # Guard: no available and no explicit amount
                 if amt_micro is None and available <= 0:
                     self.message_user(request, 'No unused CONFIO available to withdraw.', level='info')
@@ -835,7 +896,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         # Build admin credentials via KMS
         from blockchain.kms_manager import get_kms_signer_from_settings
         try:
-            signer = get_kms_signer_from_settings()
+            signer = get_kms_signer_from_settings(role="admin")
             admin_addr = signer.address
         except Exception:
             self.message_user(request, 'Admin signer not configured', level='error')
@@ -882,6 +943,25 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             form = WithdrawCUSDForm(request.POST)
             if form.is_valid():
                 recv = form.cleaned_data.get('receiver') or admin_addr
+                # This action always sweeps the FULL balance — there is no
+                # amount field — so a mistyped receiver sends everything to a
+                # wrong address, irreversibly. Validate the checksum first.
+                from algosdk import encoding as _algo_encoding
+                if not _algo_encoding.is_valid_address(recv):
+                    msg = f'Receiver is not a valid Algorand address: {recv!r}. Nothing was sent.'
+                    self.message_user(request, msg, level='ERROR')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw collected cUSD',
+                        cusd_balance=cusd_balance/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_cusd',
+                        queryset=queryset,
+                        result_message=msg,
+                        result_level='error',
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
                 if cusd_balance <= 0:
                     self.message_user(request, 'No cUSD available to withdraw.', level='info')
                     context = dict(
@@ -1030,7 +1110,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 if not has_confio:
                     from blockchain.kms_manager import get_kms_signer_from_settings
                     try:
-                        signer = get_kms_signer_from_settings()
+                        signer = get_kms_signer_from_settings(role="admin")
                         sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
                         signer.assert_matches_address(sponsor_addr)
                         admin_addr = signer.address
@@ -1074,7 +1154,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
             from blockchain.kms_manager import get_kms_signer_from_settings
             try:
-                sponsor_signer = get_kms_signer_from_settings()
+                sponsor_signer = get_kms_signer_from_settings(role="admin")
                 sponsor_signer.assert_matches_address(sponsor_addr)
             except Exception:
                 self.message_user(request, 'Sponsor signer not configured', level='error')
@@ -1217,12 +1297,54 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
     actions = ['mark_as_completed', 'mark_as_failed']
     
     def mark_as_completed(self, request, queryset):
-        updated = 0
-        for purchase in queryset.filter(status__in=['pending', 'processing']):
-            purchase.complete_purchase(f"manual_completion_{purchase.id}")
-            updated += 1
-        self.message_user(request, f"{updated} purchase(s) marked as completed.")
-    mark_as_completed.short_description = "Mark as completed"
+        # This action used to FORGE exactly the state the rest of the system
+        # trusts: it wrote a synthetic "manual_completion_{id}" hash with no
+        # proof that anyone had paid. A completed purchase is picked up by
+        # sync_presale_migration_credits, becomes a PresaleMigrationCredit,
+        # and is handed real CONFIO out of the vault's migratedPool — and sync
+        # only ever RAISES pending credits, never lowers them, so un-marking a
+        # mistake here does not undo it.
+        #
+        # Completing is now reconciliation, not fabrication: the row must
+        # already carry the on-chain hash proving it was broadcast.
+        from django.db import transaction
+        from django.utils import timezone
+
+        completed = 0
+        unpaid = []
+        for pid in list(queryset.filter(status__in=['pending', 'processing'])
+                                .values_list('id', flat=True)):
+            with transaction.atomic():
+                purchase = PresalePurchase.objects.select_for_update().get(id=pid)
+                if purchase.status not in ('pending', 'processing'):
+                    continue
+                tx_hash = (purchase.transaction_hash or '').strip()
+                if not tx_hash:
+                    unpaid.append(purchase.id)
+                    continue
+                upl, _ = UserPresaleLimit.objects.get_or_create(
+                    user=purchase.user, phase=purchase.phase)
+                upl = UserPresaleLimit.objects.select_for_update().get(pk=upl.pk)
+                purchase.complete_purchase(tx_hash)
+                # Both real confirmers increment the locked limit. This action
+                # used to skip it, so manually completed purchases did not
+                # count against the user's per-phase cap.
+                upl.total_purchased += purchase.cusd_amount
+                upl.last_purchase_at = timezone.now()
+                upl.save(update_fields=['total_purchased', 'last_purchase_at'])
+                completed += 1
+
+        self.message_user(request, f"{completed} purchase(s) marked as completed.")
+        if unpaid:
+            self.message_user(
+                request,
+                f"{len(unpaid)} purchase(s) skipped because they carry no transaction "
+                f"hash, so there is no evidence they were paid: {sorted(unpaid)}. "
+                f"Completing them would create a migration credit — and real CONFIO — "
+                f"for an unpaid order. Record the on-chain hash first.",
+                level='WARNING',
+            )
+    mark_as_completed.short_description = "Mark as completed (requires tx hash)"
     
     def mark_as_failed(self, request, queryset):
         # Enforce the invariant instead of losing to it. A purchase with a LIVE
@@ -1230,8 +1352,18 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         # converge it straight back to 'processing' — so failing it here would
         # look like it worked and then silently undo itself. Refuse those and
         # say why; the batch settling is what resolves them.
+        # Same reasoning covers the legacy Algorand rail, which has no
+        # SponsoredBatch row to inspect: if a purchase already carries a
+        # transaction hash it was broadcast, so it may well have landed.
+        # Failing it here would free the reservation for an order that
+        # actually took the user's funds.
         from blockchain.models import SponsoredBatch
         candidates = queryset.filter(status__in=['pending', 'processing'])
+        broadcast_ids = set(
+            candidates.exclude(transaction_hash='')
+                      .exclude(transaction_hash__isnull=True)
+                      .values_list('id', flat=True)
+        )
         live_ids = set(
             SponsoredBatch.objects.filter(
                 kind='presale_buy',
@@ -1239,8 +1371,16 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
                 status__in=('signed', 'sent', 'confirmed'),
             ).values_list('source_id', flat=True)
         )
-        updated = candidates.exclude(id__in=live_ids).update(status='failed')
+        updated = candidates.exclude(id__in=(live_ids | broadcast_ids)).update(status='failed')
         self.message_user(request, f"{updated} purchase(s) marked as failed.")
+        if broadcast_ids - live_ids:
+            self.message_user(
+                request,
+                f"{len(broadcast_ids - live_ids)} purchase(s) skipped: they already "
+                f"carry a transaction hash, so they were broadcast and may have "
+                f"executed. Verify the hash on chain before failing them.",
+                level='WARNING',
+            )
         if live_ids:
             self.message_user(
                 request,
@@ -1531,8 +1671,22 @@ class PresaleMigrationCreditAdmin(admin.ModelAdmin):
     ]
     list_filter = ['status', 'created_at']
     search_fields = ['user__username', 'user__email', 'bsc_address', 'batch_id', 'safe_tx_hash']
-    readonly_fields = ['user', 'created_at', 'updated_at', 'credited_at']
+    # Every field here is money. build_presale_credit_batch turns bsc_address
+    # and confio_amount into Safe calldata verbatim, and the vault only bounds
+    # the migratedPool TOTAL — it does not notice a redirected address or a
+    # duplicated credit. Editing status or batch_id re-opens an already-paid
+    # credit for a second payout. The sanctioned way to change any of this is
+    # the presale_migration_credits management command, which reconciles
+    # against the source purchases; notes stays writable for annotation.
+    readonly_fields = [
+        'user', 'bsc_address', 'confio_amount', 'status', 'batch_id',
+        'safe_tx_hash', 'created_at', 'updated_at', 'credited_at',
+    ]
     date_hierarchy = 'created_at'
+
+    def has_add_permission(self, request):
+        # Credits are derived from completed purchases, never hand-authored.
+        return False
 
     fieldsets = (
         ('Credit', {
