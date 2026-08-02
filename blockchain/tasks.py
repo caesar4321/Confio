@@ -365,22 +365,35 @@ def scan_inbound_deposits():
         except Exception:
             sponsor_address = None
 
-        def resolve_sender_name(sender_addr: str) -> str:
+        def resolve_sender_account(sender_addr: str):
             if not sender_addr:
-                return 'Billetera externa'
+                return None
             try:
-                sender_account = Account.objects.filter(
+                return Account.objects.filter(
                     algorand_address=sender_addr
                 ).select_related('user', 'business').first()
-                if sender_account:
-                    if sender_account.account_type == 'business' and sender_account.business:
-                        return sender_account.business.name
-                    if sender_account.user:
-                        full_name = f"{sender_account.user.first_name or ''} {sender_account.user.last_name or ''}".strip()
-                        return full_name or sender_account.user.username or 'Usuario'
             except Exception:
-                pass
+                return None
+
+        def resolve_sender_name(sender_addr: str) -> str:
+            sender_account = resolve_sender_account(sender_addr)
+            if sender_account:
+                if sender_account.account_type == 'business' and sender_account.business:
+                    return sender_account.business.name
+                if sender_account.user:
+                    full_name = f"{sender_account.user.first_name or ''} {sender_account.user.last_name or ''}".strip()
+                    return full_name or sender_account.user.username or 'Usuario'
             return 'Billetera externa'
+
+        def sender_is_external(sender_addr: str) -> bool:
+            """This scan also records serverless INTERNAL transfers (emergency
+            exit, P2P USDC withdrawal) that have no SendTransaction of their
+            own. The row it writes says sender_type='external' regardless, so
+            the notification must ask who the sender actually is — telling a
+            business's employees that a known Confío user is an external
+            wallet, and handing them that user's address, is exactly what the
+            phone-withholding rule next door exists to prevent."""
+            return resolve_sender_account(sender_addr) is None
 
         def create_or_get_external_send_tx(
             *,
@@ -585,14 +598,21 @@ def scan_inbound_deposits():
 
                     try:
                         pending_auto_swap = human_amt >= 1
+                        # Serverless P2P USDC withdrawals land here with a
+                        # Confío sender, so this branch needs the same gate as
+                        # the cUSD/CONFIO and ALGO ones below.
+                        is_external = sender_is_external(sender)
                         notif_data = {
                             'transaction_type': 'deposit',
                             'type': 'deposit',
                             'currency': 'USDC',
                             'amount': str(human_amt),
-                            'sender': sender,
+                            'is_external_address': is_external,
+                            **({'sender': sender, 'sender_address': sender}
+                               if is_external else {}),
                             'sender_name': sender_name,
                             'receiver': to_addr,
+                            'recipient_address': to_addr,
                             'txid': txid,
                             'round': cround,
                             'deposit_id': str(deposit.internal_id),
@@ -639,11 +659,21 @@ def scan_inbound_deposits():
                 )
 
                 try:
+                    is_external = sender_is_external(sender)
                     notif_data = {
                         'token_type': token_name,
                         'amount': str(human_amt),
-                        'sender': sender,
+                        # 'sender' is this task's own legacy name for the same
+                        # value as sender_address, so it has to obey the same
+                        # gate — leaving it ungated would put an internal
+                        # sender's address back in every employee's payload
+                        # and let the client promote it into fromAddress.
+                        # 'receiver' is the recipient's OWN address: harmless.
                         'receiver': to_addr,
+                        'is_external_address': is_external,
+                        **({'sender': sender, 'sender_address': sender}
+                           if is_external else {}),
+                        'recipient_address': to_addr,
                         'txid': txid,
                         'round': cround,
                         'sender_name': resolve_sender_name(sender),
@@ -833,11 +863,15 @@ def scan_inbound_deposits():
                     )
 
                     pending_auto_swap = human_amt >= 1
+                    is_external = sender_is_external(sender)
                     notif_data = {
                         'token_type': 'ALGO',
                         'amount': str(human_amt),
-                        'sender': sender,
                         'receiver': to_addr,
+                        'is_external_address': is_external,
+                        **({'sender': sender, 'sender_address': sender}
+                           if is_external else {}),
+                        'recipient_address': to_addr,
                         'txid': txid,
                         'round': cround,
                         'sender_name': resolve_sender_name(sender),
@@ -1292,6 +1326,26 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         or (recipient_phone_intl or None)
                         or (s.recipient_address[:6] + '...' + s.recipient_address[-4:] if s.recipient_address else 'Contacto')
                     )
+                    # Only the external side's address ships — see the same
+                    # gate in send/tasks.py: a Confío counterparty is named by
+                    # its display name and phone, and volunteering its wallet
+                    # address would both mislabel it as external on the phone-
+                    # less business payloads and expose it to every employee.
+                    # Invitations are recipient_type='external' as well (see
+                    # invite_send_mutations), but their address is the escrow
+                    # app and the client hides the expiry warning + reclaim
+                    # button on anything flagged external. Never call one that.
+                    external_sender = (getattr(s, 'sender_type', '') or '') == 'external'
+                    external_recipient = (
+                        (getattr(s, 'recipient_type', '') or '') == 'external'
+                        and not getattr(s, 'is_invitation', False))
+                    external_addr_fields = {
+                        'is_external_address': external_sender or external_recipient,
+                        **({'sender_address': s.sender_address or ''}
+                           if external_sender else {}),
+                        **({'recipient_address': s.recipient_address or ''}
+                           if external_recipient else {}),
+                    }
                     # Recipient notification
                     if s.recipient_user_id:
                         notif_utils.create_notification(
@@ -1317,6 +1371,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                     'sender_phone': sender_phone_intl,
                                     'recipient_phone': recipient_phone_intl,
                                 }),
+                                **external_addr_fields,
                                 'memo': s.memo or '',
                                 'transaction_type': 'send',
                             },
@@ -1345,6 +1400,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                     'sender_phone': sender_phone_intl,
                                     'recipient_phone': recipient_phone_intl,
                                 }),
+                                **external_addr_fields,
                                 'memo': s.memo or '',
                                 'transaction_type': 'send',
                             },

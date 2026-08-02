@@ -1428,6 +1428,13 @@ class ClaimInviteForPhone(graphene.Mutation):
                                     'invitation_id': inv.invitation_id,
                                     'sender_name': sender_name,
                                     'sender_address': stx.sender_address if stx else '',
+                                    # The inviter is a Confío user, not a
+                                    # wallet stranger. Without this the client
+                                    # sees an address and no phone and falls
+                                    # back to labelling them "Billetera
+                                    # externa" whenever the detail refetch
+                                    # fails.
+                                    'is_external_address': False,
                                     'status': 'confirmed',
                                     'isInvitedFriend': True,
                                     'txid': txid,

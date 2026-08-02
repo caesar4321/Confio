@@ -50,6 +50,19 @@ def _notify_send_parties(s) -> None:
         or (s.recipient_address[:6] + '...' + s.recipient_address[-4:]
             if s.recipient_address else 'Contacto')
     )
+    # ONLY the external side's address travels. An external counterparty has
+    # no name and no phone, so the address is the only thing identifying it —
+    # but a Confío counterparty already has both, and shipping its address
+    # anyway would (a) trip the app's "an address and no phone" heuristic and
+    # relabel a real user as "Billetera externa" on business notifications,
+    # which carry no phones by design, and (b) hand every employee the
+    # personal wallet address that the phone rule below deliberately withholds.
+    # An invitation is recipient_type='external' too, but its address is the
+    # ESCROW app, not a counterparty — and the client suppresses the expiry
+    # warning and the reclaim button whenever is_external_address is set, so
+    # calling an invite external would cost the inviter their money back.
+    external_sender = (s.sender_type or '') == 'external'
+    external_recipient = (s.recipient_type or '') == 'external' and not s.is_invitation
     common = {
         'transaction_id': str(s.internal_id),
         'internal_id': str(s.internal_id),
@@ -58,6 +71,11 @@ def _notify_send_parties(s) -> None:
         'token_type': s.token_type,
         'sender_name': sender_name,
         'recipient_name': recipient_name,
+        # Stated, not inferred: the client should never have to guess which
+        # side is external from which fields happen to be populated.
+        'is_external_address': external_sender or external_recipient,
+        **({'sender_address': s.sender_address or ''} if external_sender else {}),
+        **({'recipient_address': s.recipient_address or ''} if external_recipient else {}),
         'memo': s.memo or '',
         'transaction_type': 'send',
     }

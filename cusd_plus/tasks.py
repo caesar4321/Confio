@@ -399,6 +399,32 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         return
 
     pps_wad = cp_vault.p_plus_wad()
+
+    def _mint_already_recorded(tx_hash: str, holder: str) -> bool:
+        """Does a durable conversion already own THIS mint?
+
+        Hash-scoped and holder-scoped on purpose. record_savings_mint also
+        falls back to "any in-flight to_savings saga for this address", which
+        is right for ITS job (don't double-write; the saga row survives either
+        way) and wrong for ours: CREATED lasts 24h and STUCK can sit
+        indefinitely, while this scan only rewinds 100 blocks, so an unrelated
+        saga would suppress a genuinely unowned mint long enough for the log to
+        age out — erasing the only record that money ever arrived.
+
+        The two failure modes are not symmetric. Guessing "not owned" costs a
+        duplicate feed row for a bridge mint whose hash the client has not yet
+        written. Guessing "owned" costs the history outright. Prefer the
+        duplicate."""
+        from conversion.models import Conversion
+        try:
+            return Conversion.objects.filter(
+                conversion_type='to_savings', to_transaction_hash=tx_hash,
+                user_bsc_address__iexact=holder, is_deleted=False,
+            ).exists()
+        except Exception:  # noqa: BLE001 — never drop a mint on a lookup error
+            logger.exception('mint ownership check failed for %s', tx_hash)
+            return False
+
     for log in logs:
         sender = ('0x' + log['topics'][1][-40:]).lower()
         if sender in registered:
@@ -406,6 +432,21 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         key = ('0x' + log['topics'][2][-40:]).lower()
         account_id = registered.get(key)
         if account_id is None:
+            continue
+        is_mint = sender == '0x' + '0' * 40
+        if is_mint and _mint_already_recorded(log['transactionHash'], key):
+            # A MINT, not a deposit. The topic filter wildcards the sender, so
+            # every savings mint (Transfer 0x0 -> holder) lands here and the
+            # zero address is never "registered" — opening a second, phantom
+            # external-deposit row beside the to_savings conversion that
+            # already records it.
+            #
+            # Only skip when that conversion actually EXISTS. record_savings_mint
+            # is best-effort and swallows its own write failures, and
+            # depositAndMint mints with no repo-side hook at all, so an
+            # unowned mint has no other app-visible record — dropping it here
+            # would erase the only history of that money. Keep the row for
+            # those; it just isn't an external wallet deposit (below).
             continue
         shares = int(log['data'], 16)
         amount_usd = (Decimal(shares) * Decimal(pps_wad) / Decimal(10 ** 36)).quantize(
@@ -419,12 +460,19 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         # Idempotency key carries the log identity so a rescan can't double it.
         from send.models import SendTransaction
         from users.models import Account
-        reference = f"scan_cusdp:{log['transactionHash']}:{int(log.get('logIndex', '0x0'), 16)}"
+        # idempotency_key is a varchar(64), and the whole key must FIT — the
+        # original 'scan_cusdp:' + full 66-char 0x-hash + ':' + index was 79,
+        # so every insert here raised DataError and no external cUSD+ arrival
+        # was ever recorded. Budget it explicitly: 3 ('cp:') + 48 hex + 1 +
+        # index digits = 57 even for an absurd 5-digit log index. 48 hex is
+        # 192 bits, still collision-impossible.
+        _log_index = int(log.get('logIndex', '0x0'), 16)
+        reference = f"cp:{log['transactionHash'][2:50]}:{_log_index}"
         account = Account.objects.filter(id=account_id).select_related(
             'user', 'business').first()
         if account is None:
             continue
-        _, created = SendTransaction.objects.get_or_create(
+        arrival_row, created = SendTransaction.objects.get_or_create(
             idempotency_key=reference,
             defaults={
                 'recipient_user': account.user,
@@ -437,9 +485,11 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
                 'recipient_address': key,
                 # No Confío row on the sending side: the money came from
                 # outside, so the sender is the raw address and nothing else.
+                # An unowned MINT is the exception — 0x000…000 is not a wallet
+                # anyone sent from, so store no address rather than a fake one.
                 'sender_type': 'external',
-                'sender_display_name': '',
-                'sender_address': sender,
+                'sender_display_name': 'Ahorro acreditado' if is_mint else '',
+                'sender_address': '' if is_mint else sender,
                 'amount': amount_usd,
                 'token_type': 'CUSD_PLUS',
                 'status': 'CONFIRMED',
@@ -470,7 +520,24 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
                         'network': 'BSC',
                         'amount': str(amount_usd),
                         'tx_hash': log['transactionHash'],
+                        # The sending wallet has no Confío identity: without
+                        # its address the detail screen has nothing to show
+                        # for the counterparty. A mint has no sending wallet
+                        # at all, so it is not an external deposit — name it
+                        # instead, or the detail screen falls back to calling
+                        # a credit to the user's own savings a wallet stranger.
+                        'is_external_address': not is_mint,
+                        **({'sender_name': 'Ahorro acreditado'} if is_mint
+                           else {'sender_address': sender}),
+                        'recipient_address': key,
+                        # Without these the row is unreachable: tapping a bare
+                        # SEND_RECEIVED navigates nowhere.
+                        'internal_id': str(arrival_row.internal_id),
+                        'transaction_id': str(arrival_row.internal_id),
                     },
+                    related_object_type='SendTransaction',
+                    related_object_id=str(arrival_row.internal_id),
+                    action_url=f'confio://transaction/{arrival_row.internal_id}',
                 )
         except Exception:  # noqa: BLE001 — comms failure must not lose the row
             logger.exception('cUSD+ receive notification failed for %s', reference)
@@ -714,6 +781,11 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                 'network': 'BSC',
                 'amount': str(amount_usd),
                 'tx_hash': tx_hash,
+                # Same reason as the cUSD+ scan above: an external depositor
+                # is identified by its address and nothing else.
+                'is_external_address': True,
+                'sender_address': from_addr or '',
+                'recipient_address': to_addr or '',
                 # No conversion for an ineligible holder: the notification
                 # opens the USDT receipt instead, so tapping it lands on the
                 # movement that actually exists.

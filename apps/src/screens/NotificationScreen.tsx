@@ -594,8 +594,19 @@ export const NotificationScreen = () => {
         const derivedToPhone = contactToByName?.normalizedPhones?.[0] || contactToByName?.phoneNumbers?.[0];
 
         // Normalize addresses
-        const toAddress = fullData.toAddress ?? fullData.recipient_address;
-        const fromAddress = fullData.fromAddress ?? fullData.sender_address;
+        // A delivered notification keeps whatever key its producer used at the
+        // time and a stored data blob is never rewritten, so read the address
+        // under every UNAMBIGUOUS spelling. The Algorand indexer's legacy
+        // `sender`/`receiver` are deliberately NOT among them: that producer
+        // emits the same keys for serverless INTERNAL transfers, and the old
+        // payloads have no flag to tell the two apart — reading them would
+        // put a real Confío user's wallet address on screen (and on every
+        // employee's business notification) for the sake of back-filling an
+        // address on deposits that predate the fix.
+        const toAddress = fullData.toAddress ?? fullData.recipient_address
+          ?? fullData.to_address;
+        const fromAddress = fullData.fromAddress ?? fullData.sender_address
+          ?? fullData.from_address ?? fullData.source_address;
 
         // Normalize currency for UI (cUSD)
         const currency = (fullData.currency ?? fullData.token_type ?? fullData.tokenType);
@@ -769,8 +780,19 @@ export const NotificationScreen = () => {
         // Direction
         const isSent = txnType === 'sent' || txnType === 'send';
         const isReceived = txnType === 'received';
-        const toAddress = fullData.toAddress ?? fullData.recipient_address;
-        const fromAddress = fullData.fromAddress ?? fullData.sender_address;
+        // A delivered notification keeps whatever key its producer used at the
+        // time and a stored data blob is never rewritten, so read the address
+        // under every UNAMBIGUOUS spelling. The Algorand indexer's legacy
+        // `sender`/`receiver` are deliberately NOT among them: that producer
+        // emits the same keys for serverless INTERNAL transfers, and the old
+        // payloads have no flag to tell the two apart — reading them would
+        // put a real Confío user's wallet address on screen (and on every
+        // employee's business notification) for the sake of back-filling an
+        // address on deposits that predate the fix.
+        const toAddress = fullData.toAddress ?? fullData.recipient_address
+          ?? fullData.to_address;
+        const fromAddress = fullData.fromAddress ?? fullData.sender_address
+          ?? fullData.from_address ?? fullData.source_address;
         // Names from message if available
         const msg = (notification.message || '').trim();
         let recipientNameFromMsg: string | undefined;
@@ -834,6 +856,11 @@ export const NotificationScreen = () => {
           sender_phone: normalizedFrom,
           ...(isSent ? { toPhone: normalizedTo } : {}),
           ...(isReceived ? { fromPhone: normalizedFrom } : {}),
+          // addresses — resolved above for the contact lookup, but the detail
+          // screen needs them too: for an external counterparty the address is
+          // the whole identity, and dropping it here left the line blank.
+          ...(toAddress ? { toAddress, recipient_address: toAddress } : {}),
+          ...(fromAddress ? { fromAddress, sender_address: fromAddress } : {}),
         };
         navigateToTransactionDetail({
           id,

@@ -50,6 +50,20 @@ import { phoneKeyToE164, parsePhoneKey } from '../utils/phoneKey';
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
 
+// FCM data payloads are all strings (notifications/fcm_service.py str()s every
+// value) and not every delivery path coerces them back, so a server-sent false
+// can arrive as the string "False" — which is truthy, i.e. the exact opposite
+// of what the server said. Parse these flags; never truthy-test them.
+const readStatedFlag = (value: any): boolean | undefined => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+  }
+  return undefined;
+};
+
 // Color palette from the original design
 // Helper function to format amount with proper decimals
 const formatAmount = (amount: string | number | undefined): string => {
@@ -960,6 +974,26 @@ export const TransactionDetailScreen = () => {
       type = 'conversion';
     }
 
+    // Counterparty addresses reach this screen under whichever key the
+    // producer used: notifications already delivered keep their original blob
+    // forever (the Algorand indexer wrote sender/receiver), and a deposit's
+    // address is the only identity an external wallet has — miss the key and
+    // the counterparty line renders empty.
+    //
+    // The Algorand indexer's legacy `sender`/`receiver` keys are deliberately
+    // NOT read here. That producer emits them for serverless INTERNAL
+    // transfers too, and payloads delivered before the fix carry no flag to
+    // tell those apart — so honouring them would display a real Confío user's
+    // wallet address, and on a business notification show it to every
+    // employee. Back-filling an address on old deposits is not worth that.
+    const senderAddressFromPayload = transactionData.sender_address
+      || transactionData.senderAddress
+      || (transactionData as any).from_address
+      || (transactionData as any).source_address;
+    const recipientAddressFromPayload = transactionData.recipient_address
+      || transactionData.recipientAddress
+      || (transactionData as any).to_address;
+
     // Normalize field names from notification data (snake_case to camelCase)
     normalizedTransactionData = {
       ...transactionData,
@@ -978,7 +1012,7 @@ export const TransactionDetailScreen = () => {
       internalId: transactionData.internal_id || transactionData.internalId,
       recipientName: transactionData.recipient_name || transactionData.recipientName,
       recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
-      recipientAddress: transactionData.recipient_address || transactionData.recipientAddress,
+      recipientAddress: recipientAddressFromPayload,
       is_external_address: transactionData.is_external_address,
       is_invited_friend: transactionData.is_invited_friend,
       isInvitedFriend: transactionData.is_invited_friend || transactionData.isInvitedFriend,
@@ -988,10 +1022,10 @@ export const TransactionDetailScreen = () => {
       invitationReverted: (transactionData as any).invitationReverted || (transactionData as any).invitation_reverted,
       invitationExpiresAt: (transactionData as any).invitationExpiresAt || (transactionData as any).invitation_expires_at,
       recipient_phone: transactionData.recipient_phone || transactionData.recipientPhone,
-      recipient_address: transactionData.recipient_address || transactionData.recipientAddress,
+      recipient_address: recipientAddressFromPayload,
       senderName: transactionData.sender_name || transactionData.senderName,
       senderPhone: transactionData.sender_phone || transactionData.senderPhone,
-      senderAddress: transactionData.sender_address || transactionData.senderAddress,
+      senderAddress: senderAddressFromPayload,
       transactionHash: transactionData.transaction_hash || transactionData.transactionHash,
       hash: transactionData.transaction_hash || transactionData.transactionHash || transactionData.hash || transactionData.txid,
       // Override 'to' and 'from' if they contain truncated addresses
@@ -1177,11 +1211,21 @@ export const TransactionDetailScreen = () => {
   );
 
   // Detect external wallet counterparties to label them as "Billetera externa"
+  // A stated flag beats the heuristic in BOTH directions. "An address and no
+  // phone" is only a guess, and it guesses wrong on business notifications,
+  // which carry no phones by design — so an explicit false has to be able to
+  // say "this is a real Confío counterparty" and stop the guess.
+  const statedExternal: boolean | undefined =
+    readStatedFlag(currentTx?.is_external_address) ?? readStatedFlag(currentTx?.isExternalDeposit);
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
-    currentTx?.is_external_address || currentTx?.isExternalDeposit || currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone)
+    statedExternal !== undefined
+      ? statedExternal
+      : (currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone))
   )) as boolean;
   const isExternalRecipient = ((currentTx?.type === 'send' || currentTx?.type === 'sent' || currentTx?.type === 'withdrawal') && (
-    currentTx?.is_external_address || currentTx?.destinationAddress || ((currentTx?.toAddress || currentTx?.recipient_address) && !recipientPhone)
+    statedExternal !== undefined
+      ? statedExternal
+      : (currentTx?.destinationAddress || ((currentTx?.toAddress || currentTx?.recipient_address) && !recipientPhone))
   )) as boolean;
 
   // The counterparty address of an inbound external transfer lands in a
@@ -1298,7 +1342,10 @@ export const TransactionDetailScreen = () => {
   }
 
   const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || currentTx?.isInvitation || currentTx?.is_invitation || false;
-  const isExternalAddress = currentTx?.is_external_address || false;
+  // Parsed, not truthy-tested: this gates the invite expiry warning and the
+  // reclaim button, so a stringified "False" reading as external would take
+  // away the inviter's way to get their money back.
+  const isExternalAddress = readStatedFlag(currentTx?.is_external_address) === true;
   const invitationClaimed = currentTx?.invitationClaimed || currentTx?.invitation_claimed || false;
   const invitationReverted = currentTx?.invitationReverted || currentTx?.invitation_reverted || Boolean(reclaimedInviteTxid);
   const invitationExpiresAt = currentTx?.invitationExpiresAt || currentTx?.invitation_expires_at;
@@ -1483,7 +1530,9 @@ export const TransactionDetailScreen = () => {
           return `Enviado a ${displayToName}`;
         } else if (tx.is_invited_friend && tx.recipient_phone) {
           return 'Enviado a amigo invitado';
-        } else if (tx.is_external_address || (tx.toAddress && !tx.recipient_phone) || (tx.recipient_address && !tx.recipient_phone)) {
+        } else if (readStatedFlag(tx.is_external_address) === true
+          || (readStatedFlag(tx.is_external_address) === undefined
+            && ((tx.toAddress && !tx.recipient_phone) || (tx.recipient_address && !tx.recipient_phone)))) {
           return 'Enviado a billetera externa';
         }
         return 'Enviado';
@@ -1799,21 +1848,57 @@ export const TransactionDetailScreen = () => {
                     <Icon name="arrow-down-circle" size={24} color={colors.primary} />
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>Depósito desde wallet externa</Text>
+                    {/* Not every "deposit" is external: a serverless internal
+                        transfer (emergency exit, P2P USDC withdrawal) is
+                        recorded by the same indexer branch. Say who actually
+                        sent it rather than asserting a wallet stranger. */}
+                    <Text style={styles.participantName}>
+                      {(() => {
+                        // A name is only a name. "Desconocido", a placeholder,
+                        // or an address that leaked into the name field all
+                        // read worse as "Depósito de 0x1234…" than as the
+                        // honest external label.
+                        const name = (displayFromName || '').trim();
+                        const nameIsUsable = !!name
+                          && name !== 'Desconocido'
+                          && name !== 'Usuario'
+                          && !name.startsWith('0x')
+                          && !name.startsWith('Externo (');
+                        return isExternalSender || !nameIsUsable
+                          ? 'Depósito desde wallet externa'
+                          : `Depósito de ${name}`;
+                      })()}
+                    </Text>
                     <View style={styles.addressContainer}>
-                      <Text style={styles.addressText}>{currentTx.sourceAddress || currentTx.fromAddress}</Text>
-                      <TouchableOpacity
-                        onPress={() => handleCopy(currentTx.sourceAddress || currentTx.fromAddress, 'from')}
-                        style={styles.copyButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Copiar dirección de origen"
-                      >
-                        {copied === 'from' ? (
-                          <Icon name="check" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
-                        )}
-                      </TouchableOpacity>
+                      {(() => {
+                        /* Truncated like every other counterparty line: a full
+                           42-char BSC address does not fit beside the copy
+                           button. The copy still yields the whole address. */
+                        const addressVal = currentTx.sourceAddress || currentTx.fromAddress;
+                        const line = getPreferredSecondaryLine({
+                          address: addressVal,
+                          isExternal: isExternalSender,
+                        });
+                        return (
+                          <>
+                            <Text style={styles.addressText}>{line}</Text>
+                            {!!line && !!addressVal && (
+                              <TouchableOpacity
+                                onPress={() => handleCopy(addressVal, 'from')}
+                                style={styles.copyButton}
+                                accessibilityRole="button"
+                                accessibilityLabel="Copiar dirección de origen"
+                              >
+                                {copied === 'from' ? (
+                                  <Icon name="check" size={16} color={colors.accent} />
+                                ) : (
+                                  <Icon name="copy" size={16} color={colors.accent} />
+                                )}
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        );
+                      })()}
                     </View>
                   </View>
                 </View>
@@ -1827,19 +1912,32 @@ export const TransactionDetailScreen = () => {
                   <View style={styles.participantDetails}>
                     <Text style={styles.participantName}>Retiro hacia wallet externa</Text>
                     <View style={styles.addressContainer}>
-                      <Text style={styles.addressText}>{currentTx.destinationAddress || currentTx.toAddress}</Text>
-                      <TouchableOpacity
-                        onPress={() => handleCopy(currentTx.destinationAddress || currentTx.toAddress, 'to')}
-                        style={styles.copyButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Copiar dirección de destino"
-                      >
-                        {copied === 'to' ? (
-                          <Icon name="check" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
-                        )}
-                      </TouchableOpacity>
+                      {(() => {
+                        const addressVal = currentTx.destinationAddress || currentTx.toAddress;
+                        const line = getPreferredSecondaryLine({
+                          address: addressVal,
+                          isExternal: true,
+                        });
+                        return (
+                          <>
+                            <Text style={styles.addressText}>{line}</Text>
+                            {!!line && !!addressVal && (
+                              <TouchableOpacity
+                                onPress={() => handleCopy(addressVal, 'to')}
+                                style={styles.copyButton}
+                                accessibilityRole="button"
+                                accessibilityLabel="Copiar dirección de destino"
+                              >
+                                {copied === 'to' ? (
+                                  <Icon name="check" size={16} color={colors.accent} />
+                                ) : (
+                                  <Icon name="copy" size={16} color={colors.accent} />
+                                )}
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        );
+                      })()}
                     </View>
                   </View>
                 </View>
@@ -1917,32 +2015,43 @@ export const TransactionDetailScreen = () => {
                       <StatusTierBadge tier={resolvedSenderStatusTier} variant="compact" style={{ marginTop: 4, alignSelf: 'flex-start' }} />
                     )}
                     <View style={styles.addressContainer}>
-                      <Text style={styles.addressText}>
-                        {/* is_external_address only ever arrives on push payloads; a
-                            deposit opened from the list or refetched from the server
-                            has to be recognised by the same heuristic that named it
-                            "Billetera externa", or the address line renders empty. */}
-                        {getPreferredSecondaryLine({
+                      {/* is_external_address only ever arrives on push payloads; a
+                          deposit opened from the list or refetched from the server
+                          has to be recognised by the same heuristic that named it
+                          "Billetera externa", or the address line renders empty.
+                          A business notification carries neither phone nor internal
+                          address by design, so the line can legitimately be empty —
+                          in that case the copy button must go too, rather than sit
+                          there copying `undefined`. */}
+                      {(() => {
+                        const line = getPreferredSecondaryLine({
                           phone: senderPhone,
                           address: senderExternalAddress,
                           isExternal: isExternalSender,
-                        })}
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() => handleCopy(
-                          senderPhone ? formatPhoneNumber(senderPhone) : senderExternalAddress,
-                          'from'
-                        )}
-                        style={styles.copyButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Copiar datos del remitente"
-                      >
-                        {copied === 'from' ? (
-                          <Icon name="check" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
-                        )}
-                      </TouchableOpacity>
+                        });
+                        const copyValue = senderPhone
+                          ? formatPhoneNumber(senderPhone)
+                          : senderExternalAddress;
+                        return (
+                          <>
+                            <Text style={styles.addressText}>{line}</Text>
+                            {!!line && !!copyValue && (
+                              <TouchableOpacity
+                                onPress={() => handleCopy(copyValue, 'from')}
+                                style={styles.copyButton}
+                                accessibilityRole="button"
+                                accessibilityLabel="Copiar datos del remitente"
+                              >
+                                {copied === 'from' ? (
+                                  <Icon name="check" size={16} color={colors.accent} />
+                                ) : (
+                                  <Icon name="copy" size={16} color={colors.accent} />
+                                )}
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        );
+                      })()}
                     </View>
                   </View>
                 </View>
@@ -1952,7 +2061,7 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>
-                      {currentTx.avatar || (currentTx.is_external_address ? '0' : 'U')}
+                      {currentTx.avatar || (isExternalRecipient ? '0' : 'U')}
                     </Text>
                   </View>
                   <View style={styles.participantDetails}>
@@ -1963,7 +2072,9 @@ export const TransactionDetailScreen = () => {
                           if (currentTx.is_invited_friend && currentTx.recipient_phone) {
                             return `Invitación enviada${currentTx.recipient_display_name ? ` a ${currentTx.recipient_display_name}` : ''}`;
                           }
-                          if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
+                          if (isExternalRecipient
+                            || (statedExternal === undefined
+                              && currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
                             return 'Billetera externa';
                           }
                           const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
@@ -1996,35 +2107,42 @@ export const TransactionDetailScreen = () => {
                       <StatusTierBadge tier={resolvedRecipientStatusTier} variant="compact" style={{ marginTop: 4, alignSelf: 'flex-start' }} />
                     )}
                     <View style={styles.addressContainer}>
-                      <Text style={styles.addressText}>
-                        {(() => {
-                          const phoneVal = resolvedRecipientPhone || currentTx.recipient_phone || derivedRecipientPhoneFromName;
-                          const forcePhone = !!phoneVal || !!preferredTo.fromContacts;
-                          const isExternalHeuristic = !!(currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone));
-                          return getPreferredSecondaryLine({
-                            phone: phoneVal,
-                            address: currentTx.toAddress || currentTx.recipient_address,
-                            isExternal: forcePhone ? false : isExternalHeuristic,
-                          });
-                        })()}
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() => handleCopy(
-                          recipientPhone || currentTx.recipient_phone
-                            ? formatPhoneNumber(recipientPhone || currentTx.recipient_phone)
-                            : (currentTx.toAddress || currentTx.recipient_address || ''),
-                          'to'
-                        )}
-                        style={styles.copyButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Copiar datos del destinatario"
-                      >
-                        {copied === 'to' ? (
-                          <Icon name="check" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
-                        )}
-                      </TouchableOpacity>
+                      {(() => {
+                        const phoneVal = resolvedRecipientPhone || currentTx.recipient_phone || derivedRecipientPhoneFromName;
+                        const forcePhone = !!phoneVal || !!preferredTo.fromContacts;
+                        const addressVal = currentTx.toAddress || currentTx.recipient_address;
+                        // Stated flag first, heuristic only when nothing was stated.
+                        const isExternalHeuristic = statedExternal !== undefined
+                          ? statedExternal
+                          : !!(addressVal && !currentTx.recipient_phone);
+                        const line = getPreferredSecondaryLine({
+                          phone: phoneVal,
+                          address: addressVal,
+                          isExternal: forcePhone ? false : isExternalHeuristic,
+                        });
+                        const copyValue = recipientPhone || currentTx.recipient_phone
+                          ? formatPhoneNumber(recipientPhone || currentTx.recipient_phone)
+                          : (addressVal || '');
+                        return (
+                          <>
+                            <Text style={styles.addressText}>{line}</Text>
+                            {!!line && !!copyValue && (
+                              <TouchableOpacity
+                                onPress={() => handleCopy(copyValue, 'to')}
+                                style={styles.copyButton}
+                                accessibilityRole="button"
+                                accessibilityLabel="Copiar datos del destinatario"
+                              >
+                                {copied === 'to' ? (
+                                  <Icon name="check" size={16} color={colors.accent} />
+                                ) : (
+                                  <Icon name="copy" size={16} color={colors.accent} />
+                                )}
+                              </TouchableOpacity>
+                            )}
+                          </>
+                        );
+                      })()}
                     </View>
                   </View>
                 </View>
