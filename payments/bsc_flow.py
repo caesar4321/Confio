@@ -36,11 +36,24 @@ and drops the vault balance, so a real payment landed as an invisible
 position its owner could not operate. Product decision 2026-08-02: an
 ineligible merchant should not receive or handle cUSD+ at all.
 
-The pay contract moves ONE token and has no redeem path, so this is enforced
-by refusing the cUSD+ rail rather than converting. A payer funded only from
-savings gets `merchant_requires_usdt`; carrying them requires a redeem leg in
-the batch (the presale flow's shape) and an auth signed over USDT, which is
-the follow-up, not a bolt-on.
+The MERCHANT's geo decides the destination token; the payer is always
+carried there, never refused. The pay contract moves ONE token and has no
+redeem path, so when the merchant cannot hold cUSD+ and the payer is funded
+from savings, the batch grows a leading conversion:
+
+    [ vault.redeemToUsdt(shares, minOut, PAYER),
+      USDT.approve(payContract, gross),
+      payContract.pay(invoiceId, USDT, gross, merchant) ]
+
+Ondo refuses redemptions under $1, so the conversion takes at least that
+floor and leaves the change with the payer as USDT — a 50-cent invoice must
+not dead-end on a dollar minimum. The redeem credits the PAYER and the
+validator pins that: crediting anyone else would be an exfiltration
+primitive dressed as a payment.
+
+The mirror case needs no work: an ineligible PAYER already pays in USDT, and
+an eligible merchant's USDT auto-mints to cUSD+ through the existing savings
+resume.
 """
 import json
 import logging
@@ -55,6 +68,14 @@ logger = logging.getLogger(__name__)
 WAD = 10 ** 18
 FEE_BPS = 90
 BPS = 10_000
+
+# Ondo's Instant Manager refuses redemptions under $1, so a conversion for an
+# ineligible merchant converts at least this much and leaves the change with
+# the payer as USDT.
+ONDO_MIN_REDEEM_WEI = 10 ** 18
+# The predicted redeem output is a prediction: pPlus only rises, but the chain
+# floors twice, so minOut sits just under it. Mirrors send/bsc_flow.
+REDEEM_SLIPPAGE_BPS = 50
 
 
 def _uint_word(v: int) -> str:
@@ -182,7 +203,9 @@ def _notify_merchant_needs_app(invoice, payer_user) -> None:
 
 def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
     from cusd_plus import vault as cp_vault
-    from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PAY, USDT_BSC
+    from cusd_plus.sponsor_7702 import (SEL_APPROVE, SEL_PAY,
+                                        SEL_REDEEM_TO_USDT, USDT_BSC)
+    redeem_leg = None
     from users.models import Account
     from .models import PaymentTransaction
 
@@ -295,16 +318,40 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
             token_type = 'CUSD_PLUS'
             token = vault_addr
             gross_units = (gross_wei * WAD) // pps_wad  # shares at the live price
-        elif not merchant_eligible and usdt_raw < gross_wei and shares_value_wei >= gross_wei:
-            # The payer could cover this from savings, but only in the token
-            # this merchant cannot hold. Redeeming for them needs a redeem leg
-            # in the batch (the presale flow's shape) plus an auth signed over
-            # USDT — deliberately not bolted on here. Refuse with a reason the
-            # client can act on rather than settling shares on them.
-            logger.info('[PAY][BSC] invoice %s: merchant %s is Ondo-ineligible and the '
-                        'payer holds only cUSD+ — refusing rather than settling shares',
-                        invoice.internal_id, merchant_addr[:12])
-            return {'success': False, 'error': 'merchant_requires_usdt'}
+        elif not merchant_eligible and usdt_raw < gross_wei and shares_value_wei > 0:
+            # The merchant cannot hold cUSD+, so the payer converts on the way
+            # through: redeem to their OWN address, then pay in USDT. Same
+            # shape as the presale buy's funding leg, and it means an
+            # ineligible merchant never costs the payer a refusal.
+            #
+            # Ondo rejects redemptions under $1, so convert at least that
+            # floor even when the invoice is smaller and leave the change as
+            # the payer's USDT — refusing a 50-cent payment because the floor
+            # is a dollar would be the same dead end in a different place.
+            shortfall = gross_wei - usdt_raw
+            target_out = max(shortfall, ONDO_MIN_REDEEM_WEI)
+            oracle_p_wad = cp_vault.last_oracle_price_wad()
+            shares_needed = -(-(target_out * WAD) // pps_wad)  # ceil
+            if shares_needed > shares_raw:
+                shares_needed = shares_raw
+            predicted = cp_vault.redeem_usdt_out(shares_needed, pps_wad, oracle_p_wad)
+            if predicted < shortfall or predicted < ONDO_MIN_REDEEM_WEI:
+                # Not enough savings to clear the invoice or the Ondo floor.
+                # Ordinary insufficient funds, not a policy refusal.
+                return {'success': False, 'error': 'insufficient_balance'}
+            kind = 'pay_usdt'
+            token_type = 'USDT'
+            token = USDT_BSC
+            gross_units = gross_wei
+            redeem_leg = {
+                'to': vault_addr, 'value': '0',
+                'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares_needed)
+                        + _uint_word(predicted * (10_000 - REDEEM_SLIPPAGE_BPS) // 10_000)
+                        + _addr_word(payer_addr),
+            }
+            logger.info('[PAY][BSC] invoice %s: merchant is Ondo-ineligible — redeeming '
+                        '%s shares to USDT for the payer before paying',
+                        invoice.internal_id, shares_needed)
         elif usdt_raw >= gross_wei:
             kind = 'pay_usdt'
             token_type = 'USDT'
@@ -333,7 +380,7 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         ['bytes32', 'address', 'uint256', 'address', 'uint256', 'bytes'],
         [bytes.fromhex(invoice_id32[2:]), to_checksum_address(token), int(gross_units),
          to_checksum_address(merchant_addr), pay_deadline, bytes.fromhex(auth_sig[2:])])
-    calls = [
+    calls = ([redeem_leg] if redeem_leg else []) + [
         {'to': token, 'value': '0',
          'data': '0x' + SEL_APPROVE + _addr_word(pay_contract) + _uint_word(gross_units)},
         {'to': pay_contract, 'value': '0',
@@ -408,11 +455,19 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
     [approve(payContract, gross),
      payContract.pay(invoiceId, token, gross, merchant, deadline, authSig)].
 
+    A third, LEADING call is allowed when the merchant cannot hold cUSD+ and
+    the payer converted savings first:
+    [vault.redeemToUsdt(shares, minOut, payer), approve(...), pay(...)].
+
     Every field is pinned to the stored row, the approval matches the pay()
     amount, the deadline hasn't lapsed, and the embedded server authorization
     recovers to the expected paymentSigner — the contract re-enforces all of
     it on-chain, but a bad batch never reaches the sponsor."""
-    from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PAY, USDT_BSC
+    payer_addr = (getattr(payment_tx, 'payer_address', '') or '').lower()
+    if not payer_addr:
+        raise PolicyError('payer_address_missing')
+    from cusd_plus.sponsor_7702 import (PolicyError, SEL_APPROVE, SEL_PAY,
+                                        SEL_REDEEM_TO_USDT, USDT_BSC)
 
     vault = _vault_address()
     pay_contract = _pay_contract()
@@ -423,7 +478,7 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
         'pay_usdt': USDT_BSC,
         'pay_confio': _confio_token_address(),
     }.get((payment_tx.blockchain_data or {}).get('kind'))
-    if len(calls) != 2:
+    if len(calls) not in (2, 3):
         raise PolicyError('bad_batch_size')
     for call in calls:
         if int(call.get('value') or 0) != 0:
@@ -431,7 +486,22 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
         if not (call.get('data') or '').lower().startswith('0x'):
             raise PolicyError('bad_calldata')
 
-    approve, pay = calls
+    # Three calls means the payer converted savings on the way through,
+    # because this merchant cannot hold cUSD+. Validate that leg as strictly
+    # as the rest: it must be redeemToUsdt on OUR vault, paying the PAYER —
+    # a redeem crediting anyone else would be an exfiltration primitive
+    # dressed as a payment.
+    if len(calls) == 3:
+        redeem, approve, pay = calls
+        if (redeem.get('to') or '').lower() != _vault_address():
+            raise PolicyError('destination_not_allowed')
+        r_data = (redeem.get('data') or '').lower()
+        if len(r_data) != 2 + 8 + 192 or r_data[2:10] != SEL_REDEEM_TO_USDT:
+            raise PolicyError('bad_calldata')
+        if r_data[138:202] != _addr_word(payer_addr):
+            raise PolicyError('redeem_recipient_not_allowed')
+    else:
+        approve, pay = calls
     token = (approve.get('to') or '').lower()
     if not expected_token or token != expected_token:
         raise PolicyError('destination_not_allowed')
