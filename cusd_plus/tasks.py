@@ -12,6 +12,8 @@ fake a STUCK state while the money already landed. It remains available
 as a support diagnostic for genuinely stuck rows only.
 """
 import logging
+
+from django.db import models
 import threading
 from datetime import timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -651,6 +653,19 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
     except Exception:  # noqa: BLE001 — a scanner must not die on a lookup
         logger.exception('presale ownership check failed for %s', tx_hash)
     try:
+        # A payment's own conversion leg pays the PAYER, and its unified row
+        # names the MERCHANT as recipient — so nothing matched and the payer's
+        # redeem was booked as an inbound deposit. Match either side of the
+        # payment.
+        from payments.models import PaymentTransaction
+        if PaymentTransaction.objects.filter(
+                transaction_hash__iexact=tx_hash).filter(
+                models.Q(payer_address__iexact=r) | models.Q(merchant_address__iexact=r)
+        ).exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('payment ownership check failed for %s', tx_hash)
+    try:
         from payroll.models import PayrollItem
         # recipient_address is the snapshot taken at broadcast. Resolving
         # through recipient_account.bsc_address would read the account's
@@ -1235,8 +1250,8 @@ def check_sponsored_batch_receipt(self, batch_id: int):
 
 
 # Kinds that own a SEPARATE domain confirm task keyed (source_id, batch_id).
-# Everything else (subscribe/redeem/payroll_fund/invite_*) settles via the
-# batch-level receipt task alone, so promoting the batch is enough.
+# Everything else (subscribe/redeem/payroll_fund) settles via the batch-level
+# receipt task alone, so promoting the batch is enough.
 _DOMAIN_CONFIRM_TASKS = {
     'send_cusd_plus': 'send.confirm_bsc_send',
     'send_redeem': 'send.confirm_bsc_send',
@@ -1247,6 +1262,7 @@ _DOMAIN_CONFIRM_TASKS = {
     'pay_confio': 'payments.confirm_bsc_payment',
     'payroll_payout': 'payroll.confirm_bsc_payroll_payout',
     'presale_buy': 'presale.confirm_bsc_purchase',
+    'invite_create': 'send.confirm_bsc_invite_create',
     'invite_reclaim': 'send.confirm_bsc_invite_reclaim',
 }
 
