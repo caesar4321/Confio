@@ -319,19 +319,25 @@ def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None
 
 
 def _locate_referral_for_user(user):
+    """The referral whose reward THIS user's activity can trigger.
+
+    Only their own referral-as-referee counts. The reward is bought by the
+    invited friend's deposit, so the qualifying event has to be theirs.
+
+    There used to be a fallback here: if the user wasn't anyone's referee, it
+    took the newest referral where they were the REFERRER and treated their
+    activity as the trigger. That paid both sides off the inviter's own money —
+    invite a fresh account, deposit and convert US$19 yourself, and both legs
+    became eligible while the invited friend did nothing at all. An inviter can
+    still earn, but only when their friend actually qualifies, which is the
+    path that fires with actor_role='referrer' from the referee's own event.
+    """
     referral = UserReferral.objects.filter(
         referred_user=user,
         deleted_at__isnull=True,
     ).order_by('-created_at').first()
     if referral:
         return referral, 'referee'
-
-    referral = UserReferral.objects.filter(
-        referrer_user=user,
-        deleted_at__isnull=True,
-    ).order_by('-created_at').first()
-    if referral:
-        return referral, 'referrer'
 
     return None, None
 

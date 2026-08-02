@@ -563,6 +563,21 @@ class UserRewardAdmin(admin.ModelAdmin):
     mark_as_earned.short_description = "Mark selected as earned"
     
     def mark_as_claimed(self, request, queryset):
+        # Same gate as the GraphQL path: the achievement scheme is retired, and
+        # claim_reward() credits ConfioRewardBalance, which the CONFIO breakdown
+        # reports as an earned bonus. Closing the API door and leaving this one
+        # open would let staff mint obligations from a dead scheme — 9.6K rows
+        # are still sitting in 'earned'.
+        from django.conf import settings
+        from django.contrib import messages
+        if not getattr(settings, 'ACHIEVEMENT_CLAIMS_ENABLED', False):
+            self.message_user(
+                request,
+                "Los logros están descontinuados: no otorgan $CONFIO. "
+                "(ACHIEVEMENT_CLAIMS_ENABLED=False)",
+                level=messages.ERROR,
+            )
+            return
         count = 0
         for achievement in queryset.filter(status='earned'):
             if achievement.claim_reward():

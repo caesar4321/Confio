@@ -936,8 +936,13 @@ class ConfioRewardBalance(SoftDeleteModel):
     
     @property
     def available_balance(self):
-        """Get current available balance"""
-        return self.total_unlocked - self.total_spent
+        """Get current available balance.
+
+        total_unlocked is a RUNNING balance: a spend decrements it and also
+        increments total_spent, which is a lifetime counter. Subtracting one
+        from the other charged every spend twice.
+        """
+        return self.total_unlocked
 
 
 class ConfioRewardTransaction(SoftDeleteModel):

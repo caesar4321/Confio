@@ -5093,7 +5093,21 @@ class CreateInfluencerReferral(graphene.Mutation):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return CreateInfluencerReferral(success=False, error="Authentication required")
-		
+
+		# The influencer scheme is retired along with achievements: the live one
+		# is invite + a first deposit over the threshold. Left open, this
+		# mutation took ANY username, wrote a UserReferral into the live ledger
+		# with referee_confio_awarded=100, and created an 'earned' achievement
+		# row. Two consequences, both bad: the user is left holding a referral
+		# that already looks paid, which blocks them from naming a real friend
+		# as referrer, and the claim path can read that stale 100 as proof a
+		# later, genuine reward was already settled.
+		if not getattr(settings, 'INFLUENCER_REFERRALS_ENABLED', False):
+			return CreateInfluencerReferral(
+				success=False,
+				error="El programa de influencers está descontinuado. Ahora ganas invitando amigos.",
+			)
+
 		try:
 			# Clean the referrer identifier (remove @ if present for TikTok usernames)
 			clean_username = referrer_identifier.lstrip('@').strip()
