@@ -536,21 +536,28 @@ export const HomeScreen = () => {
   // What the user OWNS: available + presale + earned bonuses. Bonuses still
   // waiting on a deposit are excluded — the home number is my money, and this
   // row used to count CONFIO that had not been earned yet, which also inflated
-  // the portfolio headline below. Falls back to the myBalances pair when the
-  // breakdown query didn't answer (older server, offline).
-  const confioTotal = React.useMemo(() => {
+  // the portfolio headline below.
+  //
+  // NULL when the breakdown hasn't answered, and there is deliberately NO
+  // fallback to confioLive + confioLocked: myBalances.confioLocked still
+  // includes the unearned pending rewards on purpose (older builds depend on
+  // it), so falling back would silently put ~101K CONFIO of money nobody
+  // earned back into this row and into the portfolio headline. An unknown
+  // balance renders as "—"; a wrong one gets spent against. Apollo's cache
+  // keeps the last good read, so this only shows before the first success.
+  const confioTotal = React.useMemo<number | null>(() => {
     const b = confioBreakdownData?.myConfioBreakdown;
-    if (b) {
-      const num = (v: string | null | undefined) => {
-        const parsed = parseFloat(v ?? '0');
-        return isFinite(parsed) ? parsed : 0;
-      };
-      return num(b.available) + num(b.presaleLocked) + num(b.earnedBonuses);
-    }
-    return confioLive + confioLocked;
-  }, [confioBreakdownData, confioLive, confioLocked]);
+    if (!b) return null;
+    const num = (v: string | null | undefined) => {
+      const parsed = parseFloat(v ?? '0');
+      return isFinite(parsed) ? parsed : 0;
+    };
+    return num(b.available) + num(b.presaleLocked) + num(b.earnedBonuses);
+  }, [confioBreakdownData]);
 
-  const confioUsdValue = React.useMemo(() => confioTotal * confioPriceUsd, [confioTotal, confioPriceUsd]);
+  // Unknown contributes nothing to the portfolio total. Understating is the
+  // safe direction: it can't make someone think they have money they don't.
+  const confioUsdValue = React.useMemo(() => (confioTotal ?? 0) * confioPriceUsd, [confioTotal, confioPriceUsd]);
 
 
 
@@ -1258,7 +1265,9 @@ export const HomeScreen = () => {
       accountType: 'confio',
       accountName: 'Confío',
       accountSymbol: '$CONFIO',
-      accountBalance: confioTotal.toFixed(2),
+      // Route param is only a first-paint hint; the detail screen reads the
+      // breakdown itself. Empty when unknown rather than a guessed number.
+      accountBalance: confioTotal !== null ? confioTotal.toFixed(2) : '',
       // Fix: Use local state algorandAddress if available, fall back to context
       accountAddress: algorandAddress || activeAccount?.algorandAddress || ''
     });
@@ -1776,10 +1785,14 @@ export const HomeScreen = () => {
                   </View>
                   <View style={styles.walletBalanceContainer}>
                     <Text style={styles.walletBalanceText}>
-                      {/* Hide balance for employees without viewBalance permission */}
+                      {/* Hide balance for employees without viewBalance permission.
+                          "—" when the breakdown hasn't answered: unknown, not zero,
+                          and never the pending-inclusive legacy number. */}
                       {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
                         ? '••••'
-                        : showBalance ? formatFixedFloor(confioTotal, 2) : '••••'}
+                        : !showBalance ? '••••'
+                        : confioTotal === null ? '—'
+                        : formatFixedFloor(confioTotal, 2)}
                     </Text>
                     <Icon name="chevron-right" size={20} color={colors.text.light} />
                   </View>

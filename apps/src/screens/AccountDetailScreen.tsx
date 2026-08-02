@@ -369,12 +369,17 @@ export const AccountDetailScreen = () => {
   }, [confioBreakdownData]);
   // pendingBonuses is deliberately absent: CONFIO the user has not earned yet
   // is not balance, and folding it in here would overstate what they own.
-  const confioOwnedTotal = React.useMemo(
+  //
+  // NULL when the breakdown hasn't answered. No fallback to confioLive +
+  // confioLocked: confioLocked still carries the unearned pending rewards for
+  // older builds, so falling back would show money nobody earned. Unknown
+  // renders as "—".
+  const confioOwnedTotal = React.useMemo<number | null>(
     () =>
       confioBreakdown
         ? confioBreakdown.available + confioBreakdown.presaleLocked + confioBreakdown.earnedBonuses
-        : confioLive + confioLocked,
-    [confioBreakdown, confioLive, confioLocked],
+        : null,
+    [confioBreakdown],
   );
 
   const currentBalance = React.useMemo(() => {
@@ -387,9 +392,8 @@ export const AccountDetailScreen = () => {
       if (!isFinite(v)) return route.params.accountBalance;
       return v.toFixed(2);
     }
-    const v = confioOwnedTotal;
-    if (!isFinite(v)) return route.params.accountBalance;
-    return v.toFixed(2);
+    if (confioOwnedTotal === null || !isFinite(confioOwnedTotal)) return '';
+    return confioOwnedTotal.toFixed(2);
   }, [isCusd, cusdLive, confioOwnedTotal, route.params.accountBalance,
       isSavingsAccount, savingsAccountTotal]);
 
@@ -1996,9 +2000,13 @@ export const AccountDetailScreen = () => {
           <Text style={styles.balanceText}>
             {!canViewBalance
               ? account.balanceHidden
-              : (showBalance
-                ? `$${formatBalanceDisplay(account.balance)}`
-                : account.balanceHidden)}
+              : !showBalance
+                ? account.balanceHidden
+                // Empty balance = the CONFIO breakdown hasn't answered yet.
+                // Unknown reads as "—", never as a stale or inflated number.
+                : account.balance === ''
+                  ? '—'
+                  : `$${formatBalanceDisplay(account.balance)}`}
           </Text>
           {canViewBalance && (
             <TouchableOpacity onPress={toggleBalanceVisibility} accessibilityRole="button" accessibilityLabel={showBalance ? 'Ocultar saldo' : 'Mostrar saldo'}>
@@ -2054,60 +2062,38 @@ export const AccountDetailScreen = () => {
             into transferable tokens; before the launch nothing they do moves
             $CONFIO, so each line names WHEN it opens and who opens it.
             Preventa and Bonos appear only when they hold some — an empty row
-            reads as a promise. Falls back to the old pair when the breakdown
-            query didn't answer. */}
-        {route.params.accountType === 'confio' && canViewBalance && showBalance && (parseFloat(account.balance) > 0 || confioLocked > 0) && (
+            reads as a promise. Rendered ONLY from the breakdown: the old
+            myBalances pair still carries unearned pending rewards, so there is
+            no fallback to it here — no breakdown, no split. */}
+        {route.params.accountType === 'confio' && canViewBalance && showBalance && confioOwnedTotal !== null && confioOwnedTotal > 0 && (
           <View style={styles.lockedStatusContainer}>
-            {confioBreakdown ? (
-              <>
-                <View style={styles.lockedStatusRow}>
-                  <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
-                  <Text style={styles.lockedStatusText}>
-                    Disponible: {formatBalanceDisplay(confioBreakdown.available)} $CONFIO
-                  </Text>
-                </View>
-                {confioBreakdown.presaleLocked > 0 && (
-                  <View style={styles.lockedStatusRow}>
-                    <Icon name="lock" size={14} color="#fbbf24" />
-                    <Text style={styles.lockedStatusText}>
-                      Preventa: {formatBalanceDisplay(confioBreakdown.presaleLocked)} $CONFIO
-                    </Text>
-                  </View>
-                )}
-                {confioBreakdown.earnedBonuses > 0 && (
-                  <View style={styles.lockedStatusRow}>
-                    <Icon name="lock" size={14} color="#fbbf24" />
-                    <Text style={styles.lockedStatusText}>
-                      Bonos ganados: {formatBalanceDisplay(confioBreakdown.earnedBonuses)} $CONFIO
-                    </Text>
-                  </View>
-                )}
-                {(confioBreakdown.presaleLocked > 0 || confioBreakdown.earnedBonuses > 0) && (
-                  <Text style={styles.lockedStatusDescription}>
-                    Tu preventa y tus bonos ya son tuyos. Podrás moverlos cuando
-                    $CONFIO se lance al mercado.
-                  </Text>
-                )}
-              </>
-            ) : (
-              <>
-                <View style={styles.lockedStatusRow}>
-                  <Icon name="lock" size={14} color="#fbbf24" />
-                  <Text style={styles.lockedStatusText}>
-                    Guardado: {formatBalanceDisplay(confioLocked)} $CONFIO
-                  </Text>
-                </View>
-                <View style={styles.lockedStatusRow}>
-                  <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
-                  <Text style={styles.lockedStatusText}>
-                    Disponible: {formatBalanceDisplay(confioLive)} $CONFIO
-                  </Text>
-                </View>
-                <Text style={styles.lockedStatusDescription}>
-                  Lo guardado ya es tuyo. Podrás moverlo cuando $CONFIO se lance
-                  al mercado.
+            <View style={styles.lockedStatusRow}>
+              <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
+              <Text style={styles.lockedStatusText}>
+                Disponible: {formatBalanceDisplay(confioBreakdown!.available)} $CONFIO
+              </Text>
+            </View>
+            {confioBreakdown!.presaleLocked > 0 && (
+              <View style={styles.lockedStatusRow}>
+                <Icon name="lock" size={14} color="#fbbf24" />
+                <Text style={styles.lockedStatusText}>
+                  Preventa: {formatBalanceDisplay(confioBreakdown!.presaleLocked)} $CONFIO
                 </Text>
-              </>
+              </View>
+            )}
+            {confioBreakdown!.earnedBonuses > 0 && (
+              <View style={styles.lockedStatusRow}>
+                <Icon name="lock" size={14} color="#fbbf24" />
+                <Text style={styles.lockedStatusText}>
+                  Bonos ganados: {formatBalanceDisplay(confioBreakdown!.earnedBonuses)} $CONFIO
+                </Text>
+              </View>
+            )}
+            {(confioBreakdown!.presaleLocked > 0 || confioBreakdown!.earnedBonuses > 0) && (
+              <Text style={styles.lockedStatusDescription}>
+                Tu preventa y tus bonos ya son tuyos. Podrás moverlos cuando
+                $CONFIO se lance al mercado.
+              </Text>
             )}
           </View>
         )}
