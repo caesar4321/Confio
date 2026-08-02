@@ -28,6 +28,15 @@ contract MockCusdPlus is ERC20 {
     }
 }
 
+/// Reports a plausible usdtOut, burns nothing, pays nobody. This is what a
+/// hostile or broken UUPS upgrade of CusdPlusVault looks like from here.
+contract LyingCusdPlus is ERC20 {
+    constructor() ERC20("cUSD+", "cUSD+") {}
+    function mint(address to, uint256 amt) external { _mint(to, amt); }
+    function redeemToUsdt(uint256 shares, uint256, address)
+        external pure returns (uint256) { return shares; }
+}
+
 contract ConfioPayContractTest is Test {
     MockCusdPlus cusdPlus;
     MockToken usdt;
@@ -195,6 +204,39 @@ contract ConfioPayContractTest is Test {
         vm.prank(payer);
         vm.expectRevert("redeem needs cUSD+");
         pay.pay("inv-wrong", address(usdt), gross, merchant, true, 1, deadline, sig);
+    }
+
+    function test_a_lying_vault_cannot_consume_the_invoice() public {
+        LyingCusdPlus liar = new LyingCusdPlus();
+        ConfioPayContract p2 = new ConfioPayContract(
+            address(liar), address(usdt), address(confio), paymentSigner, safeOwner);
+        uint256 gross = 100 * WAD;
+        liar.mint(payer, gross);
+        vm.prank(payer);
+        liar.approve(address(p2), type(uint256).max);
+        uint256 net = gross - p2.feeFor(gross);
+
+        bytes32 digest = p2.payDigest(
+            "inv-liar", payer, address(liar), gross, merchant, true, net, deadline);
+        (uint8 v, bytes32 r, bytes32 sg) = vm.sign(signerKey, digest);
+        bytes memory sig = abi.encodePacked(r, sg, v);
+
+        vm.prank(payer);
+        vm.expectRevert("merchant not paid");
+        p2.pay("inv-liar", address(liar), gross, merchant, true, net, deadline, sig);
+
+        // and the invoice is still open, the payer still holds their money
+        assertFalse(p2.invoiceDone("inv-liar"), "invoice consumed by a failed pay");
+        assertEq(liar.balanceOf(payer), gross, "payer lost funds");
+    }
+
+    function test_redeem_requires_a_minimum_out() public {
+        uint256 gross = 100 * WAD;
+        bytes memory sig = _signAs(
+            signerKey, "inv-nomin", payer, address(cusdPlus), gross, merchant, true, 0, deadline);
+        vm.prank(payer);
+        vm.expectRevert("minOut required");
+        pay.pay("inv-nomin", address(cusdPlus), gross, merchant, true, 0, deadline, sig);
     }
 
     function test_pay_splits_net_and_accrues_fee() public {

@@ -140,7 +140,23 @@ _PAY_TYPEHASH_V4 = keccak(
 
 
 def _pay_contract_v4() -> bool:
-    return bool(getattr(settings, 'BSC_PAY_CONTRACT_V4', False))
+    """NOT YET USABLE — the digest is only one third of the v4 switch.
+
+    Codex audit 2026-08-02 [P2]: enabling this today is a deterministic BSC
+    payment outage, because prepare still ABI-encodes the six-argument v3
+    pay(), SEL_PAY is still the v3 selector, and _validate_payment_batch
+    still decodes the v3 shape. The typehash would flip while the calldata
+    did not. Those three must land with the flag; until they do this raises
+    rather than silently breaking every payment.
+    """
+    enabled = bool(getattr(settings, 'BSC_PAY_CONTRACT_V4', False))
+    if enabled:
+        raise RuntimeError(
+            'BSC_PAY_CONTRACT_V4 is set but the v4 calldata path is not built: '
+            'prepare still encodes the v3 pay() signature and SEL_PAY is the '
+            'v3 selector. Ship the selector, encoder and validator together '
+            'with this flag.')
+    return False
 _PAY_DOMAIN_TYPEHASH = keccak(
     text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 _PAY_NAME_HASH = keccak(text='ConfioPay')

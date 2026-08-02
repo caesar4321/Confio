@@ -204,8 +204,22 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         uint256 usdtOut;
         if (redeemToUsdt) {
             require(token == address(CUSD_PLUS), "redeem needs cUSD+");
+            require(minUsdtOut > 0, "minOut required");
             IERC20(token).safeTransferFrom(msg.sender, address(this), net);
+
+            // Trust the OUTCOME, not the return value. CUSD_PLUS is a UUPS
+            // proxy: a faulty or hostile implementation could return a
+            // plausible usdtOut while paying the merchant nothing and leaving
+            // `net` here — where collectFees, bounded by accruedFees, could
+            // never retrieve it. Measure what the merchant actually received
+            // and what we actually spent, and revert unless both hold.
+            uint256 merchantBefore = USDT.balanceOf(merchant);
+            uint256 sharesBefore = IERC20(token).balanceOf(address(this));
             usdtOut = ICusdPlusVault(address(CUSD_PLUS)).redeemToUsdt(net, minUsdtOut, merchant);
+            require(USDT.balanceOf(merchant) - merchantBefore >= minUsdtOut,
+                    "merchant not paid");
+            require(sharesBefore - IERC20(token).balanceOf(address(this)) == net,
+                    "shares not consumed");
         } else {
             require(minUsdtOut == 0, "minOut without redeem");
             IERC20(token).safeTransferFrom(msg.sender, merchant, net);
