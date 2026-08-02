@@ -36,6 +36,14 @@ app.conf.beat_schedule.setdefault('ramps-refresh-koywe-limits', {
     'schedule': crontab(minute=7),
 })
 
+# A payout whose confirmer exhausted its retries before the chain answered
+# has nothing else watching it: the wage paid, the item stays SUBMITTED, the
+# run stays PARTIAL, and no ledger row or notification is ever written.
+app.conf.beat_schedule.setdefault('payroll-reconcile-stranded-bsc', {
+    'task': 'payroll.reconcile_stranded_bsc_payroll',
+    'schedule': crontab(minute='*/15'),
+})
+
 # Ensure DB connections are properly managed around every Celery task
 try:
     from celery import signals

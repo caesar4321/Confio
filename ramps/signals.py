@@ -370,10 +370,26 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
     # itself is still saved and still visible to support; the ledger simply
     # waits until the provider tells us what actually landed on chain.
     if final_amount is None:
-        logger.info(
-            'ramp %s: no crypto amount yet (fiat %s %s) — deferring the ledger row',
-            getattr(ramp_tx, 'id', '?'), ramp_tx.fiat_amount, ramp_tx.fiat_currency,
-        )
+        # A TERMINAL ramp with no crypto amount is a different situation: the
+        # user's money really did move and we cannot say how much, so
+        # deferring hides real funds instead of hiding a wrong number. Koywe
+        # can report DELIVERED with no usable amountIn/amountOut, which is
+        # exactly that case. Nothing honest can be written — inventing a
+        # figure is what caused the fiat-as-dollars rows — so make it loud
+        # enough for support to chase the provider rather than silent.
+        if ramp_tx.status in ('COMPLETED', 'AML_REVIEW'):
+            logger.error(
+                'ramp %s is %s but reports NO crypto amount (fiat %s %s, provider '
+                '%s) — the user was paid and the ledger cannot say how much; '
+                'needs a provider reconciliation',
+                ramp_tx.id, ramp_tx.status, ramp_tx.fiat_amount,
+                ramp_tx.fiat_currency, ramp_tx.provider,
+            )
+        else:
+            logger.info(
+                'ramp %s: no crypto amount yet (fiat %s %s) — deferring the ledger row',
+                getattr(ramp_tx, 'id', '?'), ramp_tx.fiat_amount, ramp_tx.fiat_currency,
+            )
         return None
 
     status = ramp_tx.status
@@ -395,10 +411,11 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
         'transaction_type': 'ramp',
         'amount': str(final_amount if final_amount is not None else ramp_tx.fiat_amount or Decimal('0')),
         'token_type': _ledger_token(ramp_tx, final_currency),
-        # A row retracted while it was still fiat-only comes back the moment
-        # the provider tells us what actually landed. Without this the
-        # correction would be permanent and a real on-ramp would stay hidden.
-        'deleted_at': None,
+        # NOTE: deleted_at is deliberately NOT reset here. Doing so revived
+        # every deliberately retracted row — a duplicate, a fraudulent one,
+        # anything support hid — on the next provider poll. Un-retraction is
+        # handled below, and only for the narrow case it was meant for: a row
+        # retracted while it had no crypto amount, now that it has one.
         'status': unified_status,
         'transaction_hash': '',
         'error_message': ramp_tx.status_detail or '',
@@ -418,9 +435,23 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
         'from_address': '' if is_on_ramp else actor_address,
         'to_address': actor_address if is_on_ramp else '',
         'transaction_date': ramp_tx.created_at,
-        'deleted_at': None,
         'ramp_transaction': ramp_tx,
     }
+
+    existing = UnifiedTransactionTable.objects.filter(ramp_transaction=ramp_tx).first()
+    # Un-retract ONLY what this module retracted: a row hidden because its
+    # amount was a fiat figure, now that a real crypto amount exists. A row
+    # support retracted for any other reason — duplicate, fraud, a manual
+    # correction — stays hidden, because reviving it is not ours to decide
+    # and the provider polls often enough to undo the decision instantly.
+    if existing is not None and existing.deleted_at is not None:
+        was_fiat_figure = str(existing.amount) == str(ramp_tx.fiat_amount or '')
+        if was_fiat_figure:
+            defaults['deleted_at'] = None
+        else:
+            logger.info(
+                'ramp %s: unified row %s stays retracted (retracted with a real '
+                'amount — not this module to revive)', ramp_tx.id, existing.id)
 
     unified, _ = UnifiedTransactionTable.objects.update_or_create(
         ramp_transaction=ramp_tx,

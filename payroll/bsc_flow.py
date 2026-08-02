@@ -563,17 +563,33 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
     finally:
         release_sponsor_nonce_lock()
 
-    from cusd_plus.tasks import check_sponsored_batch_receipt
-    check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=6)
-
+    # RECORD BEFORE SCHEDULING. Anything between the broadcast and this save
+    # can fail — a broker outage on apply_async, the process dying — and the
+    # money has already moved. The item would stay PREPARED with no hash and
+    # no recipient_address, which strands it permanently: the reconciler only
+    # sweeps batches still in 'signed', the confirmer refuses anything not
+    # SUBMITTED, and the scanner then books the wage as an external deposit
+    # because nothing carries the hash that proves payroll owns it.
+    #
+    # The locally computed hash is AUTHORITATIVE: it is derived from the
+    # signed payload, while the node's answer is only a claim. A node
+    # returning something else must not desync item.transaction_hash from
+    # batch.tx_hash, which would strand the confirmer forever.
     from django.utils import timezone
-    item.transaction_hash = sent or tx_hash
+    if sent and str(sent).lower() != str(tx_hash).lower():
+        logger.error(
+            '[PAYROLL][BSC] node returned %s for a transaction signed as %s — '
+            'keeping the signed hash', sent, tx_hash)
+    item.transaction_hash = tx_hash
     item.status = 'SUBMITTED'
     item.executed_by_user = user
     item.executed_at = timezone.now()
     item.recipient_address = (payout.get('recipient') or '').lower()
     item.save(update_fields=['transaction_hash', 'status', 'executed_by_user',
                              'executed_at', 'recipient_address', 'updated_at'])
+
+    from cusd_plus.tasks import check_sponsored_batch_receipt
+    check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=6)
 
     try:
         from cusd_plus.vault import invalidate_position
@@ -583,4 +599,4 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
 
     from .tasks import confirm_bsc_payroll_payout
     confirm_bsc_payroll_payout.apply_async(args=[item.id, batch.id], countdown=8)
-    return {'success': True, 'transaction_hash': sent or tx_hash}
+    return {'success': True, 'transaction_hash': tx_hash}

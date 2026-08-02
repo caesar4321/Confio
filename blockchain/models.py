@@ -382,6 +382,21 @@ class SponsoredBatch(models.Model):
                 ),
                 name='cpsb_unique_active_presale_buy',
             ),
+            # Same protection for wages. Without it two concurrent submits of
+            # one PREPARED item both broadcast: the first pays, the second
+            # reverts on the contract's itemUsed guard, and then they race to
+            # write item.transaction_hash. If the reverting one wins, a wage
+            # that actually paid is recorded FAILED and the retry can never
+            # succeed because the item id is spent on chain. The sponsor
+            # nonce lock serialises nonces, not items — this claims the item.
+            models.UniqueConstraint(
+                fields=['kind', 'source_id'],
+                condition=models.Q(
+                    kind='payroll_payout',
+                    status__in=('signed', 'sent', 'confirmed'),
+                ),
+                name='cpsb_unique_active_payroll_payout',
+            ),
         ]
 
     def __str__(self):

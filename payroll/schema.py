@@ -309,8 +309,18 @@ class CreatePayrollRun(graphene.Mutation):
                 for item_input in items:
                     validate_transaction_amount(item_input.net_amount)
                     account = Account.objects.filter(id=item_input.recipient_account_id, deleted_at__isnull=True).select_related('user').first()
-                    if not account or not account.algorand_address:
-                        raise ValueError("Recipient account invalid or missing Algorand address")
+                    if not account:
+                        raise ValueError("Recipient account invalid")
+                    # A recipient needs an address on SOME rail, not on
+                    # Algorand specifically. Requiring algorand_address here
+                    # made BSC payroll unusable for exactly the people being
+                    # onboarded now: with ALGORAND_ONBOARDING_ENABLED=False a
+                    # new employee never gets an Algorand address, so a run
+                    # that would have paid them entirely over BSC was refused
+                    # before it could be prepared.
+                    if not (account.algorand_address or account.bsc_address):
+                        raise ValueError(
+                            "Recipient account has no wallet address on any network")
 
                     # Only Confío users (accounts stored in DB) are allowed
                     recipient_user = account.user
