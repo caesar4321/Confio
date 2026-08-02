@@ -478,16 +478,15 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
 
     resolve_address = get_primary_bsc_address if use_bsc else get_primary_algorand_address
 
+    # An address is only needed to WRITE to a chain. The BSC model writes
+    # nothing when the reward is earned — the DB is the record, and payment
+    # happens post-launch through a claim that binds to msg.sender, so the
+    # address matters then, not now. The Algorand model does write, so there it
+    # is still required.
+    address_required = not use_bsc
+
     referee_address = resolve_address(referral.referred_user)
-    if not referee_address:
-        # BSC address is client-registered on app entry, so a referee who
-        # hasn't opened a post-EVM build has none yet. Defer (retryable via
-        # resync) rather than fail — they earn it once registered.
-        if use_bsc:
-            event.reward_status = "skipped"
-            event.error = "Referido sin dirección BSC todavía; se reintentará."
-            event.save(update_fields=["reward_status", "error", "updated_at"])
-            return referral
+    if not referee_address and address_required:
         event.reward_status = "failed"
         event.error = "Usuario referido sin dirección Algorand."
         event.save(update_fields=["reward_status", "error", "updated_at"])
@@ -500,17 +499,20 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
     referrer_address_missing = False
     if referrer_confio > 0 and referral.referrer_user:
         referrer_address = resolve_address(referral.referrer_user)
-        if not referrer_address:
-            # The referee is still paid; the referrer's share can't be assigned
-            # on chain without their address. Drop ONLY the chain leg — the
-            # allocation stays in the DB and their status stays 'pending'.
+        if not referrer_address and address_required:
+            # Algorand only: the referee is still paid, but the referrer's share
+            # can't be assigned on chain without their address. Drop ONLY the
+            # chain leg — the allocation stays in the DB and their status stays
+            # 'pending'.
             #
             # Zeroing the stored amount (the old behavior) erased the
             # obligation for good: this referral is marked eligible, sync
             # returns early for an eligible referral, and the management resync
             # then reads back the zero. A referrer who simply hadn't opened an
-            # EVM-capable build lost their bonus permanently — the exact case
-            # the BSC migration makes common.
+            # EVM-capable build lost their bonus permanently.
+            #
+            # Under the DB-only model there is nothing to assign, so a missing
+            # address changes nothing: they earned it, and it is recorded.
             referrer_confio = Decimal("0")
             referrer_address_missing = True
 
