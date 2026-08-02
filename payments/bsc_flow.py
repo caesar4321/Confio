@@ -681,9 +681,15 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
 
     # Re-verify the server's own authorization recovers to the paymentSigner.
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+    # The routing is part of what was SIGNED, so it must be part of what is
+    # reconstructed. Omitting it defaulted to (False, 0) here while prepare had
+    # signed (True, min_out), so every v4 redeem payment failed validation with
+    # bad_authorization — a 100% failure rate on the path this whole change
+    # exists to enable.
     digest = pay_authorization_digest(
         pay_contract, chain_id, invoice_id32, payment_tx.payer_address, token,
-        gross, payment_tx.merchant_address, int(d_deadline))
+        gross, payment_tx.merchant_address, int(d_deadline),
+        redeem_to_usdt=bool(d_redeem), min_usdt_out=int(d_min_out))
     try:
         recovered = _recover_pay_signer(digest, '0x' + auth_sig.hex())
     except Exception:  # noqa: BLE001
