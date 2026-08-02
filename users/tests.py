@@ -179,10 +179,27 @@ class MigrationSafetyTestCase(TestCase):
         self.assertIsNone(blocker)
 
 
+class _FakeAlgodHTTPError(Exception):
+    """Quacks exactly like AlgodHTTPError — same attributes, same message —
+    without being one. Exists so a test can prove the predicate checks the
+    TYPE, not just the fields."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
 class MigrationSafetyInspectionFailureTestCase(TestCase):
     """An address algod cannot be read is UNKNOWN, not empty. Reporting the two
     as the same thing let a node blip authorize moving the account pointer away
-    from a wallet that may still hold funds."""
+    from a wallet that may still hold funds.
+
+    These use the SDK's REAL exception type. A hand-written stand-in passes
+    whatever the code under test happens to check, which is how the first
+    version of this suite stayed green while the predicate silently dropped its
+    status check."""
+
+    ADDRESS = 'A2GJGRKRABIUOCGXQKKR4YBTWUQPATJKNSH2CAUL2GG2U4MRLFSXUPT744'
 
     class RaisingAlgodClient:
         def __init__(self, exc):
@@ -191,71 +208,51 @@ class MigrationSafetyInspectionFailureTestCase(TestCase):
         def account_info(self, address):
             raise self.exc
 
-    class AlgodHTTPErrorLike(Exception):
-        def __init__(self, message, code=None):
-            super().__init__(message)
-            self.code = code
+    def test_algod_404_is_a_confirmed_empty_answer(self):
+        from algosdk.error import AlgodHTTPError
 
-    def test_404_is_a_confirmed_empty_answer(self):
         algod = self.RaisingAlgodClient(
-            self.AlgodHTTPErrorLike('no accounts found for address', code=404)
+            AlgodHTTPError(f'no accounts found for address {self.ADDRESS}', 404)
         )
 
-        risk = inspect_address_migration_risk(algod, 'legacy')
+        risk = inspect_address_migration_risk(algod, self.ADDRESS)
         self.assertFalse(risk['inspection_failed'])
         self.assertFalse(risk['has_material_risk'])
-        self.assertIsNone(get_address_reassignment_blocker(algod, 'legacy', 'new'))
+        self.assertIsNone(get_address_reassignment_blocker(algod, self.ADDRESS, 'new'))
 
-    def test_generic_404_is_not_an_empty_answer(self):
-        """`.code` carries any HTTP response from the provider. A proxy or
-        routing 404 says nothing about the balance, so status alone must not
-        stand in for algod's own 'no accounts found' body."""
-        for exc in (
-            self.AlgodHTTPErrorLike('404 page not found', code=404),
-            self.AlgodHTTPErrorLike('', code=404),
-            Exception('gaierror: host not found'),
-        ):
-            with self.subTest(message=str(exc)):
+    def test_confirmed_empty_requires_type_and_status_and_body(self):
+        """Each condition alone admits a different false positive: a wrapper
+        exception carrying algod's wording, a 500 whose body happens to match,
+        or a proxy 404 that says nothing about the balance. Dropping any one of
+        the three restores a fail-open."""
+        from algosdk.error import AlgodHTTPError
+
+        cases = {
+            'right body, wrong status': AlgodHTTPError('no accounts found for address', 500),
+            'right status, wrong body': AlgodHTTPError('404 page not found', 404),
+            'right status, empty body': AlgodHTTPError('', 404),
+            # Carries BOTH the status and the body, and still must not pass:
+            # this is the only case that isolates the type condition. Without
+            # it, deleting the isinstance check regresses silently, because
+            # every other wrong-type case also lacks `.code`.
+            'right body and status, wrong type': _FakeAlgodHTTPError(
+                'no accounts found for address', 404
+            ),
+            'right body, wrong type, no status': Exception('no accounts found for address'),
+            'transport error': Exception('HTTPSConnectionPool: Read timed out'),
+            'dns failure': Exception('gaierror: host not found'),
+        }
+        for label, exc in cases.items():
+            with self.subTest(case=label):
                 algod = self.RaisingAlgodClient(exc)
 
-                self.assertTrue(inspect_address_migration_risk(algod, 'legacy')['inspection_failed'])
-                self.assertIsNotNone(get_address_reassignment_blocker(algod, 'legacy', 'new'))
-
-    def test_logs_never_carry_a_full_address(self):
-        from users.migration_safety import redact_address
-
-        address = 'A2GJGRKRABIUOCGXQKKR4YBTWUQPATJKNSH2CAUL2GG2U4MRLFSXUPT744'
-        redacted = redact_address(address)
-
-        self.assertNotIn(redacted, (address,))
-        self.assertNotEqual(redacted, address)
-        self.assertTrue(address.startswith(redacted.split('…')[0]))
-        self.assertTrue(address.endswith(redacted.split('…')[1]))
-        self.assertEqual(redact_address(None), '(none)')
-        self.assertEqual(redact_address(''), '(none)')
-
-    def test_unreadable_address_blocks_reassignment(self):
-        for exc in (
-            Exception('HTTPSConnectionPool: Read timed out'),
-            self.AlgodHTTPErrorLike('502 Bad Gateway', code=502),
-            ValueError('Expecting value: line 1 column 1 (char 0)'),
-        ):
-            with self.subTest(exc=type(exc).__name__):
-                algod = self.RaisingAlgodClient(exc)
-
-                risk = inspect_address_migration_risk(algod, 'legacy')
-                self.assertTrue(risk['inspection_failed'])
-
-                blocker = get_address_reassignment_blocker(algod, 'legacy', 'new')
-                self.assertIsNotNone(blocker)
-                # The user is told to retry, not that they hold funds they don't.
-                self.assertIn('verificar', blocker)
-                self.assertNotIn('activos pendientes', blocker)
+                self.assertTrue(inspect_address_migration_risk(algod, self.ADDRESS)['inspection_failed'])
+                self.assertIsNotNone(get_address_reassignment_blocker(algod, self.ADDRESS, 'new'))
 
     def test_same_address_noop_survives_an_outage(self):
         algod = self.RaisingAlgodClient(Exception('Read timed out'))
 
-        self.assertIsNone(get_address_reassignment_blocker(algod, 'legacy', 'legacy'))
+        self.assertIsNone(get_address_reassignment_blocker(algod, self.ADDRESS, self.ADDRESS))
 
     def test_inspection_failure_does_not_flip_has_material_risk(self):
         """MarkWalletMigrated reads has_material_risk only. Keeping it False on
@@ -263,7 +260,53 @@ class MigrationSafetyInspectionFailureTestCase(TestCase):
         opting them into fail-closed is a separate, deliberate change."""
         algod = self.RaisingAlgodClient(Exception('Read timed out'))
 
-        self.assertFalse(inspect_address_migration_risk(algod, 'legacy')['has_material_risk'])
+        self.assertFalse(inspect_address_migration_risk(algod, self.ADDRESS)['has_material_risk'])
+
+    def test_emitted_logs_never_contain_a_full_address(self):
+        """Captures the real log records rather than testing the helper in
+        isolation. algod embeds the queried address in its own error bodies, so
+        redacting the address argument while logging the exception text beside
+        it leaked the address anyway — a helper-only test passed throughout."""
+        from algosdk.error import AlgodHTTPError
+
+        cases = (
+            AlgodHTTPError(f'no accounts found for address {self.ADDRESS}', 404),
+            AlgodHTTPError(f'failed to read {self.ADDRESS} from ledger', 500),
+        )
+        for exc in cases:
+            with self.subTest(code=exc.code):
+                algod = self.RaisingAlgodClient(exc)
+
+                with self.assertLogs('users.migration_safety', level='INFO') as captured:
+                    inspect_address_migration_risk(algod, self.ADDRESS)
+                self.assertNotIn(self.ADDRESS, '\n'.join(captured.output))
+
+        # The blocker's own log lines carry both addresses.
+        algod = self.RaisingAlgodClient(Exception('Read timed out'))
+        with self.assertLogs('users.migration_safety', level='WARNING') as captured:
+            get_address_reassignment_blocker(algod, self.ADDRESS, 'B' * 58)
+        joined = '\n'.join(captured.output)
+        self.assertNotIn(self.ADDRESS, joined)
+        self.assertNotIn('B' * 58, joined)
+
+    def test_redact_address_shape(self):
+        from users.migration_safety import redact_address
+
+        redacted = redact_address(self.ADDRESS)
+        self.assertNotEqual(redacted, self.ADDRESS)
+        self.assertTrue(self.ADDRESS.startswith(redacted.split('…')[0]))
+        self.assertTrue(self.ADDRESS.endswith(redacted.split('…')[1]))
+        self.assertEqual(redact_address(None), '(none)')
+        self.assertEqual(redact_address(''), '(none)')
+
+    def test_retry_message_is_not_a_funds_message(self):
+        """An unreadable address must not tell the user they hold funds they
+        may not have; it must tell them to try again."""
+        algod = self.RaisingAlgodClient(Exception('HTTPSConnectionPool: Read timed out'))
+
+        blocker = get_address_reassignment_blocker(algod, self.ADDRESS, 'new')
+        self.assertIn('verificar', blocker)
+        self.assertNotIn('activos pendientes', blocker)
 
 
 class PhoneLookupTestCase(TestCase):

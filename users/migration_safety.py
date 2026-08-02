@@ -25,21 +25,42 @@ def redact_address(address):
     return f"{value[:6]}…{value[-4:]}" if len(value) > 14 else '(none)'
 
 
-# algod's own wording for "this address holds nothing". Anything else that
-# arrives with a 404 came from somewhere between us and the node.
+try:  # pragma: no cover - import shape, not logic
+    from algosdk.error import AlgodHTTPError
+except Exception:  # pragma: no cover - keeps this module importable without the SDK
+    AlgodHTTPError = None
+
+
+# algod's own wording for "this address holds nothing".
 _MISSING_ACCOUNT_PHRASES = ('no accounts found', 'account does not exist')
 
 
-def _looks_like_missing_account(exc):
-    """Algod answers 404 with one of these bodies for an address that was never
-    funded or was closed out. That is a CONFIRMED-empty answer.
+def _describe_exception(exc):
+    """Type and status only. algod embeds the queried address in its error
+    bodies, so the message itself is PII on this path."""
+    code = getattr(exc, 'code', None)
+    return f"{type(exc).__name__}(code={code})" if code is not None else type(exc).__name__
 
-    The BODY is required, not just the status: `.code` carries any HTTP response
-    from the provider, so a proxy or routing 404 would otherwise be read as proof
-    the account is empty and restore the fail-open this function exists to close.
-    A bare `not found` match would do the same to a DNS error ("host not found").
-    An unrecognised 404 costs the user a retry; a misread transport error costs
-    them the guard."""
+
+def _looks_like_missing_account(exc):
+    """True only for algod's own "this address holds nothing" answer, which is a
+    CONFIRMED-empty result rather than a failure to look.
+
+    All three conditions are required, because each alone admits a different
+    false positive:
+      - the SDK's own exception type, so a wrapper or transport error carrying a
+        similar string cannot pass;
+      - status 404, so an error with a matching body but a 500 cannot pass;
+      - algod's phrasing, because `.code` carries ANY HTTP response from the
+        provider and a proxy or routing 404 says nothing about the balance.
+    An unrecognised 404 costs the user a retry; a misread error costs them the
+    guard, so the strict end is the safe end. (Note that the configured provider
+    answers 200 with amount 0 for unfunded addresses, so this path is only
+    reached on nodes that genuinely 404.)"""
+    if AlgodHTTPError is not None and not isinstance(exc, AlgodHTTPError):
+        return False
+    if getattr(exc, 'code', None) != 404:
+        return False
     message = str(exc).lower()
     return any(phrase in message for phrase in _MISSING_ACCOUNT_PHRASES)
 
@@ -65,7 +86,7 @@ def inspect_address_migration_risk(algod_client, address):
         account_info = algod_client.account_info(address)
     except Exception as exc:
         if _looks_like_missing_account(exc):
-            logger.info("Treating missing address %s as no migration risk: %s", redact_address(address), exc)
+            logger.info("Treating missing address %s as no migration risk: %s", redact_address(address), _describe_exception(exc))
             return {
                 'has_material_risk': False,
                 'relevant_assets': {},
@@ -75,7 +96,7 @@ def inspect_address_migration_risk(algod_client, address):
         # A node timeout, outage, or malformed response tells us nothing about
         # the balance. Reporting it as "no risk" is what lets a transient blip
         # authorize moving the pointer away from a wallet that still holds funds.
-        logger.warning("Could not inspect %s for migration risk: %s", redact_address(address), exc)
+        logger.warning("Could not inspect %s for migration risk: %s", redact_address(address), _describe_exception(exc))
         return {
             'has_material_risk': False,
             'relevant_assets': {},

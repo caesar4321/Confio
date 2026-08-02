@@ -29,8 +29,10 @@ import algorandService from './algorandService';
 // retries free; failures leave no marker and retry later.
 // Never blocks sign-in or rendering.
 // Head+tail only. Enough for a human to match an address they already have,
-// not enough to be an identifier sitting in a log file.
-function redactAddress(address?: string | null): string {
+// not enough to be an identifier sitting in a log file. Production silences
+// NOTHING — setup/silenceLogs.ts only takes effect under __DEV__ — so every
+// console call here ships to release logs exactly as written.
+export function redactAddress(address?: string | null): string {
   const value = String(address || '');
   return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : '(none)';
 }
@@ -79,9 +81,6 @@ export async function registerAlgorandAddressChecked(
     console.error(
       `[AuthService] Server REFUSED Algorand address registration (${context}):`,
       error,
-      // Truncated: production silences console.log but NOT console.error, so a
-      // full address here ships to release logs against the No-PII policy.
-      // Head+tail stays greppable for support without logging the identifier.
       { address: redactAddress(algorandAddress) },
     );
     await reportFailure(error);

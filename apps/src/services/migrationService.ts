@@ -24,7 +24,7 @@ const PREPARE_ATOMIC_MIGRATION = gql`
     }
 `;
 import { secureDeterministicWallet, retrieveClientSecret, getOrCreateMasterSecret, storeClientSecret, deriveWalletV2 } from './secureDeterministicWallet';
-import authService, { registerAlgorandAddressChecked } from './authService';
+import authService, { registerAlgorandAddressChecked, redactAddress } from './authService';
 import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, GOOGLE_CLIENT_IDS, USDC_ASSET_ID } from '../config/env';
 
 // Legacy CONFÍO asset ID from before token migration
@@ -348,9 +348,9 @@ class WalletMigrationService {
                 iss, sub, aud, provider, 'personal', accountIndex, businessId
             );
             const v1Address = v1Wallet.address;
-            console.log('[MigrationService] DERIVED V1 ADDRESS:', v1Address);
+            console.log('[MigrationService] DERIVED V1 ADDRESS:', redactAddress(v1Address));
 
-            console.log(`[MigrationService] Migrating from ${v1Address} to ${v2Address}`);
+            console.log(`[MigrationService] Migrating from ${redactAddress(v1Address)} to ${redactAddress(v2Address)}`);
 
             // 3. Call Backend to Prepare Atomic Migration Group
             // The backend Sponsors MBR and Fees, and constructs the optimized group
