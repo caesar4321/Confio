@@ -929,10 +929,13 @@ export const AddPayoutMethodModal = ({
             include: ['GetUserBankAccounts']
           });
 
-          // Method 2: Safer global refresh to avoid in-flight reset invariant
-          apolloClient.stop();
+          // Method 2: Safer global refresh to avoid in-flight reset invariant.
+          // No stop() — it unregisters every mounted query app-wide, so the
+          // refetch below is a no-op and nothing polls again for the rest of
+          // the session (saving a payout method used to freeze Home's
+          // balances). clearStore() cancels in-flight work by itself.
           await apolloClient.clearStore();
-          apolloClient.reFetchObservableQueries();
+          await apolloClient.reFetchObservableQueries();
 
         } catch (refetchError) {
           // Even if refetch fails, try to clear the cache

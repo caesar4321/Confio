@@ -69,14 +69,24 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         throw new Error('Cuenta no encontrada');
       }
 
-      // Step 2: Pause all queries to prevent race conditions
-      setState(prev => ({ ...prev, progress: 'Pausando consultas activas...' }));
-      apolloClient.stop();
-
-      // Step 3: Clear Apollo cache to prevent stale data
+      // Step 2+3: Cancel in-flight fetches and empty the cache in ONE call.
+      //
+      // NOT apolloClient.stop(): that deletes every ObservableQuery from the
+      // QueryManager, so reFetchObservableQueries() in step 9 iterates an
+      // empty map and refetches NOTHING — and polling never restarts. Every
+      // mounted screen then keeps rendering the PREVIOUS account's data
+      // until it remounts. Only queries a component refetches by hand
+      // survived, which is why Home's cUSD row updated and the cUSD+ /
+      // payroll / eligibility rows did not.
+      //
+      // clearStore() cancels the same in-flight work and clears the same
+      // cache, but leaves mounted observers registered — so step 9 can
+      // actually refetch them. (resetStore() is clearStore + refetch in one,
+      // but it refetches HERE, before the new JWT exists, so the queries
+      // would answer for the OLD account. Hence the two halves stay split.)
       setState(prev => ({ ...prev, progress: 'Limpiando caché...' }));
       try {
-        await apolloClient.cache.reset();
+        await apolloClient.clearStore();
       } catch (cacheError) {
         // Continue anyway - cache clear is not critical
       }
@@ -115,9 +125,11 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       setState(prev => ({ ...prev, progress: 'Actualizando lista de cuentas...' }));
       await refreshAccountsRef.current();
 
-      // Step 9: Resume Apollo queries
+      // Step 9: Refetch every mounted query against the NEW token. Awaited:
+      // returning before the answers land is what let the caller's own
+      // refetch race this one.
       setState(prev => ({ ...prev, progress: 'Reiniciando consultas...' }));
-      apolloClient.reFetchObservableQueries();
+      await apolloClient.reFetchObservableQueries().catch(() => {});
 
       // Step 10: Final validation - ensure everything is in sync
       setState(prev => ({ ...prev, progress: 'Validando sincronización...' }));

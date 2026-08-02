@@ -12,6 +12,8 @@ import {
   RefreshControl,
   Animated,
   Vibration,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import ConvertModal from '../components/ConvertModal';
 import { AuthService } from '../services/authService';
@@ -291,15 +293,42 @@ export const HomeScreen = () => {
     };
   }, []);
 
-  // Refetch balances when active account changes (skip initial mount — useQuery already fetches)
+  // Refetch when the active account changes (skip initial mount — useQuery
+  // already fetches). EVERY account-scoped query on this screen, not just
+  // cUSD: the BSC dollar row, its Confío Dollar / Confío Dollar+ name (a
+  // per-USER eligibility flag that still arrives inside this per-account
+  // payload) and the payroll card are all read under the JWT's account, so
+  // refetching one of the six left the rest showing the account the user
+  // just left. Belt to the account-switch machinery's braces — this also
+  // covers switch paths that don't go through useAtomicAccountSwitch.
   const prevAccountIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     const currentId = activeAccount?.id;
     if (currentId && prevAccountIdRef.current !== undefined && prevAccountIdRef.current !== currentId) {
       refetchMyBalances();
+      refetchPendingPayroll();
+      refetchSavingsPortfolioRef.current?.().catch(() => {});
     }
     prevAccountIdRef.current = currentId;
-  }, [activeAccount?.id, refetchMyBalances]);
+  }, [activeAccount?.id, refetchMyBalances, refetchPendingPayroll]);
+
+  // Re-foreground refresh. Home never remounts and never loses focus while
+  // the app is backgrounded, so without this the screen shows whatever it
+  // read before the phone went in a pocket — including a stale
+  // Confío Dollar / Confío Dollar+ name after a server-side eligibility
+  // change. The portfolio's 60s poll gets there eventually; a user coming
+  // back to the app should not have to wait for it.
+  const appStateRef = useRef(AppState.currentState);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        refetchMyBalances();
+        refetchSavingsPortfolioRef.current?.().catch(() => {});
+      }
+      appStateRef.current = next;
+    });
+    return () => sub.remove();
+  }, [refetchMyBalances]);
 
   // Force refresh balances when navigating BACK to this screen (not on initial mount)
   const isMountedRef = useRef(false);
@@ -1681,7 +1710,10 @@ export const HomeScreen = () => {
                   ]}
                   onPress={() => navigation.navigate('AccountDetail', {
                     accountType: 'cusd_plus',
-                    accountName: 'Confío Dollar+',
+                    // Same rule as the row title: an ineligible user must not
+                    // land on a screen headed "Confío Dollar+".
+                    accountName: savingsPortfolio.savings.enabled
+                      ? 'Confío Dollar+' : 'Confío Dollar',
                     accountSymbol: '$cUSD+',
                     // Live figures come from the portfolio inside the screen;
                     // this is only the first paint.
@@ -1694,10 +1726,19 @@ export const HomeScreen = () => {
                     </View>
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName}>
-                        {/* Named for what the row actually holds: someone who
-                            cannot mint can still be holding cUSD+. */}
-                        {(savingsPortfolio.savings.enabled || savingsPortfolio.savings.balanceUsd > 0)
-                          ? 'Confío Dollar+' : 'Confío Dollar'}
+                        {/* ELIGIBILITY ALONE names the row (Julian, 08-02).
+                            It used to also say "Confío Dollar+" whenever a
+                            vault balance existed — "someone who cannot mint
+                            can still be holding cUSD+" — but that made the
+                            name a property of the balance instead of the
+                            product: a blocked user kept the + title over a
+                            "Dólar digital" subtitle, and it never changed
+                            back, not even across a restart. An ineligible
+                            user reads "Confío Dollar / Dólar digital",
+                            always. The BALANCE below still includes the
+                            vault position — what you hold is untouched, only
+                            what we call it changed. */}
+                        {savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}
                       </Text>
                       <Text style={styles.walletSymbol}>
                         {/* Ticker in the subtitle like every other row

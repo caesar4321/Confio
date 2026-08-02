@@ -31,8 +31,8 @@ export const PayrollSetupWizard = () => {
   const navigation = useNavigation<NavigationProp>();
   const { activeAccount } = useAccount();
   const { signTransactions } = useAlgorand();
-  const { activateOnBsc, rail } = usePayrollDelegates();
-  const instrument = payrollInstrument(rail);
+  const { activateOnBsc, rail, status: railStatus } = usePayrollDelegates();
+  const instrument = payrollInstrument(railStatus?.fundingToken);
   const [step, setStep] = useState(1);
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);

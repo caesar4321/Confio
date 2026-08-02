@@ -27,14 +27,16 @@ import {
 } from './sponsored7702';
 
 const PREPARE_ADMIN = gql`
-  mutation PrepareBscPayrollAdmin($action: String!, $amount: Decimal, $delegateUserId: ID, $delegateUserIds: [ID], $includeSelf: Boolean, $allowed: Boolean) {
-    prepareBscPayrollAdmin(action: $action, amount: $amount, delegateUserId: $delegateUserId, delegateUserIds: $delegateUserIds, includeSelf: $includeSelf, allowed: $allowed) {
+  mutation PrepareBscPayrollAdmin($action: String!, $amount: Decimal, $delegateUserId: ID, $delegateUserIds: [ID], $includeSelf: Boolean, $allowed: Boolean, $tokenType: String) {
+    prepareBscPayrollAdmin(action: $action, amount: $amount, delegateUserId: $delegateUserId, delegateUserIds: $delegateUserIds, includeSelf: $includeSelf, allowed: $allowed, tokenType: $tokenType) {
       success
       error
       errorName
       calls { to valueWei data }
       intentId
       shares
+      asset
+      tokenType
       delegateAddress
       delegateAddresses
     }
@@ -42,8 +44,8 @@ const PREPARE_ADMIN = gql`
 `;
 
 const SUBMIT_ADMIN = gql`
-  mutation SubmitBscPayrollAdmin($action: String!, $shares: String, $delegateAddress: String, $delegateAddresses: [String], $allowed: Boolean, $nonce: String!, $deadline: String!, $intentSignature: String!, $authorization: BscPayrollAuthorizationInput) {
-    submitBscPayrollAdmin(action: $action, shares: $shares, delegateAddress: $delegateAddress, delegateAddresses: $delegateAddresses, allowed: $allowed, nonce: $nonce, deadline: $deadline, intentSignature: $intentSignature, authorization: $authorization) {
+  mutation SubmitBscPayrollAdmin($action: String!, $shares: String, $asset: Int, $delegateAddress: String, $delegateAddresses: [String], $allowed: Boolean, $nonce: String!, $deadline: String!, $intentSignature: String!, $authorization: BscPayrollAuthorizationInput) {
+    submitBscPayrollAdmin(action: $action, shares: $shares, asset: $asset, delegateAddress: $delegateAddress, delegateAddresses: $delegateAddresses, allowed: $allowed, nonce: $nonce, deadline: $deadline, intentSignature: $intentSignature, authorization: $authorization) {
       success
       error
       authorizationRequired
@@ -81,7 +83,11 @@ export const BSC_PAYROLL_ERRORS: Record<string, string> = {
   not_onchain_delegate:
     'Tu cuenta aún no está autorizada para pagar nómina de este negocio. Pide al dueño que te autorice.',
   insufficient_escrow: 'El fondo de nómina no alcanza. Deposita primero.',
-  insufficient_balance: 'Saldo insuficiente.',
+  // Names WHERE the money has to be. A business reading a bare "Saldo
+  // insuficiente" over a balance it can see has no way to know the top-up
+  // draws on its business account, not on the payroll vault.
+  insufficient_balance:
+    'Tu cuenta de negocio no tiene ese saldo disponible para mover a la bóveda.',
   payout_expired: 'La autorización expiró. Inténtalo de nuevo.',
   sponsor_busy: 'La red está ocupada. Inténtalo de nuevo en unos segundos.',
   business_no_bsc_address: 'La cuenta del negocio aún no está activada para BSC.',
@@ -132,6 +138,11 @@ export interface BscPayrollAdminParams {
    * the JWT server-side, so it never depends on the client knowing who it is. */
   includeSelf?: boolean;
   allowed?: boolean;
+  /** Which escrow pool to fund or withdraw. The pools are separate money and
+   * a business can hold both, so the CALLER names one — the server used to
+   * derive it, which hid the whole USDT pool from anyone still holding a
+   * single cUSD+ share. Omit to use the business's default pool. */
+  tokenType?: 'CUSD_PLUS' | 'USDT';
 }
 
 /** Business escrow op, signed by the BUSINESS EOA (active account must be
@@ -156,6 +167,7 @@ export const runBscPayrollAdmin = async (
       amount: params.amountUsd,
       delegateUserId: params.delegateUserId,
       delegateUserIds: params.delegateUserIds,
+      tokenType: params.tokenType,
       includeSelf: params.includeSelf ?? false,
       allowed: params.allowed ?? true,
     },
@@ -210,6 +222,10 @@ export const runBscPayrollAdmin = async (
       variables: {
         action: params.action,
         shares: prep.shares,
+        // Which escrow pool the batch touches. Echoed back verbatim: the
+        // server rebuilds the SAME calls from it, and those are the bytes
+        // the business signed — a different pool just fails recovery.
+        asset: prep.asset ?? 0,
         delegateAddress: prep.delegateAddress,
         delegateAddresses: prep.delegateAddresses,
         allowed: params.allowed ?? true,

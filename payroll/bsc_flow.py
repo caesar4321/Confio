@@ -5,20 +5,27 @@ delegate-signed payouts). Phase 2 W3 of the cUSD phase-out.
 Why this rail is shaped differently from send/pay: under EIP-7702 only the
 business key can sign for the business EOA, so an employee-delegate cannot
 author a business batch. The delegate model lives ON-CHAIN instead — the
-business parks cUSD+ shares in ConfioPayrollVault and allowlists delegate
+business parks payroll float in ConfioPayrollVault and allowlists delegate
 EVM addresses; each payout is an EIP-712 signature by the delegate (their
 OWN personal wallet key) which ANY caller may execute. Confío's KMS sponsor
 is that caller (plain type-2 tx, not 7702), paying gas.
 
+TWO ESCROW POOLS (v2, 2026-08-02). The vault escrows cUSD+ shares OR raw
+USDT, per business, never fungible between them. An Ondo-BLOCKED employer
+holds its dollars as raw USDT and can never mint shares, so the shares-only
+v1 made Nómina eligible-employers-only: fundableBalance read $0.00 and
+funding failed "insufficient balance" on money the business owned. Which
+pool a run spends is `funding_token` at creation, pinned on the run.
+
 Three surfaces:
 
   admin ops (business EOA, 7702 sponsored batches like every other flow):
-      fund          [cusdPlus.approve(payroll, shares), payroll.deposit(shares)]
-      withdraw      [payroll.withdraw(shares, business)]   — NEVER blocked
+      fund          [token.approve(payroll, amt), payroll.deposit(asset, amt)]
+      withdraw      [payroll.withdraw(asset, amt, business)]  — NEVER blocked
       set_delegate  [payroll.setDelegate(delegateAddr, allowed)]
-    No stored batch: submit rebuilds the calls from INTEGER params (shares,
-    delegate address), so the batch is byte-exact by construction and the
-    server never trusts client calldata.
+    No stored batch: submit rebuilds the calls from INTEGER params (asset,
+    amount, delegate address), so the batch is byte-exact by construction
+    and the server never trusts client calldata.
 
   payout (two-step, server-authoritative like send/pay):
       prepare  gates + branch choice, stores the exact Payout struct on the
@@ -28,9 +35,12 @@ Three surfaces:
                on-chain allowlist, broadcast payout() as a plain KMS tx
                under the shared sponsor nonce lock
 
-Recipient rails mirror send/bsc_flow.py: eligible → shares transfer;
-ineligible/unknown → vault.redeemToUsdt inside payout() (atomic USDT
-delivery — exits never geo-gated).
+Recipient rails mirror send/bsc_flow.py, and apply to the cUSD+ pool only:
+eligible → shares transfer; ineligible/unknown → vault.redeemToUsdt inside
+payout() (atomic USDT delivery — exits never geo-gated). Out of the USDT
+pool there is one rail, a plain transfer: the money is already what an
+ineligible recipient would be redeemed into, and an eligible one sweeps it
+into cUSD+ themselves exactly as they would a ramp deposit.
 """
 import json
 import logging
@@ -57,23 +67,36 @@ ONDO_MIN_REDEEM_WEI = 10 ** 18
 P_DOMAIN_TYPEHASH = keccak(
     text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 P_NAME_HASH = keccak(text='ConfioPayrollVault')
-P_VERSION_HASH = keccak(text='1')
+# "2": the Payout struct gained `asset` and renamed shares→amount when the
+# vault learned to escrow raw USDT (2026-08-02).
+P_VERSION_HASH = keccak(text='2')
 PAYOUT_TYPEHASH = keccak(
-    text='Payout(address business,address recipient,uint256 netShares,'
-         'uint256 feeShares,bool redeemToUsdt,uint256 minUsdtOut,'
-         'bytes32 itemId,uint256 deadline)')
+    text='Payout(address business,address recipient,uint8 asset,'
+         'uint256 netAmount,uint256 feeAmount,bool redeemToUsdt,'
+         'uint256 minUsdtOut,bytes32 itemId,uint256 deadline)')
+
+# ── The two escrow pools ─────────────────────────────────────────────────
+# Mirrors ConfioPayrollVault.Asset. An Ondo-BLOCKED employer holds its
+# dollars as raw USDT and can never mint shares, so a shares-only escrow
+# made Nómina eligible-employers-only; the pools are separate money and a
+# run is denominated in exactly one of them, pinned at creation.
+ASSET_CUSD_PLUS = 0
+ASSET_USDT = 1
+#: run/item token_type ↔ on-chain asset selector
+TOKEN_ASSET = {'CUSD_PLUS': ASSET_CUSD_PLUS, 'USDT': ASSET_USDT}
 
 
 def _sel(sig: str) -> str:
     return keccak(text=sig)[:4].hex()
 
 
-SEL_PAYROLL_DEPOSIT = _sel('deposit(uint256)')
-SEL_PAYROLL_WITHDRAW = _sel('withdraw(uint256,address)')
+SEL_PAYROLL_DEPOSIT = _sel('deposit(uint8,uint256)')
+SEL_PAYROLL_WITHDRAW = _sel('withdraw(uint8,uint256,address)')
 SEL_PAYROLL_SET_DELEGATE = _sel('setDelegate(address,bool)')
 SEL_PAYOUT = _sel(
-    'payout((address,address,uint256,uint256,bool,uint256,bytes32,uint256),bytes)')
+    'payout((address,address,uint8,uint256,uint256,bool,uint256,bytes32,uint256),bytes)')
 SEL_ESCROW_SHARES = _sel('escrowShares(address)')
+SEL_ESCROW_USDT = _sel('escrowUsdt(address)')
 SEL_IS_DELEGATE = _sel('isDelegate(address,address)')
 
 # Fork-calibrated (ConfioPayrollVault.fork.t.sol: transfer payout 147k,
@@ -90,6 +113,14 @@ def _vault_address() -> str:
     return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
 
 
+def _escrow_token_address(asset: int) -> str:
+    """The ERC-20 behind a pool: vault shares, or BSC USDT."""
+    if asset == ASSET_USDT:
+        from cusd_plus import vault as cp_vault
+        return (cp_vault.usdt_address() or '').lower()
+    return _vault_address()
+
+
 def _uint_word(v: int) -> str:
     return format(int(v), 'x').rjust(64, '0')
 
@@ -98,14 +129,25 @@ def _addr_word(addr: str) -> str:
     return addr.lower().replace('0x', '').rjust(64, '0')
 
 
+def _payout_asset(p: dict) -> int:
+    """Asset selector for a prepared payout.
+
+    Defaults to cUSD+ so a payout dict written before the USDT pool existed
+    still hashes to what it was signed against — the field is inside the
+    struct hash, and silently reading a missing key as 0 is only safe
+    BECAUSE 0 is exactly what those older payouts meant.
+    """
+    return int(p.get('asset', ASSET_CUSD_PLUS))
+
+
 def payout_digest(p: dict, chain_id: int) -> bytes:
     """EIP-712 digest exactly as ConfioPayrollVault.payoutDigest computes it."""
     struct_hash = keccak(abi_encode(
-        ['bytes32', 'address', 'address', 'uint256', 'uint256', 'bool',
+        ['bytes32', 'address', 'address', 'uint8', 'uint256', 'uint256', 'bool',
          'uint256', 'bytes32', 'uint256'],
-        [PAYOUT_TYPEHASH, p['business'], p['recipient'], int(p['net_shares']),
-         int(p['fee_shares']), bool(p['redeem_to_usdt']), int(p['min_usdt_out']),
-         bytes.fromhex(p['item_id'][2:]), int(p['deadline'])],
+        [PAYOUT_TYPEHASH, p['business'], p['recipient'], _payout_asset(p),
+         int(p['net_amount']), int(p['fee_amount']), bool(p['redeem_to_usdt']),
+         int(p['min_usdt_out']), bytes.fromhex(p['item_id'][2:]), int(p['deadline'])],
     ))
     domain_separator = keccak(abi_encode(
         ['bytes32', 'bytes32', 'bytes32', 'uint256', 'address'],
@@ -117,9 +159,9 @@ def payout_digest(p: dict, chain_id: int) -> bytes:
 def payout_calldata(p: dict, signature_hex: str) -> str:
     """ABI-encode ConfioPayrollVault.payout(Payout, bytes)."""
     encoded = abi_encode(
-        ['(address,address,uint256,uint256,bool,uint256,bytes32,uint256)', 'bytes'],
-        [(p['business'], p['recipient'], int(p['net_shares']), int(p['fee_shares']),
-          bool(p['redeem_to_usdt']), int(p['min_usdt_out']),
+        ['(address,address,uint8,uint256,uint256,bool,uint256,bytes32,uint256)', 'bytes'],
+        [(p['business'], p['recipient'], _payout_asset(p), int(p['net_amount']),
+          int(p['fee_amount']), bool(p['redeem_to_usdt']), int(p['min_usdt_out']),
           bytes.fromhex(p['item_id'][2:]), int(p['deadline'])),
          bytes.fromhex(signature_hex.replace('0x', ''))],
     )
@@ -141,6 +183,63 @@ def _eth_call(to: str, data: str) -> str:
 def escrow_shares_raw(business_addr: str) -> int:
     out = _eth_call(_payroll_address(), '0x' + SEL_ESCROW_SHARES + _addr_word(business_addr))
     return int(out, 16) if out and out != '0x' else 0
+
+
+def escrow_usdt_raw(business_addr: str) -> int:
+    out = _eth_call(_payroll_address(), '0x' + SEL_ESCROW_USDT + _addr_word(business_addr))
+    return int(out, 16) if out and out != '0x' else 0
+
+
+def escrow_raw(business_addr: str, asset: int) -> int:
+    """Parked amount in one pool, in that asset's own units."""
+    return (escrow_usdt_raw(business_addr) if asset == ASSET_USDT
+            else escrow_shares_raw(business_addr))
+
+
+def escrow_split_usd(business_addr: str) -> dict:
+    """Both pools in USD, separately: {'CUSD_PLUS': x, 'USDT': y}.
+
+    The screens need this because the pools are NOT fungible — a business
+    holding both can only move one per operation, and a single summed figure
+    let the top-up screen validate a withdrawal against money the chosen pool
+    did not have (audit 2026-08-02, [P1]). None per pool on a read failure,
+    for the same reason escrow_usd returns None: "we could not reach the
+    node" and "$0.00" are different sentences to an employer.
+    """
+    out = {'CUSD_PLUS': None, 'USDT': None}
+    if not business_addr or not _payroll_address():
+        return out
+    key = business_addr.lower()
+    try:
+        from cusd_plus import vault as cp_vault
+        shares = escrow_shares_raw(key)
+        out['CUSD_PLUS'] = (0.0 if shares == 0
+                            else (shares * cp_vault.p_plus_wad()) / (WAD * WAD))
+    except Exception:  # noqa: BLE001
+        logger.warning('[PAYROLL][BSC] cUSD+ escrow read failed for %s', key)
+    try:
+        out['USDT'] = escrow_usdt_raw(key) / WAD
+    except Exception:  # noqa: BLE001
+        logger.warning('[PAYROLL][BSC] USDT escrow read failed for %s', key)
+    return out
+
+
+def fundable_split_usd(business_addr: str) -> dict:
+    """What the business could move INTO escrow, per pool, in USD — its own
+    wallet balances, the exact figures prepare_bsc_payroll_admin checks."""
+    out = {'CUSD_PLUS': None, 'USDT': None}
+    if not business_addr:
+        return out
+    from cusd_plus import vault as cp_vault
+    try:
+        out['CUSD_PLUS'] = cp_vault.position_usd(business_addr)
+    except Exception:  # noqa: BLE001
+        logger.warning('[PAYROLL][BSC] cUSD+ wallet read failed for %s', business_addr)
+    try:
+        out['USDT'] = cp_vault.usdt_balance_raw(business_addr) / WAD
+    except Exception:  # noqa: BLE001
+        logger.warning('[PAYROLL][BSC] USDT wallet read failed for %s', business_addr)
+    return out
 
 
 def is_onchain_delegate(business_addr: str, delegate_addr: str) -> bool:
@@ -192,8 +291,15 @@ def invalidate_delegates(business_addr: str) -> None:
 
 
 def escrow_usd(business_addr: str):
-    """USD value of a business's payroll escrow = shares × pPlus, or None
-    when we genuinely do not know.
+    """USD value of a business's payroll escrow — BOTH pools summed
+    (shares × pPlus, plus raw USDT at 1:1) — or None when we genuinely do
+    not know.
+
+    Summed on purpose: this is the "how much payroll float is parked"
+    number the hub prints, and a business that funded in USDT after being
+    geo-blocked has float that is every bit as real as a share position.
+    Which pool a given RUN spends is a separate question, answered by the
+    run's own token_type.
 
     Degradation contract, stricter than cusd_plus.vault.position_usd: a
     flaky node falls back to the last successfully read value, and if there
@@ -211,6 +317,7 @@ def escrow_usd(business_addr: str):
         from cusd_plus import vault as cp_vault
         shares = escrow_shares_raw(key)
         value = 0.0 if shares == 0 else (shares * cp_vault.p_plus_wad()) / (WAD * WAD)
+        value += escrow_usdt_raw(key) / WAD
     except Exception:  # noqa: BLE001 — a read failure must not break the screen
         logger.warning('[PAYROLL][BSC] escrow read failed for %s', business_addr,
                        exc_info=True)
@@ -352,9 +459,61 @@ def display_rail(business_account) -> str:
     return 'bsc' if parked > 0 else 'algorand'
 
 
-def rail_token(rail: str) -> str:
-    """The token a run created on this rail is denominated in."""
-    return 'CUSD_PLUS' if rail == 'bsc' else 'CUSD'
+def funding_token(business_account, actor_user) -> str:
+    """Which pool this business tops up and pays FROM: 'CUSD_PLUS' or 'USDT'.
+
+    `actor_user` is whoever is acting on the business right now, not "the
+    owner" — deliberately. A business account holds no jurisdiction of its
+    own; the mint gate that decides whether its USDT becomes cUSD+ tests the
+    HUMAN making the call. So the person who will actually run the top-up is
+    the one whose eligibility answers this. Two delegates in different
+    countries can only disagree while BOTH pools are empty, which is exactly
+    the case where nothing has been decided yet anyway.
+
+    Two inputs, in this order:
+      1. What it already has parked. Float that is sitting in a pool is
+         spendable from that pool, whatever the employer's status says
+         today — an employer who was eligible when they funded must not be
+         told their existing float is unusable the day their country
+         changes.
+      2. Otherwise, what its money WILL be. An Ondo-eligible owner's USDT
+         is swept into cUSD+ (deposits land as USDT for everyone since the
+         phase-out); a blocked owner's stays raw forever, because the mint
+         gate refuses it.
+
+    Phone-country eligibility ONLY, deliberately: this answer is pinned
+    onto a run that outlives the request, and the full check's IP half
+    would re-denominate a business's payroll because its owner opened the
+    app from an airport. The mint gate stays the full check where it is
+    actually enforced.
+    """
+    from cusd_plus.eligibility import is_ondo_eligible
+
+    addr = ((getattr(business_account, 'bsc_address', None) or '') or '').lower()
+    if addr:
+        try:
+            if escrow_shares_raw(addr) > 0:
+                return 'CUSD_PLUS'
+            if escrow_usdt_raw(addr) > 0:
+                return 'USDT'
+        except Exception:  # noqa: BLE001 — an RPC hiccup falls through to status
+            logger.warning('[PAYROLL][BSC] escrow probe failed for %s', addr,
+                           exc_info=True)
+    return 'CUSD_PLUS' if is_ondo_eligible(actor_user) else 'USDT'
+
+
+def rail_token(rail: str, business_account=None, actor_user=None) -> str:
+    """The token a run created on this rail is denominated in.
+
+    On BSC that is no longer a constant: the asset a run draws from must be
+    one the employer can actually park. Callers without a business in hand
+    (pure rail questions) still get the historical answer.
+    """
+    if rail != 'bsc':
+        return 'CUSD'
+    if business_account is None or actor_user is None:
+        return 'CUSD_PLUS'
+    return funding_token(business_account, actor_user)
 
 
 # ── Shared context resolution ────────────────────────────────────────────
@@ -396,7 +555,7 @@ def _flags_error():
 
 def build_admin_calls(action: str, shares: int = 0, delegate_addr: str = '',
                       allowed: bool = True, business_addr: str = '',
-                      delegate_addrs=None) -> list:
+                      delegate_addrs=None, asset: int = ASSET_CUSD_PLUS) -> list:
     """Canonical batches for the three business ops. Deterministic from
     integer/address params — submit rebuilds and the signature must match.
 
@@ -406,20 +565,23 @@ def build_admin_calls(action: str, shares: int = 0, delegate_addr: str = '',
     which matters directly, since the sponsor's daily batch cap is small
     enough that a five-delegate activation would otherwise exhaust it."""
     payroll = _payroll_address()
-    vault = _vault_address()
     if action == 'fund':
+        # Approve the TOKEN BEING PARKED, not the cUSD+ vault by reflex: a
+        # USDT top-up that approved shares would deposit nothing and revert
+        # on the transferFrom.
+        token = _escrow_token_address(asset)
         return [
-            {'to': vault, 'value': '0',
+            {'to': token, 'value': '0',
              'data': '0x' + '095ea7b3' + _addr_word(payroll) + _uint_word(shares)},
             {'to': payroll, 'value': '0',
-             'data': '0x' + SEL_PAYROLL_DEPOSIT + _uint_word(shares)},
+             'data': '0x' + SEL_PAYROLL_DEPOSIT + _uint_word(asset) + _uint_word(shares)},
         ]
     if action == 'withdraw':
         # Destination pinned to the business's own EOA — a compromised
         # session cannot exfiltrate the float elsewhere.
         return [{'to': payroll, 'value': '0',
-                 'data': '0x' + SEL_PAYROLL_WITHDRAW + _uint_word(shares)
-                         + _addr_word(business_addr)}]
+                 'data': '0x' + SEL_PAYROLL_WITHDRAW + _uint_word(asset)
+                         + _uint_word(shares) + _addr_word(business_addr)}]
     if action == 'set_delegate':
         addrs = list(delegate_addrs) if delegate_addrs else (
             [delegate_addr] if delegate_addr else [])
@@ -435,7 +597,8 @@ def build_admin_calls(action: str, shares: int = 0, delegate_addr: str = '',
 def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
                               delegate_user_id=None, allowed: bool = True,
                               delegate_user_ids=None,
-                              include_self: bool = False) -> dict:
+                              include_self: bool = False,
+                              token_type: str = '') -> dict:
     from cusd_plus import vault as cp_vault
     from django.contrib.auth import get_user_model
 
@@ -458,24 +621,47 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
             return {'success': False, 'error': 'invalid_amount'}
         if amount_usd <= 0:
             return {'success': False, 'error': 'invalid_amount'}
-        try:
-            pps_wad = cp_vault.p_plus_wad()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning('[PAYROLL][BSC] pps read failed: %s', exc)
-            return {'success': False, 'error': 'balance_unavailable'}
-        shares = (int(amount_usd * WAD) * WAD) // pps_wad
-        if shares <= 0:
+        # WHICH pool — the CALLER says (audit 2026-08-02, [P1]). Deriving it
+        # from one server-side answer could not express "this employer has
+        # money in BOTH pools", which is the normal state after an
+        # eligibility flip and the exact case this vault exists to serve: a
+        # single answer preferring shares hid the whole USDT pool from
+        # funding AND withdrawal, so a USDT-denominated run could never be
+        # funded until the cUSD+ pool was drained to zero.
+        #
+        # Safe to take from the client: the asset goes into the batch the
+        # business signs, and every path below re-checks the real balance of
+        # the pool it names. funding_token() remains the DEFAULT for older
+        # clients that send nothing, and remains what pins a run at creation.
+        token = (token_type or '').upper() or funding_token(business_account, user)
+        if token not in TOKEN_ASSET:
+            return {'success': False, 'error': 'unknown_token_type'}
+        asset = TOKEN_ASSET[token]
+        if asset == ASSET_USDT:
+            # USDT is the unit of account AND the token: no share price in
+            # the path at all, so nothing to fail on and nothing to round.
+            units = int(amount_usd * WAD)
+        else:
+            try:
+                pps_wad = cp_vault.p_plus_wad()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('[PAYROLL][BSC] pps read failed: %s', exc)
+                return {'success': False, 'error': 'balance_unavailable'}
+            units = (int(amount_usd * WAD) * WAD) // pps_wad
+        if units <= 0:
             return {'success': False, 'error': 'invalid_amount'}
         if action == 'fund':
-            held = cp_vault.erc20_balance_raw(_vault_address(), business_addr)
-            if held < shares:
+            held = cp_vault.erc20_balance_raw(_escrow_token_address(asset), business_addr)
+            if held < units:
                 return {'success': False, 'error': 'insufficient_balance'}
         else:
-            if escrow_shares_raw(business_addr) < shares:
+            if escrow_raw(business_addr, asset) < units:
                 return {'success': False, 'error': 'insufficient_escrow'}
-        calls = build_admin_calls(action, shares=shares, business_addr=business_addr)
+        calls = build_admin_calls(action, shares=units, business_addr=business_addr,
+                                  asset=asset)
         from cusd_plus.sponsor_7702 import intent_id_hex
-        return {'success': True, 'calls': calls, 'shares': str(shares),
+        return {'success': True, 'calls': calls, 'shares': str(units),
+                'asset': asset, 'token_type': token,
                 'intent_id': intent_id_hex(f'payroll_{action}', business_account.id)}
 
     if action == 'set_delegate':
@@ -523,9 +709,18 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
 def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
                              intent_signature, authorization=None,
                              shares=None, delegate_address='',
-                             allowed: bool = True, delegate_addresses=None) -> dict:
+                             allowed: bool = True, delegate_addresses=None,
+                             asset: int = ASSET_CUSD_PLUS) -> dict:
     """Rebuild the canonical batch from integer params and relay it. The
-    signature only verifies against the server's own bytes."""
+    signature only verifies against the server's own bytes.
+
+    `asset` is echoed by the client rather than re-derived here, and that is
+    safe for the same reason every other param is: it goes into the rebuilt
+    calls, the business signed THOSE bytes, so naming a different pool than
+    it signed for fails signature recovery. Re-deriving would be worse — the
+    answer can legitimately change between prepare and submit (a payout in
+    between emptying a pool), and the batch must match what was signed, not
+    what is true a second later."""
     from cusd_plus import sponsor_7702
 
     err = _flags_error()
@@ -542,7 +737,8 @@ def submit_bsc_payroll_admin(user, jwt_ctx, action: str, nonce, deadline,
             if shares_int <= 0:
                 return {'success': False, 'error': 'invalid_amount'}
             calls = build_admin_calls(action, shares=shares_int,
-                                      business_addr=business_addr)
+                                      business_addr=business_addr,
+                                      asset=int(asset or ASSET_CUSD_PLUS))
         elif action == 'set_delegate':
             addrs = [(a or '').lower() for a in (delegate_addresses or [])] or (
                 [(delegate_address or '').lower()] if delegate_address else [])
@@ -674,22 +870,30 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     if signer_addr != business_addr and not is_onchain_delegate(business_addr, signer_addr):
         return {'success': False, 'error': 'not_onchain_delegate'}
 
-    try:
-        pps_wad = cp_vault.p_plus_wad()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning('[PAYROLL][BSC] pps read failed: %s', exc)
-        return {'success': False, 'error': 'balance_unavailable'}
+    # WHICH pool pays. Pinned on the run at creation, never re-derived here:
+    # an employer whose eligibility changes mid-run must still be paying out
+    # of the escrow the run was funded into.
+    asset = TOKEN_ASSET[item.run.token_type]
 
     net_wei = int(Decimal(item.net_amount) * WAD)
     fee_wei = int(Decimal(item.fee_amount or 0) * WAD)
     if net_wei <= 0:
         return {'success': False, 'error': 'invalid_amount'}
-    net_shares = (net_wei * WAD) // pps_wad
-    fee_shares = (fee_wei * WAD) // pps_wad
-    if net_shares <= 0:
+    if asset == ASSET_USDT:
+        # Dollars ARE the units — no share price anywhere in this branch.
+        net_units, fee_units = net_wei, fee_wei
+    else:
+        try:
+            pps_wad = cp_vault.p_plus_wad()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('[PAYROLL][BSC] pps read failed: %s', exc)
+            return {'success': False, 'error': 'balance_unavailable'}
+        net_units = (net_wei * WAD) // pps_wad
+        fee_units = (fee_wei * WAD) // pps_wad
+    if net_units <= 0:
         return {'success': False, 'error': 'invalid_amount'}
 
-    if escrow_shares_raw(business_addr) < net_shares + fee_shares:
+    if escrow_raw(business_addr, asset) < net_units + fee_units:
         return {'success': False, 'error': 'insufficient_escrow'}
 
     # Schedule and cap were decorative on this rail: neither BSC prepare nor
@@ -716,8 +920,11 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
                            run.id, cap_amount, paid)
             return {'success': False, 'error': 'run_cap_exceeded'}
 
-    recipient_eligible = is_ondo_eligible(item.recipient_user)
-    redeem = not recipient_eligible
+    # The recipient fork applies to the cUSD+ pool ONLY. Paying out of USDT
+    # escrow there is nothing to redeem — the money is already the thing an
+    # ineligible employee would have been redeemed INTO, and an eligible one
+    # sweeps it into cUSD+ themselves exactly as they would a ramp deposit.
+    redeem = (asset == ASSET_CUSD_PLUS) and not is_ondo_eligible(item.recipient_user)
     # Ondo refuses redemptions under $1. Unlike a payment there is no change
     # to leave behind — the employee is owed an exact wage — so catch it here
     # rather than letting the sponsored transaction revert on chain, burn gas
@@ -732,8 +939,9 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     payout = {
         'business': business_addr,
         'recipient': recipient_addr,
-        'net_shares': str(net_shares),
-        'fee_shares': str(fee_shares),
+        'asset': asset,
+        'net_amount': str(net_units),
+        'fee_amount': str(fee_units),
         'redeem_to_usdt': redeem,
         'min_usdt_out': str(min_usdt_out),
         'item_id': item_id_bytes32(item.internal_id),
@@ -746,7 +954,9 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     data = dict(item.blockchain_data or {})
     data['bsc_payout'] = payout
     item.blockchain_data = data
-    item.token_type = 'CUSD_PLUS' if not redeem else 'USDT'
+    # What the EMPLOYEE ends up holding, which is not always what the run
+    # spent: a cUSD+ run redeeming for an ineligible recipient lands USDT.
+    item.token_type = 'USDT' if (asset == ASSET_USDT or redeem) else 'CUSD_PLUS'
     item.status = 'PREPARED'
     item.save(update_fields=['blockchain_data', 'token_type', 'status', 'updated_at'])
 
@@ -782,6 +992,16 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
 
     payout = (item.blockchain_data or {}).get('bsc_payout')
     if not payout or payout.get('business') != business_addr:
+        return {'success': False, 'error': 'payout_not_prepared'}
+    if 'net_amount' not in payout:
+        # Prepared against the v1 vault (netShares/feeShares, no asset). Its
+        # signature is worthless here whatever we do — different typehash,
+        # different domain version, and a different contract address — so
+        # say "re-prepare" rather than KeyError on the old shape. Only items
+        # left PREPARED across the v2 deploy can hit this, and the client's
+        # normal retry re-prepares them.
+        logger.info('[PAYROLL][BSC] %s was prepared against the v1 vault; '
+                    're-prepare required', item.internal_id)
         return {'success': False, 'error': 'payout_not_prepared'}
     if int(payout['deadline']) < int(time.time()) + 15:
         return {'success': False, 'error': 'payout_expired'}

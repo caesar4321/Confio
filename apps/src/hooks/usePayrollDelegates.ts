@@ -22,8 +22,13 @@ const GET_PAYROLL_RAIL_STATUS = gql`
       rail
       executionRail
       tokenType
+      fundingToken
       vaultBalanceUsd
       fundableBalanceUsd
+      escrowCusdPlusUsd
+      escrowUsdtUsd
+      fundableCusdPlusUsd
+      fundableUsdtUsd
       activated
       delegateEmployeeIds
     }
@@ -45,31 +50,52 @@ export interface PayrollRailStatus {
    * showing one and acting on the other moves funds the user never saw. */
   executionRail: PayrollRail;
   tokenType: string;
+  /** Which escrow pool a top-up parks into — 'CUSD_PLUS' or 'USDT' — and so
+   * the asset `fundableBalanceUsd` is measured in. 'USDT' means this
+   * employer is Ondo-blocked: its dollars can only ever be raw, and its
+   * payroll float earns nothing. Null on the legacy rail (and from a
+   * server that predates the field). */
+  fundingToken: string | null;
   /** null = the chain did not answer and nothing was cached. NOT zero —
    * rendering "$0.00" for "we don't know" tells a business its payroll float
    * is gone. Screens show "—" instead. */
   vaultBalanceUsd: number | null;
   fundableBalanceUsd: number | null;
+  /** Per-pool breakdown. The pools are NOT fungible — a business holding both
+   * can only move one per operation — so every amount check must run against
+   * the SELECTED pool, never against a sum. null per pool = unknown, same
+   * rule as the aggregates. */
+  escrowCusdPlusUsd: number | null;
+  escrowUsdtUsd: number | null;
+  fundableCusdPlusUsd: number | null;
+  fundableUsdtUsd: number | null;
   /** null = indeterminate (partial delegate read); don't offer activation. */
   activated: boolean | null;
   delegateEmployeeIds: string[];
 }
 
-/** Payroll is denominated in cUSD+. Full stop — not conditional on which rail
- * a given business happens to resolve to today.
+/** Payroll is denominated in cUSD+ — unless the employer cannot legally hold
+ * it, in which case its float is raw USDT and calling that "Confío Dollar+"
+ * would be a lie about what they own.
  *
  * This started out rail-conditional, labelling a business on the legacy
- * Algorand vault "Confío Dollar". Julian's call, and it is the right one:
- * nómina IS the cUSD+ product, and a screen that renames itself based on
- * migration plumbing teaches the user that Confío has two dollars. The
- * Algorand vault is scaffolding on its way out, not a second brand.
+ * Algorand vault "Confío Dollar". Julian's call to drop that was the right
+ * one: nómina IS the cUSD+ product, and a screen that renames itself based
+ * on migration plumbing teaches the user that Confío has two dollars.
+ *
+ * The argument here is NOT plumbing. It is the same distinction the wallet
+ * row on Home draws: an Ondo-blocked account holds "Confío Dollar / Dólar
+ * digital", and it stays ticker-less because that money is USDT, not cUSD+,
+ * and a cUSD+ badge on it would be dishonest.
  *
  * cUSD+ is an instrument, not a currency unit — an accumulating share that
  * drifts above $1 — so amounts stay in dollars and this names the instrument
  * beside them, payment-method style. The NUMBER still comes from whichever
  * escrow actually holds the money, and still shows "—" when unknown. */
-export const payrollInstrument = (_rail?: PayrollRail | null) =>
-  ({ name: 'Confío Dollar+', short: 'cUSD+', isPlus: true, known: true });
+export const payrollInstrument = (fundingToken?: string | null) =>
+  String(fundingToken || '').toUpperCase() === 'USDT'
+    ? { name: 'Confío Dollar', short: 'Dólar digital', isPlus: false, known: true }
+    : { name: 'Confío Dollar+', short: 'cUSD+', isPlus: true, known: true };
 
 const SET_BUSINESS_DELEGATES = gql`
   mutation SetBusinessDelegates($businessAccount: String!, $add: [String!]!, $remove: [String!]!, $signedTransaction: String) {
@@ -115,8 +141,13 @@ export const usePayrollDelegates = () => {
       rail: s.rail === 'bsc' ? 'bsc' : 'algorand',
       executionRail: (s.executionRail ?? s.rail) === 'bsc' ? 'bsc' : 'algorand',
       tokenType: s.tokenType || 'CUSD',
+      fundingToken: s.fundingToken || null,
       vaultBalanceUsd: num(s.vaultBalanceUsd),
       fundableBalanceUsd: num(s.fundableBalanceUsd),
+      escrowCusdPlusUsd: num(s.escrowCusdPlusUsd),
+      escrowUsdtUsd: num(s.escrowUsdtUsd),
+      fundableCusdPlusUsd: num(s.fundableCusdPlusUsd),
+      fundableUsdtUsd: num(s.fundableUsdtUsd),
       activated: s.activated === null || s.activated === undefined ? null : !!s.activated,
       delegateEmployeeIds: (s.delegateEmployeeIds || []).map(String),
     };
@@ -238,7 +269,7 @@ export const usePayrollDelegates = () => {
     status,
     rail: status?.rail ?? null,
     executionRail: status?.executionRail ?? null,
-    instrument: payrollInstrument(status?.rail),
+    instrument: payrollInstrument(status?.fundingToken),
     loading: loading || statusLoading || mutating,
     isActivated,
     activatePayroll,

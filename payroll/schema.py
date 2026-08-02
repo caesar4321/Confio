@@ -384,7 +384,13 @@ class CreatePayrollRun(graphene.Mutation):
             business_id=business_id, account_type='business',
             deleted_at__isnull=True).order_by('account_index').first()
         from . import bsc_flow
-        normalized_token = bsc_flow.rail_token(bsc_flow.execution_rail(business_account))
+        # The rail no longer determines the token by itself: on BSC the run
+        # is denominated in the pool this employer can actually park into
+        # (cUSD+, or raw USDT when Ondo blocks them). PINNED here, at
+        # creation — a run must keep paying out of the escrow it was funded
+        # into even if the employer's eligibility changes mid-run.
+        normalized_token = bsc_flow.rail_token(
+            bsc_flow.execution_rail(business_account), business_account, user)
         if token_type and str(token_type).upper() != normalized_token:
             logger.info(
                 '[PAYROLL] client asked for %s; this business pays in %s — '
@@ -1834,10 +1840,26 @@ class PayrollRailStatusType(graphene.ObjectType):
     execution_rail = graphene.String(
         description="bsc | algorand — where NEW work (funding, fresh runs) executes. "
                     "Differs from `rail` only while the kill switch is on with money still parked.")
-    token_type = graphene.String(description="Token a run created now is denominated in (CUSD_PLUS on BSC)")
+    token_type = graphene.String(
+        description="Token a run created now is denominated in — CUSD_PLUS on BSC, "
+                    "or USDT for an Ondo-blocked employer whose float can only be raw")
+    funding_token = graphene.String(
+        description="DEFAULT pool for a top-up: CUSD_PLUS or USDT. A hint, not a "
+                    "constraint — the client may fund or withdraw either pool "
+                    "explicitly. Names the asset fundableBalanceUsd is measured in.")
+    escrow_cusd_plus_usd = graphene.Float(
+        description="Payroll escrow parked as cUSD+ shares, in USD. null = unknown")
+    escrow_usdt_usd = graphene.Float(
+        description="Payroll escrow parked as raw USDT, in USD. null = unknown")
+    fundable_cusd_plus_usd = graphene.Float(
+        description="Business wallet cUSD+ position a top-up could park, in USD")
+    fundable_usdt_usd = graphene.Float(
+        description="Business wallet raw USDT a top-up could park, in USD")
     vault_balance_usd = graphene.Float(description="Payroll escrow, in USD")
     fundable_balance_usd = graphene.Float(
-        description="Business balance a top-up can draw from, in USD — the cUSD+ position on BSC")
+        description="Business balance a top-up can draw from, in USD, measured in "
+                    "whatever fundingToken names — the cUSD+ position, or the raw "
+                    "USDT wallet balance for an Ondo-blocked employer")
     activated = graphene.Boolean(description="At least one signer is allowlisted, so a payout can be authorized")
     delegate_employee_ids = graphene.List(
         graphene.ID, description="BusinessEmployee ids whose signer is allowlisted on the rail")
@@ -2150,12 +2172,27 @@ class Query(graphene.ObjectType):
             vault_usd = bsc_flow.escrow_usd(biz_addr)
             try:
                 from cusd_plus import vault as cp_vault
-                # What a top-up spends: the business's own cUSD+ shares, the
-                # exact balance prepare_bsc_payroll_admin checks before it
-                # will build the approve+deposit batch.
-                fundable_usd = cp_vault.position_usd(biz_addr)
+                # What a top-up spends — in the asset this business can
+                # actually park. Reporting the cUSD+ position unconditionally
+                # told an Ondo-blocked employer it had $0.00 to fund with
+                # while it held thousands in raw USDT, and the funding call
+                # then failed "insufficient balance" on money it owned.
+                # Same answer prepare_bsc_payroll_admin builds the batch from.
+                funding_token = bsc_flow.funding_token(biz_acct, user)
+                # Per-pool, because the pools are not fungible: a business
+                # holding both can only move one per operation, and a single
+                # summed figure let the top-up screen validate a withdrawal
+                # against money the chosen pool did not have (audit
+                # 2026-08-02, [P1]). fundable_usd stays as the DEFAULT pool's
+                # figure so older clients keep working.
+                escrow_split = bsc_flow.escrow_split_usd(biz_addr)
+                fundable_split = bsc_flow.fundable_split_usd(biz_addr)
+                fundable_usd = fundable_split.get(funding_token)
             except Exception:  # noqa: BLE001
+                funding_token = None
                 fundable_usd = None
+                escrow_split = {}
+                fundable_split = {}
             # One eth_call per candidate, so only enumerate when the answer is
             # actually going to be sent. When it is not, the two addresses that
             # settle `activated` are enough.
@@ -2184,6 +2221,9 @@ class Query(graphene.ObjectType):
             # for, and duplicating its view_balance check here would be a
             # second place to get it wrong.
             fundable_usd = None
+            funding_token = None
+            escrow_split = {}
+            fundable_split = {}
             addrs = {
                 (a or '').strip().upper()
                 for a in (Query.resolve_payroll_delegates(self, info) or [])
@@ -2194,11 +2234,21 @@ class Query(graphene.ObjectType):
 
         return PayrollRailStatusType(
             rail=rail,
-            token_type=bsc_flow.rail_token(exec_rail),
+            token_type=bsc_flow.rail_token(exec_rail, biz_acct, user),
             execution_rail=exec_rail,
+            funding_token=funding_token if in_business_ctx else None,
             vault_balance_usd=vault_usd if may_see_balance else None,
             fundable_balance_usd=(fundable_usd
                                   if (may_see_balance and in_business_ctx) else None),
+            # Same permission gate as the aggregates they break down: a
+            # revoked employee must not read the figures through the split.
+            escrow_cusd_plus_usd=(escrow_split.get('CUSD_PLUS')
+                                  if may_see_balance else None),
+            escrow_usdt_usd=(escrow_split.get('USDT') if may_see_balance else None),
+            fundable_cusd_plus_usd=(fundable_split.get('CUSD_PLUS')
+                                    if (may_see_balance and in_business_ctx) else None),
+            fundable_usdt_usd=(fundable_split.get('USDT')
+                               if (may_see_balance and in_business_ctx) else None),
             activated=activated,
             delegate_employee_ids=delegate_ids,
         )
@@ -2243,18 +2293,27 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
             required=False,
             description="Also allowlist the caller's own signer — activation does this")
         allowed = graphene.Boolean(required=False)
+        token_type = graphene.String(
+            required=False,
+            description="Which escrow pool to fund/withdraw: CUSD_PLUS or USDT. "
+                        "Omit to use the business's default pool.")
 
     success = graphene.Boolean()
     error = graphene.String()
     error_name = graphene.String(description="Who the error is about, when it names someone")
     calls = graphene.List(BscPayrollCallType)
     shares = graphene.String()
+    asset = graphene.Int(
+        description="Escrow pool this batch touches: 0 = cUSD+ shares, 1 = raw USDT")
+    token_type = graphene.String(
+        description="The same pool by name — what the top-up is denominated in")
     delegate_address = graphene.String()
     delegate_addresses = graphene.List(graphene.String)
     intent_id = graphene.String()  # bytes32 the client binds into its signature
 
     def mutate(self, info, action, amount=None, delegate_user_id=None,
-               delegate_user_ids=None, include_self=False, allowed=True):
+               delegate_user_ids=None, include_self=False, allowed=True,
+               token_type=None):
         from . import bsc_flow
 
         jwt_ctx = get_jwt_business_context_with_validation(
@@ -2265,7 +2324,8 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
             info.context.user, jwt_ctx, action, amount=amount,
             delegate_user_id=delegate_user_id,
             delegate_user_ids=delegate_user_ids,
-            include_self=bool(include_self), allowed=bool(allowed))
+            include_self=bool(include_self), allowed=bool(allowed),
+            token_type=token_type or '')
         if not result.get('success'):
             return PrepareBscPayrollAdmin(
                 success=False, error=result.get('error'),
@@ -2277,6 +2337,8 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
                 for c in result['calls']
             ],
             shares=result.get('shares'),
+            asset=result.get('asset'),
+            token_type=result.get('token_type'),
             delegate_address=result.get('delegate_address'),
             delegate_addresses=result.get('delegate_addresses'),
             intent_id=result.get('intent_id'),
@@ -2290,6 +2352,11 @@ class SubmitBscPayrollAdmin(graphene.Mutation):
     class Arguments:
         action = graphene.String(required=True)
         shares = graphene.String(required=False)
+        asset = graphene.Int(
+            required=False,
+            description="Echo prepare's asset. Safe to take from the client: it "
+                        "goes into the rebuilt calls the business signed, so a "
+                        "different pool fails signature recovery.")
         delegate_address = graphene.String(required=False)
         delegate_addresses = graphene.List(graphene.String, required=False)
         allowed = graphene.Boolean(required=False)
@@ -2304,8 +2371,8 @@ class SubmitBscPayrollAdmin(graphene.Mutation):
     transaction_hash = graphene.String()
 
     def mutate(self, info, action, nonce, deadline, intent_signature,
-               shares=None, delegate_address='', delegate_addresses=None,
-               allowed=True, authorization=None):
+               shares=None, asset=None, delegate_address='',
+               delegate_addresses=None, allowed=True, authorization=None):
         from . import bsc_flow
 
         jwt_ctx = get_jwt_business_context_with_validation(
@@ -2315,6 +2382,7 @@ class SubmitBscPayrollAdmin(graphene.Mutation):
         result = bsc_flow.submit_bsc_payroll_admin(
             info.context.user, jwt_ctx, action, nonce, deadline,
             intent_signature, authorization=authorization, shares=shares,
+            asset=int(asset or 0),
             delegate_address=delegate_address or '',
             delegate_addresses=delegate_addresses, allowed=bool(allowed))
         return SubmitBscPayrollAdmin(

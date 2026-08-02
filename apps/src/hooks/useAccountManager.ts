@@ -519,9 +519,13 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         // Clear Apollo cache to ensure fresh data with new account context
         // Avoid resetStore() during in-flight queries (causes invariant error)
         try {
-          apolloClient.stop(); // stop polls/in-flight operations
+          // NO apolloClient.stop() here: it unregisters every ObservableQuery
+          // from the QueryManager, so the reFetchObservableQueries() below
+          // finds nothing to refetch and polling never resumes — mounted
+          // screens keep the previous account's data. clearStore() already
+          // cancels in-flight operations and empties the cache.
           await apolloClient.clearStore(); // clear cache without auto-refetch
-          apolloClient.reFetchObservableQueries(); // restart and refetch active observers
+          await apolloClient.reFetchObservableQueries(); // refetch active observers
         } catch (error) {
           // Fallback to cache eviction
           try {

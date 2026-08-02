@@ -92,9 +92,22 @@ def _decode_settled_amount(tx_hash: str, item):
     """PaidOut.usdtOut when the payout redeemed, else the nominal net.
 
     PaidOut(address business, address recipient, bytes32 itemId, address
-    signer, uint256 netShares, uint256 feeShares, bool redeemedToUsdt,
-    uint256 usdtOut) — business/recipient/itemId are indexed, so the four
-    remaining values sit in `data` in that order, 32 bytes each.
+    signer, uint8 asset, uint256 netAmount, uint256 feeAmount, bool
+    redeemedToUsdt, uint256 usdtOut) — only business/recipient/itemId are
+    indexed, so SIX values sit in `data` in that order, 32 bytes each:
+    signer · asset · netAmount · feeAmount · redeemedToUsdt · usdtOut.
+
+    Two version-pinned things, both silent when wrong:
+     - v2 inserted `asset` ahead of the amounts (2026-08-02), changing the
+       topic hash AND every offset after it.
+     - `signer` is NOT indexed. The v1 decoder's comment said "four remaining
+       values" and read from word 2, one short — so it took feeShares as the
+       redeem flag (`== 1` essentially never true) and quietly recorded the
+       nominal wage for every redeemed payout instead of the real usdtOut.
+       Offsets here are counted off the ABI, not the sentence.
+
+    An enum is `uint8` in the event signature; `Asset` would hash to a
+    different topic entirely.
 
     Returns net_amount unchanged when the payout was in cUSD+ shares (no
     slippage there) or when the log cannot be read: never guess a number
@@ -109,7 +122,7 @@ def _decode_settled_amount(tx_hash: str, item):
 
         vault = (getattr(settings, 'BSC_PAYROLL_VAULT_ADDRESS', '') or '').lower()
         topic = '0x' + keccak(
-            b'PaidOut(address,address,bytes32,address,uint256,uint256,bool,uint256)'
+            b'PaidOut(address,address,bytes32,address,uint8,uint256,uint256,bool,uint256)'
         ).hex()
         receipt = _rpc('eth_getTransactionReceipt', [tx_hash]) or {}
         for log in receipt.get('logs') or []:
@@ -118,10 +131,11 @@ def _decode_settled_amount(tx_hash: str, item):
             if not log.get('topics') or log['topics'][0].lower() != topic:
                 continue
             data = (log.get('data') or '0x')[2:]
-            if len(data) < 4 * 64:
+            if len(data) < 6 * 64:
                 break
-            redeemed = int(data[2 * 64:3 * 64], 16) == 1
-            usdt_out = int(data[3 * 64:4 * 64], 16)
+            # signer · asset · netAmount · feeAmount · redeemedToUsdt · usdtOut
+            redeemed = int(data[4 * 64:5 * 64], 16) == 1
+            usdt_out = int(data[5 * 64:6 * 64], 16)
             if not redeemed:
                 return nominal  # paid in shares — nominal is what moved
             settled = (Decimal(usdt_out) / Decimal(10) ** 18).quantize(Decimal('0.000001'))

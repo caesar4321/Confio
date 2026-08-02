@@ -39,8 +39,8 @@ export const PayrollRunScreen = () => {
   const [schedule, setSchedule] = useState<ScheduleOption>('now');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
-  const { rail } = usePayrollDelegates();
-  const instrument = payrollInstrument(rail);
+  const { rail, status: railStatus } = usePayrollDelegates();
+  const instrument = payrollInstrument(railStatus?.fundingToken);
 
   const selectedSchedule = SCHEDULE_OPTIONS.find(s => s.key === schedule);
 

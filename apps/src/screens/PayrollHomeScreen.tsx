@@ -31,7 +31,7 @@ export const PayrollHomeScreen = () => {
   });
   const { delegates, status, rail, loading: delegatesLoading, isActivated, refetch: refetchDelegates } = usePayrollDelegates();
   const [refreshing, setRefreshing] = useState(false);
-  const instrument = payrollInstrument(rail);
+  const instrument = payrollInstrument(status?.fundingToken);
 
   useFocusEffect(
     useCallback(() => {

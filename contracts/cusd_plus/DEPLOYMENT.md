@@ -287,7 +287,8 @@ EOA exists to reconcile.
 | **ConfioPayContract** (v3, CONFIO in the allowlist) | `0x039Ebe91283c686F23F4C751600a39567967736D` |
 | ~~ConfioPayContract v2~~ (superseded, 2-token allowlist) | ~~`0x71256d060Ba718ff758647Ab4CB91A113a09E93d`~~ |
 | ~~ConfioPayContract v1~~ (STALE, permissionless) | ~~`0x1FAEFF796cd1a737FB8E1A660E84b80fd1702FCD`~~ |
-| **ConfioPayrollVault** | `0x664378b2668f320ce3573D0eD6DD154b8C8B3835` |
+| **ConfioPayrollVault** (v2, two-asset escrow) | `0x851cA801c3028D4C0e651d29803f8e35D86d7299` |
+| ~~ConfioPayrollVault v1~~ (ABANDONED 2026-08-02, cUSD+ only) | ~~`0x664378b2668f320ce3573D0eD6DD154b8C8B3835`~~ |
 | Owner (both) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
 | cUSD+ vault | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
 
@@ -499,3 +500,54 @@ fixed by namespacing storage keccak256(inviter, inviteId)).
   pausable). Creation tx `0x1b97c3e9…675d` (nonce 33). BscScan verified.
   Config `BSC_INVITE_ESCROW_ADDRESS` + `BSC_INVITE_ENABLED` (dark). Backend
   create/claim/reclaim flow + client are the next piece.
+
+### ConfioPayrollVault v2 — two-asset escrow, deployed 2026-08-02
+
+v1 escrowed cUSD+ SHARES only, which quietly made Nómina an
+eligible-employers-only product. An Ondo-geo-blocked employer holds its
+dollars as raw USDT and can never mint shares — the mint gate refuses it —
+so `fundableBalance` read $0.00 and funding failed `insufficient_balance` on
+money the business plainly owned. v1 already paid INELIGIBLE employees
+(atomic `redeemToUsdt` inside `payout`); nothing handled an ineligible
+EMPLOYER.
+
+v2 escrows cUSD+ shares OR raw USDT, per business, never fungible between
+them. `Payout` gained `asset` and renamed `netShares`/`feeShares` →
+`netAmount`/`feeAmount`; the EIP-712 domain version moved `"1"` → `"2"`.
+
+| Role | Address |
+| --- | --- |
+| **ConfioPayrollVault v2** | `0x851cA801c3028D4C0e651d29803f8e35D86d7299` |
+| cUSD+ vault (constructor arg) | `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` |
+| USDT (read FROM the vault at construction, never passed in) | `0x55d398326f99059fF775485246999027B3197955` |
+| Owner (3-of-5 Safe) | `0xF29A418744E793973BF4eEc676F8a30B2793b623` |
+| Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (KMS sponsor) |
+
+- deploy tx: `0x81dbc3dc3ff31ad4f9b8f34a0e2a563ab325c200cb993a96b2ba0814769afe3a`
+  (`manage.py deploy_payroll_vault --broadcast --yes-mainnet`, nonce 75,
+  1,899,477 gas ≈ 0.0019 BNB)
+- post-deploy verified live: CUSD_PLUS / USDT / owner wired as above,
+  `paused = false`, all four counters (`totalEscrowShares`,
+  `totalEscrowUsdt`, `accruedFeeShares`, `accruedFeeUsdt`) at zero, and
+  `PAYOUT_TYPEHASH` equal to the v2 type string the server signs against.
+
+Codex audit 2026-08-02 (2 P1 + 2 P2, all fixed before deploy):
+- [P1] one server-side pool selector could not express "both pools hold
+  money" — the caller now names the pool explicitly; `funding_token()`
+  demoted to a default and to pinning a run at creation.
+- [P1] the top-up screen validated withdrawals against the SUM of both
+  pools and treated `insufficient_escrow` as licence to drain the Algorand
+  vault instead. Per-pool validation; that fall-through is gone.
+- [P2] `_decode_settled_amount` decoded the v1 `PaidOut` layout. Fixing it
+  surfaced an older bug: `signer` was never indexed, so v1's decoder was
+  off by one for its whole life and recorded the nominal wage instead of
+  actual `usdtOut` for every redeemed payout.
+- [P2] a frozen business could still `deposit()` into escrow it could not
+  exit. Deposits are now freeze-gated like withdraw and payout.
+
+**v1 is ABANDONED, not migrated** (Julian, 08-02). It held 0.000381 cUSD+ of
+business escrow and 0.019581 of accrued fees — roughly two cents, not worth
+a dual-vault code path. Note this is a *cutover*, not an upgrade: v2 starts
+with EMPTY `isDelegate` mappings, so **every business must re-activate
+payroll before it can pay anyone**. Items left `PREPARED` across the cutover
+answer `payout_not_prepared`; the client re-prepares them.

@@ -49,7 +49,11 @@ contract ConfioPayrollVaultForkTest is Test {
         IERC20(USDT).approve(VAULT, type(uint256).max);
         uint256 shares = vault.subscribeAndMint(500e18, 400e18, business);
         vault.approve(address(payroll), type(uint256).max);
-        payroll.deposit(shares);
+        payroll.deposit(ConfioPayrollVault.Asset.CusdPlus, shares);
+        // Real USDT escrow too: the leg an Ondo-blocked employer lives on,
+        // against the real BSC token rather than a mock.
+        IERC20(USDT).approve(address(payroll), type(uint256).max);
+        payroll.deposit(ConfioPayrollVault.Asset.Usdt, 200e18);
         payroll.setDelegate(delegate, true);
         vm.stopPrank();
     }
@@ -66,8 +70,9 @@ contract ConfioPayrollVaultForkTest is Test {
         p = ConfioPayrollVault.Payout({
             business: business,
             recipient: employee,
-            netShares: 100e18,
-            feeShares: 1e18,
+            asset: ConfioPayrollVault.Asset.CusdPlus,
+            netAmount: 100e18,
+            feeAmount: 1e18,
             redeemToUsdt: redeem,
             minUsdtOut: redeem ? 98e18 : 0,
             itemId: bytes32("fork-item"),
@@ -84,6 +89,30 @@ contract ConfioPayrollVaultForkTest is Test {
         payroll.payout(p, sig);
         assertEq(vault.balanceOf(employee), 100e18, "real vault shares moved");
         assertEq(payroll.accruedFeeShares(), 1e18);
+    }
+
+    /// The Ondo-blocked employer's rail, end to end on real tokens: USDT
+    /// parked, USDT paid, no vault share involved anywhere.
+    function test_fork_payout_from_usdt_escrow() public {
+        if (!_forked()) return;
+        ConfioPayrollVault.Payout memory p = ConfioPayrollVault.Payout({
+            business: business,
+            recipient: employee,
+            asset: ConfioPayrollVault.Asset.Usdt,
+            netAmount: 100e18,
+            feeAmount: 1e18,
+            redeemToUsdt: false,
+            minUsdtOut: 0,
+            itemId: bytes32("fork-usdt-item"),
+            deadline: block.timestamp + 1 hours
+        });
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(delegateKey, payroll.payoutDigest(p));
+        vm.prank(sponsor);
+        payroll.payout(p, abi.encodePacked(r, s, v));
+        assertEq(IERC20(USDT).balanceOf(employee), 100e18, "real USDT paid");
+        assertEq(vault.balanceOf(employee), 0, "no shares involved");
+        assertEq(payroll.accruedFeeUsdt(), 1e18);
+        assertEq(payroll.escrowUsdt(business), 200e18 - 101e18);
     }
 
     function test_fork_payout_redeem_realOndoRail() public {

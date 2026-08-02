@@ -55,8 +55,25 @@ const PayrollTopUpScreen = () => {
   // describes where a top-up will GO. Using one rail for both showed the
   // cUSD+ balance and logo while the dark-flag fall-through actually funded
   // the Algorand vault.
-  const vaultInstrument = payrollInstrument(rail);
-  const instrument = payrollInstrument(executionRail);
+  // WHICH POOL this screen is operating on. A business can hold escrow in
+  // BOTH (the normal state after an eligibility flip), and the two are not
+  // fungible — one operation moves one pool. So the pool is SELECTED state,
+  // seeded from the server's default, and every balance check below runs
+  // against the selected one. Deriving it server-side hid the entire USDT
+  // pool from anyone still holding a single cUSD+ share (audit 2026-08-02).
+  const [pool, setPool] = useState<'CUSD_PLUS' | 'USDT' | null>(null);
+  const defaultPool = (railStatus?.fundingToken as 'CUSD_PLUS' | 'USDT' | null) ?? null;
+  const activePool = pool ?? defaultPool;
+  const instrument = payrollInstrument(activePool);
+  const vaultInstrument = instrument;
+  const escrowOf = (p: typeof activePool) =>
+    p === 'USDT' ? railStatus?.escrowUsdtUsd ?? null : railStatus?.escrowCusdPlusUsd ?? null;
+  const fundableOf = (p: typeof activePool) =>
+    p === 'USDT' ? railStatus?.fundableUsdtUsd ?? null : railStatus?.fundableCusdPlusUsd ?? null;
+  // Offer the choice only when BOTH pools actually hold something — a single
+  // door is the common case and a picker over one option is pure friction.
+  const showPoolPicker =
+    (railStatus?.escrowCusdPlusUsd ?? 0) > 0 && (railStatus?.escrowUsdtUsd ?? 0) > 0;
   const { data: vaultData, loading: vaultLoading, refetch: refetchVault } = useQuery(GET_PAYROLL_VAULT_BALANCE, {
     fetchPolicy: 'cache-and-network',
     skip: !isBusinessAccount,
@@ -74,15 +91,33 @@ const PayrollTopUpScreen = () => {
   const [prepareWithdraw] = useMutation(PREPARE_PAYROLL_VAULT_WITHDRAWAL);
   const [submitWithdraw] = useMutation(SUBMIT_PAYROLL_VAULT_WITHDRAWAL);
 
+  // What a top-up can draw on: the SELECTED pool's wallet balance, falling
+  // back to the aggregate for a server that predates the split.
   const availableBalance = useMemo(() => {
+    const perPool = fundableOf(activePool);
+    if (perPool !== null && perPool !== undefined) return perPool;
     if (railStatus?.fundableBalanceUsd !== null && railStatus?.fundableBalanceUsd !== undefined) {
       return railStatus.fundableBalanceUsd;
     }
     const legacy = parseFloat(balanceData?.accountBalance ?? '');
     return Number.isFinite(legacy) ? legacy : null;
-  }, [railStatus?.fundableBalanceUsd, balanceData]);
+  }, [railStatus, activePool, balanceData]);
   // null = unknown, rendered "—". Never 0: see PayrollHomeScreen.
+  //
+  // WITHDRAWALS validate against this, so it is the SELECTED pool, not the
+  // sum of both: one operation drains one pool, and validating against a sum
+  // let a business ask for more than the chosen pool held — the server then
+  // answered insufficient_escrow, which the fall-through below used to read
+  // as "withdraw from Algorand instead" (audit 2026-08-02).
   const vaultBalance = useMemo(() => {
+    const perPool = escrowOf(activePool);
+    if (perPool !== null && perPool !== undefined) return perPool;
+    if (railStatus) return railStatus.vaultBalanceUsd;
+    const raw = vaultData?.payrollVaultBalance;
+    return raw === null || raw === undefined ? null : Number(raw);
+  }, [railStatus, activePool, vaultData]);
+  // The hero still shows everything parked — that IS the payroll float.
+  const totalVaultBalance = useMemo(() => {
     if (railStatus) return railStatus.vaultBalanceUsd;
     const raw = vaultData?.payrollVaultBalance;
     return raw === null || raw === undefined ? null : Number(raw);
@@ -179,7 +214,10 @@ const PayrollTopUpScreen = () => {
         const { runBscPayrollAdmin, bscPayrollErrorMessage } = await import('../services/bscPayroll');
         try {
           setProcessingMessage('Firmando transacción…');
-          await runBscPayrollAdmin({ action: 'fund', amountUsd: String(parsed) });
+          await runBscPayrollAdmin({
+            action: 'fund', amountUsd: String(parsed),
+            tokenType: activePool ?? undefined,
+          });
           setProcessingMessage('Confirmando transacción…');
           await refreshBalances();
           setProcessing(false);
@@ -341,7 +379,10 @@ const PayrollTopUpScreen = () => {
         const { runBscPayrollAdmin, bscPayrollErrorMessage } = await import('../services/bscPayroll');
         try {
           setProcessingMessage('Firmando retiro…');
-          await runBscPayrollAdmin({ action: 'withdraw', amountUsd: String(parsed) });
+          await runBscPayrollAdmin({
+            action: 'withdraw', amountUsd: String(parsed),
+            tokenType: activePool ?? undefined,
+          });
           setProcessingMessage('Confirmando transacción…');
           await refreshBalances();
           setProcessing(false);
@@ -352,13 +393,15 @@ const PayrollTopUpScreen = () => {
           return;
         } catch (bscErr: any) {
           const code = bscErr?.message || '';
-          // insufficient_escrow stays: nothing parked on BSC means the money
-          // the business wants back is in the legacy vault. A relay outage
-          // does NOT — that would withdraw from a different pot than the one
-          // the screen is showing.
+          // insufficient_escrow is NO LONGER a fall-through (audit
+          // 2026-08-02, [P1]). It used to mean "nothing parked on BSC, so the
+          // money must be in the legacy vault" — true only while there was
+          // ONE BSC pool. With two, it also fires when the business picked
+          // the pool that happens to be short, and withdrawing from Algorand
+          // then moves a different pot than the one on screen. A short pool
+          // is an error to show, not a reason to drain another vault.
           const fallThrough = code === 'payroll_vault_not_configured'
-            || code === 'vault_not_configured'
-            || code === 'insufficient_escrow';
+            || code === 'vault_not_configured';
           if (!fallThrough) {
             throw new Error(bscPayrollErrorMessage(code));
           }
@@ -445,10 +488,13 @@ const PayrollTopUpScreen = () => {
             <BrandFieldBackground id="payrollTopUpField" ringCy="25%" ringR={70} ringWidth={18} />
             <View style={styles.vaultHeroInner}>
               <Text style={styles.vaultHeroLabel}>BÓVEDA DE NÓMINA</Text>
+              {/* The hero is the WHOLE payroll float, both pools — that is
+                  what the business has parked. The controls below operate on
+                  one pool at a time, and say which. */}
               <Text style={styles.vaultHeroBalance}>
                 {vaultLoading && !railStatus
                   ? '...'
-                  : vaultBalance === null ? '—' : `$${vaultBalance.toFixed(2)}`}
+                  : totalVaultBalance === null ? '—' : `$${totalVaultBalance.toFixed(2)}`}
               </Text>
               {vaultInstrument.known ? (
                 <View style={styles.instrumentRow}>
@@ -461,6 +507,15 @@ const PayrollTopUpScreen = () => {
                   <Text style={styles.instrumentLabel}>{vaultInstrument.name}</Text>
                 </View>
               ) : null}
+              {/* Split shown ONLY when both pools hold money — otherwise the
+                  hero total already IS the one pool. */}
+              {showPoolPicker ? (
+                <Text style={styles.vaultHeroHint}>
+                  {`Confío Dollar+ $${(railStatus?.escrowCusdPlusUsd ?? 0).toFixed(2)}`}
+                  {'  ·  '}
+                  {`Confío Dollar $${(railStatus?.escrowUsdtUsd ?? 0).toFixed(2)}`}
+                </Text>
+              ) : null}
               <Text style={styles.vaultHeroHint}>
                 Disponible en tu cuenta de negocio: {balanceLoading && !railStatus
                   ? '...'
@@ -468,6 +523,40 @@ const PayrollTopUpScreen = () => {
               </Text>
             </View>
           </View>
+
+          {/* Which pool the controls below act on. Only rendered when the
+              business genuinely holds both — one door needs no picker. */}
+          {showPoolPicker ? (
+            <View style={styles.card}>
+              <Text style={styles.cardLabel}>¿Con cuál saldo?</Text>
+              <View style={styles.poolRow}>
+                {(['CUSD_PLUS', 'USDT'] as const).map((p) => {
+                  const selected = activePool === p;
+                  const label = payrollInstrument(p).name;
+                  return (
+                    <TouchableOpacity
+                      key={p}
+                      style={[styles.poolChip, selected && styles.poolChipSelected]}
+                      onPress={() => { setPool(p); setAmount(''); setWithdrawAmount(''); }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`Usar ${label}`}
+                    >
+                      <Text style={[styles.poolChipText, selected && styles.poolChipTextSelected]}>
+                        {label}
+                      </Text>
+                      <Text style={[styles.poolChipAmount, selected && styles.poolChipTextSelected]}>
+                        {`$${(escrowOf(p) ?? 0).toFixed(2)}`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.cardHint}>
+                Los dos saldos son dinero distinto: cada operación mueve uno solo.
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Monto a fondear</Text>
@@ -499,6 +588,16 @@ const PayrollTopUpScreen = () => {
               )}
             </View>
             <Text style={styles.cardHint}>Moveremos este monto desde la cuenta de negocio hacia la bóveda de nómina.</Text>
+            {/* An Ondo-blocked employer funds in raw USDT. Say so once, here:
+                the money works the same for paying wages, but it does not
+                earn — and finding that out from a flat balance months later
+                is worse than one line now. */}
+            {railStatus?.fundingToken === 'USDT' ? (
+              <Text style={styles.cardHint}>
+                Tu nómina se fondea en {vaultInstrument.name}. Paga igual, pero no
+                genera rendimiento en tu país.
+              </Text>
+            ) : null}
           </View>
 
           <Button
@@ -602,6 +701,37 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 4,
   },
+  poolRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  poolChip: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.neutralDark,
+    backgroundColor: colors.neutral,
+  },
+  poolChipSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  poolChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  poolChipAmount: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: 2,
+  },
+  poolChipTextSelected: { color: colors.primaryDark },
   instrumentIcon: { width: 18, height: 18, resizeMode: 'contain' },
   instrumentLabel: {
     fontSize: 13,

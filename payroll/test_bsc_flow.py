@@ -36,38 +36,53 @@ class DigestParityTests(SimpleTestCase):
     """The three-way anchor: this vector is asserted against the CONTRACT
     in forge (test_payoutDigest_sharedVector). Never change one alone."""
 
-    def test_payout_digest_parity(self):
-        p = {
+    def _vector(self, asset):
+        redeem = asset == bsc_flow.ASSET_CUSD_PLUS
+        return {
             'business': '0x1111111111111111111111111111111111111111',
             'recipient': '0x2222222222222222222222222222222222222222',
-            'net_shares': 100 * WAD,
-            'fee_shares': WAD,
-            'redeem_to_usdt': True,
-            'min_usdt_out': 99 * WAD,
+            'asset': asset,
+            'net_amount': 100 * WAD,
+            'fee_amount': WAD,
+            'redeem_to_usdt': redeem,
+            'min_usdt_out': 99 * WAD if redeem else 0,
             'item_id': '0x' + keccak(text='item-vector').hex(),
             'deadline': 1_800_000_000,
         }
+
+    def test_payout_digest_parity(self):
         self.assertEqual(
-            '0x' + bsc_flow.payout_digest(p, 56).hex(),
-            '0xef818ab5751bd3f46c0459e4afd2f4b2802562771dd9e2a96a63bbfa36295e9c',
+            '0x' + bsc_flow.payout_digest(self._vector(bsc_flow.ASSET_CUSD_PLUS), 56).hex(),
+            '0x2c40c42f0c28313ecc1797a92bdcdb90ba02269f2637e7a9df46d019696aa62e',
+        )
+
+    def test_payout_digest_parity_usdt_pool(self):
+        """The asset is INSIDE the struct hash: the same wage drawn from the
+        other pool is a different signature, so a client that dropped the
+        field could not accidentally authorize the wrong escrow."""
+        self.assertEqual(
+            '0x' + bsc_flow.payout_digest(self._vector(bsc_flow.ASSET_USDT), 56).hex(),
+            '0x442f16cf1636af9d2af1a59a731d45e2f1fc2638767f9532844e128d62b2644f',
         )
 
     def test_payout_calldata_roundtrip(self):
         from eth_abi import decode as abi_decode
         p = {
             'business': BUSINESS_ADDR, 'recipient': RECIPIENT_ADDR,
-            'net_shares': 5 * WAD, 'fee_shares': 0, 'redeem_to_usdt': False,
+            'asset': bsc_flow.ASSET_USDT,
+            'net_amount': 5 * WAD, 'fee_amount': 0, 'redeem_to_usdt': False,
             'min_usdt_out': 0, 'item_id': '0x' + 'ab' * 32, 'deadline': 123,
         }
         data = bsc_flow.payout_calldata(p, '0x' + 'cd' * 65)
         self.assertTrue(data.startswith('0x' + bsc_flow.SEL_PAYOUT))
         decoded = abi_decode(
-            ['(address,address,uint256,uint256,bool,uint256,bytes32,uint256)', 'bytes'],
+            ['(address,address,uint8,uint256,uint256,bool,uint256,bytes32,uint256)', 'bytes'],
             bytes.fromhex(data[2 + 8:]),
         )
         tup, sig = decoded
         self.assertEqual(tup[0].lower(), BUSINESS_ADDR)
-        self.assertEqual(tup[2], 5 * WAD)
+        self.assertEqual(tup[2], bsc_flow.ASSET_USDT)
+        self.assertEqual(tup[3], 5 * WAD)
         self.assertEqual(sig, bytes.fromhex('cd' * 65))
 
     def test_item_id_deterministic(self):
@@ -91,14 +106,29 @@ class AdminBatchTests(SimpleTestCase):
                          PAYROLL_VAULT[2:].rjust(64, '0'))
         self.assertEqual(calls[1]['to'], PAYROLL_VAULT)
         self.assertEqual(calls[1]['data'][2:10], bsc_flow.SEL_PAYROLL_DEPOSIT)
-        self.assertEqual(int(calls[1]['data'][10:74], 16), 7 * WAD)
+        self.assertEqual(int(calls[1]['data'][10:74], 16), bsc_flow.ASSET_CUSD_PLUS)
+        self.assertEqual(int(calls[1]['data'][74:138], 16), 7 * WAD)
+
+    def test_usdt_fund_batch_approves_the_token_being_parked(self):
+        """A USDT top-up that approved the cUSD+ vault by reflex would
+        deposit nothing and revert on the transferFrom."""
+        usdt = '0x55d398326f99059ff775485246999027b3197955'
+        with mock.patch('cusd_plus.vault.usdt_address', return_value=usdt):
+            calls = bsc_flow.build_admin_calls(
+                'fund', shares=7 * WAD, asset=bsc_flow.ASSET_USDT)
+        self.assertEqual(calls[0]['to'], usdt)
+        self.assertEqual(calls[0]['data'][2:10], '095ea7b3')
+        self.assertEqual(int(calls[1]['data'][10:74], 16), bsc_flow.ASSET_USDT)
+        self.assertEqual(int(calls[1]['data'][74:138], 16), 7 * WAD)
 
     def test_withdraw_destination_pinned_to_business(self):
         calls = bsc_flow.build_admin_calls(
             'withdraw', shares=WAD, business_addr=BUSINESS_ADDR)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]['data'][2:10], bsc_flow.SEL_PAYROLL_WITHDRAW)
-        self.assertEqual(calls[0]['data'][74:138], BUSINESS_ADDR[2:].rjust(64, '0'))
+        self.assertEqual(int(calls[0]['data'][10:74], 16), bsc_flow.ASSET_CUSD_PLUS)
+        self.assertEqual(int(calls[0]['data'][74:138], 16), WAD)
+        self.assertEqual(calls[0]['data'][138:202], BUSINESS_ADDR[2:].rjust(64, '0'))
 
     def test_set_delegate_words(self):
         calls = bsc_flow.build_admin_calls(
@@ -169,11 +199,68 @@ class ReadSideTests(SimpleTestCase):
         from django.core.cache import cache
         cache.clear()
         self.addCleanup(cache.clear)
+        # Most of these assert the SHARES pool; keep the USDT pool empty
+        # unless a test says otherwise, rather than reaching for a node.
+        empty_usdt = mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=0)
+        empty_usdt.start()
+        self.addCleanup(empty_usdt.stop)
 
     def test_escrow_usd_is_shares_times_price(self):
         with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=50 * WAD), \
                 mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10):
             self.assertAlmostEqual(bsc_flow.escrow_usd(BUSINESS_ADDR), 55.0, places=6)
+
+    def test_escrow_usd_sums_both_pools(self):
+        """An employer who funded in USDT after being geo-blocked has float
+        every bit as real as a share position; the hub prints one number."""
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=50 * WAD), \
+                mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=20 * WAD), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10):
+            self.assertAlmostEqual(bsc_flow.escrow_usd(BUSINESS_ADDR), 75.0, places=6)
+
+    def test_funding_token_prefers_the_pool_that_already_has_money(self):
+        """An employer who funded while eligible must not be told their
+        existing float is unusable the day their country changes."""
+        biz = SimpleNamespace(bsc_address=BUSINESS_ADDR)
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=5 * WAD), \
+                mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=False):
+            self.assertEqual(bsc_flow.funding_token(biz, _user()), 'CUSD_PLUS')
+
+    def test_funding_token_follows_eligibility_when_nothing_is_parked(self):
+        biz = SimpleNamespace(bsc_address=BUSINESS_ADDR)
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=0):
+            with mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=False):
+                # The blocked employer: their dollars stay raw USDT forever,
+                # because the mint gate refuses them.
+                self.assertEqual(bsc_flow.funding_token(biz, _user()), 'USDT')
+            with mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True):
+                self.assertEqual(bsc_flow.funding_token(biz, _user()), 'CUSD_PLUS')
+
+    def test_escrow_split_reports_each_pool_separately(self):
+        """[P1 2026-08-02] The pools are not fungible. A summed figure let the
+        top-up screen validate a withdrawal against money the chosen pool did
+        not have."""
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=50 * WAD), \
+                mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=20 * WAD), \
+                mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10):
+            split = bsc_flow.escrow_split_usd(BUSINESS_ADDR)
+        self.assertAlmostEqual(split['CUSD_PLUS'], 55.0, places=6)
+        self.assertAlmostEqual(split['USDT'], 20.0, places=6)
+
+    def test_escrow_split_reports_unknown_not_zero_on_a_dead_read(self):
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw',
+                               side_effect=RuntimeError('node down')), \
+                mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=20 * WAD):
+            split = bsc_flow.escrow_split_usd(BUSINESS_ADDR)
+        self.assertIsNone(split['CUSD_PLUS'], 'unknown must not read as $0.00')
+        self.assertAlmostEqual(split['USDT'], 20.0, places=6)
+
+    def test_funding_token_reads_the_usdt_pool_before_falling_back(self):
+        biz = SimpleNamespace(bsc_address=BUSINESS_ADDR)
+        with mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=0), \
+                mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=3 * WAD), \
+                mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True):
+            self.assertEqual(bsc_flow.funding_token(biz, _user()), 'USDT')
 
     def test_escrow_read_failure_keeps_the_last_known_value(self):
         """A flaky node must not tell a business its payroll float is gone."""
@@ -317,6 +404,8 @@ class PreparePayoutTests(SimpleTestCase):
                         return_value=eligible), \
              mock.patch.object(bsc_flow, 'escrow_shares_raw',
                                return_value=escrow), \
+             mock.patch.object(bsc_flow, 'escrow_usdt_raw',
+                               return_value=escrow), \
              mock.patch.object(bsc_flow, 'is_onchain_delegate',
                                return_value=is_delegate):
             acct_objs.filter.return_value.select_related.return_value.first.return_value = \
@@ -338,7 +427,8 @@ class PreparePayoutTests(SimpleTestCase):
         self.assertTrue(result['success'], result)
         self.assertFalse(result['redeem_to_usdt'])
         payout = item.blockchain_data['bsc_payout']
-        self.assertEqual(int(payout['net_shares']), (100 * WAD * WAD) // pps)
+        self.assertEqual(payout['asset'], bsc_flow.ASSET_CUSD_PLUS)
+        self.assertEqual(int(payout['net_amount']), (100 * WAD * WAD) // pps)
         self.assertEqual(int(payout['min_usdt_out']), 0)
         self.assertEqual(payout['expected_signer'], SIGNER_ADDR)
         self.assertEqual(item.status, 'PREPARED')
@@ -353,6 +443,86 @@ class PreparePayoutTests(SimpleTestCase):
         self.assertEqual(int(payout['min_usdt_out']),
                          (100 * WAD * 9_950) // 10_000)
         self.assertEqual(item.token_type, 'USDT')
+
+    def test_a_usdt_run_pays_raw_usdt_and_never_redeems(self):
+        """The Ondo-BLOCKED employer's rail. There is nothing to redeem: the
+        money is already what an ineligible employee would be redeemed INTO,
+        and an eligible one sweeps it into cUSD+ themselves."""
+        item = _item(run_token='USDT')
+        result, _ = self._prepare(item, eligible=False)
+        self.assertTrue(result['success'], result)
+        self.assertFalse(result['redeem_to_usdt'])
+        payout = item.blockchain_data['bsc_payout']
+        self.assertEqual(payout['asset'], bsc_flow.ASSET_USDT)
+        # Dollars ARE the units: no share price anywhere in this branch.
+        self.assertEqual(int(payout['net_amount']), 100 * WAD)
+        self.assertEqual(int(payout['fee_amount']), 9 * WAD // 10)
+        self.assertEqual(int(payout['min_usdt_out']), 0)
+        self.assertEqual(item.token_type, 'USDT')
+
+    def test_a_usdt_run_pays_an_eligible_employee_in_usdt_too(self):
+        item = _item(run_token='USDT')
+        result, _ = self._prepare(item, eligible=True)
+        self.assertTrue(result['success'], result)
+        self.assertFalse(result['redeem_to_usdt'])
+        self.assertEqual(item.token_type, 'USDT')
+
+    def test_a_usdt_run_is_not_blocked_by_the_one_dollar_redeem_floor(self):
+        """The floor is Ondo's, and a raw transfer never touches Ondo —
+        gating it there would refuse a legitimate sub-$1 wage."""
+        item = _item(net='0.50', fee='0', run_token='USDT')
+        result, _ = self._prepare(item, eligible=False)
+        self.assertTrue(result['success'], result)
+
+    def test_admin_honours_an_explicitly_named_pool(self):
+        """[P1 2026-08-02] The caller names the pool. Deriving it server-side
+        hid the entire USDT pool from a business that still held one share."""
+        business_account = SimpleNamespace(
+            id=5, bsc_address=BUSINESS_ADDR,
+            business=SimpleNamespace(id=77, name='Bodega'))
+        usdt = '0x55d398326f99059ff775485246999027b3197955'
+        with mock.patch('users.models.Account.objects') as acct_objs, \
+             mock.patch('cusd_plus.vault.usdt_address', return_value=usdt), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=500 * WAD), \
+             mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=5 * WAD), \
+             mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True):
+            acct_objs.filter.return_value.select_related.return_value.first.return_value = \
+                business_account
+            # funding_token() would say CUSD_PLUS here (shares are parked);
+            # the caller asks for USDT and gets USDT.
+            result = bsc_flow.prepare_bsc_payroll_admin(
+                _user(), _jwt_ctx(), 'fund', amount='10', token_type='USDT')
+        self.assertTrue(result['success'], result.get('error'))
+        self.assertEqual(result['asset'], bsc_flow.ASSET_USDT)
+        self.assertEqual(result['token_type'], 'USDT')
+        self.assertEqual(result['calls'][0]['to'], usdt)
+
+    def test_admin_refuses_a_pool_that_does_not_exist(self):
+        business_account = SimpleNamespace(
+            id=5, bsc_address=BUSINESS_ADDR,
+            business=SimpleNamespace(id=77, name='Bodega'))
+        with mock.patch('users.models.Account.objects') as acct_objs:
+            acct_objs.filter.return_value.select_related.return_value.first.return_value = \
+                business_account
+            result = bsc_flow.prepare_bsc_payroll_admin(
+                _user(), _jwt_ctx(), 'fund', amount='10', token_type='CUSD')
+        self.assertEqual(result['error'], 'unknown_token_type')
+
+    def test_a_usdt_run_draws_on_the_usdt_pool_only(self):
+        item = _item(run_token='USDT')
+        business_account = SimpleNamespace(
+            bsc_address=BUSINESS_ADDR,
+            business=SimpleNamespace(id=77, name='Bodega'))
+        with mock.patch('users.models.Account.objects') as acct_objs, \
+             mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True), \
+             mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=10_000 * WAD), \
+             mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=0), \
+             mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+            acct_objs.filter.return_value.select_related.return_value.first.return_value = \
+                business_account
+            result = bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
+        # Thousands parked in shares must not pay a USDT-denominated wage.
+        self.assertEqual(result['error'], 'insufficient_escrow')
 
     def test_recipient_without_address_blocks_and_nudges(self):
         item = _item(recipient_addr=None)
@@ -401,7 +571,8 @@ class SubmitPayoutTests(SimpleTestCase):
         item.status = 'PREPARED'
         item.blockchain_data = {'bsc_payout': {
             'business': BUSINESS_ADDR, 'recipient': RECIPIENT_ADDR,
-            'net_shares': str(90 * WAD), 'fee_shares': str(WAD),
+            'asset': bsc_flow.ASSET_CUSD_PLUS,
+            'net_amount': str(90 * WAD), 'fee_amount': str(WAD),
             'redeem_to_usdt': False, 'min_usdt_out': '0',
             'item_id': bsc_flow.item_id_bytes32('item42'),
             'deadline': int(_time.time()) + 600,
@@ -437,8 +608,84 @@ class SubmitPayoutTests(SimpleTestCase):
         result = self._submit(item)
         self.assertEqual(result['error'], 'item_not_prepared')
 
+    def test_a_v1_prepared_payout_asks_for_a_re_prepare(self):
+        """Items left PREPARED across the v2 deploy carry the old
+        netShares/feeShares shape. That signature is worthless here anyway
+        (different typehash, domain version and contract address), so the
+        answer is "re-prepare" — not a KeyError on the old keys."""
+        item = self._prepared_item()
+        payout = item.blockchain_data['bsc_payout']
+        payout['net_shares'] = payout.pop('net_amount')
+        payout['fee_shares'] = payout.pop('fee_amount')
+        payout.pop('asset')
+        result = self._submit(item)
+        self.assertEqual(result['error'], 'payout_not_prepared')
+
     def test_business_mismatch_rejected(self):
         item = self._prepared_item()
         item.blockchain_data['bsc_payout']['business'] = '0x' + '99' * 20
         result = self._submit(item)
         self.assertEqual(result['error'], 'payout_not_prepared')
+
+
+@override_settings(BSC_PAYROLL_VAULT_ADDRESS=PAYROLL_VAULT)
+class SettledAmountDecodeTests(SimpleTestCase):
+    """PaidOut is decoded by TOPIC + fixed data offsets, and both moved in v2.
+
+    This decoder fails SILENTLY when its offsets drift — it reads a wrong word,
+    finds a redeem flag that isn't 1, and returns the nominal wage. The v1
+    version did exactly that for its whole life: its comment said "four
+    remaining values" but `signer` is not indexed, so every redeemed payout was
+    recorded at nominal instead of the USDT that actually landed. Pin the
+    layout against the contract, not against a sentence.
+    """
+
+    TOPIC = ('0x' + keccak(
+        text='PaidOut(address,address,bytes32,address,uint8,uint256,uint256,bool,uint256)'
+    ).hex())
+
+    def _receipt(self, *, redeemed: bool, usdt_out: int, asset: int = 0):
+        def word(v):
+            return format(int(v), 'x').rjust(64, '0')
+        # signer · asset · netAmount · feeAmount · redeemedToUsdt · usdtOut
+        data = '0x' + (SIGNER_ADDR[2:].rjust(64, '0') + word(asset) + word(100 * WAD)
+                       + word(WAD) + word(1 if redeemed else 0) + word(usdt_out))
+        return {'logs': [{'address': PAYROLL_VAULT, 'topics': [self.TOPIC], 'data': data}]}
+
+    def _decode(self, receipt):
+        from payroll import tasks
+        item = SimpleNamespace(internal_id='item42', net_amount=Decimal('100'))
+        with mock.patch('cusd_plus.tasks._rpc', return_value=receipt):
+            return tasks._decode_settled_amount('0x' + 'ab' * 32, item)
+
+    def test_topic_matches_the_compiled_contract(self):
+        # forge inspect ConfioPayrollVault events → this exact hash.
+        self.assertEqual(
+            self.TOPIC,
+            '0x5b873c111d662ad7ad92551f91901eec7d9ece92d3306fde06a9c76c49ea2549')
+
+    def test_redeemed_payout_records_the_usdt_that_actually_landed(self):
+        # 99.5 USDT against a nominal 100 — the slippage the field exists for.
+        settled = self._decode(self._receipt(redeemed=True, usdt_out=995 * WAD // 10))
+        self.assertEqual(settled, Decimal('99.500000'))
+
+    def test_share_payout_records_the_nominal(self):
+        self.assertEqual(self._decode(self._receipt(redeemed=False, usdt_out=0)),
+                         Decimal('100'))
+
+    def test_usdt_pool_payout_records_the_nominal(self):
+        # asset=1 never redeems, so the wage moved exactly as promised.
+        self.assertEqual(
+            self._decode(self._receipt(redeemed=False, usdt_out=0, asset=1)),
+            Decimal('100'))
+
+    def test_a_v1_shaped_log_is_ignored_rather_than_misread(self):
+        """The old topic must not match: decoding a v1 log with v2 offsets
+        would read past the data and invent a settled amount."""
+        v1_topic = ('0x' + keccak(
+            text='PaidOut(address,address,bytes32,address,uint256,uint256,bool,uint256)'
+        ).hex())
+        self.assertNotEqual(v1_topic, self.TOPIC)
+        receipt = self._receipt(redeemed=True, usdt_out=995 * WAD // 10)
+        receipt['logs'][0]['topics'] = [v1_topic]
+        self.assertEqual(self._decode(receipt), Decimal('100'))

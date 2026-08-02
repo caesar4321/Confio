@@ -50,7 +50,7 @@ export const PayrollPendingScreen = () => {
     skip: false,
   });
   const { status: railStatus, rail } = usePayrollDelegates();
-  const instrument = payrollInstrument(rail);
+  const instrument = payrollInstrument(railStatus?.fundingToken);
   const [preparePayrollItem] = useMutation(PREPARE_PAYROLL_ITEM_PAYOUT);
   const [submitPayrollItem] = useMutation(SUBMIT_PAYROLL_ITEM_PAYOUT);
   const [payingItemId, setPayingItemId] = useState<string | null>(null);
