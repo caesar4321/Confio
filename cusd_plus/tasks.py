@@ -294,9 +294,28 @@ def monitor_bridge_arrivals():
     now = timezone.now()
     min_deposit = Decimal(str(getattr(settings, 'CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD', 1)))
     arrived: dict[str, dict] = {}
+    savings_vault = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
     for log in logs:
         key = ('0x' + log['topics'][2][-40:]).lower()
+        sender = ('0x' + log['topics'][1][-40:]).lower()
         raw_units = int(log['data'], 16)
+        # An arrival is a DEPOSIT only if it came from outside Confío. This
+        # pass filters on the RECIPIENT topic alone, so it used to record our
+        # own outflows as inbound money: redeemToUsdt pays the cUSD+ vault's
+        # USDT straight to the holder, which is how a presale buy funded from
+        # savings is assembled (presale/bsc_flow._build_calls) and how any
+        # savings withdrawal lands. The user got a push and a +USDT card for
+        # money they were SPENDING. Skipping these also stops a redeem from
+        # being mistaken for a bridge delivery and falsely completing a
+        # to_savings saga, which is why the check sits above conv_watch.
+        # The cUSD+ pass below has always applied this rule to shares; the
+        # USDT pass never did.
+        if sender and (sender == savings_vault or sender in registered):
+            logger.info(
+                'internal USDT movement to %s from %s (%s) — not a deposit',
+                key, sender, log['transactionHash'],
+            )
+            continue
         conv = conv_watch.get(key)
         if conv is not None:
             floor_units = int(float(conv.to_amount) * 0.9 * 1e18)
