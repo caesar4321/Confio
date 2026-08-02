@@ -397,6 +397,23 @@ class SponsoredBatch(models.Model):
                 ),
                 name='cpsb_unique_active_payroll_payout',
             ),
+            # And for invoices. Two concurrent submits of one
+            # PENDING_BLOCKCHAIN payment both passed the unlocked status check
+            # and both broadcast: one paid the merchant, the other reverted on
+            # the contract's invoiceDone guard, and then they clobbered each
+            # other's transaction_hash. If the reverting one landed last, the
+            # successful batch's confirmer refused its own settlement (hash
+            # mismatch) and the reverting one marked the payment FAILED — a
+            # merchant paid, an invoice still PENDING, and a payer told it
+            # failed. One live batch per payment, whatever the token.
+            models.UniqueConstraint(
+                fields=['kind', 'source_id'],
+                condition=models.Q(
+                    kind__in=('pay_cusd_plus', 'pay_usdt', 'pay_confio'),
+                    status__in=('signed', 'sent', 'confirmed'),
+                ),
+                name='cpsb_unique_active_payment',
+            ),
         ]
 
     def __str__(self):

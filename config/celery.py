@@ -44,6 +44,14 @@ app.conf.beat_schedule.setdefault('payroll-reconcile-stranded-bsc', {
     'schedule': crontab(minute='*/15'),
 })
 
+# Same gap on the invoice side: a batch that outlived the request which
+# broadcast it leaves the merchant paid and the invoice pending, and the
+# signed-batch reconciler does not look at 'sent' rows.
+app.conf.beat_schedule.setdefault('payments-reconcile-stranded-bsc', {
+    'task': 'payments.reconcile_stranded_bsc_payments',
+    'schedule': crontab(minute='*/15'),
+})
+
 # Ensure DB connections are properly managed around every Celery task
 try:
     from celery import signals

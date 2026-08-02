@@ -60,18 +60,25 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
                        p.internal_id, batch.id, batch.status)
         return
 
-    p.status = 'CONFIRMED'
-    p.save(update_fields=['status', 'updated_at'])
+    # ONE transaction. These were two independent saves, and the retry guard
+    # above returns as soon as the payment leaves SUBMITTED — so a worker that
+    # died between them left the payment CONFIRMED, the invoice PENDING, and
+    # nothing that would ever revisit it. The invoice must become PAID with
+    # the payment or not at all.
+    from django.db import transaction as _db_tx
+    with _db_tx.atomic():
+        p.status = 'CONFIRMED'
+        p.save(update_fields=['status', 'updated_at'])
 
-    invoice = p.invoice
-    if invoice and invoice.status != 'PAID':
-        invoice.status = 'PAID'
-        invoice.paid_at = timezone.now()
-        invoice.paid_by_user = p.payer_user
-        invoice.paid_by_business = p.payer_business
-        invoice.save(update_fields=[
-            'status', 'paid_at', 'paid_by_user', 'paid_by_business', 'updated_at',
-        ])
+        invoice = p.invoice
+        if invoice and invoice.status != 'PAID':
+            invoice.status = 'PAID'
+            invoice.paid_at = timezone.now()
+            invoice.paid_by_user = p.payer_user
+            invoice.paid_by_business = p.payer_business
+            invoice.save(update_fields=[
+                'status', 'paid_at', 'paid_by_user', 'paid_by_business', 'updated_at',
+            ])
 
     from .bsc_flow import WAD, payment_fee_wei
     gross = Decimal(p.amount)
@@ -95,6 +102,14 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
         'recipient_name': merchant_name,
         'transaction_type': 'payment',
     }
+    # The merchant received gross MINUS the 0.9% fee — this module's own
+    # docstring says "payer -gross, merchant +net" — but both notifications
+    # were built from `amount_str`, the gross. `net` was computed above and
+    # then discarded, so every merchant was told they had received 0.9% more
+    # than the contract actually transferred to them.
+    net_str = f'{net:.2f}'.rstrip('0').rstrip('.')
+    merchant_data = dict(common, amount=net_str, gross_amount=amount_str,
+                         fee_amount=f'{(gross - net):.6f}')
     try:
         if p.merchant_account_user_id:
             notif_utils.create_notification(
@@ -103,8 +118,8 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
                 business=p.merchant_business,
                 notification_type=NotifType.PAYMENT_RECEIVED,
                 title='Pago recibido',
-                message=f'Recibiste {amount_str} {token} de {payer_name}',
-                data=dict(common),
+                message=f'Recibiste {net_str} {token} de {payer_name}',
+                data=merchant_data,
                 related_object_type='PaymentTransaction',
                 related_object_id=str(p.internal_id),
             )
@@ -125,3 +140,51 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
 
     logger.info('[PAY][BSC] %s confirmed (%s %s): %s',
                 p.internal_id, gross, token, p.transaction_hash)
+
+
+@shared_task(name='payments.reconcile_stranded_bsc_payments')
+def reconcile_stranded_bsc_payments():
+    """Repair invoices whose batch outlived the request that broadcast it.
+
+    Two gaps, both leaving a merchant paid on chain and an invoice pending:
+
+    - the sponsor marks the batch 'sent' and the process dies before
+      payment_tx.save(), so the payment keeps its placeholder hash and its
+      PENDING_BLOCKCHAIN status forever. The signed-batch reconciler only
+      recovers rows still in 'signed' and its convergence pass is
+      presale-only, so nothing else looks at this.
+    - the payment reaches SUBMITTED but confirm_bsc_payment is never queued,
+      or exhausts its retries while the receipt worker settles later.
+
+    Both are repaired from the batch, which is the durable record: it is
+    written before broadcast and carries the real hash.
+    """
+    from blockchain.models import SponsoredBatch
+    from .models import PaymentTransaction
+
+    TERMINAL = ('confirmed', 'reverted', 'dropped', 'reorged', 'noop_failed')
+
+    repaired = requeued = 0
+    batches = (SponsoredBatch.objects
+               .filter(kind__in=PAY_KINDS, status__in=('sent',) + TERMINAL)
+               .exclude(source_id=None).order_by('-id')[:300])
+    for batch in batches:
+        p = PaymentTransaction.objects.filter(id=batch.source_id).first()
+        if p is None:
+            continue
+        if p.status == 'PENDING_BLOCKCHAIN':
+            # The lost save. Adopt the batch's hash — it is what executed.
+            p.transaction_hash = batch.tx_hash
+            p.status = 'SUBMITTED'
+            p.save(update_fields=['transaction_hash', 'status', 'updated_at'])
+            repaired += 1
+            logger.warning(
+                '[PAY][BSC] repaired %s: batch %s was %s while the payment was '
+                'still PENDING_BLOCKCHAIN', p.internal_id, batch.id, batch.status)
+        if p.status == 'SUBMITTED' and batch.status in TERMINAL:
+            confirm_bsc_payment.apply_async(args=[p.id, batch.id])
+            requeued += 1
+    if repaired or requeued:
+        logger.info('[PAY][BSC] reconcile: %s repaired, %s re-queued',
+                    repaired, requeued)
+    return {'repaired': repaired, 'requeued': requeued}
