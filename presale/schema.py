@@ -282,6 +282,12 @@ class PrepareBscPresalePurchase(graphene.Mutation):
         description="'direct_cusd' (wallet Confío Dollar) or 'cusd_plus_redeem' "
                     "(savings redeemed inside the same batch)")
     intent_id = graphene.String()  # bytes32 the client binds into its signature
+    # Signing params the SERVER read, so the device makes zero chain calls on
+    # the happy path (see bsc_flow.execution_params for why that's safe).
+    delegate_nonce = graphene.String()
+    is_delegated = graphene.Boolean()
+    account_nonce = graphene.String(description="EOA nonce for the 7702 authorization; only meaningful when isDelegated is false")
+    delegate_address = graphene.String()
 
     @login_required
     def mutate(self, info, amount_usd, accepted_terms, not_us_attestation):
@@ -326,6 +332,10 @@ class PrepareBscPresalePurchase(graphene.Mutation):
             avg_price=res['avg_price'],
             funding_source=res.get('funding_source'),
             intent_id=res['intent_id'],
+            delegate_nonce=res.get('delegate_nonce'),
+            is_delegated=res.get('is_delegated'),
+            account_nonce=res.get('account_nonce'),
+            delegate_address=res.get('delegate_address'),
         )
 
 
@@ -344,6 +354,11 @@ class SubmitBscPresalePurchase(graphene.Mutation):
     success = graphene.Boolean()
     error = graphene.String()
     authorization_required = graphene.Boolean()
+    # Present on the two RETRYABLE failures so the client re-signs without
+    # reading the chain itself.
+    delegate_nonce = graphene.String()
+    is_delegated = graphene.Boolean()
+    account_nonce = graphene.String()
     transaction_hash = graphene.String()
     # See SubmitBscSend.execution in send/schema.py.
     execution = graphene.String(
@@ -389,6 +404,9 @@ class SubmitBscPresalePurchase(graphene.Mutation):
             success=bool(res.get('success')),
             error=res.get('error'),
             authorization_required=bool(res.get('authorization_required')),
+            delegate_nonce=res.get('delegate_nonce'),
+            is_delegated=res.get('is_delegated'),
+            account_nonce=res.get('account_nonce'),
             transaction_hash=res.get('transaction_hash'),
             execution=res.get('execution'),
         )

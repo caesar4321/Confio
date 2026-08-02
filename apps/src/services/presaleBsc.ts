@@ -21,7 +21,6 @@ import {
 } from './evmWallet';
 import {
   delegateNonce,
-  fetchSponsored7702Params,
   isDelegatedTo,
 } from './sponsored7702';
 
@@ -38,6 +37,10 @@ const PREPARE = gql`
       avgPrice
       fundingSource
       intentId
+      delegateNonce
+      isDelegated
+      accountNonce
+      delegateAddress
     }
   }
 `;
@@ -50,6 +53,9 @@ const SUBMIT = gql`
       authorizationRequired
       transactionHash
       execution
+      delegateNonce
+      isDelegated
+      accountNonce
     }
   }
 `;
@@ -77,10 +83,6 @@ export const buyPresaleBsc = async (
   const { installBscServerTransport } = await import('./bscServerRpc');
   installBscServerTransport();
 
-  const sponsored = await fetchSponsored7702Params();
-  if (!sponsored.enabled || !sponsored.delegateAddress) {
-    throw new Error('sponsored_rail_unavailable');
-  }
   const wallet = await getActiveEvmWallet();
 
   const { data } = await apolloClient.mutate({
@@ -100,15 +102,21 @@ export const buyPresaleBsc = async (
     data: c.data,
   }));
 
+  const delegateAddress: string = prep.delegateAddress;
+  if (!delegateAddress) throw new Error('sponsored_rail_unavailable');
+
+  // ZERO chain reads on the happy path: prepare already returned the signing
+  // params, because the server had to read them anyway (submit re-checks
+  // delegation and the authorization's live account nonce before it
+  // broadcasts). Every one of these is an execution parameter whose only
+  // failure mode is a revert or a silent no-op — both server-detected — so
+  // taking them from the server can cost a retry, never funds.
+  let execNonce = BigInt(prep.delegateNonce ?? '0');
+  let delegated = !!prep.isDelegated;
+  let accountNonce = BigInt(prep.accountNonce ?? '0');
+
   let lastError = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
-    // Independent reads, so pay for ONE round trip instead of two — each is
-    // a phone→server→BSC hop and both are always needed. The account nonce
-    // stays conditional: it's read only on a first-ever (undelegated) call.
-    const [execNonce, delegated] = await Promise.all([
-      delegateNonce(wallet.address),
-      isDelegatedTo(wallet.address, sponsored.delegateAddress),
-    ]);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
     const digest = hashBatchIntent(calls, execNonce, deadline, prep.intentId, wallet.address);
@@ -119,9 +127,8 @@ export const buyPresaleBsc = async (
     // SetCodeAuthorization's shape matches BscPresaleAuthorizationInput.
     let authorization;
     if (!delegated) {
-      const accountNonce = await bscGetNonce(wallet.address);
       authorization = signSetCodeAuthorization(
-        sponsored.delegateAddress, accountNonce, wallet.privKeyHex);
+        delegateAddress, accountNonce, wallet.privKeyHex);
     }
 
     const res = await apolloClient.mutate({
@@ -137,8 +144,26 @@ export const buyPresaleBsc = async (
     const sub = res.data?.submitBscPresalePurchase;
     if (!sub?.success) {
       lastError = sub?.error || 'sponsor rejected';
-      // Nonce races are retryable with fresh reads; policy errors are not.
-      if (sub?.authorizationRequired || sub?.error === 'stale_auth_nonce') continue;
+      // Nonce races are retryable with FRESH params; policy errors are not.
+      if (sub?.authorizationRequired || sub?.error === 'stale_auth_nonce') {
+        if (sub.delegateNonce != null) {
+          // The server re-read them when it rejected us — no chain hop.
+          execNonce = BigInt(sub.delegateNonce);
+          delegated = !!sub.isDelegated;
+          accountNonce = BigInt(sub.accountNonce ?? '0');
+        } else {
+          // Server couldn't read them (RPC blip): fall back to reading the
+          // chain ourselves, which now goes through our own transport.
+          const [freshNonce, freshDelegated] = await Promise.all([
+            delegateNonce(wallet.address),
+            isDelegatedTo(wallet.address, delegateAddress),
+          ]);
+          execNonce = freshNonce;
+          delegated = freshDelegated;
+          if (!freshDelegated) accountNonce = await bscGetNonce(wallet.address);
+        }
+        continue;
+      }
       throw new Error(lastError);
     }
 

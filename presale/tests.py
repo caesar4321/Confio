@@ -173,7 +173,10 @@ class BscPurchaseFlowTest(TestCase):
         }
         def fake_call(to, data):
             return answers[data[2:10]]
-        with mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_call):
+        exec_stub = {'delegate_nonce': '0', 'is_delegated': False,
+                     'account_nonce': '7', 'delegate_address': '0x' + 'cc' * 20}
+        with mock.patch.object(bsc_flow, 'execution_params', return_value=exec_stub), \
+             mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_call):
             return bsc_flow.prepare_purchase(self.user, self.account, amount, **defaults)
 
     def test_prepare_gates(self):
@@ -294,7 +297,10 @@ class BscRedeemFundingTest(TestCase):
             }[data[:10]]
 
         shares_held = int((Decimal(shares_held_usd) / Decimal('1.05')) * self.WAD)
-        with mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_eth_call), \
+        exec_stub = {'delegate_nonce': '0', 'is_delegated': False,
+                     'account_nonce': '7', 'delegate_address': '0x' + 'cc' * 20}
+        with mock.patch.object(bsc_flow, 'execution_params', return_value=exec_stub), \
+             mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_eth_call), \
              mock.patch.object(cplus, 'sweepable_usdt_wei', return_value=int(Decimal(spendable_usd) * self.WAD)), \
              mock.patch.object(cplus, 'vault_address', return_value=self.SAVINGS_VAULT), \
              mock.patch.object(cplus, 'erc20_balance_raw', return_value=shares_held), \

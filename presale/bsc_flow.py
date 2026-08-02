@@ -42,6 +42,45 @@ BSC_FUNDING_SOURCES = ('direct_cusd', 'cusd_plus_redeem')
 SEL_QUOTE_TOKENS = '0x' + keccak(text='quoteTokens(uint256)')[:4].hex()
 SEL_QUOTE_COST = '0x' + keccak(text='quoteCost(uint256)')[:4].hex()
 SEL_BALANCE_OF = '0x' + keccak(text='balanceOf(address)')[:4].hex()
+SEL_NONCES = '0x' + keccak(text='nonces()')[:4].hex()
+
+
+def execution_params(user_addr: str) -> dict:
+    """Everything the client needs to SIGN, so the device reads no chain.
+
+    The server performs these reads anyway (submit re-checks delegation and
+    the authorization's account nonce), so having the phone repeat them was
+    pure duplicate latency — and, before the server transport landed, a
+    third-party node learning the user's address.
+
+    Trusting the server here is safe: every one of these is an EXECUTION
+    parameter whose only failure mode is a revert or a silent no-op, both of
+    which the server already detects and reports.
+      - delegate nonce: the delegate requires nonce == current, so a wrong
+        one reverts (BadNonce). It cannot redirect funds — the calls are
+        server-built and the intent binds intentId to THIS purchase.
+      - delegated: wrong either way costs at most one wasted sponsor tx
+        (the sponsor griefing its own BNB); noop_failed catches it.
+      - account nonce: submit re-reads the LIVE nonce and rejects a stale
+        authorization before broadcasting.
+    """
+    from cusd_plus import sponsor_7702
+    from cusd_plus.tasks import _rpc
+
+    delegated = sponsor_7702.is_delegated(user_addr)
+    # nonces() on a not-yet-delegated EOA returns empty data — that IS nonce 0.
+    delegate_nonce = _eth_call(user_addr, SEL_NONCES)
+    # Only a first-ever (undelegated) call needs the 7702 authorization tuple.
+    account_nonce = (
+        0 if delegated
+        else int(_rpc('eth_getTransactionCount', [user_addr, 'pending']), 16)
+    )
+    return {
+        'delegate_nonce': str(delegate_nonce),
+        'is_delegated': delegated,
+        'account_nonce': str(account_nonce),
+        'delegate_address': sponsor_7702.delegate_address(),
+    }
 
 
 def presale_vault_address() -> str:
@@ -219,6 +258,7 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         if q_wei <= 0:
             return {'success': False, 'error': 'sold_out'}
         cost_wei = _eth_call(vault, SEL_QUOTE_COST + _uint_word(q_wei))
+        exec_params = execution_params(user_addr)
     except Exception as exc:  # noqa: BLE001
         logger.warning('[PRESALE][BSC] quote rpc failed: %s', exc)
         return {'success': False, 'error': 'quote_unavailable'}
@@ -339,6 +379,7 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         'avg_price': str(avg_price),
         'funding_source': plan['source'],
         'intent_id': intent_id_hex('presale_buy', purchase.id),
+        **exec_params,
     }
 
 
@@ -388,6 +429,18 @@ def _validate_presale_batch(calls: list, purchase) -> None:
         raise PolicyError('bad_calldata')
 
 
+def _retry_params(user_addr: str) -> dict:
+    """Fresh signing params attached to the two RETRYABLE submit failures, so
+    the client can re-sign without going to the chain itself. Best effort: if
+    the read fails the client falls back to reading them (through our own
+    RPC transport), which is the old behavior."""
+    try:
+        return execution_params(user_addr)
+    except Exception:  # noqa: BLE001
+        logger.warning('[PRESALE][BSC] retry params unavailable for %s', user_addr)
+        return {}
+
+
 def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature: str,
                     authorization=None, client_ip=None, ip_country_hint=None) -> dict:
     from cusd_plus import sponsor_7702
@@ -430,16 +483,52 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
         if not sponsor_7702.is_delegated(user_addr):
             if authorization is None:
                 return {'success': False, 'error': 'authorization_required',
-                        'authorization_required': True}
+                        'authorization_required': True,
+                        **_retry_params(user_addr)}
             auth_dict = sponsor_7702.normalize_and_validate_authorization(
                 authorization, user_addr, chain_id)
 
-        tx_hash, batch = sponsor_7702.send_sponsored_batch(
-            user, user_addr, calls, int(nonce), int(deadline),
-            intent_signature, auth_dict, 'presale_buy', source_id=purchase.id)
+        # REPLAY GUARD. A successful broadcast below sets only
+        # transaction_hash; the row stays 'processing' until
+        # confirm_bsc_presale_purchase runs 8s later (longer if the queue
+        # lags, indefinitely while it retries). The guard at the top of this
+        # function only tests that status, so without this the same prepared
+        # batch could be re-signed with a fresh delegate nonce and executed
+        # again — redeeming the user's savings and calling buy() twice while
+        # the database books one purchase, which also walks past the per-user
+        # presale limits.
+        #
+        # Two layers because they cover different races: SponsoredBatch is
+        # written BEFORE broadcast (durable, survives a cache flush) and
+        # cache.add is atomic (covers two requests in flight at once).
+        # Terminal-FAILED batches are deliberately not counted — reverted /
+        # noop_failed / dropped are exactly the cases the user must retry,
+        # and the delegate's monotonic nonce makes that safe.
+        from django.core.cache import cache
+
+        from blockchain.models import SponsoredBatch
+        if SponsoredBatch.objects.filter(
+            kind='presale_buy', source_id=purchase.id,
+            status__in=('signed', 'sent', 'confirmed'),
+        ).exists():
+            return {'success': False, 'error': 'purchase_already_submitted'}
+        claim_key = f'presale_bsc_submit_{purchase.id}'
+        if not cache.add(claim_key, 1, 600):
+            return {'success': False, 'error': 'purchase_already_submitting'}
+
+        try:
+            tx_hash, batch = sponsor_7702.send_sponsored_batch(
+                user, user_addr, calls, int(nonce), int(deadline),
+                intent_signature, auth_dict, 'presale_buy', source_id=purchase.id)
+        except Exception:
+            # Nothing was broadcast (or it failed outright) — let the user
+            # retry rather than stranding the purchase behind a stale claim.
+            cache.delete(claim_key)
+            raise
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
-            return {'success': False, 'error': exc.code, 'authorization_required': True}
+            return {'success': False, 'error': exc.code, 'authorization_required': True,
+                    **_retry_params(user_addr)}
         return {'success': False, 'error': exc.code}
     except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
         logger.exception('[PRESALE][BSC] sponsored buy failed for purchase %s', purchase.id)
