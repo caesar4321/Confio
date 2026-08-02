@@ -230,12 +230,14 @@ class PresaleQueries(graphene.ObjectType):
         user = info.context.user
 
         def _db_owned() -> float:
-            total = sum(
-                (p.confio_amount for p in PresalePurchase.objects.filter(
-                    user=user, status='completed').only('confio_amount')),
-                Decimal('0'),
-            )
-            return float(total)
+            # Aggregate in the DB: a user with a long purchase history would
+            # otherwise pull every row into Python for a sum (Codex audit
+            # 2026-08-02, P2).
+            from django.db.models import Sum
+            total = PresalePurchase.objects.filter(
+                user=user, status='completed',
+            ).aggregate(s=Sum('confio_amount'))['s']
+            return float(total or 0)
 
         try:
             vault = (getattr(dj_settings, 'BSC_PRESALE_VAULT_ADDRESS', '') or '').lower()
@@ -255,10 +257,26 @@ class PresaleQueries(graphene.ObjectType):
             def call(sig: str) -> int:
                 return _eth_call(vault, '0x' + keccak(text=sig)[:4].hex() + _addr_word(bsc_address))
 
-            purchased = call('purchased(address)') / 10 ** 18
-            claimed = call('claimed(address)') / 10 ** 18
-            claimable = call('claimableOf(address)') / 10 ** 18
-            unlocked = _eth_call(vault, '0x' + keccak(text='claimsUnlocked()')[:4].hex())
+            from django.core.cache import cache
+
+            cache_key = f'presale:onchain_info:{bsc_address}'
+            try:
+                purchased = call('purchased(address)') / 10 ** 18
+                claimed = call('claimed(address)') / 10 ** 18
+                claimable = call('claimableOf(address)') / 10 ** 18
+                unlocked = bool(_eth_call(vault, '0x' + keccak(text='claimsUnlocked()')[:4].hex()))
+                # Keep the last GOOD read: an RPC blip used to report
+                # claimable=0, which the app renders as "nothing to claim" and
+                # disables the button — hiding real funds instead of showing a
+                # transient error (Codex audit 2026-08-02, P2).
+                cache.set(cache_key, (purchased, claimed, claimable, unlocked), 24 * 3600)
+            except Exception:
+                logger.warning('[PRESALE] onchain read failed for %s; serving last known', bsc_address)
+                last = cache.get(cache_key)
+                if last is None:
+                    raise
+                purchased, claimed, claimable, unlocked = last
+
             # A migration credit that hasn't been assigned on-chain yet still
             # belongs to the user — show the DB figure so nobody thinks their
             # purchase vanished while the Safe batch is pending.
@@ -266,7 +284,7 @@ class PresaleQueries(graphene.ObjectType):
                 purchased=max(purchased, _db_owned()),
                 claimed=claimed,
                 claimable=claimable,
-                locked=not bool(unlocked),
+                locked=not unlocked,
             )
         except Exception:
             logger.exception('[PRESALE] onchain info read failed for user %s', getattr(user, 'id', None))

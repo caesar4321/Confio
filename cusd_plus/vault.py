@@ -114,6 +114,8 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
     """
     from decimal import Decimal
 
+    from django.db.models import Sum
+
     total = Decimal(0)
     addr = (bsc_address or '').lower()
     if not addr:
@@ -124,7 +126,11 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
         pending = SendTransaction.objects.filter(
             sender_user=user, status='PENDING', token_type='USDT',
         ).exclude(bsc_calls_json='')
-        for row in pending.only('amount', 'bsc_calls_json')[:100]:
+        # No slice: a capped scan silently stopped reserving the 101st pending
+        # send, and that USDT then read back as sweepable (Codex audit
+        # 2026-08-02, P2). Row-wise is required here because the kind lives
+        # inside the JSON blob.
+        for row in pending.only('amount', 'bsc_calls_json').iterator():
             import json
             try:
                 if json.loads(row.bsc_calls_json or '{}').get('kind') == 'send_usdt':
@@ -137,24 +143,22 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
 
     try:
         from ramps.models import RampTransaction
-        orders = RampTransaction.objects.filter(
+        orders_total = RampTransaction.objects.filter(
             direction='off_ramp', destination='cusd_plus',
             status__in=('PENDING', 'PROCESSING'), actor_address__iexact=bsc_address,
-        ).only('crypto_amount_estimated')[:50]
-        for order in orders:
-            total += Decimal(str(order.crypto_amount_estimated or 0))
+        ).aggregate(s=Sum('crypto_amount_estimated'))['s']
+        total += Decimal(str(orders_total or 0))
     except Exception:  # noqa: BLE001
         logger.exception('reserved usdt: ramp orders unreadable')
         raise
 
     try:
         from conversion.models import Conversion
-        sagas = Conversion.objects.filter(
+        sagas_total = Conversion.objects.filter(
             conversion_type='to_savings', user_bsc_address__iexact=bsc_address,
             status__in=Conversion.IN_FLIGHT_STATUSES, is_deleted=False,
-        ).only('to_amount')[:50]
-        for saga in sagas:
-            total += Decimal(str(saga.to_amount or 0))
+        ).aggregate(s=Sum('to_amount'))['s']
+        total += Decimal(str(sagas_total or 0))
     except Exception:  # noqa: BLE001
         logger.exception('reserved usdt: in-flight sagas unreadable')
         raise

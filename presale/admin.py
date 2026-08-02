@@ -1225,10 +1225,30 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
     mark_as_completed.short_description = "Mark as completed"
     
     def mark_as_failed(self, request, queryset):
-        updated = queryset.filter(status__in=['pending', 'processing']).update(
-            status='failed'
+        # Enforce the invariant instead of losing to it. A purchase with a LIVE
+        # sponsored batch may have executed on chain, and the reconciler will
+        # converge it straight back to 'processing' — so failing it here would
+        # look like it worked and then silently undo itself. Refuse those and
+        # say why; the batch settling is what resolves them.
+        from blockchain.models import SponsoredBatch
+        candidates = queryset.filter(status__in=['pending', 'processing'])
+        live_ids = set(
+            SponsoredBatch.objects.filter(
+                kind='presale_buy',
+                source_id__in=list(candidates.values_list('id', flat=True)),
+                status__in=('signed', 'sent', 'confirmed'),
+            ).values_list('source_id', flat=True)
         )
+        updated = candidates.exclude(id__in=live_ids).update(status='failed')
         self.message_user(request, f"{updated} purchase(s) marked as failed.")
+        if live_ids:
+            self.message_user(
+                request,
+                f"{len(live_ids)} purchase(s) skipped: a sponsored batch is still "
+                f"live for them, so they may have executed on chain. Let the batch "
+                f"settle (or resolve the batch first) instead of failing them here.",
+                level='WARNING',
+            )
     mark_as_failed.short_description = "Mark as failed"
 
 
@@ -1358,11 +1378,24 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
         return False
 
     def unlock_claims_and_finish_presale(self, request, queryset):
-        """Mark all presale phases as completed, disable presale, unlock on-chain claims, and set timestamps."""
+        """Finish the presale and open claims. DB-ONLY — claims are BSC-only.
+
+        This action used to also call the Algorand contract's irreversible
+        on-chain unlock. That call sets locked=0 FOREVER, and once made any
+        opted-in buyer can self-fund a claim transaction with no server
+        involvement — so the refusal in presale/ws_consumers.py would not stop
+        them, and a buyer whose allocation was already carried to BSC by
+        creditMigrated could claim the same paid CONFIO on BOTH chains
+        (Codex audit 2026-08-02, P1).
+
+        The on-chain locked=1 is what actually enforces the one-chain rule, so
+        nothing here may flip it. $CONFIO exists only on BSC; opening claims
+        means wiring the token into ConfioPresaleVault and calling
+        unlockClaims() from the 3-of-5 Safe — a deliberate multisig action,
+        not an admin button.
+        """
         from django.utils import timezone
-        from django.conf import settings as dj_settings
         try:
-            # Update DB first (idempotent)
             from .models import PresalePhase, PresaleSettings
             PresalePhase.objects.exclude(status='completed').update(status='completed')
             settings_obj = PresaleSettings.get_settings()
@@ -1373,42 +1406,16 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
             settings_obj.claims_unlocked_at = timezone.now()
             settings_obj.save()
 
-            # Attempt on-chain permanent unlock (best-effort; report errors clearly)
-            app_id = getattr(dj_settings, 'ALGORAND_PRESALE_APP_ID', 0)
-            confio_id = getattr(dj_settings, 'ALGORAND_CONFIO_ASSET_ID', 0)
-            cusd_id = getattr(dj_settings, 'ALGORAND_CUSD_ASSET_ID', 0)
-            if not app_id or not confio_id or not cusd_id:
-                self.message_user(request, 'On-chain unlock skipped: missing PRESALE APP/ASSET IDs or admin signer', level='warning')
-            else:
-                try:
-                    from contracts.presale.admin_presale import PresaleAdmin as _PresaleAdmin
-                    from blockchain.kms_manager import get_kms_signer_from_settings
-                    signer = get_kms_signer_from_settings()
-                    pa = _PresaleAdmin(int(app_id), int(confio_id), int(cusd_id))
-                    # Ensure algod client uses Django settings (works with hosted providers)
-                    try:
-                        from algosdk.v2client import algod as _algod
-                        _addr = getattr(dj_settings, 'ALGORAND_ALGOD_ADDRESS', '')
-                        _tok = getattr(dj_settings, 'ALGORAND_ALGOD_TOKEN', '')
-                        ua = {'User-Agent': 'confio-admin/algosdk'}
-                        if 'nodely' in (_addr or '').lower() and (_tok or ''):
-                            headers = {**ua, 'X-API-Key': _tok}
-                            pa.algod_client = _algod.AlgodClient('', _addr, headers=headers)
-                        else:
-                            pa.algod_client = _algod.AlgodClient(_tok, _addr, headers=ua)
-                    except Exception:
-                        pass
-                    admin_addr = signer.address
-                    # Do not prompt (automation-friendly)
-                    pa.permanent_unlock(admin_address=admin_addr, admin_sk=signer, skip_confirmation=True)
-                    self.message_user(request, 'On-chain permanent unlock executed successfully.')
-                except Exception as chain_e:
-                    self.message_user(request, f'On-chain unlock attempt failed: {chain_e}', level='error')
-
-            self.message_user(request, 'Presale marked finished and claims unlocked.')
+            self.message_user(
+                request,
+                'Presale marked finished and claims unlocked in the DB. '
+                'Algorand claims stay permanently locked on-chain; CONFIO is '
+                'claimed on BSC only, which the Safe opens via '
+                'ConfioPresaleVault.unlockClaims().',
+            )
         except Exception as e:
             self.message_user(request, f'Failed to unlock claims: {e}', level='error')
-    unlock_claims_and_finish_presale.short_description = 'Finish presale and unlock user claims (on-chain + DB)'
+    unlock_claims_and_finish_presale.short_description = 'Finish presale and unlock user claims (DB only - Algorand stays locked)'
 
 
 @admin.register(PresaleWaitlist)
