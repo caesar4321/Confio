@@ -190,6 +190,17 @@ class UnifiedTransactionTable(models.Model):
         ('USD_VALUE', 'Dollar value at the time of the transaction'),
         ('SHARES', 'Accruing-vault share count'),
     ]
+    # A fee makes one row mean two different numbers: the payer is debited
+    # `amount`, the recipient is credited `amount - fee_amount`. One shared
+    # value cannot express both, and writing either one alone misreports the
+    # other side — a merchant billed 100 was told they received 100 while the
+    # contract transferred 99.10. Store the gross and the fee; each viewer's
+    # figure is derived from their own side of the transaction.
+    fee_amount = models.CharField(
+        max_length=32, blank=True, default='',
+        help_text="Fee deducted from `amount` before the recipient is credited. "
+                  "Blank means no fee: both sides see `amount`.",
+    )
     amount_denomination = models.CharField(
         max_length=16, choices=AMOUNT_DENOMINATIONS, default='TOKEN_UNITS',
         help_text='Unit of `amount`. Every current cUSD+ writer stores a '
@@ -312,6 +323,28 @@ class UnifiedTransactionTable(models.Model):
         if canonical == 'CUSD_PLUS' and self.amount_denomination == 'TOKEN_UNITS':
             self.amount_denomination = 'USD_VALUE'
         super().save(*args, **kwargs)
+
+    def amount_for_direction(self, direction):
+        """What THIS side of the transaction actually moved.
+
+        The payer parts with the gross; the recipient receives the gross less
+        the fee. Returns a string so callers can keep treating amounts as the
+        opaque decimal strings the rest of this table uses.
+        """
+        if direction != 'received' or not self.fee_amount:
+            return str(self.amount)
+        try:
+            from decimal import Decimal
+            net = Decimal(str(self.amount)) - Decimal(str(self.fee_amount))
+            if net < 0:
+                logger.error(
+                    'unified %s: fee %s exceeds amount %s — showing gross',
+                    self.pk, self.fee_amount, self.amount)
+                return str(self.amount)
+            return format(net.normalize(), 'f')
+        except Exception:  # noqa: BLE001 — a display helper must not raise
+            logger.exception('unified %s: bad fee_amount %r', self.pk, self.fee_amount)
+            return str(self.amount)
 
     def get_direction_for_address(self, address):
         """

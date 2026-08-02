@@ -188,7 +188,11 @@ class UnifiedTransactionType(DjangoObjectType):
                 if direction == 'sent':
                     return f'-{self.amount}'
                 elif direction == 'received':
-                    return f'+{self.amount}'
+                    # Net of any fee: the recipient is credited what actually
+                    # reached them, not the invoice's face value. The app
+                    # prefers displayAmount over amount, so this corrects
+                    # every build already in the field.
+                    return f'+{self.amount_for_direction("received")}'
         except Exception as e:
             print(f"Error in resolve_display_amount: {e}")
         return str(self.amount)

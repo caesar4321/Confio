@@ -74,6 +74,28 @@ def create_unified_transaction_from_send(send_transaction):
         return None
 
 
+def _payment_fee_amount(payment_transaction) -> str:
+    """The platform fee deducted before the merchant is credited.
+
+    Derived with the SAME ceiling arithmetic the contract and the confirmer
+    use (payments/bsc_flow.payment_fee_wei), so the ledger's net matches the
+    transfer to the wei rather than approximating it. Returns '' when there
+    is no fee, which is how the ledger says "both sides see the same amount".
+    """
+    try:
+        from decimal import Decimal
+        from payments.bsc_flow import WAD, payment_fee_wei
+        gross = Decimal(str(payment_transaction.amount or 0))
+        if gross <= 0:
+            return ''
+        fee = Decimal(payment_fee_wei(int(gross * WAD))) / WAD
+        return format(fee.quantize(Decimal('0.000001')).normalize(), 'f')
+    except Exception:  # noqa: BLE001 — never block the ledger row on this
+        logger.exception('payment fee derivation failed for %s',
+                         getattr(payment_transaction, 'id', '?'))
+        return ''
+
+
 def create_unified_transaction_from_payment(payment_transaction):
     """Create or update UnifiedTransactionTable from PaymentTransaction"""
     try:
@@ -87,6 +109,11 @@ def create_unified_transaction_from_payment(payment_transaction):
             defaults={
                 'transaction_type': 'payment',
                 'amount': payment_transaction.amount,
+                # The payer is debited this gross; the merchant is credited
+                # gross minus the platform fee. Recording the fee lets each
+                # side be shown its own figure from one row — previously the
+                # merchant's card and balance claimed the full invoice amount.
+                'fee_amount': _payment_fee_amount(payment_transaction),
                 # Normalize to uppercase to align with filters and choices
                 'token_type': (payment_transaction.token_type or '').upper(),
                 'status': 'CONFIRMED' if payment_transaction.status == 'PAID' else payment_transaction.status,
