@@ -170,13 +170,19 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             try:
                 amount = content.get("amount")
                 platform = content.get("platform", "")
-                has_accepted_terms_field = "accepted_terms" in content
-                accepted_terms = bool(content.get("accepted_terms")) if has_accepted_terms_field else True
+                # OMISSION IS NOT CONSENT (Codex audit 2026-08-02, P1). This
+                # used to read `... if "accepted_terms" in content else True`,
+                # which turned leaving the field out into acceptance — and the
+                # unconditional check in _prepare could never fire, while the
+                # purchase was stored with no terms version, timestamp, IP or
+                # user agent. Every shipped client sends accepted_terms=true,
+                # so absence means a hand-rolled caller, not an old app.
+                accepted_terms = bool(content.get("accepted_terms"))
                 has_not_us_field = "not_us_attestation" in content
                 not_us_attestation = bool(content.get("not_us_attestation")) if has_not_us_field else False
                 try:
                     logging.getLogger(__name__).info(
-                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms} not_us_attestation={not_us_attestation} legacy_client={not has_accepted_terms_field}"
+                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms} not_us_attestation={not_us_attestation}"
                     )
                 except Exception:
                     pass
@@ -184,7 +190,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                     amount,
                     platform=platform,
                     accepted_terms=accepted_terms,
-                    require_terms=has_accepted_terms_field,
+                    require_terms=True,
                     not_us_attestation=not_us_attestation,
                     require_not_us_attestation=has_not_us_field,
                     client_ip=self._get_client_ip(),
@@ -870,6 +876,14 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import base64, json
         # Do not wait for confirmation in request path
 
+        # The kill switch covers SUBMIT too, not just prepare: a group signed
+        # moments before closure stays valid for the rest of its Algorand
+        # window, so gating only prepare let a purchase (or sponsor-funded
+        # opt-in) land after the cutoff (Codex audit 2026-08-02, P1).
+        if _algorand_presale_closed():
+            return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
+
+
         if not isinstance(signed_transactions, list) or not signed_transactions:
             return {"success": False, "error": "signed_transactions_required"}
 
@@ -938,6 +952,14 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import base64
         import msgpack
         from django.conf import settings as _dj_settings
+
+        # The kill switch covers SUBMIT too, not just prepare: a group signed
+        # moments before closure stays valid for the rest of its Algorand
+        # window, so gating only prepare let a purchase (or sponsor-funded
+        # opt-in) land after the cutoff (Codex audit 2026-08-02, P1).
+        if _algorand_presale_closed():
+            return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
+
 
         # Load purchase
         try:

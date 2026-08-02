@@ -165,14 +165,17 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
         # second prepare — must not spend it first. Reserving the full amount
         # slightly over-reserves a redeem-funded buy; that is the safe
         # direction, and abandon_stale_bsc_purchases releases it after 24h.
+        from django.db.models import Sum
         from presale.bsc_flow import BSC_FUNDING_SOURCES
         from presale.models import PresalePurchase
-        buys = PresalePurchase.objects.filter(
+        # Aggregate, never slice: a [:50] cap silently stopped reserving the
+        # 51st prepared purchase, so USDT already promised to it read back as
+        # sweepable and could be minted away (Codex audit 2026-08-02, P2).
+        pending_buys = PresalePurchase.objects.filter(
             user=user, status='processing', transaction_hash__isnull=True,
             funding_source__in=BSC_FUNDING_SOURCES,
-        ).only('cusd_amount')[:50]
-        for buy in buys:
-            total += Decimal(str(buy.cusd_amount or 0))
+        ).aggregate(s=Sum('cusd_amount'))['s']
+        total += Decimal(str(pending_buys or 0))
     except Exception:  # noqa: BLE001
         logger.exception('reserved usdt: in-flight presale buys unreadable')
         raise

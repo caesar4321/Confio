@@ -1550,13 +1550,22 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         p.completed_at = dj_tz.now()
                     p.save(update_fields=['status', 'completed_at'])
 
-                    # Update user's phase limit tally
+                    # Update user's phase limit tally.
+                    # Locked read-modify-write: this ran unlocked, so it could
+                    # overwrite the increment the BSC confirm task had just
+                    # made under ITS lock — leaving total_purchased understated
+                    # and the per-user cap spendable twice. Both rails settle
+                    # into this one row, so both must take the lock
+                    # (Codex audit 2026-08-02, P1).
                     try:
+                        from django.db import transaction as dj_transaction
                         from presale.models import UserPresaleLimit
-                        upl, _ = UserPresaleLimit.objects.get_or_create(user=p.user, phase=p.phase)
-                        upl.total_purchased = (upl.total_purchased or Decimal('0')) + (p.cusd_amount or Decimal('0'))
-                        upl.last_purchase_at = dj_tz.now()
-                        upl.save(update_fields=['total_purchased', 'last_purchase_at'])
+                        with dj_transaction.atomic():
+                            upl, _ = UserPresaleLimit.objects.get_or_create(user=p.user, phase=p.phase)
+                            upl = UserPresaleLimit.objects.select_for_update().get(pk=upl.pk)
+                            upl.total_purchased = (upl.total_purchased or Decimal('0')) + (p.cusd_amount or Decimal('0'))
+                            upl.last_purchase_at = dj_tz.now()
+                            upl.save(update_fields=['total_purchased', 'last_purchase_at'])
                     except Exception as le:
                         logger.warning(f"Failed updating presale user limit for {p.user_id}: {le}")
 

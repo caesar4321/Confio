@@ -217,6 +217,14 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
         # leave a completed purchase that never counted.
         from django.db import transaction
         with transaction.atomic():
+            # Re-read the purchase UNDER LOCK. The status check above ran on a
+            # copy fetched before this transaction, so two Celery deliveries of
+            # the same task could both pass it and each add the amount again
+            # (Codex audit 2026-08-02, P2). Whoever gets the lock second sees
+            # 'completed' and leaves.
+            purchase = PresalePurchase.objects.select_for_update().get(id=purchase.id)
+            if purchase.status != 'processing':
+                return
             upl, _ = UserPresaleLimit.objects.get_or_create(
                 user=purchase.user, phase=purchase.phase)
             upl = UserPresaleLimit.objects.select_for_update().get(pk=upl.pk)
@@ -228,7 +236,26 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
                 status='CONFIRMED', transaction_hash=batch.tx_hash,
             )
         logger.info('[PRESALE][BSC] purchase %s confirmed: %s', purchase.id, batch.tx_hash)
-    else:  # reverted / noop_failed
+    else:  # reverted / noop_failed / dropped
+        # A terminal batch frees this purchase's uniqueness slot, so the user
+        # may already have retried and be mid-flight on a NEW batch. This task
+        # is scheduled after the terminalisation (reconcile_signed_batches
+        # marks 'dropped' and enqueues us ten seconds later), so by the time we
+        # run the replacement can exist — and failing the purchase here would
+        # book an executing buy as failed, while the replacement's own confirm
+        # would then see a non-processing row and return. Defer to the live
+        # batch; whichever one settles resolves the purchase.
+        from blockchain.models import SponsoredBatch
+        newer = SponsoredBatch.objects.filter(
+            kind='presale_buy', source_id=purchase.id,
+            status__in=('signed', 'sent', 'confirmed'),
+        ).exclude(pk=batch.pk).exists()
+        if newer:
+            logger.info(
+                '[PRESALE][BSC] batch %s is %s but purchase %s has a live '
+                'replacement — leaving it processing',
+                batch.id, batch.status, purchase.id)
+            return
         purchase.status = 'failed'
         purchase.notes = (purchase.notes or '') + f'\n[Error] batch {batch.status}: {batch.tx_hash}'
         purchase.save(update_fields=['status', 'notes'])
@@ -256,13 +283,33 @@ def abandon_stale_bsc_purchases() -> dict:
     # left an unsigned cusd_plus_redeem row 'processing' forever, permanently
     # subtracting its amount from sweepableUsdtUsd. The auto-mint then finds
     # nothing to sweep and the user's deposits silently stop converting.
+    #
+    # "No tx hash" does NOT prove nothing was broadcast. send_sponsored_batch
+    # flips its row to 'sent' and submit_purchase saves the hash separately —
+    # a crash between those leaves an EXECUTED purchase with a null hash, and
+    # failing it here would tell the user their money did nothing while the
+    # chain says otherwise. An active SponsoredBatch is the durable proof, so
+    # those rows are left for reconciliation instead of being reaped.
+    # Exists(), NOT `id__in=...values('source_id')`. source_id is nullable, so
+    # a single NULL in that subquery makes `id NOT IN (…)` evaluate to UNKNOWN
+    # for EVERY candidate row in PostgreSQL — silently disabling this reaper
+    # completely. A correlated EXISTS has no such trap.
+    from django.db.models import Exists, OuterRef
+
+    from blockchain.models import SponsoredBatch
+
     from .bsc_flow import BSC_FUNDING_SOURCES
+    live_batch = SponsoredBatch.objects.filter(
+        kind='presale_buy',
+        source_id=OuterRef('pk'),
+        status__in=('signed', 'sent', 'confirmed'),
+    )
     stale = PresalePurchase.objects.filter(
         status='processing',
         funding_source__in=BSC_FUNDING_SOURCES,
         transaction_hash__isnull=True,
         created_at__lt=cutoff,
-    )
+    ).annotate(_live_batch=Exists(live_batch)).filter(_live_batch=False)
     ids = list(stale.values_list('id', flat=True))
     updated = stale.update(status='failed')
     if updated:
