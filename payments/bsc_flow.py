@@ -230,6 +230,17 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     # Algorand group. One authority, checked on both rails.
     if getattr(invoice, 'settlement_chain', 'ALGORAND') != 'BSC':
         return {'success': False, 'error': 'invoice_not_bsc'}
+    # The invoice can be edited between prepare and submit; only the rail was
+    # re-checked. Everything the payer agreed to is re-checked here.
+    if not _invoice_terms_unchanged(invoice, payment_tx):
+        logger.warning('[PAY][BSC] invoice %s changed after preparation — refusing',
+                       invoice.internal_id)
+        return {'success': False, 'error': 'invoice_terms_changed'}
+    # And the payer's authority can be revoked in that same window.
+    if not _payer_still_authorized(user, payment_tx):
+        logger.warning('[PAY][BSC] user %s no longer authorized to spend from the '
+                       'payer account for invoice %s', user.id, invoice.internal_id)
+        return {'success': False, 'error': 'not_authorized'}
     invoice_token = (invoice.token_type or '').upper()
     if invoice_token not in DOLLAR_INVOICE_TOKENS and invoice_token != 'CONFIO':
         return {'success': False, 'error': 'unsupported_token'}
@@ -448,6 +459,75 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         'fee': str(Decimal(fee_wei) / WAD),
         'intent_id': intent_id_hex(kind, payment_tx.id),
     }
+
+
+def _payer_still_authorized(user, payment_tx) -> bool:
+    """Is this user STILL allowed to spend from the payer account?
+
+    prepare ran the full JWT business gate; submit only checked that the row
+    belonged to the same user. Between the two, an employee can be
+    deactivated, demoted, or have send_funds revoked — and the prepared batch
+    would still broadcast. Re-check at the point money actually moves.
+
+    Mirrors get_jwt_business_context_with_validation deliberately: the Account
+    is ownership, is_active is the deactivation signal, and an explicit False
+    override denies. There is no request here, so the IP-bearing gate itself
+    cannot be reused.
+    """
+    biz_id = getattr(payment_tx, 'payer_business_id', None)
+    if not biz_id:
+        return True  # personal payer — payer_user_id was already matched
+    from users.models import Account
+    from users.models_employee import BusinessEmployee
+    from users.jwt_context import check_role_permission
+
+    if Account.objects.filter(
+            user=user, business_id=biz_id, account_type='business',
+            deleted_at__isnull=True).exists():
+        return True
+    emp = BusinessEmployee.objects.filter(
+        user=user, business_id=biz_id, is_active=True,
+        deleted_at__isnull=True).first()
+    if emp is None:
+        return False
+    overrides = emp.permissions or {}
+    if 'send_funds' in overrides and not overrides['send_funds']:
+        return False
+    return check_role_permission(emp.role, 'send_funds')
+
+
+def _invoice_terms_unchanged(invoice, payment_tx) -> bool:
+    """Do the invoice's terms still match what the payer authorized?
+
+    Only settlement_chain was immutable; amount, token_type and the merchant
+    could all be edited after preparation while batch validation compared
+    against the payment row's OWN snapshot. The old amount could then settle
+    to the old address and mark the modified invoice PAID — payer, invoice,
+    ledger and recipient each describing a different transaction.
+    """
+    from decimal import Decimal
+    try:
+        if Decimal(str(invoice.amount)) != Decimal(str(payment_tx.amount)):
+            return False
+    except Exception:  # noqa: BLE001 — unparseable means do not proceed
+        return False
+    # The invoice's DENOMINATION must not have changed class. A dollar
+    # invoice settles in cUSD+ or USDT depending on the payer's funding, so
+    # comparing it to payment_tx.token_type directly would be wrong; what
+    # must hold is that a dollar invoice is still a dollar invoice and a
+    # CONFIO invoice still a CONFIO one.
+    settled = (payment_tx.token_type or '').upper()
+    invoice_token = (invoice.token_type or '').upper()
+    if settled == 'CONFIO':
+        if invoice_token != 'CONFIO':
+            return False
+    elif invoice_token not in DOLLAR_INVOICE_TOKENS:
+        return False
+    if invoice.merchant_business_id != payment_tx.merchant_business_id:
+        return False
+    if invoice.merchant_account_id != payment_tx.merchant_account_id:
+        return False
+    return True
 
 
 def _validate_payment_batch(calls: list, payment_tx) -> None:
