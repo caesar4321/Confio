@@ -121,7 +121,7 @@ All contracts listed below are live on BNB Smart Chain mainnet and source-verifi
 | Contract | Address |
 | --- | --- |
 | cUSD+ vault proxy | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
-| Sponsored-batch delegate | [`0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C`](https://bscscan.com/address/0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C#code) |
+| Sponsored-batch delegate | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 | $CONFIO token | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
 | $CONFIO presale vault | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
 | $CONFIO reward vault | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |

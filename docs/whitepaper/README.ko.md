@@ -110,7 +110,7 @@ cUSD+ 볼트, 스폰서드 트랜잭션 델리게이트, $CONFIO 토큰, 프리�
 | 계약 | 주소 |
 | --- | --- |
 | cUSD+ 볼트 프록시 | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
-| 스폰서드 배치 델리게이트 | [`0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C`](https://bscscan.com/address/0xE9d9Ae4d97aE8128DF4501152540d7aA091b435C#code) |
+| 스폰서드 배치 델리게이트 | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 | $CONFIO 토큰 | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
 | 프리세일 볼트 | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
 | 리워드 볼트 | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
