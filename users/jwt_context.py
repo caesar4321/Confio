@@ -81,7 +81,19 @@ def is_business_employee(user, business_id) -> bool:
     if not user or not business_id:
         return False
     try:
+        from .models import Account
         from .models_employee import BusinessEmployee
+        # OWNERSHIP FIRST. Every business creates a role='owner' employee row
+        # for its owner, so "has an employee row" was true for all 58 owners
+        # in production — and the ramp rule reads this as "not the owner" and
+        # refused them with "solo el dueño puede recargar o retirar". Owners
+        # were locked out of funding their own business, on both the GraphQL
+        # ramps and the Guardarian REST path. The Account is the ownership
+        # proof; the employee row is delegation.
+        if Account.objects.filter(
+                user=user, business_id=business_id,
+                account_type='business', deleted_at__isnull=True).exists():
+            return False
         return BusinessEmployee.objects.filter(
             user=user, business_id=business_id, deleted_at__isnull=True,
         ).exists()

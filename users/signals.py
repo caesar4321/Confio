@@ -85,6 +85,11 @@ def _payment_fee_amount(payment_transaction) -> str:
     try:
         from decimal import Decimal
         from payments.bsc_flow import WAD, payment_fee_wei
+        # A fee is money that was DEDUCTED. A payment that never settled did
+        # not deduct anything, so recording one there would claim a credit
+        # against funds that never moved (audit 2026-08-02 P2).
+        if (payment_transaction.status or '').upper() not in ('CONFIRMED', 'PAID'):
+            return ''
         gross = Decimal(str(payment_transaction.amount or 0))
         if gross <= 0:
             return ''

@@ -378,10 +378,22 @@ def _viewer_address_for(transaction, account):
     handing back algorand_address unconditionally made every cUSD+/USDT row
     match neither side: direction came out 'unknown', which in turn renders
     the counterparty as "Unknown" and the amount without a +/- sign.
+
+    CONFIO lives on BOTH chains — the legacy ASA and the re-issued BEP-20 —
+    so the token alone cannot say which address to compare. Decide from the
+    row's own addresses: a 0x-prefixed from/to is a BSC row whatever the
+    token. Without this, BSC CONFIO payments matched neither side and
+    rendered with no direction and an "Unknown" counterparty.
     """
     token = (getattr(transaction, 'token_type', '') or '').upper()
     if token in ('CUSD_PLUS', 'USDT'):
         return getattr(account, 'bsc_address', None) or ''
+    if token == 'CONFIO':
+        for field in ('from_address', 'to_address', 'sender_address',
+                      'counterparty_address'):
+            value = (getattr(transaction, field, '') or '').strip().lower()
+            if value.startswith('0x'):
+                return getattr(account, 'bsc_address', None) or ''
     return account.algorand_address
 
 

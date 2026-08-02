@@ -1694,7 +1694,10 @@ export const HomeScreen = () => {
                     </View>
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName}>
-                        {savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}
+                        {/* Named for what the row actually holds: someone who
+                            cannot mint can still be holding cUSD+. */}
+                        {(savingsPortfolio.savings.enabled || savingsPortfolio.savings.balanceUsd > 0)
+                          ? 'Confío Dollar+' : 'Confío Dollar'}
                       </Text>
                       <Text style={styles.walletSymbol}>
                         {/* Ticker in the subtitle like every other row
@@ -1711,11 +1714,14 @@ export const HomeScreen = () => {
                             mere wallet, nothing vault-flavored. */}
                         {/* Same rule as the legacy row: an employee without
                             viewBalance sees the wallet, not the figure. */}
+                        {/* ALWAYS include the vault balance. Dropping it when
+                            savings is disabled meant an ineligible holder saw
+                            $0.00 over real cUSD+ — money the portfolio total
+                            below was counting all along. Eligibility gates
+                            MINTING, never what you already hold. */}
                         {(canViewBalance && showBalance)
                           ? `$${formatFixedFloor(
-                              savingsPortfolio.savings.enabled
-                                ? savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd
-                                : savingsPortfolio.usdtBalanceUsd,
+                              savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd,
                               2,
                             )}`
                           : '••••'}
