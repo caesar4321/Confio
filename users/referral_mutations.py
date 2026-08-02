@@ -176,6 +176,17 @@ class SetReferrer(graphene.Mutation):
                         },
                     ),
                 )
+                # Lost the race: another request attached a referrer first, and
+                # get_or_create handed back THEIR row. Reporting success here
+                # would tell this client its referrer was registered while the
+                # database holds someone else's, and would file analytics under
+                # an identifier that never won.
+                if not _created:
+                    return SetReferrer(
+                        success=False,
+                        error=f"Ya registraste a @{referral.referrer_identifier}.",
+                    )
+
                 try:
                     from users.funnel import emit_referral_signup_step
                     emit_referral_signup_step(

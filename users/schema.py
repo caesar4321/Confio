@@ -22,6 +22,7 @@ from achievements.referral_security import (
 )
 InfluencerReferral = UserReferral
 from django.db import transaction as db_transaction
+from django.db import IntegrityError
 from django.db.models import Sum, Q, F
 from decimal import Decimal, ROUND_DOWN
 from .country_codes import COUNTRY_CODES
@@ -243,9 +244,17 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 		if claim_amount <= Decimal('0'):
 			return
 
-		ref_key_parts = [str(event.id)]
+		# Key on the ENTITLEMENT, not the event. A leg is owed once per
+		# (referral, role) no matter how many events describe it — and since a
+		# deposit and its conversion are both paying triggers, one leg really
+		# can end up with two eligible events. Keying on event.id gave those two
+		# different reference_keys, so the uniqueness constraint never saw a
+		# collision and the leg could be credited twice. Falls back to the event
+		# only when there is no referral to key on.
 		if referral:
-			ref_key_parts.append(str(referral.id))
+			ref_key_parts = [str(referral.id), (actor_role or 'referee')]
+		else:
+			ref_key_parts = ['event', str(event.id)]
 		if user:
 			ref_key_parts.append(str(user.id))
 		reference_key = ":".join(ref_key_parts)
@@ -3515,7 +3524,23 @@ class UpdateAccountBscAddress(graphene.Mutation):
                 error="Esa dirección BSC ya está registrada en otra cuenta.",
             )
         account.bsc_address = addr
-        account.save(update_fields=['bsc_address'])
+        try:
+            account.save(update_fields=['bsc_address'])
+        except IntegrityError:
+            # Lost the race against a concurrent registration of the same
+            # address: both .exists() checks above passed, the other writer
+            # committed first, and uniq_account_bsc_address_ci rejected this
+            # one. Answer the client the same way the pre-check would have,
+            # instead of surfacing a database error.
+            logger.warning(
+                "[bsc_address] lost uniqueness race for account=%s user=%s",
+                account.pk,
+                user.id,
+            )
+            return UpdateAccountBscAddress(
+                success=False,
+                error="Esa dirección BSC ya está registrada en otra cuenta.",
+            )
         return UpdateAccountBscAddress(success=True, error=None)
 
 

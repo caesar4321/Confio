@@ -379,8 +379,16 @@ class ReferralRewardServiceTests(TestCase):
         self.assertIn("todavía debe terminar su verificación", error)
 
     def test_friend_joined_notifications_created(self):
+        # A fresh referee, not self.referred: that user already has a live
+        # referral from setUp, and uniq_live_referral_per_referee now enforces
+        # one per person. Creating a second was the very race the constraint
+        # exists to stop, so the fixture had to stop relying on it.
+        new_referee = get_user_model().objects.create_user(
+            username="referred_for_notifications",
+            password="test-pass",
+        )
         new_referral = UserReferral.objects.create(
-            referred_user=self.referred,
+            referred_user=new_referee,
             referrer_identifier="@referrer2",
             referrer_user=self.referrer,
         )

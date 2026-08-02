@@ -71,13 +71,14 @@ TOP_UP_CHECKPOINT_KEY = "top_up_checkpoint"
 EVENT_NOTIFICATION_TEMPLATES: Dict[str, Dict[str, Dict[str, str]]] = {
     "top_up": {
         "notification_type": NotificationTypeChoices.REFERRAL_EVENT_TOP_UP,
-        "referee": {
-            "title": "Recarga confirmada 🎉",
-            "message": "Ya tienes saldo para explorar Confío. Haz tu primera conversión o envío para ganar tus CONFIO.",
-        },
+        # No referee entry on purpose: the deposit now PAYS, and
+        # notify_reward_ready already tells them they earned it. Leaving the old
+        # "haz tu primera conversión para ganar tus CONFIO" line here sent two
+        # contradictory notifications for one event — one saying the bonus was
+        # still pending an action, the other saying it had landed.
         "referrer": {
             "title": "Tu referido recargó su billetera",
-            "message": "Ayúdale a convertir a cUSD para que ambos reciban los CONFIO del bono.",
+            "message": "¡Listo! Ambos ganaron US$5 en $CONFIO por su primera recarga.",
         },
     },
     "conversion_usdc_to_cusd": {

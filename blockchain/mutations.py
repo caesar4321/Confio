@@ -362,6 +362,68 @@ def _sum_referral_withdrawals(user, since=None) -> Decimal:
     return qs.aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total'] or Decimal('0')
 
 
+def reverse_referral_withdrawal(reference_id: str):
+    """Give back a referral debit when the send never landed.
+
+    The debit happens at SUBMIT, which is deliberate — it reserves the balance
+    so two quick sends cannot spend the same CONFIO twice — but the sponsor
+    service does not wait for confirmation, and a send that later expires or
+    fails used to leave the balance permanently spent for tokens that never
+    moved.
+
+    Soft-deletes the log rather than deleting it, so the history survives and
+    uniq_referral_withdrawal_reference (which excludes deleted rows) still
+    allows a retry of the same send to be logged again.
+    """
+    from django.db import transaction as db_transaction
+    from django.db.models import F
+    from achievements.models import ReferralWithdrawalLog, ConfioRewardBalance, ConfioRewardTransaction
+
+    if not reference_id:
+        return
+
+    with db_transaction.atomic():
+        log = (
+            ReferralWithdrawalLog.objects.select_for_update()
+            .filter(
+                reference_type='send_transaction',
+                reference_id=str(reference_id),
+                deleted_at__isnull=True,
+            )
+            .first()
+        )
+        if not log:
+            return
+
+        amount = log.amount or Decimal('0')
+        log.deleted_at = timezone.now()
+        log.save(update_fields=['deleted_at'])
+        if amount <= Decimal('0'):
+            return
+
+        balance, _ = ConfioRewardBalance.objects.get_or_create(user=log.user)
+        ConfioRewardBalance.objects.filter(pk=balance.pk).update(
+            total_unlocked=F('total_unlocked') + amount,
+            total_spent=Greatest(F('total_spent') - amount, Decimal('0')),
+        )
+        balance.refresh_from_db()
+        ConfioRewardTransaction.objects.create(
+            user=log.user,
+            transaction_type='unlocked',
+            amount=amount,
+            balance_after=balance.total_unlocked,
+            reference_type='referral_withdrawal_reversal',
+            reference_id=str(reference_id),
+            description='Reverso de retiro que no se confirmó',
+        )
+        logger.info(
+            "[referral_withdrawal] reversed %s CONFIO for user=%s send=%s",
+            amount,
+            log.user_id,
+            reference_id,
+        )
+
+
 def _record_referral_withdrawal(user, amount: Decimal, *, reference_id: str = '', requires_review: bool = False):
     """Persist referral withdrawal metadata and adjust reward balances."""
     if amount <= Decimal('0'):

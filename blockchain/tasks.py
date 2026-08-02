@@ -1433,6 +1433,18 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     s.status = 'FAILED'
                     s.error_message = str(pe)
                     s.save(update_fields=['status', 'error_message', 'updated_at'])
+                    # The referral debit was taken at submit. This send is not
+                    # landing, so give it back — otherwise the balance stays
+                    # spent for CONFIO that never moved.
+                    if (s.token_type or '').upper() == 'CONFIO':
+                        try:
+                            from blockchain.mutations import reverse_referral_withdrawal
+                            reverse_referral_withdrawal(str(s.id))
+                        except Exception:
+                            logger.warning(
+                                "Failed to reverse referral withdrawal for send %s", s.id,
+                                exc_info=True,
+                            )
                     processed += 1
                 continue
 
@@ -1452,6 +1464,17 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 s.status = 'FAILED'
                 s.error_message = "Transaction expired or lost from pool"
                 s.save(update_fields=['status', 'error_message', 'updated_at'])
+                # Same reversal as the explicit-error path above: an expired
+                # send spent nothing, so the referral debit has to come back.
+                if (s.token_type or '').upper() == 'CONFIO':
+                    try:
+                        from blockchain.mutations import reverse_referral_withdrawal
+                        reverse_referral_withdrawal(str(s.id))
+                    except Exception:
+                        logger.warning(
+                            "Failed to reverse referral withdrawal for send %s", s.id,
+                            exc_info=True,
+                        )
                 logger.warning(f"Marking stuck send {s.internal_id} as FAILED (missing from node)")
                 processed += 1
                 continue
