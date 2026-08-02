@@ -828,10 +828,13 @@ class KoyweClient:
                 if not prev_email or prev_email == email:
                     continue
                 try:
-                    existing = self.get_account(email=prev_email)
-                    if existing:
+                    # Never let a previous email's profile stand in for the
+                    # target one below: the fallback update addresses *email*,
+                    # which still has no account of its own.
+                    previous_account = self.get_account(email=prev_email)
+                    if previous_account:
                         migration_payload = self._build_migration_payload(
-                            existing=existing,
+                            existing=previous_account,
                             target_payload=payload,
                             country_code=country_code,
                             current_email=prev_email,
@@ -841,6 +844,15 @@ class KoyweClient:
                         return None
                 except KoyweError:
                     continue
+
+        if not existing:
+            # Koywe rejected the create because the document is taken, yet no
+            # account answers to any email we know. Updating would only return
+            # "account not found with email", which hides the real conflict.
+            raise KoyweError(
+                'Tu documento ya está registrado con Koywe bajo otro email. '
+                'Usa el email con el que lo registraste o contacta a soporte.'
+            )
 
         if self._account_profile_satisfies_payload(existing, payload):
             return None

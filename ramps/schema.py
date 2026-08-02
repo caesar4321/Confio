@@ -5,8 +5,10 @@ from types import SimpleNamespace
 import graphene
 from graphene_django import DjangoObjectType
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.db.models import Q
 from django.utils import timezone
 
 from security.didit import ISO2_TO_ISO3
@@ -998,6 +1000,12 @@ class CreateRampOrder(graphene.Mutation):
                     success=False,
                     error='Ingresa un email real donde puedas recibir el código de PSE.',
                 )
+            # Koywe owns the profile under whichever email created it. Read the
+            # stored inbox before overwriting it, or the migration path loses the
+            # only pointer to the account it needs to rename.
+            previous_auth_email = str(
+                getattr(getattr(user, 'ramp_user_address', None), 'auth_email', '') or ''
+            ).strip().lower()
             _store_koywe_auth_email(user=user, auth_email=koywe_email)
             external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
             contact_profile = _get_koywe_contact_profile(
@@ -1035,6 +1043,7 @@ class CreateRampOrder(graphene.Mutation):
                     country_code=resolved_country_code,
                     document_number=contact_profile.get('documentNumber') or '',
                     selected_email=koywe_email,
+                    prior_auth_email=previous_auth_email,
                 ),
             )
         except KoyweConfigurationError as exc:
@@ -1802,6 +1811,7 @@ def _get_koywe_profile_previous_emails(
     country_code: str,
     document_number: str,
     selected_email: str,
+    prior_auth_email: str | None = None,
 ) -> list[str]:
     """Return prior account emails, including the test identity being migrated.
 
@@ -1810,6 +1820,11 @@ def _get_koywe_profile_previous_emails(
     delegated-KYC identity. Koywe may already own that identity under the
     duende address; include it only for those designated users so updateEmail
     can migrate the existing profile.
+
+    The designated test users share one delegated-KYC identity per country, and
+    Koywe enforces document uniqueness, so the profile can only live under one
+    of their inboxes at a time. Include the siblings' stored emails as well, or
+    the second test user can never take the identity over.
     """
     previous_emails = _get_koywe_previous_emails(
         country_code=country_code,
@@ -1818,9 +1833,44 @@ def _get_koywe_profile_previous_emails(
     override = _get_koywe_test_account_override(user=user, country_code=country_code)
     override_email = str((override or {}).get('email') or '').strip().lower()
     normalized_selected_email = str(selected_email or '').strip().lower()
+    if override:
+        for sibling_email in _get_koywe_test_sibling_emails(user=user):
+            previous_emails.insert(0, sibling_email)
     if override_email and override_email != normalized_selected_email:
         previous_emails.insert(0, override_email)
-    return list(dict.fromkeys(previous_emails))
+    normalized_prior = str(prior_auth_email or '').strip().lower()
+    if normalized_prior and not _is_koywe_test_email(normalized_prior):
+        previous_emails.insert(0, normalized_prior)
+    return [
+        email for email in dict.fromkeys(previous_emails)
+        if email and email != normalized_selected_email
+    ]
+
+
+def _get_koywe_test_sibling_emails(*, user) -> list[str]:
+    """Emails of the other designated test users, newest stored inbox first."""
+    username = str(getattr(user, 'username', '') or '').strip().lower()
+    siblings = _KOYWE_TEST_OVERRIDE_USERNAMES - {username}
+    if not siblings:
+        return []
+    username_filter = Q()
+    for sibling_username in siblings:
+        username_filter |= Q(username__iexact=sibling_username)
+    emails: list[str] = []
+    for sibling in (
+        get_user_model().objects
+        .filter(username_filter)
+        .select_related('ramp_user_address')
+    ):
+        ramp_email = str(
+            getattr(getattr(sibling, 'ramp_user_address', None), 'auth_email', '') or ''
+        ).strip().lower()
+        if ramp_email and not _is_koywe_test_email(ramp_email):
+            emails.append(ramp_email)
+        sibling_email = str(getattr(sibling, 'email', '') or '').strip().lower()
+        if sibling_email and not sibling_email.endswith('@privaterelay.appleid.com'):
+            emails.append(sibling_email)
+    return list(dict.fromkeys(emails))
 
 
 def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None = None) -> str:

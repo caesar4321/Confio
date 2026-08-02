@@ -5,7 +5,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from ramps import schema as ramps_schema
-from ramps.koywe_client import KoyweClient
+from ramps.koywe_client import KoyweClient, KoyweError
 from ramps.koywe_sync import build_koywe_instruction_snapshot, _merge_koywe_metadata
 
 
@@ -102,6 +102,81 @@ class KoyweClientProviderMergeTests(SimpleTestCase):
         self.assertEqual(enriched['paymentProvider']['details'], provider['details'])
 
 
+class KoyweExistingAccountProfileTests(SimpleTestCase):
+    PAYLOAD = {
+        'document': {
+            'documentNumber': '1234567890',
+            'documentType': 'CED_CIU',
+            'country': 'COL',
+            'isCompany': False,
+        },
+        'personalInfo': {
+            'names': 'Duende',
+            'firstLastname': 'Colombia',
+            'activity': 'EMPLOYEE',
+            'phoneNumber': '999999999',
+            'dob': '1900-01-01',
+        },
+    }
+
+    def test_unknown_email_reports_the_document_conflict(self):
+        client = KoyweClient()
+
+        with mock.patch.object(
+            client,
+            'get_account',
+            side_effect=KoyweError('account not found with email: new@example.com'),
+        ), mock.patch.object(client, 'update_account') as update_mock:
+            with self.assertRaises(KoyweError) as ctx:
+                client._ensure_existing_account_profile(
+                    email='new@example.com',
+                    country_code='CO',
+                    payload=dict(self.PAYLOAD),
+                    previous_emails=['old@example.com'],
+                )
+
+        update_mock.assert_not_called()
+        self.assertIn('ya está registrado', str(ctx.exception))
+
+    def test_failed_migration_does_not_update_the_unknown_email(self):
+        client = KoyweClient()
+        previous_account = {
+            'email': 'old@example.com',
+            'document': {
+                'documentNumber': '1234567890',
+                'documentType': 'CED_CIU',
+                'country': 'COL',
+            },
+        }
+
+        def fake_get_account(*, email):
+            if email == 'old@example.com':
+                return previous_account
+            raise KoyweError(f'account not found with email: {email}')
+
+        with mock.patch.object(client, 'get_account', side_effect=fake_get_account), \
+                mock.patch.object(
+                    client,
+                    'update_account',
+                    side_effect=KoyweError('email already in use'),
+                ) as update_mock:
+            with self.assertRaises(KoyweError) as ctx:
+                client._ensure_existing_account_profile(
+                    email='new@example.com',
+                    country_code='CO',
+                    payload=dict(self.PAYLOAD),
+                    previous_emails=['old@example.com'],
+                )
+
+        # Only the migration attempt on the owning email, never a blind update
+        # of the email that has no account.
+        self.assertEqual(
+            [call.kwargs['email'] for call in update_mock.call_args_list],
+            ['old@example.com'],
+        )
+        self.assertIn('ya está registrado', str(ctx.exception))
+
+
 class KoyweEmailSelectionTests(SimpleTestCase):
     def test_previous_emails_do_not_include_duende_test_accounts(self):
         emails = ramps_schema._get_koywe_previous_emails(
@@ -154,6 +229,10 @@ class KoyweEmailSelectionTests(SimpleTestCase):
             ramps_schema,
             '_get_koywe_previous_emails',
             return_value=['old@example.com'],
+        ), mock.patch.object(
+            ramps_schema,
+            '_get_koywe_test_sibling_emails',
+            return_value=[],
         ):
             emails = ramps_schema._get_koywe_profile_previous_emails(
                 user=user,
@@ -166,6 +245,65 @@ class KoyweEmailSelectionTests(SimpleTestCase):
             emails,
             ['duende-colombia@koywe-test.com', 'old@example.com'],
         )
+
+    def test_profile_migration_includes_prior_inbox_and_sibling_test_account(self):
+        """The shared test identity can only live under one inbox at a time."""
+        user = type('User', (), {
+            'username': 'julianmoonluna',
+        })()
+
+        with mock.patch.object(
+            ramps_schema,
+            '_get_koywe_previous_emails',
+            return_value=['pse@example.com', 'old@example.com'],
+        ), mock.patch.object(
+            ramps_schema,
+            '_get_koywe_test_sibling_emails',
+            return_value=['sibling@example.com'],
+        ):
+            emails = ramps_schema._get_koywe_profile_previous_emails(
+                user=user,
+                country_code='CO',
+                document_number='1234567890',
+                selected_email='pse@example.com',
+                prior_auth_email='previous@example.com',
+            )
+
+        # The email being registered is never its own previous owner.
+        self.assertEqual(
+            emails,
+            [
+                'previous@example.com',
+                'duende-colombia@koywe-test.com',
+                'sibling@example.com',
+                'old@example.com',
+            ],
+        )
+
+    def test_profile_migration_skips_siblings_without_override(self):
+        user = type('User', (), {
+            'username': 'someoneelse',
+        })()
+
+        with mock.patch.object(
+            ramps_schema,
+            '_get_koywe_previous_emails',
+            return_value=['old@example.com'],
+        ), mock.patch.object(
+            ramps_schema,
+            '_get_koywe_test_sibling_emails',
+            side_effect=AssertionError('siblings are test-only'),
+        ):
+            emails = ramps_schema._get_koywe_profile_previous_emails(
+                user=user,
+                country_code='CO',
+                document_number='1234567890',
+                selected_email='pse@example.com',
+                prior_auth_email='duende-colombia@koywe-test.com',
+            )
+
+        # A stale duende inbox is not a real previous owner.
+        self.assertEqual(emails, ['old@example.com'])
 
     @mock.patch.object(ramps_schema, '_get_latest_personal_verification')
     @mock.patch.object(ramps_schema, '_build_effective_ramp_address_snapshot')
