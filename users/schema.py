@@ -27,6 +27,7 @@ from decimal import Decimal, ROUND_DOWN
 from .country_codes import COUNTRY_CODES
 from .phone_utils import normalize_any_phone
 from .phone_utils import normalize_phone
+from .phone_utils import phone_lookup_key
 from .review_numbers import is_review_test_phone_key
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
@@ -2058,61 +2059,65 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		if not phone_numbers:
 			return results
 			
+		# Contact discovery hands the app a userId that later sends resolve
+		# DIRECTLY, skipping every phone guard — so a wrong match here pays a
+		# stranger. It therefore obeys the same rule as the send rails: match
+		# the FULL number (calling code + subscriber digits) or not at all.
+		# Guessing a split on bare digits read "3132587634" (a Colombian
+		# mobile) as "31:32587634" — a Netherlands number.
 		phone_to_key = {}
-		phone_to_cleaned = {}
 		keys_set = set()
-		cleaned_set = set()
 
-		# Collect unique formatted inputs
 		for phone in phone_numbers:
-			# Prefer canonical phone key matching across ISO variants
-			key = normalize_any_phone(phone)
+			key = phone_lookup_key(phone)
 			if key:
 				phone_to_key[phone] = key
 				keys_set.add(key)
-			else:
-				# Fallback: digits-only direct match
-				cleaned_phone = ''.join(filter(str.isdigit, phone))
-				if cleaned_phone:
-					phone_to_cleaned[phone] = cleaned_phone
-					cleaned_set.add(cleaned_phone)
-			
+
 		from django.db.models import Q, Prefetch
 		from users.models import Account
-		
-		query = Q()
-		if keys_set:
-			query |= Q(phone_key__in=keys_set)
-		if cleaned_set:
-			query |= Q(phone_number__in=cleaned_set)
 
 		matched_users_by_key = {}
-		matched_users_by_cleaned = {}
+		ambiguous_keys = set()
 
-		if query:
+		if keys_set:
 			accounts_prefetch = Prefetch(
 				'accounts',
 				queryset=Account.objects.filter(account_type='personal', account_index=0),
 				to_attr='prefetched_active_accounts'
 			)
-			users = User.objects.filter(query).prefetch_related(accounts_prefetch)
-			
+			# Deactivated users must not be offered as send targets.
+			# Ordered so a shared key resolves to the same account every time.
+			users = User.objects.filter(
+				is_active=True, phone_key__in=keys_set).order_by('id').prefetch_related(accounts_prefetch)
+
 			for u in users:
-				if u.phone_key:
-					matched_users_by_key[u.phone_key] = u
-				if u.phone_number:
-					matched_users_by_cleaned[u.phone_number] = u
+				if not u.phone_key:
+					continue
+				# `phone_key` has no unique constraint in any migration, and
+				# production has none either — it really does hold several
+				# active accounts on one key. Report neither rather than
+				# arbitrarily handing back whichever row came back last.
+				if u.phone_key in matched_users_by_key:
+					ambiguous_keys.add(u.phone_key)
+					continue
+				matched_users_by_key[u.phone_key] = u
+
+		# The app-store reviewer number is shared on purpose and holds no real
+		# money — resolve it to the first account instead of hiding it, or the
+		# reviewer sees their own test contacts as "not on Confío".
+		from .review_numbers import is_shared_reviewer_phone_key
+		ambiguous_keys = {k for k in ambiguous_keys if not is_shared_reviewer_phone_key(k)}
+
+		for key in ambiguous_keys:
+			logger.error(
+				'contact discovery refused: phone_key=%r matches multiple active users', key)
+			matched_users_by_key.pop(key, None)
 
 		for phone in phone_numbers:
-			found_user = None
 			key = phone_to_key.get(phone)
-			if key and key in matched_users_by_key:
-				found_user = matched_users_by_key[key]
-			else:
-				cleaned_phone = phone_to_cleaned.get(phone)
-				if cleaned_phone and cleaned_phone in matched_users_by_cleaned:
-					found_user = matched_users_by_cleaned[cleaned_phone]
-			
+			found_user = matched_users_by_key.get(key) if key else None
+
 			if found_user:
 				# Get the user's active account
 				active_account = found_user.prefetched_active_accounts[0] if getattr(found_user, 'prefetched_active_accounts', []) else None

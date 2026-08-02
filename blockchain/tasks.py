@@ -1272,16 +1272,24 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             return nm or None
                         except Exception:
                             return None
+                    # Stored phone columns hold LOCAL digits; a client can
+                    # neither display nor re-send to those. Use the full
+                    # international number everywhere it leaves the server.
+                    from users.phone_utils import to_international
+                    sender_phone_intl = to_international(
+                        getattr(s, 'sender_phone', ''), s.sender_user if s.sender_user_id else None)
+                    recipient_phone_intl = to_international(
+                        getattr(s, 'recipient_phone', ''), s.recipient_user if s.recipient_user_id else None)
                     sender_name = (
                         s.sender_display_name
                         or (full_name_user(s.sender_user) if s.sender_user_id else None)
-                        or (s.sender_phone if getattr(s, 'sender_phone', '') else None)
+                        or (sender_phone_intl or None)
                         or (s.sender_address[:6] + '...' + s.sender_address[-4:] if s.sender_address else 'Usuario')
                     )
                     recipient_name = (
                         s.recipient_display_name
                         or (full_name_user(s.recipient_user) if s.recipient_user_id else None)
-                        or (s.recipient_phone if getattr(s, 'recipient_phone', '') else None)
+                        or (recipient_phone_intl or None)
                         or (s.recipient_address[:6] + '...' + s.recipient_address[-4:] if s.recipient_address else 'Contacto')
                     )
                     # Recipient notification
@@ -1301,8 +1309,14 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 'token_type': token,
                                 'sender_name': sender_name,
                                 'recipient_name': recipient_name,
-                                'sender_phone': s.sender_phone or '',
-                                'recipient_phone': s.recipient_phone or '',
+                                # Personal phones travel only on personal
+                                # notifications: a business notification is
+                                # pushed to every employee and its whole data
+                                # blob is readable by all of them.
+                                **({} if s.recipient_business else {
+                                    'sender_phone': sender_phone_intl,
+                                    'recipient_phone': recipient_phone_intl,
+                                }),
                                 'memo': s.memo or '',
                                 'transaction_type': 'send',
                             },
@@ -1327,8 +1341,10 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 'token_type': token,
                                 'sender_name': sender_name,
                                 'recipient_name': recipient_name,
-                                'sender_phone': s.sender_phone or '',
-                                'recipient_phone': s.recipient_phone or '',
+                                **({} if s.sender_business else {
+                                    'sender_phone': sender_phone_intl,
+                                    'recipient_phone': recipient_phone_intl,
+                                }),
                                 'memo': s.memo or '',
                                 'transaction_type': 'send',
                             },

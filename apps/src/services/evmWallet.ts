@@ -236,11 +236,70 @@ export const bscEstimateGas = async (
     value: valueWei ? '0x' + valueWei.toString(16) : undefined,
   }]));
 
+export interface BscLog {
+  address: string;
+  topics: string[];
+  data: string;
+}
+
 export interface BscReceipt {
   status: string; // '0x1' success, '0x0' revert
   transactionHash: string;
   blockNumber: string;
+  logs?: BscLog[];
 }
+
+/** keccak256("BatchExecuted(uint256,uint256)") — ConfioBatchDelegate emits
+ *  it, as the user's own EOA, with the consumed intent nonce as topic 1. */
+export const BATCH_EXECUTED_TOPIC =
+  '0x' + bytesToHex(keccak_256(utf8ToBytes('BatchExecuted(uint256,uint256)')));
+
+/**
+ * Did THIS receipt actually execute our batch?
+ *
+ * A 7702 silent no-op mines with status 0x1 while executing nothing (the
+ * authorization's account nonce raced, so the EOA stayed codeless and the
+ * call hit an address with no code). The proof of real execution is the
+ * exact BatchExecuted(nonce) from the user's own address — which the
+ * receipt we already hold carries. Reading it here replaces a second
+ * `nonces()` round trip that asked the chain the same question.
+ *
+ * ABSENCE OF THE LOG IS NOT PROOF OF NON-EXECUTION (Codex audit 2026-08-02
+ * [P1]). 'unknown' exists because the alternative is the double-send bug:
+ * a batch that DID execute, reported as failed, retried by the user, and
+ * settled twice. Only an affirmative `logs: []` earns 'noop' — that is the
+ * ONLY shape a real no-op can have, since a delegation that never applied
+ * left a codeless EOA that could not emit anything.
+ *
+ * A non-empty log list without our event is ALSO 'unknown', not 'noop':
+ * ConfioBatchDelegate emits BatchExecuted LAST, after the call loop, so any
+ * response that drops trailing logs drops exactly this event while keeping
+ * the inner transfers — indistinguishable from "something else executed".
+ *
+ * Comparisons are case-insensitive: hex casing is not guaranteed across
+ * nodes, and a case mismatch reads as "did not execute" — the dangerous way
+ * to be wrong.
+ */
+export type BatchExecutionVerdict = 'executed' | 'noop' | 'unknown';
+
+export const receiptExecutedBatch = (
+  receipt: BscReceipt, eoa: string, execNonce: bigint,
+): BatchExecutionVerdict => {
+  const logs = receipt.logs;
+  if (!logs) return 'unknown'; // not shown the evidence ≠ evidence of absence
+  if (logs.length === 0) return 'noop'; // affirmatively zero logs = real no-op
+  const want = '0x' + execNonce.toString(16).padStart(64, '0');
+  const from = eoa.toLowerCase();
+  const hit = logs.some(
+    (lg) =>
+      lg
+      && (lg.address || '').toLowerCase() === from
+      && (lg.topics || []).length >= 2
+      && (lg.topics[0] || '').toLowerCase() === BATCH_EXECUTED_TOPIC
+      && (lg.topics[1] || '').toLowerCase() === want,
+  );
+  return hit ? 'executed' : 'unknown';
+};
 
 /**
  * The transaction IS on the network but we stopped waiting for its receipt.
@@ -278,17 +337,51 @@ export const isOutcomeUnknown = (e: unknown): boolean =>
   // Defensive: an older bundle or a re-thrown copy may only carry the text.
   || /bsc tx timeout/i.test(String((e as any)?.message || ''));
 
-/** Poll for a receipt; throws on revert or timeout. ~2s cadence. */
+/**
+ * Poll for a receipt; throws on revert or timeout.
+ *
+ * Cadence is tight first, then backs off. BSC mines sub-second, so the old
+ * flat 2s quantum spent most of its wall clock waiting on a transaction
+ * that had ALREADY landed — the chain was never the slow part. Early polls
+ * are cheap (the relay allows 120 reads/min/user and a send spends ~5), and
+ * the back-off keeps a genuinely stuck tx from burning that budget.
+ *
+ * The give-up budget stays ~120s, now expressed as time rather than a
+ * count, so changing the cadence can't silently change the deadline.
+ *
+ * Each individual read is capped too (Codex audit 2026-08-02 [P1]). The
+ * budget is only checked BETWEEN polls, so without a per-read cap one hung
+ * relay request extends the total without limit — and the screen's 180s
+ * watchdog would then declare failure while the transaction is still live,
+ * which is the retry path that double-sends. The relay can legitimately
+ * take a while (it rotates endpoints server-side), so the cap is generous;
+ * it exists to bound the tail, not to tighten the common case.
+ */
+const RECEIPT_READ_CAP_MS = 10_000;
+
 export const bscWaitForReceipt = async (
-  txHash: string, tries = 60,
+  txHash: string, budgetMs = 120_000,
 ): Promise<BscReceipt> => {
-  for (let i = 0; i < tries; i++) {
-    const rec = (await rpcCall('eth_getTransactionReceipt', [txHash])) as BscReceipt | null;
+  // 300,500,800,1200 then 2000 steady.
+  const delayFor = (i: number): number =>
+    [300, 500, 800, 1200][i] ?? 2000;
+  const deadline = Date.now() + budgetMs;
+  for (let i = 0; ; i++) {
+    // Abandon a read that outlives the cap. This does NOT cancel the request
+    // (there is nothing to cancel a GraphQL read with here) — it stops us
+    // waiting on it, which is all the deadline needs.
+    const rec = (await Promise.race([
+      rpcCall('eth_getTransactionReceipt', [txHash]),
+      new Promise((resolve) =>
+        setTimeout(() => resolve(null), Math.min(RECEIPT_READ_CAP_MS, Math.max(deadline - Date.now(), 1)))),
+    ])) as BscReceipt | null;
     if (rec) {
       if (rec.status !== '0x1') throw new BscRevertedError(txHash);
       return rec;
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    const delay = delayFor(i);
+    if (Date.now() + delay >= deadline) break;
+    await new Promise((r) => setTimeout(r, delay));
   }
   throw new BscReceiptTimeoutError(txHash);
 };

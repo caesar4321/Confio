@@ -13,6 +13,7 @@ import { MARK_NOTIFICATION_READ, MARK_ALL_NOTIFICATIONS_READ } from '../apollo/m
 import moment from 'moment';
 import 'moment/locale/es';
 import { contactService } from '../services/contactService';
+import { formatPhoneForDisplay } from '../hooks/useContactName';
 import { useAuth } from '../contexts/AuthContext';
 import { APP_LAYOUT } from '../config/layout';
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
@@ -1100,6 +1101,24 @@ export const NotificationScreen = () => {
             processedText = processedText.replace(parsedData.counterparty_name, counterpartyContact.name);
           }
         }
+
+        // No contact matched, so a raw number is still sitting in the text.
+        // The server sends it as full E.164 ("+573132587634") because that is
+        // what identifies a person; make it readable without losing the
+        // country code.
+        [
+          parsedData.sender_phone,
+          parsedData.recipient_phone,
+          parsedData.trader_phone,
+          parsedData.counterparty_phone,
+        ].forEach((phone: unknown) => {
+          const raw = typeof phone === 'string' ? phone.trim() : '';
+          if (!raw || !processedText.includes(raw)) return;
+          const pretty = formatPhoneForDisplay(raw);
+          if (pretty && pretty !== raw) {
+            processedText = processedText.split(raw).join(pretty);
+          }
+        });
       } catch (error) {
       }
     }

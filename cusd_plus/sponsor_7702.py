@@ -459,7 +459,8 @@ def simulate(user_addr: str, calldata: str, delegated: bool, sponsor: str,
         raise PolicyError('simulation_reverted')
 
 
-def acquire_sponsor_nonce_lock(attempts: int = 30, ttl_s: int = 15):
+def acquire_sponsor_nonce_lock(attempts: int = 150, ttl_s: int = 15,
+                               poll_s: float = 0.1):
     """Serialize sponsor-account nonce-fetch → broadcast across EVERY rail
     that signs from the KMS sponsor (7702 batches, presale, payroll payouts).
 
@@ -467,14 +468,138 @@ def acquire_sponsor_nonce_lock(attempts: int = 30, ttl_s: int = 15):
     2026-07-31 P2): the token must be passed to release_sponsor_nonce_lock
     so a slow holder whose TTL expired cannot delete a DIFFERENT holder's
     lock and let two requests allocate the same sponsor nonce. Caller MUST
-    release in a finally block."""
+    release in a finally block.
+
+    attempts x poll_s keeps the SAME ~15s give-up budget as before, at a
+    finer quantum: a holder that finishes 50ms in no longer costs the next
+    request the rest of a 500ms sleep. Pure user-visible latency, since this
+    sits directly in the submit path."""
     import uuid
     token = uuid.uuid4().hex
     for _ in range(attempts):
         if cache.add('bsc_sponsor_nonce_lock', token, ttl_s):
             return token
-        time.sleep(0.5)
+        time.sleep(poll_s)
     return None
+
+
+def classify_receipt_execution(receipt: dict, user_addr: str, nonce: int):
+    """'executed' | 'reverted' | 'noop' | None(unknown) from one receipt.
+
+    ABSENCE OF THE LOG IS NOT PROOF OF NON-EXECUTION (Codex audit 2026-08-02
+    [P1]). The distinction that makes this safe:
+
+      logs missing entirely  -> None. We were not shown the evidence, so we
+                                know nothing. Saying 'noop' here is what lets
+                                a client retry a batch that already executed
+                                and settle the same money twice.
+      logs == []             -> 'noop'. The node AFFIRMATIVELY reported zero
+                                logs, and that is the ONLY shape a silent
+                                7702 no-op can have: the delegation never
+                                applied, so the tx was a plain call to a
+                                codeless EOA and could not emit anything.
+      logs non-empty, no
+      BatchExecuted(nonce)   -> None. Something emitted logs, so this was NOT
+                                a no-op; we just can't see OUR proof.
+                                ConfioBatchDelegate emits BatchExecuted LAST
+                                (after the call loop), so any response that
+                                drops trailing logs drops precisely this
+                                event while keeping the inner transfers —
+                                i.e. the truncation case looks identical to
+                                "executed something else". Unknown, not
+                                failure (Codex re-audit 2026-08-02 [P1]).
+
+    Topic and address comparisons are case-INSENSITIVE on both sides: hex
+    casing is not guaranteed across nodes, and a case mismatch here reads as
+    "did not execute" — the dangerous direction.
+    """
+    from .tasks import _BATCH_EXECUTED_TOPIC
+
+    if receipt.get('status') != '0x1':
+        return 'reverted'
+
+    logs = receipt.get('logs')
+    if logs is None:
+        return None  # no evidence shown — NOT evidence of absence
+    if not logs:
+        return 'noop'  # affirmatively zero logs: the only real no-op shape
+
+    want_nonce = '0x' + format(int(nonce), 'x').rjust(64, '0')
+    want_topic = _BATCH_EXECUTED_TOPIC.lower()
+    executed = any(
+        isinstance(lg, dict)
+        and (lg.get('address') or '').lower() == user_addr.lower()
+        and len(lg.get('topics') or []) >= 2
+        and (lg['topics'][0] or '').lower() == want_topic
+        and (lg['topics'][1] or '').lower() == want_nonce
+        for lg in logs
+    )
+    return 'executed' if executed else None
+
+
+def wait_for_execution_briefly(tx_hash: str, user_addr: str, nonce: int):
+    """Poll BRIEFLY for the receipt and report what the chain showed:
+
+      'executed' — mined, and the exact BatchExecuted(nonce) is present
+      'reverted' — mined with status 0x0; definitive, and safe to retry
+      'noop'     — mined 0x1 but the delegation never applied; NOT retryable
+                   as-is, the client must re-prepare with a fresh auth
+      None       — not observed inside the budget; caller keeps polling
+
+    'reverted' and 'noop' are kept apart deliberately: they carry opposite
+    retry semantics on the client, and collapsing them into one "failed"
+    would either strand a retryable send or re-send an unretryable one.
+
+    Why this exists: the client used to do this waiting itself, from a phone,
+    over the relay — every poll a phone→server→BSC round trip on a 2s
+    quantum, against a chain that mines sub-second. Here the same wait is one
+    warm keep-alive hop, so the common case (mines in the first block or two)
+    costs the user nothing beyond the submit they were already awaiting.
+
+    NOT a settlement signal and deliberately NOT persisted to the row: money
+    settles in check_sponsored_batch_receipt, which additionally waits
+    CUSD_PLUS_FINALITY_DEPTH blocks and re-verifies the block is canonical.
+    This is only permission for the UI to stop spinning — exactly the
+    confidence the client's own pre-finality receipt wait already had.
+
+    Never raises: a slow or failing RPC returns None, and the caller falls
+    back to the client poll plus the reconciler. Budget 0 disables it.
+
+    The wall clock is HARD-bounded (Codex audit 2026-08-02 [P1]): each read
+    goes to ONE endpoint with a timeout clamped to the time actually left, so
+    "1500ms" cannot become 45s of endpoint rotation blocking an ASGI thread.
+    """
+    from .tasks import _rpc_preferred_only
+
+    budget_ms = int(getattr(settings, 'CUSD_PLUS_SUBMIT_RECEIPT_WAIT_MS', 1500))
+    if budget_ms <= 0:
+        return None
+    poll_s = float(getattr(settings, 'CUSD_PLUS_SUBMIT_RECEIPT_POLL_S', 0.25))
+    deadline = time.monotonic() + (budget_ms / 1000.0)
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            # Timeout never EXCEEDS what's left (a floor that overran the
+            # budget would defeat the point); if under the floor, stop.
+            if remaining < 0.05:
+                return None
+            receipt = _rpc_preferred_only(
+                'eth_getTransactionReceipt', [tx_hash], remaining)
+            # classify INSIDE the guard: this runs after the tx is already
+            # broadcast, so an exception here would surface as "send failed"
+            # on a transaction that is on the network — the double-send path.
+            # The docstring's "never raises" has to be literally true.
+            if receipt:
+                return classify_receipt_execution(receipt, user_addr, nonce)
+        except Exception as exc:  # noqa: BLE001 — never fail a sent tx on this
+            logger.info('early receipt check failed for %s: %s', tx_hash, exc)
+            return None
+        if time.monotonic() + poll_s >= deadline:
+            return None
+        time.sleep(poll_s)
 
 
 def release_sponsor_nonce_lock(token=None) -> None:
@@ -604,7 +729,14 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
         release_sponsor_nonce_lock(lock)
 
     from .tasks import check_sponsored_batch_receipt
-    check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=6)
+    # 3s: mine (~0.5s) + BSC fast finality (~1s) with margin. The old 6s was
+    # sized for the 15-block depth heuristic this no longer uses.
+    check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=3)
     logger.info('7702 sponsored %s batch sent for user %s at %s: %s (gas=%s)',
                 kind, user.id, user_addr, tx_hash, gas)
+
+    # Optimistic early receipt (transient, NOT persisted — see helper). Held
+    # AFTER the nonce lock is released so a waiter never blocks the next
+    # signer. Lets the client skip its own poll on the common path.
+    batch.executed_early = wait_for_execution_briefly(tx_hash, user_addr, int(nonce))
     return tx_hash, batch

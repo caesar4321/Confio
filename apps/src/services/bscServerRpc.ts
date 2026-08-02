@@ -52,6 +52,7 @@ const SPONSOR_BSC_BATCH = gql`
       txHash
       authorizationRequired
       error
+      execution
     }
   }
 `;
@@ -61,6 +62,10 @@ export interface SponsorBatchResult {
   txHash?: string;
   authorizationRequired?: boolean;
   error?: string;
+  /** What the sponsor saw on-chain before answering: 'executed' |
+   *  'reverted' | 'noop'; absent/null = it didn't observe one in time and
+   *  the caller should poll for the receipt itself. */
+  execution?: string | null;
 }
 
 /** Submit a 7702 sponsored batch (sponsor pays gas; server validates the

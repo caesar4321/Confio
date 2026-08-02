@@ -162,14 +162,61 @@ def phone_lookup_key(raw_phone: str) -> str:
     return key if ':' in key else ''
 
 
+def to_international(value: str = '', user=None) -> str:
+    """The full international number ("+573132587634") for display and reuse.
+
+    `SendTransaction.sender_phone`/`recipient_phone` store LOCAL digits — the
+    columns are matched against elsewhere (send/schema.py, graphql_views.py),
+    so their format is fixed. But a local number is not a number anyone can
+    read, dial, or send to: it renders as "3132587634" with no country and
+    resolves to nobody. Anything LEAVING the server for a client (notification
+    payloads especially) should carry the full number instead.
+
+    `user` wins when it has a usable key — it is the canonical record. A value
+    that already names its country passes through. Bare digits with no user
+    are returned unchanged: we cannot invent a country, and showing the local
+    number beats showing nothing.
+    """
+    if user is not None:
+        key = getattr(user, 'phone_key', '') or ''
+        if ':' not in key:
+            number = getattr(user, 'phone_number', '') or ''
+            country = getattr(user, 'phone_country', '') or ''
+            key = normalize_phone(number, country) if number else ''
+        if ':' in key:
+            cc, _, local = key.partition(':')
+            return f'+{cc}{local}'
+
+    raw = (value or '').strip()
+    if not raw:
+        return ''
+    if ':' in raw:
+        cc, _, local = raw.partition(':')
+        cc_digits = ''.join(ch for ch in cc if ch.isdigit())
+        local_digits = ''.join(ch for ch in local if ch.isdigit())
+        if cc_digits and local_digits:
+            return f'+{cc_digits}{local_digits}'
+    if raw.startswith('+'):
+        return '+' + ''.join(ch for ch in raw if ch.isdigit())
+    return raw
+
+
 def find_user_by_phone(raw_phone: str):
     """Resolve a Confío user from a FULL phone number (with calling code).
 
     Returns None when the input names no complete number, when nothing
-    matches, or when the number is AMBIGUOUS. `phone_key` carries a partial
-    unique index in production, but that index lives in no migration, so a
-    freshly-migrated environment has no such guarantee — and paying an
-    arbitrary one of several matching users is worse than refusing.
+    matches, or when the number is AMBIGUOUS. Duplicates are real: as of
+    2026-08-01 production holds 10 active accounts on `1:2025550123` and 6 on
+    `54:2025550123`. `phone_key` has no unique constraint in any migration,
+    and production has no such index either — that is what lets those rows
+    exist. Paying an arbitrary one of several matching users is worse than
+    refusing.
+
+    The one exception is the app-store REVIEWER number, shared by design:
+    `is_review_test_phone_key` is what waives the duplicate check at phone
+    verification, so every reviewer signup adds a row on the same key. Those
+    are reserved-for-fiction numbers holding no real money, so they resolve
+    deterministically by id instead of failing the reviewer's send.
 
     Callers surface a None as "not registered", the safe, loud failure.
     See `phone_lookup_key` for the shapes accepted.
@@ -186,8 +233,14 @@ def find_user_by_phone(raw_phone: str):
     User = get_user_model()
     # Soft-deleted users are already excluded by the default manager;
     # deactivated ones are not, and their wallet should not receive.
-    matches = list(User.objects.filter(is_active=True, phone_key=key)[:2])
+    qs = User.objects.filter(is_active=True, phone_key=key)
+    matches = list(qs.order_by('id')[:2])
     if len(matches) > 1:
+        from .review_numbers import is_shared_reviewer_phone_key
+        if is_shared_reviewer_phone_key(key):
+            logger.info(
+                'phone lookup: reviewer test key %r has multiple accounts, taking the first', key)
+            return matches[0]
         logger.error('phone lookup refused: phone_key=%r matches multiple active users', key)
         return None
     return matches[0] if matches else None

@@ -137,13 +137,19 @@ export const runBscPayrollAdmin = async (
 
   let lastError = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
-    const execNonce = await delegateNonce(wallet.address);
+    // Independent reads, so pay for ONE round trip instead of two — each is
+    // a phone→server→BSC hop and both are always needed. The account nonce
+    // stays conditional: it's read only on a first-ever (undelegated) call.
+    const [execNonce, delegated] = await Promise.all([
+      delegateNonce(wallet.address),
+      isDelegatedTo(wallet.address, sponsored.delegateAddress),
+    ]);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
     const digest = hashBatchIntent(calls, execNonce, deadline, prep.intentId, wallet.address);
     const intentSignature = signIntentDigest(digest, wallet.privKeyHex);
 
     let authorization;
-    if (!(await isDelegatedTo(wallet.address, sponsored.delegateAddress))) {
+    if (!delegated) {
       const accountNonce = await bscGetNonce(wallet.address);
       authorization = signSetCodeAuthorization(
         sponsored.delegateAddress, accountNonce, wallet.privKeyHex);

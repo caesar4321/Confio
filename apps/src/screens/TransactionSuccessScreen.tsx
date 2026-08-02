@@ -15,6 +15,7 @@ import { SuccessHero } from '../components/common/SuccessHero';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
+import { useSettlementStatus } from '../hooks/useSettlementStatus';
 import { formatTokenAmount, formatTokenLabel, explorerFor, sendTokenParamFor } from '../utils/tokenDisplay';
 
 type TransactionType = 'sent' | 'received' | 'payment';
@@ -306,7 +307,17 @@ export const TransactionSuccessScreen = () => {
 
   const displayId = (transactionData as any).internalId || (transactionData as any).transactionId || 'pendiente';
   const transactionId = displayId; // Alias for backward compatibility in render
-  const isConfirmed = (transactionData as any).status === 'CONFIRMED';
+  // 'Confirmado' is the SERVER's word — the Celery confirm task only says it
+  // once the chain has finalized the block (BSC finality is a validator-set
+  // commitment, not a receipt). We start from whatever the flow handed us
+  // (always 'SUBMITTED' for BSC) and upgrade when the row settles.
+  const settlementKind = transactionData.type === 'payment' ? 'payment' : 'send';
+  const settledStatus = useSettlementStatus(
+    settlementKind,
+    (transactionData as any).internalId,
+    (transactionData as any).status,
+  );
+  const isConfirmed = settledStatus === 'CONFIRMED';
   const currentDate = new Date().toLocaleDateString('es-ES');
   const currentTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 

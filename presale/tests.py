@@ -228,7 +228,10 @@ class BscPurchaseFlowTest(TestCase):
         sig = pk.sign_msg_hash(digest)
         sig_hex = '0x' + sig.r.to_bytes(32, 'big').hex() + sig.s.to_bytes(32, 'big').hex() + bytes([27 + sig.v]).hex()
 
-        fake_batch = mock.Mock(id=1)
+        # executed_early explicitly None: a bare Mock would auto-create the
+        # attribute and feed a Mock object into the `execution` field, where
+        # the real batch row carries 'executed' | 'reverted' | 'noop' | None.
+        fake_batch = mock.Mock(id=1, executed_early=None)
         with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True), \
              mock.patch.object(sponsor_7702, 'send_sponsored_batch',
                                return_value=('0x' + 'ab' * 32, fake_batch)) as sent, \

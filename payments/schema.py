@@ -1116,6 +1116,9 @@ class SubmitBscInvoicePayment(graphene.Mutation):
     error = graphene.String()
     authorization_required = graphene.Boolean()
     transaction_hash = graphene.String()
+    # See SubmitBscSend.execution in send/schema.py.
+    execution = graphene.String(
+        description="Sponsor-observed execution: executed | reverted | noop; null=unknown")
 
     @login_required
     def mutate(self, info, payment_id, nonce, deadline, intent_signature, authorization=None):
@@ -1143,6 +1146,7 @@ class SubmitBscInvoicePayment(graphene.Mutation):
             error=result.get('error'),
             authorization_required=bool(result.get('authorization_required')),
             transaction_hash=result.get('transaction_hash'),
+            execution=result.get('execution'),
         )
 
 

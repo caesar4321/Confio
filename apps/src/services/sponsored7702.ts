@@ -16,6 +16,8 @@
 
 import {
   BatchCall,
+  BscReceiptTimeoutError,
+  BscRevertedError,
   DerivedEvmWallet,
   bscEthCall,
   bscGetCode,
@@ -23,6 +25,7 @@ import {
   bscWaitForReceipt,
   deriveIntentId,
   hashBatchIntent,
+  receiptExecutedBatch,
   selector,
   signIntentDigest,
   signSetCodeAuthorization,
@@ -96,25 +99,41 @@ export const isDelegatedTo = async (eoa: string, delegate: string): Promise<bool
   return code === DELEGATION_PREFIX + delegate.toLowerCase().slice(2);
 };
 
+/** What a sponsored batch settled to. `receipt` is present only when THIS
+ *  client observed it; when the sponsor reported the execution it saw, the
+ *  hash is all we legitimately have — so the type says so rather than
+ *  handing back a fabricated receipt. */
+export interface SponsoredBatchResultReceipt {
+  txHash: string;
+  receipt?: BscReceipt;
+}
+
 /**
  * Execute `calls` as the user's EOA via a sponsor-paid transaction.
- * Waits for the receipt AND proves execution actually happened (delegate
- * nonce advanced); retries once with fresh nonces on the races the server
- * reports (authorization_required / stale_auth_nonce) or a silent no-op.
- * Returns the mined receipt. Throws on policy rejection or exhaustion.
+ * Confirms execution actually happened — the sponsor's own observation when
+ * it has one, otherwise our own receipt poll — and retries once with fresh
+ * nonces on the races the server reports (authorization_required /
+ * stale_auth_nonce) or a silent no-op. Throws on policy rejection or
+ * exhaustion.
  */
 export const executeSponsoredBatch = async (params: {
   wallet: DerivedEvmWallet;
   calls: BatchCall[];
   delegateAddress: string;
-}): Promise<BscReceipt> => {
+}): Promise<SponsoredBatchResultReceipt> => {
   const { sponsorBscBatch } = await import('./bscServerRpc');
   const { wallet, calls, delegateAddress } = params;
   const from = wallet.address;
 
   let lastError = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
-    const execNonce = await delegateNonce(from);
+    // Independent reads, so pay for ONE round trip instead of two — each is
+    // a phone→server→BSC hop and both are always needed. The account nonce
+    // stays conditional: it's read only on a first-ever (undelegated) call.
+    const [execNonce, delegated] = await Promise.all([
+      delegateNonce(from),
+      isDelegatedTo(from, delegateAddress),
+    ]);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
     // Savings rail: no prepare step, so derive intentId the way the server
@@ -126,7 +145,7 @@ export const executeSponsoredBatch = async (params: {
     // First use (or re-delegation): the authorization tuple rides along.
     // The server re-checks delegation state authoritatively either way.
     let authorization;
-    if (!(await isDelegatedTo(from, delegateAddress))) {
+    if (!delegated) {
       const accountNonce = await bscGetNonce(from);
       authorization = signSetCodeAuthorization(delegateAddress, accountNonce, wallet.privKeyHex);
     }
@@ -146,10 +165,28 @@ export const executeSponsoredBatch = async (params: {
       throw new Error(`sponsored batch rejected: ${lastError}`);
     }
 
-    const receipt = await bscWaitForReceipt(res.txHash as string);
-    if ((await delegateNonce(from)) > execNonce) return receipt; // executed for real
-    // Mined but the delegate nonce didn't move: the delegation never
-    // applied (silent 7702 no-op). Fresh reads, one more shot.
+    const txHash = res.txHash as string;
+    // The sponsor watched the chain before answering; null (it didn't see
+    // the tx inside its budget) falls through to our own poll. A server
+    // without `execution` fails this whole mutation at GraphQL validation
+    // rather than omitting the field, so deploy the server first.
+    if (res.execution === 'executed') return { txHash };
+    if (res.execution === 'reverted') throw new BscRevertedError(txHash);
+    if (res.execution !== 'noop') {
+      const receipt = await bscWaitForReceipt(txHash);
+      // BatchExecuted(nonce) from this EOA is the proof the delegation
+      // applied — the same question the second nonces() read used to ask,
+      // answered by the receipt we already hold.
+      const verdict = receiptExecutedBatch(receipt, from, execNonce);
+      if (verdict === 'executed') return { txHash, receipt };
+      // No logs field at all: we were never shown whether this executed.
+      // Outcome-unknown, NOT failure — cusdPlusVault's callers check
+      // isOutcomeUnknown precisely so they don't broadcast a second,
+      // self-signed transfer for money that may already have moved.
+      if (verdict === 'unknown') throw new BscReceiptTimeoutError(txHash);
+    }
+    // Mined without our BatchExecuted: the delegation never applied
+    // (silent 7702 no-op). Fresh reads, one more shot.
     lastError = 'delegation_not_applied';
   }
   throw new Error(`sponsored batch failed: ${lastError}`);

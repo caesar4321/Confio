@@ -325,4 +325,6 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
     from .tasks import confirm_bsc_presale_purchase
     confirm_bsc_presale_purchase.apply_async(args=[purchase.id, batch.id], countdown=8)
 
-    return {'success': True, 'transaction_hash': tx_hash}
+    # See send/bsc_flow.py: sponsor-observed execution, not settlement.
+    return {'success': True, 'transaction_hash': tx_hash,
+            'execution': getattr(batch, 'executed_early', None)}

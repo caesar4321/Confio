@@ -513,4 +513,6 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     from .tasks import confirm_bsc_payment
     confirm_bsc_payment.apply_async(args=[payment_tx.id, batch.id], countdown=8)
 
-    return {'success': True, 'transaction_hash': tx_hash}
+    # See send/bsc_flow.py: sponsor-observed execution, not settlement.
+    return {'success': True, 'transaction_hash': tx_hash,
+            'execution': getattr(batch, 'executed_early', None)}

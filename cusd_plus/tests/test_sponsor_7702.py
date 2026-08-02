@@ -226,6 +226,12 @@ def _rpc_factory(overrides=None, delegated=False, sent_raws=None):
             if sent_raws is not None:
                 sent_raws.append(params[0])
             return '0x' + 'ab' * 32
+        if method == 'eth_getTransactionReceipt':
+            # send_sponsored_batch's brief post-broadcast look. Default is
+            # "not mined yet", the same answer a real node gives in the
+            # milliseconds after a broadcast; the wait is set to 0ms below
+            # so these tests never actually sleep on it.
+            return None
         raise AssertionError(f'unexpected rpc {method}')
     return rpc
 
@@ -235,6 +241,7 @@ def _rpc_factory(overrides=None, delegated=False, sent_raws=None):
     CUSD_PLUS_BATCH_DELEGATE_ADDRESS=DELEGATE,
     CUSD_PLUS_VAULT_ADDRESS=VAULT,
     BSC_CHAIN_ID=56,
+    CUSD_PLUS_SUBMIT_RECEIPT_WAIT_MS=0,  # broadcast path only; the wait has its own tests
 )
 class SponsorBscBatchTests(SimpleTestCase):
 
@@ -463,7 +470,17 @@ class ReceiptCheckerTests(SimpleTestCase):
         return {'address': USER,
                 'topics': [_BATCH_EXECUTED_TOPIC, '0x' + format(nonce, 'x').rjust(64, '0')]}
 
-    def _run(self, batch, receipt, head=BLK + 100, canonical_hash=BLKHASH):
+    def setUp(self):
+        # _finalized_block_number caches for 2s; a value leaking between
+        # tests would silently decide the gate they are trying to exercise.
+        from django.core.cache import cache
+        cache.delete('cusd_plus_bsc_finalized')
+
+    def _run(self, batch, receipt, head=BLK + 100, canonical_hash=BLKHASH,
+             finalized='unsupported'):
+        """finalized: a block number the node reports as FINALIZED, or
+        'unsupported' to model a node that doesn't serve the tag (which is
+        what drives the depth fallback)."""
         from cusd_plus import tasks
         def _rpc(method, params, *a, **k):
             if method == 'eth_getTransactionReceipt':
@@ -471,6 +488,10 @@ class ReceiptCheckerTests(SimpleTestCase):
             if method == 'eth_blockNumber':
                 return hex(head)
             if method == 'eth_getBlockByNumber':
+                if params and params[0] == 'finalized':
+                    if finalized == 'unsupported':
+                        return None
+                    return {'number': hex(finalized), 'hash': canonical_hash}
                 return {'hash': canonical_hash}
             return '0x'
         with mock.patch('blockchain.models.SponsoredBatch.objects') as objs, \
@@ -492,21 +513,76 @@ class ReceiptCheckerTests(SimpleTestCase):
         self.assertEqual(batch.status, 'confirmed')
         self.assertEqual(batch.block_number, self.BLK)
 
+    def test_finalized_tag_settles_without_waiting_for_depth(self):
+        """BSC finalizes in ~2 blocks (a validator-set commitment), so once
+        the chain says the block is finalized we must NOT keep counting to
+        CUSD_PLUS_FINALITY_DEPTH — that heuristic made users wait ~6.8s for a
+        guarantee the chain had already given at ~0.9s."""
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[self._exec_log()]),
+                  head=self.BLK + 2, finalized=self.BLK)
+        self.assertEqual(batch.status, 'confirmed')
+
+    def test_not_finalized_stays_pending_even_when_deep(self):
+        """The finalized tag OVERRIDES depth in the strict direction too: a
+        block buried under 100 confirmations that the validator set has not
+        committed to is not settled."""
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[self._exec_log()]),
+                  head=self.BLK + 100, finalized=self.BLK - 1)
+        self.assertEqual(batch.status, 'sent')
+
+    def test_falls_back_to_depth_when_tag_unsupported(self):
+        """A partial or pre-BEP-126 endpoint must degrade to the old
+        behaviour, not strand settlement."""
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[self._exec_log()]),
+                  head=self.BLK + 100, finalized='unsupported')
+        self.assertEqual(batch.status, 'confirmed')
+
+        shallow = self._batch()
+        self._run(shallow, self._receipt(logs=[self._exec_log()]),
+                  head=self.BLK + 1, finalized='unsupported')
+        self.assertEqual(shallow.status, 'sent')
+
     def test_reverted(self):
         batch = self._batch()
         self._run(batch, self._receipt(status='0x0'))
         self.assertEqual(batch.status, 'reverted')
 
     def test_silent_noop_flagged(self):
-        # status 0x1 but no BatchExecuted log = delegation didn't apply.
+        # The delegation didn't apply, so the tx called a CODELESS EOA and
+        # could not emit anything. Zero logs is the only shape a real 7702
+        # no-op has, and it is what earns a terminal noop_failed.
         batch = self._batch()
-        self._run(batch, self._receipt(logs=[{'address': USER, 'topics': []}]))
+        self._run(batch, self._receipt(logs=[]))
         self.assertEqual(batch.status, 'noop_failed')
 
-    def test_wrong_nonce_is_noop(self):
+    def test_logs_present_without_proof_retries_instead_of_failing(self):
+        """Codex re-audit [P1]. Non-empty logs mean SOMETHING executed, so
+        this was not a no-op — we just can't see our own proof. Since
+        BatchExecuted is emitted last, a clipped response looks exactly like
+        this. Retry (recoverable) instead of settling noop_failed, which
+        fails a batch that may have moved money and invites a re-send."""
+        batch = self._batch()
+        self._run(batch, self._receipt(logs=[{'address': USER, 'topics': []}]))
+        self.assertEqual(batch.status, 'sent')
+
+    def test_wrong_nonce_retries(self):
+        # Same reasoning: a BatchExecuted for a different intent is evidence
+        # that logs exist, not evidence that ours is absent.
         batch = self._batch()
         self._run(batch, self._receipt(logs=[self._exec_log(nonce=999)]))
-        self.assertEqual(batch.status, 'noop_failed')
+        self.assertEqual(batch.status, 'sent')
+
+    def test_missing_logs_field_never_settles_noop(self):
+        """The authoritative path used to fold a missing `logs` field into []
+        and settle noop_failed off it — failing an executed batch."""
+        batch = self._batch()
+        rec = self._receipt(logs=[])
+        rec.pop('logs', None)
+        self._run(batch, rec)
+        self.assertEqual(batch.status, 'sent')
 
     def test_not_final_stays_pending(self):
         batch = self._batch()
@@ -600,3 +676,138 @@ class ReconcileSignedBatchesTests(SimpleTestCase):
         self.assertEqual(batch.status, 'sent')
         receipt_task.apply_async.assert_called_once()
         capp.send_task.assert_not_called()
+
+
+@override_settings(CUSD_PLUS_SUBMIT_RECEIPT_POLL_S=0)
+class WaitForExecutionBrieflyTests(SimpleTestCase):
+    """The brief post-broadcast look that lets the client skip its own poll.
+
+    It must be as strict as the reconciler (exact BatchExecuted(nonce) from
+    the user's own address) and must never turn an RPC problem into a
+    verdict — an unobserved outcome is None, not a failure.
+    """
+
+    TXH = '0x' + 'cd' * 32
+    ADDR = '0x' + '19' * 20
+    NONCE = 7
+
+    def _topic_nonce(self, n):
+        return '0x' + format(n, 'x').rjust(64, '0')
+
+    def _receipt(self, status='0x1', logs=None):
+        return {'status': status, 'logs': logs if logs is not None else []}
+
+    def _good_log(self, addr=None, nonce=None):
+        from cusd_plus.tasks import _BATCH_EXECUTED_TOPIC
+        return {
+            'address': (addr or self.ADDR).upper(),  # nodes vary in casing
+            'topics': [_BATCH_EXECUTED_TOPIC,
+                       self._topic_nonce(self.NONCE if nonce is None else nonce)],
+        }
+
+    def _run(self, rpc_side_effect):
+        # The wait now reads through _rpc_preferred_only (ONE endpoint, no
+        # rotation) so its wall clock is bounded — patch that, not _rpc.
+        from cusd_plus import tasks as _tasks
+        with mock.patch.object(_tasks, '_rpc_preferred_only',
+                               side_effect=lambda m, p, t: rpc_side_effect(m, p)):
+            return sponsor_7702.wait_for_execution_briefly(
+                self.TXH, self.ADDR, self.NONCE)
+
+    def test_executed_when_batch_executed_log_matches(self):
+        rec = self._receipt(logs=[self._good_log()])
+        self.assertEqual(self._run(lambda m, p: rec), 'executed')
+
+    def test_reverted_on_status_zero(self):
+        # Logs are irrelevant once it reverted.
+        rec = self._receipt(status='0x0', logs=[self._good_log()])
+        self.assertEqual(self._run(lambda m, p: rec), 'reverted')
+
+    def test_noop_when_node_reports_zero_logs(self):
+        """The 7702 silent failure: mines 0x1 having executed nothing. An
+        AFFIRMATIVE empty list is the node telling us there were no logs."""
+        self.assertEqual(self._run(lambda m, p: self._receipt(logs=[])), 'noop')
+
+    def test_unknown_when_logs_field_absent(self):
+        """Codex audit [P1]: a receipt with NO logs field is not evidence of
+        non-execution. Returning 'noop' here is what lets a client retry a
+        batch that already executed and settle the same money twice."""
+        self.assertIsNone(self._run(lambda m, p: {'status': '0x1'}))
+
+    def test_unknown_when_nonce_differs(self):
+        """A BatchExecuted from a DIFFERENT intent is not ours — but logs
+        exist, so this was NOT a no-op and we must not call it one."""
+        rec = self._receipt(logs=[self._good_log(nonce=self.NONCE + 1)])
+        self.assertIsNone(self._run(lambda m, p: rec))
+
+    def test_unknown_when_log_from_another_address(self):
+        rec = self._receipt(logs=[self._good_log(addr='0x' + 'ee' * 20)])
+        self.assertIsNone(self._run(lambda m, p: rec))
+
+    def test_unknown_when_trailing_log_truncated(self):
+        """Codex re-audit [P1]: BatchExecuted is emitted LAST, so a response
+        that clips trailing logs keeps the inner transfers and drops exactly
+        our proof. That must read as unknown, never as a no-op."""
+        inner = {'address': '0x' + 'aa' * 20, 'topics': ['0x' + 'bb' * 32]}
+        self.assertIsNone(self._run(lambda m, p: self._receipt(logs=[inner])))
+
+    def test_never_raises_on_malformed_logs(self):
+        """This runs AFTER broadcast: an exception here surfaces as "send
+        failed" for a tx that is already on the network."""
+        self.assertIsNone(self._run(lambda m, p: self._receipt(logs=['not-a-dict'])))
+        self.assertIsNone(self._run(lambda m, p: {'status': '0x1', 'logs': [None]}))
+
+    def test_uppercase_topics_still_match(self):
+        """Codex audit [P1]: hex casing is not guaranteed across nodes, and a
+        case mismatch used to read as 'did not execute' — the dangerous way to
+        be wrong."""
+        lg = self._good_log()
+        lg['topics'] = [t.upper() for t in lg['topics']]
+        self.assertEqual(self._run(lambda m, p: self._receipt(logs=[lg])), 'executed')
+
+    def test_wall_clock_is_bounded_by_the_budget(self):
+        """Codex audit [P1]: the per-call timeout must be clamped to the time
+        LEFT, so a hanging endpoint cannot turn a 1.5s budget into 45s of
+        rotation blocking an ASGI thread."""
+        from cusd_plus import tasks as _tasks
+        seen = []
+
+        def rpc(method, params, timeout):
+            seen.append(timeout)
+            return None
+
+        with override_settings(CUSD_PLUS_SUBMIT_RECEIPT_WAIT_MS=200,
+                               CUSD_PLUS_SUBMIT_RECEIPT_POLL_S=0):
+            with mock.patch.object(_tasks, '_rpc_preferred_only', side_effect=rpc):
+                sponsor_7702.wait_for_execution_briefly(
+                    self.TXH, self.ADDR, self.NONCE)
+        self.assertTrue(seen, 'should have asked at least once')
+        # Every per-call timeout fits inside the remaining budget.
+        self.assertTrue(all(t <= 0.2 for t in seen), seen)
+
+    def test_none_when_not_mined_inside_budget(self):
+        calls = []
+
+        def rpc(method, params):
+            calls.append(method)
+            return None
+
+        # Above the 0.05s floor, so it polls at least once before giving up.
+        with override_settings(CUSD_PLUS_SUBMIT_RECEIPT_WAIT_MS=60):
+            self.assertIsNone(self._run(rpc))
+        self.assertTrue(calls, 'should have asked at least once')
+
+    def test_none_and_no_raise_when_rpc_fails(self):
+        """An RPC problem must never be reported as an outcome — the client
+        poll and the reconciler both still own this transaction."""
+        def rpc(method, params):
+            raise RuntimeError('all 3 BSC RPC endpoints failed')
+
+        self.assertIsNone(self._run(rpc))
+
+    def test_disabled_by_zero_budget_makes_no_call(self):
+        def rpc(method, params):
+            raise AssertionError('must not touch the node when disabled')
+
+        with override_settings(CUSD_PLUS_SUBMIT_RECEIPT_WAIT_MS=0):
+            self.assertIsNone(self._run(rpc))

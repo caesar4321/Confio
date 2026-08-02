@@ -298,8 +298,10 @@ export const TransactionProcessingScreen = () => {
     // and the minute-keyed idempotency key has rolled by then: two sends.
     // Algorand settles in seconds. A BSC sponsored send legitimately runs
     // much longer (prepare + sign + submit + bscWaitForReceipt, which alone
-    // polls 60x2s = 120s before throwing its own, better-worded error), so
-    // the backstop only fires once that has had its chance.
+    // has a 120s budget before throwing its own, better-worded error), so
+    // the backstop only fires once that has had its chance. The common case
+    // is now far quicker — the sponsor usually reports the execution it saw
+    // and the client never polls — but the watchdog sizes the WORST case.
     const watchdogMs = (transactionData as any)?.bscSend ? 180000 : 20000;
     const watchdog = setTimeout(() => {
       if (isComplete) return;
@@ -794,7 +796,19 @@ export const TransactionProcessingScreen = () => {
         // invites a retry whose minute-keyed idempotency key has rolled,
         // which is exactly how the same money left twice.
         (transactionData as any).transactionHash = res?.txHash || (transactionData as any).transactionHash;
-        (transactionData as any).status = res?.pending ? 'SUBMITTED' : 'CONFIRMED';
+        // sendId IS the SendTransaction internal_id — the handle the success
+        // screen polls settlement with. Without it that screen has nothing to
+        // ask about and would sit on 'Confirmando…' forever.
+        if (res?.sendId) (transactionData as any).internalId = res.sendId;
+        // ALWAYS 'SUBMITTED', never CONFIRMED from here. Holding a receipt is
+        // not the same as the transaction being final: on BSC a block is only
+        // committed once the validator set has voted on it, and until then a
+        // reorg can still take it back. 'Confirmado' is the CELERY confirm
+        // task's word, read from the server row — the success screen polls
+        // for it, which is why claiming it locally is both wrong and
+        // unnecessary. (On Algorand this distinction never existed: the
+        // first block is final.)
+        (transactionData as any).status = 'SUBMITTED';
         setTransactionSuccess(true);
         setIsComplete(true);
       } catch (e: any) {

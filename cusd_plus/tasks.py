@@ -12,6 +12,7 @@ fake a STUCK state while the money already landed. It remains available
 as a support diagnostic for genuinely stuck rows only.
 """
 import logging
+import threading
 from datetime import timedelta
 from decimal import ROUND_DOWN, Decimal
 
@@ -37,11 +38,14 @@ _DEFAULT_RPC_POOL = (
     'https://bsc-dataseed.bnbchain.org',
     'https://1rpc.io/bnb',
 )
+# `or` NOT a getattr default: settings declares this key, so an unset env
+# var makes it '' — present but empty, which a getattr default never sees.
+# Falling through to an EMPTY pool would take every BSC RPC down at once.
 BSC_RPC_URLS = [
-    u.strip() for u in getattr(
-        settings, 'CUSD_PLUS_BSC_RPC_URLS', ','.join(_DEFAULT_RPC_POOL)
+    u.strip() for u in (
+        getattr(settings, 'CUSD_PLUS_BSC_RPC_URLS', '') or ','.join(_DEFAULT_RPC_POOL)
     ).split(',') if u.strip()
-]
+] or list(_DEFAULT_RPC_POOL)
 USDT_BSC = getattr(settings, 'CUSD_PLUS_USDT_BSC', '0x55d398326f99059fF775485246999027B3197955')
 # keccak256("Transfer(address,address,uint256)")
 TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
@@ -58,8 +62,40 @@ SCAN_FAILURE_ALERT_THRESHOLD = 10
 _FAILURE_KEY = 'cusd_plus_bsc_scan_failures'
 
 
+# CONNECTION REUSE (2026-08-01): a bare requests.post per call meant a fresh
+# DNS + TCP + TLS handshake on EVERY rpc. One sponsored submit makes ~7 of
+# them serially (getCode, getTransactionCount, eth_call, gasPrice, sponsor
+# nonce, sponsor balance, sendRawTransaction), and each relayed client read
+# adds another — all of it on the user's latency budget, dwarfing BSC's
+# sub-second block time. Sessions are held per (thread, url): urllib3 keeps
+# the keep-alive pool, and thread-local ownership sidesteps requests.Session's
+# shared-mutable-state caveats under daphne's threadpool and celery alike.
+_rpc_sessions = threading.local()
+
+
+def _rpc_session(url):
+    by_url = getattr(_rpc_sessions, 'by_url', None)
+    if by_url is None:
+        by_url = {}
+        _rpc_sessions.by_url = by_url
+    sess = by_url.get(url)
+    if sess is None:
+        sess = requests.Session()
+        # One host per session, so the pool only ever holds that host's
+        # connections. max_retries=0 ON PURPOSE: _rpc's endpoint rotation IS
+        # the retry, and urllib3 retrying in here would delay the failover
+        # that the 2026-07-31 incident exists to make fast.
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=4, pool_maxsize=8, max_retries=0,
+        )
+        sess.mount('https://', adapter)
+        sess.mount('http://', adapter)
+        by_url[url] = sess
+    return sess
+
+
 def _rpc_single(url, method, params, timeout=15):
-    res = requests.post(
+    res = _rpc_session(url).post(
         url,
         json={'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params},
         timeout=timeout,
@@ -71,9 +107,34 @@ def _rpc_single(url, method, params, timeout=15):
     return body['result']
 
 
+def _rpc_preferred_only(method, params, timeout):
+    """ONE shot at the endpoint most likely to answer — NO rotation.
+
+    Worst case is `timeout`, not `timeout x len(BSC_RPC_URLS)`. That matters
+    for latency-critical OPTIMISTIC reads (the post-broadcast peek in
+    sponsor_7702): rotation exists to make a failing call eventually succeed,
+    which is the opposite of what an optimistic read wants. Callers here
+    always have a fallback — the client's own poll and the reconciler — so a
+    slow endpoint must END the attempt, not start a 3x cascade that blocks an
+    ASGI thread for 45s while claiming a 1.5s budget.
+
+    Never use this for a call whose result is required; use _rpc.
+    """
+    from django.core.cache import cache
+
+    preferred = cache.get('cusd_plus_bsc_rpc_preferred')
+    url = preferred if preferred in BSC_RPC_URLS else BSC_RPC_URLS[0]
+    return _rpc_single(url, method, params, timeout)
+
+
 def _rpc(method, params, timeout=15):
     """Try the pool in preference order; remember the last URL that worked
-    so steady state is one request, not a failover cascade."""
+    so steady state is one request, not a failover cascade.
+
+    NOTE for latency-sensitive callers: worst case is timeout x len(pool),
+    since every endpoint may hang for the full timeout before the next is
+    tried. Use _rpc_preferred_only when a bounded wall clock matters more
+    than eventually succeeding."""
     from django.core.cache import cache
 
     preferred = cache.get('cusd_plus_bsc_rpc_preferred')
@@ -799,6 +860,51 @@ def _finality_depth() -> int:
     return int(getattr(settings, 'CUSD_PLUS_FINALITY_DEPTH', 15))
 
 
+def _finalized_block_number():
+    """BSC's DETERMINISTIC finality head, or None if the node won't serve it.
+
+    BSC has fast finality (BEP-126): a block is final once 2/3+ of the
+    validator set has voted on it — measured 2026-08-02 as 2 blocks behind
+    head, ~0.9s at the observed 0.45s block time. Reversing a finalized
+    block requires >1/3 of stake to equivocate and be slashed.
+
+    That is a COMMITMENT, not a probability, which is why counting N
+    confirmations is the wrong instrument here: the depth heuristic we
+    inherited is both slower (15 blocks ≈ 6.8s) and a weaker guarantee than
+    simply asking the chain what it has finalized. (Algorand needed neither
+    — its first block is final — which is why this never came up before.)
+
+    Cached briefly. A STALE value can only make us wait longer, never settle
+    early, so the cache's error direction is the safe one.
+    """
+    from django.core.cache import cache
+
+    cached = cache.get('cusd_plus_bsc_finalized')
+    if cached is not None:
+        return cached
+    try:
+        blk = _rpc('eth_getBlockByNumber', ['finalized', False])
+    except Exception as exc:  # noqa: BLE001 — pre-BEP-126 or a partial node
+        logger.info('finalized tag unavailable, using depth fallback: %s', exc)
+        return None
+    if not blk or not blk.get('number'):
+        return None
+    num = int(blk['number'], 16)
+    cache.set('cusd_plus_bsc_finalized', num, 2)
+    return num
+
+
+def _retry_countdown(retries: int) -> int:
+    """Fast while finality is plausibly imminent, slow for the long tail.
+
+    Finality lands ~1s after mining, so the first few checks should be
+    seconds apart — a flat 15s meant a user watched 'Confirmando…' for up to
+    ~20s waiting on a guarantee the chain had already given. The tail stays
+    slow so a degraded RPC isn't hammered, and the total retry WINDOW is
+    preserved (see max_retries on each task) rather than traded away."""
+    return 3 if retries < 5 else 15
+
+
 @shared_task(name='cusd_plus.check_sponsored_batch_receipt', bind=True, max_retries=40)
 def check_sponsored_batch_receipt(self, batch_id: int):
     """Resolve a SponsoredBatch to a FINAL outcome (audit 2026-07-31 P1-3).
@@ -833,7 +939,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     if not receipt:
         # Not mined yet (or broadcast never landed) — back off and retry,
         # then leave for the reconciler. Never guess an outcome.
-        raise self.retry(countdown=15)
+        raise self.retry(countdown=_retry_countdown(self.request.retries))
 
     if receipt.get('status') != '0x1':
         batch.status = 'reverted'
@@ -845,18 +951,26 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     logs = receipt.get('logs') or []
     is_7702 = batch.delegate_nonce is not None
     if is_7702:
-        # Require the EXACT BatchExecuted(nonce) from the user EOA. Absent /
-        # wrong nonce => the batch did not execute (no-op or a different
-        # delegate ran first).
-        want_nonce = '0x' + format(int(batch.delegate_nonce), 'x').rjust(64, '0')
-        executed = any(
-            (lg.get('address') or '').lower() == batch.user_bsc_address.lower()
-            and (lg.get('topics') or [None])[0] == _BATCH_EXECUTED_TOPIC
-            and len(lg.get('topics') or []) >= 2
-            and lg['topics'][1].lower() == want_nonce
-            for lg in logs
-        )
-        if not executed:
+        # ONE rule for "did our batch execute", shared with the submit-path
+        # peek. This settles MONEY, so it is the path that most needs the
+        # distinction it previously lacked (Codex re-audit 2026-08-02 [P1]):
+        # it used to fold a MISSING logs field into [] and compare topic 0
+        # case-sensitively, so a receipt that merely failed to show us the
+        # evidence was settled as noop_failed — failing a batch that had
+        # executed, and inviting the retry that sends the money twice.
+        from .sponsor_7702 import classify_receipt_execution
+
+        verdict = classify_receipt_execution(
+            receipt, batch.user_bsc_address, batch.delegate_nonce)
+        if verdict is None:
+            # Can't see the proof (logs absent, or present-but-truncated —
+            # BatchExecuted is emitted last, so it is the first thing a
+            # clipped response loses). Ask again rather than guess; an
+            # exhausted retry budget leaves the row 'sent' for the
+            # reconciler, which is recoverable. noop_failed is not.
+            logger.warning('7702 batch %s: receipt shows no usable proof, retrying', batch.tx_hash)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+        if verdict != 'executed':
             batch.status = 'noop_failed'
             settle_savings_mint(batch.tx_hash, 'noop_failed')
             batch.save(update_fields=['status', 'updated_at'])
@@ -873,16 +987,31 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             logger.warning('plain batch %s mined with no logs', batch.tx_hash)
             return
 
-    # Finality: wait N confirmations, then verify the block is canonical.
+    # Finality: ask the chain what it has FINALIZED (BSC fast finality), and
+    # only fall back to counting confirmations on a node that won't answer.
+    # Then verify the block is still canonical either way.
     try:
         blk_num = int(receipt.get('blockNumber'), 16)
         blk_hash = (receipt.get('blockHash') or '').lower()
-        head = int(_rpc('eth_blockNumber', []), 16)
     except Exception as exc:  # noqa: BLE001
         logger.warning('7702 finality read failed for %s: %s', batch.tx_hash, exc)
-        raise self.retry(countdown=15)
-    if head - blk_num < _finality_depth():
-        raise self.retry(countdown=15)
+        raise self.retry(countdown=_retry_countdown(self.request.retries))
+
+    finalized = _finalized_block_number()
+    if finalized is not None:
+        if blk_num > finalized:
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+    else:
+        # No finalized tag from this endpoint — the old depth heuristic, kept
+        # so a partial or pre-BEP-126 node degrades to the previous behavior
+        # instead of stranding settlement entirely.
+        try:
+            head = int(_rpc('eth_blockNumber', []), 16)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('7702 head read failed for %s: %s', batch.tx_hash, exc)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+        if head - blk_num < _finality_depth():
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
     # The block that held the receipt must still be canonical at this height.
     canonical = _rpc('eth_getBlockByNumber', [hex(blk_num), False])
     if not canonical or (canonical.get('hash') or '').lower() != blk_hash:
@@ -901,7 +1030,7 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             logger.warning('7702 batch %s reorged out (block %s no longer canonical)',
                            batch.tx_hash, blk_num)
             return
-        raise self.retry(countdown=15)
+        raise self.retry(countdown=_retry_countdown(self.request.retries))
 
     batch.block_number = blk_num
     batch.block_hash = blk_hash

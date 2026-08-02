@@ -10,6 +10,7 @@ import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client'
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 
 // Simple auth readiness gate to coordinate token-dependent queries
@@ -329,6 +330,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             return; // Exit early to prevent setting profile data
           }
         }
+
+        // Address-book numbers that omit a country code are read against the
+        // user's OWN country. Without this every non-Venezuelan user's local
+        // contacts parse as +58 and match the wrong person (or nobody).
+        setDefaultPhoneRegion(data?.me?.phoneCountry);
 
         setProfileData({
           userProfile: data?.me || null,

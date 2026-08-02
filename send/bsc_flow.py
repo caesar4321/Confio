@@ -634,6 +634,14 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
         pass
 
     from .tasks import confirm_bsc_send
-    confirm_bsc_send.apply_async(args=[send_tx.id, batch.id], countdown=8)
+    # 4s: just behind the batch receipt check (3s), so the domain row flips
+    # to CONFIRMED on the first pass in the common case rather than waiting
+    # out a retry — this delay IS how long the user sees 'Confirmando…'.
+    confirm_bsc_send.apply_async(args=[send_tx.id, batch.id], countdown=4)
 
-    return {'success': True, 'transaction_hash': tx_hash}
+    # executed_early: the sponsor already SAW this execute() in a receipt, so
+    # the client can stop spinning without a poll of its own. None = not yet
+    # observed (client falls back to polling); it is never a settlement claim
+    # — confirm_bsc_send still owns the money row.
+    return {'success': True, 'transaction_hash': tx_hash,
+            'execution': getattr(batch, 'executed_early', None)}

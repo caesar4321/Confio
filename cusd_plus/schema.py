@@ -874,6 +874,9 @@ class SponsorBscBatch(graphene.Mutation):
     tx_hash = graphene.String()
     authorization_required = graphene.Boolean()
     error = graphene.String()
+    # Tri-state (null ≠ false) — see SubmitBscSend.executed in send/schema.py.
+    execution = graphene.String(
+        description="Sponsor-observed execution: executed | reverted | noop; null=unknown")
 
     def mutate(self, info, calls, nonce, deadline, intent_signature, authorization=None):
         import time as _time
@@ -1021,7 +1024,7 @@ class SponsorBscBatch(graphene.Mutation):
                         success=False, authorization_required=True,
                         error='stale_auth_nonce')
 
-            tx_hash, _batch = sponsor_7702.send_sponsored_batch(
+            tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind)
             if mint_call is not None:
@@ -1047,7 +1050,8 @@ class SponsorBscBatch(graphene.Mutation):
 
         cache.set(rl_key, 1, 30)  # 30s per-address cooldown
         cache.set(day_key, day_count + 1, 24 * 3600)
-        return SponsorBscBatch(success=True, tx_hash=tx_hash)
+        return SponsorBscBatch(success=True, tx_hash=tx_hash,
+                               execution=getattr(batch, 'executed_early', None))
 
 
 class RegisterBscUsdtArrival(graphene.Mutation):

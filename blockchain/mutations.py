@@ -1364,13 +1364,23 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                         fees_saved=result.get('fees_saved') or 0.0
                     )
 
-                # Resolve recipient user if known by Algorand address
+                # Resolve recipient by Algorand address. A BUSINESS account
+                # carries both its owning user and the business; recording
+                # only the user made a business recipient indistinguishable
+                # from a personal one, so anything reading the row back (the
+                # "send again" CTA especially) would target the owner's
+                # PERSONAL wallet under the business's name.
                 recipient_user = None
+                recipient_business = None
                 try:
-                    acct = Account.objects.filter(algorand_address=recipient_addr).select_related('user').first()
-                    recipient_user = acct.user if acct else None
+                    acct = Account.objects.filter(
+                        algorand_address=recipient_addr).select_related('user', 'business').first()
+                    if acct:
+                        recipient_user = acct.user
+                        recipient_business = acct.business if acct.account_type == 'business' else None
                 except Exception:
                     recipient_user = None
+                    recipient_business = None
 
                 # Derive friendly display names and types
                 def full_name(u):
@@ -1382,11 +1392,13 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
 
                 sender_display = full_name(user) or (getattr(user, 'username', None) if '@' not in (getattr(user, 'username', '') or '') else None)
                 recipient_display = None
-                if recipient_user:
+                if recipient_business:
+                    recipient_display = recipient_business.name
+                elif recipient_user:
                     recipient_display = full_name(recipient_user) or (getattr(recipient_user, 'username', None) if '@' not in (getattr(recipient_user, 'username', '') or '') else None)
 
                 sender_type = 'user'
-                recipient_type = 'user' if recipient_user else 'external'
+                recipient_type = 'business' if recipient_business else ('user' if recipient_user else 'external')
 
                 # Phone numbers (used for contact matching; optional)
                 try:
@@ -1396,8 +1408,12 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 except Exception:
                     sender_phone = ''
                 try:
-                    rc = getattr(recipient_user, 'phone_country', None) if recipient_user else None
-                    rn = getattr(recipient_user, 'phone_number', None) if recipient_user else None
+                    # A business recipient has no phone of its own — the
+                    # owner's number is not the business's, and recording it
+                    # here is what let a "send again" reach a personal wallet.
+                    # Mirrors send/bsc_flow.py, which leaves it blank too.
+                    rc = getattr(recipient_user, 'phone_country', None) if (recipient_user and not recipient_business) else None
+                    rn = getattr(recipient_user, 'phone_number', None) if (recipient_user and not recipient_business) else None
                     recipient_phone = (f"{rc}{rn}" if rn and rc else (rn or '')) or ''
                 except Exception:
                     recipient_phone = ''
@@ -1419,6 +1435,7 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     defaults={
                         'sender_user': user,
                         'recipient_user': recipient_user,
+                        'recipient_business': recipient_business,
                         'sender_address': sender_addr or '',
                         'recipient_address': recipient_addr or '',
                         'amount': amount_dec,

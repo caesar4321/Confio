@@ -305,6 +305,17 @@ class SubmitBscSend(graphene.Mutation):
     error = graphene.String()
     authorization_required = graphene.Boolean()
     transaction_hash = graphene.String()
+    # What the sponsor SAW on-chain before answering, so the client can skip
+    # a poll it would otherwise make from a phone through the relay:
+    #   'executed' — the exact BatchExecuted(nonce) landed
+    #   'reverted' — mined 0x0; definitive, and safe to retry
+    #   'noop'     — mined 0x1 but the delegation never applied; needs a
+    #                fresh prepare, NOT a retry of this batch
+    #   null       — not observed in the submit budget; client keeps polling
+    # Only null means "unknown". Collapsing reverted/noop into one flag would
+    # give the two opposite retry semantics the same handling.
+    execution = graphene.String(
+        description="Sponsor-observed execution: executed | reverted | noop; null=unknown")
 
     @login_required
     def mutate(self, info, send_id, nonce, deadline, intent_signature, authorization=None):
@@ -332,6 +343,7 @@ class SubmitBscSend(graphene.Mutation):
             error=result.get('error'),
             authorization_required=bool(result.get('authorization_required')),
             transaction_hash=result.get('transaction_hash'),
+            execution=result.get('execution'),
         )
 
 

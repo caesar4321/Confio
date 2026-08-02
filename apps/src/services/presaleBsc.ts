@@ -10,9 +10,12 @@
 import { gql } from '@apollo/client';
 import {
   BatchCall,
+  BscReceiptTimeoutError,
+  BscRevertedError,
   bscGetNonce,
   bscWaitForReceipt,
   hashBatchIntent,
+  receiptExecutedBatch,
   signIntentDigest,
   signSetCodeAuthorization,
 } from './evmWallet';
@@ -45,6 +48,7 @@ const SUBMIT = gql`
       error
       authorizationRequired
       transactionHash
+      execution
     }
   }
 `;
@@ -87,7 +91,13 @@ export const buyPresaleBsc = async (
 
   let lastError = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
-    const execNonce = await delegateNonce(wallet.address);
+    // Independent reads, so pay for ONE round trip instead of two — each is
+    // a phone→server→BSC hop and both are always needed. The account nonce
+    // stays conditional: it's read only on a first-ever (undelegated) call.
+    const [execNonce, delegated] = await Promise.all([
+      delegateNonce(wallet.address),
+      isDelegatedTo(wallet.address, sponsored.delegateAddress),
+    ]);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
     const digest = hashBatchIntent(calls, execNonce, deadline, prep.intentId, wallet.address);
@@ -97,7 +107,7 @@ export const buyPresaleBsc = async (
     // The server re-checks delegation state authoritatively either way.
     // SetCodeAuthorization's shape matches BscPresaleAuthorizationInput.
     let authorization;
-    if (!(await isDelegatedTo(wallet.address, sponsored.delegateAddress))) {
+    if (!delegated) {
       const accountNonce = await bscGetNonce(wallet.address);
       authorization = signSetCodeAuthorization(
         sponsored.delegateAddress, accountNonce, wallet.privKeyHex);
@@ -121,19 +131,40 @@ export const buyPresaleBsc = async (
       throw new Error(lastError);
     }
 
-    await bscWaitForReceipt(sub.transactionHash as string);
-    if ((await delegateNonce(wallet.address)) > execNonce) {
-      return {
-        txHash: sub.transactionHash,
-        quote: {
-          purchaseId: prep.purchaseId,
-          confioAmount: prep.confioAmount,
-          cost: prep.cost,
-          avgPrice: prep.avgPrice,
-        },
-      };
+    const done = {
+      txHash: sub.transactionHash,
+      quote: {
+        purchaseId: prep.purchaseId,
+        confioAmount: prep.confioAmount,
+        cost: prep.cost,
+        avgPrice: prep.avgPrice,
+      },
+    };
+
+    // The sponsor watched the chain before answering; null (it didn't see
+    // the tx inside its budget) falls through to our own poll.
+    //
+    // There is NO "older server omits the field" case: GraphQL validates the
+    // whole operation up front, so a server without `execution` fails this
+    // ENTIRE mutation with "Cannot query field" and no send happens at all
+    // (Codex audit 2026-08-02 [P1]). The server schema must therefore be
+    // deployed BEFORE this bundle ships — the normal order, since app
+    // releases lag server deploys.
+    if (sub.execution === 'executed') return done;
+    if (sub.execution === 'reverted') throw new BscRevertedError(sub.transactionHash);
+    if (sub.execution !== 'noop') {
+      // Proof of execution from the receipt we already hold: the delegate
+      // emits BatchExecuted(nonce) as this EOA, which is exactly what a
+      // second nonces() read used to ask the chain.
+      const receipt = await bscWaitForReceipt(sub.transactionHash as string);
+      const verdict = receiptExecutedBatch(receipt, wallet.address, execNonce);
+      if (verdict === 'executed') return done;
+      // We were never shown proof either way (no logs field, or a log list
+      // missing the trailing BatchExecuted). Outcome-unknown, NOT failure —
+      // callers must not re-send on it.
+      if (verdict === 'unknown') throw new BscReceiptTimeoutError(sub.transactionHash);
     }
-    // Mined but the delegate nonce didn't move: silent 7702 no-op —
+    // Mined without our BatchExecuted: silent 7702 no-op —
     // fresh reads, one more shot (the server marks the purchase failed;
     // a NEW prepare gives a fresh quote/purchase).
     lastError = 'delegation_not_applied';

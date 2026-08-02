@@ -34,13 +34,19 @@ def _account_for_bsc_address(addr: str):
 def _notify_send_parties(s) -> None:
     from notifications import utils as notif_utils
     from notifications.models import NotificationType as NotifType
+    from users.phone_utils import to_international
 
     token = TOKEN_DISPLAY.get((s.token_type or '').upper(), s.token_type)
     amount_str = f'{s.amount:.2f}'.rstrip('0').rstrip('.')
+    # The stored columns hold LOCAL digits; a client can neither display nor
+    # re-send to those. Send the full international number.
+    sender_phone = to_international(s.sender_phone, s.sender_user if s.sender_user_id else None)
+    recipient_phone = to_international(
+        s.recipient_phone, s.recipient_user if s.recipient_user_id else None)
     sender_name = s.sender_display_name or 'Contacto'
     recipient_name = (
         s.recipient_display_name
-        or (s.recipient_phone if s.recipient_phone else None)
+        or (recipient_phone if recipient_phone else None)
         or (s.recipient_address[:6] + '...' + s.recipient_address[-4:]
             if s.recipient_address else 'Contacto')
     )
@@ -52,11 +58,21 @@ def _notify_send_parties(s) -> None:
         'token_type': s.token_type,
         'sender_name': sender_name,
         'recipient_name': recipient_name,
-        'sender_phone': s.sender_phone or '',
-        'recipient_phone': s.recipient_phone or '',
         'memo': s.memo or '',
         'transaction_type': 'send',
     }
+
+    def payload(business):
+        """A notification attached to a business is pushed to EVERY employee
+        (notifications/fcm_service.py) and its whole `data` blob is readable
+        by all of them. Personal phone numbers are not business data, so they
+        travel only on the personal notifications."""
+        data = dict(common)
+        if business is None:
+            data['sender_phone'] = sender_phone
+            data['recipient_phone'] = recipient_phone
+        return data
+
     try:
         if s.recipient_user_id:
             notif_utils.create_notification(
@@ -66,7 +82,7 @@ def _notify_send_parties(s) -> None:
                 notification_type=NotifType.SEND_RECEIVED,
                 title='Dinero recibido',
                 message=f'Recibiste {amount_str} {token} de {sender_name}',
-                data=dict(common),
+                data=payload(s.recipient_business),
                 related_object_type='SendTransaction',
                 related_object_id=str(s.internal_id),
                 action_url=f'confio://send/{s.internal_id}',
@@ -79,7 +95,7 @@ def _notify_send_parties(s) -> None:
                 notification_type=NotifType.SEND_SENT,
                 title='Dinero enviado',
                 message=f'Enviaste {amount_str} {token} a {recipient_name}',
-                data=dict(common),
+                data=payload(s.sender_business),
                 related_object_type='SendTransaction',
                 related_object_id=str(s.internal_id),
                 action_url=f'confio://send/{s.internal_id}',
@@ -88,7 +104,7 @@ def _notify_send_parties(s) -> None:
         logger.exception('send notifications failed for %s', s.internal_id)
 
 
-@shared_task(name='send.confirm_bsc_send', bind=True, max_retries=20)
+@shared_task(name='send.confirm_bsc_send', bind=True, max_retries=25)
 def confirm_bsc_send(self, send_id: int, batch_id: int):
     from blockchain.models import SponsoredBatch
     from .models import SendTransaction
@@ -112,7 +128,12 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
         return
 
     if batch.status in ('signed', 'sent'):
-        raise self.retry(countdown=15)
+        # Fast early, slow tail (cusd_plus.tasks._retry_countdown): BSC
+        # finality lands ~1s after mining, so the first checks should be
+        # seconds apart. A flat 15s here is what kept the user staring at
+        # 'Confirmando…' long after the chain had already committed.
+        from cusd_plus.tasks import _retry_countdown
+        raise self.retry(countdown=_retry_countdown(self.request.retries))
 
     if batch.status == 'confirmed':
         s.status = 'CONFIRMED'

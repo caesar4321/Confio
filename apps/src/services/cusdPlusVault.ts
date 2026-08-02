@@ -109,11 +109,16 @@ export const subscribeUsdtToSavings = async (
       });
       // One atomic tx: the approve (if any) shares the mint's hash.
       return {
-        approveTx: needsApprove ? rec.transactionHash : undefined,
-        mintTx: rec.transactionHash,
+        approveTx: needsApprove ? rec.txHash : undefined,
+        mintTx: rec.txHash,
         recipient: from,
       };
     } catch (e) {
+      // Fall back ONLY when nothing can still land — same rule as the
+      // transfer path below. An outcome-unknown sponsored batch is ALREADY
+      // on the network; running the legacy self-signed path here would
+      // execute the same vault call twice (Codex re-audit 2026-08-02 [P1]).
+      if (isOutcomeUnknown(e)) throw e;
       // Sponsored rail down ≠ savings down: fall back to the self-signed
       // legacy path (works only with user-funded BNB at the address).
       console.warn('[cusdPlusVault] sponsored subscribe failed, using legacy path', e);
@@ -174,7 +179,7 @@ export const transferUsdt = async (params: {
         calls,
         delegateAddress: sponsored.delegateAddress,
       });
-      return { txHash: rec.transactionHash };
+      return { txHash: rec.txHash };
     } catch (e) {
       // Fall back ONLY when we know nothing can still land. A receipt
       // timeout means the sponsored tx is already on the network with an
@@ -241,8 +246,13 @@ export const redeemSavingsToUsdt = async (params: {
         calls: [{ to: params.vaultAddress, valueWei: 0n, data: redeemData }],
         delegateAddress: sponsored.delegateAddress,
       });
-      return { redeemTx: rec.transactionHash, recipient };
+      return { redeemTx: rec.txHash, recipient };
     } catch (e) {
+      // Fall back ONLY when nothing can still land — same rule as the
+      // transfer path below. An outcome-unknown sponsored batch is ALREADY
+      // on the network; running the legacy self-signed path here would
+      // execute the same vault call twice (Codex re-audit 2026-08-02 [P1]).
+      if (isOutcomeUnknown(e)) throw e;
       console.warn('[cusdPlusVault] sponsored redeem failed, using legacy path', e);
     }
   }

@@ -1158,13 +1158,36 @@ export const TransactionDetailScreen = () => {
       : (currentTx?.recipientBusiness || currentTx?.merchantBusiness || (currentTx as any)?.counterpartyBusiness)
   );
 
+  // ...and do we actually KNOW who the counterparty is? A notification payload
+  // carries names and a phone but no user/business objects, so the business
+  // check above silently passes on it. That matters because a business
+  // notification is pushed to every employee (notifications/fcm_service.py),
+  // and an employee who did not send it cannot refetch the row — the server
+  // authorizes only sender_user/recipient_user (send/schema.py). They would be
+  // left holding a payload that looks personal and a phone that resolves to
+  // the owner's personal wallet. Absent a verified identity, offer nothing.
+  const counterpartyIdentityVerified = Boolean(
+    fetchedData?.sendTransaction
+    || (transactionData as any)?.senderUser
+    || (transactionData as any)?.counterpartyUser
+    || (transactionData as any)?.recipientUser
+    || (transactionData as any)?.senderBusiness
+    || (transactionData as any)?.counterpartyBusiness
+    || (transactionData as any)?.recipientBusiness
+  );
+
   // Detect external wallet counterparties to label them as "Billetera externa"
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
-    currentTx?.is_external_address || currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone)
+    currentTx?.is_external_address || currentTx?.isExternalDeposit || currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone)
   )) as boolean;
   const isExternalRecipient = ((currentTx?.type === 'send' || currentTx?.type === 'sent' || currentTx?.type === 'withdrawal') && (
     currentTx?.is_external_address || currentTx?.destinationAddress || ((currentTx?.toAddress || currentTx?.recipient_address) && !recipientPhone)
   )) as boolean;
+
+  // The counterparty address of an inbound external transfer lands in a
+  // different field depending on where the row came from (list, push payload,
+  // server refetch), so read all three rather than one.
+  const senderExternalAddress = currentTx?.fromAddress || currentTx?.senderAddress || currentTx?.sourceAddress;
 
   // Don't use truncated addresses as fallback names
   const senderFallbackName = isExternalSender
@@ -1210,6 +1233,9 @@ export const TransactionDetailScreen = () => {
   }, [senderPhone, resolvedRecipientPhone]);
 
   const { data: badgeLookupData } = useQuery(CHECK_USERS_BY_PHONES, {
+    // $phoneNumbers is non-null; omitting variables made every one of these
+    // an invalid request, so phone-derived badges never loaded.
+    variables: { phoneNumbers: badgeLookupPhones },
     skip: badgeLookupPhones.length === 0,
     fetchPolicy: 'cache-first',
   });
@@ -1892,11 +1918,19 @@ export const TransactionDetailScreen = () => {
                     )}
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
-                        {getPreferredSecondaryLine({ phone: senderPhone, address: currentTx.fromAddress, isExternal: !!currentTx.is_external_address })}
+                        {/* is_external_address only ever arrives on push payloads; a
+                            deposit opened from the list or refetched from the server
+                            has to be recognised by the same heuristic that named it
+                            "Billetera externa", or the address line renders empty. */}
+                        {getPreferredSecondaryLine({
+                          phone: senderPhone,
+                          address: senderExternalAddress,
+                          isExternal: isExternalSender,
+                        })}
                       </Text>
                       <TouchableOpacity
                         onPress={() => handleCopy(
-                          senderPhone ? formatPhoneNumber(senderPhone) : currentTx.fromAddress,
+                          senderPhone ? formatPhoneNumber(senderPhone) : senderExternalAddress,
                           'from'
                         )}
                         style={styles.copyButton}
@@ -2286,7 +2320,7 @@ export const TransactionDetailScreen = () => {
               account the button names. Rather than pay the wrong account, we
               don't offer the shortcut. */}
           {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll')
-            && !counterpartyIsBusiness && (
+            && !counterpartyIsBusiness && counterpartyIdentityVerified && (
                 <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {

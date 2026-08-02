@@ -41,6 +41,17 @@ def _configured_review_numbers() -> Iterable[str]:
 	return [phone for phone, _ in review_test_pairs()]
 
 
+# Reviewer numbers this mechanism has used over time. `+12025550123` is the
+# built-in default of REVIEW_TEST_PHONE_E164 (config/settings.py) and was the
+# live value before prod's .env moved to +54, which is why production carries
+# 10 active accounts on `1:2025550123` alongside 6 on `54:2025550123`.
+#
+# They stay recognized for as long as those rows exist. All of them sit in the
+# NANP 555-01XX range, permanently reserved for fictional use, so no real
+# person can ever hold one — recognizing them can never shadow a real user.
+_RESERVED_REVIEW_PHONES: tuple[str, ...] = ('+12025550123',)
+
+
 @lru_cache(maxsize=1)
 def _review_phone_keys() -> set[str]:
 	"""Cache canonical phone keys derived from configured review numbers."""
@@ -50,6 +61,36 @@ def _review_phone_keys() -> set[str]:
 		if normalized:
 			keys.add(normalized)
 	return keys
+
+
+@lru_cache(maxsize=1)
+def _shared_reviewer_phone_keys() -> set[str]:
+	"""Keys that legitimately map to SEVERAL accounts.
+
+	The reviewer number is shared on purpose: `is_review_test_phone_key` is
+	what waives the duplicate check at phone verification (sms_verification/
+	schema.py), so every reviewer signup adds another row on the same key.
+
+	Deliberately WIDER than `_review_phone_keys()` and independent of
+	REVIEW_TEST_ENABLED: those rows exist in the database whether or not the
+	feature is currently on, and a lookup still has to decide what to do with
+	them. Deliberately NOT wired into the code bypass — a number here without
+	a configured code still cannot verify, so this grants no way in.
+	"""
+	keys = set(_review_phone_keys())
+	for phone in _RESERVED_REVIEW_PHONES:
+		normalized = normalize_any_phone(phone)
+		if normalized:
+			keys.add(normalized)
+	return keys
+
+
+def is_shared_reviewer_phone_key(phone_key: str | None) -> bool:
+	"""True when a key is shared by reviewer accounts by design, so resolving
+	it to one of them is expected rather than an ambiguity to refuse."""
+	if not phone_key:
+		return False
+	return phone_key in _shared_reviewer_phone_keys()
 
 
 def is_review_test_phone_key(phone_key: str | None) -> bool:

@@ -30,6 +30,26 @@ interface ContactMap {
 const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
+
+/**
+ * Region used to read address-book numbers that omit a country code — most
+ * people save local contacts that way. It has to be the SIGNED-IN USER's
+ * country: a Colombian's "313 258 7634" is +57, not +58, and parsing it as
+ * Venezuela produces a number belonging to someone else entirely.
+ *
+ * Venezuela stays the fallback for the case where we don't know the user's
+ * country yet, which is what this always assumed before.
+ */
+let defaultPhoneRegion = 'VE';
+
+export const setDefaultPhoneRegion = (country?: string | null): void => {
+  const iso = (country || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(iso)) {
+    defaultPhoneRegion = iso;
+  }
+};
+
+const getDefaultPhoneRegion = (): any => defaultPhoneRegion;
 const CONTACTS_PRIVACY_SERVICE = 'com.confio.contacts_privacy';
 // Use a dedicated keychain service for upload consent to avoid overwriting permission status
 const CONTACTS_CONSENT_SERVICE = 'com.confio.contacts_upload_consent';
@@ -269,16 +289,20 @@ export class ContactService {
         contact.phoneNumbers.forEach(phoneObj => {
           const phone = phoneObj.number;
           phones.push(phone);
-          allPhoneNumbers.push(phone); // Collect all phone numbers for batch checking
 
           // Try to normalize the phone number
           try {
-            const parsed = parsePhoneNumber(phone, 'VE'); // Default to Venezuela
+            const parsed = parsePhoneNumber(phone, getDefaultPhoneRegion());
             if (parsed && parsed.isValid()) {
               // Store in E.164 format for consistent matching
               normalizedPhones.push(parsed.format('E.164'));
               // Also store without + for backward compatibility
               normalizedPhones.push(parsed.format('E.164').substring(1));
+              // Only a FULL number can be matched against a Confío account —
+              // the server refuses countryless digits because they name no
+              // country, and a wrong match here would hand the app a userId
+              // that later sends resolve directly.
+              allPhoneNumbers.push(parsed.format('E.164'));
             } else {
               // If parsing fails, store cleaned version
               const cleaned = phone.replace(/\D/g, '');
@@ -502,7 +526,7 @@ export class ContactService {
 
         // Try to parse and add variations
         try {
-          const parsed = parsePhoneNumber(phone, 'VE');
+          const parsed = parsePhoneNumber(phone, getDefaultPhoneRegion());
           if (parsed && parsed.isValid()) {
             const e164 = parsed.format('E.164');
             const withoutPlus = e164.substring(1);
@@ -607,7 +631,7 @@ export class ContactService {
 
     // Try normalized lookup
     try {
-      const parsed = parsePhoneNumber(phoneNumber, 'VE');
+      const parsed = parsePhoneNumber(phoneNumber, getDefaultPhoneRegion());
       if (parsed && parsed.isValid()) {
         const e164 = parsed.format('E.164');
         const withoutPlus = e164.substring(1);
@@ -654,7 +678,7 @@ export class ContactService {
         }
 
         // Try parsing and normalizing
-        const parsed = parsePhoneNumber(phoneNumber, 'VE');
+        const parsed = parsePhoneNumber(phoneNumber, getDefaultPhoneRegion());
         if (parsed && parsed.isValid()) {
           const e164 = parsed.format('E.164');
           const withoutPlus = e164.substring(1);

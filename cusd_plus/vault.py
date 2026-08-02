@@ -44,8 +44,13 @@ def oracle_address() -> str | None:
 
 
 def _rpc(method: str, params: list, timeout: int = 12):
+    # Same pooled, keep-alive session as tasks._rpc (see the CONNECTION REUSE
+    # note there). Deliberately keeps this module's OWN single-URL setting
+    # rather than borrowing the rotation pool — only the transport is shared.
+    from .tasks import _rpc_session
+
     url = getattr(settings, 'BSC_RPC_URL', 'https://bsc-dataseed.bnbchain.org')
-    resp = requests.post(
+    resp = _rpc_session(url).post(
         url, json={'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params},
         timeout=timeout,
     )

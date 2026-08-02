@@ -260,10 +260,11 @@ class PhoneLookupTestCase(TestCase):
             self.assertEqual(find_user_by_phone(shape), ar_user, shape)
 
     def test_ambiguous_number_is_refused_not_guessed(self):
-        # Production carries a partial unique index on phone_key, but it lives
-        # in no migration — so a freshly-migrated environment (including this
-        # test DB) can hold duplicates. Paying an arbitrary one of two matching
-        # users is worse than refusing.
+        # phone_key has no unique constraint in any migration, and production
+        # has none either — as of 2026-08-01 it holds 10 active accounts on
+        # 1:2025550123. Paying an arbitrary one of several matching users is
+        # worse than refusing. (The local dev DB happens to have an
+        # out-of-band index, hence the skip below.)
         from django.db import IntegrityError, transaction
         try:
             with transaction.atomic():
@@ -278,6 +279,51 @@ class PhoneLookupTestCase(TestCase):
         except IntegrityError:
             self.skipTest('this database enforces phone_key uniqueness; nothing to refuse')
         self.assertIsNone(find_user_by_phone('57:3132587634'))
+
+    def test_reviewer_numbers_resolve_despite_sharing(self):
+        # The app-store reviewer number is shared BY DESIGN — the duplicate
+        # check at phone verification is waived for it (sms_verification/
+        # schema.py), so every reviewer signup adds a row on the same key.
+        # Prod holds 6 on 54:2025550123 and 10 on the legacy default
+        # 1:2025550123. Refusing them would break the reviewer's send, and
+        # they are 555-01XX reserved-for-fiction numbers holding no real
+        # money, so they resolve to the lowest id — deterministic, not random.
+        from django.db import IntegrityError
+        from django.test import override_settings
+        from users.review_numbers import _review_phone_keys, _shared_reviewer_phone_keys
+
+        for country, local, dial in (('AR', '2025550123', '+54'), ('US', '2025550123', '+1')):
+            with self.subTest(country=country), override_settings(
+                REVIEW_TEST_ENABLED=True,
+                REVIEW_TEST_PHONE_E164='+542025550123',
+                REVIEW_TEST_CODE='000000',
+            ):
+                _review_phone_keys.cache_clear()
+                _shared_reviewer_phone_keys.cache_clear()
+                first = User.objects.create_user(
+                    username=f'rv1{country}', email=f'rv1{country}@example.com',
+                    password='testpass123', firebase_uid=f'rv1-{country}',
+                    phone_country=country, phone_number=local,
+                )
+                try:
+                    User.objects.create_user(
+                        username=f'rv2{country}', email=f'rv2{country}@example.com',
+                        password='testpass123', firebase_uid=f'rv2-{country}',
+                        phone_country=country, phone_number=local,
+                    )
+                except IntegrityError:
+                    self.skipTest('this database enforces phone_key uniqueness')
+                self.assertEqual(find_user_by_phone(f'{dial}{local}'), first)
+        _review_phone_keys.cache_clear()
+        _shared_reviewer_phone_keys.cache_clear()
+
+    def test_legacy_reviewer_number_still_cannot_bypass_verification(self):
+        # Widening the DUPLICATE tolerance to the legacy number must not
+        # widen the SMS-code bypass — that is what would grant a way in.
+        from users.review_numbers import (
+            get_review_test_code_for_phone, is_shared_reviewer_phone_key)
+        self.assertTrue(is_shared_reviewer_phone_key('1:2025550123'))
+        self.assertIsNone(get_review_test_code_for_phone('+12025550123'))
 
     def test_deactivated_user_does_not_receive(self):
         self.user.is_active = False

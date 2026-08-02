@@ -5,7 +5,7 @@ import graphene
 from decimal import Decimal
 from django.db import transaction as db_transaction
 from .models import User, Account
-from .phone_utils import normalize_any_phone
+from .phone_utils import find_user_by_phone
 from achievements.models import UserReferral, UserAchievement, AchievementType
 from .decorators import rate_limit, check_suspicious_activity
 from .jwt_context import get_jwt_business_context_with_validation
@@ -70,14 +70,18 @@ class SetReferrer(graphene.Mutation):
             referrer_identifier = identifier
 
             if is_phone:
-                clean_phone = '+' + ''.join(filter(str.isdigit, identifier))
-                normalized = normalize_any_phone(clean_phone)
-                if not normalized:
+                # Only a FULL number identifies a person. Prepending '+' to
+                # bare digits used to invent a country: "3132587634" (a
+                # Colombian mobile) became "+31 32587634", a Netherlands
+                # number, and credited that stranger as the referrer.
+                typed = identifier.replace(' ', '')
+                if not typed.startswith('+'):
                     return SetReferrer(
                         success=False,
-                        error="Número de teléfono inválido."
+                        error="Incluye el código de país, por ejemplo +57 313 258 7634."
                     )
-                referrer_user = User.objects.filter(phone_key=normalized).first()
+                clean_phone = '+' + ''.join(filter(str.isdigit, typed))
+                referrer_user = find_user_by_phone(clean_phone)
                 if not referrer_user:
                     return SetReferrer(
                         success=False,
