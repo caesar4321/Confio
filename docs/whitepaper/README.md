@@ -238,7 +238,7 @@ The current BNB Smart Chain token contract has a fixed initial supply of 1,000,0
 
 **Canonical BSC contract:** [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8)
 
-The on-chain token name is deliberately the ASCII **“Confio”**, while the accented **“Confío”** remains the product and brand name. This avoids inconsistent HTML escaping and rendering of non-ASCII metadata across explorers, wallets, and decentralized exchanges. The canonical contract supersedes the initial accented-name deployment at `0xd57BEc35857839DC33F6FaBE7356C6a19a8d72c1`, which was delisted and had its supply burned before external distribution or presale wiring. Readers should use only the canonical address above. <sup>[17]</sup>
+The on-chain token name is deliberately the ASCII **“Confio”**, while the accented **“Confío”** remains the product and brand name. This avoids inconsistent HTML escaping and rendering of non-ASCII metadata across explorers, wallets, and decentralized exchanges. Readers should use only the canonical address above. <sup>[17]</sup>
 
 Allocation, founder ownership, vesting, presale rights, and concentration risks are disclosed in the separate authoritative English tokenomics. The founder allocation is a founder allocation; custody in a distribution treasury does not reclassify it as an undefined ecosystem reserve.
 
@@ -269,8 +269,6 @@ Claims are locked until the DEX launch. Before claims open, the multi-party trea
 > The RewardVault is not a trustless escrow. Reward entitlements remain discretionary treasury obligations: its governance owner can rotate the signer, pause claims, and withdraw funds, including after the one-way DEX unlock. Users therefore rely on the treasury to reconcile database obligations, fund the pool, and keep valid claims available. The signer’s exposure is limited operationally by short signature deadlines and by funding the vault in working tranches, but these controls do not remove treasury trust.
 
 **Canonical RewardVault:** [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code)
-
-This contract supersedes the earlier attestation-model vault at `0x1766A2Ac798dA2247E5Da6E410453D526FD2f6ab`, which was abandoned empty and never funded. <sup>[17]</sup>
 
 ## 8. Wallet, security, and open-source architecture
 
