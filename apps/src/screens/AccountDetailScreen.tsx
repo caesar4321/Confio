@@ -41,7 +41,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES, CHECK_USERS_BY_PHONES } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES, GET_MY_CONFIO_BREAKDOWN, CHECK_USERS_BY_PHONES } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
@@ -57,6 +57,7 @@ import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { useSavingsResume } from '../hooks/useSavingsResume';
+import { useRampCountry } from '../hooks/useRampCountry';
 import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
 import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
@@ -144,6 +145,9 @@ const normalizePhoneLookupKey = (value?: string | null): string => {
 
 export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
+  // Same guard as Home: blocked countries go to Efectivo, not into a ramp
+  // flow their country cannot complete.
+  const { navigateToRampOrEfectivo } = useRampCountry();
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
@@ -343,6 +347,36 @@ export const AccountDetailScreen = () => {
   const confioLocked = React.useMemo(() => (isConfio ? parseFloat(balancesData?.myBalances?.confioLocked || balancesData?.myBalances?.confioPresaleLocked || '0') : 0), [balancesData?.myBalances?.confioLocked, balancesData?.myBalances?.confioPresaleLocked, isConfio]);
   const cusdLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
 
+  // $CONFIO by unlock event. Its own query so an older server degrades to the
+  // myBalances numbers above instead of blanking the screen.
+  const { data: confioBreakdownData } = useQuery(GET_MY_CONFIO_BREAKDOWN, {
+    skip: !isConfio,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+  const confioBreakdown = React.useMemo(() => {
+    const b = confioBreakdownData?.myConfioBreakdown;
+    if (!b) return null;
+    const num = (v: string | null | undefined) => {
+      const parsed = parseFloat(v ?? '0');
+      return isFinite(parsed) ? parsed : 0;
+    };
+    return {
+      available: num(b.available),
+      presaleLocked: num(b.presaleLocked),
+      earnedBonuses: num(b.earnedBonuses),
+    };
+  }, [confioBreakdownData]);
+  // pendingBonuses is deliberately absent: CONFIO the user has not earned yet
+  // is not balance, and folding it in here would overstate what they own.
+  const confioOwnedTotal = React.useMemo(
+    () =>
+      confioBreakdown
+        ? confioBreakdown.available + confioBreakdown.presaleLocked + confioBreakdown.earnedBonuses
+        : confioLive + confioLocked,
+    [confioBreakdown, confioLive, confioLocked],
+  );
+
   const currentBalance = React.useMemo(() => {
     // Savings reads its own live portfolio, not a route param: the number
     // moves on its own (yield accrues, deposits mint) so a value captured at
@@ -353,10 +387,10 @@ export const AccountDetailScreen = () => {
       if (!isFinite(v)) return route.params.accountBalance;
       return v.toFixed(2);
     }
-    const v = confioLive + confioLocked;
+    const v = confioOwnedTotal;
     if (!isFinite(v)) return route.params.accountBalance;
     return v.toFixed(2);
-  }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance,
+  }, [isCusd, cusdLive, confioOwnedTotal, route.params.accountBalance,
       isSavingsAccount, savingsAccountTotal]);
 
   // Account data from navigation params
@@ -872,6 +906,10 @@ export const AccountDetailScreen = () => {
           to: toDisplay,
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? fromPhoneKey : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? toPhoneKey : undefined),
+          // Carry the server's fee through so the detail screen can render the
+          // breakdown from the ledger instead of a hardcoded rate.
+          feeAmount: tx.feeAmount || undefined,
+          netAmount: tx.netAmount || undefined,
           amount: isConversion
             ? conversionAmount
             : type === 'ramp' && rampDirection === 'on_ramp' && signedRampFiatAmount
@@ -2011,24 +2049,66 @@ export const AccountDetailScreen = () => {
           </>
         )}
 
-        {/* Show locked status for CONFIO tokens - only if balance > 0 */}
+        {/* $CONFIO by unlock event, not by chain. The old Bloqueado/Disponible
+            pair described a world where the user's own deposit turned a bonus
+            into transferable tokens; before the launch nothing they do moves
+            $CONFIO, so each line names WHEN it opens and who opens it.
+            Preventa and Bonos appear only when they hold some — an empty row
+            reads as a promise. Falls back to the old pair when the breakdown
+            query didn't answer. */}
         {route.params.accountType === 'confio' && canViewBalance && showBalance && (parseFloat(account.balance) > 0 || confioLocked > 0) && (
           <View style={styles.lockedStatusContainer}>
-            <View style={styles.lockedStatusRow}>
-              <Icon name="lock" size={14} color="#fbbf24" />
-              <Text style={styles.lockedStatusText}>
-                Bloqueado: ${formatBalanceDisplay(confioLocked)} $CONFIO
-              </Text>
-            </View>
-            <View style={styles.lockedStatusRow}>
-              <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
-              <Text style={styles.lockedStatusText}>
-                Disponible: ${formatBalanceDisplay(confioLive)} $CONFIO
-              </Text>
-            </View>
-            <Text style={styles.lockedStatusDescription}>
-              Se desbloquearán cuando Confío alcance adopción masiva en toda Latinoamérica
-            </Text>
+            {confioBreakdown ? (
+              <>
+                <View style={styles.lockedStatusRow}>
+                  <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
+                  <Text style={styles.lockedStatusText}>
+                    Disponible: {formatBalanceDisplay(confioBreakdown.available)} $CONFIO
+                  </Text>
+                </View>
+                {confioBreakdown.presaleLocked > 0 && (
+                  <View style={styles.lockedStatusRow}>
+                    <Icon name="lock" size={14} color="#fbbf24" />
+                    <Text style={styles.lockedStatusText}>
+                      Preventa: {formatBalanceDisplay(confioBreakdown.presaleLocked)} $CONFIO
+                    </Text>
+                  </View>
+                )}
+                {confioBreakdown.earnedBonuses > 0 && (
+                  <View style={styles.lockedStatusRow}>
+                    <Icon name="lock" size={14} color="#fbbf24" />
+                    <Text style={styles.lockedStatusText}>
+                      Bonos ganados: {formatBalanceDisplay(confioBreakdown.earnedBonuses)} $CONFIO
+                    </Text>
+                  </View>
+                )}
+                {(confioBreakdown.presaleLocked > 0 || confioBreakdown.earnedBonuses > 0) && (
+                  <Text style={styles.lockedStatusDescription}>
+                    Tu preventa y tus bonos ya son tuyos. Podrás moverlos cuando
+                    $CONFIO se lance al mercado.
+                  </Text>
+                )}
+              </>
+            ) : (
+              <>
+                <View style={styles.lockedStatusRow}>
+                  <Icon name="lock" size={14} color="#fbbf24" />
+                  <Text style={styles.lockedStatusText}>
+                    Guardado: {formatBalanceDisplay(confioLocked)} $CONFIO
+                  </Text>
+                </View>
+                <View style={styles.lockedStatusRow}>
+                  <Icon name="unlock" size={14} color={colors.white} style={{ opacity: 0.5 }} />
+                  <Text style={styles.lockedStatusText}>
+                    Disponible: {formatBalanceDisplay(confioLive)} $CONFIO
+                  </Text>
+                </View>
+                <Text style={styles.lockedStatusDescription}>
+                  Lo guardado ya es tuyo. Podrás moverlo cuando $CONFIO se lance
+                  al mercado.
+                </Text>
+              </>
+            )}
           </View>
         )}
 
@@ -2192,7 +2272,7 @@ export const AccountDetailScreen = () => {
                 onPress={() => {
                   // "Ahorrar" was never a separate verb — recharging the
                   // savings account IS this button, pointed at the BSC rail.
-                  (navigation as any).navigate('TopUp',
+                  navigateToRampOrEfectivo('TopUp',
                     isSavingsAccount ? { destination: 'cusd_plus' } : undefined);
                 }}
                 accessibilityRole="button"

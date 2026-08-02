@@ -169,7 +169,19 @@ const formatPhoneNumber = (phone: string | undefined): string => {
   return phone; // Return as-is if we can't format it
 };
 
-// Helper to compute Confío service fee (0.9%) for payment transactions
+// The fee the SERVER recorded for this transaction, falling back to the
+// legacy 0.9% only when the row predates feeAmount. The rate must not be
+// hardcoded here: it is wrong the moment a rate changes or a flow prices
+// differently, and it is what made this screen subtract the fee twice when
+// the backend briefly sent a netted amount. See docs/ledger-amounts.md.
+const serverFee = (tx: any): number | null => {
+  const raw = tx?.feeAmount;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = parseFloat(String(raw));
+  return Number.isFinite(n) ? n : null;
+};
+
+// Legacy fallback for rows written before feeAmount existed.
 const computeConfioFee = (amountLike: string | number | undefined): number => {
   try {
     if (amountLike === undefined || amountLike === null) return 0;
@@ -1638,7 +1650,7 @@ export const TransactionDetailScreen = () => {
     items.push({ label: 'Comisión de red', value: 'Gratis · cubre Confío', color: colors.primaryDark });
 
     if (currentTx.type === 'payment' && !isPaymentDebit) {
-      const fee = computeConfioFee(currentTx.amount);
+      const fee = serverFee(currentTx) ?? computeConfioFee(currentTx.amount);
       if (fee > 0) {
         items.push({
           label: 'Comisión Confío (0.9%)',
@@ -1655,7 +1667,10 @@ export const TransactionDetailScreen = () => {
       let totalAbs = grossAbs;
       if (currentTx.type === 'payment') {
         totalLabel = isPaymentDebit ? 'Total pagado' : 'Total recibido';
-        if (!isPaymentDebit) totalAbs = Math.max(0, grossAbs - computeConfioFee(raw));
+        if (!isPaymentDebit) {
+          const f = serverFee(currentTx) ?? computeConfioFee(raw);
+          totalAbs = Math.max(0, grossAbs - f);
+        }
       }
       items.push({
         label: totalLabel,

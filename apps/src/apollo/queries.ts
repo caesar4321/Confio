@@ -2693,6 +2693,11 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       # Computed fields from user perspective
       direction
       displayAmount
+      # feeAmount is what the recipient did NOT receive; netAmount is what
+      # they did. Read these instead of computing a rate client-side — see
+      # docs/ledger-amounts.md.
+      feeAmount
+      netAmount
       displayCounterparty
       displayDescription
       
@@ -3128,6 +3133,11 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       # Computed fields from user perspective
       direction
       displayAmount
+      # feeAmount is what the recipient did NOT receive; netAmount is what
+      # they did. Read these instead of computing a rate client-side — see
+      # docs/ledger-amounts.md.
+      feeAmount
+      netAmount
       displayCounterparty
       displayDescription
       rampDirection
@@ -3229,6 +3239,11 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
       # Computed fields from user perspective
       direction
       displayAmount
+      # feeAmount is what the recipient did NOT receive; netAmount is what
+      # they did. Read these instead of computing a rate client-side — see
+      # docs/ledger-amounts.md.
+      feeAmount
+      netAmount
       displayCounterparty
       displayDescription
       
