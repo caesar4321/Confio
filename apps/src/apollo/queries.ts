@@ -1008,18 +1008,23 @@ export const GET_MY_MIGRATION_STATUS = gql`
 `;
 
 /**
- * ISOLATED on purpose. bscAddress was added to AccountType in the same release
- * as this query, and one unknown field fails the WHOLE request against an
- * older server — folding it into GET_MY_MIGRATION_STATUS would take the
+ * The caller's own wallet-recovery anchors, in ONE read.
+ *
+ * ISOLATED on purpose: myWalletAnchors ships in the same release as this
+ * query, and one unknown field fails the WHOLE request against an older
+ * server — folding it into GET_MY_MIGRATION_STATUS would take the
  * algorandAddress anchor down with it during the deploy window. Callers run
- * this in its own try/catch and degrade to "no BSC anchor" if it errors.
+ * this in its own try/catch and fall back to the older query.
+ *
+ * Both addresses come back together deliberately: fetching them separately let
+ * the two anchors come from different wallet generations if a migration landed
+ * in between. Server-side this is a self-only resolver, NOT fields on
+ * AccountType, which is readable for arbitrary users via user(id:){ accounts }.
  */
-export const GET_MY_BSC_ADDRESSES = gql`
-  query GetMyBscAddresses {
-    userAccounts {
-      id
-      accountType
-      accountIndex
+export const GET_MY_WALLET_ANCHORS = gql`
+  query GetMyWalletAnchors {
+    myWalletAnchors {
+      algorandAddress
       bscAddress
     }
   }

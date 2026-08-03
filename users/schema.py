@@ -834,6 +834,24 @@ class EmployeePermissionsType(graphene.ObjectType):
 	exportData = graphene.Boolean()
 
 
+class WalletAnchorsType(graphene.ObjectType):
+	"""
+	The caller's OWN personal-account addresses, for anchoring wallet recovery.
+
+	Both addresses derive from the same client-side master secret, so the client
+	only needs one of them to prove a candidate secret is the right one — but
+	BSC-only accounts (Algorand deprecated) have no algorand_address at all, and
+	without any anchor an unanchored Drive scan can adopt the oldest decryptable
+	backup over a good local wallet.
+
+	Returned together in ONE read on purpose: fetching them in two requests let
+	the two anchors come from different wallet generations if a migration landed
+	in between, which could either resurrect a stale backup or deny a valid one.
+	"""
+	algorand_address = graphene.String()
+	bsc_address = graphene.String()
+
+
 class AccountType(DjangoObjectType):
 	# Define computed fields explicitly
 	account_id = graphene.String()
@@ -848,13 +866,18 @@ class AccountType(DjangoObjectType):
 	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address', 'bsc_address', 'is_keyless_migrated')
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address', 'is_keyless_migrated')
 		# Note: algorand_address added back for payroll delegate matching.
-		# bsc_address exposed so the client can anchor wallet recovery for
-		# BSC-only accounts (Algorand deprecated): without it, enableDriveBackup
-		# had no anchor at all for those users and an unanchored Drive scan can
-		# adopt the oldest decryptable backup. Both addresses are public
-		# on-chain identifiers, not secrets.
+		#
+		# bsc_address is deliberately NOT here. AccountType is reachable via
+		# UserType.accounts, and resolve_user(id:) lets ANY authenticated caller
+		# fetch ANY user ("can add more restrictions later"), so anything added
+		# to this type is readable for arbitrary users. An address is public
+		# on-chain, but its association with a named person or business is not —
+		# that is what the viewBusinessAddress permission exists to protect.
+		# Wallet recovery gets `myWalletAnchors` below instead: same data, scoped
+		# to the caller. algorand_address being already exposed here is a
+		# pre-existing leak, not a licence to widen it.
 	
 	@classmethod
 	def get_queryset(cls, queryset, info):
@@ -1321,6 +1344,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	business_categories = graphene.List(BusinessCategoryType)
 	user_verifications = graphene.List(IdentityVerificationType, user_id=graphene.ID())
 	user_accounts = graphene.List(AccountType)
+	my_wallet_anchors = graphene.Field(
+		'users.schema.WalletAnchorsType',
+		description=(
+			"The authenticated caller's own personal-account chain addresses, used "
+			"to anchor wallet recovery. Deliberately NOT fields on AccountType: that "
+			"type is reachable via user(id:){ accounts } for arbitrary users."
+		),
+	)
 	account_balance = graphene.String(token_type=graphene.String(required=True))
 	current_account_permissions = graphene.Field(graphene.JSONString)
 	legalDocument = graphene.Field(
@@ -1857,6 +1888,26 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		
 		# If no user_id provided, return current user's verifications
 		return IdentityVerification.objects.filter(user=user)
+
+	def resolve_my_wallet_anchors(self, info):
+		"""Caller's own personal account (index 0) only. Never takes an id."""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+
+		account = Account.objects.filter(
+			user=user,
+			account_type='personal',
+			account_index=0,
+			deleted_at__isnull=True,
+		).first()
+		if not account:
+			return None
+
+		return WalletAnchorsType(
+			algorand_address=account.algorand_address or None,
+			bsc_address=account.bsc_address or None,
+		)
 
 	def resolve_user_accounts(self, info):
 		user = getattr(info.context, 'user', None)

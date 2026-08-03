@@ -554,39 +554,45 @@ export class AuthService {
       // longer derived to the server's address.
       let expectedAddress: string | null = null;
       let expectedEvmAddress: string | null = null;
+
+      // PREFERRED: both anchors in ONE read, from a self-only resolver.
+      // Two separate reads let the anchors come from different wallet
+      // generations if a migration landed between them, which could either
+      // resurrect a stale backup or deny a valid one.
+      let anchorsResolved = false;
       try {
-        const { GET_MY_MIGRATION_STATUS } = await import('../apollo/queries');
+        const { GET_MY_WALLET_ANCHORS } = await import('../apollo/queries');
         const { data } = await apolloClient.query({
-          query: GET_MY_MIGRATION_STATUS,
+          query: GET_MY_WALLET_ANCHORS,
           fetchPolicy: 'network-only',
         });
-        const personalAccount = (data?.userAccounts || []).find(
-          (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
-        );
-        expectedAddress = personalAccount?.algorandAddress || null;
-      } catch (meErr) {
-        console.warn('[AuthService] Failed to fetch expectedAddress before Drive sync (proceeding without filter):', meErr);
+        if (data?.myWalletAnchors) {
+          expectedAddress = data.myWalletAnchors.algorandAddress || null;
+          expectedEvmAddress = data.myWalletAnchors.bscAddress || null;
+          anchorsResolved = true;
+        }
+      } catch (anchorErr) {
+        console.warn('[AuthService] myWalletAnchors unavailable (older server?); falling back to the migration-status query:', anchorErr);
       }
 
-      // SEPARATE request, separate try/catch: bscAddress ships in the same
-      // release as this query, so against an older server it errors — and
-      // folding it into the query above would take the Algorand anchor down
-      // with it during the deploy window. BSC-only accounts (Algorand
-      // deprecated) have no algorandAddress at all, so this is their ONLY
-      // anchor; without it an unanchored Drive scan can adopt the oldest
-      // decryptable backup over a perfectly good local wallet.
-      try {
-        const { GET_MY_BSC_ADDRESSES } = await import('../apollo/queries');
-        const { data } = await apolloClient.query({
-          query: GET_MY_BSC_ADDRESSES,
-          fetchPolicy: 'network-only',
-        });
-        const personalAccount = (data?.userAccounts || []).find(
-          (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
-        );
-        expectedEvmAddress = personalAccount?.bscAddress || null;
-      } catch (bscErr) {
-        console.warn('[AuthService] Could not fetch the BSC anchor (older server?); continuing with whatever anchors we have:', bscErr);
+      // FALLBACK for the deploy window, when the server predates
+      // myWalletAnchors. Algorand-only: BSC-only accounts stay unanchored, and
+      // that case is held safe on the client (an unanchored restore may not
+      // REPLACE an existing local secret).
+      if (!anchorsResolved) {
+        try {
+          const { GET_MY_MIGRATION_STATUS } = await import('../apollo/queries');
+          const { data } = await apolloClient.query({
+            query: GET_MY_MIGRATION_STATUS,
+            fetchPolicy: 'network-only',
+          });
+          const personalAccount = (data?.userAccounts || []).find(
+            (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
+          );
+          expectedAddress = personalAccount?.algorandAddress || null;
+        } catch (meErr) {
+          console.warn('[AuthService] Failed to fetch expectedAddress before Drive sync (proceeding without filter):', meErr);
+        }
       }
 
       if (expectedAddress || expectedEvmAddress) {
