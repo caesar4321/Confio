@@ -508,12 +508,76 @@ class PreparePayoutTests(SimpleTestCase):
                 _user(), _jwt_ctx(), 'fund', amount='10', token_type='CUSD')
         self.assertEqual(result['error'], 'unknown_token_type')
 
-    def test_a_usdt_run_draws_on_the_usdt_pool_only(self):
-        item = _item(run_token='USDT')
+    def _prepare_pools(self, item, *, shares, usdt, eligible=True):
+        """Prepare with the two pools independently funded."""
         business_account = SimpleNamespace(
             bsc_address=BUSINESS_ADDR,
             business=SimpleNamespace(id=77, name='Bodega'))
         with mock.patch('users.models.Account.objects') as acct_objs, \
+             mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD), \
+             mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=eligible), \
+             mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=shares), \
+             mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=usdt), \
+             mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+            acct_objs.filter.return_value.select_related.return_value.first.return_value = \
+                business_account
+            return bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
+
+    def test_a_pinned_pool_that_cannot_pay_falls_back_to_the_one_that_can(self):
+        """The deadlock this closes, seen live: a run pinned CUSD_PLUS whose
+        business is Ondo-BLOCKED can never be paid, because the block is
+        exactly what stops them minting shares. 1.119 USDT parked, a 1.0999
+        payroll, and "el fondo de nómina no alcanza" forever."""
+        item = _item(net='1.09', fee='0.0099', run_token='CUSD_PLUS')
+        result = self._prepare_pools(item, shares=0, usdt=1119 * WAD // 1000,
+                                     eligible=False)
+        self.assertTrue(result['success'], result.get('error'))
+        payout = item.blockchain_data['bsc_payout']
+        self.assertEqual(payout['asset'], bsc_flow.ASSET_USDT)
+        self.assertEqual(int(payout['net_amount']), 109 * WAD // 100)
+        # Raw USDT never redeems, whatever the recipient's eligibility.
+        self.assertFalse(payout['redeem_to_usdt'])
+        self.assertEqual(item.token_type, 'USDT')
+
+    def test_the_pin_still_wins_when_it_can_pay(self):
+        # Both pools funded: the run's own pin decides, no drift.
+        item = _item(net='1.09', fee='0.0099', run_token='CUSD_PLUS')
+        result = self._prepare_pools(item, shares=50 * WAD, usdt=50 * WAD)
+        self.assertTrue(result['success'], result.get('error'))
+        self.assertEqual(item.blockchain_data['bsc_payout']['asset'],
+                         bsc_flow.ASSET_CUSD_PLUS)
+
+    def test_neither_pool_covering_is_still_insufficient(self):
+        item = _item(net='1.09', fee='0.0099', run_token='CUSD_PLUS')
+        result = self._prepare_pools(item, shares=WAD // 100, usdt=WAD // 100)
+        self.assertEqual(result['error'], 'insufficient_escrow')
+
+    def test_a_usdt_run_falls_back_to_shares_when_that_is_where_the_money_is(self):
+        # The mirror case: pinned USDT, funded in cUSD+.
+        item = _item(net='1.09', fee='0.0099', run_token='USDT')
+        result = self._prepare_pools(item, shares=50 * WAD, usdt=0)
+        self.assertTrue(result['success'], result.get('error'))
+        self.assertEqual(item.blockchain_data['bsc_payout']['asset'],
+                         bsc_flow.ASSET_CUSD_PLUS)
+
+    def test_the_amounts_are_always_priced_in_the_pool_that_pays(self):
+        """Replaces an assertion that a USDT-pinned run must NEVER touch the
+        shares pool. That strictness was wrong: it deadlocked any employer
+        whose money sat in the other pool (see
+        test_a_pinned_pool_that_cannot_pay_falls_back_to_the_one_that_can).
+
+        What still has to hold is the pricing: shares and dollars are
+        different units, so whichever pool is chosen, the amount must be
+        computed in THAT pool's units. Cross-pool ISOLATION is enforced
+        where it belongs — in the contract's _debit, covered by forge."""
+        item = _item(net='100', fee='0.9', run_token='USDT')
+        # Pinned pool empty, shares pool funded, share price 1.10.
+        business_account = SimpleNamespace(
+            bsc_address=BUSINESS_ADDR,
+            business=SimpleNamespace(id=77, name='Bodega'))
+        pps = 11 * WAD // 10
+        with mock.patch('users.models.Account.objects') as acct_objs, \
+             mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
              mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True), \
              mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=10_000 * WAD), \
              mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=0), \
@@ -521,8 +585,11 @@ class PreparePayoutTests(SimpleTestCase):
             acct_objs.filter.return_value.select_related.return_value.first.return_value = \
                 business_account
             result = bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
-        # Thousands parked in shares must not pay a USDT-denominated wage.
-        self.assertEqual(result['error'], 'insufficient_escrow')
+        self.assertTrue(result['success'], result.get('error'))
+        payout = item.blockchain_data['bsc_payout']
+        self.assertEqual(payout['asset'], bsc_flow.ASSET_CUSD_PLUS)
+        # Priced in SHARES at 1.10, not passed through as dollars.
+        self.assertEqual(int(payout['net_amount']), (100 * WAD * WAD) // pps)
 
     def test_recipient_without_address_blocks_and_nudges(self):
         item = _item(recipient_addr=None)

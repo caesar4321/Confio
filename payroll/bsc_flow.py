@@ -870,31 +870,62 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     if signer_addr != business_addr and not is_onchain_delegate(business_addr, signer_addr):
         return {'success': False, 'error': 'not_onchain_delegate'}
 
-    # WHICH pool pays. Pinned on the run at creation, never re-derived here:
-    # an employer whose eligibility changes mid-run must still be paying out
-    # of the escrow the run was funded into.
-    asset = TOKEN_ASSET[item.run.token_type]
-
     net_wei = int(Decimal(item.net_amount) * WAD)
     fee_wei = int(Decimal(item.fee_amount or 0) * WAD)
     if net_wei <= 0:
         return {'success': False, 'error': 'invalid_amount'}
-    if asset == ASSET_USDT:
-        # Dollars ARE the units — no share price anywhere in this branch.
-        net_units, fee_units = net_wei, fee_wei
-    else:
+
+    def _units(asset: int):
+        """(net, fee) in one pool's own units, or None if unpriceable."""
+        if asset == ASSET_USDT:
+            # Dollars ARE the units — no share price anywhere in this branch.
+            return net_wei, fee_wei
         try:
             pps_wad = cp_vault.p_plus_wad()
         except Exception as exc:  # noqa: BLE001
             logger.warning('[PAYROLL][BSC] pps read failed: %s', exc)
-            return {'success': False, 'error': 'balance_unavailable'}
-        net_units = (net_wei * WAD) // pps_wad
-        fee_units = (fee_wei * WAD) // pps_wad
-    if net_units <= 0:
-        return {'success': False, 'error': 'invalid_amount'}
+            return None
+        return (net_wei * WAD) // pps_wad, (fee_wei * WAD) // pps_wad
 
-    if escrow_raw(business_addr, asset) < net_units + fee_units:
+    # WHICH pool pays. The run's pin is a PREFERENCE, not a lock.
+    #
+    # It was a lock, and that deadlocked the exact employer this vault was
+    # built for. A run pinned CUSD_PLUS whose business is Ondo-blocked can
+    # never be paid: the block is precisely what stops them minting shares,
+    # so escrowShares is 0 and stays 0 no matter how much they top up. Seen
+    # live — 1.119 USDT parked, a 1.0999 payroll, and "el fondo de nómina no
+    # alcanza" forever, because the read went to the empty pool.
+    #
+    # So: honour the pin when it can actually pay, otherwise spend the pool
+    # that can. Both pools are the SAME BUSINESS's own escrow, so this
+    # chooses which of their dollars moves, never whose. The choice is
+    # recorded per item (blockchain_data.bsc_payout.asset and
+    # item.token_type), and the run's own token_type is left alone — one
+    # short item must not silently re-denominate every other item on it.
+    pinned = TOKEN_ASSET[item.run.token_type]
+    chosen = None
+    for candidate in (pinned, ASSET_USDT if pinned == ASSET_CUSD_PLUS else ASSET_CUSD_PLUS):
+        pair = _units(candidate)
+        if pair is None:
+            if candidate == pinned:
+                return {'success': False, 'error': 'balance_unavailable'}
+            continue
+        cand_net, cand_fee = pair
+        if cand_net <= 0:
+            continue
+        if escrow_raw(business_addr, candidate) >= cand_net + cand_fee:
+            chosen = candidate
+            net_units, fee_units = cand_net, cand_fee
+            break
+    if chosen is None:
         return {'success': False, 'error': 'insufficient_escrow'}
+    if chosen != pinned:
+        logger.info(
+            '[PAYROLL][BSC] %s: run pinned %s but that pool cannot cover it; '
+            'paying from the %s pool the business actually funded',
+            item.internal_id, item.run.token_type,
+            'USDT' if chosen == ASSET_USDT else 'CUSD_PLUS')
+    asset = chosen
 
     # Schedule and cap were decorative on this rail: neither BSC prepare nor
     # submit consulted them and the contract carries no window or cap state.
@@ -1030,7 +1061,7 @@ def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
 
     gas = GAS_PAYOUT_REDEEM if payout['redeem_to_usdt'] else GAS_PAYOUT_TRANSFER
     gas_price = max(int(_rpc('eth_gasPrice', []), 16),
-                    int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
+                    int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 50_000_000)))
     price_cap = int(getattr(settings, 'CUSD_PLUS_7702_MAX_GAS_PRICE_WEI', 5_000_000_000))
     if gas_price > price_cap:
         return {'success': False, 'error': 'gas_price_too_high'}
