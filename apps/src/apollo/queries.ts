@@ -3477,7 +3477,10 @@ export const GET_CURRENT_BUSINESS_EMPLOYEES = gql`
           id
           accountType
           accountIndex
-          algorandAddress
+          # algorandAddress deliberately NOT selected: PayrollSetupWizard uses
+          # only account.id and accountType to create recipients, so shipping
+          # every employee's on-chain address to the owner's client was data
+          # nobody read. Payroll delegate matching happens server-side.
         }
       }
       role

@@ -605,6 +605,14 @@ class UserType(DjangoObjectType):
 		return self.verification_status
 	
 	def resolve_accounts(self, info):
+		# NOT self-only, deliberately. A business owner legitimately reads their
+		# employees' accounts through currentBusinessEmployees (which is already
+		# scoped to that owner's business) — PayrollSetupWizard needs account.id
+		# and accountType to create payroll recipients. Making this self-only
+		# breaks payroll setup.
+		#
+		# Cross-user EXPOSURE is closed at the entry points instead: Query.user
+		# is self-only, and the remaining nested paths carry their own scoping.
 		return Account.objects.filter(user=self).select_related('business')
 
 	def resolve_pending_modal(self, info):
@@ -1775,15 +1783,20 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
 		
-		try:
-			# For security, only allow fetching user details if they have interacted with the current user
-			# or if the current user is fetching their own details
-			requested_user = User.objects.get(id=id)
-			
-			# For now, allow fetching any user's basic info (can add more restrictions later)
-			return requested_user
-		except User.DoesNotExist:
+		# Self only. The old behaviour ("allow fetching any user's basic info,
+		# can add more restrictions later") let any authenticated caller walk
+		# the user-id space and read other people's profiles and accounts.
+		#
+		# Nothing in the app needs this: the only document that used it,
+		# GET_USER_BY_ID, has no callers, and contact discovery goes through
+		# phone-hash matching (CheckUsersByPhones), not id lookup. Kept as a
+		# field rather than removed so older shipped builds that still send the
+		# query get an empty result instead of a schema error.
+		if str(user.id) != str(id):
+			logger.warning(f"Blocked cross-user lookup: user {user.id} requested user {id}")
 			return None
+
+		return user
 
 	def resolve_business(self, info, id):
 		user = getattr(info.context, 'user', None)
