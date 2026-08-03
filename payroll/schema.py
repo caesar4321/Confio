@@ -1962,22 +1962,50 @@ class Query(graphene.ObjectType):
         if not ok:
             return []
 
-        # If caller is in a business context (owner/admin), return that business' items
+        # GATED ON send_funds, the same permission the payout mutation
+        # requires. This list is not a report — HomeScreen turns a non-empty
+        # answer into a payroll card with a Pagar button, so anything served
+        # here is an action we are offering. It used to filter on
+        # BusinessEmployee.is_active alone, which handed the card to every
+        # cashier of every business the user works at: people the app will
+        # not even let the owner APPOINT as a payroll delegate
+        # (PayrollDelegatesManageScreen excludes role 'cashier'), sent to a
+        # button that could only ever answer permission_denied.
+        #
+        # If caller is in a business context (owner/admin), return that
+        # business' items.
         ctx = get_jwt_business_context_with_validation(info, required_permission=None)
         if ctx and ctx.get('account_type') == 'business' and ctx.get('business_id'):
+            # Second call rather than one gated call: a permission failure
+            # must return NOTHING, not fall through to the delegate branch
+            # below and hand back the same business's items anyway.
+            if not get_jwt_business_context_with_validation(
+                    info, required_permission='send_funds'):
+                return []
             return PayrollItem.objects.filter(
                 run__business_id=ctx['business_id'],
                 status__in=['PENDING', 'PREPARED'],
                 deleted_at__isnull=True
             ).select_related('run', 'recipient_account', 'recipient_user')
 
-        # Otherwise, fall back to delegate view (employee of any business)
+        # Otherwise, fall back to delegate view (employee of any business),
+        # keeping only the businesses this user could actually pay.
         from users.models_employee import BusinessEmployee
-        biz_ids = BusinessEmployee.objects.filter(
+        from users.jwt_context import check_role_permission
+        biz_ids = []
+        for emp in BusinessEmployee.objects.filter(
             user=user,
             is_active=True,
             deleted_at__isnull=True
-        ).values_list('business_id', flat=True)
+        ).only('business_id', 'role', 'permissions'):
+            # Same two-step as jwt_context: the role matrix grants, and an
+            # explicit per-employee False revokes. Deny-only — an explicit
+            # True is left to the matrix, so this cannot widen the role.
+            overrides = emp.permissions or {}
+            if 'send_funds' in overrides and not overrides['send_funds']:
+                continue
+            if check_role_permission(emp.role, 'send_funds'):
+                biz_ids.append(emp.business_id)
 
         if not biz_ids:
             return []

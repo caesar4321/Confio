@@ -689,3 +689,64 @@ class SettledAmountDecodeTests(SimpleTestCase):
         receipt = self._receipt(redeemed=True, usdt_out=995 * WAD // 10)
         receipt['logs'][0]['topics'] = [v1_topic]
         self.assertEqual(self._decode(receipt), Decimal('100'))
+
+
+class PendingItemsPermissionTests(SimpleTestCase):
+    """The list HomeScreen turns into a Pagar button must not be wider than
+    the permission that button needs.
+
+    It used to filter on BusinessEmployee.is_active alone, so every cashier
+    of every business the user works at got the payroll card — and the app
+    will not even let an owner APPOINT a cashier as a payroll delegate. They
+    tapped Pagar and got permission_denied.
+    """
+
+    def _biz_ids_for(self, rows):
+        """The delegate-branch filter, exercised over fake employee rows."""
+        from users.jwt_context import check_role_permission
+        out = []
+        for emp in rows:
+            overrides = emp.permissions or {}
+            if 'send_funds' in overrides and not overrides['send_funds']:
+                continue
+            if check_role_permission(emp.role, 'send_funds'):
+                out.append(emp.business_id)
+        return out
+
+    def _emp(self, business_id, role, permissions=None):
+        return SimpleNamespace(business_id=business_id, role=role,
+                               permissions=permissions)
+
+    def test_cashier_is_excluded(self):
+        self.assertEqual(self._biz_ids_for([self._emp(1, 'cashier')]), [])
+
+    def test_manager_and_admin_are_included(self):
+        rows = [self._emp(1, 'manager'), self._emp(2, 'admin')]
+        self.assertEqual(self._biz_ids_for(rows), [1, 2])
+
+    def test_an_explicit_revocation_wins_over_the_role(self):
+        # Revoking send_funds on one manager must remove their card too —
+        # the role still says yes, the override says no.
+        rows = [self._emp(1, 'manager', {'send_funds': False})]
+        self.assertEqual(self._biz_ids_for(rows), [])
+
+    def test_an_explicit_true_does_not_widen_a_cashier(self):
+        # Deny-only, matching jwt_context: an explicit True is left to the
+        # role matrix, so this must NOT promote a cashier.
+        rows = [self._emp(1, 'cashier', {'send_funds': True})]
+        self.assertEqual(self._biz_ids_for(rows), [])
+
+    def test_only_the_payable_businesses_survive(self):
+        rows = [self._emp(1, 'cashier'), self._emp(2, 'manager'),
+                self._emp(3, 'admin', {'send_funds': False})]
+        self.assertEqual(self._biz_ids_for(rows), [2])
+
+    def test_the_delegate_screen_agrees_about_cashiers(self):
+        # PayrollDelegatesManageScreen filters eligible delegates with
+        # `role !== 'cashier'`. If the role matrix ever granted a cashier
+        # send_funds, that screen and this gate would disagree about who can
+        # pay payroll.
+        from users.jwt_context import check_role_permission
+        self.assertFalse(check_role_permission('cashier', 'send_funds'))
+        for role in ('admin', 'manager', 'owner'):
+            self.assertTrue(check_role_permission(role, 'send_funds'), role)
