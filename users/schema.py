@@ -2390,7 +2390,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			if found_user:
 				active_account = found_user.prefetched_active_accounts[0] if getattr(found_user, 'prefetched_active_accounts', []) else None
 				results.append(UserByPhoneType(
-					phone_number=found_user.phone_number,
+					# NEVER the phone number here. This lookup is keyed by
+					# USERNAME, which is a guessable public handle — returning
+					# phone_number turned it into a username -> phone oracle, and
+					# silently defeated UserType.resolve_phone_number, which
+					# guards that exact field for this exact reason. The
+					# phone-keyed variant above is different: the caller already
+					# holds the number they are asking about (contact sync).
+					phone_number=None,
 					user_id=found_user.id,
 					username=found_user.username,
 					first_name=found_user.first_name,

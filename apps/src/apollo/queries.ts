@@ -391,7 +391,9 @@ export const CHECK_USERS_BY_PHONES = gql`
 export const CHECK_USERS_BY_USERNAMES = gql`
   query CheckUsersByUsernames($usernames: [String!]!) {
     checkUsersByUsernames(usernames: $usernames) {
-      phoneNumber
+      # No phoneNumber: a username is a guessable handle, so asking for the
+      # phone behind one is an enumeration oracle. The server returns null
+      # regardless; not selecting it keeps the intent visible here too.
       userId
       username
       isOnConfio
@@ -3477,10 +3479,12 @@ export const GET_CURRENT_BUSINESS_EMPLOYEES = gql`
           id
           accountType
           accountIndex
-          # algorandAddress deliberately NOT selected: PayrollSetupWizard uses
-          # only account.id and accountType to create recipients, so shipping
-          # every employee's on-chain address to the owner's client was data
-          # nobody read. Payroll delegate matching happens server-side.
+          # algorandAddress IS required here: PayrollDelegatesManageScreen
+          # compares it against the on-chain delegate list to reconcile who is
+          # already a delegate. Removing it silently made every employee fail
+          # to match. This query has seven screen consumers — check all of them
+          # before trimming a field.
+          algorandAddress
         }
       }
       role
