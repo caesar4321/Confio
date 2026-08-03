@@ -2,9 +2,9 @@
 
 **Dollar finance built for Latin America — user-controlled money, distributed through trust.**
 
-Confío is a fully open-source, non-custodial financial application built for Latin America’s dollar reality. It combines local fiat access, yield-bearing dollars, transfers, payments, payroll, and tokenized assets in a familiar mobile experience without requiring users to understand crypto.
+Confío is a fully open-source, non-custodial financial application built for Latin America’s dollar reality. It combines local fiat access, yield-bearing dollars, transfers, payments, and payroll in a familiar mobile experience without requiring users to understand crypto. Access to additional tokenized financial products remains a separately evaluated extension rather than part of the current release.
 
-**Global reference · Version 4.0 · July 2026**<br>
+**Global reference · Version 4.1 · August 2026**<br>
 Julian Moon · Founder & CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -22,7 +22,7 @@ This paper is the current global reference for Confío’s product architecture,
 3. [The BNB Smart Chain product system](#3-the-bnb-smart-chain-product-system)
 4. [Why BNB Smart Chain](#4-why-bnb-smart-chain)
 5. [cUSD+: savings that can move](#5-cusd-savings-that-can-move)
-6. [Payments, payroll, and tokenized assets](#6-payments-payroll-and-tokenized-assets)
+6. [Payments, payroll, and evaluated extensions](#6-payments-payroll-and-evaluated-extensions)
 7. [$CONFIO on BNB Smart Chain](#7-confio-on-bnb-smart-chain)
 8. [Wallet, security, and open-source architecture](#8-wallet-security-and-open-source-architecture)
 9. [Users, distribution, and go-to-market](#9-users-distribution-and-go-to-market)
@@ -39,7 +39,7 @@ This paper is the current global reference for Confío’s product architecture,
 
 ## 1. Executive summary
 
-Confío is a fully open-source, non-custodial digital-dollar application for Latin America. It gives users a familiar mobile interface to hold, save, send, spend, and invest without requiring them to manage gas tokens, memorize blockchain addresses, or navigate exchange screens. <sup>[3]</sup>
+Confío is a fully open-source, non-custodial digital-dollar application for Latin America. It gives users a familiar mobile interface to hold, save, send, and spend without requiring them to manage gas tokens, memorize blockchain addresses, or navigate exchange screens. <sup>[3]</sup>
 
 > **Product thesis**
 >
@@ -51,10 +51,10 @@ Confío’s product system now settles entirely on BNB Smart Chain:
 | --- | --- | --- |
 | USDT | Universal funding, liquidity, and exit rail. | BSC-USDT enters through local and international providers, can be held or transferred directly, and is the input/output asset for cUSD+. |
 | cUSD+ | Primary dollar savings and transaction balance. | USDY-backed accumulating vault shares that can be saved, sent, spent, paid through payroll, or redeemed to USDT. |
-| Ondo Stocks | Eligible tokenized-market access. | In-app purchases and sales launch in the same application update and settle through Ondo Global Markets on BNB Smart Chain. |
+| Potential tokenized assets | Separately evaluated product extension. | Not included in the current release. Any future integration requires an acceptable legal, commercial, compliance, and technical structure before launch. |
 | $CONFIO | Community and ecosystem token. | Fixed-supply BEP-20 on BNB Smart Chain with a USDT-denominated on-chain presale. It does not back user dollar balances. |
 
-The single-network design is not a generic chain bet. It follows the product’s economic center of gravity: Ondo Finance made its USDY, InstantManager, price oracle, USDT subscription/redemption path, and Global Markets infrastructure available on BNB Smart Chain. Confío then consolidated payments, payroll, transfers, and $CONFIO onto the same network to eliminate chain switching and fragmented liquidity. <sup>[7, 8, 10]</sup>
+The single-network design is not a generic chain bet. It follows the product’s economic center of gravity: Ondo Finance made its USDY, InstantManager, price oracle, and USDT subscription/redemption path available on BNB Smart Chain. Confío then consolidated payments, payroll, transfers, and $CONFIO onto the same network to eliminate chain switching and fragmented liquidity. <sup>[7, 8, 10]</sup>
 
 As of 23 July 2026, Confío records 8,004 users who completed phone verification and 177 users who completed Didit identity verification by submitting a government-issued identity document and capturing a live selfie for liveness and face-matching checks. The Didit flow has a 61.5% completion rate among users who began it. Confío also records 2,094 push-reachable devices, with 2,092 of those devices used within the last 30 days. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
 
@@ -110,7 +110,6 @@ Confío presents one dollar experience while using different assets for differen
 | Send | cUSD+ or USDT | Eligible internal recipients can receive cUSD+; other recipients receive USDT through an atomic cUSD+ redemption or direct USDT transfer. |
 | Pay a merchant | cUSD+ or $CONFIO, funded from cUSD+ or USDT | The merchant charges in cUSD+ or $CONFIO; the payment contract pays the merchant, enforces the 0.9% fee, and records fee accrual on-chain. |
 | Run payroll | cUSD+ with optional USDT exit | Businesses fund a cUSD+ escrow; authorized delegates sign payouts, and recipients can receive cUSD+ or USDT. |
-| Buy or sell tokenized assets | Ondo Global Markets | Eligible orders settle through BNB Smart Chain using Ondo’s quote and attestation infrastructure. |
 | Participate in $CONFIO presale | USDT | A sponsored transaction purchases an allocation against an immutable on-chain price curve. |
 | Earn and claim rewards | $CONFIO RewardVault | Eligible rewards are recorded cumulatively off-chain and become claimable through signed on-chain claims after the DEX unlock. |
 
@@ -134,7 +133,7 @@ All contracts listed below are live on BNB Smart Chain mainnet and source-verifi
 
 The consolidation removes three recurring sources of consumer friction:
 
-- no bridge is required between the primary dollar balance, savings, payments, payroll, tokenized assets, and $CONFIO;
+- no bridge is required between the primary dollar balance, savings, payments, payroll, and $CONFIO;
 - one EVM address can receive the user’s funding, product balances, and ecosystem token; and
 - one sponsored-transaction system can pay network fees across the product.
 
@@ -148,7 +147,7 @@ Koywe provides live local rails across seven Latin American markets, including c
 
 ### 4.1 The product followed Ondo’s infrastructure
 
-The primary reason is Ondo Finance. Confío did not choose a network and then search for a savings product. cUSD+ was designed around USDY, and Ondo deployed the production USDY token, InstantManager, price oracle, USDT subscription/redemption route, and Global Markets contracts on BNB Smart Chain. Keeping the entire Confío product system beside that infrastructure provides a direct, permissioned route into savings and tokenized assets. <sup>[7, 8, 10, 18]</sup>
+The primary reason is Ondo Finance. Confío did not choose a network and then search for a savings product. cUSD+ was designed around USDY, and Ondo deployed the production USDY token, InstantManager, price oracle, and USDT subscription/redemption route on BNB Smart Chain. Keeping the Confío product system beside that infrastructure provides a direct, permissioned route into USDY-backed savings. <sup>[7, 8, 10]</sup>
 
 ### 4.2 Consumer-scale economics and liquidity
 
@@ -158,7 +157,7 @@ BNB Smart Chain adds:
 - low transaction costs suitable for sponsored consumer activity;
 - mature wallets, RPC providers, explorers, exchanges, and developer tooling;
 - access to BNB Chain’s payments, wallet, DeFi, and RWA ecosystem; and
-- one environment for cUSD+, USDT, $CONFIO, merchant payments, payroll, and tokenized assets. <sup>[5, 6, 12]</sup>
+- one environment for cUSD+, USDT, $CONFIO, merchant payments, and payroll. <sup>[5, 6, 12]</sup>
 
 Chain ecosystem size does not create product demand by itself. Confío’s value still depends on users, retained balances, reliable exits, distribution, security, and transparent economics.
 
@@ -200,7 +199,7 @@ If the USDY oracle falls or moves beyond a configured guard threshold, value-mov
 
 cUSD+ is not isolated in a savings tab. It is the preferred balance for internal sends, merchant payments, and payroll because value can continue accumulating until it is spent. When cUSD+ is unsuitable for the recipient or route, Confío can atomically redeem it and deliver USDT instead. Raw USDT remains a first-class fallback rather than a hidden intermediate asset.
 
-## 6. Payments, payroll, and tokenized assets
+## 6. Payments, payroll, and evaluated extensions
 
 ### 6.1 Person-to-person transfers
 
@@ -224,13 +223,13 @@ The payment contract calculates the 0.9% merchant fee, pays the merchant net amo
 
 Businesses can hold working capital as cUSD+ in a dedicated escrow while it continues to participate in cUSD+ reference-value growth. The business authorizes delegates to sign specific payouts. Recipients can receive cUSD+ or an atomic USDT redemption, while the payroll contract keeps fee accounting separate from business escrow.
 
-### 6.4 Ondo Stocks
+### 6.4 Ondo Global Markets evaluation
 
-The same application update introduces eligible Ondo Global Markets products inside Confío. Purchases and sales use Ondo’s quote, attestation, eligibility, and settlement infrastructure. Confío applies an explicit 0.30% fee to each purchase and sale, shown separately from any cost or spread in the Ondo execution quote and from third-party charges. <sup>[18]</sup>
+Ondo Global Markets integration is paused and is not included in the current Confío release. The current mint interface does not support the direct-to-user delivery model Confío intended. Confío is evaluating the appropriate legal, commercial, compliance, custody and settlement, and technical structure before deciding whether to proceed. No purchase or sale fee is currently charged because Confío does not currently offer this product. <sup>[18]</sup>
 
 ## 7. $CONFIO on BNB Smart Chain
 
-$CONFIO is the community and ecosystem token of Confío. It is not a stablecoin, does not represent a bank deposit, and does not back USDT, cUSD+, USDY, or Ondo Stocks.
+$CONFIO is the community and ecosystem token of Confío. It is not a stablecoin, does not represent a bank deposit, and does not back USDT, cUSD+, or USDY.
 
 ### 7.1 Fixed-supply token
 
@@ -333,7 +332,7 @@ The funnel is measured from content reach through installation, phone completion
 
 ### 9.3 Country-by-country rollout
 
-Confío does not expose every feature in every country. Fiat methods, identity requirements, USDY eligibility, Ondo Stocks access, sanctions controls, withdrawal options, and support procedures vary by market. Rollout follows verified provider capabilities and legal/operational readiness rather than a country flag in a marketing page.
+Confío does not expose every feature in every country. Fiat methods, identity requirements, USDY eligibility, sanctions controls, withdrawal options, and support procedures vary by market. Rollout follows verified provider capabilities and legal/operational readiness rather than a country flag in a marketing page.
 
 ## 10. Business model
 
@@ -345,7 +344,6 @@ Confío aligns revenue with useful financial activity rather than speculative tr
 | Merchant payments | 0.9% flat Confío platform fee, enforced by the payment contract. |
 | Payroll and mass payouts | 0.9% flat Confío platform fee, with fee shares accrued separately from business escrow. |
 | cUSD+ yield share | 15% of positive USDY reference-price appreciation to Confío and 85% to the cUSD+ holder reference value. Yield is variable and not guaranteed. |
-| Ondo Stocks transactions | 0.30% explicit Confío fee on each purchase and sale, separate from the Ondo execution quote and third-party charges. |
 | Fiat-rail economics | Koywe provider pricing and Guardarian revenue-sharing may apply according to the live quote and relevant partner agreement. |
 | Future financial products | Potential fees or revenue share from other eligible RWA, brokerage, card, or business-service partners, subject to separate terms and approvals. |
 
@@ -366,7 +364,7 @@ Confío’s architecture separates wallet-key custody from product and provider 
 - Koywe applies its own identity, address, eligibility, sanctions, and transaction controls across its supported local rails. <sup>[13]</sup>
 - Guardarian’s onboarding for SEPA and card access also includes residential-address information and remains subject to its identity, eligibility, payment-method, sanctions, and transaction controls. <sup>[13]</sup>
 - Phone completion or Didit verification alone does not guarantee that Koywe, Guardarian, Ondo, or another provider will approve a user or transaction.
-- USDY minting and Ondo Stocks access are limited by Ondo eligibility, geographic, address, and compliance requirements. <sup>[7, 10, 18]</sup>
+- USDY minting is limited by Ondo eligibility, geographic, address, and compliance requirements. <sup>[7, 10]</sup>
 - Additional countries and rails launch only after the corresponding legal, operational, and provider checks.
 
 ## 12. Risks and mitigations
@@ -400,7 +398,7 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 | Payroll | cUSD+ escrow, delegate-signed payouts, optional USDT exit, backend/client flows, and payroll vault deployed, source-verified, and wired into production. | Pilot with businesses, expand staged user exposure, and verify escrow and payout reliability at meaningful volume. |
 | $CONFIO | Fixed-supply token and replacement continuous-curve presale vault deployed, source-verified, re-seeded, and wired into production on BSC. | Fund claim obligations before claims open and keep tokenomics disclosures synchronized with on-chain state. |
 | $CONFIO rewards | Canonical RewardVault deployed, source-verified, wired to the canonical token, and locked until DEX launch; database-only accrual uses the live presale-curve price when enabled. | Enable database-only accrual when operationally ready; at DEX time, fund a working tranche, activate the short-deadline EIP-712 signer and sponsored client claim flow, and unlock claims. |
-| Ondo Stocks | Included in the same BSC application release, with in-app purchase and sale flows built around Ondo’s quote, attestation, eligibility, and settlement infrastructure. | Release to eligible users and measure execution reliability, transaction volume, and repeat use. |
+| Ondo Global Markets | Integration paused and excluded from the current release. No user purchase or sale flow and no Confío transaction fee are active. | Proceed only after a separately approved legal, commercial, compliance, custody and settlement, and technical structure supports direct-to-user delivery. |
 | Fiat access | Koywe live across seven LATAM markets; Guardarian live for SEPA and card-based access. | Add verified providers and fallback routes without creating hidden dependencies. |
 | Distribution | 8,004 phone-complete users; 177 Didit-verified users; approximately 480,000 founder audience; effectively zero paid-media spend to date. | Convert distribution into funded users, retained balances, repeat transactions, referrals, and country-level cohorts. |
 
@@ -418,15 +416,15 @@ Distribution is measured as a funnel: content reach, store visit, installation, 
 
 ## 14. Legal disclaimer
 
-This document is provided for informational and technical-reference purposes only. It is not investment, legal, tax, accounting, or financial advice; it is not a prospectus, offer, solicitation, recommendation, or promise of returns. Product descriptions reflect the current design and status as of 31 July 2026 and may change.
+This document is provided for informational and technical-reference purposes only. It is not investment, legal, tax, accounting, or financial advice; it is not a prospectus, offer, solicitation, recommendation, or promise of returns. Product descriptions reflect the current design and status as of 3 August 2026 and may change.
 
 USDT and cUSD+ are not bank deposits and are not insured by a deposit-insurance scheme. Stablecoins, tokenized notes, smart contracts, blockchains, oracles, fiat providers, market makers, custodians, and other infrastructure can fail, be suspended, lose value, or become subject to new rules.
 
 Any cUSD+ yield is variable, depends on USDY and the vault, and is not guaranteed. USDY access and cUSD+ minting are subject to Ondo eligibility, compliance conditions, provider availability, and applicable law.
 
-Ondo Stocks are tokenized financial products rather than direct Confío-issued shares. Availability, execution, transferability, redemption, economic rights, and geographic eligibility are governed by Ondo’s product terms, execution quotes, provider conditions, and applicable law. They are not available to U.S. persons through the Confío product flow.
+Confío does not currently offer Ondo Global Markets products. Any future integration would require separate legal, commercial, compliance, custody and settlement, and technical approval, together with definitive product disclosures and applicable provider terms.
 
-$CONFIO is separate from USDT, cUSD+, USDY, and Ondo Stocks. It does not provide a claim on the backing, revenue, equity, assets, or profits of Confío unless definitive terms expressly state otherwise. Token purchasers should review the separate tokenomics, presale terms, smart contracts, vesting state, treasury concentration, and applicable law.
+$CONFIO is separate from USDT, cUSD+, and USDY. It does not provide a claim on the backing, revenue, equity, assets, or profits of Confío unless definitive terms expressly state otherwise. Token purchasers should review the separate tokenomics, presale terms, smart contracts, vesting state, treasury concentration, and applicable law.
 
 Readers should review definitive product terms, risk disclosures, smart contracts, provider terms, and local law before using any service.
 

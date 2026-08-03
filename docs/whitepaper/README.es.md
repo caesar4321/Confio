@@ -2,9 +2,9 @@
 
 **Finanzas en dólares creadas para América Latina: dinero controlado por el usuario, distribuido mediante confianza.**
 
-Confío es una aplicación financiera totalmente abierta y no custodial, construida para la realidad del dólar en América Latina. Combina acceso local a dinero fiduciario, dólares con rendimiento, transferencias, pagos, nómina y activos tokenizados en una experiencia móvil familiar, sin exigir que el usuario entienda cripto.
+Confío es una aplicación financiera totalmente abierta y no custodial, construida para la realidad del dólar en América Latina. Combina acceso local a dinero fiduciario, dólares con rendimiento, transferencias, pagos y nómina en una experiencia móvil familiar, sin exigir que el usuario entienda cripto. El acceso a otros productos financieros tokenizados permanece como una extensión evaluada por separado y no forma parte de la versión actual.
 
-**Referencia global · Versión 4.0 · Julio de 2026**<br>
+**Referencia global · Versión 4.1 · Agosto de 2026**<br>
 Julian Moon · Fundador y CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -22,7 +22,7 @@ Este documento es la referencia global actual sobre la arquitectura, estrategia,
 3. [Sistema de producto en BNB Smart Chain](#3-sistema-de-producto-en-bnb-smart-chain)
 4. [Por qué BNB Smart Chain](#4-por-qué-bnb-smart-chain)
 5. [cUSD+: ahorro que se puede mover](#5-cusd-ahorro-que-se-puede-mover)
-6. [Pagos, nómina y activos tokenizados](#6-pagos-nómina-y-activos-tokenizados)
+6. [Pagos, nómina y extensiones evaluadas](#6-pagos-nómina-y-extensiones-evaluadas)
 7. [$CONFIO en BNB Smart Chain](#7-confio-en-bnb-smart-chain)
 8. [Billetera, seguridad y arquitectura abierta](#8-billetera-seguridad-y-arquitectura-abierta)
 9. [Usuarios, distribución y salida al mercado](#9-usuarios-distribución-y-salida-al-mercado)
@@ -39,7 +39,7 @@ Este documento es la referencia global actual sobre la arquitectura, estrategia,
 
 ## 1. Resumen ejecutivo
 
-Confío es una aplicación de dólares digitales, totalmente abierta y no custodial, para América Latina. Permite guardar, ahorrar, enviar, gastar e invertir mediante una interfaz móvil familiar, sin administrar tokens de gas, memorizar direcciones blockchain ni navegar pantallas de exchange. <sup>[3]</sup>
+Confío es una aplicación de dólares digitales, totalmente abierta y no custodial, para América Latina. Permite guardar, ahorrar, enviar y gastar mediante una interfaz móvil familiar, sin administrar tokens de gas, memorizar direcciones blockchain ni navegar pantallas de exchange. <sup>[3]</sup>
 
 > **Tesis de producto**
 >
@@ -51,10 +51,10 @@ Todo el sistema de producto de Confío se liquida en BNB Smart Chain:
 | --- | --- | --- |
 | USDT | Entrada, liquidez y salida universal. | BSC-USDT llega por proveedores locales e internacionales, puede mantenerse o transferirse y es el activo de entrada y salida de cUSD+. |
 | cUSD+ | Saldo principal de ahorro y transacciones. | Participaciones acumulativas respaldadas por USDY que pueden ahorrarse, enviarse, gastarse, pagarse por nómina o redimirse a USDT. |
-| Ondo Stocks | Acceso elegible a mercados tokenizados. | Compras y ventas dentro de la app se lanzan en la misma actualización y se liquidan mediante Ondo Global Markets en BNB Smart Chain. |
+| Posibles activos tokenizados | Extensión evaluada por separado. | No se incluye en la versión actual. Cualquier integración futura requiere una estructura legal, comercial, de cumplimiento y técnica aceptable antes de su lanzamiento. |
 | $CONFIO | Token comunitario y del ecosistema. | BEP-20 de oferta fija con preventa on-chain denominada en USDT. No respalda los saldos en dólares de los usuarios. |
 
-La arquitectura de una sola red sigue el centro económico del producto: Ondo hizo disponibles en BNB Smart Chain USDY, InstantManager, el oráculo, la ruta USDT de suscripción/redención y Global Markets. Confío consolidó pagos, nómina, transferencias y $CONFIO en esa misma red para eliminar cambios de cadena y liquidez fragmentada. <sup>[7, 8, 10]</sup>
+La arquitectura de una sola red sigue el centro económico del producto: Ondo hizo disponibles en BNB Smart Chain USDY, InstantManager, el oráculo y la ruta USDT de suscripción/redención. Confío consolidó pagos, nómina, transferencias y $CONFIO en esa misma red para eliminar cambios de cadena y liquidez fragmentada. <sup>[7, 8, 10]</sup>
 
 Al 23 de julio de 2026, 8.004 usuarios habían completado la verificación telefónica y 177 la verificación de identidad de Didit mediante documento oficial y selfie en vivo para prueba de vida y comparación facial. El flujo de Didit registra una finalización de 61,5% entre quienes lo iniciaron. Confío registra además 2.094 dispositivos alcanzables por notificaciones, 2.092 de ellos usados en los 30 días anteriores. Son métricas internas, no auditadas, y no equivalen a usuarios financiados ni a una definición estandarizada de MAU. <sup>[14]</sup>
 
@@ -99,7 +99,6 @@ Congelamientos bancarios, controles, fintechs fallidas, brokers informales, spre
 | Enviar | cUSD+ o USDT | Un receptor elegible recibe cUSD+; otros reciben USDT mediante redención atómica o transferencia directa. |
 | Pagar | cUSD+ o $CONFIO, fondeado con cUSD+ o USDT | El comercio cobra en cUSD+ o $CONFIO; el contrato paga al comercio, aplica 0,9% y registra la comisión on-chain. |
 | Nómina | cUSD+ con salida opcional a USDT | La empresa fondea un escrow y delegados autorizados firman pagos. |
-| Comprar o vender activos | Ondo Global Markets | Las órdenes elegibles usan cotización y attestations de Ondo en BSC. |
 | Preventa $CONFIO | USDT | Una transacción patrocinada compra asignación sobre una curva inmutable. |
 | Recompensas | RewardVault | Derechos acumulativos se registran off-chain y se reclaman on-chain tras el desbloqueo DEX. |
 
@@ -121,7 +120,7 @@ Todos están activos en mainnet y tienen código verificado.
 
 ### 3.2 Por qué importa una sola red
 
-No se requiere bridge entre ahorro, pagos, nómina, activos tokenizados y $CONFIO; una dirección EVM recibe fondos y activos; y un solo sistema patrocinado cubre gas. Cada producto conserva sus propias reglas económicas, legales y de elegibilidad.
+No se requiere bridge entre ahorro, pagos, nómina y $CONFIO; una dirección EVM recibe fondos y activos; y un solo sistema patrocinado cubre gas. Cada producto conserva sus propias reglas económicas, legales y de elegibilidad.
 
 ### 3.3 Acceso local e internacional
 
@@ -131,7 +130,7 @@ Koywe ofrece rieles locales activos en siete mercados mediante transferencias ba
 
 ### 4.1 El producto siguió la infraestructura de Ondo
 
-La razón principal es Ondo Finance. cUSD+ se diseñó alrededor de USDY, y Ondo desplegó USDY, InstantManager, oráculo, ruta USDT y Global Markets en BNB Smart Chain. Ubicar todo Confío junto a esa infraestructura da una ruta directa y permissionada a ahorro y activos tokenizados. <sup>[7, 8, 10, 18]</sup>
+La razón principal es Ondo Finance. cUSD+ se diseñó alrededor de USDY, y Ondo desplegó USDY, InstantManager, oráculo y ruta USDT en BNB Smart Chain. Ubicar Confío junto a esa infraestructura da una ruta directa y permissionada al ahorro respaldado por USDY. <sup>[7, 8, 10]</sup>
 
 ### 4.2 Economía y liquidez de escala de consumo
 
@@ -161,7 +160,7 @@ La bóveda publica obligaciones, ratio de respaldo y excedente, redondea a favor
 
 cUSD+ puede seguir acumulando valor hasta enviarse, gastarse o pagarse por nómina. Cuando no es adecuado para el receptor, Confío lo redime atómicamente y entrega USDT. USDT sigue siendo una alternativa visible de primera clase.
 
-## 6. Pagos, nómina y activos tokenizados
+## 6. Pagos, nómina y extensiones evaluadas
 
 ### 6.1 Transferencias entre personas
 
@@ -179,15 +178,15 @@ El contrato calcula 0,9%, paga el neto al comercio y acumula únicamente comisio
 
 Las empresas mantienen capital en un escrow cUSD+ y autorizan delegados para pagos específicos. El receptor recibe cUSD+ o USDT redimido, y la contabilidad de comisiones permanece separada del escrow empresarial.
 
-### 6.4 Ondo Stocks
+### 6.4 Evaluación de Ondo Global Markets
 
-En la misma actualización, usuarios elegibles pueden comprar y vender productos tokenizados de Ondo Global Markets. Confío presenta disclosure y cotización, cobra 0,30% por compra o venta separado de la ejecución de Ondo, obtiene la attestation requerida y patrocina la liquidación en BSC. No está disponible para personas estadounidenses. <sup>[18]</sup>
+La integración con Ondo Global Markets está en pausa y no forma parte de la versión actual de Confío. La interfaz de mint actual no admite el modelo de entrega directa al usuario que Confío contemplaba. Antes de decidir si procede, Confío evalúa la estructura legal, comercial, de cumplimiento, custodia y liquidación, y técnica adecuada. Actualmente no existe una comisión de compra o venta porque Confío no ofrece este producto. <sup>[18]</sup>
 
 ## 7. $CONFIO en BNB Smart Chain
 
 ### 7.1 Token de oferta fija
 
-$CONFIO es un BEP-20 no actualizable de 1.000.000.000 de unidades. No tiene owner, minter, proxy, tax, blacklist, pause ni freeze. La oferta se acuñó una sola vez a la tesorería multipartita. No respalda USDT, cUSD+, USDY ni Ondo Stocks. <sup>[17]</sup>
+$CONFIO es un BEP-20 no actualizable de 1.000.000.000 de unidades. No tiene owner, minter, proxy, tax, blacklist, pause ni freeze. La oferta se acuñó una sola vez a la tesorería multipartita. No respalda USDT, cUSD+ ni USDY. <sup>[17]</sup>
 
 ### 7.2 Preventa on-chain
 
@@ -239,7 +238,7 @@ La audiencia hispanohablante del fundador suma aproximadamente 480.000. La venta
 
 ### 9.3 Despliegue país por país
 
-Métodos fiduciarios, identidad, elegibilidad USDY, Ondo Stocks, sanciones, retiros y soporte varían. El lanzamiento sigue capacidad comprobada y preparación legal/operativa, no una bandera de marketing.
+Métodos fiduciarios, identidad, elegibilidad USDY, sanciones, retiros y soporte varían. El lanzamiento sigue capacidad comprobada y preparación legal/operativa, no una bandera de marketing.
 
 ## 10. Modelo de negocio
 
@@ -249,7 +248,6 @@ Métodos fiduciarios, identidad, elegibilidad USDY, Ondo Stocks, sanciones, reti
 | Comercios | 0,9% fijo, aplicado por contrato. |
 | Nómina | 0,9% fijo, separado del escrow. |
 | Rendimiento cUSD+ | 15% de apreciación positiva para Confío y 85% para holders; variable y no garantizado. |
-| Ondo Stocks | 0,30% por compra y venta, separado de Ondo y terceros. |
 | Rieles fiduciarios | Precios Koywe y revenue share Guardarian según cotización y contrato. |
 | Productos futuros | Posibles comisiones o revenue share sujetos a términos y aprobaciones. |
 
@@ -288,7 +286,7 @@ Confío está diseñado para que custodia fiduciaria, conversión, verificación
 | Nómina | Escrow, delegados, salida USDT y app conectados. | Pilotos empresariales. |
 | $CONFIO | Token y preventa continua desplegados y conectados. | Fondear obligaciones antes de reclamos. |
 | Recompensas | RewardVault canónico desplegado y bloqueado hasta DEX. | Activar acumulación; luego firmante, cliente, fondeo y unlock. |
-| Ondo Stocks | Compra/venta integrada en la misma versión. | Lanzar a elegibles y medir ejecución. |
+| Ondo Global Markets | Integración en pausa y excluida de la versión actual. No hay flujo activo de compra o venta ni comisión de Confío. | Proceder solo tras aprobar por separado una estructura legal, comercial, de cumplimiento, custodia y liquidación, y técnica que permita la entrega directa al usuario. |
 | Acceso fiat | Koywe en siete mercados; Guardarian SEPA/tarjetas. | Añadir proveedores y fallback verificados. |
 | Distribución | 8.004 phone-complete, 177 Didit, audiencia ≈480.000, gasto pagado efectivamente cero. | Convertir en usuarios financiados y saldos retenidos. |
 
@@ -304,11 +302,11 @@ Confío separa registros, teléfono completo, verificados, financiados, disposit
 
 ## 14. Aviso legal
 
-Este documento es informativo y técnico; no es asesoría ni prospecto, oferta, solicitud, recomendación o promesa de retorno. Refleja el diseño al 31 de julio de 2026 y puede cambiar.
+Este documento es informativo y técnico; no es asesoría ni prospecto, oferta, solicitud, recomendación o promesa de retorno. Refleja el diseño al 3 de agosto de 2026 y puede cambiar.
 
-USDT y cUSD+ no son depósitos bancarios ni están asegurados. Stablecoins, notas tokenizadas, contratos, blockchains, oráculos, proveedores, market makers y custodios pueden fallar, suspenderse, perder valor o enfrentar reglas nuevas. El rendimiento de cUSD+ es variable y depende de USDY y de la bóveda. Ondo Stocks son productos tokenizados sujetos a términos, cotizaciones, elegibilidad y ley de Ondo; no están disponibles para personas estadounidenses mediante Confío.
+USDT y cUSD+ no son depósitos bancarios ni están asegurados. Stablecoins, notas tokenizadas, contratos, blockchains, oráculos, proveedores, market makers y custodios pueden fallar, suspenderse, perder valor o enfrentar reglas nuevas. El rendimiento de cUSD+ es variable y depende de USDY y de la bóveda. Confío no ofrece actualmente productos de Ondo Global Markets. Cualquier integración futura requeriría aprobación legal, comercial, de cumplimiento, custodia y liquidación, y técnica por separado, junto con divulgaciones definitivas y términos del proveedor.
 
-$CONFIO es separado de USDT, cUSD+, USDY y Ondo Stocks. No concede derecho sobre respaldo, ingresos, equity, activos o ganancias de Confío salvo términos definitivos expresos. Deben revisarse tokenomics, términos, contratos, vesting, concentración y ley aplicable.
+$CONFIO es separado de USDT, cUSD+ y USDY. No concede derecho sobre respaldo, ingresos, equity, activos o ganancias de Confío salvo términos definitivos expresos. Deben revisarse tokenomics, términos, contratos, vesting, concentración y ley aplicable.
 
 ## Notas
 

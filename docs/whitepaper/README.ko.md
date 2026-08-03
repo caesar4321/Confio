@@ -2,9 +2,9 @@
 
 **라틴아메리카를 위한 달러 금융 — 사용자가 통제하는 돈, 신뢰를 통한 유통.**
 
-Confío는 라틴아메리카의 달러 현실을 위해 만든 완전 오픈소스 비수탁형 금융 앱이다. 현지 법정화폐 접근, 수익형 달러, 송금, 결제, 급여, 토큰화 자산을 익숙한 모바일 경험에 결합하며 사용자가 크립토를 이해하도록 요구하지 않는다.
+Confío는 라틴아메리카의 달러 현실을 위해 만든 완전 오픈소스 비수탁형 금융 앱이다. 현지 법정화폐 접근, 수익형 달러, 송금, 결제와 급여를 익숙한 모바일 경험에 결합하며 사용자가 크립토를 이해하도록 요구하지 않는다. 추가 토큰화 금융상품 접근은 현재 출시에 포함되지 않으며 별도로 검토하는 확장 기능이다.
 
-**글로벌 기준 문서 · 버전 4.0 · 2026년 7월**<br>
+**글로벌 기준 문서 · 버전 4.1 · 2026년 8월**<br>
 Julian Moon · 창업자 겸 CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -22,7 +22,7 @@ Julian Moon · 창업자 겸 CEO<br>
 3. [BNB Smart Chain 제품 시스템](#3-bnb-smart-chain-제품-시스템)
 4. [BNB Smart Chain을 선택한 이유](#4-bnb-smart-chain을-선택한-이유)
 5. [cUSD+: 움직일 수 있는 저축](#5-cusd-움직일-수-있는-저축)
-6. [결제, 급여와 토큰화 자산](#6-결제-급여와-토큰화-자산)
+6. [결제, 급여와 검토 중인 확장 기능](#6-결제-급여와-검토-중인-확장-기능)
 7. [BNB Smart Chain의 $CONFIO](#7-bnb-smart-chain의-confio)
 8. [지갑, 보안과 오픈소스 구조](#8-지갑-보안과-오픈소스-구조)
 9. [사용자, 유통과 시장 진입](#9-사용자-유통과-시장-진입)
@@ -39,7 +39,7 @@ Julian Moon · 창업자 겸 CEO<br>
 
 ## 1. 요약
 
-Confío는 라틴아메리카를 위한 완전 오픈소스 비수탁형 디지털 달러 앱이다. 사용자는 가스 토큰, 블록체인 주소, 거래소 화면을 다루지 않고 달러를 보유하고, 저축하고, 보내고, 쓰고, 투자할 수 있다. <sup>[3]</sup>
+Confío는 라틴아메리카를 위한 완전 오픈소스 비수탁형 디지털 달러 앱이다. 사용자는 가스 토큰, 블록체인 주소, 거래소 화면을 다루지 않고 달러를 보유하고, 저축하고, 보내고, 쓸 수 있다. <sup>[3]</sup>
 
 > **제품 논리**
 >
@@ -51,10 +51,10 @@ Confío의 제품 시스템은 모두 BNB Smart Chain에서 결제된다.
 | --- | --- | --- |
 | USDT | 범용 입금·유동성·출금 레일 | 현지·국제 제공자가 BSC-USDT를 사용자 주소로 보내며, 직접 보유·전송하거나 cUSD+ 입출력에 사용한다. |
 | cUSD+ | 주 달러 저축·거래 잔액 | USDY 기반 누적형 볼트 지분으로 저축, 송금, 결제, 급여에 쓰고 USDT로 상환할 수 있다. |
-| Ondo Stocks | 적격 사용자의 토큰화 시장 접근 | 같은 앱 업데이트에서 매수·매도를 출시하고 BSC의 Ondo Global Markets로 결제한다. |
+| 잠재적 토큰화 자산 | 별도로 평가하는 제품 확장 | 현재 출시에 포함되지 않는다. 향후 통합은 출시 전에 수용 가능한 법률·상업·컴플라이언스·기술 구조를 별도로 승인받아야 한다. |
 | $CONFIO | 커뮤니티·생태계 토큰 | 고정 공급 BEP-20이며 USDT 표시 온체인 프리세일을 사용한다. 사용자 달러 잔액의 담보가 아니다. |
 
-단일 네트워크는 막연한 체인 선택이 아니다. Ondo Finance가 USDY, InstantManager, 가격 오라클, USDT 구독·상환 경로와 Global Markets를 BNB Smart Chain에 제공했고, Confío는 체인 전환과 유동성 분산을 없애기 위해 결제, 급여, 송금과 $CONFIO도 같은 네트워크로 통합했다. <sup>[7, 8, 10]</sup>
+단일 네트워크는 막연한 체인 선택이 아니다. Ondo Finance가 USDY, InstantManager, 가격 오라클과 USDT 구독·상환 경로를 BNB Smart Chain에 제공했고, Confío는 체인 전환과 유동성 분산을 없애기 위해 결제, 급여, 송금과 $CONFIO도 같은 네트워크로 통합했다. <sup>[7, 8, 10]</sup>
 
 2026년 7월 23일 기준 전화 인증 완료 사용자는 8,004명이다. 177명은 정부 발급 신분증과 라이브 셀피를 제출해 Didit의 생체 확인과 얼굴 비교를 완료했으며 시작자 대비 완료율은 61.5%다. 푸시 도달 가능 기기는 2,094개이고 2,092개가 최근 30일 안에 사용됐다. 이는 독립 감사를 거치지 않은 내부 지표이며 funded user나 표준 MAU를 뜻하지 않는다. <sup>[14]</sup>
 
@@ -99,7 +99,6 @@ cUSD+ 볼트, 스폰서드 트랜잭션 델리게이트, $CONFIO 토큰, 프리�
 | 송금 | cUSD+ 또는 USDT | 적격 내부 수취인은 cUSD+, 그 외에는 원자적 상환 또는 직접 USDT를 받는다. |
 | 가맹점 결제 | cUSD+ 또는 $CONFIO, 결제 재원은 cUSD+ 또는 USDT | 가맹점이 cUSD+ 또는 $CONFIO로 청구하고, 계약이 0.9%를 계산해 가맹점에 순액을 지급한다. |
 | 급여 | cUSD+, 선택적 USDT 출금 | 기업이 에스크로를 채우고 승인된 델리게이트가 지급을 서명한다. |
-| 토큰화 자산 | Ondo Global Markets | 적격 주문이 Ondo 견적·attestation으로 BSC에서 결제된다. |
 | $CONFIO 프리세일 | USDT | 스폰서드 트랜잭션이 불변 가격곡선에서 배분을 산다. |
 | 리워드 | RewardVault | 누적 권리가 DB에 기록되고 DEX 해제 뒤 온체인 청구된다. |
 
@@ -121,7 +120,7 @@ cUSD+ 볼트, 스폰서드 트랜잭션 델리게이트, $CONFIO 토큰, 프리�
 
 ### 3.2 하나의 네트워크가 중요한 이유
 
-저축, 결제, 급여, 토큰화 자산과 $CONFIO 사이에 bridge가 필요 없고, 하나의 EVM 주소와 스폰서드 가스 시스템을 쓴다. 단일 체인이라도 각 제품의 경제·법률·적격성 규칙은 다르다.
+저축, 결제, 급여와 $CONFIO 사이에 bridge가 필요 없고, 하나의 EVM 주소와 스폰서드 가스 시스템을 쓴다. 단일 체인이라도 각 제품의 경제·법률·적격성 규칙은 다르다.
 
 ### 3.3 현지·국제 접근
 
@@ -131,7 +130,7 @@ Koywe는 7개 라틴아메리카 시장에서 은행이체, Alias/CVU, SPEI, 상
 
 ### 4.1 제품이 Ondo 인프라를 따랐다
 
-핵심 이유는 Ondo Finance다. cUSD+는 USDY를 중심으로 설계됐고 Ondo는 프로덕션 USDY, InstantManager, 오라클, USDT 경로, Global Markets를 BNB Smart Chain에 배포했다. 같은 네트워크는 저축과 토큰화 자산에 직접 permissioned 접근을 준다. <sup>[7, 8, 10, 18]</sup>
+핵심 이유는 Ondo Finance다. cUSD+는 USDY를 중심으로 설계됐고 Ondo는 프로덕션 USDY, InstantManager, 오라클과 USDT 경로를 BNB Smart Chain에 배포했다. 같은 네트워크는 USDY 기반 저축에 직접 permissioned 접근을 준다. <sup>[7, 8, 10]</sup>
 
 ### 4.2 소비자 규모의 비용과 유동성
 
@@ -161,7 +160,7 @@ USDY 기준가격의 양의 상승분 중 85%는 cUSD+ holder 기준가에, 15%�
 
 cUSD+는 송금, 결제, 급여 직전까지 가치가 누적된다. 수취인이나 경로에 부적합하면 원자적으로 USDT로 상환한다. USDT는 숨은 중간자산이 아니라 명시적 fallback이다.
 
-## 6. 결제, 급여와 토큰화 자산
+## 6. 결제, 급여와 검토 중인 확장 기능
 
 ### 6.1 개인 간 송금
 
@@ -179,15 +178,15 @@ USDT를 그대로 보유한 고객도 달러 청구서를 결제할 수 있으�
 
 기업은 cUSD+ 에스크로에 운영자금을 두고 델리게이트에게 특정 지급 서명을 허가한다. 수취인은 cUSD+ 또는 상환된 USDT를 받고 수수료 회계는 에스크로와 분리된다.
 
-### 6.4 Ondo Stocks
+### 6.4 Ondo Global Markets 검토
 
-같은 앱 업데이트에서 적격 사용자가 Ondo Global Markets 토큰화 상품을 사고판다. Confío는 disclosure와 견적을 표시하고 Ondo 실행과 별도로 매수·매도 각각 0.30%를 부과하며 attestation과 BSC 결제를 처리한다. 미국인은 대상이 아니다. <sup>[18]</sup>
+Ondo Global Markets 통합은 보류됐으며 현재 Confío 출시에 포함되지 않는다. 현재 mint 인터페이스는 Confío가 의도한 사용자 직접 전달 모델을 지원하지 않는다. Confío는 진행 여부를 결정하기 전에 적절한 법률·상업·컴플라이언스·수탁 및 결제·기술 구조를 검토하고 있다. 현재 상품을 제공하지 않으므로 매수·매도 수수료도 부과하지 않는다. <sup>[18]</sup>
 
 ## 7. BNB Smart Chain의 $CONFIO
 
 ### 7.1 고정 공급 토큰
 
-$CONFIO는 10억 개 고정 공급의 비업그레이드 BEP-20이다. owner, minter, proxy, tax, blacklist, pause, freeze가 없고 전체 공급은 multipart treasury에 한 번 발행됐다. USDT, cUSD+, USDY, Ondo Stocks를 담보하지 않는다. <sup>[17]</sup>
+$CONFIO는 10억 개 고정 공급의 비업그레이드 BEP-20이다. owner, minter, proxy, tax, blacklist, pause, freeze가 없고 전체 공급은 multipart treasury에 한 번 발행됐다. USDT, cUSD+, USDY를 담보하지 않는다. <sup>[17]</sup>
 
 ### 7.2 온체인 프리세일
 
@@ -239,7 +238,7 @@ cUSD+는 외부 Ondo 계약 변경에 대응하기 위해 업그레이드 가능
 
 ### 9.3 국가별 출시
 
-법정화폐 수단, 신원요건, USDY·Ondo Stocks 적격성, 제재, 출금과 지원은 시장별로 다르다. 마케팅상의 국기보다 검증된 제공자 역량과 법률·운영 준비를 따른다.
+법정화폐 수단, 신원요건, USDY 적격성, 제재, 출금과 지원은 시장별로 다르다. 마케팅상의 국기보다 검증된 제공자 역량과 법률·운영 준비를 따른다.
 
 ## 10. 사업 모델
 
@@ -249,7 +248,6 @@ cUSD+는 외부 Ondo 계약 변경에 대응하기 위해 업그레이드 가능
 | 가맹점 | 계약이 집행하는 0.9% |
 | 급여 | 에스크로와 분리된 0.9% |
 | cUSD+ 수익 | 양의 USDY 상승분 15% Confío, 85% holder; 변동·비보장 |
-| Ondo Stocks | 매수·매도 각각 0.30%, Ondo·제3자 비용과 별도 |
 | 법정화폐 레일 | 실시간 견적·계약에 따른 Koywe 비용과 Guardarian revenue share |
 | 미래 상품 | 별도 조건·승인에 따른 수수료 또는 revenue share |
 
@@ -288,7 +286,7 @@ Confío는 법정화폐 보관·환전, 신원확인과 permissioned 자산 접�
 | 급여 | escrow, delegate 지급, USDT 출금과 앱 연결 | 기업 pilot |
 | $CONFIO | 고정토큰과 연속곡선 프리세일 배포·연결 | 청구 전에 의무량 funding |
 | 리워드 | RewardVault 배포, DEX까지 잠금 | DB 적립, signer·client·funding·unlock |
-| Ondo Stocks | 같은 BSC 앱 버전에 매수·매도 포함 | 적격 사용자 출시와 실행 측정 |
+| Ondo Global Markets | 통합 보류, 현재 출시에서 제외. 사용자 매수·매도 흐름과 Confío 거래 수수료는 활성화되지 않았다. | 사용자 직접 전달을 지원하는 법률·상업·컴플라이언스·수탁 및 결제·기술 구조가 별도로 승인된 뒤에만 진행 |
 | Fiat | Koywe 7개 시장, Guardarian SEPA·카드 | 검증된 제공자와 fallback 추가 |
 | 유통 | 8,004 전화완료, 177 Didit, 청중 ≈48만, paid media 사실상 0 | funded user와 retained balance로 전환 |
 
@@ -304,11 +302,11 @@ Confío는 법정화폐 보관·환전, 신원확인과 permissioned 자산 접�
 
 ## 14. 법적 고지
 
-이 문서는 정보·기술 참고용이며 투자, 법률, 세무, 회계, 금융 조언이나 투자설명서, 제안, 권유, 추천, 수익 약속이 아니다. 2026년 7월 31일의 설계와 상태를 반영하며 바뀔 수 있다.
+이 문서는 정보·기술 참고용이며 투자, 법률, 세무, 회계, 금융 조언이나 투자설명서, 제안, 권유, 추천, 수익 약속이 아니다. 2026년 8월 3일의 설계와 상태를 반영하며 바뀔 수 있다.
 
-USDT와 cUSD+는 은행예금이 아니고 예금보험 대상이 아니다. Stablecoin, tokenized note, smart contract, blockchain, oracle, fiat provider, market maker, custodian은 실패, 중단, 가치하락 또는 규칙 변경을 겪을 수 있다. cUSD+ 수익은 변동하며 USDY와 볼트에 의존한다. Ondo Stocks는 Ondo 조건, 견적, 적격성과 법률을 따르는 토큰화 금융상품이며 Confío를 통해 미국인에게 제공되지 않는다.
+USDT와 cUSD+는 은행예금이 아니고 예금보험 대상이 아니다. Stablecoin, tokenized note, smart contract, blockchain, oracle, fiat provider, market maker, custodian은 실패, 중단, 가치하락 또는 규칙 변경을 겪을 수 있다. cUSD+ 수익은 변동하며 USDY와 볼트에 의존한다. Confío는 현재 Ondo Global Markets 상품을 제공하지 않는다. 향후 통합에는 별도의 법률·상업·컴플라이언스·수탁 및 결제·기술 승인과 확정 공시 및 제공자 조건이 필요하다.
 
-$CONFIO는 USDT, cUSD+, USDY, Ondo Stocks와 별개이며 명시적 최종조건이 없는 한 Confío의 담보, 수익, 지분, 자산, 이익에 대한 권리를 주지 않는다.
+$CONFIO는 USDT, cUSD+, USDY와 별개이며 명시적 최종조건이 없는 한 Confío의 담보, 수익, 지분, 자산, 이익에 대한 권리를 주지 않는다.
 
 ## 주석
 
