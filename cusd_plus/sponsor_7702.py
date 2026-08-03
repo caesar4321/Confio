@@ -683,7 +683,7 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     simulate(user_addr, calldata, authorization is None, sponsor, gas)
 
     gas_price = max(int(_rpc('eth_gasPrice', []), 16),
-                    int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
+                    int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 50_000_000)))
     price_cap = int(getattr(settings, 'CUSD_PLUS_7702_MAX_GAS_PRICE_WEI', 5_000_000_000))
     if gas_price > price_cap:
         # Underpricing below the live market would strand the tx; refusing

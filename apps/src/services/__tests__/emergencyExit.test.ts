@@ -152,6 +152,238 @@ describe('planAlgorandExit', () => {
   });
 });
 
+// The 24h wait is per-episode anti-coercion. It used to be a one-time
+// toll: `elapsed >= 24h` only ever becomes MORE true, and nothing spent
+// the unlock — so one served wait left an account permanently drainable
+// in a single session.
+describe('cooloff lifecycle', () => {
+  const {
+    getExitEligibility, consumeExitCooloff, requestExitCooloff,
+    NORMAL_COOLOFF_SECONDS, COOLOFF_VALID_SECONDS,
+  } = require('../emergencyExit/reachability');
+  const KEY = 'personal_0';
+  const STORE_KEY = `confio_emergency_cooloff_v1_${KEY}`;
+  const NOW = 1_900_000_000;
+
+  const store = (seed?: Record<string, string>) => {
+    const m = new Map<string, string>(Object.entries(seed ?? {}));
+    return {
+      map: m,
+      get: async (k: string) => m.get(k) ?? null,
+      set: async (k: string, v: string) => { m.set(k, v); },
+      del: async (k: string) => { m.delete(k); },
+    };
+  };
+  const normal = { state: 'normal', immediate: false, chainNowSec: NOW } as any;
+  const at = (secondsAgo: number) => store({ [STORE_KEY]: String(NOW - secondsAgo) });
+
+  it('is pending before 24h and eligible after', async () => {
+    expect((await getExitEligibility(store(), KEY, normal)).reason).toBe('no_request');
+    expect((await getExitEligibility(at(3600), KEY, normal)).reason).toBe('cooloff_pending');
+    expect((await getExitEligibility(at(NORMAL_COOLOFF_SECONDS), KEY, normal)).eligible).toBe(true);
+  });
+
+  it('an unused unlock expires, and the stale key is dropped', async () => {
+    const s = at(NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS + 1);
+    const elig = await getExitEligibility(s, KEY, normal);
+    expect(elig).toMatchObject({ eligible: false, reason: 'cooloff_expired' });
+    // Dropped, so the screen offers a fresh wait instead of a dead button.
+    expect(s.map.has(STORE_KEY)).toBe(false);
+  });
+
+  it('stays usable through the whole validity window', async () => {
+    const s = at(NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS - 60);
+    expect((await getExitEligibility(s, KEY, normal)).eligible).toBe(true);
+  });
+
+  it('consuming the unlock re-arms the wait', async () => {
+    const s = at(NORMAL_COOLOFF_SECONDS);
+    expect((await getExitEligibility(s, KEY, normal)).eligible).toBe(true);
+    await consumeExitCooloff(s, KEY);
+    expect((await getExitEligibility(s, KEY, normal)).reason).toBe('no_request');
+  });
+
+  it('immediate states never consult the cooloff at all', async () => {
+    const banned = { state: 'banned', immediate: true, chainNowSec: NOW } as any;
+    expect(await getExitEligibility(store(), KEY, banned))
+      .toEqual({ eligible: true, reason: 'immediate' });
+  });
+
+  it('re-requesting does not restart a running wait', async () => {
+    const s = at(3600);
+    const { requestedAtSec } = await requestExitCooloff(s, KEY);
+    expect(requestedAtSec).toBe(NOW - 3600);
+  });
+});
+
+describe('usdtCreditedTo', () => {
+  const { usdtCreditedTo } = require('../emergencyExit/bscExit');
+  const USDT = '0x55d398326f99059fF775485246999027B3197955';
+  const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+  const DEST = '0xA18392260d04e1253B87E3aA5f12Cd8478F31c16';
+  const topicFor = (addr: string) => '0x' + '0'.repeat(24) + addr.slice(2).toLowerCase();
+  const log = (over: Record<string, unknown> = {}) => ({
+    address: USDT,
+    topics: [TRANSFER, topicFor('0x' + '11'.repeat(20)), topicFor(DEST)],
+    data: '0x' + (10n ** 18n).toString(16).padStart(64, '0'),
+    ...over,
+  });
+
+  // The success card states this number as the user's money. Anything it
+  // can't prove from the destination's own credit must not be counted.
+  it('sums only USDT credits to the destination', () => {
+    expect(usdtCreditedTo({ logs: [log(), log()] }, DEST)).toBe(2n * 10n ** 18n);
+  });
+
+  it('ignores other tokens, other recipients and other events', () => {
+    const other = '0x' + 'ab'.repeat(20);
+    expect(usdtCreditedTo({
+      logs: [
+        log({ address: '0x' + 'cd'.repeat(20) }),                    // not USDT
+        log({ topics: [TRANSFER, topicFor(other), topicFor(other)] }), // not ours
+        log({ topics: ['0x' + '99'.repeat(32), topicFor(other), topicFor(DEST)] }), // not Transfer
+      ],
+    }, DEST)).toBe(0n);
+  });
+
+  it('matches the destination case-insensitively', () => {
+    expect(usdtCreditedTo({ logs: [log()] }, DEST.toLowerCase())).toBe(10n ** 18n);
+  });
+
+  it('returns 0 when the receipt carries no logs (degraded / RPC omission)', () => {
+    expect(usdtCreditedTo({}, DEST)).toBe(0n);
+    expect(usdtCreditedTo({ logs: [] }, DEST)).toBe(0n);
+  });
+});
+
+// The checkpoint exists to resume ONE interrupted attempt. v1 never
+// expired and was never cleared, so a completed exit left a permanent
+// "already done" record: the NEXT exit to the same destination skipped
+// every step, sent nothing, and still reported success. Regression cover.
+describe('bsc exit checkpoint', () => {
+  const WALLET = { address: '0x' + '11'.repeat(20), privKeyHex: '00' } as any;
+  const DEST = '0x' + '22'.repeat(20);
+  const VAULT = '0x' + '33'.repeat(20);
+  const ACCOUNT_KEY = 'personal_0';
+  const ONE_TOKEN = '0x' + (10n ** 18n).toString(16).padStart(64, '0');
+
+  const memStore = (seed?: Record<string, string>) => {
+    const m = new Map<string, string>(Object.entries(seed ?? {}));
+    return {
+      map: m,
+      get: async (k: string) => m.get(k) ?? null,
+      set: async (k: string, v: string) => { m.set(k, v); },
+      del: async (k: string) => { m.delete(k); },
+    };
+  };
+
+  // Load bscExit with the chain layer stubbed: every balance reads as one
+  // token, so both legs have something to send unless a checkpoint stops them.
+  const loadExit = (sendCall: jest.Mock) => {
+    jest.resetModules();
+    jest.doMock('../evmWallet', () => ({
+      bscBnbBalance: async () => 0n,
+      bscGasPrice: async () => 100_000_000n,
+      bscEthCall: async () => ONE_TOKEN,
+      sendCall,
+      selector: () => '0xdeadbeef',
+      encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
+      encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      setBscTransport: () => {},
+    }));
+    return require('../emergencyExit/bscExit');
+  };
+
+  const okSend = () => jest.fn(async () => ({
+    status: '0x1', transactionHash: '0x' + 'ab'.repeat(32), blockNumber: '0x1', logs: [],
+  }));
+
+  const run = async (mod: any, store: any) => mod.executeBscExit({
+    wallet: WALLET, dest: DEST, vaultAddress: VAULT,
+    minUsdtOutWei: 0n, accountKey: ACCOUNT_KEY, store,
+  });
+
+  it('clears the checkpoint once every step resolves', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const store = memStore();
+    const res = await run(mod, store);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+    expect(store.map.size).toBe(0); // nothing left to poison the next exit
+  });
+
+  it('a second exit to the same destination sends again', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const store = memStore();
+    await run(mod, store);
+    const second = await run(mod, store);
+    expect(second.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+    expect(send).toHaveBeenCalledTimes(4); // 2 legs x 2 exits, not 2
+  });
+
+  it('ignores a checkpoint older than its TTL', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const key = `confio_emergency_bsc_ck_v2_${ACCOUNT_KEY}_${DEST.toLowerCase()}`;
+    const store = memStore({
+      [key]: JSON.stringify({
+        ts: Date.now() - 31 * 60 * 1000,
+        steps: { redeemCusdPlus: '0xold', transferUsdt: '0xold' },
+      }),
+    });
+    const res = await run(mod, store);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+  });
+
+  it('a FRESH checkpoint still resumes — and reports nothing sent now', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const key = `confio_emergency_bsc_ck_v2_${ACCOUNT_KEY}_${DEST.toLowerCase()}`;
+    const store = memStore({
+      [key]: JSON.stringify({
+        ts: Date.now(),
+        steps: { redeemCusdPlus: '0xold', transferUsdt: '0xold' },
+      }),
+    });
+    const res = await run(mod, store);
+    expect(send).not.toHaveBeenCalled();
+    // The screen keys its headline off this: no broadcast ⇒ no "Listo".
+    expect(res.sentNow).toEqual([]);
+  });
+
+  it('ignores a v1 checkpoint (flat map, no timestamp)', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const v1key = `confio_emergency_bsc_ck_v2_${ACCOUNT_KEY}_${DEST.toLowerCase()}`;
+    const store = memStore({
+      [v1key]: JSON.stringify({ redeemCusdPlus: '0xold', transferUsdt: '0xold' }),
+    });
+    const res = await run(mod, store);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+  });
+
+  it('records skipped legs without counting them as sent', async () => {
+    const send = okSend();
+    jest.resetModules();
+    jest.doMock('../evmWallet', () => ({
+      bscBnbBalance: async () => 0n,
+      bscGasPrice: async () => 100_000_000n,
+      bscEthCall: async () => '0x' + '0'.repeat(64), // every balance is zero
+      sendCall: send,
+      selector: () => '0xdeadbeef',
+      encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
+      encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      setBscTransport: () => {},
+    }));
+    const mod = require('../emergencyExit/bscExit');
+    const res = await run(mod, memStore());
+    expect(send).not.toHaveBeenCalled();
+    expect(res.sentNow).toEqual([]);
+    expect(res.txids).toEqual({ redeemCusdPlus: 'skipped_zero', transferUsdt: 'skipped_zero' });
+  });
+});
+
 describe('looksLikeBanResponse', () => {
   const { looksLikeBanResponse } = require('../emergencyExit/banSignal');
 

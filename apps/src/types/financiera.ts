@@ -2,11 +2,11 @@
 //
 // Confío does NOT intermediate these exchanges. We only list financieras and
 // liquidity providers with their WhatsApp, service area and community ratings
-// so users can convert USDC with someone they can verify.
+// so users can convert USDT with someone they can verify.
 //
-// One rail at launch: USDC on Algorand, shown as a single friendly tag.
+// One rail: USDT on BNB Smart Chain, shown as a single friendly tag.
 
-export const USDC_ALGORAND_TAG = 'USDC-Algorand';
+export const USDT_BSC_TAG = 'USDT-BSC';
 
 import { getCurrencyByCountry } from '../utils/currencies';
 
@@ -21,20 +21,35 @@ export const localCurrencyShort = (countryIso: string): string => {
 
 // Anonymous review by an identity-verified user, backed by a real transaction.
 // Decimal fields arrive as strings over GraphQL.
+// Token of the backing transaction. USDT/cUSD+ are the current BSC rail;
+// USDC/cUSD stay in the union because older reviews were backed by the
+// retired Algorand rail and must still render.
+export type FinancieraReviewToken = 'USDT' | 'CUSD_PLUS' | 'USDC' | 'CUSD';
+
 export interface FinancieraReview {
   id: string;
   rating: number;
   direction: 'sent' | 'received';
-  sentToken: 'USDC' | 'CUSD'; // token of the backing transaction, both $1-pegged
+  sentToken: FinancieraReviewToken; // all $1-denominated
   sentUsdc: string;
   receivedUsd: string;
   comment?: string;
   createdAt: string;
 }
 
-// Display label: the app brands Confío Dollar as 'cUSD'.
-export const tokenLabel = (token: 'USDC' | 'CUSD'): string =>
-  token === 'CUSD' ? 'cUSD' : 'USDC';
+// Display label: the app brands Confío Dollar as 'cUSD' / 'cUSD+'.
+export const tokenLabel = (token: FinancieraReviewToken): string => {
+  switch (token) {
+    case 'CUSD_PLUS':
+      return 'cUSD+';
+    case 'CUSD':
+      return 'cUSD';
+    case 'USDC':
+      return 'USDC';
+    default:
+      return 'USDT';
+  }
+};
 
 export interface Financiera {
   id: string;
@@ -44,6 +59,8 @@ export interface Financiera {
   city: string;
   neighborhood: string;
   whatsapp: string; // digits-only E.164 without '+'
+  // Wire name kept from the Algorand rail; it now means "supports USDT-BSC".
+  // Renaming it would break the app against servers still serving the old field.
   supportsUsdcAlgorand: boolean;
   hasPhysicalLocation: boolean;
   cashUsd: boolean;
@@ -62,7 +79,7 @@ export interface Financiera {
   reviews?: FinancieraReview[];
 }
 
-// Optional-service badges shown on cards/detail (the mandatory USDC-Algorand
+// Optional-service badges shown on cards/detail (the mandatory USDT-BSC
 // rail is rendered separately as the primary tag).
 export const serviceBadges = (f: Financiera): string[] => {
   const badges: string[] = [];
@@ -80,12 +97,12 @@ export const serviceBadges = (f: Financiera): string[] => {
   return badges;
 };
 
-// Registration checklist. Supporting USDC-Algorand is mandatory — a financiera
+// Registration checklist. Supporting USDT-BSC is mandatory — a financiera
 // cannot register without committing to it; the rest map to optional flags on
 // the registerFinanciera mutation.
 export interface FinancieraServiceOption {
   id:
-    | 'usdc_algorand'
+    | 'usdt_bsc'
     | 'physical_location'
     | 'cash_usd'
     | 'cash_local'
@@ -99,7 +116,7 @@ export interface FinancieraServiceOption {
 }
 
 export const FINANCIERA_SERVICES: FinancieraServiceOption[] = [
-  { id: 'usdc_algorand', label: 'Soporta USDC por la red Algorand', mandatory: true, group: 'support' },
+  { id: 'usdt_bsc', label: 'Soporta USDT por la red BNB Smart Chain', mandatory: true, group: 'support' },
   { id: 'physical_location', label: 'Tengo un local físico', group: 'location' },
   { id: 'cash_usd', label: 'Entrego dólares en efectivo', group: 'payout' },
   { id: 'cash_local', label: 'Entrego moneda local en efectivo', group: 'payout' },
@@ -123,5 +140,5 @@ export const financieraServiceLabel = (
   return option.label;
 };
 
-export const MANDATORY_SERVICE_ID = 'usdc_algorand';
+export const MANDATORY_SERVICE_ID = 'usdt_bsc';
 export const PAYOUT_SERVICE_IDS = ['cash_usd', 'cash_local', 'digital_local'] as const;

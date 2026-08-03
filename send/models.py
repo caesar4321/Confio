@@ -260,8 +260,19 @@ def handle_first_cusd_on_send_receive(sender, instance: SendTransaction, **kwarg
 
 class PhoneInvite(SoftDeleteModel):
     """Track phone-based invites for non-Confío friends (off-chain index)."""
+    # One escrow slot, one row. Every transition out of an in-flight state is
+    # a compare-and-set, and every in-flight state is resolved by a receipt,
+    # never by "we broadcast it, so it happened" (Codex audit 2026-08-02).
+    #
+    # 'pending' used to mean BOTH "prepared, nothing on chain" and "escrow
+    # funded, awaiting claim". That conflation is what let a second submit
+    # broadcast over the first, and let the auto-claim try to release a slot
+    # that no transaction had funded yet. They are separate states now.
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
+        ('draft', 'Prepared, nothing broadcast'),
+        ('creating', 'Create batch in flight'),
+        ('pending', 'Escrowed, awaiting claim'),
+        ('claiming', 'Claim in flight'),
         ('claimed', 'Claimed'),
         # In-flight reclaim (audit 2026-07-31 P3): the reclaim batch is
         # broadcast but not yet final. The row is NOT 'reclaimed' until the
@@ -269,7 +280,20 @@ class PhoneInvite(SoftDeleteModel):
         # invitee claimed first) must not leave the DB claiming otherwise.
         ('reclaiming', 'Reclaim in flight'),
         ('reclaimed', 'Reclaimed'),
+        ('failed', 'Create never landed'),
     ]
+
+    # Which chain actually holds the money. Two invite rails share this table
+    # (Algorand box storage and the BSC ConfioInviteEscrow), and each used to
+    # infer ownership differently — BSC from a non-empty inviter_address,
+    # Algorand from nothing at all, which let it pick up a BSC row and hand a
+    # 64-hex escrow id to the box API as a key (Codex audit 2026-08-02).
+    #
+    # Stated, never inferred. token_type cannot do this job: CONFIO exists on
+    # both rails.
+    RAIL_CHOICES = [('algorand', 'Algorand'), ('bsc', 'BNB Smart Chain')]
+    rail = models.CharField(max_length=8, choices=RAIL_CHOICES,
+                            default='algorand', db_index=True)
 
     # Deterministic invitation id used on-chain (derived from phone_key)
     invitation_id = models.CharField(max_length=64, unique=True)

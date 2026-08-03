@@ -102,6 +102,10 @@ export const BSC_INVITE_ERRORS: Record<string, string> = {
   sponsored_rail_unavailable: 'Las invitaciones con dinero están en preparación. Inténtalo más tarde.',
   token_not_escrowable: 'Esa moneda no se puede reservar para una invitación.',
   invite_already_pending: 'Ya tienes una invitación pendiente para ese número.',
+  // The escrow slot for (this phone, this inviter) is spent on-chain — the id
+  // is deterministic and the contract never frees a settled slot, so a new
+  // create for the same pair cannot succeed.
+  invite_id_spent: 'Ya enviaste una invitación a ese número. Espera a que la reclame.',
   bad_phone_key: 'Ese número no parece válido.',
   no_bsc_address: 'Tu cuenta aún se está activando. Inténtalo en un momento.',
   invalid_amount: 'El monto no es válido.',

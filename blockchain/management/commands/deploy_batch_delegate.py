@@ -68,7 +68,13 @@ class Command(BaseCommand):
 
         balance = int(_rpc(rpc_url, "eth_getBalance", [deployer, "latest"]), 16)
         nonce = int(_rpc(rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
-        gas_price = max(int(_rpc(rpc_url, "eth_gasPrice", []), 16), 1_000_000_000)
+        # Floor + 1.2x inclusion buffer, same knob the sponsored paths use
+        # (CUSD_PLUS_GAS_PRICE_FLOOR_WEI). This was a hardcoded 1 gwei — 20x
+        # BSC's resting price — which burned ~$20 of gas across the July 2026
+        # migration deploys before the 2026-08-03 sponsor audit caught it.
+        gas_price = max(int(_rpc(rpc_url, "eth_gasPrice", []), 16),
+                        int(settings.CUSD_PLUS_GAS_PRICE_FLOOR_WEI))
+        gas_price = (gas_price * 12) // 10
 
         self.stdout.write(f"Deployer (KMS sponsor): {deployer}")
         self.stdout.write(

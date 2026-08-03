@@ -1404,7 +1404,16 @@ export const TransactionDetailScreen = () => {
         return;
       }
       setReclaimedInviteTxid(result.txid || '');
-      Alert.alert('Fondos devueltos', 'La invitación expirada fue devuelta a tu balance.');
+      // "Enviada", not "devueltos": on BSC this is a broadcast, not a
+      // settlement. The invitee may still claim first, or the transaction may
+      // revert — the server's confirm task has the last word, and telling the
+      // user their money is back before that is a promise we cannot keep.
+      Alert.alert(
+        'Devolución enviada',
+        isBscInviteId
+          ? 'Estamos devolviendo los fondos a tu balance. Te avisamos al confirmarse.'
+          : 'La invitación expirada fue devuelta a tu balance.',
+      );
     } catch (e: any) {
       Alert.alert('No se pudo devolver', e?.message || 'Inténtalo nuevamente.');
     } finally {

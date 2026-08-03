@@ -203,6 +203,7 @@ class PrepareInviteForPhone(graphene.Mutation):
                 PhoneInvite.objects.update_or_create(
                     invitation_id=res.invitation_id,
                     defaults={
+                        'rail': 'algorand',
                         'phone_key': phone_key,
                         'phone_country': (phone_country or '')[:2],
                         'phone_number': ''.join(ch for ch in (phone or '') if ch.isdigit()),
@@ -1077,6 +1078,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                     # Fallback to DB lookup in case the box read failed but DB has the invite
                     from send.models import PhoneInvite
                     inv = PhoneInvite.objects.filter(
+                        rail='algorand',
                         phone_key__in=phone_keys,
                         status='pending',
                         deleted_at__isnull=True
@@ -1104,6 +1106,7 @@ class ClaimInviteForPhone(graphene.Mutation):
                     except Exception:
                         alt_phone_key = phone_key
                     inv = PhoneInvite.objects.filter(
+                        rail='algorand',
                         phone_key=phone_key,
                         status='pending',
                         deleted_at__isnull=True
@@ -1533,7 +1536,9 @@ def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
             return {'exists': False}
 
         # Find the most recent invite for any candidate key
-        inv = PhoneInvite.objects.filter(phone_key__in=phone_keys, deleted_at__isnull=True).order_by('-created_at').first()
+        inv = PhoneInvite.objects.filter(
+            rail='algorand', phone_key__in=phone_keys,
+            deleted_at__isnull=True).order_by('-created_at').first()
         if not inv:
             return {'exists': False}
 
@@ -1613,6 +1618,7 @@ def get_all_pending_invites_for_phone(user_phone: str, user_country: str | None)
 
         # Find ALL pending invites for any candidate key
         pending_invites = PhoneInvite.objects.filter(
+            rail='algorand',
             phone_key__in=phone_keys,
             status='pending',
             deleted_at__isnull=True

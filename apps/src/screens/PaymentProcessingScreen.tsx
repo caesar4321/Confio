@@ -727,11 +727,14 @@ export const PaymentProcessingScreen = () => {
     }
   }, [isComplete, paymentError, navigation, transactionData, paymentResponse]);
 
-  // Prevent back navigation during processing
+  // Prevent back navigation while a payment is actually in flight.
+  // Scoped to `isProcessing` on purpose: an unconditional guard also swallows the
+  // legitimate exits below (invalid data, biometric cancel) and the reset out of
+  // PaymentSuccess, which leaves the payer stranded on this screen.
   useEffect(() => {
     const onBackPress = () => {
       // Block back navigation during processing to prevent double payments
-      return true; // Return true to prevent default back behavior
+      return isProcessing; // Return true to prevent default back behavior
     };
 
     // Add event listener for hardware back button
@@ -741,7 +744,18 @@ export const PaymentProcessingScreen = () => {
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [isProcessing]);
+
+  // Same guard for the navigation layer (iOS gesture, programmatic pops, reset).
+  useEffect(() => {
+    const unsubscribe = (navigation as any).addListener('beforeRemove', (e: any) => {
+      if (isProcessing) {
+        e.preventDefault();
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, isProcessing]);
 
   // Cleanup effect to reset state when screen unmounts
   useEffect(() => {

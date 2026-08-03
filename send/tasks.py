@@ -16,7 +16,8 @@ from django.utils import timezone
 # autodiscovers <app>.tasks, so it would otherwise never import invite_tasks
 # and the worker would reject 'send.confirm_bsc_invite_reclaim'.
 from send.invite_tasks import (  # noqa: F401
-    confirm_bsc_invite_create, confirm_bsc_invite_reclaim,
+    confirm_bsc_invite_claim, confirm_bsc_invite_create, confirm_bsc_invite_reclaim,
+    reconcile_bsc_invites, retry_bsc_invite_claim,
 )
 
 logger = logging.getLogger(__name__)

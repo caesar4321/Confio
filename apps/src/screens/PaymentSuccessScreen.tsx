@@ -64,9 +64,19 @@ export const PaymentSuccessScreen = () => {
   // Helper function to format currency for display
   const formatCurrency = formatTokenLabel;
 
+  // Reset rather than navigate: in React Navigation 7 `navigate` no longer walks back
+  // to an existing route, so navigating here pushed a *second* BottomTabs on top of the
+  // payment stack. Resetting tears the payment flow down and leaves a single tab shell.
+  const goToTab = (screen: 'Home' | 'Contacts') => {
+    (navigation as any).reset({
+      index: 0,
+      routes: [{ name: 'BottomTabs', params: { screen } }],
+    });
+  };
+
   const handleDone = () => {
     // Navigate back to home screen
-    (navigation as any).navigate('BottomTabs');
+    goToTab('Home');
   };
 
   const handleViewTransaction = () => {
@@ -128,11 +138,11 @@ export const PaymentSuccessScreen = () => {
   };
 
   const handleGoHome = () => {
-    (navigation as any).navigate('BottomTabs', { screen: 'Home' });
+    goToTab('Home');
   };
 
   const handleViewContacts = () => {
-    (navigation as any).navigate('BottomTabs', { screen: 'Contacts' });
+    goToTab('Contacts');
   };
 
   const isPending = transactionData.status === 'SUBMITTED' || !transactionData.transactionHash;

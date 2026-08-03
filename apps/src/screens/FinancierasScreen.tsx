@@ -32,7 +32,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { OfferCardSkeleton } from '../components/SkeletonLoader';
 import {
   Financiera,
-  USDC_ALGORAND_TAG,
+  USDT_BSC_TAG,
   localCurrencyShort,
   serviceBadges,
 } from '../types/financiera';
@@ -301,7 +301,7 @@ const LocationFilterModal = ({
 // ---- Card -------------------------------------------------------------------
 
 // Compact row optimized for comparison: identity + rating on the left, the
-// headline "what you get for 100 USDC" figure on the right, badges + a small
+// headline "what you get for 100 USDT" figure on the right, badges + a small
 // WhatsApp pill below. The full rate breakdown lives on the detail screen.
 const FinancieraCard = ({
   financiera,
@@ -355,7 +355,7 @@ const FinancieraCard = ({
               ? `$${formatNumber(financiera.avgReceivedPer100, { maximumFractionDigits: 1 })}`
               : '—'}
           </Text>
-          <Text style={styles.rateSub}>por 100 USDC</Text>
+          <Text style={styles.rateSub}>por 100 USDT</Text>
           <Text style={styles.rateCashTag}>{rateTag(financiera)}</Text>
         </View>
       </View>
@@ -363,7 +363,7 @@ const FinancieraCard = ({
       <View style={styles.cardBottom}>
         <View style={styles.chipsRow}>
           <View style={styles.railChip}>
-            <Text style={styles.railChipText}>{USDC_ALGORAND_TAG}</Text>
+            <Text style={styles.railChipText}>{USDT_BSC_TAG}</Text>
           </View>
           {badges.map((b) => (
             <View key={b} style={styles.serviceChip}>

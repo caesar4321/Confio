@@ -591,7 +591,10 @@ export const TransactionProcessingScreen = () => {
           (transactionData as any).internalId = res.internalId;
         }
         const invitationId =
-          res.invitationId ||
+          // submitPreparedInvite doesn't return an invitationId; only the
+          // one-shot createInviteForPhone does. Kept as the first choice for
+          // whichever result lands here, hence the cast.
+          (res as any).invitationId ||
           preparedInvite?.invitationId ||
           (transactionData as any).preparedInvite?.invitationId ||
           (transactionData as any).idempotencyKey;

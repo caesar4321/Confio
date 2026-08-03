@@ -481,13 +481,11 @@ export const MainNavigator = () => {
           options={{
             headerShown: false,
             gestureEnabled: false, // Prevent back gesture
-            animation: 'slide_from_right',
-            presentation: 'modal' // Ensure it's treated as a modal
-          }}
-          listeners={{
-            beforeRemove: (e) => {
-              e.preventDefault();
-            }
+            animation: 'slide_from_right'
+            // NOTE: no `presentation: 'modal'` here. On iOS a modal screen owns its own
+            // native container, so every screen pushed above it (PaymentSuccess, and then
+            // BottomTabs) renders inset inside the sheet. Back navigation is already
+            // blocked by gestureEnabled: false plus the guards in PaymentProcessingScreen.
           }}
         />
         <Stack.Screen

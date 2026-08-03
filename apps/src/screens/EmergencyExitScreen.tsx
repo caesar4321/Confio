@@ -27,7 +27,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, Alert, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking,
+  ActivityIndicator, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -47,12 +47,14 @@ import {
 } from '../services/emergencyExit/accountRoster';
 import {
   evaluateEmergencyState, getExitEligibility, requestExitCooloff, cancelExitCooloff,
-  devElapseCooloff, ReachabilityResult, ExitEligibility, NORMAL_COOLOFF_SECONDS,
+  consumeExitCooloff, devElapseCooloff, ReachabilityResult, ExitEligibility,
+  NORMAL_COOLOFF_SECONDS,
 } from '../services/emergencyExit/reachability';
 import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
-  installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BscExitResult,
+  installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BscExitResult, BscExitStep,
 } from '../services/emergencyExit/bscExit';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -77,6 +79,20 @@ const STEP_NAMES: Record<string, string> = {
   transferUsdt: 'Enviar USDT',
 };
 const stepName = (id: string): string => STEP_NAMES[id] ?? id;
+
+// What the blocking overlay says while each send is in flight. The exit is
+// two transactions on a public RPC — silence here is what made the first
+// drill feel broken.
+const STEP_WAIT: Record<string, string> = {
+  redeemCusdPlus: 'Canjeando tu ahorro por USDT…',
+  transferUsdt: 'Enviando tu USDT…',
+};
+
+// USDT-BSC is 18 decimals. Two decimals is the app's dollar grammar.
+const fmtUsdt = (wei: string): string =>
+  (Number(BigInt(wei) / 10n ** 12n) / 1e6).toLocaleString('es-VE', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
 
 const fmtRemaining = (sec: number): string => {
   const h = Math.floor(sec / 3600);
@@ -108,6 +124,9 @@ export const EmergencyExitScreen: React.FC = () => {
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
   // Gas shortfall, null = still reading.
   const [bscGasShortWei, setBscGasShortWei] = useState<bigint | null>(null);
+  const [gasChecking, setGasChecking] = useState(false);
+  // Address the in-flight gas read belongs to (account switches race it).
+  const gasAddrRef = useRef<string | null>(null);
 
   const [bscDest, setBscDest] = useState('');
   const [scanVisible, setScanVisible] = useState(false);
@@ -118,6 +137,11 @@ export const EmergencyExitScreen: React.FC = () => {
   const [bscRunning, setBscRunning] = useState(false);
   const [bscResult, setBscResult] = useState<BscExitResult | null>(null);
   const [bscError, setBscError] = useState<string | null>(null);
+  // What the overlay is currently waiting on (null = generic).
+  const [bscPhase, setBscPhase] = useState<string | null>(null);
+  // Destination as it was at execution time — the result card must not
+  // re-read the editable input.
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   // Wizard step within the eligible flow (0..3). Internal state, not
   // routes — one decision per screen without any navigation plumbing.
@@ -167,9 +191,35 @@ export const EmergencyExitScreen: React.FC = () => {
     })();
   }, []);
 
+  // Live gas status for one address, off public RPCs (all of this must work
+  // exactly when Confío doesn't). Deliberately SEPARATE from the
+  // account-change effect: depositing BNB is the one action the user takes
+  // while sitting on this screen, so ↻ has to be able to turn "te falta"
+  // into "listo" without switching accounts or leaving.
+  const refreshGas = useCallback(async (address?: string | null) => {
+    const addr = address ?? evmAddress;
+    if (!addr) return;
+    setGasChecking(true);
+    const restore = installEmergencyBscTransport();
+    try {
+      const plan = await planBscExit(addr, BUNDLED_VAULT_ADDRESS);
+      // A late reply for a since-abandoned account must not overwrite the
+      // current one's status.
+      if (gasAddrRef.current !== addr) return;
+      if (!plan.steps.length) { setBscGasShortWei(0n); return; }
+      const need = await estimateBscExitGasWei(plan);
+      if (gasAddrRef.current !== addr) return;
+      setBscGasShortWei(plan.bnbWei >= need ? 0n : need - plan.bnbWei);
+    } catch { /* status shows as unverified; execution re-checks anyway */ } finally {
+      restore();
+      // Always clear: a guarded clear can strand the spinner forever when
+      // the next account has no address to read.
+      setGasChecking(false);
+    }
+  }, [evmAddress]);
+
   // Resolve the SELECTED account's address (local V2 derivation, with the
-  // per-account stored address as legacy fallback), then read live gas
-  // status from public RPCs (all must work exactly when Confío doesn't).
+  // per-account stored address as legacy fallback), then read its gas.
   useEffect(() => {
     if (!selCtx) return;
     let stale = false;
@@ -177,8 +227,9 @@ export const EmergencyExitScreen: React.FC = () => {
       setAccountKey(rosterAccountKey(selCtx));
       setEvmAddress(null);
       setBscGasShortWei(null);
+      gasAddrRef.current = null;
       // Results/errors belong to the previously selected account.
-      setBscResult(null); setBscError(null);
+      setBscResult(null); setBscError(null); setSentTo(null);
       try {
         const ctx = { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } as const;
         const { deriveAddressesForContext } = await import('../services/secureDeterministicWallet');
@@ -194,22 +245,16 @@ export const EmergencyExitScreen: React.FC = () => {
         }
         if (stale) return;
         setEvmAddress(evmAddr);
-        if (evmAddr) {
-          const restore = installEmergencyBscTransport();
-          try {
-            const plan = await planBscExit(evmAddr, BUNDLED_VAULT_ADDRESS);
-            if (!plan.steps.length) { if (!stale) setBscGasShortWei(0n); return; }
-            const need = await estimateBscExitGasWei(plan);
-            if (!stale) setBscGasShortWei(plan.bnbWei >= need ? 0n : need - plan.bnbWei);
-          } catch { /* status shows as unverified; execution re-checks anyway */ } finally {
-            restore();
-          }
-        }
+        gasAddrRef.current = evmAddr;
+        if (evmAddr) await refreshGas(evmAddr);
       } catch (e) {
         console.warn('[EmergencyExit] address resolution failed', e);
       }
     })();
     return () => { stale = true; };
+    // refreshGas is intentionally omitted: it closes over evmAddress, which
+    // this effect sets — including it would re-derive on every read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selCtx]);
 
   const allChecked = checks.every(Boolean);
@@ -236,30 +281,35 @@ export const EmergencyExitScreen: React.FC = () => {
   const runBsc = async () => {
     const ok = await biometricAuthService.authenticate('Confirmar salida de emergencia (BNB Smart Chain)');
     if (!ok) return;
-    setBscRunning(true); setBscError(null);
+    const dest = bscDest.trim();
+    setBscRunning(true); setBscError(null); setBscPhase(null); setSentTo(dest);
     try {
       const wallet = await getActiveEvmWallet(
         selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined,
       );
       const result = await executeBscExit({
         wallet,
-        dest: bscDest.trim(),
+        dest,
         vaultAddress: BUNDLED_VAULT_ADDRESS,
         minUsdtOutWei: 0n, // oracle guard + fully-backed assert protect pricing; IM has no book
         accountKey,
         store: emergencyStore,
+        onStep: (step: BscExitStep) => setBscPhase(STEP_WAIT[step] ?? null),
       });
       setBscResult(result);
-      if (result.degraded.length) {
-        Alert.alert(
-          'Atención',
-          'Tu ahorro no pudo canjearse por USDT (servicio de Ondo no disponible). Se enviaron los tokens cUSD+ tal cual: para canjearlos necesitarás una herramienta externa.',
-        );
-      }
+      // An exit that actually broadcast SPENDS the 24h unlock: the wait is
+      // per-episode anti-coercion, not a one-time toll. Never on failure —
+      // a half-moved exit must stay retryable now, not in a day.
+      if (result.sentNow.length) await consumeExitCooloff(emergencyStore, accountKey);
+      // The result card carries the degraded case (headline + explanation);
+      // an Alert on top of it would just be a second thing to dismiss.
     } catch (e: any) {
       setBscError(e?.message || String(e));
     } finally {
       setBscRunning(false);
+      setBscPhase(null);
+      // Land on the outcome, not on the button that produced it.
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
     }
   };
 
@@ -316,13 +366,23 @@ export const EmergencyExitScreen: React.FC = () => {
   const renderWaitCard = () => {
     if (!es || es.immediate || es.state === 'offline') return null;
     if (!elig) return null;
-    if (elig.reason === 'no_request') {
+    if (elig.reason === 'no_request' || elig.reason === 'cooloff_expired') {
+      const expired = elig.reason === 'cooloff_expired';
       return (
         <View style={styles.card}>
           <View style={styles.stepHeader}>
             <View style={styles.stepBadge}><Text style={styles.stepBadgeText}>1</Text></View>
             <Text style={styles.cardTitle}>Espera de seguridad</Text>
           </View>
+          {/* An unlock that sat unused for a week re-arms. Say so plainly:
+              a user who returns to a button that no longer works deserves
+              the reason, not a silently reset screen. */}
+          {expired && (
+            <Text style={styles.bodyText}>
+              Tu espera anterior venció por no usarse. Puedes iniciarla de
+              nuevo — tu dinero nunca dejó de ser tuyo.
+            </Text>
+          )}
           <Text style={styles.bodyText}>
             Para protegerte de estafas, la salida completa se habilita 24 horas
             después de solicitarla. El tiempo se mide en la blockchain — ni
@@ -370,6 +430,7 @@ export const EmergencyExitScreen: React.FC = () => {
   };
 
   const gasStatusLine = (short: bigint | null, fmt: (v: bigint) => string) => {
+    if (gasChecking) return { icon: 'refresh-cw', color: colors.text.secondary, text: 'Verificando tu saldo para la comisión…' };
     if (short === null) return { icon: 'help-circle', color: colors.text.secondary, text: 'No se pudo verificar — si un envío falla por comisiones, deposita un poco aquí.' };
     if (short === 0n) return { icon: 'check-circle', color: colors.primaryDark, text: 'Comisiones listas' };
     return { icon: 'alert-circle', color: colors.warning.text, text: `Falta ≈ ${fmt(short)}` };
@@ -427,17 +488,121 @@ export const EmergencyExitScreen: React.FC = () => {
         {!evmAddress && (
           <Text style={styles.bodyText}>Cargando tu dirección…</Text>
         )}
+        {/* Depositing BNB happens in ANOTHER app, so the user comes back
+            needing exactly this. The header ↻ also does it, but nobody
+            hunts for a header icon after pasting an address elsewhere. */}
+        {!!evmAddress && (
+          <TouchableOpacity
+            style={styles.gasRecheck}
+            onPress={() => refreshGas()}
+            disabled={gasChecking}
+          >
+            <Icon name="refresh-cw" size={13} color={colors.primaryDark} />
+            <Text style={styles.gasRecheckText}>
+              {gasChecking ? 'Verificando…' : 'Ya deposité — verificar de nuevo'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
 
+  // ── Outcome ───────────────────────────────────────────────────────────
+  // A blocking overlay covers the run, so whatever renders here is FINAL.
+  // The exit's whole promise is "you don't have to trust us", which fails
+  // if the user can't tell what happened — so the answer is a headline,
+  // not a list of hashes. Explorer links stay, demoted to verification.
+  // Read sentNow, NEVER txids: txids can replay hashes from an interrupted
+  // earlier attempt, and a headline built on those claimed "tu dinero
+  // salió" for a run that broadcast nothing at all.
+  const outcome: 'none' | 'error' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
+    if (bscError) return 'error';
+    if (!bscResult) return 'none';
+    if (!bscResult.sentNow.length) {
+      // Nothing broadcast now. Either the account was empty, or this is a
+      // re-tap on an attempt whose sends already went through — those are
+      // different facts and must not share a headline.
+      const done = Object.values(bscResult.txids).some((t) => !t.startsWith('skipped'));
+      return done ? 'already' : 'empty';
+    }
+    return bscResult.degraded.length ? 'degraded' : 'ok';
+  })();
+
+  const OUTCOME_COPY = {
+    ok: {
+      icon: 'check-circle', tone: colors.primaryDark,
+      title: 'Listo. Tu dinero salió de Confío',
+    },
+    degraded: {
+      icon: 'alert-circle', tone: colors.warning.text,
+      title: 'Tu dinero salió, pero sin canjear',
+    },
+    empty: {
+      icon: 'info', tone: colors.text.secondary,
+      title: 'No había nada que mover',
+    },
+    already: {
+      icon: 'check-circle', tone: colors.text.secondary,
+      title: 'Ya se había enviado',
+    },
+    error: {
+      icon: 'x-circle', tone: colors.error.text,
+      title: 'No se pudo completar',
+    },
+  } as const;
+
+  const outcomeSub = (): string => {
+    const to = truncAddr(sentTo ?? bscDest.trim());
+    switch (outcome) {
+      case 'ok': {
+        // '0' means this run proved no amount (resumed run, or the chain
+        // didn't log a credit) — say what moved without inventing a number.
+        const wei = bscResult?.usdtToDest ?? '0';
+        return wei !== '0'
+          ? `Enviamos $${fmtUsdt(wei)} USDT a ${to}. Puede tardar un minuto en aparecer en tu billetera.`
+          : `Enviamos tu saldo a ${to}. Puede tardar un minuto en aparecer en tu billetera.`;
+      }
+      case 'degraded':
+        return `Tu ahorro no pudo canjearse por USDT (el servicio de Ondo no respondió), así que enviamos los tokens cUSD+ tal cual a ${to}. Son tuyos: para canjearlos necesitarás una herramienta externa.`;
+      case 'already':
+        return 'Los envíos de este intento ya se habían hecho, así que no se repitieron. Puedes comprobarlos abajo.';
+      case 'empty':
+        return 'Esta cuenta no tenía saldo en BNB Smart Chain. No se envió ninguna transacción y no se cobró ninguna comisión.';
+      default:
+        return `${bscError} — puedes reintentar; los pasos completados no se repiten.`;
+    }
+  };
+
+  // Nothing left to send for this account+destination.
+  const exitDone = outcome === 'ok' || outcome === 'degraded' || outcome === 'already';
+
+  const renderOutcome = () => {
+    if (outcome === 'none') return null;
+    const copy = OUTCOME_COPY[outcome];
+    return (
+      <View style={styles.card}>
+        <View style={styles.outcomeHead}>
+          <Icon name={copy.icon} size={40} color={copy.tone} />
+          <Text style={[styles.outcomeTitle, { color: copy.tone }]}>{copy.title}</Text>
+          <Text style={styles.outcomeSub}>{outcomeSub()}</Text>
+        </View>
+        {!!bscResult && outcome !== 'empty' && (
+          <>
+            <Text style={styles.verifyLabel}>Compruébalo tú mismo</Text>
+            {renderProgress(bscResult, (tx) => `https://bscscan.com/tx/${tx}`)}
+          </>
+        )}
+      </View>
+    );
+  };
+
+  // Per-step explorer links. Progress/failure narration moved to the
+  // overlay and the outcome card — this is now purely the receipt.
   const renderProgress = (
     result: { txids: Record<string, string>; degraded?: string[] } | null,
-    error: string | null,
-    running: boolean,
     explorerUrl: (tx: string) => string,
   ) => {
-    if (!result && !error && !running) return null;
+    if (!result) return null;
     return (
       <View style={styles.progressBox}>
         {result && Object.entries(result.txids).map(([step, tx]) => {
@@ -470,20 +635,6 @@ export const EmergencyExitScreen: React.FC = () => {
             </TouchableOpacity>
           );
         })}
-        {running && (
-          <View style={styles.progressRow}>
-            <ActivityIndicator size="small" color={colors.primaryDark} />
-            <Text style={styles.progressText}>Firmando y enviando…</Text>
-          </View>
-        )}
-        {error && (
-          <View style={styles.progressRow}>
-            <Icon name="x-circle" size={15} color={colors.error.text} />
-            <Text style={[styles.progressText, { color: colors.error.text }]}>
-              {error} — puedes reintentar; los pasos completados no se repiten.
-            </Text>
-          </View>
-        )}
       </View>
     );
   };
@@ -507,8 +658,17 @@ export const EmergencyExitScreen: React.FC = () => {
                 <Icon name="arrow-left" size={24} color={colors.white} />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Salida de emergencia</Text>
-              <TouchableOpacity onPress={evaluate} style={styles.headerIconBtn} disabled={evaluating}>
-                <Icon name="refresh-cw" size={18} color={colors.white} />
+              {/* ↻ re-checks BOTH halves of "can I exit right now?": the
+                  server/chain state AND the gas balance. */}
+              <TouchableOpacity
+                onPress={() => { evaluate(); refreshGas(); }}
+                style={styles.headerIconBtn}
+                disabled={evaluating || gasChecking}
+                accessibilityLabel="Actualizar estado y comisión"
+              >
+                {evaluating || gasChecking
+                  ? <ActivityIndicator size="small" color={colors.white} />
+                  : <Icon name="refresh-cw" size={18} color={colors.white} />}
               </TouchableOpacity>
             </View>
             <View style={styles.heroWrap}>
@@ -728,6 +888,10 @@ export const EmergencyExitScreen: React.FC = () => {
             {/* ── Paso 4: resumen + ejecución ───────────────────────────── */}
             {wStep === 3 && (
               <>
+            {renderOutcome()}
+
+            {!exitDone && (
+              <>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Resumen</Text>
               <View style={styles.summaryRow}>
@@ -749,16 +913,24 @@ export const EmergencyExitScreen: React.FC = () => {
                 onPress={runBsc}
               >
                 <Icon name="send" size={16} color={colors.white} />
-                <Text style={styles.execBtnText}>Mover mi dinero</Text>
+                <Text style={styles.execBtnText}>
+                  {outcome === 'error' ? 'Reintentar' : 'Mover mi dinero'}
+                </Text>
               </TouchableOpacity>
-              {renderProgress(bscResult, bscError, bscRunning,
-                (tx) => `https://bscscan.com/tx/${tx}`)}
             </View>
+              </>
+            )}
 
             {anyResult && roster.length > 1 && (
               <TouchableOpacity style={styles.primaryBtn} onPress={() => goToStep(0)}>
                 <Icon name="repeat" size={16} color={colors.white} />
                 <Text style={styles.primaryBtnText}>Retirar otra cuenta</Text>
+              </TouchableOpacity>
+            )}
+
+            {exitDone && (
+              <TouchableOpacity style={styles.ghostBtn} onPress={() => navigation.goBack()}>
+                <Text style={styles.doneBtnText}>Volver</Text>
               </TouchableOpacity>
             )}
 
@@ -776,6 +948,11 @@ export const EmergencyExitScreen: React.FC = () => {
         )}
       </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Same blocking overlay every other transaction in the app uses —
+          it names the step in flight and, critically, keeps the user from
+          tapping "Mover mi dinero" twice while two sends are pending. */}
+      <LoadingOverlay visible={bscRunning} message={bscPhase ?? 'Moviendo tu dinero…'} />
 
       <AddressScannerModal
         network="bsc"
@@ -949,6 +1126,21 @@ const styles = StyleSheet.create({
     marginTop: 10, backgroundColor: colors.neutral,
     borderRadius: 10, padding: 12, gap: 8,
   },
+  gasRecheck: {
+    flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start',
+    marginTop: 12, paddingVertical: 6,
+  },
+  gasRecheckText: { color: colors.primaryDark, fontWeight: '700', fontSize: 13.5 },
+  outcomeHead: { alignItems: 'center', gap: 10, paddingVertical: 4 },
+  outcomeTitle: { fontSize: 19, fontWeight: '700', textAlign: 'center' },
+  outcomeSub: {
+    fontSize: 14.5, lineHeight: 21, color: colors.text.secondary, textAlign: 'center',
+  },
+  verifyLabel: {
+    fontSize: 12, fontWeight: '700', color: colors.text.secondary,
+    letterSpacing: 0.4, textTransform: 'uppercase', marginTop: 18,
+  },
+  doneBtnText: { color: colors.primaryDark, fontWeight: '700', fontSize: 14 },
   progressRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   progressText: { flex: 1, fontSize: 14, lineHeight: 19, color: colors.text.primary },
   progressSkipped: { color: colors.text.light },

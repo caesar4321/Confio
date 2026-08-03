@@ -339,6 +339,7 @@ class VerifySMSCode(graphene.Mutation):
                             if recipient_addr:
                                 from send.models import PhoneInvite
                                 inv = PhoneInvite.objects.filter(
+                                    rail='algorand',
                                     phone_key=pk,
                                     status='pending',
                                     token_type__in=('CUSD', 'CONFIO', 'USDC'),
@@ -410,6 +411,7 @@ class VerifySMSCode(graphene.Mutation):
                 if recipient_addr:
                     from send.models import PhoneInvite
                     inv = PhoneInvite.objects.filter(
+                        rail='algorand',
                         phone_key=pk,
                         status='pending',
                         token_type__in=('CUSD', 'CONFIO', 'USDC'),

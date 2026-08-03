@@ -410,9 +410,11 @@ class SubmitBscInvite(graphene.Mutation):
         from .models import PhoneInvite
         from . import invite_bsc_flow
 
+        # 'draft' — prepared, nothing broadcast. submit_create then CASes it to
+        # 'creating', so only one caller can ever broadcast for this invite.
         invite = PhoneInvite.objects.filter(
             invitation_id=invite_id.replace('0x', ''), inviter_user=info.context.user,
-            status='pending', deleted_at__isnull=True).first()
+            status='draft', deleted_at__isnull=True).first()
         if not invite:
             return SubmitBscInvite(success=False, error='invite_not_found')
         result = invite_bsc_flow.submit_create(

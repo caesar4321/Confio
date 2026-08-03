@@ -26,6 +26,7 @@ import time
 from decimal import Decimal
 
 from django.conf import settings
+from django.db.models import Q
 from eth_abi import encode as abi_encode
 from eth_utils import keccak, to_checksum_address
 
@@ -116,10 +117,12 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     if not phone_key or ':' not in phone_key:
         return {'success': False, 'error': 'bad_phone_key'}
 
+    sender_business = None
     if jwt_ctx.get('account_type') == 'business' and jwt_ctx.get('business_id'):
         acct = Account.objects.filter(
             business_id=jwt_ctx['business_id'], account_type='business',
             account_index=jwt_ctx.get('account_index', 0), deleted_at__isnull=True).first()
+        sender_business = getattr(acct, 'business', None)
     else:
         acct = user.accounts.filter(
             account_type='personal', account_index=jwt_ctx.get('account_index', 0),
@@ -139,19 +142,29 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     invite_id32 = invite_id_bytes32(phone_key, inviter_addr)
     digits = ''.join(ch for ch in (phone_display or '') if ch.isdigit())
 
-    # One active invite per (inviter, phone): the escrow rejects a duplicate
-    # storage key, so mirror that off-chain — but only once the escrow is
-    # actually funded. A prepare the user abandoned, or one whose submit was
-    # rejected, leaves a 'pending' row whose history row never left PENDING;
-    # treating that as an active invite would lock the inviter out of ever
-    # inviting that person again. Reuse it instead — same id, same escrow slot.
+    # The invite id is deterministic in (phone, inviter) and the escrow never
+    # deletes a settled slot, so this row is the ONE row that id will ever
+    # have. What happens on a repeat prepare depends on where the last attempt
+    # got to (Codex audit 2026-08-02 P1/P2):
+    #
+    #   draft            nothing was ever broadcast → recycle it, new terms.
+    #   failed           the create never executed, so the escrow's mapping
+    #                    slot is EMPTY and this id is still usable → recycle.
+    #   creating         a batch is in flight; recycling would let a second
+    #                    batch fund the same slot and strand the first.
+    #   funded/settled   the escrow holds (or held) money under this id. A
+    #                    fresh create would revert on-chain with 'invite
+    #                    exists', so refuse honestly rather than take a
+    #                    signature for a transaction that cannot succeed.
     existing = PhoneInvite.objects.filter(
-        invitation_id=invite_id32[2:], status='pending',
+        rail='bsc', invitation_id=invite_id32[2:],
         deleted_at__isnull=True).select_related('send_transaction').first()
-    if existing is not None:
-        stx = existing.send_transaction
-        if stx is None or stx.status != 'PENDING':
-            return {'success': False, 'error': 'invite_already_pending'}
+    if existing is not None and existing.status not in ('draft', 'failed'):
+        if existing.status in ('claimed', 'reclaimed'):
+            # The slot is spent on-chain and the id cannot be reused. Say so
+            # in its own terms — 'already pending' would be a lie.
+            return {'success': False, 'error': 'invite_id_spent'}
+        return {'success': False, 'error': 'invite_already_pending'}
 
     calls = build_create_calls(token_type, amount_wei, invite_id32)
 
@@ -169,20 +182,41 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         send_tx.recipient_phone = phone_display or ''
         send_tx.sender_address = inviter_addr
         send_tx.recipient_address = _escrow()
+        send_tx.sender_business = sender_business
+        send_tx.sender_type = 'business' if sender_business else 'user'
+        send_tx.sender_display_name = (
+            sender_business.name if sender_business else (user.get_full_name() or user.username))
         send_tx.save(update_fields=[
             'amount', 'token_type', 'recipient_display_name', 'recipient_phone',
-            'sender_address', 'recipient_address', 'updated_at'])
+            'sender_address', 'recipient_address', 'sender_business',
+            'sender_type', 'sender_display_name', 'updated_at'])
         invite.amount = amount_usd
         invite.token_type = token_type.upper()
         invite.phone_number = digits
         invite.inviter_address = inviter_addr
+        # A recycled 'failed' row starts a fresh attempt from 'draft', and its
+        # history row goes back to PENDING (save(), so the unified row follows).
+        invite.status = 'draft'
         invite.save(update_fields=['amount', 'token_type', 'phone_number',
-                                   'inviter_address', 'updated_at'])
+                                   'inviter_address', 'status', 'updated_at'])
+        if send_tx.status == 'FAILED':
+            send_tx.status = 'PENDING'
+            send_tx.error_message = ''
+            send_tx.transaction_hash = None
+            send_tx.save(update_fields=['status', 'error_message',
+                                        'transaction_hash', 'updated_at'])
     else:
+        # Attribution follows the account that SIGNS, exactly as bsc_flow.py
+        # does for sends. A business invite filed under the personal account
+        # disappears from business history — and the reclaim button with it,
+        # which is the inviter's only way to get the money back.
         send_tx = SendTransaction.objects.create(
             sender_user=user,
-            sender_type='user',
-            sender_display_name=user.get_full_name() or user.username,
+            sender_business=sender_business,
+            sender_type='business' if sender_business else 'user',
+            sender_display_name=(
+                sender_business.name if sender_business
+                else (user.get_full_name() or user.username)),
             sender_phone=user.phone_number or '',
             recipient_type='external',
             recipient_display_name=phone_display or phone_key,
@@ -198,6 +232,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             idempotency_key=invite_id32[2:],
         )
         invite = PhoneInvite.objects.create(
+            rail='bsc',
             invitation_id=invite_id32[2:],  # 64-hex, fits the field
             phone_key=phone_key,
             phone_number=digits,
@@ -206,7 +241,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             send_transaction=send_tx,
             amount=amount_usd,
             token_type=token_type.upper(),
-            status='pending',
+            status='draft',
         )
     invite.blockchain_calls = json.dumps({'calls': calls, 'kind': 'invite_create',
                                           'inviter': inviter_addr})
@@ -245,7 +280,7 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     from cusd_plus import sponsor_7702
     from .models import PhoneInvite
 
-    if phone_invite.inviter_user_id != user.id or phone_invite.status != 'pending':
+    if phone_invite.inviter_user_id != user.id or phone_invite.status != 'draft':
         return {'success': False, 'error': 'invite_not_pending'}
 
     # The address prepare escrowed FROM, not a re-derived one: prepare honours
@@ -262,6 +297,12 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     if not (now + 30 <= int(deadline) <= now + 1800):
         return {'success': False, 'error': 'bad_deadline'}
 
+    # EVERYTHING that can reject without side effects happens BEFORE the row is
+    # taken (Codex follow-up audit 2026-08-02 P1). Validating after the CAS left
+    # a dead end on the most ordinary path there is: a first-ever invite always
+    # returns 'authorization_required' so the client can attach its 7702
+    # authorization, and that return abandoned the row in 'creating' — the
+    # retry then found no 'draft' row and first-use invites failed outright.
     try:
         _validate_create_batch(calls, phone_invite.token_type, invite_id32)
         intent_id = sponsor_7702.intent_id_for('invite_create', phone_invite.pk)
@@ -273,35 +314,108 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
             if authorization is None:
                 return {'success': False, 'error': 'authorization_required', 'authorization_required': True}
             auth_dict = sponsor_7702.normalize_and_validate_authorization(authorization, inviter_addr, chain_id)
+    except sponsor_7702.PolicyError as exc:
+        if exc.code == 'stale_auth_nonce':
+            return {'success': False, 'error': exc.code, 'authorization_required': True}
+        return {'success': False, 'error': exc.code}
+
+    # Now take the row. Two concurrent submits both used to pass the status
+    # read above and both broadcast; one funded the escrow, the other reverted
+    # on the consumed delegate nonce, and whichever confirmer ran last decided
+    # the row's fate — leaving the funded slot with no way back. The UPDATE is
+    # the lock: exactly one caller can move draft → creating, and only that
+    # caller broadcasts.
+    won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='draft').update(
+        status='creating')
+    if not won:
+        return {'success': False, 'error': 'invite_not_pending'}
+    phone_invite.status = 'creating'
+
+    send_tx = phone_invite.send_transaction
+    # SUBMITTED before the broadcast, not after. send_sponsored_batch writes
+    # its durable SponsoredBatch row before eth_sendRawTransaction, so a crash
+    # anywhere past this point leaves state the reconciler can resolve; a
+    # crash BETWEEN broadcast and this write used to leave the rows looking
+    # untouched and reusable while the batch was still on its way to the chain.
+    #
+    # No expiry yet: the contract starts the 7-day window when the create
+    # MINES, so dating it from here would show the inviter a reclaim button
+    # that the escrow rejects as 'not expired'. confirm_bsc_invite_create sets
+    # it from the confirmation.
+    if send_tx is not None:
+        send_tx.status = 'SUBMITTED'
+        # The marker that keeps the Algorand recovery scanner off this row
+        # (blockchain/tasks.py): it asks an algod node about the hash, and a
+        # BSC hash no algod node has heard of reads as "missing from the pool"
+        # — it would mark a perfectly good invite FAILED after two minutes.
+        send_tx.bsc_calls_json = json.dumps({
+            'calls': calls, 'kind': 'invite_create', 'inviter': inviter_addr})
+        send_tx.save(update_fields=['status', 'bsc_calls_json', 'updated_at'])
+
+    try:
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, inviter_addr, calls, int(nonce), int(deadline), intent_signature, auth_dict, 'invite_create', source_id=phone_invite.pk)
     except sponsor_7702.PolicyError as exc:
+        # Every PolicyError is raised before the batch row is written (bad
+        # calldata, failed simulation, gas price cap), so nothing can be in
+        # flight — hand the row back for a retry.
+        _release_create(phone_invite)
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}
         return {'success': False, 'error': exc.code}
     except Exception as exc:  # noqa: BLE001
         logger.exception('[INVITE][BSC] create failed for %s', phone_invite.invitation_id)
+        # Only release when no batch was ever written. If one exists, it was
+        # written before broadcast and may be on the chain right now — the
+        # reconciler owns it, and rolling back here is exactly how the slot
+        # would get funded twice.
+        _release_create(phone_invite, only_if_no_batch=True)
         return {'success': False, 'error': str(exc)[:200]}
 
-    from django.utils import timezone
-    from datetime import timedelta
-    expires_at = timezone.now() + timedelta(days=7)
-    phone_invite.expires_at = expires_at
-    phone_invite.save(update_fields=['expires_at', 'updated_at'])
-
-    send_tx = phone_invite.send_transaction
     if send_tx is not None:
-        send_tx.status = 'SUBMITTED'
         send_tx.transaction_hash = tx_hash
-        # The 7-day window starts when the escrow is actually funded, not when
-        # the batch was prepared — a prepare the user never signed must not
-        # shorten a later invite's reclaim clock.
-        send_tx.invitation_expires_at = expires_at
-        send_tx.save(update_fields=['status', 'transaction_hash',
-                                    'invitation_expires_at', 'updated_at'])
-        from .invite_tasks import confirm_bsc_invite_create
-        confirm_bsc_invite_create.apply_async(args=[send_tx.pk, batch.id], countdown=5)
+        send_tx.save(update_fields=['transaction_hash', 'updated_at'])
+    from .invite_tasks import confirm_bsc_invite_create
+    # Keyed by the INVITE pk, matching the batch's source_id — that is what
+    # cusd_plus.reconcile_signed_batches passes when it re-enqueues a domain
+    # confirm the crash skipped.
+    confirm_bsc_invite_create.apply_async(args=[phone_invite.pk, batch.id], countdown=5)
     return {'success': True, 'transaction_hash': tx_hash}
+
+
+def _release_create(phone_invite, only_if_no_batch: bool = False) -> None:
+    """Hand a 'creating' row back to 'draft' after an attempt that provably
+    never reached the chain. CAS-guarded: if a confirmer already advanced the
+    row, its verdict stands."""
+    from blockchain.models import SponsoredBatch
+
+    from .models import PhoneInvite, SendTransaction
+
+    # A LIVE batch, not any historical one. A terminal batch (confirmed /
+    # reverted / dropped) is already settled and cannot fund anything, so
+    # treating it as "in flight" would refuse to release a row forever after a
+    # single earlier attempt (Codex follow-up audit 2026-08-02 P1).
+    if only_if_no_batch and SponsoredBatch.objects.filter(
+            kind='invite_create', source_id=phone_invite.pk,
+            status__in=('signed', 'sent')).exists():
+        logger.warning('[INVITE][BSC] invite %s left in-flight — a live batch exists',
+                       phone_invite.pk)
+        return
+    released = PhoneInvite.objects.filter(
+        pk=phone_invite.pk, status='creating').update(status='draft')
+    if released:
+        phone_invite.status = 'draft'
+        # transaction_hash is null=True, so a row that never broadcast holds
+        # NULL, not '' — matching only '' left the history row (and the unified
+        # row behind it) stuck on SUBMITTED after a pre-batch rejection.
+        stx = SendTransaction.objects.filter(
+            pk=phone_invite.send_transaction_id, status='SUBMITTED').filter(
+                Q(transaction_hash__isnull=True) | Q(transaction_hash='')).first()
+        if stx is not None:
+            # save(), not update(): the unified history row is maintained by a
+            # post_save signal that a queryset update does not fire.
+            stx.status = 'PENDING'
+            stx.save(update_fields=['status', 'updated_at'])
 
 
 # ── Claim (sponsor, plain KMS tx) ────────────────────────────────────────
@@ -314,6 +428,8 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     )
     from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
 
+    from .models import PhoneInvite
+
     if not _enabled():
         return {'success': False, 'error': 'bsc_invite_disabled'}
     if phone_invite.status != 'pending':
@@ -324,6 +440,13 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     # when the invite came from a business account — the claim would revert and
     # the money would sit in escrow until expiry. Use the address we recorded.
     inviter_addr = (phone_invite.inviter_address or '').lower()
+    # Revalidate ownership at SIGNING time, not at scheduling time. This runs
+    # asynchronously (post-create auto-claim, retry task), and a phone can move
+    # between accounts in the meantime — releasing to whoever was resolved
+    # minutes ago would pay the wrong person (Codex follow-up audit P1).
+    if (getattr(recipient_user, 'phone_key', None) or '') != phone_invite.phone_key:
+        return {'success': False, 'error': 'recipient_phone_changed'}
+
     rec_acct = recipient_user.accounts.filter(
         account_type='personal', account_index=0, deleted_at__isnull=True).first()
     recipient_addr = ((getattr(rec_acct, 'bsc_address', None) or '') or '').lower()
@@ -346,14 +469,34 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
         return {'success': False, 'error': 'simulation_reverted'}
 
     gas_price = max(int(_rpc('eth_gasPrice', []), 16),
-                    int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
+                    int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 50_000_000)))
     price_cap = int(getattr(settings, 'CUSD_PLUS_7702_MAX_GAS_PRICE_WEI', 5_000_000_000))
     if gas_price > price_cap:
         return {'success': False, 'error': 'gas_price_too_high'}
     fee_per_gas = min((gas_price * 12) // 10, price_cap)
 
-    if not acquire_sponsor_nonce_lock():
+    # Take the invite before broadcasting, same reasoning as create: 'claiming'
+    # is what stops a reclaim from being prepared against a slot whose claim is
+    # already on its way, and what stops a second auto-claim double-broadcast.
+    won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='pending').update(
+        status='claiming', claimed_by=recipient_user)
+    if not won:
+        return {'success': False, 'error': 'invite_not_pending'}
+    phone_invite.status = 'claiming'
+
+    # Keep the ownership token. Releasing without it is the legacy
+    # unconditional delete, which a holder whose 15s TTL lapsed can use to drop
+    # a NEWER holder's lock — letting two sponsor transactions sign the same
+    # nonce (sponsor_7702.py documents this; the invite claim was still on the
+    # legacy path).
+    lock_token = acquire_sponsor_nonce_lock()
+    if not lock_token:
+        _revert_claiming(phone_invite)
         return {'success': False, 'error': 'sponsor_busy'}
+    # Bound before the try: the except below branches on whether signing got
+    # far enough to produce a hash, and an unbound name there would raise
+    # inside the handler and strand the invite in 'claiming' forever.
+    tx_hash = ''
     try:
         nonce = int(_rpc('eth_getTransactionCount', [sponsor, 'pending']), 16)
         tx = {'type': 2, 'chainId': chain_id, 'nonce': nonce,
@@ -361,27 +504,45 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
               'gas': GAS_CLAIM, 'to': to_checksum_address(escrow), 'value': 0,
               'data': calldata, 'accessList': []}
         raw, tx_hash = signer.sign_typed_transaction(tx)
+        # Record the hash BEFORE broadcasting. The hash of a signed tx is
+        # deterministic, so writing it first means a crash mid-broadcast still
+        # leaves the confirmer something to look up — the same durability rule
+        # sponsor_7702.send_sponsored_batch follows for batches.
+        PhoneInvite.objects.filter(pk=phone_invite.pk, status='claiming').update(
+            claimed_txid=tx_hash)
         sent = _rpc('eth_sendRawTransaction', [raw])
     except Exception as exc:  # noqa: BLE001
         logger.exception('[INVITE][BSC] claim broadcast failed %s', invite_id32)
+        if tx_hash:
+            # Signed, so it may already be in a mempool — settle it from the
+            # receipt rather than reverting to 'pending' and inviting a second
+            # claim of the same escrow slot.
+            confirm_bsc_invite_claim_later(phone_invite.pk, tx_hash)
+        else:
+            # Never signed: nothing can be in flight, so give the slot back.
+            _revert_claiming(phone_invite)
         return {'success': False, 'error': str(exc)[:200]}
     finally:
-        release_sponsor_nonce_lock()
+        release_sponsor_nonce_lock(lock_token)
 
-    from django.utils import timezone
-    phone_invite.status = 'claimed'
-    phone_invite.claimed_by = recipient_user
-    phone_invite.claimed_txid = sent or tx_hash
-    phone_invite.claimed_at = timezone.now()
-    phone_invite.save(update_fields=['status', 'claimed_by', 'claimed_txid', 'claimed_at', 'updated_at'])
-
-    # Mirror onto the history row, or the inviter keeps seeing an expiry
-    # warning and a reclaim button for money that is already the invitee's.
-    send_tx = phone_invite.send_transaction
-    if send_tx is not None:
-        send_tx.invitation_claimed = True
-        send_tx.save(update_fields=['invitation_claimed', 'updated_at'])
+    # NOT 'claimed' — that is the receipt's word. A dropped or reverted claim
+    # booked as final here is money the invitee never got and the inviter can
+    # no longer reclaim (Codex audit 2026-08-02 P1).
+    confirm_bsc_invite_claim_later(phone_invite.pk, sent or tx_hash)
     return {'success': True, 'transaction_hash': sent or tx_hash}
+
+
+def _revert_claiming(phone_invite) -> None:
+    """Undo the 'claiming' take when nothing was signed or broadcast."""
+    from .models import PhoneInvite
+    if PhoneInvite.objects.filter(pk=phone_invite.pk, status='claiming').update(
+            status='pending', claimed_by=None):
+        phone_invite.status = 'pending'
+
+
+def confirm_bsc_invite_claim_later(invite_pk: int, tx_hash: str) -> None:
+    from .invite_tasks import confirm_bsc_invite_claim
+    confirm_bsc_invite_claim.apply_async(args=[invite_pk, tx_hash], countdown=5)
 
 
 def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
@@ -394,12 +555,12 @@ def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
     if not _enabled() or not phone_key:
         return 0
     claimed = 0
-    # inviter_address is the rail discriminator, NOT token_type: the Algorand
-    # invite flow writes PhoneInvite rows too, and its CONFIO rows would
-    # otherwise be handed to the BSC sponsor, which would try to release an
-    # escrow slot that only exists on Algorand.
+    # rail, stated on the row, is the discriminator — token_type cannot be one
+    # (CONFIO exists on both rails). inviter_address stays in the filter as a
+    # second, independent condition: a row has to satisfy both to be handed to
+    # the BSC sponsor, so a single mislabelled field cannot misroute money.
     pending = PhoneInvite.objects.filter(
-        phone_key=phone_key, status='pending',
+        rail='bsc', phone_key=phone_key, status='pending',
         token_type__in=('CUSD_PLUS', 'CONFIO'), deleted_at__isnull=True,
     ).exclude(inviter_address='')
     for inv in pending:
@@ -410,9 +571,42 @@ def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
             else:
                 logger.info('[INVITE][BSC] auto-claim skipped %s: %s',
                             inv.invitation_id, res.get('error'))
+                _retry_claim_later(inv, recipient_user, res.get('error'))
         except Exception:  # noqa: BLE001 — onboarding must not fail on this
             logger.exception('[INVITE][BSC] auto-claim errored %s', inv.invitation_id)
+            _retry_claim_later(inv, recipient_user, 'exception')
     return claimed
+
+
+# Conditions that will pass on their own later. Anything else (the recipient is
+# the inviter, the escrow says no) will fail identically forever, so retrying
+# just burns sponsor RPC.
+_RETRYABLE_CLAIM_ERRORS = frozenset({
+    'sponsor_busy', 'gas_price_too_high', 'simulation_reverted', 'exception',
+})
+
+
+def _retry_claim_later(phone_invite, recipient_user, error) -> None:
+    """Re-attempt a claim that failed on something transient.
+
+    Without this the auto-claim is one-shot: a sponsor that happened to be busy
+    at the moment the invitee verified their phone left the money escrowed
+    until the inviter reclaimed it a week later, and nothing in the system was
+    ever going to try again (Codex audit 2026-08-02 P2).
+
+    'simulation_reverted' is in the retryable set on purpose — the usual cause
+    is a create that has not mined yet, which is exactly the case that fixes
+    itself.
+    """
+    if error not in _RETRYABLE_CLAIM_ERRORS:
+        return
+    try:
+        from .invite_tasks import retry_bsc_invite_claim
+        retry_bsc_invite_claim.apply_async(
+            args=[phone_invite.pk, recipient_user.pk], countdown=60)
+    except Exception:  # noqa: BLE001 — onboarding must not fail on this
+        logger.exception('[INVITE][BSC] could not schedule claim retry %s',
+                         phone_invite.invitation_id)
 
 
 # ── Reclaim (inviter, 7702) ──────────────────────────────────────────────
@@ -423,6 +617,8 @@ def build_reclaim_calls(invite_id32: str) -> list:
 
 def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, authorization=None) -> dict:
     from cusd_plus import sponsor_7702
+
+    from .models import PhoneInvite
 
     if phone_invite.inviter_user_id != user.id or phone_invite.status != 'pending':
         return {'success': False, 'error': 'invite_not_reclaimable'}
@@ -436,6 +632,11 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
     if not (now + 30 <= int(deadline) <= now + 1800):
         return {'success': False, 'error': 'bad_deadline'}
 
+    # Validate before taking the row — same dead end as create, but worse here
+    # because the stranded escrow is FUNDED: an 'authorization_required' return
+    # (the normal first-use path) left the invite in 'reclaiming' with no batch
+    # and no confirmer, so neither claim nor reclaim could ever run again and
+    # the money was unreachable (Codex follow-up audit 2026-08-02 P1).
     try:
         intent_id = sponsor_7702.intent_id_for('invite_reclaim', phone_invite.pk)
         digest = sponsor_7702.intent_digest(calls, int(nonce), int(deadline), inviter_addr, chain_id, intent_id)
@@ -446,22 +647,56 @@ def submit_reclaim(user, phone_invite, nonce, deadline, intent_signature, author
             if authorization is None:
                 return {'success': False, 'error': 'authorization_required', 'authorization_required': True}
             auth_dict = sponsor_7702.normalize_and_validate_authorization(authorization, inviter_addr, chain_id)
+    except sponsor_7702.PolicyError as exc:
+        if exc.code == 'stale_auth_nonce':
+            return {'success': False, 'error': exc.code, 'authorization_required': True}
+        return {'success': False, 'error': exc.code}
+
+    # Now take the row. Previously the status only flipped AFTER a successful
+    # broadcast, so a claim landing in between (or a second reclaim) raced
+    # against it; now 'pending' is consumed once and the loser is told so.
+    won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='pending').update(
+        status='reclaiming')
+    if not won:
+        return {'success': False, 'error': 'invite_not_reclaimable'}
+    phone_invite.status = 'reclaiming'
+
+    try:
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, inviter_addr, calls, int(nonce), int(deadline), intent_signature, auth_dict, 'invite_reclaim', source_id=phone_invite.pk)
     except sponsor_7702.PolicyError as exc:
+        # Pre-batch failure — nothing in flight, so the escrow is still
+        # claimable and the row goes back.
+        _release_reclaim(phone_invite)
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}
         return {'success': False, 'error': exc.code}
     except Exception as exc:  # noqa: BLE001
         logger.exception('[INVITE][BSC] reclaim failed %s', phone_invite.invitation_id)
+        _release_reclaim(phone_invite, only_if_no_batch=True)
         return {'success': False, 'error': str(exc)[:200]}
 
-    # Mark in-flight, NOT reclaimed (audit P3): the confirm task finalizes to
-    # 'reclaimed' only once the batch mines; a reverted reclaim reverts to
+    # Still 'reclaiming', NOT 'reclaimed' (audit P3): the confirm task
+    # finalizes only once the batch mines; a reverted reclaim goes back to
     # 'pending' so the escrow stays claimable / retryable.
-    phone_invite.status = 'reclaiming'
-    phone_invite.save(update_fields=['status', 'updated_at'])
-
     from .invite_tasks import confirm_bsc_invite_reclaim
     confirm_bsc_invite_reclaim.apply_async(args=[phone_invite.pk, batch.id], countdown=8)
     return {'success': True, 'transaction_hash': tx_hash}
+
+
+def _release_reclaim(phone_invite, only_if_no_batch: bool = False) -> None:
+    """Hand a 'reclaiming' row back to 'pending' after an attempt that provably
+    never reached the chain."""
+    from blockchain.models import SponsoredBatch
+
+    from .models import PhoneInvite
+
+    if only_if_no_batch and SponsoredBatch.objects.filter(
+            kind='invite_reclaim', source_id=phone_invite.pk,
+            status__in=('signed', 'sent')).exists():
+        logger.warning('[INVITE][BSC] invite %s reclaim left in-flight — a live batch exists',
+                       phone_invite.pk)
+        return
+    if PhoneInvite.objects.filter(pk=phone_invite.pk, status='reclaiming').update(
+            status='pending'):
+        phone_invite.status = 'pending'

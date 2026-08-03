@@ -28,7 +28,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import {
   Financiera,
   FinancieraReview,
-  USDC_ALGORAND_TAG,
+  USDT_BSC_TAG,
   serviceBadges,
   tokenLabel,
 } from '../types/financiera';
@@ -256,7 +256,7 @@ export const FinancieraDetailScreen = () => {
           <View style={styles.rateBox}>
             <View style={styles.rateSide}>
               <Text style={styles.rateLabel}>Enviaron</Text>
-              <Text style={styles.rateValue}>100 USDC</Text>
+              <Text style={styles.rateValue}>100 USDT</Text>
             </View>
             <Icon name="arrow-right" size={20} color={colors.text.light} />
             <View style={styles.rateSide}>
@@ -282,7 +282,7 @@ export const FinancieraDetailScreen = () => {
           <View style={styles.serviceLine}>
             <View style={styles.railChip}>
               <Icon name="check" size={12} color={colors.white} />
-              <Text style={styles.railChipText}>{USDC_ALGORAND_TAG}</Text>
+              <Text style={styles.railChipText}>{USDT_BSC_TAG}</Text>
             </View>
           </View>
           {badges.map((b) => (
@@ -325,7 +325,7 @@ export const FinancieraDetailScreen = () => {
             financiera.hasPhysicalLocation
               ? 'Si visitas el local, confirma que sea el mismo lugar indicado por la financiera.'
               : 'Esta financiera atiende de forma digital, sin local físico. Guíate por sus reseñas recientes.',
-            'Nunca envíes USDC antes de tener el efectivo, la transferencia recibida o un acuerdo claro.',
+            'Nunca envíes USDT antes de tener el efectivo, la transferencia recibida o un acuerdo claro.',
             'La primera vez, empieza con un monto pequeño.',
             'Si algo no se siente bien, no continúes — y cuéntalo en una reseña.',
           ].map((tip, i) => (

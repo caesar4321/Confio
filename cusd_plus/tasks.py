@@ -1053,7 +1053,11 @@ def _bnb_gas_reserve_wei() -> int:
         gas_price = int(_rpc('eth_gasPrice', []), 16)
     except Exception:  # noqa: BLE001
         gas_price = 1_000_000_000  # 1 gwei fallback
-    gas_price = max(gas_price, int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))  # ≥0.1 gwei
+    # Deliberately NOT CUSD_PLUS_GAS_PRICE_FLOOR_WEI. That floor governs what
+    # the sponsor PAYS, where lower is cheaper and a stall costs us a retry.
+    # This one governs what we LEAVE with a user, where too low means their
+    # self-signed leg strands — so it keeps the conservative 0.1 gwei.
+    gas_price = max(gas_price, int(getattr(settings, 'CUSD_PLUS_USER_GAS_RESERVE_FLOOR_WEI', 100_000_000)))
     target = action_gas * gas_price * spike_mult
     cap = int(getattr(settings, 'CUSD_PLUS_GAS_RESERVE_MAX_WEI', 5_000_000_000_000_000))  # 0.005 BNB hard cap
     return min(target, cap)
@@ -1733,7 +1737,7 @@ def accrue_vault():
         sender = signer.address
         nonce = int(_rpc('eth_getTransactionCount', [sender, 'pending']), 16)
         gas_price = max(int(_rpc('eth_gasPrice', []), 16),
-                        int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 100_000_000)))
+                        int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 50_000_000)))
         # accrue() is a couple of sstores plus the oracle's range walk;
         # generous limit, unused gas is not charged.
         gas_limit = int(getattr(settings, 'CUSD_PLUS_ACCRUE_GAS_LIMIT', 300_000))
@@ -1750,3 +1754,61 @@ def accrue_vault():
     except Exception as exc:  # noqa: BLE001 — next scheduled run retries
         logger.exception('cUSD+ accrue keeper send failed: %s', exc)
         return {'skipped': 'send_failed'}
+
+
+# Rough gas for one median sponsored batch, used only to turn the sponsor's
+# remaining balance into a legible "≈N ops left". Measured 2026-08-03 across
+# the 39 batches the sponsor had broadcast: send_cusd_plus 92k at the low end,
+# subscribe/send_redeem ~443k at the high end. Deliberately the pessimistic
+# end — a runway estimate that flatters itself is worse than none.
+SPONSOR_OPS_GAS_ESTIMATE = 450_000
+
+
+@shared_task(name='cusd_plus.check_sponsor_balance')
+def check_sponsor_balance():
+    """Warn before the BSC sponsor hot key runs dry.
+
+    One key broadcasts every user-facing BSC operation — sends, payments,
+    payroll payouts, invite claims, presale buys — so when it empties they
+    all fail simultaneously, and the only symptom is a wall of 'insufficient
+    funds' in the worker logs long after users started seeing errors. The
+    accrue keeper already refuses to send on a low balance, but it only
+    notices on the ~1 run/day where the oracle actually stepped.
+
+    Read-only: never moves funds. Topping the sponsor up is a human decision
+    (see the key-custody rules in the BSC/EVM KMS runbook)."""
+    if not getattr(settings, 'BSC_SPONSOR_BALANCE_ALERTS_ENABLED', True):
+        return {'skipped': 'disabled'}
+
+    address = getattr(settings, 'BSC_SPONSOR_ADDRESS', None)
+    if not address:
+        return {'skipped': 'unconfigured'}
+
+    try:
+        balance = int(_rpc('eth_getBalance', [address, 'latest']), 16)
+        gas_price = max(int(_rpc('eth_gasPrice', []), 16),
+                        int(getattr(settings, 'CUSD_PLUS_GAS_PRICE_FLOOR_WEI', 50_000_000)))
+    except Exception as exc:  # noqa: BLE001 — RPC blip: next run retries
+        logger.warning('BSC sponsor balance check: chain read failed: %s', exc)
+        return {'skipped': 'read_failed'}
+
+    warn = int(getattr(settings, 'BSC_SPONSOR_BALANCE_WARN_WEI', 50_000_000_000_000_000))
+    crit = int(getattr(settings, 'BSC_SPONSOR_BALANCE_CRITICAL_WEI', 20_000_000_000_000_000))
+    # The 1.2x buffer the sponsored paths add on top of the floor.
+    ops_left = balance // (SPONSOR_OPS_GAS_ESTIMATE * ((gas_price * 12) // 10) or 1)
+    bnb = balance / 1e18
+
+    if balance < crit:
+        logger.error(
+            'BSC sponsor CRITICALLY low: %s holds %.6f BNB (~%s sponsored ops left '
+            'at %.3f gwei). Every BSC send/pay/payroll/invite fails when this hits '
+            'zero — refill now.', address, bnb, ops_left, gas_price / 1e9)
+        return {'level': 'critical', 'balance_wei': balance, 'ops_left': ops_left}
+    if balance < warn:
+        logger.warning(
+            'BSC sponsor low: %s holds %.6f BNB (~%s sponsored ops left at '
+            '%.3f gwei) — schedule a refill.', address, bnb, ops_left, gas_price / 1e9)
+        return {'level': 'warning', 'balance_wei': balance, 'ops_left': ops_left}
+
+    logger.info('BSC sponsor balance OK: %.6f BNB (~%s ops)', bnb, ops_left)
+    return {'level': 'ok', 'balance_wei': balance, 'ops_left': ops_left}

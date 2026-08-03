@@ -21,7 +21,7 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
-import { tokenLabel } from '../types/financiera';
+import { tokenLabel, FinancieraReviewToken } from '../types/financiera';
 import {
   GET_FINANCIERA,
   GET_MY_REVIEWABLE_USDC_SENDS,
@@ -37,7 +37,7 @@ interface ReviewableSend {
   id: string;
   kind: 'send' | 'withdrawal';
   direction: 'sent' | 'received';
-  token: 'USDC' | 'CUSD';
+  token: FinancieraReviewToken;
   amountUsdc: string;
   destination: string;
   createdAt: string;
@@ -80,7 +80,7 @@ const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: 
   </View>
 );
 
-// Reviews are anchored to real transactions: without a recent USDC/cUSD
+// Reviews are anchored to real transactions: without a recent USDT/cUSD+
 // transfer there is nothing to review.
 const NoSendsGate = ({ onBack }: { onBack: () => void }) => (
   <View style={styles.gate}>
@@ -89,7 +89,7 @@ const NoSendsGate = ({ onBack }: { onBack: () => void }) => (
     </View>
     <Text style={styles.gateTitle}>Aún no tienes transacciones para reseñar</Text>
     <Text style={styles.gateText}>
-      Las reseñas se conectan a una transacción real de USDC o cUSD para que la información
+      Las reseñas se conectan a una transacción real de USDT o cUSD+ para que la información
       del directorio sea confiable. Cuando hayas comprado o vendido con una financiera,
       vuelve aquí para contar tu experiencia.
     </Text>
@@ -135,21 +135,21 @@ export const FinancieraReviewScreen = () => {
   const previewPer100 =
     sent > 0 && received > 0 ? Math.round((received / sent) * 100 * 10) / 10 : null;
 
-  // Soft typo guard. The API hard-rejects fiat > USDC/cUSD only for sell-side reviews.
-  const isBuyingUsdc = selectedSend?.direction === 'received';
+  // Soft typo guard. The API hard-rejects fiat > USDT/cUSD+ only for sell-side reviews.
+  const isBuyingUsdt = selectedSend?.direction === 'received';
   const amountWarning =
     sent > 0 && received > 0
-      ? !isBuyingUsdc && received > sent
-        ? `La transacción fue de ${formatNumber(sent, { maximumFractionDigits: 2 })} ${selectedSend ? tokenLabel(selectedSend.token) : 'USDC'} — el monto en dólares no puede ser mayor.`
+      ? !isBuyingUsdt && received > sent
+        ? `La transacción fue de ${formatNumber(sent, { maximumFractionDigits: 2 })} ${selectedSend ? tokenLabel(selectedSend.token) : 'USDT'} — el monto en dólares no puede ser mayor.`
         : received < sent / 2
-        ? isBuyingUsdc
+        ? isBuyingUsdt
           ? 'Eso es menos de la mitad de lo que recibiste. Revisa el monto.'
           : 'Eso es menos de la mitad de lo que enviaste. Revisa el monto.'
         : null
       : null;
 
   const canSubmit =
-    !!selectedSend && rating > 0 && received > 0 && (isBuyingUsdc || received <= sent) && !submitting;
+    !!selectedSend && rating > 0 && received > 0 && (isBuyingUsdt || received <= sent) && !submitting;
 
   const submitReview = async () => {
     if (!selectedSend) return;
@@ -289,11 +289,11 @@ export const FinancieraReviewScreen = () => {
           {/* Received amount */}
           <View style={styles.card}>
             <Text style={styles.label}>
-              {isBuyingUsdc ? '¿Cuánto pagaste en dólares (USD)?' : '¿Cuánto recibiste en dólares (USD)?'}
+              {isBuyingUsdt ? '¿Cuánto pagaste en dólares (USD)?' : '¿Cuánto recibiste en dólares (USD)?'}
             </Text>
             {selectedSend && (
               <Text style={styles.sublabel}>
-                {isBuyingUsdc ? 'Recibiste' : 'Enviaste'} {formatNumber(sent, { maximumFractionDigits: 2 })} {tokenLabel(selectedSend.token)}
+                {isBuyingUsdt ? 'Recibiste' : 'Enviaste'} {formatNumber(sent, { maximumFractionDigits: 2 })} {tokenLabel(selectedSend.token)}
               </Text>
             )}
             <View style={styles.usdInputWrap}>
@@ -318,11 +318,11 @@ export const FinancieraReviewScreen = () => {
             {previewPer100 != null && amountWarning == null && (
               <View style={styles.preview}>
                 <Text style={styles.previewText}>
-                  Equivale a 100 {selectedSend ? tokenLabel(selectedSend.token) : 'USDC'} →{' '}
+                  Equivale a 100 {selectedSend ? tokenLabel(selectedSend.token) : 'USDT'} →{' '}
                   <Text style={styles.previewStrong}>
                     ${formatNumber(previewPer100, { maximumFractionDigits: 1 })}
                   </Text>
-                  {isBuyingUsdc ? ' pagados' : ' recibidos'}
+                  {isBuyingUsdt ? ' pagados' : ' recibidos'}
                 </Text>
               </View>
             )}

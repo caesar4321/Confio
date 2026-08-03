@@ -79,7 +79,7 @@ const MyFinancieraCard = ({
             </Text>
             <Text style={styles.statDim}>· {financiera.reviewCount} reseñas</Text>
             <Text style={styles.statDim}>
-              · 100 USDC →{' '}
+              · 100 USDT →{' '}
               {financiera.avgReceivedPer100 != null
                 ? `$${formatNumber(financiera.avgReceivedPer100, { maximumFractionDigits: 1 })}`
                 : '—'}

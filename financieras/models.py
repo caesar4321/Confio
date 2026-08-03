@@ -3,14 +3,13 @@ Financieras directory models.
 
 Confío does NOT intermediate these exchanges. We only list financieras and
 liquidity providers with their WhatsApp, service area and community ratings so
-users can convert USDC with a counterparty they can verify.
+users can convert USDT with a counterparty they can verify.
 
 Key invariants:
 - Registration requires the owner to have completed identity verification and
-  to commit to accepting USDC over the Algorand network (the only rail at
-  launch).
+  to commit to accepting USDT over BNB Smart Chain (the only rail).
 - The exchange rate is never registered by the financiera. It is derived from
-  what verified users report in reviews ("envié 100 USDC, recibí $98").
+  what verified users report in reviews ("envié 100 USDT, recibí $98").
 - Reviews are shown anonymously; the reviewer FK exists only for moderation
   and rate-limiting, and must never be exposed through the API.
 """
@@ -120,12 +119,14 @@ class Financiera(SoftDeleteModel):
         help_text='Digits-only E.164 without +, e.g. 584141234567',
     )
 
-    # Services. Supporting USDC over Algorand is mandatory to be listed — the
-    # only rail at launch. Kept as a column (not implied) so the requirement is
-    # explicit, auditable, and future rails can be added alongside it.
+    # Services. Supporting USDT over BNB Smart Chain is mandatory to be
+    # listed — the only rail. Kept as a column (not implied) so the requirement
+    # is explicit, auditable, and future rails can be added alongside it. The
+    # column name predates the rail switch; renaming it would churn the
+    # GraphQL field the mobile app already queries.
     supports_usdc_algorand = models.BooleanField(
         default=False,
-        help_text='Mandatory: accepts USDC over the Algorand network',
+        help_text='Mandatory: accepts USDT over BNB Smart Chain (BEP-20)',
     )
     has_physical_location = models.BooleanField(
         default=True,
@@ -220,7 +221,7 @@ class Financiera(SoftDeleteModel):
 
     @property
     def avg_received_per_100(self):
-        """Median USD received per 100 USDC sent, from sell/outflow reviews.
+        """Median USD received per 100 USDT sent, from sell/outflow reviews.
 
         None until MIN_DISTINCT_RATE_REVIEWERS distinct users have reviewed.
         Keeps its historical name because the mobile app queries
@@ -244,9 +245,10 @@ class Financiera(SoftDeleteModel):
 
 class FinancieraReview(SoftDeleteModel):
     """Anonymous review by an identity-verified user, anchored to a real
-    USDC-Algorand transaction.
+    USDT-BSC transaction.
 
-    Every review must reference exactly one confirmed USDC outflow owned by the
+    Every review must reference exactly one confirmed dollar-stable outflow
+    owned by the
     reviewer — either a Confío send or an external withdrawal — and each
     transaction can back at most one review. sent_usdc is copied from the
     transaction server-side, never taken from the client, so the directory's
@@ -269,7 +271,7 @@ class FinancieraReview(SoftDeleteModel):
         related_name='financiera_reviews',
         null=True,
         blank=True,
-        help_text='Confirmed USDC send backing this review (XOR usdc_withdrawal)',
+        help_text='Confirmed dollar-stable send backing this review (XOR usdc_withdrawal)',
     )
     usdc_withdrawal = models.ForeignKey(
         'usdc_transactions.USDCWithdrawal',
@@ -277,21 +279,25 @@ class FinancieraReview(SoftDeleteModel):
         related_name='financiera_reviews',
         null=True,
         blank=True,
-        help_text='Completed USDC withdrawal backing this review (XOR send_transaction)',
+        help_text='Completed legacy USDC withdrawal backing this review (XOR send_transaction)',
     )
     rating = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)]
     )
+    # USDT/cUSD+ are the current BSC rail; USDC/cUSD stay as choices because
+    # reviews backed by the retired Algorand rail must keep rendering.
     SENT_TOKEN_CHOICES = [
+        ('USDT', 'Tether USD'),
+        ('CUSD_PLUS', 'Confío Dollar Plus'),
         ('USDC', 'USD Coin'),
         ('CUSD', 'Confío Dollar'),
     ]
     sent_token = models.CharField(
-        max_length=8,
+        max_length=10,
         choices=SENT_TOKEN_CHOICES,
-        default='USDC',
-        help_text='Token of the backing transaction; both are $1-pegged so the '
-                  'derived rate math is identical',
+        default='USDT',
+        help_text='Token of the backing transaction; all are $1-denominated so '
+                  'the derived rate math is identical',
     )
     sent_usdc = models.DecimalField(
         max_digits=18,
@@ -336,7 +342,10 @@ class FinancieraReview(SoftDeleteModel):
         ]
 
     def __str__(self):
-        return f'{self.rating}★ {self.sent_usdc} USDC → ${self.received_usd} ({self.financiera_id})'
+        return (
+            f'{self.rating}★ {self.sent_usdc} {self.sent_token} '
+            f'→ ${self.received_usd} ({self.financiera_id})'
+        )
 
 
 class FinancieraReport(SoftDeleteModel):

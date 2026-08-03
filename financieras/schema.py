@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 VALID_COUNTRY_CODES = {code for code, _label in COUNTRY_CHOICES}
 
-# A financiera always keeps a cut, so receiving more USD than USDC sent is
+# A financiera always keeps a cut, so receiving more USD than USDT sent is
 # implausible and almost certainly a typo that would poison the derived rate.
 MAX_RECEIVED_RATIO = Decimal('1')
 REVIEW_COOLDOWN = timedelta(hours=24)
@@ -40,7 +40,7 @@ REVIEWABLE_TX_MAX_AGE = timedelta(days=90)
 
 
 class FinancieraReviewType(DjangoObjectType):
-    direction = graphene.String(description="'sent' if user sold USDC/cUSD, 'received' if user bought")
+    direction = graphene.String(description="'sent' if user sold USDT/cUSD+, 'received' if user bought")
 
     class Meta:
         model = FinancieraReview
@@ -63,7 +63,7 @@ class FinancieraType(DjangoObjectType):
     )
     avg_received_per_100 = graphene.Float(
         description=(
-            'Median USD received per 100 USDC sent, derived from reviews; '
+            'Median USD received per 100 USDT sent, derived from reviews; '
             f'null until {MIN_DISTINCT_RATE_REVIEWERS}+ distinct verified users have reviewed'
         )
     )
@@ -168,7 +168,10 @@ class ReviewableUsdcSendType(graphene.ObjectType):
     id = graphene.ID()
     kind = graphene.String(description="'send' (Confío transfer) or 'withdrawal' (external)")
     direction = graphene.String(description="'sent' or 'received'")
-    token = graphene.String(description="'USDC' or 'CUSD' (withdrawals are always USDC)")
+    token = graphene.String(
+        description="'USDT' or 'CUSD_PLUS' on the BSC rail; legacy rows may be "
+                    "'USDC'/'CUSD' (withdrawals are always USDC)"
+    )
     amount_usdc = graphene.Decimal()
     destination = graphene.String(description='Counterparty/address, for recognition')
     created_at = graphene.DateTime()
@@ -208,7 +211,7 @@ class Query(graphene.ObjectType):
     )
     my_reviewable_usdc_sends = graphene.List(
         ReviewableUsdcSendType,
-        description='Recent confirmed USDC outflows not yet backing a review',
+        description='Recent confirmed dollar-stable outflows not yet backing a review',
     )
     financiera_countries = graphene.List(
         FinancieraCountryType,
@@ -262,7 +265,7 @@ class Query(graphene.ObjectType):
             )
 
         if sort_by == 'rate':
-            # Most dollars received per 100 USDC first. Listings whose rate is
+            # Most dollars received per 100 USDT first. Listings whose rate is
             # still hidden (fewer distinct reviewers than the public threshold)
             # sort with the unreviewed ones, so a listing never ranks on a
             # number users can't see.
@@ -413,11 +416,11 @@ class RegisterFinanciera(graphene.Mutation):
                 success=False,
                 error='Debes verificar tu identidad para registrar una financiera.',
             )
-        # Mandatory at launch: USDC over Algorand is the only supported rail.
+        # Mandatory: USDT over BNB Smart Chain is the only supported rail.
         if not supports_usdc_algorand:
             return RegisterFinanciera(
                 success=False,
-                error='Para registrarte debes aceptar USDC por la red Algorand.',
+                error='Para registrarte debes aceptar USDT por la red BNB Smart Chain.',
             )
         country_code = (country_code or '').upper().strip()
         if country_code not in VALID_COUNTRY_CODES:
@@ -648,10 +651,13 @@ class DeleteFinanciera(graphene.Mutation):
         return DeleteFinanciera(success=True)
 
 
-# Within-app transfers can be in cUSD too — it's the app's main balance, so a
-# financiera on Confío usually receives cUSD. Both tokens are $1-pegged, so the
-# derived rate math is identical. External withdrawals are USDC by nature.
-REVIEWABLE_SEND_TOKENS = ('USDC', 'CUSD')
+# Within-app transfers can be in cUSD+ too — it's the app's main balance, so a
+# financiera on Confío usually receives cUSD+. Every token here is recorded
+# with a USD-denominated amount, so the derived rate math is identical. The
+# legacy Algorand pair (USDC/cUSD) stays reviewable while transactions from
+# that rail are still inside the 90-day review window; external USDC
+# withdrawals are handled separately below.
+REVIEWABLE_SEND_TOKENS = ('USDT', 'CUSD_PLUS', 'USDC', 'CUSD')
 
 
 def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
@@ -708,7 +714,7 @@ def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
 
 
 class SubmitFinancieraReview(graphene.Mutation):
-    """Reviews must be anchored to a real USDC-Algorand transaction. The
+    """Reviews must be anchored to a real USDT-BSC transaction. The
     transaction amount comes from the server, never from the client."""
 
     class Arguments:
@@ -717,10 +723,10 @@ class SubmitFinancieraReview(graphene.Mutation):
         received_usd = graphene.Decimal(required=True)
         comment = graphene.String()
         send_transaction_id = graphene.ID(
-            description='Confirmed USDC send backing this review'
+            description='Confirmed dollar-stable send backing this review'
         )
         usdc_withdrawal_id = graphene.ID(
-            description='Completed USDC withdrawal backing this review'
+            description='Completed legacy USDC withdrawal backing this review'
         )
 
     success = graphene.Boolean()
@@ -763,11 +769,11 @@ class SubmitFinancieraReview(graphene.Mutation):
             return SubmitFinancieraReview(success=False, error='El monto debe ser mayor a cero.')
         # Hard plausibility gate for sell/outflow reviews. Buy-side reviews are
         # valid reputation signals, but they do not feed the public cash-out
-        # rate because the user may pay more fiat than the USDC/cUSD received.
+        # rate because the user may pay more fiat than the USDT/cUSD+ received.
         if direction == 'sent' and received > sent * MAX_RECEIVED_RATIO:
             return SubmitFinancieraReview(
                 success=False,
-                error='El monto no puede ser mayor que la transacción en USDC/cUSD. Revisa el monto.',
+                error='El monto en dólares no puede ser mayor que la transacción. Revisa el monto.',
             )
         recent = FinancieraReview.objects.filter(
             financiera=financiera,

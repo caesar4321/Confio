@@ -19,6 +19,29 @@ import { chainNow, CHAIN_ENDPOINTS } from './chainClock';
 export const OUTAGE_IMMEDIATE_SECONDS = 24 * 3600;
 export const NORMAL_COOLOFF_SECONDS = 24 * 3600;
 
+/**
+ * How long an elapsed cooloff stays usable before it re-arms.
+ *
+ * The wait is an anti-coercion device: it defends against whoever is on
+ * the phone with the user RIGHT NOW. A cooloff that, once served, unlocked
+ * the account forever turned that into a one-time toll — and the cheapest
+ * attack became "get them to tap a button that visibly moves no money,
+ * come back next week". So an unlock is an INTENT with a shelf life: use
+ * it within the window or serve the wait again.
+ *
+ * Costs a real emergency nothing: ban and 24h-outage set `immediate`,
+ * which never reads the cooloff at all. Missing the window only bites in
+ * the NORMAL state, where ordinary sends work — worst case is "re-arm and
+ * wait a day", never "can't reach my money".
+ *
+ * 72h, not a week: the thing this bounds is the pool of DORMANT armed
+ * accounts (armed, forgotten, permanently drainable in one session), and a
+ * week is generous to precisely that population. 72h from eligibility
+ * still covers the weekend pattern — arm Friday, eligible Saturday, act
+ * Monday — which 48h does not.
+ */
+export const COOLOFF_VALID_SECONDS = 72 * 3600;
+
 export type EmergencyState = 'normal' | 'outage' | 'offline' | 'banned';
 
 export interface KVStore {
@@ -178,7 +201,7 @@ export const evaluateEmergencyState = async (
 
 export interface ExitEligibility {
   eligible: boolean;
-  reason: 'immediate' | 'cooloff_elapsed' | 'cooloff_pending' | 'no_request' | 'offline';
+  reason: 'immediate' | 'cooloff_elapsed' | 'cooloff_pending' | 'cooloff_expired' | 'no_request' | 'offline';
   remainingSec?: number;
   requestedAtSec?: number;
 }
@@ -196,6 +219,17 @@ export const requestExitCooloff = async (
 };
 
 export const cancelExitCooloff = async (store: KVStore, accountKey: string): Promise<void> =>
+  store.del(cooloffKey(accountKey));
+
+/**
+ * Spend the unlock. Call this ONLY after an exit actually broadcast, so
+ * the next voluntary exit serves the wait again.
+ *
+ * Deliberately not called on failure: a partial or failed exit must stay
+ * retryable this instant — re-arming mid-emergency, with funds half-moved,
+ * would be the cruellest possible moment to impose a day's wait.
+ */
+export const consumeExitCooloff = async (store: KVStore, accountKey: string): Promise<void> =>
   store.del(cooloffKey(accountKey));
 
 /** DEV-ONLY QA helper: backdate the pending cooloff so stage 2 renders
@@ -221,6 +255,13 @@ export const getExitEligibility = async (
   if (!raw) return { eligible: false, reason: 'no_request' };
   const requestedAtSec = parseInt(raw, 10);
   const elapsed = state.chainNowSec - requestedAtSec;
+  if (elapsed >= NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS) {
+    // Stale unlock: drop it so the user is offered a fresh wait rather
+    // than a dead button. Deleting here (not just reporting) keeps the
+    // stored state and the answer from drifting apart.
+    await store.del(cooloffKey(accountKey));
+    return { eligible: false, reason: 'cooloff_expired', requestedAtSec };
+  }
   if (elapsed >= NORMAL_COOLOFF_SECONDS) {
     return { eligible: true, reason: 'cooloff_elapsed', requestedAtSec };
   }
