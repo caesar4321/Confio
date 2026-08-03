@@ -10,6 +10,8 @@ import { PREPARE_PAYROLL_ITEM_PAYOUT, SUBMIT_PAYROLL_ITEM_PAYOUT } from '../apol
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
+import { useAtomicAccountSwitch } from '../hooks/useAtomicAccountSwitch';
+import { payrollPayAccountFor, isPayrollContextReady } from './payrollPayContext';
 import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -19,29 +21,10 @@ import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollPending'>;
 
-const statusStyles = (status: string) => {
-  const key = (status || '').toLowerCase();
-  switch (key) {
-    case 'pending':
-      return { bg: { backgroundColor: '#fff7ed' }, fg: { color: '#9a3412' }, label: 'Pendiente' };
-    case 'ready':
-    case 'prepared':
-      return { bg: { backgroundColor: '#ecfeff' }, fg: { color: '#0e7490' }, label: 'Listo' };
-    case 'submitted':
-      return { bg: { backgroundColor: '#e0f2fe' }, fg: { color: '#075985' }, label: 'Enviado' };
-    case 'confirmed':
-    case 'completed':
-      return { bg: { backgroundColor: colors.primarySoft }, fg: { color: '#166534' }, label: 'Completado' };
-    case 'failed':
-      return { bg: { backgroundColor: colors.error.background }, fg: { color: colors.error.icon }, label: 'Fallido' };
-    default:
-      return { bg: { backgroundColor: colors.neutralDark }, fg: { color: colors.text.primary }, label: status || '—' };
-  }
-};
-
 export const PayrollPendingScreen = () => {
   const navigation = useNavigation<NavigationProp>();
-  const { activeAccount } = useAccount();
+  const { activeAccount, accounts } = useAccount();
+  const { switchAccount: atomicSwitchAccount } = useAtomicAccountSwitch();
   const { data, loading, refetch } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
     fetchPolicy: 'cache-and-network',
   });
@@ -67,7 +50,43 @@ export const PayrollPendingScreen = () => {
     return true;
   }, [activeAccount?.employeePermissions]);
 
-  const ensureBusinessContext = useCallback(async () => true, []);
+  // Put the caller in the item's business context before any money moves.
+  // Was a stub that always returned true, which is how a delegate reached
+  // the payout mutation from their personal account and got
+  // `business_context_required` back.
+  const ensureBusinessContext = useCallback(async (item: any): Promise<boolean> => {
+    if (isPayrollContextReady(item, activeAccount)) return true;
+
+    const businessName = item?.run?.business?.name || 'este negocio';
+    const target = payrollPayAccountFor(item, accounts);
+    if (!target) {
+      // Reads reach further than writes: the server serves a delegate their
+      // pending items even where they hold no business account. Say which
+      // door is missing rather than failing at the signature.
+      Alert.alert(
+        'Sin acceso a la cuenta',
+        `Para pagar la nómina de ${businessName} necesitas su cuenta de negocio. `
+        + 'Pide al dueño que te agregue como empleado con permiso para enviar fondos.',
+        [{ text: 'Entendido' }],
+      );
+      return false;
+    }
+
+    setIsProcessing(true);
+    setProcessingMessage(`Cambiando a ${businessName}…`);
+    try {
+      const ok = await atomicSwitchAccount(target.id);
+      if (!ok) return false;           // the switch reports its own error
+    } catch {
+      return false;
+    } finally {
+      // handlePay re-raises these itself; leaving them set would strand the
+      // overlay when the switch fails or the user cancels biometrics.
+      setIsProcessing(false);
+      setProcessingMessage('');
+    }
+    return true;
+  }, [activeAccount, accounts, atomicSwitchAccount]);
 
   useFocusEffect(useCallback(() => {
     refetch();
@@ -86,7 +105,9 @@ export const PayrollPendingScreen = () => {
 
   const handlePay = async (item: any) => {
     if (payingItemId) return;
-    const okCtx = await ensureBusinessContext();
+    // BEFORE biometrics on purpose: no point asking someone to authorize a
+    // payment we already know we cannot route.
+    const okCtx = await ensureBusinessContext(item);
     if (!okCtx) return;
 
     // Require biometric authentication for approving payroll payment

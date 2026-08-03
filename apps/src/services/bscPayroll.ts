@@ -83,6 +83,12 @@ export const BSC_PAYROLL_ERRORS: Record<string, string> = {
   not_onchain_delegate:
     'Tu cuenta aún no está autorizada para pagar nómina de este negocio. Pide al dueño que te autorice.',
   insufficient_escrow: 'El fondo de nómina no alcanza. Deposita primero.',
+  // Belt to PayrollPendingScreen's braces: the screen switches into the
+  // item's business context before paying, so this should be unreachable —
+  // but it used to surface as a bare error CODE, and a delegate reading
+  // "business_context_required" learns nothing about what to do.
+  business_context_required:
+    'Cambia a la cuenta de negocio para pagar esta nómina.',
   // Names WHERE the money has to be. A business reading a bare "Saldo
   // insuficiente" over a balance it can see has no way to know the top-up
   // draws on its business account, not on the payroll vault.
