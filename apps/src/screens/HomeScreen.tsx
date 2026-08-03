@@ -929,13 +929,14 @@ export const HomeScreen = () => {
     setRechargeSheetVisible(true);
   }, []);
 
-  // What the BSC withdrawal rail can actually move in ONE operation: it
-  // redeems the vault OR transfers raw USDT, never both, so max() is the
-  // honest headline (matching SendUsdtScreen and the sell screen itself).
-  const bscWithdrawableUsd = Math.max(
-    savingsPortfolio.savings.balanceUsd,
-    savingsPortfolio.usdtBalanceUsd,
-  );
+  // What the BSC withdrawal rail can actually move in ONE operation: BOTH
+  // legs. The funding batch redeems the shortfall out of the vault and pays
+  // from the combined balance in a single transaction, and the server's
+  // sufficiency check authorizes on raw + position too — so max() understated
+  // a split balance and sent users to a door that looked too small to use
+  // (audit 2026-08-03 [P2] #13). SUM, matching the sell screens.
+  const bscWithdrawableUsd =
+    savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd;
 
   // Both options land in the user's bank — the differentiator is where the
   // money sits NOW, so subtitles show live balances instead of destinations.

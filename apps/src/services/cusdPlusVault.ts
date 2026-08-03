@@ -29,6 +29,28 @@ export const USDT_BSC = '0x55d398326f99059fF775485246999027B3197955';
 
 const MAX_UINT256 = (1n << 256n) - 1n;
 
+/**
+ * Ondo's USDY Instant Manager will not process a redemption below $1.
+ *
+ * Two DIFFERENT numbers, deliberately (round 3 [P2] #7 — the earlier single
+ * constant was cited from ConfioStockRouter's ~$0.98, which is the Global
+ * Markets stock manager, not this one):
+ *
+ *  - IM_MIN_REDEEM_WEI is the hard REJECTION threshold. A position whose
+ *    whole redemption lands under it cannot exit through the vault at all.
+ *    Set at the real $1.00, so a full position worth $1.00-$1.05 — which
+ *    redeems perfectly well — is not refused for no reason.
+ *  - IM_MIN_TARGET_WEI is what we AIM a sized slice at, with margin above
+ *    the boundary so the vault's double flooring cannot land under it. Any
+ *    excess just stays as raw USDT and re-mints on the next savings resume.
+ *
+ * Ondo documents this as a configurable, USD-denominated value, so treat
+ * both as a floor on OUR side rather than a mirror of theirs; if Ondo raises
+ * it, the redeem reverts atomically and nothing is lost.
+ */
+const IM_MIN_REDEEM_WEI = 10n ** 18n;
+const IM_MIN_TARGET_WEI = (105n * 10n ** 18n) / 100n;
+
 export interface SubscribeParams {
   /** cUSD+ vault proxy address (from server config). */
   vaultAddress: string;
@@ -213,12 +235,256 @@ export const getVaultShares = async (
   return res && res !== '0x' ? BigInt(res) : 0n;
 };
 
+/** Raw wallet USDT (18dp), read through the server relay like everything else. */
+export const getUsdtBalanceWei = async (owner: string): Promise<bigint> => {
+  const { selector, encodeAddress } = await import('./evmWallet');
+  const hex = await ethCall(USDT_BSC, selector('balanceOf(address)') + encodeAddress(owner));
+  return hex && hex !== '0x' ? BigInt(hex) : 0n;
+};
+
+/** The vault's share price and guard-validated USDY price, both 1e18. */
+export const getVaultPrices = async (
+  vaultAddress: string,
+): Promise<{ pPlusWad: bigint; oraclePriceWad: bigint }> => {
+  const { selector } = await import('./evmWallet');
+  const [pp, op] = await Promise.all([
+    ethCall(vaultAddress, selector('pPlus()')),
+    ethCall(vaultAddress, selector('lastOraclePrice()')),
+  ]);
+  return {
+    pPlusWad: pp && pp !== '0x' ? BigInt(pp) : 0n,
+    oraclePriceWad: op && op !== '0x' ? BigInt(op) : 0n,
+  };
+};
+
+/**
+ * USDT a redeemToUsdt(shares) would ACTUALLY deliver — the exact mirror of
+ * CusdPlusVault.redeemToUsdt + _imRedeem, which floors TWICE:
+ *   usdyOut = shares × pPlus / p      (floor)
+ *   usdtOut = usdyOut × p / 1e18      (floor)
+ * shares × pPlus / 1e18 is an OVER-estimate and must never be used to decide
+ * whether a redeem covers an amount (mirrors cusd_plus/vault.redeem_usdt_out).
+ */
+export const predictRedeemUsdtOut = (
+  shares: bigint, pPlusWad: bigint, oraclePriceWad: bigint,
+): bigint => {
+  if (oraclePriceWad <= 0n || shares <= 0n) return 0n;
+  const usdyOut = (shares * pPlusWad) / oraclePriceWad;
+  return (usdyOut * oraclePriceWad) / 10n ** 18n;
+};
+
+/** Inverse of the above: shares to burn to net at least `usdtWei`. Rounds UP
+ *  and adds a 1-wei-per-floor cushion, so the prediction never lands short. */
+const sharesForUsdtOut = (
+  usdtWei: bigint, pPlusWad: bigint,
+): bigint => {
+  if (pPlusWad <= 0n || usdtWei <= 0n) return 0n;
+  return (usdtWei * 10n ** 18n + pPlusWad - 1n) / pPlusWad + 2n;
+};
+
+/**
+ * Everything this wallet can actually move out in one withdrawal: raw USDT
+ * plus what the WHOLE position would really redeem to. Both legs, because
+ * the funding batch below spends both — and the predicted (not nominal)
+ * redeem value, so the figure can be withdrawn rather than merely displayed.
+ */
+export const maxWithdrawableUsdtWei = async (params: {
+  owner: string;
+  vaultAddress?: string | null;
+}): Promise<bigint> => {
+  installBscServerTransport();
+  const raw = await getUsdtBalanceWei(params.owner);
+  if (!params.vaultAddress) return raw;
+  const shares = await getVaultShares(params.vaultAddress, params.owner);
+  if (shares <= 0n) return raw;
+  const { pPlusWad, oraclePriceWad } = await getVaultPrices(params.vaultAddress);
+  return raw + predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+};
+
+export class InsufficientWithdrawableError extends Error {
+  readonly availableWei: bigint;
+  constructor(availableWei: bigint) {
+    super('insufficient_withdrawable');
+    this.name = 'InsufficientWithdrawableError';
+    this.availableWei = availableWei;
+  }
+}
+
+/**
+ * Pay `amountWei` of USDT to `to` (a ramp provider's deposit address),
+ * redeeming cUSD+ shares first if raw USDT doesn't cover it — as ONE
+ * sponsored batch.
+ *
+ * Why one batch (audit 2026-08-03 [P1]): the redeem and the transfer used to
+ * be two separate sponsored calls seconds apart, and SponsorBscBatch sets a
+ * 30s per-address cooldown on success. The redeem landed, the transfer came
+ * back `rate_limited`, and the only fallback is a self-signed tx needing BNB
+ * the user structurally never has — so every vault-backed withdrawal ended
+ * with the shares redeemed and the provider order unfunded. Batched, the
+ * cooldown is set once, after both legs are already on the wire.
+ *
+ * Atomicity also removes the partial-state window entirely: if the redeem
+ * under-delivers, the transfer reverts with it and nothing moved.
+ *
+ * Share sizing: only the shares actually needed are burned, and minUsdtOut is
+ * derived from the PREDICTED output of exactly those shares (never from the
+ * shortfall alone — a shortfall-sized floor let a whole position burn for a
+ * fraction of its value and still satisfy the order, audit [P1] #4).
+ */
+export const fundUsdtDestination = async (params: {
+  /** Provider deposit address. Unrestricted — exits are never geo-gated. */
+  to: string;
+  /** Exact order amount in 18-dp base units. */
+  amountWei: bigint;
+  /** cUSD+ vault proxy; omit for a wallet that holds only raw USDT. */
+  vaultAddress?: string | null;
+  wallet?: DerivedEvmWallet;
+}): Promise<{ txHash: string; redeemedShares: bigint }> => {
+  installBscServerTransport();
+  const wallet = params.wallet ?? (await getActiveEvmWallet());
+  const { to, amountWei, vaultAddress } = params;
+
+  const transferData = encodeCall('transfer(address,uint256)', [
+    { type: 'address', value: to },
+    { type: 'uint', value: amountWei },
+  ]);
+
+  const rawUsdt = await getUsdtBalanceWei(wallet.address);
+  let calls: BatchCall[] = [{ to: USDT_BSC, valueWei: 0n, data: transferData }];
+  let shares = 0n;
+
+  if (rawUsdt < amountWei) {
+    // Short on raw USDT — the shortfall comes out of the vault, in the same
+    // batch. An ineligible user (no shares, no vault) never reaches here
+    // unless they genuinely cannot cover the amount.
+    const shortfall = amountWei - rawUsdt;
+    if (!vaultAddress) throw new InsufficientWithdrawableError(rawUsdt);
+
+    const owned = await getVaultShares(vaultAddress, wallet.address);
+    if (owned <= 0n) throw new InsufficientWithdrawableError(rawUsdt);
+
+    const { pPlusWad, oraclePriceWad } = await getVaultPrices(vaultAddress);
+    if (pPlusWad <= 0n || oraclePriceWad <= 0n) {
+      // Unreadable price: sizing the burn would be a guess. Refuse rather
+      // than redeem blind — the money is still in the user's own wallet.
+      throw new Error('No pudimos leer el precio de tu ahorro. Intenta de nuevo en un momento.');
+    }
+
+    // Size the burn ABOVE the shortfall, for two independent reasons:
+    //
+    //  1. Headroom. Sizing shares to deliver exactly the shortfall and then
+    //     flooring at `max(99% of expected, shortfall)` collapses to exactly
+    //     the predicted output — a nominal 1% tolerance that is really 0%,
+    //     so any Ondo haircut reverts the batch (re-audit [P1] #3).
+    //  2. Ondo's Instant Manager has a $1 minimum redemption. A small
+    //     shortfall would ask for a sub-$1 redeem the IM rejects outright —
+    //     which the old redeem-everything path never hit (re-audit [P1] #2).
+    //
+    // The ORDER being funded is guaranteed by the transfer leg itself: if the
+    // redeem under-delivers, the transfer cannot cover `amountWei` and the
+    // whole atomic batch reverts. That frees minUsdtOut to do its real job —
+    // protecting the VALUE of the shares being burned.
+    const grossedUp = (shortfall * 100n) / 99n + 1n;
+    const target = grossedUp > IM_MIN_TARGET_WEI ? grossedUp : IM_MIN_TARGET_WEI;
+    const needed = sharesForUsdtOut(target, pPlusWad);
+    shares = needed < owned ? needed : owned;
+    const expectedOut = predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+
+    if (expectedOut < IM_MIN_REDEEM_WEI) {
+      // The entire position redeems to less than Ondo will process. Nothing
+      // we can do on-chain — say so instead of broadcasting a certain revert.
+      throw new InsufficientWithdrawableError(rawUsdt);
+    }
+    if (rawUsdt + expectedOut < amountWei) {
+      // The whole position still doesn't cover it — the server authorized
+      // against shares × pPlus, which over-states what a double-floored
+      // redeem delivers. Report the honest figure.
+      throw new InsufficientWithdrawableError(rawUsdt + expectedOut);
+    }
+
+    // Pure value protection now, with genuine room: 1% off what these exact
+    // shares are predicted to yield. Not raised to the shortfall — doing that
+    // is what removed the tolerance in the first place.
+    //
+    // KNOWN, BOUNDED EXPOSURE (round 3 [P1] #6): this is priced off the
+    // CURRENT pPlus, but redeemToUsdt calls accrue() first. If an accrual
+    // lands between this read and execution, pPlus rises by at most
+    // MAX_ACCRUAL_JUMP_BPS (2%) net of the vault's yield share (~1.7%), so
+    // the floor is worth ~0.99/1.017 = 97.35% of execution-time value — a
+    // worst case of ~2.65%, and only when a bad IM fill coincides with an
+    // accrual. Deliberately NOT tightened here: a tighter client-side floor
+    // buys a fraction of a percent and pays for it in reverted withdrawals,
+    // which is the trade that broke this path once already. The real fix is
+    // contract-side — pass a slippage BPS and let the vault compute the
+    // floor AFTER accrue(), where the execution-time value is known.
+    const minUsdtOut = (expectedOut * 99n) / 100n;
+
+    calls = [
+      {
+        to: vaultAddress,
+        valueWei: 0n,
+        data: encodeCall('redeemToUsdt(uint256,uint256,address)', [
+          { type: 'uint', value: shares },
+          { type: 'uint', value: minUsdtOut },
+          // To OURSELVES: the vault paying the provider directly would bind
+          // the burn to a cached valuation. Atomic, so there is no window.
+          { type: 'address', value: wallet.address },
+        ]),
+      },
+      ...calls,
+    ];
+  }
+
+  const sponsored = await fetchSponsored7702Params();
+  if (sponsored.enabled && sponsored.delegateAddress) {
+    const rec = await executeSponsoredBatch({
+      wallet,
+      calls,
+      delegateAddress: sponsored.delegateAddress,
+    });
+    return { txHash: rec.txHash, redeemedShares: shares };
+  }
+
+  // ── legacy self-signed path (needs the user's OWN BNB) ──
+  // Reached only when sponsorship is switched OFF server-side. A sponsored
+  // batch that FAILED is never retried here: it may already be on the
+  // network, and a second transfer would pay an already-funded provider
+  // order twice (audit [P1] #2).
+  //
+  // Vault-backed funding is NOT offered on this path. Two self-signed
+  // transactions cannot give the atomicity this function promises — the
+  // redeem could land and the transfer fail, leaving burned shares and an
+  // unfunded order, which is the exact failure the batch exists to prevent
+  // (re-audit [P2] #8). Raw-USDT-only funding is a single transfer and is
+  // still safe, so it continues.
+  if (shares > 0n) {
+    throw new Error(
+      'Los retiros desde tu ahorro no están disponibles en este momento. '
+      + 'Intenta de nuevo en unos minutos.',
+    );
+  }
+  const rec: BscReceipt = await sendCall({
+    from: wallet.address,
+    privKeyHex: wallet.privKeyHex,
+    to: USDT_BSC,
+    data: transferData,
+    gasLimit: 80_000n,
+  });
+  return { txHash: rec.transactionHash, redeemedShares: shares };
+};
+
 /**
  * Withdraw from cUSD+ back to USDT-BSC (redeemToUsdt). Burns `shares` and
- * sends USDT to `recipient` (defaults to the user's own address; the
- * Guardarian off-ramp passes the sell order's deposit address so the vault
- * pays the ramp directly — no intermediate hop). The USD amount is
- * shares × pPlus (server displays the quote); minUsdtOut is the slippage floor.
+ * sends USDT to `recipient`, defaulting to the user's own address.
+ *
+ * NOT the off-ramp path: both ramp rails now go through
+ * fundUsdtDestination(), which redeems to the USER and pays the provider in
+ * the same atomic batch. Nothing redeems straight to a provider's deposit
+ * address any more — that bound the burn to a cached valuation. This is the
+ * plain "move my savings back to spendable USDT" primitive.
+ *
+ * minUsdtOut is the slippage floor; note the vault floors TWICE on the way
+ * out, so shares × pPlus over-states the result (see predictRedeemUsdtOut).
  */
 export const redeemSavingsToUsdt = async (params: {
   vaultAddress: string;

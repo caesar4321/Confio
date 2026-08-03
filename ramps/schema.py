@@ -1,5 +1,6 @@
 import logging
-from decimal import Decimal, InvalidOperation
+import re
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from types import SimpleNamespace
 
 import graphene
@@ -882,7 +883,12 @@ class CreateRampOrder(graphene.Mutation):
             return RampOrderType(success=False, error='direction must be ON_RAMP or OFF_RAMP')
 
         try:
-            decimal_amount = Decimal(str(amount))
+            # Canonicalize to the 6dp grain the on-chain transfer actually
+            # moves, truncating. The client already sends a canonical value;
+            # doing it here too means the quote, the order and the transfer
+            # cannot disagree even for an older build (re-audit [P1] #4).
+            decimal_amount = Decimal(str(amount)).quantize(
+                Decimal('0.000001'), rounding=ROUND_DOWN)
         except (InvalidOperation, TypeError):
             return RampOrderType(success=False, error='Invalid amount')
 
@@ -946,18 +952,44 @@ class CreateRampOrder(graphene.Mutation):
                     # raw USDT that landed but hasn't minted (and never will,
                     # for an Ondo-ineligible user). Checking raw USDT alone
                     # refused users whose money was simply already earning —
-                    # the client redeems the shortfall to its own address
-                    # before funding, so both legs are genuinely spendable.
-                    # fresh=True: sufficiency must not pass/fail on a 30s-stale
-                    # figure; RPC failure raises into the outer error handler.
+                    # the funding batch redeems the shortfall and pays from
+                    # both legs, so both are genuinely spendable.
+                    #
+                    # withdrawable_usdt_wei, not raw + position_usd: every read
+                    # is fresh (no 30s cache, no 7-day last-known fallback) and
+                    # the vault leg is the TRUE redeem output rather than
+                    # shares x pPlus, which over-states it and authorized
+                    # orders the client then could not fund (audit [P2] #11).
+                    # RPC failure raises into the outer error handler.
                     raw_usdt = (
-                        Decimal(cusd_plus_vault.usdt_balance_raw(current_account.bsc_address, fresh=True))
+                        Decimal(cusd_plus_vault.usdt_balance_raw(
+                            current_account.bsc_address, fresh=True))
                         / Decimal(10 ** 18)
                     )
-                    vault_usd = Decimal(str(
-                        cusd_plus_vault.position_usd(current_account.bsc_address)
-                    ))
-                    available_usdt = raw_usdt + vault_usd
+                    available_usdt = (
+                        Decimal(cusd_plus_vault.withdrawable_usdt_wei(current_account.bsc_address))
+                        / Decimal(10 ** 18)
+                    )
+                    # Worth is not the same as withdrawable: redeemToUsdt is
+                    # whenNotPaused and refuses while the oracle guard is
+                    # tripped. Creating an order the client provably cannot
+                    # fund just strands it (re-audit [P2] #9).
+                    #
+                    # ONLY when a redeem is actually required. Checking this
+                    # unconditionally turned a vault pause into an EXIT GATE
+                    # on people whose withdrawal never touches the vault — an
+                    # Ondo-ineligible user holds raw USDT and their funding is
+                    # a bare USDT.transfer (round 3 [P1] #2). Exits are never
+                    # gated; that is the whole point of the raw-USDT leg.
+                    if raw_usdt < decimal_amount:
+                        blocked = cusd_plus_vault.redeem_blocked_reason()
+                        if blocked:
+                            logger.warning('savings off-ramp refused: %s', blocked)
+                            return RampOrderType(
+                                success=False,
+                                error=('Los retiros desde tu ahorro están pausados por un momento. '
+                                       'Vuelve a intentar en unos minutos.'),
+                            )
                     if available_usdt < decimal_amount:
                         return RampOrderType(
                             success=False,
@@ -1107,7 +1139,13 @@ class CreateRampOrder(graphene.Mutation):
             rate_display=result.rate_display,
             next_step=result.next_step,
             next_action_url=result.next_action_url,
-            payment_details=result.raw_response,
+            payment_details=annotate_koywe_deposit_address(
+                result.raw_response, savings_rail=savings_rail,
+                allow_funding=_provider_amount_matches(
+                    result.amount_in, decimal_amount,
+                    enforce=(normalized_direction == 'OFF_RAMP'),
+                ),
+            ),
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=result.raw_response,
                 next_action_url=result.next_action_url,
@@ -1548,7 +1586,25 @@ class Query(graphene.ObjectType):
             status=result.status,
             status_details=result.status_details,
             next_action_url=result.next_action_url,
-            payment_details=result.raw_response,
+            payment_details=annotate_koywe_deposit_address(
+                result.raw_response,
+                savings_rail=(getattr(ramp_tx, 'destination', None) == 'cusd_plus'),
+                # Re-verify on EVERY read, against the amount this order was
+                # created for. Defaulting to allow_funding=True here handed a
+                # fresh vouched address to any resume path and quietly undid
+                # the creation-time refusal (round 3 [P2] #9).
+                # No row means nothing to verify the provider's amount
+                # against, so enforcement must stay ON and fail closed —
+                # reading `direction` off a missing row yielded enforce=False,
+                # which vouched for an address with no order behind it
+                # (round 4 [P2] #11).
+                allow_funding=_provider_amount_matches(
+                    getattr(result, 'amount_in', None),
+                    _ramp_tx_crypto_amount(ramp_tx),
+                    enforce=(ramp_tx is None
+                             or (getattr(ramp_tx, 'direction', '') or '').lower() == 'off_ramp'),
+                ),
+            ),
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=result.raw_response,
                 next_action_url=result.next_action_url,
@@ -1739,6 +1795,172 @@ def _get_saved_bank_info(*, current_account, bank_info_id):
 
 def _get_koywe_destination_address(*, current_account) -> str | None:
     return getattr(current_account, 'algorand_address', None)
+
+
+# The ONE key the client is allowed to fund from. Namespaced so it can never
+# collide with a provider field.
+CONFIO_DEPOSIT_ADDRESS_KEY = 'confioDepositAddress'
+CONFIO_DEPOSIT_NETWORK_KEY = 'confioDepositNetwork'
+
+# Documented Koywe fields that carry the deposit address, ORDER-SPECIFIC
+# FIRST. `providedAddress` is ranked last on purpose: koywe_client's
+# _merge_payment_provider_details copies paymentProvider.details into it, and
+# paymentProvider is generic provider metadata rather than this order's
+# deposit target. Ranking it first meant a response carrying both would fund
+# the metadata instead of the order (re-audit [P1] #1).
+_KOYWE_DEPOSIT_ADDRESS_FIELDS = (
+    'depositAddress', 'walletAddress', 'address', 'providedAddress',
+)
+
+_EVM_ADDRESS_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
+_ALGO_ADDRESS_RE = re.compile(r'^[A-Z2-7]{58}$')
+
+# Never a valid destination for a user's funds.
+_EVM_FORBIDDEN_DESTINATIONS = frozenset({
+    '0x0000000000000000000000000000000000000000',
+    '0x55d398326f99059ff775485246999027b3197955',  # USDT-BSC itself
+})
+
+
+def _ramp_tx_crypto_amount(ramp_tx) -> Decimal | None:
+    """The crypto amount an off-ramp order was created for, canonicalized.
+
+    None when there is no row to compare against — the caller then cannot
+    verify anything and must not vouch for funding.
+    """
+    if ramp_tx is None:
+        return None
+    raw = getattr(ramp_tx, 'crypto_amount_estimated', None)
+    if raw is None:
+        return None
+    try:
+        return Decimal(str(raw)).quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _provider_amount_matches(provider_amount_in, requested, *,
+                             enforce: bool) -> bool:
+    """Does the provider intend to charge exactly what we asked for?
+
+    The client funds the amount IT ordered and never looked at what Koywe
+    echoed back, so a provider-side normalization would have the transfer
+    paying a different number than the order it funds (re-audit [P1] #4).
+    Unreadable or mismatched => no auto-funding.
+
+    `enforce` is False on ON_RAMP, where amount_in is the fiat the user pays
+    a bank and no on-chain transfer of ours depends on it.
+    """
+    if not enforce:
+        return True
+    if requested is None:
+        logger.error('No recorded order amount to verify against; refusing to auto-fund')
+        return False
+    try:
+        echoed = Decimal(str(provider_amount_in)).quantize(
+            Decimal('0.000001'), rounding=ROUND_DOWN)
+    except (InvalidOperation, TypeError, ValueError):
+        logger.error('Koywe returned an unreadable amount_in (%r); refusing to auto-fund',
+                     provider_amount_in)
+        return False
+    if echoed != requested:
+        logger.error(
+            'Koywe amount_in %s != requested %s; refusing to auto-fund this order',
+            echoed, requested,
+        )
+        return False
+    return True
+
+
+def annotate_koywe_deposit_address(raw_response, *, savings_rail: bool,
+                                   allow_funding: bool = True):
+    """Resolve the deposit address ONCE, server-side, from a documented field.
+
+    The client used to walk every string in this blob and fund the first
+    `0x…`-shaped match it found. Field order in a JSON object is not a
+    contract: a response carrying `tokenAddress` (the USDT contract) before
+    the deposit address would have sent the user's withdrawal to a token
+    contract, unrecoverably (audit 2026-08-03 [P1] #5).
+
+    Returns the payload with a namespaced, validated address attached, or
+    without it when nothing valid was found — in which case the client
+    refuses to fund rather than guessing.
+    """
+    if not isinstance(raw_response, dict):
+        return raw_response
+
+    annotated = dict(raw_response)
+    annotated.pop(CONFIO_DEPOSIT_ADDRESS_KEY, None)   # never trust an echo
+    annotated.pop(CONFIO_DEPOSIT_NETWORK_KEY, None)
+
+    if not allow_funding:
+        # The caller could not reconcile what the provider is charging with
+        # what we asked for. Withhold the address so nothing is auto-funded:
+        # paying a number nobody verified is how the deposit ends up
+        # different from the order (re-audit [P1] #4).
+        #
+        # Be precise about what the user gets: automatic funding is REFUSED.
+        # The instructions screen still shows the provider's own payload, so
+        # a determined user can pay by hand, but there is no verified
+        # in-app funding action behind this — the order should be treated as
+        # needing support, not as merely "not funded yet" (round 3 [P2] #10).
+        return annotated
+
+    # Collect EVERY documented field, not just the first. Two documented
+    # fields disagreeing means we cannot tell which one is the order's true
+    # deposit target, and picking by priority would be a guess with the
+    # user's money — so that case fails CLOSED (re-audit [P1] #1).
+    # `providedAddress` is only trustworthy when it came from the ORDER. When
+    # koywe_client synthesized it from paymentProvider.details it is generic
+    # provider metadata wearing an order field's name, and paying it would be
+    # paying whatever that free-text field happens to hold (round 3 [P1] #4).
+    synthesized = bool(raw_response.get('providedAddressFromProviderDetails'))
+
+    seen: list[tuple[str, str]] = []
+    for field in _KOYWE_DEPOSIT_ADDRESS_FIELDS:
+        if field == 'providedAddress' and synthesized:
+            continue
+        value = str(raw_response.get(field) or '').strip()
+        if value:
+            seen.append((field, value))
+
+    if not seen:
+        if synthesized:
+            logger.error(
+                'Koywe order has no order-specific deposit address — only '
+                'paymentProvider.details. Refusing to auto-fund provider metadata; '
+                'the user funds manually from the instructions screen.'
+            )
+        else:
+            logger.warning('Koywe order carries no deposit address field; funding will be refused')
+        return annotated
+
+    distinct = {value.lower() for _, value in seen}
+    if len(distinct) > 1:
+        logger.error(
+            'Koywe order returned conflicting deposit addresses %s; refusing to fund',
+            [f'{field}={value}' for field, value in seen],
+        )
+        return annotated
+
+    candidate = seen[0][1]
+
+    if savings_rail:
+        if not _EVM_ADDRESS_RE.match(candidate):
+            logger.warning('Koywe savings deposit address is not a BSC address; refusing')
+            return annotated
+        if candidate.lower() in _EVM_FORBIDDEN_DESTINATIONS:
+            logger.error('Koywe returned a forbidden BSC destination (%s); refusing', candidate)
+            return annotated
+        annotated[CONFIO_DEPOSIT_NETWORK_KEY] = 'BSC'
+    else:
+        if not _ALGO_ADDRESS_RE.match(candidate):
+            logger.warning('Koywe deposit address is not an Algorand address; refusing')
+            return annotated
+        annotated[CONFIO_DEPOSIT_NETWORK_KEY] = 'ALGO'
+
+    annotated[CONFIO_DEPOSIT_ADDRESS_KEY] = candidate
+    return annotated
 
 
 def _get_algorand_asset_balance(address: str | None, asset_id: int | None) -> Decimal:

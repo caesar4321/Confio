@@ -10,8 +10,9 @@ Runs without a database (ledger write is mocked):
 from types import SimpleNamespace
 from unittest import mock
 
-import rlp
 from django.test import SimpleTestCase, override_settings
+from eth_account import Account as EthAccount
+from eth_utils import to_checksum_address
 
 from cusd_plus.schema import SubmitBscTransaction
 
@@ -20,26 +21,33 @@ VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
 SWAP_SELECTOR = bytes.fromhex('7ff36ab5')  # swapExactETHForTokens
 CHAIN_ID = 56
 
+# The relay binds the recovered signer to the active account's registered
+# address, so these fixtures must be REALLY signed (audit 2026-08-03 [P1] #9).
+SIGNER_KEY = '0x' + '11' * 32
+SIGNER_ADDR = EthAccount.from_key(SIGNER_KEY).address
+OTHER_KEY = '0x' + '22' * 32          # some other wallet's key
+OTHER_ADDR = EthAccount.from_key(OTHER_KEY).address
 
-def _legacy_tx(to: str, value: int, data: bytes) -> str:
-    """Minimal RLP legacy tx the relay's decoder accepts (sig unverified)."""
-    v = 35 + 2 * CHAIN_ID
-    fields = [
-        b'\x01',                          # nonce
-        b'\x3b\x9a\xca\x00',              # gasPrice 1 gwei
-        b'\x03\xd0\x90',                  # gas 250k
-        bytes.fromhex(to[2:]),            # to
-        value.to_bytes((value.bit_length() + 7) // 8 or 1, 'big'),
-        data,
-        v.to_bytes(2, 'big'),
-        b'\x01', b'\x01',                 # r, s (decode-only path)
-    ]
-    return '0x' + rlp.encode(fields).hex()
+
+def _legacy_tx(to: str, value: int, data: bytes, key: str = SIGNER_KEY) -> str:
+    """A genuinely signed legacy (type-0) tx on our chain."""
+    signed = EthAccount.sign_transaction({
+        'nonce': 1,
+        'gasPrice': 10 ** 9,
+        'gas': 250_000,
+        'to': to_checksum_address(to),
+        'value': value,
+        'data': data,
+        'chainId': CHAIN_ID,
+    }, key)
+    raw = getattr(signed, 'raw_transaction', None) or signed.rawTransaction
+    return '0x' + bytes(raw).hex()
 
 
 class _Info:
     class context:
         user = mock.Mock(is_authenticated=True, id=1)
+        META = {}
 
 
 @override_settings(
@@ -53,8 +61,13 @@ class RelayRouterGuardTests(SimpleTestCase):
         from django.core.cache import cache
         cache.clear()  # reset the relay rate limiter between tests
 
-    def _submit(self, raw):
-        return SubmitBscTransaction.mutate(None, _Info(), raw)
+    def _submit(self, raw, active_addr=SIGNER_ADDR):
+        # The signer is bound to the active account's registered address for
+        # every relayed tx. The business gate is left unmocked: with no real
+        # JWT the context resolves to None (the personal-account path), which
+        # is also what _active_account needs to stay off the database.
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=active_addr):
+            return SubmitBscTransaction.mutate(None, _Info(), raw)
 
     def test_swap_to_router_is_relayed_and_ledgered(self):
         raw = _legacy_tx(ROUTER, 10 ** 16, SWAP_SELECTOR + b'\x00' * 128)
@@ -102,6 +115,53 @@ class RelayRouterGuardTests(SimpleTestCase):
         res = self._submit(raw)
         self.assertFalse(res.success)
         self.assertEqual(res.error, 'destination_not_allowed')
+
+    # ── signer binding (audit 2026-08-03 [P1] #9) ──────────────────────────
+    # The destination allowlist says nothing about WHOSE money moves: USDT is
+    # an allowlisted destination, so without this the relay would broadcast a
+    # transfer signed by any key the caller happened to hold.
+
+    def test_tx_signed_by_another_key_is_refused(self):
+        raw = _legacy_tx(VAULT, 0, bytes.fromhex('deadbeef'), key=OTHER_KEY)
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, active_addr=SIGNER_ADDR)
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'signer_not_active_account')
+        rpc.assert_not_called()
+
+    def test_usdt_transfer_signed_by_another_key_is_refused(self):
+        # The exact shape the allowlist alone could not stop.
+        transfer = bytes.fromhex('a9059cbb') + b'\x00' * 64
+        raw = _legacy_tx(USDT, 0, transfer, key=OTHER_KEY)
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, active_addr=SIGNER_ADDR)
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'signer_not_active_account')
+        rpc.assert_not_called()
+
+    def test_account_without_registered_address_is_refused(self):
+        raw = _legacy_tx(VAULT, 0, bytes.fromhex('deadbeef'))
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, active_addr=None)
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'no_bsc_address')
+        rpc.assert_not_called()
+
+    def test_business_without_send_funds_is_refused(self):
+        raw = _legacy_tx(VAULT, 0, bytes.fromhex('deadbeef'))
+
+        def _ctx(info, required_permission=None):
+            # Business context, but the employee lacks send_funds.
+            return {'account_type': 'business'} if required_permission is None else None
+
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR), \
+             mock.patch('users.jwt_context.get_jwt_business_context_with_validation',
+                        side_effect=_ctx), \
+             mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = SubmitBscTransaction.mutate(None, _Info(), raw)
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'permission_denied')
+        rpc.assert_not_called()
 
 
 USDT = '0x55d398326f99059fF775485246999027B3197955'

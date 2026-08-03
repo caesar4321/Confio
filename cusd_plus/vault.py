@@ -66,34 +66,66 @@ def _call(to: str, data: str) -> int:
     return int(res, 16) if res and res != '0x' else 0
 
 
-def p_plus_wad() -> int:
-    """Share price in USD, 1e18. Cached briefly — moves only on accrual."""
+def p_plus_wad(fresh: bool = False) -> int:
+    """Share price in USD, 1e18. Cached briefly — moves only on accrual.
+
+    fresh=True skips the cache: authorizing a withdrawal must not price the
+    position off a 30s-old read (re-audit [P2] #9).
+    """
     addr = vault_address()
     if not addr:
         return 10 ** 18
-    cached = cache.get('cusd_plus_pplus')
+    cached = None if fresh else cache.get('cusd_plus_pplus')
     if cached is None:
         cached = _call(addr, SEL_PPLUS) or 10 ** 18
         cache.set('cusd_plus_pplus', cached, 30)
     return cached
 
 
-def last_oracle_price_wad() -> int:
+def last_oracle_price_wad(fresh: bool = False) -> int:
     """The vault's guard-validated USDY price snapshot, 1e18.
 
     Needed to predict a redeem's USDT output exactly: redeemToUsdt floors
     TWICE (shares -> USDY at this price, then USDY -> USDT), so
     shares * pPlus / 1e18 is an OVER-estimate and cannot be used to decide
     whether Ondo's 1.00 USDT floor is cleared.
+
+    fresh=True skips the cache — see p_plus_wad.
     """
     addr = vault_address()
     if not addr:
         return 10 ** 18
-    cached = cache.get('cusd_plus_oracle_p')
+    cached = None if fresh else cache.get('cusd_plus_oracle_p')
     if cached is None:
         cached = _call(addr, _sel('lastOraclePrice()')) or 10 ** 18
         cache.set('cusd_plus_oracle_p', cached, 30)
     return cached
+
+
+def redeem_blocked_reason() -> str | None:
+    """Why a redeem would revert right now, or None if the exit is open.
+
+    `redeemToUsdt` is `whenNotPaused` and refuses while the oracle guard is
+    tripped. Authorizing an order without checking either creates a provider
+    order the client's batch cannot possibly execute (re-audit [P2] #9).
+    """
+    addr = vault_address()
+    if not addr:
+        return None
+    try:
+        if _call(addr, _sel('oracleGuardTripped()')):
+            return 'oracle_guard_tripped'
+        if _call(addr, _sel('paused()')):
+            return 'vault_paused'
+    except Exception:  # noqa: BLE001
+        # FAIL CLOSED. This is only consulted when a redeem is actually
+        # required, and "we could not read whether the exit is open" is not
+        # a reason to promise a provider an order we may be unable to fund
+        # (round 3 [P2] #8). The user's money stays in their own wallet and
+        # the raw-USDT exit is unaffected — it never reaches this check.
+        logger.warning('cUSD+ redeem-state read failed', exc_info=True)
+        return 'redeem_state_unreadable'
+    return None
 
 
 def reserved_usdt_wei(user, bsc_address: str) -> int:
@@ -210,6 +242,39 @@ def redeem_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:
         return 0
     usdy_out = (shares * pps_wad) // oracle_p_wad
     return (usdy_out * oracle_p_wad) // (10 ** 18)
+
+
+def withdrawable_usdt_wei(user_bsc_address: str) -> int:
+    """What an address can ACTUALLY move out right now, in USDT wei.
+
+    raw wallet USDT + the true redeem output of the whole position. Use this
+    to authorize a withdrawal; `position_usd` is a DISPLAY figure and is
+    wrong here twice over (audit 2026-08-03 [P2] #11):
+
+      - it is cached (30s, and up to 7 days of last-known on RPC failure), so
+        an order could be created against shares that were already spent;
+      - shares x pPlus OVER-states the exit, because redeemToUsdt floors
+        twice on the way out (see redeem_usdt_out).
+
+    Every read is FRESH — balance, shares AND both prices — and failures
+    RAISE: refusing to quote is correct when the chain is unreadable, whereas
+    a stale figure creates a provider order that can never be funded.
+
+    Callers that authorize a withdrawal should ALSO consult
+    redeem_blocked_reason(); a position is not withdrawable while the vault is
+    paused or the oracle guard is tripped, however much it is worth.
+    """
+    if not user_bsc_address:
+        return 0
+    addr = vault_address()
+    raw = usdt_balance_raw(user_bsc_address, fresh=True)
+    if not addr:
+        return raw
+    shares = erc20_balance_raw(addr, user_bsc_address.lower())
+    if shares <= 0:
+        return raw
+    return raw + redeem_usdt_out(
+        shares, p_plus_wad(fresh=True), last_oracle_price_wad(fresh=True))
 
 
 def confio_yield_share_bps() -> int:

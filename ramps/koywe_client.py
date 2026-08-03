@@ -1050,6 +1050,12 @@ class KoyweClient:
         provider_details = provider.get('details')
         if isinstance(provider_details, str) and provider_details.strip() and not str(enriched.get('providedAddress') or '').strip():
             enriched['providedAddress'] = provider_details.strip()
+            # PROVENANCE, not decoration. Downstream this value is a candidate
+            # destination for a user's withdrawal, and after this assignment it
+            # is indistinguishable from an order-specific field. `details` is
+            # generic provider metadata, so the funding path must be able to
+            # tell the two apart and decline to pay metadata (round 3 [P1] #4).
+            enriched['providedAddressFromProviderDetails'] = True
 
         provider_image = provider.get('image')
         if isinstance(provider_image, str) and provider_image.strip() and not str(enriched.get('providedAction') or '').strip():

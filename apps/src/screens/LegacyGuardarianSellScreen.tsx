@@ -39,8 +39,7 @@ import { technicalFontFamily } from '../utils/fontFamily';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { USD_UNIT } from '../utils/rampFormat';
-import { getVaultShares, redeemSavingsToUsdt } from '../services/cusdPlusVault';
-import { getActiveEvmWallet } from '../services/secureDeterministicWallet';
+import { microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import algorandService from '../services/algorandService';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
@@ -123,6 +122,9 @@ export const SellScreen = () => {
     const { data: savingsParamsData } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavings });
     const vaultAddress: string = savingsParamsData?.cusdPlusConvertParams?.vaultAddress || '';
     const [sendingFromSavings, setSendingFromSavings] = useState(false);
+    // Latched when a funding attempt's outcome could not be determined: the
+    // money may already have moved, so this session must not offer a retry.
+    const [savingsSendOutcomeUnknown, setSavingsSendOutcomeUnknown] = useState(false);
     const sellTicker = isSavings ? 'USDT' : 'USDC';
 
     const [buildGuardarianOfframp] = useMutation(BUILD_GUARDARIAN_OFFRAMP);
@@ -267,12 +269,12 @@ export const SellScreen = () => {
     }, [derivedCurrencyCode]);
 
     const handleCreateOrder = async () => {
-        const parsedAmount = parseFloat(amount);
-        if (!amount.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
+        const amountMicros = parseUsdMicros(amount);
+        if (!amountMicros) {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
             return;
         }
-        if (isSavings && parsedAmount > withdrawableUsd) {
+        if (isSavings && microsToNumber(amountMicros) > withdrawableUsd) {
             Alert.alert(
                 'Saldo insuficiente',
                 `Tu saldo disponible es $${withdrawableUsd.toFixed(2)}.`,
@@ -286,12 +288,18 @@ export const SellScreen = () => {
 
     const handleProceedToGuardarian = async () => {
         setShowPreFlightModal(false);
-        const parsedAmount = parseFloat(amount);
+        const amountMicros = parseUsdMicros(amount);
+        if (!amountMicros) {
+            Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
+            return;
+        }
         setLoading(true);
         try {
-
+            // Canonicalized to our 6dp grain BEFORE the provider sees it —
+            // sending a raw float and only rounding at funding time is how
+            // the deposit could differ from the order (audit [P1] #7).
             const tx = await createGuardarianTransaction({
-                amount: parsedAmount,
+                amount: microsToNumber(amountMicros),
                 fromCurrency: sellTicker,
                 // USDC sells: server defaults the network to ALGO.
                 // Savings sells are USDT and must pin BSC explicitly.
@@ -386,22 +394,25 @@ export const SellScreen = () => {
         }
     };
 
-    // Savings sell: burn vault shares and have the vault pay USDT-BSC to
-    // Guardarian's deposit address directly (redeemToUsdt recipient arg).
+    // Savings sell: pay Guardarian's deposit address in USDT-BSC, redeeming
+    // only as many cUSD+ shares as the shortfall needs — in the SAME
+    // sponsored batch, so the burn and the payment cannot come apart.
     const handleSendFromSavings = async () => {
-        const parsedAmount = parseFloat(amount);
-        if (!depositAddress || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        // The SAME canonical micro-unit amount the order was created with —
+        // re-deriving it from a float here is how the funded amount could
+        // differ from the ordered one (audit [P1] #7).
+        const amountMicros = parseUsdMicros(amount);
+        if (!depositAddress || !amountMicros) {
             return;
         }
-        // No vault address is only fatal when there's nothing else to send:
-        // an Ondo-ineligible user has no vault at all, and their raw USDT
-        // withdrawal never touches one.
-        if (!vaultAddress && !(rawUsdtUsd > 0)) {
-            Alert.alert('Error', 'No pudimos cargar tu bóveda de ahorro. Cierra y vuelve a intentar.');
-            return;
-        }
+        // NOTE: no vault-address precondition. A raw-USDT-only (Ondo-
+        // ineligible) user has no vault at all, and refusing them here on a
+        // stale/absent vault query blocked an exit that never needed one
+        // (audit [P1] #8). Sufficiency is decided by the LIVE balance read
+        // inside fundUsdtDestination, which asks for a vault only if raw
+        // USDT doesn't cover the amount.
         const authenticated = await requestRampCriticalAuth({
-            amount: parsedAmount,
+            amount: microsToNumber(amountMicros),
             assetUnit: USD_UNIT,
             assetNote: 'ahorro',
             actionLabel: 'retiro',
@@ -411,62 +422,49 @@ export const SellScreen = () => {
         }
         setSendingFromSavings(true);
         try {
-            const wallet = await getActiveEvmWallet();
-            const shares = vaultAddress
-                ? await getVaultShares(vaultAddress, wallet.address)
-                : 0n;
-            // ONE payment to Guardarian, always, and only once the exact
-            // amount is provably in hand — the same shape the Koywe rail
-            // uses. Redeeming straight to the provider computed shares from
-            // a CACHED dollar valuation and accepted 1% slippage, so the
-            // deposit could land above or below the order it was funding.
-            const needWei = BigInt(Math.round(parsedAmount * 1e6)) * 10n ** 12n;
-            const { transferUsdt, USDT_BSC } = await import('../services/cusdPlusVault');
-            const { selector, encodeAddress, bscEthCall } = await import('../services/evmWallet');
-            const readUsdtWei = async (): Promise<bigint> => {
-                const hex = await bscEthCall(
-                    USDT_BSC,
-                    selector('balanceOf(address)') + encodeAddress(wallet.address),
-                );
-                return BigInt(hex === '0x' ? '0x0' : hex);
-            };
-
-            let usdtWei = await readUsdtWei();
-            if (usdtWei < needWei) {
-                // Short on raw USDT: redeem the position to OURSELVES first.
-                // A failure between the two steps then leaves the money in the
-                // user's own wallet, never a partial deposit in the order.
-                if (!vaultAddress || shares <= 0n) {
-                    throw new Error(`No tienes ${balanceNoun} disponible para retirar.`);
-                }
-                // Redeem the WHOLE position: a proportional slice priced off a
-                // display balance is what let the funded amount drift. The
-                // remainder stays as USDT and re-mints on the next resume.
-                const minUsdtOut = ((needWei - usdtWei) * 99n) / 100n;
-                await redeemSavingsToUsdt({
-                    vaultAddress,
-                    shares,
-                    minUsdtOut,
-                    recipient: wallet.address,
-                    wallet,
-                });
-                usdtWei = await readUsdtWei();
-            }
-            if (usdtWei < needWei) {
-                throw new Error(
-                    `Tu saldo disponible es $${(Number(usdtWei / 10n ** 12n) / 1e6).toFixed(2)}.`,
-                );
-            }
-            {
-                const amountWei = needWei;
-                await transferUsdt({ to: depositAddress, amountWei, wallet });
-            }
+            const { fundUsdtDestination } = await import('../services/cusdPlusVault');
+            const { microsToWei } = await import('../utils/tokenAmount');
+            // ONE sponsored batch: the redeem (if a shortfall exists) and the
+            // payment to Guardarian ride the same transaction. As two calls
+            // the second hit the server's 30s per-address cooldown, leaving
+            // the shares burned and the order unfunded (audit [P1] #1).
+            await fundUsdtDestination({
+                to: depositAddress,
+                amountWei: microsToWei(amountMicros),
+                vaultAddress: vaultAddress || null,
+            });
             Alert.alert(
                 `Enviado desde tu ${balanceNoun}`,
                 'Guardarian recibirá tus fondos en unos minutos y depositará en tu banco. Puedes seguir el estado en tu historial.',
             );
             navigation.navigate('RampHistory', { initialFilter: 'off_ramp' });
         } catch (err: any) {
+            const { isOutcomeUnknown } = await import('../services/evmWallet');
+            if (isOutcomeUnknown(err)) {
+                // The payment may ALREADY be on the network. Offering a retry
+                // here is how the same provider order gets funded twice
+                // (audit [P1] #2), so the button stays locked and we send the
+                // user to history instead of inviting another attempt.
+                setSavingsSendOutcomeUnknown(true);
+                Alert.alert(
+                    'No pudimos confirmar el envío',
+                    'Es posible que tu retiro ya se haya enviado. No lo intentes de nuevo: '
+                    + 'revisa tu historial en unos minutos y, si no aparece, escríbenos.',
+                    [{ text: 'Ver historial', onPress: () => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' }) }],
+                );
+                return;
+            }
+            if (err?.name === 'InsufficientWithdrawableError') {
+                // The honest figure: what a real redeem would deliver, not
+                // shares × pPlus (which over-states it — the contract floors
+                // twice on the way out).
+                const availableUsd = Number(err.availableWei / 10n ** 12n) / 1e6;
+                Alert.alert(
+                    'Saldo insuficiente',
+                    `Tu ${balanceNoun} disponible para retirar es $${availableUsd.toFixed(2)}.`,
+                );
+                return;
+            }
             Alert.alert('No se pudo enviar', err?.message || 'Intenta de nuevo en unos minutos.');
         } finally {
             setSendingFromSavings(false);
@@ -542,20 +540,33 @@ export const SellScreen = () => {
                     </View>
 
                     {isSavings ? (
-                        <TouchableOpacity
-                            style={[styles.ctaButton, sendingFromSavings && styles.ctaButtonDisabled]}
-                            onPress={handleSendFromSavings}
-                            disabled={sendingFromSavings}
-                        >
-                            {sendingFromSavings ? (
-                                <ActivityIndicator color={colors.white} />
-                            ) : (
-                                <>
-                                    <Text style={styles.ctaButtonText}>{`Enviar desde mi ${balanceNoun}`}</Text>
-                                    <Icon name="arrow-right" size={20} color={colors.white} />
-                                </>
-                            )}
-                        </TouchableOpacity>
+                        <>
+                            <TouchableOpacity
+                                style={[
+                                    styles.ctaButton,
+                                    (sendingFromSavings || savingsSendOutcomeUnknown) && styles.ctaButtonDisabled,
+                                ]}
+                                onPress={handleSendFromSavings}
+                                // Locked once an attempt's outcome is unknown: the
+                                // funds may already be with the provider.
+                                disabled={sendingFromSavings || savingsSendOutcomeUnknown}
+                            >
+                                {sendingFromSavings ? (
+                                    <ActivityIndicator color={colors.white} />
+                                ) : (
+                                    <>
+                                        <Text style={styles.ctaButtonText}>{`Enviar desde mi ${balanceNoun}`}</Text>
+                                        <Icon name="arrow-right" size={20} color={colors.white} />
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                            {savingsSendOutcomeUnknown ? (
+                                <Text style={styles.outcomeUnknownNote}>
+                                    No pudimos confirmar si tu envío salió. Revisa tu historial antes
+                                    de intentarlo otra vez — podría haberse enviado ya.
+                                </Text>
+                            ) : null}
+                        </>
                     ) : (
                         <TouchableOpacity
                             style={[styles.ctaButton, guardarianSendBusy && styles.ctaButtonDisabled]}
@@ -1007,6 +1018,14 @@ const styles = StyleSheet.create({
     ctaButtonDisabled: {
         backgroundColor: colors.borderMedium,
         shadowOpacity: 0,
+    },
+    outcomeUnknownNote: {
+        fontSize: 12,
+        lineHeight: 17,
+        color: colors.warning?.text || '#92400E',
+        textAlign: 'center',
+        marginTop: 10,
+        paddingHorizontal: 8,
     },
     ctaButtonText: {
         fontSize: 16,

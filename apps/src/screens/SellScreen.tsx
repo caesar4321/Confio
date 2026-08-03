@@ -38,6 +38,7 @@ import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
 import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
+import { formatMicros, microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
@@ -281,11 +282,14 @@ export const SellScreen = () => {
     }
   }, [selectedMethod?.paymentMethodId]);
 
+  // MAX must FLOOR to our 6dp grain, not round: toFixed(6) can round up past
+  // the balance, and the order would then be capped back down to a different
+  // number than the one shown in the input.
   const formatExactTokenAmount = (value: number) => {
     if (!Number.isFinite(value) || value <= 0) {
       return '0';
     }
-    return value.toFixed(6).replace(/\.?0+$/, '');
+    return formatMicros(BigInt(Math.floor(value * 1e6)));
   };
 
   const promptVerification = () => {
@@ -349,8 +353,23 @@ export const SellScreen = () => {
     if (!selectedMethod || !selectedSavedMethod || !quote) {
       return;
     }
+    // Canonicalize BEFORE the biometric prompt: the user must approve the
+    // exact number that will be ordered and transferred, not a float that
+    // still has sub-micro precision on it (re-audit [P2] #10).
+    const requestedMicros = parseUsdMicros(amount);
+    if (!requestedMicros) {
+      Alert.alert('Monto inválido', 'Revisa el monto que quieres retirar.');
+      return;
+    }
+    // Cap at the available balance. Floor rather than round: the cap is a
+    // bound, and rounding it up is the one direction that can overdraw.
+    const availableMicros = availableCusdBalance > 0
+      ? BigInt(Math.floor(availableCusdBalance * 1e6))
+      : requestedMicros;
+    const exactMicros = requestedMicros < availableMicros ? requestedMicros : availableMicros;
+
     const authenticated = await requestRampCriticalAuth({
-      amount: parsedAmount,
+      amount: microsToNumber(exactMicros),
       assetUnit: sellUnitLabel,
       assetNote: isSavingsSell ? 'ahorro' : undefined,
       actionLabel: 'retiro',
@@ -372,11 +391,15 @@ export const SellScreen = () => {
 
     setIsSubmittingOrder(true);
     try {
-      const exactRequestedAmount = Math.min(parsedAmount, availableCusdBalance || parsedAmount);
+      // exactMicros (computed above, before the biometric prompt) is the ONE
+      // canonical value: approved by the user, sent as the order, and
+      // transferred on-chain. Deriving these separately — toFixed(6) here,
+      // Math.round(x*1e6) there — is how the funded amount could differ from
+      // the ordered one (audit [P1] #6).
       const { data } = await createRampOrder({
         variables: {
           direction: 'OFF_RAMP',
-          amount: formatExactTokenAmount(exactRequestedAmount),
+          amount: formatMicros(exactMicros),
           countryCode: availability?.countryCode,
           fiatCurrency,
           paymentMethodCode: selectedMethod.code,
@@ -397,25 +420,36 @@ export const SellScreen = () => {
         // rail pays Koywe in USDT-BSC, the default rail in Algorand cUSD.
         const fundingResult = isSavingsSell
           ? await tryFundKoyweSavingsOffRampInBackground({
-            amount: exactRequestedAmount,
+            amountMicros: exactMicros,
             paymentDetails: result.paymentDetails,
             vaultAddress: savingsVaultAddress,
           })
           : await tryFundKoyweOffRampInBackground({
-            amount: exactRequestedAmount,
+            amount: formatMicros(exactMicros),
             paymentDetails: result.paymentDetails,
             providerOrderId: result.orderId,
             activeAccount,
           });
 
-        if (fundingResult.status === 'failed') {
+        if (fundingResult.status === 'unknown') {
+          // Handed to the network, verdict lost. Say so plainly — telling the
+          // user it failed is what sends them back to fund a second time.
+          autoFundingWarning = 'No pudimos confirmar si tu retiro salió. Es posible que ya se '
+            + 'haya enviado: revisa tu historial en unos minutos antes de intentarlo de nuevo.';
+        } else if (fundingResult.status === 'failed') {
           autoFundingWarning = fundingResult.reason === 'invalid_amount'
             ? 'No pudimos iniciar el envío automático del retiro.'
             : `No pudimos iniciar el envío automático del retiro: ${fundingResult.reason}.`;
         } else if (fundingResult.status === 'skipped') {
-          autoFundingWarning = isSavingsSell
-            ? 'No pudimos iniciar el envío automático porque Koywe no devolvió un destino compatible con BNB Smart Chain.'
-            : 'No pudimos iniciar el envío automático porque Koywe no devolvió un destino compatible con Algorand.';
+          // The server declined to vouch for a destination — either the
+          // provider gave no order-specific address, or the amount it echoed
+          // back didn't match the order. Either way we will NOT move money
+          // automatically, and there is no verified in-app way to complete
+          // it, so point at support rather than implying it just needs a
+          // retry (round 3 [P2] #10).
+          autoFundingWarning = 'No pudimos verificar los datos de depósito de tu retiro, '
+            + 'así que no enviamos nada. Tu dinero sigue en tu cuenta. '
+            + 'Escríbenos para completar esta orden.';
         }
       }
 

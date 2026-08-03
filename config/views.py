@@ -10,7 +10,7 @@ import logging
 import os
 import json
 import uuid
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 import requests
@@ -648,11 +648,35 @@ def guardarian_transaction_proxy(request):
     # Dollar"); the vault mint is refused server-side. The missing-address
     # refusal below stays: without a registered bsc_address there is nowhere
     # to deliver.
+    # Resolve the JWT's account FIRST, for buys AND sells. It used to be bound
+    # only inside the buy branch below while GuardarianTransaction.create()
+    # references it for every transaction — so every SELL raised
+    # UnboundLocalError into a bare `except Exception` and silently persisted
+    # nothing (audit 2026-08-03 [P1] #3). The row is authorization scope for
+    # the sponsored redeem, not bookkeeping: no row, no recovery, and no way
+    # to re-fetch the deposit address after the app is killed.
+    account = None
+    try:
+        account_type = payload.get('account_type', 'personal')
+        account_index = payload.get('account_index', 0)
+        account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
+    except Exception as e:
+        logger.warning(f"DB account lookup error: {e}")
+
+    # No account, no order. The persisted row carries the authorization scope
+    # the sponsored redeem consults, so creating the provider order first and
+    # storing it without an account produces exactly the unattributable row
+    # this field exists to prevent — and logging afterwards does not undo an
+    # order that already exists at Guardarian (re-audit [P2] #11).
+    if account is None:
+        logger.error('Guardarian order refused: no active account for user %s', user_id)
+        return JsonResponse(
+            {'error': 'No pudimos identificar tu cuenta. Cierra sesión y vuelve a entrar.'},
+            status=400,
+        )
+
     if not is_sell_transaction:
         try:
-            account_type = payload.get('account_type', 'personal')
-            account_index = payload.get('account_index', 0)
-            account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
             if account:
                 if is_savings_rail:
                     if not account.bsc_address:
@@ -683,8 +707,19 @@ def guardarian_transaction_proxy(request):
     from_network = (body.get('from_network') or body.get('fromNetwork') or '').strip().upper() or None
     to_network = (body.get('to_network') or body.get('toNetwork') or '').strip().upper() or None
     
+    # Canonicalize to the 6dp grain the on-chain funding actually transfers,
+    # truncating rather than rounding up. The client sends a canonical value
+    # already; this makes the provider, the persisted row and the transfer
+    # agree even if some older build doesn't (audit [P1] #7).
+    try:
+        canonical_amount = Decimal(str(amount)).quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+    except (InvalidOperation, TypeError, ValueError):
+        return JsonResponse({'error': 'amount inválido'}, status=400)
+    if canonical_amount <= 0:
+        return JsonResponse({'error': 'amount debe ser mayor a 0'}, status=400)
+
     guardarian_payload = {
-        'from_amount': float(amount),
+        'from_amount': float(canonical_amount),
         'from_currency': from_currency,
         'to_currency': to_currency_clean,
         'locale': body.get('locale') or 'es',
@@ -802,6 +837,34 @@ def guardarian_transaction_proxy(request):
             f'has_redirect_url={bool(data.get("redirect_url"))}, '
             f'status={data.get("status")}'
         )
+        if resp.ok and is_sell_transaction:
+            # Does Guardarian intend to take exactly what we asked for? The
+            # client funds the deposit address with the amount IT ordered and
+            # never looked at what the provider echoed, so a normalization
+            # would make the transfer pay a different number than the order it
+            # funds — the Koywe-side check did not cover this rail (round 3
+            # [P1] #5). Withholding the address degrades to manual funding.
+            echoed_raw = (
+                data.get('from_amount')
+                if data.get('from_amount') is not None
+                else data.get('fromAmount')
+            )
+            try:
+                echoed_amount = Decimal(str(echoed_raw)).quantize(
+                    Decimal('0.000001'), rounding=ROUND_DOWN)
+            except (InvalidOperation, TypeError, ValueError):
+                echoed_amount = None
+            if echoed_amount is None or echoed_amount != canonical_amount:
+                logger.error(
+                    'Guardarian echoed from_amount %r != requested %s for user %s; '
+                    'withholding the deposit address so nothing is auto-funded',
+                    echoed_raw, canonical_amount, user_id,
+                )
+                for key in ('deposit_address', 'depositAddress',
+                            'deposit_extra_id', 'depositExtraId'):
+                    data.pop(key, None)
+                data['confio_funding_blocked'] = 'amount_mismatch'
+
         if resp.ok:
             g_id = data.get('id')
             if g_id:
@@ -819,12 +882,30 @@ def guardarian_transaction_proxy(request):
                         from_amount=Decimal(str(guardarian_payload['from_amount'])),
                         from_currency=guardarian_payload['from_currency'],
                         to_currency=guardarian_payload['to_currency'],
-                        network=guardarian_payload.get('to_network', 'ALGO'),
+                        # The CRYPTO leg's network: from_network on a sell
+                        # (USDT/BSC), to_network on a buy. Reading to_network
+                        # for both stamped every savings sell 'ALGO'.
+                        network=(
+                            guardarian_payload.get('from_network')
+                            if is_sell_transaction
+                            else guardarian_payload.get('to_network')
+                        ) or 'ALGO',
                         status=data.get('status', 'waiting'),
                         to_amount_estimated=Decimal(str(data.get('estimated_exchange_amount'))) if data.get('estimated_exchange_amount') else None
                     )
-                except Exception as e:
-                    logger.error(f"Failed to save GuardarianTransaction: {e}")
+                except Exception:
+                    # LOUD: this row is how a killed app finds its way back to
+                    # an order (the deposit address is re-fetched from it) and
+                    # how the sponsored redeem scopes authorization. Losing it
+                    # silently is what made a dead order indistinguishable
+                    # from a healthy one (audit [P1] #3). The provider order
+                    # already exists, so we still return it — the client can
+                    # fund now — but this must page someone.
+                    logger.exception(
+                        'CRITICAL: Guardarian order %s created at provider but NOT persisted '
+                        '(user=%s account=%s sell=%s) — no recovery path for this order',
+                        g_id, user_id, getattr(account, 'id', None), is_sell_transaction,
+                    )
 
             logger.debug(f'Guardarian redirect_url: {data.get("redirect_url", "No URL")}')
     except ValueError:

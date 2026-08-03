@@ -757,20 +757,36 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
             # NEVER lose it — a lost row is what enables the double-send.
             logger.exception('7702 broadcast failed (row %s kept as signed): %s', batch.id, tx_hash)
             raise
-        batch.status = 'sent'
-        batch.save(update_fields=['status', 'updated_at'])
+        # PAST THE POINT OF NO RETURN. The transaction is on the network; from
+        # here nothing may raise, because the caller would translate the
+        # exception into a definitive failure and the client would retry a
+        # payment that is already settling (round 3 [P1] #3). Bookkeeping that
+        # fails is a logged incident, not a failed withdrawal — the durable
+        # row above plus the reconciler recover it.
+        try:
+            batch.status = 'sent'
+            batch.save(update_fields=['status', 'updated_at'])
+        except Exception:  # noqa: BLE001
+            logger.exception('7702 post-broadcast status write failed for %s', tx_hash)
     finally:
         release_sponsor_nonce_lock(lock)
 
-    from .tasks import check_sponsored_batch_receipt
-    # 3s: mine (~0.5s) + BSC fast finality (~1s) with margin. The old 6s was
-    # sized for the 15-block depth heuristic this no longer uses.
-    check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=3)
+    try:
+        from .tasks import check_sponsored_batch_receipt
+        # 3s: mine (~0.5s) + BSC fast finality (~1s) with margin. The old 6s was
+        # sized for the 15-block depth heuristic this no longer uses.
+        check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=3)
+    except Exception:  # noqa: BLE001 — a broker outage must not fail a sent tx
+        logger.exception('7702 receipt check could not be scheduled for %s', tx_hash)
     logger.info('7702 sponsored %s batch sent for user %s at %s: %s (gas=%s)',
                 kind, user.id, user_addr, tx_hash, gas)
 
     # Optimistic early receipt (transient, NOT persisted — see helper). Held
     # AFTER the nonce lock is released so a waiter never blocks the next
     # signer. Lets the client skip its own poll on the common path.
-    batch.executed_early = wait_for_execution_briefly(tx_hash, user_addr, int(nonce))
+    try:
+        batch.executed_early = wait_for_execution_briefly(tx_hash, user_addr, int(nonce))
+    except Exception:  # noqa: BLE001 — an unobserved receipt is 'unknown', not failure
+        logger.exception('7702 early receipt probe failed for %s', tx_hash)
+        batch.executed_early = None
     return tx_hash, batch

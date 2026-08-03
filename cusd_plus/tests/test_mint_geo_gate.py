@@ -33,7 +33,7 @@ from cusd_plus.tests.test_sponsor_7702 import (
     _mint_data,
     _redeem_data,
 )
-from cusd_plus.tests.test_bnb_autoconvert_relay import _legacy_tx
+from cusd_plus.tests.test_bnb_autoconvert_relay import SIGNER_ADDR, _legacy_tx
 
 USDT = sponsor_7702.USDT_BSC
 
@@ -86,9 +86,14 @@ class LegacyRelayGateTests(SimpleTestCase):
     def setUp(self):
         cache.clear()
 
-    def _submit(self, raw, user):
+    def _submit(self, raw, user, info=None):
         from cusd_plus.schema import SubmitBscTransaction
-        return SubmitBscTransaction.mutate(None, _info(user), raw)
+        # The relay binds the recovered signer to the active account's
+        # registered address; _legacy_tx signs with SIGNER_KEY. The business
+        # permission gate is left unmocked on purpose — with no real JWT the
+        # context resolves to None, which is the personal-account path.
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR):
+            return SubmitBscTransaction.mutate(None, info or _info(user), raw)
 
     def _mint_raw(self):
         return _legacy_tx(VAULT, 0, bytes.fromhex(_mint_data()[2:]))
@@ -101,10 +106,9 @@ class LegacyRelayGateTests(SimpleTestCase):
         rpc.assert_not_called()
 
     def test_mint_refused_for_blocked_ip(self):
-        from cusd_plus.schema import SubmitBscTransaction
         info = _info(_user('VE', uid=12), meta={'HTTP_CF_IPCOUNTRY': 'US'})
         with mock.patch('cusd_plus.tasks._rpc') as rpc:
-            res = SubmitBscTransaction.mutate(None, info, self._mint_raw())
+            res = self._submit(self._mint_raw(), None, info=info)
         self.assertEqual(res.error, 'mint_not_available')
         rpc.assert_not_called()
 
@@ -125,11 +129,9 @@ class LegacyRelayGateTests(SimpleTestCase):
 
     def test_self_redeem_relays_for_ineligible_user(self):
         # Exit #2: redeeming an existing vault position is never geo-gated.
-        raw = _legacy_tx(VAULT, 0, bytes.fromhex(_redeem_data(recipient=USER)[2:]))
-        # redeem recipient guard recovers the signer; our decode-only fixture
-        # has junk r/s, so patch recovery to the fixture user address.
-        with mock.patch('cusd_plus.tasks._rpc', return_value='0xfee') as rpc, \
-             mock.patch('eth_account.Account.recover_transaction', return_value=USER):
+        # Recipient IS the signer — the self-redeem case the guard allows.
+        raw = _legacy_tx(VAULT, 0, bytes.fromhex(_redeem_data(recipient=SIGNER_ADDR)[2:]))
+        with mock.patch('cusd_plus.tasks._rpc', return_value='0xfee') as rpc:
             res = self._submit(raw, _user('US', uid=15))
         self.assertTrue(res.success, res.error)
         rpc.assert_called_once()

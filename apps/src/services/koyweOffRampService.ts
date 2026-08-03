@@ -47,7 +47,9 @@ const SUBMIT_AUTO_SWAP_TRANSACTIONS = gql`
   }
 `;
 
-type FundingStatus = 'submitted' | 'skipped' | 'failed';
+// 'unknown' is NOT a failure: the payment was handed to the network and the
+// verdict was lost. Callers must never invite a retry on it.
+type FundingStatus = 'submitted' | 'skipped' | 'failed' | 'unknown';
 
 type FundingResult = {
   status: FundingStatus;
@@ -56,7 +58,7 @@ type FundingResult = {
   destinationAddress?: string;
 };
 
-const ALGORAND_ADDRESS_REGEX = /\b[A-Z2-7]{58}\b/;
+const ALGORAND_ADDRESS_REGEX = /^[A-Z2-7]{58}$/;
 const APP_OPT_IN_RETRY_DELAY_MS = 3000;
 const BUILD_BURN_AND_SEND_MAX_ATTEMPTS = 5;
 
@@ -75,35 +77,16 @@ const parsePaymentDetails = (value: unknown): Record<string, unknown> | null => 
   return typeof value === 'object' ? (value as Record<string, unknown>) : null;
 };
 
-const collectStringValues = (value: unknown, sink: string[]) => {
-  if (!value) return;
-  if (typeof value === 'string') {
-    sink.push(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((entry) => collectStringValues(entry, sink));
-    return;
-  }
-  if (typeof value === 'object') {
-    Object.values(value as Record<string, unknown>).forEach((entry) => collectStringValues(entry, sink));
-  }
-};
-
+/** Same rule as the BSC rail: only the address the SERVER resolved from a
+ *  documented field and validated. A blind scan of the provider blob picks
+ *  whatever address-shaped string happens to come first (audit [P1] #5). */
 const extractAlgorandAddress = (paymentDetails: unknown): string | null => {
   const parsed = parsePaymentDetails(paymentDetails);
   if (!parsed) return null;
-
-  const candidates: string[] = [];
-  collectStringValues(parsed, candidates);
-
-  for (const candidate of candidates) {
-    const match = candidate.match(ALGORAND_ADDRESS_REGEX);
-    if (match) {
-      return match[0];
-    }
-  }
-  return null;
+  const vouched = String(parsed.confioDepositAddress || '').trim();
+  if (!vouched || !ALGORAND_ADDRESS_REGEX.test(vouched)) return null;
+  if (String(parsed.confioDepositNetwork || '').toUpperCase() !== 'ALGO') return null;
+  return vouched;
 };
 
 export const tryFundKoyweOffRampInBackground = async ({
@@ -229,30 +212,47 @@ export const tryFundKoyweOffRampInBackground = async ({
 // Algorand one, and we pay it with USDT-BSC.
 //
 // Two legs can hold the money: minted cUSD+ shares and raw USDT that landed
-// but hasn't minted. When shares are needed, they are redeemed to the USER'S
-// OWN address first and only then transferred out in a single payment. That
-// ordering is deliberate: a failure between the two steps leaves everything in
-// the user's wallet, never a partial deposit sitting in Koywe's order.
-const EVM_ADDRESS_REGEX = /\b0x[0-9a-fA-F]{40}\b/;
+// but hasn't minted. Both are spent by ONE sponsored batch — the redeem (to
+// the user's own address) and the payment ride the same transaction, so
+// there is no window where the shares are burned but the provider is
+// unfunded, and the server's 30s per-address sponsor cooldown is charged
+// once instead of rejecting the payment leg. See fundUsdtDestination.
+const EVM_ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
 
+// Never a valid destination — the same list the server enforces.
+const FORBIDDEN_EVM_DESTINATIONS = new Set([
+  '0x0000000000000000000000000000000000000000',
+  '0x55d398326f99059ff775485246999027b3197955', // USDT-BSC itself
+]);
+
+/**
+ * The deposit address, taken ONLY from the key the server validated.
+ *
+ * This used to walk every string in the provider blob and fund the first
+ * `0x…`-shaped match. Field order in JSON is not a contract — a response
+ * listing a token contract before the deposit address would have sent the
+ * withdrawal to that contract, unrecoverably (audit 2026-08-03 [P1] #5).
+ * No fallback scan: if the server didn't vouch for an address, we refuse to
+ * move money and the order is funded manually instead.
+ */
 const extractEvmAddress = (paymentDetails: unknown): string | null => {
   const parsed = parsePaymentDetails(paymentDetails);
   if (!parsed) return null;
-  const candidates: string[] = [];
-  collectStringValues(parsed, candidates);
-  for (const candidate of candidates) {
-    const match = candidate.match(EVM_ADDRESS_REGEX);
-    if (match) return match[0];
-  }
-  return null;
+  const vouched = String(parsed.confioDepositAddress || '').trim();
+  if (!vouched || !EVM_ADDRESS_REGEX.test(vouched)) return null;
+  if (FORBIDDEN_EVM_DESTINATIONS.has(vouched.toLowerCase())) return null;
+  if (String(parsed.confioDepositNetwork || '').toUpperCase() !== 'BSC') return null;
+  return vouched;
 };
 
 export const tryFundKoyweSavingsOffRampInBackground = async ({
-  amount,
+  amountMicros,
   paymentDetails,
   vaultAddress,
 }: {
-  amount: string | number;
+  /** The order's canonical amount in micro-units — the SAME BigInt the order
+   *  was created with, never a re-parsed float (see utils/tokenAmount). */
+  amountMicros: bigint;
   paymentDetails: unknown;
   /** cUSD+ vault proxy; omit when the user holds only raw USDT. */
   vaultAddress?: string | null;
@@ -262,66 +262,48 @@ export const tryFundKoyweSavingsOffRampInBackground = async ({
     return { status: 'skipped', reason: 'missing_bsc_destination' };
   }
 
-  const parsedAmount = parseFloat(String(amount));
-  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+  if (!amountMicros || amountMicros <= 0n) {
     return { status: 'failed', reason: 'invalid_amount', destinationAddress };
   }
+  const { microsToWei } = await import('../utils/tokenAmount');
+  const amountWei = microsToWei(amountMicros);
 
+  // NOTE: there is NO durable one-payment-per-order guard here yet. A first
+  // attempt at one stored its state in RampTransaction.metadata, which the
+  // Koywe status sync rebuilds on every poll — a routine poll erased the
+  // claim, so the guard looked durable and was not. It was reverted rather
+  // than shipped, because a guard that silently stops guarding is worse than
+  // no guard: it invites trusting it. The rebuild belongs on its own table.
+  //
+  // Until then the protections are: no sponsored->legacy fallback, an
+  // outcome-unknown verdict that is never reported as a plain failure, and
+  // the caller not offering a retry on it.
   try {
     const { installBscServerTransport } = await import('./bscServerRpc');
     installBscServerTransport();
-    const {
-      transferUsdt, redeemSavingsToUsdt, getVaultShares, USDT_BSC,
-    } = await import('./cusdPlusVault');
-    const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
-    const { selector, encodeAddress, bscEthCall } = await import('./evmWallet');
+    const { fundUsdtDestination } = await import('./cusdPlusVault');
 
-    const wallet = await getActiveEvmWallet();
-    const readUsdtWei = async (): Promise<bigint> => {
-      const hex = await bscEthCall(
-        USDT_BSC, selector('balanceOf(address)') + encodeAddress(wallet.address),
-      );
-      return BigInt(hex === '0x' ? '0x0' : hex);
-    };
-
-    // SIX-decimal precision scaled to 18dp, because that is exactly the
-    // grain the order was created at (SellScreen's formatExactTokenAmount
-    // does toFixed(6)). Rounding to cents here would fund an order for
-    // 2.995 with 3.00 — paying the provider a different number than the one
-    // it quoted, in whichever direction the rounding fell.
-    const amountWei = BigInt(Math.round(parsedAmount * 1e6)) * 10n ** 12n;
-    let usdtWei = await readUsdtWei();
-
-    if (usdtWei < amountWei) {
-      // Short on raw USDT: redeem the gap out of the vault, to OURSELVES.
-      if (!vaultAddress) {
-        return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
-      }
-      const shares = await getVaultShares(vaultAddress, wallet.address);
-      if (shares <= 0n) {
-        return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
-      }
-      // Redeem everything: the remainder re-mints on the next savings resume,
-      // and a share-slice computed off a display balance is what previously
-      // let the funded amount drift from the ordered amount.
-      const minUsdtOut = amountWei - usdtWei;
-      await redeemSavingsToUsdt({
-        vaultAddress,
-        shares,
-        minUsdtOut: (minUsdtOut * 99n) / 100n, // 1% slippage floor, as elsewhere
-        recipient: wallet.address,
-        wallet,
-      });
-      usdtWei = await readUsdtWei();
-      if (usdtWei < amountWei) {
-        return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
-      }
-    }
-
-    // ONE payment to Koywe, only once the full amount is provably in hand.
-    const res = await transferUsdt({ to: destinationAddress, amountWei, wallet });
+    // ONE sponsored batch: redeem the shortfall (if any) and pay Koywe
+    // together. Two separate sponsored calls tripped the server's 30s
+    // per-address cooldown on the second one, leaving the shares redeemed
+    // and the order unfunded (audit 2026-08-03 [P1]).
+    const res = await fundUsdtDestination({
+      to: destinationAddress,
+      amountWei,
+      vaultAddress,
+    });
     return { status: 'submitted', transactionId: res.txHash, destinationAddress };
   } catch (error: any) {
+    const { isOutcomeUnknown } = await import('./evmWallet');
+    if (isOutcomeUnknown(error)) {
+      // Broadcast, verdict lost. NOT 'failed' — the caller must not present
+      // this as "nothing happened" and invite a second payment to an order
+      // that may already be funded (audit [P1] #2).
+      return { status: 'unknown', reason: 'funding_outcome_unknown', destinationAddress };
+    }
+    if (error?.name === 'InsufficientWithdrawableError') {
+      return { status: 'failed', reason: 'insufficient_usdt', destinationAddress };
+    }
     return {
       status: 'failed',
       reason: error?.message || 'unexpected_funding_error',

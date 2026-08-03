@@ -86,11 +86,71 @@ export const sponsorBscBatch = async (variables: {
   };
 }): Promise<SponsorBatchResult> => {
   const { apolloClient } = await import('../apollo/client');
-  const { data } = await apolloClient.mutate({
-    mutation: SPONSOR_BSC_BATCH,
-    variables,
-  });
-  return (data?.sponsorBscBatch || { success: false, error: 'no response' }) as SponsorBatchResult;
+  try {
+    const { data } = await apolloClient.mutate({
+      mutation: SPONSOR_BSC_BATCH,
+      variables,
+    });
+    return (data?.sponsorBscBatch || { success: false, error: 'no response' }) as SponsorBatchResult;
+  } catch (e) {
+    // The server VALIDATES, BROADCASTS, and only then answers. A transport
+    // failure in between means the batch may already be on the network — we
+    // simply never saw the verdict. Reporting that as a plain failure is
+    // what let a caller retry and pay an already-funded provider order a
+    // second time (audit 2026-08-03 [P1] #2).
+    //
+    // Failures we can PROVE happened before the broadcast stay ordinary
+    // errors, so an offline phone or an expired session can retry cleanly.
+    if (isDefinitivelyUnsent(e)) throw e;
+    throw new BscSubmitOutcomeUnknownError(e);
+  }
+};
+
+/** A money-moving mutation whose verdict never came back. Carries
+ *  `broadcast` so isOutcomeUnknown() treats it like a receipt timeout. */
+export class BscSubmitOutcomeUnknownError extends Error {
+  readonly broadcast = true;
+  readonly cause?: unknown;
+  constructor(cause?: unknown) {
+    super('bsc tx timeout: sponsored batch verdict unknown');
+    this.name = 'BscSubmitOutcomeUnknownError';
+    this.cause = cause;
+  }
+}
+
+/**
+ * Did this failure DEFINITIVELY happen before anything could be broadcast?
+ *
+ * The default answer is NO. Unknown is the safe verdict for money: the cost
+ * of a wrong "unknown" is one confusing message, the cost of a wrong
+ * "definitely failed" is paying a provider twice.
+ *
+ * An earlier version accepted `Network request failed` / `Failed to fetch`
+ * as proof the request stayed on the device. It is not — React Native
+ * reports the same string when a connection drops AFTER the request was
+ * fully uploaded, i.e. exactly when the server may already have broadcast
+ * (round 3 [P1] #1). Only shapes that prove the connection never carried a
+ * request qualify now.
+ */
+const isDefinitivelyUnsent = (e: any): boolean => {
+  // The server parsed, validated and REPLIED with structured errors. Our
+  // money-moving mutations report business failures as `success: false`, and
+  // post-broadcast exceptions are converted to an unknown verdict
+  // server-side, so a GraphQL error means execution never reached a
+  // broadcast. (Narrow, and deliberately the ONLY response-based case.)
+  if (Array.isArray(e?.graphQLErrors) && e.graphQLErrors.length > 0) return true;
+
+  const net = e?.networkError;
+  if (!net) return false;
+
+  // The gateway rejected us before any resolver ran.
+  if (net.statusCode === 401 || net.statusCode === 403) return true;
+
+  // No response at all: only connection-establishment failures prove the
+  // request was never carried. A generic transport error does NOT.
+  if (net.statusCode || net.response) return false;
+  const msg = String(net.message || '').toLowerCase();
+  return /enotfound|econnrefused|dns|getaddrinfo|unable to resolve host/.test(msg);
 };
 
 let installed = false;
@@ -113,11 +173,22 @@ export const installBscServerTransport = (): void => {
     },
     submit: async (rawTx: string) => {
       const { apolloClient } = await import('../apollo/client');
-      const { data } = await apolloClient.mutate({
-        mutation: SUBMIT_BSC_TX,
-        variables: { rawTx },
-      });
+      let data;
+      try {
+        ({ data } = await apolloClient.mutate({
+          mutation: SUBMIT_BSC_TX,
+          variables: { rawTx },
+        }));
+      } catch (e) {
+        // Same rule as the sponsored batch: the relay broadcasts before it
+        // answers, so a lost response is outcome-unknown, not a failure. A
+        // retry would sign a NEW tx at a fresh nonce and could spend twice.
+        // Provably-unsent failures stay retryable.
+        if (isDefinitivelyUnsent(e)) throw e;
+        throw new BscSubmitOutcomeUnknownError(e);
+      }
       const res = data?.submitBscTransaction;
+      // A server-side REJECTION is definitive — nothing was broadcast.
       if (!res?.success) throw new Error(`bsc relay submit: ${res?.error || 'failed'}`);
       return res.txHash as string;
     },

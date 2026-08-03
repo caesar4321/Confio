@@ -683,6 +683,18 @@ class SubmitBscTransaction(graphene.Mutation):
         if _bsc_rate_limited(user.id, 'submit', 10):
             return SubmitBscTransaction(success=False, error='rate_limited')
 
+        # Business accounts: this relay MOVES MONEY, so it clears the same
+        # permission the sponsored rail requires. Without it the legacy path
+        # was a hole straight through SponsorBscBatch's check — an employee
+        # holding a business signing key could relay a USDT transfer that the
+        # sponsored rail would have refused (audit 2026-08-03 [P1] #9).
+        from users.jwt_context import get_jwt_business_context_with_validation
+        _ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+        if _ctx and _ctx.get('account_type') == 'business':
+            if not get_jwt_business_context_with_validation(
+                    info, required_permission='send_funds'):
+                return SubmitBscTransaction(success=False, error='permission_denied')
+
         raw = (raw_tx or '').strip()
         if not raw.startswith('0x') or len(raw) > 100_000:
             return SubmitBscTransaction(success=False, error='bad_raw_tx')
@@ -701,6 +713,27 @@ class SubmitBscTransaction(graphene.Mutation):
 
         if chain_id != int(getattr(settings, 'BSC_CHAIN_ID', 56)):
             return SubmitBscTransaction(success=False, error='wrong_chain')
+
+        # JWT-bound signer, checked for EVERY relayed tx — not just redeems.
+        # The destination allowlist alone says nothing about WHOSE money moves:
+        # USDT.transfer is an allowlisted destination, so any key the caller
+        # holds could spend any address's balance through here. Same rule the
+        # sponsored rail enforces via the intent signature (audit [P1] #9).
+        active_addr = (_active_bsc_address(info) or '').lower()
+        if not active_addr:
+            return SubmitBscTransaction(success=False, error='no_bsc_address')
+        try:
+            from eth_account import Account as _EthAccount
+            tx_signer = _EthAccount.recover_transaction(raw).lower()
+        except Exception:
+            return SubmitBscTransaction(success=False, error='unrecoverable_signer')
+        if tx_signer != active_addr:
+            logger.warning(
+                'BSC relay refused: signer %s is not the active account address %s (user %s)',
+                tx_signer, active_addr, user.id,
+            )
+            return SubmitBscTransaction(success=False, error='signer_not_active_account')
+
         allowed = {
             (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower(),
             '0x55d398326f99059ff775485246999027b3197955',  # USDT (approve leg)
@@ -741,15 +774,11 @@ class SubmitBscTransaction(graphene.Mutation):
                 if len(data_hex) < 8 + 192:
                     return SubmitBscTransaction(success=False, error='bad_redeem_calldata')
                 recipient = '0x' + data_hex[8 + 128:8 + 192][-40:].lower()
-                try:
-                    from eth_account import Account as _EthAccount
-                    signer = _EthAccount.recover_transaction(raw).lower()
-                except Exception:
-                    return SubmitBscTransaction(success=False, error='unrecoverable_signer')
-                if not _redeem_recipient_allowed(user, recipient, signer):
+                # tx_signer was recovered and bound to the active account above.
+                if not _redeem_recipient_allowed(user, recipient, tx_signer):
                     logger.warning(
                         'redeemToUsdt recipient %s rejected for user %s (signer %s)',
-                        recipient, user.id, signer,
+                        recipient, user.id, tx_signer,
                     )
                     return SubmitBscTransaction(success=False, error='redeem_recipient_not_allowed')
             # Mint geo-gate (2026-07-30): since ramps deliver raw USDT to
@@ -971,6 +1000,9 @@ class SponsorBscBatch(graphene.Mutation):
                 return SponsorBscBatch(success=False, error='mint_not_available')
 
         chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+        # Set the instant a broadcast is attempted; nothing after that point
+        # may be reported to the client as a definitive failure.
+        broadcast_tx_hash = None
         try:
             sponsor_7702.validate_policy(norm_calls, user, user_addr)
 
@@ -1029,6 +1061,7 @@ class SponsorBscBatch(graphene.Mutation):
             tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind)
+            broadcast_tx_hash = tx_hash  # past the point of no return
             if mint_call is not None:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first
@@ -1048,6 +1081,17 @@ class SponsorBscBatch(graphene.Mutation):
             return SponsorBscBatch(success=False, error=exc.code)
         except Exception as exc:  # noqa: BLE001 — surface node rejections honestly
             logger.exception('7702 sponsored batch failed for user %s', user.id)
+            if broadcast_tx_hash:
+                # The transaction IS on the network and something AFTER the
+                # broadcast blew up. Reporting failure here tells the client
+                # nothing happened, and it may pay an already-funded provider
+                # order a second time (round 3 [P1] #3). Hand back the hash
+                # with an unknown execution instead: the client polls for the
+                # receipt, exactly as it does when the sponsor didn't observe
+                # one in time.
+                logger.error('7702 post-broadcast failure for %s — returning unknown, not failure',
+                             broadcast_tx_hash)
+                return SponsorBscBatch(success=True, tx_hash=broadcast_tx_hash, execution=None)
             return SponsorBscBatch(success=False, error=str(exc)[:200])
 
         cache.set(rl_key, 1, 30)  # 30s per-address cooldown
