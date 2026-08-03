@@ -93,7 +93,14 @@ export const MigrationModal = () => {
                 iss, sub, aud, provider, 0
             );
 
-            if (migrationState.needsMigration) {
+            if (migrationState.statusUnknown) {
+                // The check could not complete, so we do not know whether this
+                // user has V1 funds. Do NOT start a migration on an unverified
+                // picture, and do not claim there is nothing to do either —
+                // leave the modal closed and re-check on the next trigger.
+                console.warn('[MigrationModal] Migration status unknown; skipping this check.');
+                setVisible(false);
+            } else if (migrationState.needsMigration) {
                 setVisible(true);
                 void performMigration(iss, sub, aud, provider);
             } else {

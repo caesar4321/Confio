@@ -79,6 +79,14 @@ export const useBackupEnforcement = () => {
                     0
                 );
 
+                if (migrationState.statusUnknown) {
+                    // Unknown is not "clear to proceed". Reporting readiness
+                    // here let a funded V1 user through whenever the pepper
+                    // service or algod was briefly unreachable.
+                    console.warn('[BackupEnforcement] Migration status unknown; not reporting readiness.');
+                    return false;
+                }
+
                 if (!migrationState.needsMigration) {
                     return true;
                 }

@@ -21,6 +21,16 @@ const mockState = { biometricBoundReadsFail: true };
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'android' },
+  // The guard token is minted through entropyGuard.secureRandomBytes, which
+  // calls the native CSPRNG directly and refuses when it is absent. A real
+  // device always has this module, so the mock must model one — otherwise
+  // enable() fails for a reason that has nothing to do with weak sensors.
+  NativeModules: {
+    RNGetRandomValues: {
+      getRandomBase64: (byteLength: number) =>
+        require('crypto').randomBytes(byteLength).toString('base64'),
+    },
+  },
 }));
 
 jest.mock('react-native-keychain', () => ({

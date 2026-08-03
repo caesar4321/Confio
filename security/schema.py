@@ -185,9 +185,12 @@ class RequestDeviceTrust(graphene.Mutation):
                     error="Please wait before requesting another code"
                 )
             
-            # Generate verification code
-            import random
-            code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+            # Generate verification code.
+            # secrets, not random: this code authorizes trusting a new device,
+            # so a Mersenne Twister stream an attacker can reconstruct from a
+            # few observed codes would hand them device trust.
+            import secrets
+            code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
             
             # Store code in cache
             cache_key = f"device_trust_code_{user.id}"

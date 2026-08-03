@@ -1,7 +1,8 @@
 // Trustless clock for emergency-exit timing (docs/plans/salida-de-emergencia-design.md).
 //
 // Every emergency window — the 24h outage judgment, the 24h normal-state
-// cooloff, and later the Exportar-claves 7d gate — is measured against
+// cooloff, and the 72h validity window an elapsed cooloff keeps before it
+// re-arms (reachability.ts) — is measured against
 // BLOCKCHAIN block timestamps, never the device clock. A scammer can walk
 // a victim through Settings → Date; nobody can walk them through forging
 // a BSC block. This module is part of the sanctioned exception to the

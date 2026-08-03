@@ -553,6 +553,7 @@ export class AuthService {
       // la Nube". Signature errors followed because the local secret no
       // longer derived to the server's address.
       let expectedAddress: string | null = null;
+      let expectedEvmAddress: string | null = null;
       try {
         const { GET_MY_MIGRATION_STATUS } = await import('../apollo/queries');
         const { data } = await apolloClient.query({
@@ -563,8 +564,19 @@ export class AuthService {
           (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
         );
         expectedAddress = personalAccount?.algorandAddress || null;
-        if (expectedAddress) {
-          console.log('[AuthService] enableDriveBackup expectedAddress fetched from server:', expectedAddress);
+        // NOTE: bscAddress is deliberately NOT queried here — it is not on the
+        // GraphQL AccountType yet, and one unknown field fails the WHOLE query
+        // against an older server, which would silently drop the Algorand
+        // anchor too. BSC-only accounts therefore reach getOrCreateMasterSecret
+        // unanchored; that case is made safe on the client instead (an
+        // unanchored restore may no longer REPLACE an existing local secret).
+        // TODO: expose bsc_address on AccountType, then anchor on it here.
+        expectedEvmAddress = null;
+        if (expectedAddress || expectedEvmAddress) {
+          console.log('[AuthService] enableDriveBackup anchors fetched from server:', {
+            expectedAddress,
+            expectedEvmAddress,
+          });
         } else {
           console.log('[AuthService] enableDriveBackup: no server-side address found; proceeding without filter');
         }
@@ -582,6 +594,7 @@ export class AuthService {
         provider: oauthData.provider,
         requireCloudSync: true,
         expectedAddress,
+        expectedEvmAddress,
       });
       console.log('[AuthService] Master secret synced to Drive');
 
@@ -985,7 +998,14 @@ export class AuthService {
               throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
             }
           } else {
+            // Generation was allowed, so this is a NEW user — but "allowed to
+            // generate" is not "allowed to fail". A throw here means the master
+            // secret was never created or was rejected as corrupt, and
+            // continuing sign-in would hand the user an account with no usable
+            // wallet while the guard that stopped it reports nothing. Apple's
+            // equivalent path already rethrows; match it.
             driveSyncSucceeded = false;
+            throw v2Err;
           }
         }
       }

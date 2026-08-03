@@ -18,6 +18,12 @@ if (__DEV__) {
 // Import React Native components
 import { AppRegistry, Platform, UIManager } from 'react-native';
 import { name as appName } from './app.json';
+import { reportEntropySourceAtBoot } from './src/setup/entropyGuard';
+
+// Report whether the native CSPRNG is callable. ES imports are hoisted, so
+// this runs after App's module graph evaluates — it is a diagnostic, not a
+// barrier. The barrier is secureRandomBytes() at each generation site.
+reportEntropySourceAtBoot();
 
 // Ensure Buffer is available globally before anything else
 global.Buffer = Buffer;

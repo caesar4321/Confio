@@ -1,6 +1,8 @@
 import * as Keychain from 'react-native-keychain';
 import { Platform } from 'react-native';
 import { isPinOrFingerprintSet } from 'react-native-device-info';
+import { bytesToHex } from '@noble/hashes/utils';
+import { secureRandomBytes } from '../setup/entropyGuard';
 
 const BIOMETRIC_SECRET_SERVICE = 'com.confio.biometric.guard';
 const BIOMETRIC_PREFS_SERVICE = 'com.confio.biometric.prefs';
@@ -134,7 +136,9 @@ class BiometricAuthService {
         console.warn('[BiometricAuthService] Failed to reset prior biometric secret:', resetError);
       }
 
-      const randomSecret = `${Date.now()}-${Math.random()}`;
+      // Presence marker, not key material — but it is still a secret sitting in
+      // the Keychain, so mint it from the CSPRNG rather than Math.random().
+      const randomSecret = bytesToHex(secureRandomBytes(32, 'the biometric guard token'));
       await Keychain.setGenericPassword(
         BIOMETRIC_SECRET_USERNAME,
         randomSecret,

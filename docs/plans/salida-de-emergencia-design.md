@@ -1,8 +1,13 @@
 # Salida de emergencia — server-independent full exit (design)
 
 **Status**: approved 2026-07-22 (Julian + Claude + Codex/ChatGPT debate, three rounds)
+**Amended**: 2026-08-03 — raw key export rejected outright; this design is no
+longer one half of a pair (§ «Rejected: raw key export»)
 **Owner track**: self-custody survivability ("what if Confío disappears?" — Peru)
-**Siblings**: Exportar claves (Advanced, unmarketed — separate spec), Emergency Recovery Kit (post-app-deletion — separate track)
+**Siblings**: Emergency Recovery Kit (post-app-deletion — separate track)
+**Rejected sibling**: Exportar claves — cancelled 2026-08-03, never built (see
+«Rejected: raw key export» below). Salida de emergencia is now the *only*
+survivability path, not the mass-market half of a pair.
 
 ## What this is
 
@@ -12,10 +17,7 @@ account's entire balance to an external wallet, without exposing keys, and
 the feature that makes "Confío no puede aprobar, rechazar ni bloquear esta
 operación" literally true at the code level.
 
-Raw key export (Exportar claves) remains a separate, deliberately
-unmarketed Advanced feature. Key theft grants covert, permanent access to
-future deposits — qualitatively worse than a visible on-chain transfer —
-so the mass-market answer to survivability is *transfer*, not *keys*.
+The answer to survivability is *transfer*, not *keys*.
 
 ## Non-negotiable principles
 
@@ -48,8 +50,10 @@ outage — the actual emergencies — are immediate: any delay there would be
 a de-facto fund freeze and would contradict the narrative.
 
 The cooloff/outage windows are measured against **chain block
-timestamps**, not the device clock (same anti-manipulation clock source as
-Exportar claves).
+timestamps**, not the device clock: a scammer can walk a victim through
+Settings → Date, but nobody can walk them through forging a BSC block.
+(Older drafts cited Exportar claves as sharing this clock source — that
+feature was rejected; the clock rationale stands on its own.)
 
 ## Execution modes (same screen, same verification, different engine)
 
@@ -78,8 +82,10 @@ Exportar claves).
    Android sets FLAG_SECURE (remote-support viewers — the AnyDesk scam
    pattern — see black, passively, with zero abort false-positives); iOS
    shows a non-blocking warning banner when `isCaptured` is true. Hard
-   capture BLOCKING belongs to the Exportar claves screen, where actual
-   secrets render.
+   capture BLOCKING was originally deferred to the Exportar claves screen,
+   "where actual secrets render". With that feature rejected, **no screen
+   in the app renders raw key material**, so hard capture-blocking has no
+   remaining home — and needs none. Warn, never abort.
 3. **User assets — redeem-to-base-asset FIRST, raw transfer as fallback.**
    "Permissionless" is not "accessible": an external Pera user cannot
    compose the `[cUSD axfer, app call]` burn group, and a MetaMask user
@@ -194,3 +200,63 @@ State of the package:
   makes cUSD fully self-redeemable post-mortem for anyone who exited with
   raw tokens. (No kit equivalent can exist for cUSD+ — its dependency is
   contractual, not tooling; that is what the vault timelock track is for.)
+
+## Rejected: raw key export (Exportar claves)
+
+**Cancelled 2026-08-03 (Julian). Confío does not export keys — at any
+tier, marketed or not. Do not re-propose it.**
+
+Recorded here so the idea is not rediscovered as an obvious gap: it is a
+considered rejection, not an oversight.
+
+Key theft grants covert, permanent access to every *future* deposit, is
+invisible to the victim, and cannot be undone once the secret has been
+seen — a strictly larger attack surface than the thing it was meant to
+insure against. An emergency transfer is its opposite on every axis:
+visible, one-time, on-chain, and bounded by the balance that exists at
+that moment. No delay gate, view-session hardening, or scam-warning copy
+changes that asymmetry; those measures only reduce the rate at which the
+larger vector is exploited. So the feature does not exist, and the design
+has no user-reachable path to raw key material.
+
+Two corollaries worth stating, because both have already caused confusion:
+
+- **The 7-day gate belongs to no shipped feature.** It appears in old
+  notes as an export delay. It was in fact the emergency-exit sweep
+  window, and the shipped values are 24h cooloff + 72h validity
+  (`NORMAL_COOLOFF_SECONDS` / `COOLOFF_VALID_SECONDS` in
+  `apps/src/services/emergencyExit/reachability.ts`).
+- **The Drive backup's app-constant encryption is not an escape hatch
+  either — but it stays.** The wallet blob in `appDataFolder` is
+  encrypted with a constant compiled into every APK, so whoever obtains
+  that file obtains raw key material. Nobody should cite it as a
+  post-mortem path: it is not one, and it is not consented.
+
+  Re-keying it to a server-derived wrap key was **considered and
+  rejected (2026-08-03)**. The reasoning, so it is not re-proposed: the
+  real access control is the `appDataFolder` OAuth-client ACL and the
+  iCloud keychain access group, not the cipher. The dominant threat —
+  Google account takeover — routes *through the app*, which would
+  authenticate to us and be handed the wrap key anyway, so the key
+  defends only out-of-band ciphertext disclosure (insider, compelled
+  process), and a party who can compel Google can compel Confío. Against
+  that narrow gain it would cost a new lockout class (wrap-key store
+  loss bricks every Drive-only user — cf. the 2026-07 Keystore-wipe
+  incident) and, worse, would convert the server from an *operational*
+  dependency into a *cryptographic* one, permanently foreclosing the
+  recovery-only boot mode in the kit track. No user-input passphrase
+  either: a forgotten password is an unrecoverable lockout, which for
+  this user base is worse than the threat it addresses.
+
+  The residual constraint is real and worth stating plainly: at restore
+  time there is no local Keystore, no user input, and (in the scenario
+  that matters) no server, so the only key material available is what
+  ships in the binary. The constant is close to the only option, and the
+  ACL is the control. What *is* worth fixing when that code is next
+  touched: the construction, not the key —
+  `crypto-js AES.encrypt(text, passphrase)` is EVP_BytesToKey/MD5,
+  single-iteration, CBC, unauthenticated. AEAD (AES-GCM or
+  XChaCha20-Poly1305) over HKDF of the same constant is a free upgrade
+  with no trust-model change. Low priority: a corrupted blob already
+  fails the derived-address check downstream, so integrity is caught,
+  just at the wrong layer.

@@ -40,6 +40,13 @@ const TESTNET_ALGOD = 'https://testnet-api.algonode.cloud';
 
 interface MigrationStatus {
     needsMigration: boolean;
+    /**
+     * The check could not complete (pepper unavailable, chain unreachable,
+     * unexpected throw). NOT the same as "no migration needed": a user with
+     * real V1 funds looks identical to a clean user when the check fails, so
+     * readiness gates must treat this as "unknown", never as "ready".
+     */
+    statusUnknown?: boolean;
     v1Balance?: number;
     v1Assets?: number[];
     v1Address?: string;
@@ -97,13 +104,41 @@ class WalletMigrationService {
         }
     }
 
+    /**
+     * A 404 from algod is a real answer: the address has never been funded.
+     * Anything else — timeout, DNS, 5xx, rate limit — is not an answer at all,
+     * and the two must never collapse into the same value.
+     *
+     * Deliberately lenient about the 404: a bare status match counts even
+     * without a recognizable body. Requiring both would misread a
+     * genuinely-absent account as "unknown" on any SDK that drops the response
+     * body, and that failure lands on new users during onboarding.
+     */
+    private isAccountAbsentError(error: any): boolean {
+        const status = error?.status ?? error?.response?.status ?? error?.statusCode;
+        const message = String(error?.message || '').toLowerCase();
+        return (
+            status === 404 ||
+            message.includes('no accounts found') ||
+            message.includes('account does not exist')
+        );
+    }
+
     private async hasMaterialBalanceAtRisk(address: string): Promise<boolean> {
         let info;
         try {
             info = await this.algodClient.accountInformation(address).do();
         } catch (error) {
-            console.log('[MigrationService] Address no longer found on chain; treating as no migration risk:', address);
-            return false;
+            if (this.isAccountAbsentError(error)) {
+                console.log('[MigrationService] Address no longer on chain; no migration risk:', address);
+                return false;
+            }
+            // Unknown, and this gates finalizing a migration. Answering "no
+            // risk" here let a timeout or 5xx finalize without ever confirming
+            // the V1 wallet was actually swept. Assume value is still at risk;
+            // the caller refuses to finalize and the user retries.
+            console.warn('[MigrationService] Could not confirm V1 is empty; assuming value is still at risk.', error);
+            return true;
         }
 
         const relevantAssets = (info.assets || []).filter((a: any) => {
@@ -171,8 +206,14 @@ class WalletMigrationService {
 
             try {
                 v1Info = await this.algodClient.accountInformation(v1Address).do();
-            } catch (e) {
-                // Account not found on chain -> Treat as empty/new
+            } catch (e: any) {
+                // Absent means nothing to migrate. Unreachable means we do not
+                // know — and telling a funded V1 user "nothing to migrate"
+                // because their network hiccuped is the bug this closes.
+                if (!this.isAccountAbsentError(e)) {
+                    console.warn('[MigrationService] Could not read V1 account state; status unknown.', e);
+                    return { needsMigration: false, statusUnknown: true };
+                }
                 return { needsMigration: false, v1Address: undefined };
             }
 
@@ -254,8 +295,11 @@ class WalletMigrationService {
 
         } catch (error) {
             console.error('[MigrationService] Error checking status:', error);
-            // Fail safe: False
-            return { needsMigration: false };
+            // NOT "no migration needed" — we do not know. Returning a bare
+            // false here let a pepper outage or an unreachable algod mark a
+            // funded V1 user as ready to proceed, which is the fail-open this
+            // flag exists to close.
+            return { needsMigration: false, statusUnknown: true };
         }
     }
 
@@ -284,6 +328,11 @@ class WalletMigrationService {
                 accountIndex,
                 businessId
             );
+
+            if (migrationState.statusUnknown) {
+                console.warn('[MigrationService] Migration status could not be determined; refusing to report readiness.');
+                return false;
+            }
 
             if (!migrationState.needsMigration) {
                 return true;
@@ -330,10 +379,24 @@ class WalletMigrationService {
                 throw new Error('Debes activar el respaldo en Google Drive antes de migrar tu billetera.');
             }
 
+            // requireCloudSync is NOT optional here. Without it,
+            // getOrCreateMasterSecret reports sync failure through
+            // onCloudSyncResult and returns the secret anyway — so this line
+            // used to log "backed up to Drive" and then sweep the user's funds
+            // into a V2 secret that existed only on this device. That is the
+            // 10090 lockout shape, in the one path that moves money.
+            let cloudSynced = false;
             const v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken, {
                 provider,
+                requireCloudSync: true,
+                onCloudSyncResult: (synced) => { cloudSynced = synced; },
             });
-            console.log('[MigrationService] V2 Secret ready and backed up to Drive');
+            if (!cloudSynced) {
+                throw new Error(
+                    'No pudimos guardar el respaldo de tu billetera en Google Drive. No movimos tus fondos. Revisa tu conexión e inténtalo de nuevo.'
+                );
+            }
+            console.log('[MigrationService] V2 Secret ready and backup to Drive confirmed');
 
             const v2Wallet = deriveWalletV2(v2Secret, {
                 iss, sub, aud, accountType: 'personal', accountIndex, businessId
@@ -368,8 +431,18 @@ class WalletMigrationService {
 
             const rawTransactions = JSON.parse(prepResult.data.prepareAtomicMigration.transactions);
             if (!rawTransactions || rawTransactions.length === 0) {
-                // Nothing to migrate or already done
-                console.log('[MigrationService] No transactions returned (nothing to migrate?). Marking complete.');
+                // "Nothing to move" is the backend's view, and it is exactly what
+                // an ALREADY-SUBMITTED sweep looks like on the automatic retry.
+                // Without this check the retry finalized without ever confirming
+                // V1 was empty — walking straight around the post-sweep guard
+                // below, which only protected the first attempt.
+                const stillAtRisk = await this.hasMaterialBalanceAtRisk(v1Address);
+                if (stillAtRisk) {
+                    console.error('[MigrationService] Backend reports nothing to move, but V1 still holds value (or could not be verified). Refusing to finalize.');
+                    return false;
+                }
+
+                console.log('[MigrationService] No transactions returned and V1 confirmed empty. Marking complete.');
                 const registration = await registerAlgorandAddressChecked(v2Address, {
                     isV2Wallet: true,
                     context: 'migration_nothing_to_move',

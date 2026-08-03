@@ -22,10 +22,10 @@ import DeviceInfo from 'react-native-device-info';
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { REPORT_BACKUP_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
-import { randomBytes } from '@noble/hashes/utils';
+import { secureRandomBytes } from '../setup/entropyGuard';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
 import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet } from './evmWallet';
-import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
+import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, strictBase64ToBytes, NonCanonicalBase64Error } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
 
@@ -154,7 +154,10 @@ function wrapSeed(
   pepperVersion: number = 1,
   meta?: { derivationPepperHash?: string; scope?: string; saltFingerprint?: string }
 ): string {
-  const nonce = randomBytes(24);
+  // Secrecy is not the requirement here, uniqueness is: a repeating nonce
+  // under the same KEK breaks XSalsa20-Poly1305 outright, so this needs the
+  // same guaranteed-CSPRNG source as the key material itself.
+  const nonce = secureRandomBytes(24, 'a seed-wrapping nonce');
   const ciphertext = nacl.secretbox(seed32, nonce, kek32);
 
   const blob = {
@@ -522,8 +525,11 @@ function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
   return diff === 0;
 }
 
+// Pure by construction: this is used to VALIDATE untrusted candidates (Drive
+// blobs, keychain reads), so it must not cache or persist anything derived from
+// a secret that may be rejected a moment later.
 function derivePersonalV2Address(masterSecret: Uint8Array): string {
-  return deriveWalletV2(masterSecret, {
+  return deriveV2KeyMaterial(masterSecret, {
     accountType: 'personal',
     accountIndex: 0,
   }).address;
@@ -532,6 +538,39 @@ function derivePersonalV2Address(masterSecret: Uint8Array): string {
 // EVM sibling of derivePersonalV2Address. Anchor for BSC-only users
 // (Algorand deprecated): their server-registered bsc_address is immutable,
 // so a secret must derive to it before we accept it.
+/**
+ * The PURE half of V2 derivation: HKDF seed plus the Algorand keypair, with no
+ * caching, no Keychain writes, no globals.
+ *
+ * deriveWalletV2 is deliberately impure — it also derives and PERSISTS the EVM
+ * sibling. That makes it unusable for validation: checking a Drive candidate's
+ * identity commitment with it cached the rejected candidate's EVM address into
+ * memory and the Keychain, which getEvmAddressForDisplay then trusted. Anything
+ * that merely needs to ask "what address does this secret produce?" must use
+ * this function.
+ */
+export function deriveV2AddressPure(
+  clientSecret: Uint8Array,
+  opts: { accountType: string; accountIndex: number; businessId?: string }
+): string {
+  return deriveV2KeyMaterial(clientSecret, opts).address;
+}
+
+function deriveV2KeyMaterial(
+  clientSecret: Uint8Array,
+  opts: { accountType: string; accountIndex: number; businessId?: string }
+): { address: string; seed32: Uint8Array; keyPair: nacl.SignKeyPair } {
+  const saltInput = opts.businessId
+    ? `confio_v2_salt_${opts.accountType}_${opts.businessId}_${opts.accountIndex}`
+    : `confio_v2_salt_${opts.accountType}_${opts.accountIndex}`;
+  const salt = sha256(utf8ToBytes(saltInput));
+  const info = utf8ToBytes(`confio|v2|derived|${saltInput}`);
+  const seed32 = hkdf(sha256, clientSecret, salt, info, 32);
+  const keyPair = nacl.sign.keyPair.fromSeed(seed32);
+  const algosdk = require('algosdk');
+  return { address: algosdk.encodeAddress(keyPair.publicKey), seed32, keyPair };
+}
+
 function derivePersonalEvmAddress(masterSecret: Uint8Array): string {
   return deriveEvmKeyFromMasterSecret(masterSecret, {
     accountType: 'personal',
@@ -548,12 +587,215 @@ async function storeAddressBoundMasterSecret(
   await credentialStorage.storeSecret(`${ADDRESS_BOUND_SECRET_PREFIX}${address}`, masterSecret);
 }
 
+/**
+ * Every V2 master secret is exactly 32 bytes (generateRandomSecret). Anything
+ * else reaching HKDF is corruption, a truncated read, or a foreign blob — and
+ * a short secret silently shrinks the keyspace, which is precisely the class
+ * of failure this file must never allow. Reject at every trust boundary
+ * rather than deriving an address nobody can fund.
+ */
+export const MASTER_SECRET_BYTES = 32;
+
+/**
+ * Written over the legacy global alias once it has been migrated. It is
+ * deliberately not a valid secret, so the strict read path reports it as
+ * corruption — and the legacy handler has to recognise it to avoid bricking
+ * anyone whose tombstone deletion failed. Compared BYTE-EXACT: a sentinel that
+ * suppresses a fail-closed check must not be satisfiable by anything else.
+ */
+const MIGRATION_TOMBSTONE_BYTES = utf8ToBytes('MIGRATED_TOMBSTONE');
+
+/**
+ * Throw unless `secret` derives to whichever server-registered address(es) the
+ * caller supplied. Anchors are the ONLY real defense against adopting the wrong
+ * wallet — the Drive blob's own commitment is forgeable by anyone holding the
+ * app constant — so every point that ACCEPTS a candidate calls this before
+ * persisting, tombstoning or uploading anything.
+ */
+/**
+ * ANCHOR SEMANTICS — read this before changing the comparisons.
+ *
+ * The Algorand address and the EVM address are BOTH deterministic functions of
+ * the same 32-byte master secret (derivePersonalV2Address /
+ * derivePersonalEvmAddress, both fixed at personal / index 0). So matching ONE
+ * supplied anchor already proves the secret is the one that produced it: short
+ * of a hash collision, no other secret derives to that address.
+ *
+ * That has a consequence worth stating plainly, because this code got it wrong
+ * once: requiring EVERY anchor to match adds NO security. It cannot tell a
+ * wrong wallet from a right one, because a secret matching the Algorand anchor
+ * necessarily produces exactly one EVM address as well. What an all-anchors
+ * rule DOES do is brick any user whose server row is internally inconsistent —
+ * a bsc_address registered from a stale cache or the wrong account context —
+ * by rejecting the very secret that matches their authoritative Algorand
+ * address. A lockout with no compensating benefit.
+ *
+ * So: at least one supplied anchor must match. Disagreement BETWEEN anchors is
+ * a stale server record — logged loudly for reconciliation, never fatal. No
+ * anchors at all imposes no constraint (the deliberate clean-device restore).
+ */
+type AnchorVerdict = 'no-anchors' | 'match' | 'mismatch';
+
+function anchorVerdict(
+  secret: Uint8Array,
+  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined
+): AnchorVerdict {
+  const wantAlgo = options?.expectedAddress || null;
+  const wantEvm = options?.expectedEvmAddress ? options.expectedEvmAddress.toLowerCase() : null;
+  if (!wantAlgo && !wantEvm) return 'no-anchors';
+
+  const algoMatches = wantAlgo ? derivePersonalV2Address(secret) === wantAlgo : null;
+  const evmMatches = wantEvm ? derivePersonalEvmAddress(secret) === wantEvm : null;
+
+  if (algoMatches === true && evmMatches === false) {
+    console.error('[MasterSecret] STALE SERVER RECORD: secret matches the registered Algorand address but not the BSC one. Accepting on the Algorand anchor; the BSC record needs reconciliation.');
+  }
+  if (evmMatches === true && algoMatches === false) {
+    console.error('[MasterSecret] STALE SERVER RECORD: secret matches the registered BSC address but not the Algorand one. Accepting on the BSC anchor; the Algorand record needs reconciliation.');
+  }
+
+  return algoMatches === true || evmMatches === true ? 'match' : 'mismatch';
+}
+
+/** True unless the secret contradicts every anchor the caller supplied. */
+function matchesAnchors(
+  secret: Uint8Array,
+  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined
+): boolean {
+  return anchorVerdict(secret, options) !== 'mismatch';
+}
+
+/**
+ * Throwing form, for the points that ACCEPT a candidate: persistence,
+ * tombstoning, deletion, upload. Anchors are the only real defense against
+ * adopting the wrong wallet — the Drive blob's own commitment is forgeable by
+ * anyone holding the app constant — so acceptance points assert here.
+ */
+function assertAnchors(
+  secret: Uint8Array,
+  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined,
+  what: string
+): void {
+  if (anchorVerdict(secret, options) === 'mismatch') {
+    throw new Error(
+      'No encontramos el respaldo correcto de tu billetera. Intenta con la cuenta de Google donde guardaste tu respaldo o contáctanos para ayudarte.'
+    );
+  }
+  console.log(`[MasterSecret] Anchor check passed for ${what}.`);
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+export class CorruptMasterSecretError extends Error {
+  constructor(source: string, length: number) {
+    super(
+      `[MasterSecret] Stored secret from ${source} is ${length < 0 ? 'not canonical base64' : `${length} bytes, expected ${MASTER_SECRET_BYTES}`}. ` +
+      'Refusing to continue: this is corruption, not absence, and generating a replacement would ' +
+      'overwrite the only copy of a wallet that may hold funds.'
+    );
+    this.name = 'CorruptMasterSecretError';
+  }
+}
+
+/**
+ * Raised when a corrupt local secret could not be repaired from Drive. The
+ * user-facing text is Spanish because this surfaces directly in sign-in.
+ */
+export class CorruptMasterSecretRecoveryError extends Error {
+  constructor() {
+    super(
+      'Los datos de tu billetera en este dispositivo están dañados y no encontramos un respaldo válido en Google Drive. ' +
+      'Inicia sesión con la cuenta de Google donde guardaste tu respaldo, o contáctanos para ayudarte.'
+    );
+    this.name = 'CorruptMasterSecretRecoveryError';
+  }
+}
+
+/**
+ * A secret read out of LOCAL storage (keychain).
+ *
+ * Absent is a normal state — a clean device, a first login — and returns null
+ * so the caller can restore or generate. Present-but-wrong-length is NOT
+ * absence: it is a truncated or corrupted read of something that may have been
+ * a real wallet. Returning null there would send the caller down the
+ * generation path, which overwrites the alias and destroys the only copy. So
+ * that case throws and stops the flow.
+ */
+/**
+ * Read key material and normalise every failure mode the repair path must
+ * recognise. `retrieveSecretStrict` throws NonCanonicalBase64Error for a
+ * malformed stored value; that is corruption exactly like a wrong length, and
+ * the handlers below only know CorruptMasterSecretError — so convert it here
+ * rather than letting a second error type escape the recovery logic.
+ *
+ * SecureStorageReadError is deliberately NOT converted: "could not read" is not
+ * "corrupt", it must not enable repair-by-replacement, and it propagates.
+ */
+async function readMasterSecret(
+  credentialStorage: any,
+  key: string,
+  source: string
+): Promise<Uint8Array | null> {
+  let raw: Uint8Array | null;
+  try {
+    raw = await credentialStorage.retrieveSecretStrict(key);
+  } catch (error) {
+    if (error instanceof NonCanonicalBase64Error) {
+      throw new CorruptMasterSecretError(source, -1);
+    }
+    throw error;
+  }
+  return storedMasterSecret(raw, source);
+}
+
+function storedMasterSecret(
+  secret: Uint8Array | null | undefined,
+  source: string
+): Uint8Array | null {
+  if (!secret) return null;
+  if (secret.length !== MASTER_SECRET_BYTES) {
+    throw new CorruptMasterSecretError(source, secret.length);
+  }
+  return secret;
+}
+
+/**
+ * A secret decrypted from a DRIVE backup candidate.
+ *
+ * Different contract from local storage: we are filtering a list of files, any
+ * of which may be foreign or damaged. A wrong-length blob is skipped so the
+ * scan can keep looking, rather than aborting the whole restore.
+ */
+function driveCandidateSecret(
+  secret: Uint8Array | null | undefined,
+  source: string
+): Uint8Array | null {
+  if (!secret) return null;
+  if (secret.length !== MASTER_SECRET_BYTES) {
+    console.warn(
+      `[MasterSecret] Skipping ${secret.length}-byte candidate from ${source}; expected ${MASTER_SECRET_BYTES}.`
+    );
+    return null;
+  }
+  return secret;
+}
+
 async function retrieveAddressBoundMasterSecret(
   credentialStorage: any,
   address: string | null | undefined
 ): Promise<Uint8Array | null> {
   if (!address) return null;
-  return credentialStorage.retrieveSecret(`${ADDRESS_BOUND_SECRET_PREFIX}${address}`);
+  return readMasterSecret(
+    credentialStorage,
+    `${ADDRESS_BOUND_SECRET_PREFIX}${address}`,
+    'address-bound keychain alias'
+  );
 }
 
 async function tryStoreRecoveredSecret(
@@ -591,16 +833,19 @@ let v2SecretMutex: Promise<void> = Promise.resolve();
 /**
  * Generate a random V2 client secret using CSPRNG.
  * INTERNAL USE ONLY
+ *
+ * Straight from the platform CSPRNG, never via global.crypto — see
+ * entropyGuard.ts for why that global cannot be trusted to be native-backed.
  */
 function generateRandomSecret(): Uint8Array {
-  return randomBytes(32);
+  return secureRandomBytes(32, 'a new wallet master secret');
 }
 
 /**
  * Simple UUID v4 generator using the existing CSPRNG
  */
 function generateUUID(): string {
-  const b = randomBytes(16);
+  const b = secureRandomBytes(16, 'a wallet id');
   b[6] = (b[6] & 0x0f) | 0x40;
   b[8] = (b[8] & 0x3f) | 0x80;
   const hex = bytesToHex(b);
@@ -615,7 +860,32 @@ async function fetchManifest(googleDriveStorage: any, accessToken: string): Prom
     const files = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME);
     if (files.length > 0) {
       const content = await googleDriveStorage.downloadFile(accessToken, files[0].id);
-      return JSON.parse(content) as WalletManifest;
+      const parsed = JSON.parse(content);
+      // Valid JSON is not a valid manifest. Callers immediately do
+      // `manifest.wallets.filter(...)`, so a malformed-but-parseable file threw
+      // a TypeError deep in the restore path instead of degrading to "no
+      // manifest". Treat anything unexpected as empty.
+      if (parsed && Array.isArray(parsed.wallets)) {
+        // Array.isArray is not enough: `{"wallets":[null]}` passes it and then
+        // throws on the first `entry.id` dereference downstream, which denies
+        // restore and migration until the file is repaired by hand. Drop
+        // non-object entries instead of trusting the array's contents.
+        // Normalise the fields we actually consume. Filtering out null was not
+        // enough: `{"deviceHint": 1}` survives an object check and then throws
+        // on `.toLowerCase()` downstream. Coerce or drop instead.
+        const wallets = parsed.wallets
+          .filter((entry: any) => !!entry && typeof entry === 'object')
+          .map((entry: any) => ({
+            ...entry,
+            id: typeof entry.id === 'string' ? entry.id : undefined,
+            deviceHint: typeof entry.deviceHint === 'string' ? entry.deviceHint : undefined,
+          }));
+        if (wallets.length !== parsed.wallets.length) {
+          console.warn('[Manifest] Dropped malformed manifest entries.');
+        }
+        return { ...parsed, wallets } as WalletManifest;
+      }
+      console.warn('[Manifest] Parsed content is not a manifest; treating as empty.');
     }
   } catch (e) {
     console.warn('[Manifest] Fetch failed or empty:', e);
@@ -658,16 +928,16 @@ async function findOldestRestorableDriveBackup(
   expectedAddress?: string | null,
   expectedEvmAddress?: string | null
 ): Promise<OldestDriveBackupResult> {
-  // A candidate backup matches when it derives to ANY provided anchor —
-  // the Algorand address (legacy accounts) or the BSC address (BSC-only
-  // accounts, Algorand deprecated). No anchors = accept the oldest.
-  const expectedEvm = expectedEvmAddress ? expectedEvmAddress.toLowerCase() : null;
-  const candidateMatchesAnchor = (decrypted: Uint8Array): boolean => {
-    if (!expectedAddress && !expectedEvm) return true;
-    if (expectedAddress && derivePersonalV2Address(decrypted) === expectedAddress) return true;
-    if (expectedEvm && derivePersonalEvmAddress(decrypted) === expectedEvm) return true;
-    return false;
-  };
+  // A candidate must derive to EVERY anchor the caller supplied, not any one
+  // of them. Google login supplies both the Algorand and the BSC address, and
+  // "any" let a candidate that matched Algorand but NOT the registered BSC
+  // address be adopted — a different wallet on the savings chain. Callers with
+  // only one anchor (BSC-only accounts have no Algorand address) are unchanged
+  // because an absent anchor imposes no constraint. No anchors at all = accept
+  // the oldest, which is the deliberate clean-device restore behaviour.
+  // One definition of acceptance, shared with every other call site.
+  const candidateMatchesAnchor = (decrypted: Uint8Array): boolean =>
+    matchesAnchors(decrypted, { expectedAddress, expectedEvmAddress });
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
   const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
   const manifest = await fetchManifest(googleDriveStorage, accessToken);
@@ -696,7 +966,7 @@ async function findOldestRestorableDriveBackup(
   // the cold-start Android login (no BlockStore) feel stuck on
   // "Verificando seguridad del dispositivo...". The targeted path is 1
   // listFiles + 1 downloadFile per manifest entry.
-  if ((expectedAddress || expectedEvm) && manifest.wallets.length > 0) {
+  if ((expectedAddress || expectedEvmAddress) && manifest.wallets.length > 0) {
     for (const entry of manifest.wallets) {
       if (!entry.id) continue;
       const filename = `confio_wallet_v2_${entry.id}.enc`;
@@ -729,7 +999,7 @@ async function findOldestRestorableDriveBackup(
           id: entry.id,
           candidateAddress,
           expectedAddress,
-          expectedEvmAddress: expectedEvm,
+          expectedEvmAddress,
         });
       } catch (e) {
         console.warn('[MasterSecret] Fast-path failed for manifest entry; falling back to full scan.', entry.id, e);
@@ -825,7 +1095,7 @@ async function findOldestRestorableDriveBackup(
             name: candidate.name,
             candidateAddress,
             expectedAddress,
-            expectedEvmAddress: expectedEvm,
+            expectedEvmAddress,
             deviceHint: candidate.deviceHint || 'unknown',
           });
           continue;
@@ -1340,21 +1610,106 @@ export async function getOrCreateMasterSecret(
     // =================================================================================
     // 1. LOCAL CHECK
     // =================================================================================
-    let localSecret = await credentialStorage.retrieveSecret(secretAlias);
-    let localWalletIdBytes = await credentialStorage.retrieveSecret(walletIdKey);
-    let localWalletId = localWalletIdBytes ? decodeUtf8(localWalletIdBytes) : null;
+    // Corruption is a THIRD state, distinct from both "have it" and "absent".
+    // Throwing here outright would be safe against overwriting, but it would
+    // also brick the one thing that can repair the damage: an address-anchored
+    // Drive restore. So record it, let the Drive scan below run, and forbid
+    // generation at the end — the restore can rewrite the alias, and if no
+    // valid backup turns up we refuse rather than mint a replacement.
+    let localSecretCorrupt = false;
+    let localSecret: Uint8Array | null = null;
+    try {
+      localSecret = await readMasterSecret(
+        credentialStorage,
+        secretAlias,
+        'subject-bound keychain alias'
+      );
+    } catch (error) {
+      if (!(error instanceof CorruptMasterSecretError)) throw error;
+      console.error('[MasterSecret] Local secret is corrupt. Generation is now blocked; attempting anchored recovery.', error);
+      localSecretCorrupt = true;
 
-    if (localSecret && options?.expectedAddress) {
-      const localAddress = derivePersonalV2Address(localSecret);
-      if (localAddress !== options.expectedAddress) {
-        console.warn('[MasterSecret] Local subject-bound V2 secret does not match server address. Checking address-bound restore alias.', {
-          localAddress,
-          expectedAddress: options.expectedAddress,
-        });
-        const addressBoundSecret = await retrieveAddressBoundMasterSecret(
+      // Repairing corruption REQUIRES an identity anchor. Without one, the
+      // Drive scan accepts the oldest decryptable backup (the cross-identity
+      // guard below is Apple-only), so a corrupt alias could be silently
+      // replaced with a DIFFERENT wallet that happens to live in the same
+      // Drive. Refuse instead — the caller can retry once it knows the address.
+      if (!options?.expectedAddress && !options?.expectedEvmAddress) {
+        throw new CorruptMasterSecretRecoveryError();
+      }
+
+      // A valid address-bound copy may still exist locally. The subject-bound
+      // read is what was damaged; check the other alias before reaching for
+      // Drive at all.
+      //
+      // That lookup validates too, so it can throw CorruptMasterSecretError of
+      // its OWN — and letting that escape here meant damage to the SECOND alias
+      // aborted the whole recovery before Drive was ever scanned. Swallow it:
+      // a bad secondary copy is just an exhausted local option, not a reason to
+      // give up on the backup that can actually repair this.
+      let addressBound: Uint8Array | null = null;
+      try {
+        addressBound = await retrieveAddressBoundMasterSecret(
           credentialStorage,
           options.expectedAddress
         );
+      } catch (secondaryError) {
+        if (!(secondaryError instanceof CorruptMasterSecretError)) throw secondaryError;
+        console.warn('[MasterSecret] Address-bound copy is also corrupt; falling through to Drive.', secondaryError);
+      }
+
+      // Same acceptance rule as everywhere else — this branch used to hand-roll
+      // an Algorand-only comparison, clear the corruption flag and persist,
+      // leaving the backstop to catch a partially-validated candidate after the
+      // subject alias had already been rewritten.
+      if (addressBound && matchesAnchors(addressBound, options)) {
+        console.log('[MasterSecret] Repaired corrupt subject alias from the local address-bound copy.');
+        localSecret = addressBound;
+        localSecretCorrupt = false;
+        await tryStoreRecoveredSecret(
+          credentialStorage,
+          secretAlias,
+          localSecret,
+          'corrupt subject-bound secret'
+        );
+      }
+    }
+    let localWalletIdBytes = await credentialStorage.retrieveSecret(walletIdKey);
+    let localWalletId = localWalletIdBytes ? decodeUtf8(localWalletIdBytes) : null;
+
+    if (localSecret && (options?.expectedAddress || options?.expectedEvmAddress)) {
+      // EVERY supplied anchor must hold, not just the Algorand one. Google
+      // login supplies both; checking only Algorand let a secret that derives
+      // to the right Algorand address but the WRONG registered BSC address be
+      // fast-pathed, persisted and returned.
+      if (!matchesAnchors(localSecret, options)) {
+        console.warn('[MasterSecret] Local subject-bound V2 secret does not match the server anchors. Checking address-bound restore alias.', {
+          expectedAddress: options.expectedAddress,
+          expectedEvmAddress: options.expectedEvmAddress,
+        });
+        // A damaged SECONDARY alias must not abort anchored Drive recovery —
+        // same reasoning as the corruption handler above, different branch.
+        // SecureStorageReadError still propagates: "could not read" is not
+        // licence to keep going.
+        let addressBoundSecret: Uint8Array | null = null;
+        try {
+          addressBoundSecret = await retrieveAddressBoundMasterSecret(
+            credentialStorage,
+            options.expectedAddress
+          );
+        } catch (secondaryError) {
+          if (!(secondaryError instanceof CorruptMasterSecretError)) throw secondaryError;
+          console.warn('[MasterSecret] Address-bound alias is corrupt; continuing to Drive recovery.', secondaryError);
+        }
+        // Validate BEFORE adopting and persisting. The alias is keyed by
+        // address, but the value stored under it is not proof of anything —
+        // accepting it unchecked wrote a possibly-wrong secret over the subject
+        // alias, and the final anchor guard then rejected it AFTER the damage.
+        if (addressBoundSecret && !matchesAnchors(addressBoundSecret, options)) {
+          console.warn('[MasterSecret] Address-bound alias does not satisfy every server anchor; ignoring it.');
+          addressBoundSecret = null;
+        }
+
         if (addressBoundSecret) {
           localSecret = addressBoundSecret;
           await tryStoreRecoveredSecret(
@@ -1370,11 +1725,14 @@ export async function getOrCreateMasterSecret(
           );
         }
       } else {
-        await storeAddressBoundMasterSecret(
-          credentialStorage,
-          options.expectedAddress,
-          localSecret
-        );
+        // Every supplied anchor holds. Safe to bind and fast-path.
+        if (options.expectedAddress) {
+          await storeAddressBoundMasterSecret(
+            credentialStorage,
+            options.expectedAddress,
+            localSecret
+          );
+        }
         // FAST PATH: local secret already derives to the server's recorded
         // address. The Drive scan + cloud sync below would just re-upload the
         // same bytes with a new IV. On a slow network that costs 8–16 Drive
@@ -1387,35 +1745,17 @@ export async function getOrCreateMasterSecret(
         // server while the user's Drive stayed empty — an unrecoverable
         // lockout once the local Keystore was wiped (user 10090).
         if (!options?.requireCloudSync) {
-          console.log('[MasterSecret] Local secret matches server address. Skipping Drive scan.');
+          console.log('[MasterSecret] Local secret matches every server anchor. Skipping Drive scan.');
           return localSecret;
         }
-        console.log('[MasterSecret] Local secret matches server address but cloud sync is required. Continuing to Drive backup.');
+        console.log('[MasterSecret] Local secret matches every server anchor but cloud sync is required. Continuing to Drive backup.');
       }
     }
 
-    // EVM-anchored check (BSC-only accounts, Algorand deprecated): mirror the
-    // expectedAddress logic above using the immutable server bsc_address.
-    if (localSecret && !options?.expectedAddress && options?.expectedEvmAddress) {
-      const expectedEvm = options.expectedEvmAddress.toLowerCase();
-      const localEvm = derivePersonalEvmAddress(localSecret);
-      if (localEvm !== expectedEvm) {
-        console.warn('[MasterSecret] Local V2 secret does not derive to the server BSC address.', {
-          localEvm,
-          expectedEvm,
-        });
-        if (options.allowGenerate === false && !accessToken) {
-          throw new Error(
-            'Esta cuenta ya fue vinculada a otra billetera. Necesitamos recuperar esa billetera desde Google Drive antes de continuar.'
-          );
-        }
-        // Fall through to the Drive restore below; the restored secret is
-        // validated against the same EVM anchor.
-      } else if (!options?.requireCloudSync) {
-        console.log('[MasterSecret] Local secret matches server BSC address. Skipping Drive scan.');
-        return localSecret;
-      }
-    }
+    // (The separate EVM-only anchored check that used to live here is gone: the
+    // unified matchesAnchors block above covers it, and having two partial
+    // checks was exactly how a candidate could satisfy one anchor and skip the
+    // other.)
 
     // SANITY CHECK: Ensure we never use the string "null" or "undefined" as an ID
     if (localWalletId === 'null' || localWalletId === 'undefined') {
@@ -1424,7 +1764,11 @@ export async function getOrCreateMasterSecret(
     }
 
     // --- ACL MIGRATION HOOK (iOS) ---
-    if (localSecret && Platform.OS === 'ios') {
+    // Only for a secret that has CLEARED every supplied anchor. Reaching here
+    // with a mismatching localSecret is normal (the block above falls through
+    // to Drive recovery), and rewriting it would persist the wrong secret and
+    // report iCloud safety for it — before the final guards ever run.
+    if (localSecret && Platform.OS === 'ios' && matchesAnchors(localSecret, options)) {
       const ACL_FLAG_KEY = 'v2_acl_migration_complete_v1';
       const currentFlag = await credentialStorage.retrieveSecret(ACL_FLAG_KEY);
       if (!currentFlag) {
@@ -1514,6 +1858,16 @@ export async function getOrCreateMasterSecret(
         }
 
         if (localSecret && !secretsEqual(localSecret, restore.secret)) {
+          // Replacing a DIFFERENT local secret needs positive evidence that the
+          // Drive copy is the right one. With no anchors, candidateMatchesAnchor
+          // accepts the oldest decryptable blob, so an unanchored caller (a
+          // BSC-only account, whose bsc_address is not yet on AccountType, has
+          // no anchor to pass) could overwrite a perfectly good local wallet
+          // and then upload it as canonical. Keep what we have instead.
+          if (!options?.expectedAddress && !options?.expectedEvmAddress) {
+            console.warn('[MasterSecret] Drive holds a different secret but no anchor was supplied; keeping the local secret rather than replacing it.');
+            return localSecret;
+          }
           console.log('[MasterSecret] Replacing local V2 secret with canonical Drive backup.');
         }
         localSecret = restore.secret;
@@ -1546,39 +1900,97 @@ export async function getOrCreateMasterSecret(
       }
     }
 
-    // FINAL EVM-ANCHOR GUARD (BSC-only accounts): if we still hold a secret
-    // that does NOT derive to the server-registered BSC address, refuse —
-    // returning (and syncing) it would silently replace the user's real
-    // wallet. This closes the fallthrough where a mismatched local secret
-    // survives an empty Drive scan.
-    if (
-      localSecret &&
-      !options?.expectedAddress &&
-      options?.expectedEvmAddress &&
-      derivePersonalEvmAddress(localSecret) !== options.expectedEvmAddress.toLowerCase()
-    ) {
-      throw new Error(
-        'No encontramos el respaldo correcto de tu billetera. Intenta con la cuenta de Google donde guardaste tu respaldo o contáctanos para ayudarte.'
-      );
+    // FINAL ANCHOR BACKSTOP: every acceptance point above validates its own
+    // candidate, but this is the last place before persistence and cloud sync,
+    // so assert once more against EVERY supplied anchor. The two guards that
+    // used to live here were mutually exclusive (`expectedAddress` vs
+    // `!expectedAddress`), which meant a caller supplying BOTH — Google login
+    // does — only ever had the Algorand half checked.
+    if (localSecret) {
+      assertAnchors(localSecret, options, 'the secret about to be persisted');
     }
 
     // =================================================================================
     // 3. GENERATION (If still missing)
     // =================================================================================
     if (!localSecret) {
-      if (options?.allowGenerate === false) {
-        throw new Error('[MasterSecret] Existing wallet requires recovery; refusing to generate replacement secret.');
+      // The Drive restore above was this user's chance to repair a corrupt
+      // alias. It did not, so stop: generating here would overwrite the only
+      // copy of a wallet that may hold funds, which is strictly worse than
+      // refusing to sign in.
+      if (localSecretCorrupt) {
+        throw new CorruptMasterSecretRecoveryError();
       }
 
-      // Check Legacy Local (Migration from V1 Global)
-      const legacyGlobalSecret = await credentialStorage.retrieveSecret(legacyAlias);
-      if (legacyGlobalSecret && legacyGlobalSecret.length === 32) {
+      // NOTE: allowGenerate:false is checked AFTER the legacy-alias read, not
+      // before it. Refusing here first meant a returning user whose only
+      // surviving local copy was the legacy global alias could never migrate
+      // it, even when it satisfied every server anchor — a recovery lockout
+      // caused by the guard rather than by missing data. Reading the alias
+      // generates nothing; only the else-branch below does.
+
+      // Check Legacy Local (Migration from V1 Global).
+      //
+      // STRICT: this is key material, and the `else` branch below GENERATES a
+      // replacement. Reading it leniently meant an unreadable Keychain or a
+      // malformed value returned null, fell through, and minted a new wallet
+      // over a funded legacy one — the exact loss condition the strict read
+      // path exists to prevent.
+      let legacyGlobalSecret: Uint8Array | null = null;
+      try {
+        legacyGlobalSecret = await readMasterSecret(
+          credentialStorage,
+          legacyAlias,
+          'legacy global alias'
+        );
+      } catch (legacyErr) {
+        // The tombstone written after a successful migration is deliberately
+        // not a 32-byte secret, so it trips the corruption check. Distinguish
+        // it from real damage: a tombstone means "already migrated, carry on";
+        // anything else of the wrong length must still fail closed.
+        if (!(legacyErr instanceof CorruptMasterSecretError)) throw legacyErr;
+        const raw = await credentialStorage.retrieveSecret(legacyAlias);
+        // Byte-exact, not string-compare: decodeUtf8 strips a UTF-8 BOM, so a
+        // BOM-prefixed value would have passed as a tombstone. A sentinel that
+        // suppresses a fail-closed check has to match exactly.
+        const isTombstone = !!raw && bytesEqual(raw, MIGRATION_TOMBSTONE_BYTES);
+        if (!isTombstone) throw legacyErr;
+        console.log('[MasterSecret] Legacy alias holds a migration tombstone; treating as absent.');
+      }
+
+      // Anchor checks happen HERE, before anything is written. The final guard
+      // further down runs too late to help: by then the legacy alias has been
+      // tombstoned and deleted, or a fresh secret has been persisted and
+      // queued for upload. Validate each candidate at the moment it is chosen.
+      if (legacyGlobalSecret) {
+        // A legacy secret that does not derive to the server's address is not
+        // this account's wallet; migrating it would tombstone the original and
+        // adopt the wrong one.
+        assertAnchors(legacyGlobalSecret, options, 'the legacy global secret');
+
         console.log('[MasterSecret] Migrating Local Legacy Secret...');
         localSecret = legacyGlobalSecret;
         // Poison old
-        await credentialStorage.storeSecret(legacyAlias, utf8ToBytes('MIGRATED_TOMBSTONE'));
+        await credentialStorage.storeSecret(legacyAlias, MIGRATION_TOMBSTONE_BYTES);
         await credentialStorage.deleteSecret(legacyAlias);
       } else {
+        // No legacy secret to migrate, so from here on we would be GENERATING.
+        if (options?.allowGenerate === false) {
+          throw new Error('[MasterSecret] Existing wallet requires recovery; refusing to generate replacement secret.');
+        }
+
+        // An anchor means the server already knows this account's wallet, so
+        // there is nothing legitimate to generate — a fresh random secret can
+        // never derive to an address that already exists. enableDriveBackup
+        // passes an anchor WITHOUT allowGenerate:false, so without this the
+        // flow minted a replacement, persisted it over the alias and uploaded
+        // it as the user's backup.
+        if (options?.expectedAddress || options?.expectedEvmAddress) {
+          throw new Error(
+            'No encontramos el respaldo de tu billetera en este dispositivo. Inicia sesión con la cuenta de Google donde guardaste tu respaldo para recuperarla.'
+          );
+        }
+
         console.log('[MasterSecret] Generating NEW Secret...');
         localSecret = generateRandomSecret();
       }
@@ -1629,8 +2041,8 @@ export async function getOrCreateMasterSecret(
           throw new Error('[MasterSecret] CRITICAL: Attempted to overwrite legacy backup file. Aborting.');
         }
 
-        const secretBase64 = bytesToBase64(finalSecret);
-        const encryptedBody = AES.encrypt(secretBase64, APP_BACKUP_KEY).toString();
+        // Writes are v2 from here on; reads still accept v1 forever.
+        const encryptedBody = encryptBackupV2(finalSecret, APP_BACKUP_KEY);
         const finalContent = `${DRIVE_SECURITY_HEADER}\n${encryptedBody}`;
 
         // Always overwrite/update the specific file for *this* wallet ID
@@ -1710,16 +2122,122 @@ export async function getOrCreateMasterSecret(
 }
 
 // Helper: Decryption Logic
+/**
+ * Drive backup format v2: authenticated and versioned, with a
+ * SELF-CONSISTENCY commitment (not an identity binding — read on).
+ *
+ * v1 was `AES.encrypt(base64(secret), passphrase)` — EVP_BytesToKey/MD5, CBC,
+ * NO authentication — decoded through a LENIENT base64 decoder and checked only
+ * for length. Two consequences, both of which showed up as real findings:
+ *   - a damaged or tampered blob decrypts to garbage instead of failing;
+ *   - an encrypted payload of `'!'.repeat(43) + '='` decodes to 32 ZERO bytes
+ *     and passes a length check.
+ *
+ * v2 uses XSalsa20-Poly1305 (the same primitive wrapSeed already uses), so
+ * tampering and corruption fail loudly instead of decoding into plausible
+ * garbage. The payload also carries the addresses the secret derives to.
+ *
+ * WHAT THE COMMITMENT IS NOT: it is not a defense against substitution. The
+ * key is `sha256` of a constant compiled into every build, so anyone holding
+ * that constant can seal a valid envelope committing to any secret they choose.
+ * The commitment catches accidental corruption and our own writer bugs; it
+ * proves nothing about an adversary. The only real defense against adopting the
+ * wrong wallet is the EXTERNAL address anchor, which is why corrupt-local
+ * repair refuses to proceed without one. Do not let this field's existence
+ * justify relaxing that requirement.
+ *
+ * The trust model is unchanged: the real access control remains the
+ * appDataFolder OAuth-client ACL, not the cipher.
+ */
+interface BackupEnvelopeV2 {
+  v: 2;
+  alg: 'xsalsa20poly1305';
+  nonce: string;
+  ct: string;
+}
+
+function backupKeyBytes(passphrase: string): Uint8Array {
+  return sha256(utf8ToBytes(passphrase));
+}
+
+function encryptBackupV2(secret: Uint8Array, passphrase: string): string {
+  const nonce = secureRandomBytes(24, 'a Drive backup nonce');
+  const inner = JSON.stringify({
+    v: 2,
+    secret: bytesToBase64(secret),
+    // Identity commitment: whoever opens this can confirm the secret is the one
+    // that belongs to these addresses, without asking our server.
+    algo: derivePersonalV2Address(secret),
+    evm: derivePersonalEvmAddress(secret),
+  });
+  const ct = nacl.secretbox(utf8ToBytes(inner), nonce, backupKeyBytes(passphrase));
+  const envelope: BackupEnvelopeV2 = {
+    v: 2,
+    alg: 'xsalsa20poly1305',
+    nonce: bytesToHex(nonce),
+    ct: bytesToHex(ct),
+  };
+  return JSON.stringify(envelope);
+}
+
+function decryptBackupV2(body: string, passphrase: string): Uint8Array | null {
+  let envelope: any;
+  try {
+    envelope = JSON.parse(body);
+  } catch {
+    return null; // not v2; caller falls back to the legacy format
+  }
+  if (!envelope || envelope.v !== 2 || envelope.alg !== 'xsalsa20poly1305') return null;
+
+  const opened = nacl.secretbox.open(
+    hexToBytes(envelope.ct),
+    hexToBytes(envelope.nonce),
+    backupKeyBytes(passphrase)
+  );
+  if (!opened) {
+    // Authentication failure. Under v1 this same blob would have "decrypted"
+    // to garbage and been length-checked; now it is rejected.
+    console.warn('[MasterSecret] Drive backup failed authentication; rejecting.');
+    return null;
+  }
+
+  try {
+    const inner = JSON.parse(decodeUtf8(opened));
+    const secret = strictBase64ToBytes(inner.secret, MASTER_SECRET_BYTES);
+    // The commitment must match what the secret actually derives to; a blob
+    // whose payload and claimed identity disagree is not usable.
+    if (inner.algo !== derivePersonalV2Address(secret) || inner.evm !== derivePersonalEvmAddress(secret)) {
+      console.warn('[MasterSecret] Drive backup identity commitment does not match its secret; rejecting.');
+      return null;
+    }
+    return secret;
+  } catch (e) {
+    console.warn('[MasterSecret] Drive backup payload malformed; rejecting.', e);
+    return null;
+  }
+}
+
 function decryptBackup(content: string, AES: any, key: string, Utf8: any): Uint8Array | null {
   try {
     let clean = content.trim();
     if (clean.includes('ADVERTENCIA') || clean.includes('\n')) {
       clean = clean.split('\n').pop()!.trim();
     }
+    // v2 first; a v1 blob is not JSON, so this returns null and we fall through.
+    const v2 = decryptBackupV2(clean, key);
+    if (v2) return v2;
+
     const bytes = AES.decrypt(clean, key);
     const b64 = bytes.toString(Utf8);
     if (!b64) return null;
-    return base64ToBytes(b64);
+    // STRICT decode on the legacy path too: base64-js maps junk to zero bytes,
+    // so `'!'.repeat(43) + '='` used to sail through as 32 zero bytes here.
+    // v1 blobs are unauthenticated, so this is the only integrity signal they
+    // have. Existing backups must keep working — never stop reading v1.
+    return driveCandidateSecret(
+      strictBase64ToBytes(b64, MASTER_SECRET_BYTES),
+      'Drive backup (legacy v1)'
+    );
   } catch (e) {
     console.warn('Decryption failed:', e);
     return null;
@@ -1803,31 +2321,21 @@ export function deriveWalletV2(
     businessId?: string
   }
 ): DerivedWallet {
+  // Last line of defense. Every caller is supposed to have validated the
+  // secret at its trust boundary, but this is the one function they all funnel
+  // through, so enforce it here too: HKDF will happily stretch 4 bytes into a
+  // valid-looking keypair, and the resulting address is indistinguishable from
+  // a real one until funds are already in it.
+  if (clientSecret?.length !== MASTER_SECRET_BYTES) {
+    throw new Error(
+      `[V2] Refusing to derive from a ${clientSecret?.length ?? 'missing'}-byte secret; expected ${MASTER_SECRET_BYTES}.`
+    );
+  }
+
   // Master Secret is already unique per-user (Random ONCE + Persist)
   // We use Info/Salt for domain separation between accounts (Personal vs Business)
 
-  // Create salt from account context
-  let saltInput: string;
-  if (opts.businessId) {
-    saltInput = `confio_v2_salt_${opts.accountType}_${opts.businessId}_${opts.accountIndex}`;
-  } else {
-    saltInput = `confio_v2_salt_${opts.accountType}_${opts.accountIndex}`;
-  }
-  const salt = sha256(utf8ToBytes(saltInput));
-
-  // IKM = Client Secret (Master Secret)
-  const ikm = clientSecret;
-
-  // Info = Domain Separation
-  const info = utf8ToBytes(`confio|v2|derived|${saltInput}`);
-
-  // Derive Seed (HKDF-SHA256)
-  const seed32 = hkdf(sha256, ikm, salt, info, 32);
-
-  // Generate Keypair
-  const keyPair = nacl.sign.keyPair.fromSeed(seed32);
-  const algosdk = require('algosdk');
-  const address = algosdk.encodeAddress(keyPair.publicKey);
+  const { address, seed32, keyPair } = deriveV2KeyMaterial(clientSecret, opts);
 
   console.log('[DeriveV2] Wallet derived:', address);
 
@@ -1980,12 +2488,21 @@ export class SecureDeterministicWalletService {
   ): Promise<DerivedWallet> {
     console.log('[WalletService] Explicitly restoring Legacy V1 Wallet');
     const { pepper: derivationPepper } = await this.getDerivationPepper({ accountType, accountIndex, businessId });
+    // getDerivationPepper swallows every failure (no JWT, network down, server
+    // error) and returns undefined. Falling back to '' here used to derive a
+    // wallet from the OAuth claims and client salt ALONE — no server secret in
+    // the mix, so the "wallet" was reproducible by anyone holding public
+    // identity data, and it silently pointed at an address holding no funds.
+    // Match the normal V1 path (deriveWallet below): refuse instead.
+    if (!derivationPepper) {
+      throw new Error('Missing derivation pepper: cannot restore legacy wallet without pepper. Ensure authentication and network are available.');
+    }
     const salt = generateClientSalt(iss, sub, aud, accountType, accountIndex, businessId);
 
     // Explicitly use V1 logic
     return deriveDeterministicAlgorandKey({
       clientSalt: salt,
-      derivationPepper: derivationPepper || '',
+      derivationPepper,
       provider,
       accountType,
       accountIndex,
@@ -2051,43 +2568,60 @@ export class SecureDeterministicWalletService {
       // If a V2 Master Secret exists, use it immediately (Random ONCE + Persist).
       // This bypasses all legacy V1 overhead (Peppers, KEKs, Caching).
       // ----------------------------------------------------------------------
+      const { credentialStorage } = await import('./credentialStorage');
+
+      // Namespace the key by User ID (sub) to support multi-user devices
+      // Use SHA256 of subject for privacy and safe key characters
+      const safeSub = bytesToHex(sha256(utf8ToBytes(sub)));
+      // ROTATION: Using 'v2' suffix to obtain the CLEAN, ISOLATED key (ignoring previous corrupted state)
+      const namespacedKey = `confio_master_secret_v2_${safeSub}`;
+
+      // ONLY a confirmed null may fall through to V1. A read that FAILS —
+      // locked Keychain, biometric-invalidated key, storage error — is not
+      // evidence that no V2 secret exists, and treating it as such silently
+      // hands the user a V1 wallet at a different address while their real
+      // V2 wallet holds the funds. This try wraps the read and nothing else,
+      // so a corruption throw or a derivation failure propagates instead of
+      // being absorbed into the same fallback.
+      let rawSecret: Uint8Array | null;
       try {
-        const { credentialStorage } = await import('./credentialStorage');
-
-        // Namespace the key by User ID (sub) to support multi-user devices
-        // Use SHA256 of subject for privacy and safe key characters
-        const safeSub = bytesToHex(sha256(utf8ToBytes(sub)));
-        // ROTATION: Using 'v2' suffix to obtain the CLEAN, ISOLATED key (ignoring previous corrupted state)
-        const namespacedKey = `confio_master_secret_v2_${safeSub}`;
-
-
-
-        const masterSecret = await credentialStorage.retrieveSecret(namespacedKey);
-
-        // NOTE: We do NOT fallback to legacy global key here. 
-        // Migration from Legacy -> V2 Namespaced is handled exclusively by 'getOrCreateMasterSecret'.
-        // If masterSecret is missing here, we fall back to V1 (Pepper/Salt) logic below.
-
-        if (masterSecret) {
-          console.log('[WalletService] ⚡️ V2 Master Secret found. Deriving V2 Wallet...');
-          const wallet = deriveWalletV2(masterSecret, {
-            iss, sub, aud, accountType, accountIndex, businessId
-          });
-
-          // Store seed in memory for session
-          const memKey = scope;
-          this.inMemSeeds.set(memKey, wallet.privSeedHex);
-          this.currentScope.set('current', scope);
-
-          console.log(`[WalletService] ✅ V2 Wallet restored: ${wallet.address}`);
-          perfLog('Total wallet generation time (V2)');
-          return wallet;
-        } else {
-          console.log('[WalletService] No V2 Master Secret found. Proceeding with Legacy V1 restoration...');
+        rawSecret = await credentialStorage.retrieveSecretStrict(namespacedKey);
+      } catch (readErr: any) {
+        if (readErr instanceof NonCanonicalBase64Error) {
+          throw new CorruptMasterSecretError('subject-bound keychain alias (derive path)', -1);
         }
-      } catch (checkErr) {
-        console.warn('[WalletService] Error checking V2 secret:', checkErr);
+        console.error('[WalletService] Could not read the V2 master secret; refusing to fall back to V1.', readErr);
+        throw new Error(
+          'No pudimos leer tu billetera guardada en este dispositivo. Cierra la app, ábrela de nuevo y vuelve a intentarlo.'
+        );
       }
+
+      const masterSecret = storedMasterSecret(
+        rawSecret,
+        'subject-bound keychain alias (derive path)'
+      );
+
+      // NOTE: We do NOT fallback to legacy global key here.
+      // Migration from Legacy -> V2 Namespaced is handled exclusively by 'getOrCreateMasterSecret'.
+      // If masterSecret is genuinely absent, we fall back to V1 (Pepper/Salt) logic below.
+
+      if (masterSecret) {
+        console.log('[WalletService] ⚡️ V2 Master Secret found. Deriving V2 Wallet...');
+        const wallet = deriveWalletV2(masterSecret, {
+          iss, sub, aud, accountType, accountIndex, businessId
+        });
+
+        // Store seed in memory for session
+        const memKey = scope;
+        this.inMemSeeds.set(memKey, wallet.privSeedHex);
+        this.currentScope.set('current', scope);
+
+        console.log(`[WalletService] ✅ V2 Wallet restored: ${wallet.address}`);
+        perfLog('Total wallet generation time (V2)');
+        return wallet;
+      }
+
+      console.log('[WalletService] No V2 Master Secret found. Proceeding with Legacy V1 restoration...');
       // ----------------------------------------------------------------------
 
       // Store current scope for this session

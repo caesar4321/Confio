@@ -8,4 +8,7 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!(?:@react-native|react-native|@noble)/)',
   ],
+  // Backs entropyGuard's native CSPRNG with Node's. The guard has no runtime
+  // environment exemption by design, so the test substitution belongs here.
+  setupFiles: ['<rootDir>/jest.setup.js'],
 };
