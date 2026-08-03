@@ -21,6 +21,26 @@ import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollPending'>;
 
+const statusStyles = (status: string) => {
+  const key = (status || '').toLowerCase();
+  switch (key) {
+    case 'pending':
+      return { bg: { backgroundColor: '#fff7ed' }, fg: { color: '#9a3412' }, label: 'Pendiente' };
+    case 'ready':
+    case 'prepared':
+      return { bg: { backgroundColor: '#ecfeff' }, fg: { color: '#0e7490' }, label: 'Listo' };
+    case 'submitted':
+      return { bg: { backgroundColor: '#e0f2fe' }, fg: { color: '#075985' }, label: 'Enviado' };
+    case 'confirmed':
+    case 'completed':
+      return { bg: { backgroundColor: colors.primarySoft }, fg: { color: '#166534' }, label: 'Completado' };
+    case 'failed':
+      return { bg: { backgroundColor: colors.error.background }, fg: { color: colors.error.icon }, label: 'Fallido' };
+    default:
+      return { bg: { backgroundColor: colors.neutralDark }, fg: { color: colors.text.primary }, label: status || '—' };
+  }
+};
+
 export const PayrollPendingScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { activeAccount, accounts } = useAccount();
@@ -59,7 +79,9 @@ export const PayrollPendingScreen = () => {
 
     const businessName = item?.run?.business?.name || 'este negocio';
     const target = payrollPayAccountFor(item, accounts);
-    if (!target) {
+    // An account with no id is unswitchable, so it is the same outcome as
+    // having no account at all — say so once rather than failing later.
+    if (!target?.id) {
       // Reads reach further than writes: the server serves a delegate their
       // pending items even where they hold no business account. Say which
       // door is missing rather than failing at the signature.
