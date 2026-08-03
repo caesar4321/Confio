@@ -82,6 +82,34 @@ def p_plus_wad(fresh: bool = False) -> int:
     return cached
 
 
+def total_supply_shares_raw() -> int:
+    """Sigma of every holder's cUSD+ shares, 18 decimals. Uncached and
+    raising: the callers that want a supply figure (ops metrics) must be
+    able to tell a read failure from an empty vault."""
+    addr = vault_address()
+    if not addr:
+        return 0
+    return _call(addr, SEL_TOTAL_SUPPLY)
+
+
+def total_owed_usd_wad() -> int:
+    """What the vault owes holders in USD, 1e18, as the contract computes
+    it. Uncached and raising — see total_supply_shares_raw."""
+    addr = vault_address()
+    if not addr:
+        return 0
+    return _call(addr, SEL_TOTAL_OWED)
+
+
+def backing_ratio_bps() -> int:
+    """reserve / owed in bps; 10_000 is exactly collateralised. Uncached
+    and raising — see total_supply_shares_raw."""
+    addr = vault_address()
+    if not addr:
+        return 0
+    return _call(addr, SEL_BACKING)
+
+
 def last_oracle_price_wad(fresh: bool = False) -> int:
     """The vault's guard-validated USDY price snapshot, 1e18.
 
@@ -528,8 +556,8 @@ def health() -> dict:
             'wired': True,
             'address': addr,
             'p_plus': p_plus_wad() / 1e18,
-            'total_owed_usd': _call(addr, SEL_TOTAL_OWED) / 1e18,
-            'backing_ratio_bps': _call(addr, SEL_BACKING),
+            'total_owed_usd': total_owed_usd_wad() / 1e18,
+            'backing_ratio_bps': backing_ratio_bps(),
             'usdy_daily_rate': usdy_daily_rate(),
             'gross_apy_pct': gross_apy_pct(),
             'net_apy_pct': net_apy_pct(),

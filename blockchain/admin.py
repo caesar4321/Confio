@@ -1,7 +1,10 @@
 import logging
 
 from django.contrib import admin
-from .models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor
+from .models import (
+    Balance, IndexerAssetCursor, PendingAutoSwap, ProcessedIndexerTransaction,
+    SponsoredBatch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,25 +41,68 @@ class IndexerAssetCursorAdmin(admin.ModelAdmin):
     reset_cursors.short_description = "Reset selected cursors to round 0"
 
 
+class PendingAutoSwapAdmin(admin.ModelAdmin):
+    """Actionable auto-swap work waiting on the client signer.
+
+    Covers both rails: Algorand USDC/ALGO rescues and the BSC 'BNB' rows,
+    which are ALSO the authoritative allowlist for outbound native BNB — an
+    outbound transfer with no row here is dust extraction. That makes this
+    an audit surface, so nothing here is editable and rows are never
+    deleted; a PENDING pile is a stranded-deposit queue, not a backlog to
+    clear by hand.
+    """
+    list_display = (
+        'id', 'account', 'asset_type', 'amount_decimal', 'status',
+        'source_address', 'source_tx_hash', 'created_at', 'completed_at',
+    )
+    list_filter = ('asset_type', 'status', 'actor_type', 'created_at')
+    search_fields = (
+        'source_tx_hash', 'source_address', 'actor_address',
+        'account__user__username', 'account__user__email',
+    )
+    # Derived from the model so a field added later cannot appear here as an
+    # editable input on what is also an audit surface.
+    readonly_fields = tuple(f.name for f in PendingAutoSwap._meta.fields)
+    ordering = ('-created_at',)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('account', 'account__user')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 class SponsoredBatchAdmin(admin.ModelAdmin):
     """Read-only 7702 sponsorship ledger: rows are written by sponsor_7702
     at broadcast and resolved by the receipt task. Support triage keys:
     'noop_failed' = delegation didn't apply (auth nonce raced — client
     should have retried); lingering 'sent' = receipt never resolved."""
     list_display = (
-        'user', 'kind', 'user_bsc_address', 'num_calls', 'status',
-        'gas_limit', 'tx_hash', 'created_at',
+        'user', 'kind', 'source_id', 'user_bsc_address', 'num_calls', 'status',
+        'block_number', 'gas_limit', 'tx_hash', 'created_at',
     )
-    list_filter = ('status', 'kind')
+    list_filter = ('status', 'kind', 'created_at')
     search_fields = ('tx_hash', 'user_bsc_address', 'user__username', 'user__email')
-    readonly_fields = (
-        'user', 'user_bsc_address', 'kind', 'num_calls', 'calls_json',
-        'tx_hash', 'gas_limit', 'max_fee_wei', 'status', 'created_at',
-        'updated_at',
-    )
+    # Derived from the model rather than hand-listed: this admin blocks
+    # changes, and a hand-list silently exposed every field added after it
+    # was written (source_id, delegate_nonce, block_number, block_hash) as
+    # an EDITABLE input on an audit ledger.
+    readonly_fields = tuple(f.name for f in SponsoredBatch._meta.fields)
     ordering = ('-created_at',)
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('user')
+
     def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
     def has_delete_permission(self, request, obj=None):

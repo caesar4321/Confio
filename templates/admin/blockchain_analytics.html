@@ -145,9 +145,195 @@
         </div>
     </div>
 
+    <!-- BNB Smart Chain (cUSD+ rail) -->
+    <div class="dashboard-module">
+        <h2>BNB Smart Chain — cUSD+ rail</h2>
+        <p style="color:#666; margin: -5px 0 15px;">
+            No balance cache and no indexer here: BSC balances are read from the
+            chain per request. This rail's health is scanner lag, sponsor fuel and
+            vault collateral.
+        </p>
+        <div class="metrics-grid">
+            <div class="metric-card {% if bsc_scanner.dead %}danger{% elif bsc_scanner.consecutive_failures %}warning{% endif %}">
+                <div class="metric-label">Deposit Scanner</div>
+                <div class="metric-value" style="font-size: 20px;">
+                    {% if bsc_scanner.dead %}DEAD
+                    {% elif bsc_scanner.consecutive_failures %}DEGRADED
+                    {% else %}OK{% endif %}
+                </div>
+                <small>
+                    {{ bsc_scanner.consecutive_failures }} consecutive failures
+                    (alert at {{ bsc_scanner.failure_threshold }})
+                </small>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Scan Cursor Lag</div>
+                <div class="metric-value">
+                    {% if bsc_scanner.lag is not None %}{{ bsc_scanner.lag }}
+                    {% else %}<span style="color:#999; font-size:20px;">unknown</span>{% endif %}
+                </div>
+                <small>
+                    Cursor {{ bsc_scanner.scan_cursor|default:'-' }} /
+                    head {{ bsc_scanner.latest_block|default:'-' }}
+                </small>
+            </div>
+            <div class="metric-card {% if bsc_sponsor.level == 'critical' %}danger{% elif bsc_sponsor.level == 'warning' or bsc_sponsor.level == 'unknown' %}warning{% elif bsc_sponsor.level == 'ok' %}success{% endif %}">
+                <div class="metric-label">Sponsor Balance</div>
+                <div class="metric-value" style="font-size: 22px;">
+                    {% if not bsc_sponsor.configured %}<span style="color:#999;">unset</span>
+                    {% elif bsc_sponsor.level == 'unknown' %}<span style="color:#999;">unknown</span>
+                    {% else %}{{ bsc_sponsor.balance_bnb|floatformat:4 }} BNB{% endif %}
+                </div>
+                <small style="word-break: break-all;">{{ bsc_sponsor.address|default:'not configured' }}</small>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">7702 Sponsorship</div>
+                <div class="metric-value" style="font-size: 20px;">
+                    {% if bsc_scanner.sponsorship_enabled %}ON{% else %}OFF{% endif %}
+                </div>
+                <small>Finality depth {{ bsc_scanner.finality_depth }}</small>
+            </div>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Circulating cUSD+</div>
+                <div class="metric-value" style="font-size: 22px;">
+                    {% if cusd_plus_metrics.circulating_cusd_plus is not None %}
+                    ${{ cusd_plus_metrics.circulating_cusd_plus|floatformat:2 }}
+                    {% else %}<span style="color:#999;">unavailable</span>{% endif %}
+                </div>
+                <small>
+                    {% if cusd_plus_metrics.total_shares is not None %}
+                    {{ cusd_plus_metrics.total_shares|floatformat:4 }} shares @
+                    {{ cusd_plus_metrics.p_plus|floatformat:6 }}
+                    {% else %}source: {{ cusd_plus_metrics.source }}{% endif %}
+                </small>
+            </div>
+            <div class="metric-card {% if cusd_plus_metrics.is_undercollateralised %}danger{% endif %}">
+                <div class="metric-label">USDY Reserve</div>
+                <div class="metric-value" style="font-size: 22px;">
+                    {% if cusd_plus_metrics.usdy_reserve_usd is not None %}
+                    ${{ cusd_plus_metrics.usdy_reserve_usd|floatformat:2 }}
+                    {% else %}<span style="color:#999;">unavailable</span>{% endif %}
+                </div>
+                <small>
+                    {% if cusd_plus_metrics.backing_ratio_bps is not None %}
+                    Backing {{ cusd_plus_metrics.backing_ratio_bps }} bps
+                    {% else %}Backing unreadable{% endif %}
+                </small>
+            </div>
+            <div class="metric-card {% if cusd_plus_metrics.redeem_blocked_reason %}danger{% endif %}">
+                <div class="metric-label">Redeem Exit</div>
+                <div class="metric-value" style="font-size: 20px;">
+                    {% if cusd_plus_metrics.redeem_blocked_reason %}BLOCKED
+                    {% elif cusd_plus_metrics.wired %}OPEN
+                    {% else %}—{% endif %}
+                </div>
+                <small>{{ cusd_plus_metrics.redeem_blocked_reason|default:'redeemToUsdt available' }}</small>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Vault</div>
+                <div class="metric-value" style="font-size: 13px; word-break: break-all;">
+                    {{ cusd_plus_metrics.address|default:'not configured' }}
+                </div>
+                <small>
+                    {% if cusd_plus_metrics.net_apy_pct is not None %}
+                    Net {{ cusd_plus_metrics.net_apy_pct|floatformat:2 }}% /
+                    gross {{ cusd_plus_metrics.gross_apy_pct|floatformat:2 }}%
+                    {% else %}APY unreadable{% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sponsored batch outcomes -->
+    <div class="dashboard-module">
+        <h2>Sponsored Batch Outcomes (last {{ request.GET.days|default:'30' }} days)</h2>
+        <div class="metrics-grid">
+            <div class="metric-card success">
+                <div class="metric-label">Confirmed</div>
+                <div class="metric-value">{{ bsc_sponsorship_stats.confirmed|floatformat:0 }}</div>
+                <small>of {{ bsc_sponsorship_stats.total|floatformat:0 }} broadcast</small>
+            </div>
+            <div class="metric-card {% if bsc_sponsorship_stats.failed %}danger{% endif %}">
+                <div class="metric-label">Failed</div>
+                <div class="metric-value">{{ bsc_sponsorship_stats.failed|floatformat:0 }}</div>
+                <small>
+                    {{ bsc_sponsorship_stats.reverted }} reverted /
+                    {{ bsc_sponsorship_stats.noop_failed }} no-op /
+                    {{ bsc_sponsorship_stats.dropped }} dropped /
+                    {{ bsc_sponsorship_stats.reorged }} reorged
+                </small>
+            </div>
+            <div class="metric-card {% if bsc_sponsorship_stats.unresolved_all_time %}warning{% endif %}">
+                <div class="metric-label">Unresolved (all time)</div>
+                <div class="metric-value">{{ bsc_sponsorship_stats.unresolved_all_time|floatformat:0 }}</div>
+                <small>signed/sent with no receipt — engineering escalation, not a button</small>
+            </div>
+        </div>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Kind</th>
+                    <th>Batches</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in bsc_sponsorship_stats.by_kind %}
+                <tr>
+                    <td><strong>{{ row.kind }}</strong></td>
+                    <td>{{ row.count }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="2" style="text-align:center; color:#999;">No sponsored batches in range</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h3>Recent Batches</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Tx Hash</th>
+                    <th>Kind</th>
+                    <th>User</th>
+                    <th>Calls</th>
+                    <th>Status</th>
+                    <th>Block</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in recent_sponsored_batches %}
+                <tr>
+                    <td style="font-family: monospace; font-size: 12px;">{{ b.tx_hash|truncatechars:24|default:'-' }}</td>
+                    <td>{{ b.kind }}</td>
+                    <td>{{ b.user.username }}</td>
+                    <td>{{ b.num_calls }}</td>
+                    <td>
+                        <span class="status-badge {% if b.status == 'confirmed' %}completed{% elif b.status == 'signed' or b.status == 'sent' %}processing{% else %}failed{% endif %}">
+                            {{ b.status }}
+                        </span>
+                    </td>
+                    <td>{{ b.block_number|default:'-' }}</td>
+                    <td>{{ b.created_at|date:"Y-m-d H:i:s" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" style="text-align:center; color:#999;">No sponsored batches recorded</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
     <!-- Balance Cache Health -->
     <div class="dashboard-module">
-        <h2>Balance Cache Health</h2>
+        <h2>Balance Cache Health (Algorand)</h2>
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-label">Total Cached Balances</div>
@@ -189,7 +375,7 @@
 
     <!-- Token Distribution -->
     <div class="dashboard-module">
-        <h2>Token Balance Distribution</h2>
+        <h2>Token Balance Distribution (Algorand cache)</h2>
         <table class="data-table">
             <thead>
                 <tr>
@@ -218,7 +404,7 @@
 
     <!-- Indexer Cursor Status -->
     <div class="dashboard-module">
-        <h2>Indexer Cursor Status</h2>
+        <h2>Indexer Cursor Status (Algorand)</h2>
         <table class="data-table">
             <thead>
                 <tr>

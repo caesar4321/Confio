@@ -1427,8 +1427,8 @@
     </div>
     {% endif %}
 
-    <!-- Conversion Volume -->
-    <h2 class="section-title">USDC ↔ cUSD Conversions</h2>
+    <!-- Dollar rail 1: cUSD on Algorand -->
+    <h2 class="section-title">cUSD — Algorand rail</h2>
     <div class="metrics-grid">
         <div class="metric-card">
             <div class="metric-label">USDC → cUSD Volume</div>
@@ -1467,9 +1467,223 @@
         <div class="metric-card">
             <div class="metric-label">Conversions Today</div>
             <div class="metric-value">{{ conversions_today|intcomma }}</div>
-            <div class="metric-change">{{ conversions_last_7_days }} last 7 days</div>
+            <div class="metric-change">
+                Both rails &middot; {{ savings_conversions_today }} on cUSD+ today,
+                {{ savings_conversions_last_7_days }} of {{ conversions_last_7_days }} last 7 days
+            </div>
+        </div>
+    </div>
+
+    <!-- Dollar rail 2: cUSD+ on BNB Smart Chain -->
+    <h2 class="section-title">cUSD+ — BNB Smart Chain rail</h2>
+    {% if cusd_plus_source == "unconfigured" %}
+    <div class="alert"
+        style="background: #f3f4f6; color: #374151; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <strong>Vault not wired in this environment</strong> — set
+        <code>CUSD_PLUS_VAULT_ADDRESS</code> to read live supply and collateral.
+        Saga counters below still reflect real rows.
+    </div>
+    {% elif cusd_plus_source == "unavailable" %}
+    <div class="alert"
+        style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <strong>⚠️ BSC node unreachable</strong> — supply, collateral and APY are
+        shown as <em>unavailable</em> rather than zero. Saga counters below come
+        from the database and are unaffected.
+    </div>
+    {% elif cusd_plus_metrics.is_undercollateralised %}
+    <div class="alert"
+        style="background: #fee2e2; color: #991b1b; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <strong>🚨 Vault under-collateralised</strong> — backing ratio
+        {{ cusd_plus_metrics.backing_ratio_bps }} bps (below 10,000). Reserve is
+        short of what holders are owed.
+    </div>
+    {% endif %}
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Circulating cUSD+</div>
+            <div class="metric-value">
+                {% if cusd_plus_circulating is not None %}
+                ${{ cusd_plus_circulating|floatformat:0|intcomma }}
+                {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+            </div>
+            <div class="metric-change">Owed to holders (on-chain)</div>
         </div>
 
+        <div class="metric-card">
+            <div class="metric-label">USDY Reserve</div>
+            <div class="metric-value">
+                {% if cusd_plus_reserve is not None %}
+                ${{ cusd_plus_reserve|floatformat:0|intcomma }}
+                {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+            </div>
+            <div class="metric-change">
+                {% if cusd_plus_metrics.backing_ratio_bps is not None %}
+                Backing {{ cusd_plus_metrics.backing_ratio_bps }} bps
+                {% else %}Backing unreadable{% endif %}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Net APY</div>
+            <div class="metric-value">
+                {% if cusd_plus_metrics.net_apy_pct is not None %}
+                {{ cusd_plus_metrics.net_apy_pct|floatformat:2 }}%
+                {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+            </div>
+            <div class="metric-change">
+                {% if cusd_plus_metrics.gross_apy_pct is not None %}
+                Gross {{ cusd_plus_metrics.gross_apy_pct|floatformat:2 }}%
+                {% else %}Gross unreadable{% endif %}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Net Savings Inflow</div>
+            <div class="metric-value {% if savings_stats.net_savings_inflow < 0 %}negative{% endif %}">
+                {% if savings_stats.net_savings_inflow >= 0 %}+{% endif %}${{ savings_stats.net_savings_inflow|floatformat:0|intcomma }}
+            </div>
+            <div class="metric-change">
+                Rolling 30d &middot; in ${{ savings_stats.to_savings_volume|floatformat:0|intcomma }}
+                / out ${{ savings_stats.from_savings_volume|floatformat:0|intcomma }}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Exit Status</div>
+            <div class="metric-value" style="font-size: 16px;">
+                {% if cusd_plus_metrics.redeem_blocked_reason %}
+                <span style="color:#991b1b;">{{ cusd_plus_metrics.redeem_blocked_reason }}</span>
+                {% elif cusd_plus_metrics.wired %}Open{% else %}—{% endif %}
+            </div>
+            <div class="metric-change">Redeem to USDT</div>
+        </div>
+    </div>
+
+    <h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">Savings Sagas — ops attention</h3>
+    <p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
+        Every halted state leaves value at a user-owned address, never a treasury.
+        These are queues to resolve, not losses. Counters are all-time on purpose —
+        a saga stuck since last month outranks one stuck today.
+    </p>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">In Flight</div>
+            <div class="metric-value">{{ savings_stats.in_flight|intcomma }}</div>
+            <div class="metric-change">
+                {{ savings_stats.created }} created &middot;
+                {{ savings_stats.src_committed }} bridging &middot;
+                {{ savings_stats.dest_arrived }} awaiting mint
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Stuck Bridges</div>
+            <div class="metric-value {% if savings_stats.stuck %}negative{% endif %}">
+                {{ savings_stats.stuck|intcomma }}
+            </div>
+            <div class="metric-change">Past bridge timeout — chain-judged</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Delivered as USDT</div>
+            <div class="metric-value {% if savings_stats.delivered_usdt %}negative{% endif %}">
+                {{ savings_stats.delivered_usdt|intcomma }}
+            </div>
+            <div class="metric-change">Arrived, mint gate refused the holder</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Completed</div>
+            <div class="metric-value">{{ savings_stats.completed|intcomma }}</div>
+            <div class="metric-change">{{ savings_stats.abandoned }} abandoned quotes</div>
+        </div>
+    </div>
+
+    {% if savings_stats.by_source %}
+    <h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">Where cUSD+ Deposits Come From (30d)</h3>
+    <div class="data-table" style="border-radius: 8px; border: 1px solid #e5e7eb;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background: #f9fafb;">
+                <tr>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Source</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Completed</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Volume</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in savings_stats.by_source %}
+                <tr>
+                    <td style="padding: 12px;">{{ row.label }}</td>
+                    <td style="padding: 12px; text-align: right;">{{ row.count|intcomma }}</td>
+                    <td style="padding: 12px; text-align: right;">${{ row.volume|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p style="color:#6b7280; font-size:13px; margin:8px 0 0;">
+        Only <code>convert</code> rows move money Confío already held —
+        <code>external_deposit</code> and <code>ramp</code> are new inflow.
+    </p>
+    {% endif %}
+
+    <!-- BSC sponsorship: the rail every user-facing BSC action rides -->
+    <h2 class="section-title">BSC Sponsorship (EIP-7702)</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Sponsored Batches (24h)</div>
+            <div class="metric-value">{{ sponsorship_stats.total|intcomma }}</div>
+            <div class="metric-change">{{ sponsorship_stats_7d.total|intcomma }} last 7 days</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Failed (24h)</div>
+            <div class="metric-value {% if sponsorship_stats.failed %}negative{% endif %}">
+                {{ sponsorship_stats.failed|intcomma }}
+            </div>
+            <div class="metric-change">
+                {{ sponsorship_stats.reverted }} reverted &middot;
+                {{ sponsorship_stats.noop_failed }} no-op &middot;
+                {{ sponsorship_stats.dropped }} dropped &middot;
+                {{ sponsorship_stats.reorged }} reorged
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Unresolved</div>
+            <div class="metric-value {% if sponsorship_stats.unresolved_all_time %}negative{% endif %}">
+                {{ sponsorship_stats.unresolved_all_time|intcomma }}
+            </div>
+            <div class="metric-change">
+                All-time signed/sent with no receipt — escalate, never terminalize by hand
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">BNB Rescues Pending</div>
+            <div class="metric-value {% if bnb_autoconvert_stats.pending %}negative{% endif %}">
+                {{ bnb_autoconvert_stats.pending|intcomma }}
+            </div>
+            <div class="metric-change">
+                {{ bnb_autoconvert_stats.pending_amount|floatformat:4 }} BNB awaiting client signature
+            </div>
+        </div>
+    </div>
+    <div style="margin-bottom: 20px;">
+        <a href="{% url 'confio_admin:blockchain_sponsoredbatch_changelist' %}" class="action-button secondary"
+            style="margin-right: 10px;">Sponsorship Ledger</a>
+        <a href="{% url 'confio_admin:blockchain_pendingautoswap_changelist' %}?asset_type__exact=BNB"
+            class="action-button secondary" style="margin-right: 10px;">BNB Auto-Swaps</a>
+        <a href="{% url 'confio_admin:conversion_conversion_changelist' %}?status__exact=STUCK"
+            class="action-button secondary">Stuck Sagas</a>
+    </div>
+
+    <!-- Platform messaging -->
+    <h2 class="section-title">Messaging</h2>
+    <div class="metrics-grid">
         <div class="metric-card">
             <div class="metric-label">Notifications Today</div>
             <div class="metric-value">{{ notifications_sent_today|intcomma }}</div>
@@ -1485,9 +1699,15 @@
 
     <!-- Blockchain Integration -->
     <h2 class="section-title">Blockchain Integration</h2>
+    <p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
+        Balance caching is an Algorand-rail concept — BSC balances are read from
+        the chain per request, so cUSD+ has no cache to go stale. Its health lives
+        in the sponsorship counters above and on
+        <a href="{% url 'confio_admin:blockchain_analytics' %}">Blockchain Analytics</a>.
+    </p>
     <div class="metrics-grid">
         <div class="metric-card">
-            <div class="metric-label">Cached Balances</div>
+            <div class="metric-label">Cached Balances (Algorand)</div>
             <div class="metric-value">{{ cached_balances|intcomma }}</div>
             <div class="metric-change">{{ balance_cache_health.stale_percentage|floatformat:1 }}% stale
             </div>

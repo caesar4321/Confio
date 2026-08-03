@@ -63,7 +63,7 @@ class ConversionAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('internal_id', 'conversion_type', 'status')
+            'fields': ('internal_id', 'conversion_type', 'source', 'status')
         }),
         ('Actor Information', {
             'fields': ('actor_type', 'actor_user', 'actor_business', 'actor_display_name', 'actor_address')
@@ -73,6 +73,19 @@ class ConversionAdmin(admin.ModelAdmin):
         }),
         ('Transaction Hashes', {
             'fields': ('from_transaction_hash', 'to_transaction_hash')
+        }),
+        # Null on the Algorand swap rows. Without this section the merged
+        # savings columns were unreachable from the change form — the exact
+        # fields support needs to triage a STUCK or DELIVERED_USDT saga.
+        ('cUSD+ Savings Saga (BSC)', {
+            'fields': (
+                'user_bsc_address', 'quoted_cost_pct', 'bridge_arrival_tx',
+                'dest_scan_from_block', 'src_committed_at', 'dest_arrived_at',
+            ),
+            'description': (
+                'BSC savings rows only. Every halted state leaves value at a '
+                'user-owned address — there is no treasury to refund from.'
+            ),
         }),
         ('Status & Errors', {
             'fields': ('error_message',)

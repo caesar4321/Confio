@@ -149,6 +149,43 @@
         </div>
     </div>
     
+    <!-- Rail Split -->
+    <h2 class="section-title">Rail Split</h2>
+    <p style="color:#6b7280; font-size:13px; margin:-10px 0 20px;">
+        Based on <code>token_type</code> — what actually moved on-chain. CONFIO
+        trades on both chains, so it is counted separately rather than folded
+        into either rail's share.
+    </p>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Sends on BSC (cUSD+ / USDT)</div>
+            <div class="metric-value">{{ send_rail_split.bsc_pct|floatformat:1 }}%</div>
+            <div class="metric-change">
+                {{ send_rail_split.bsc|intcomma }} BSC vs
+                {{ send_rail_split.algorand|intcomma }} Algorand
+                &middot; {{ send_rail_split.confio|intcomma }} CONFIO
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Payments on BSC (cUSD+ / USDT)</div>
+            <div class="metric-value">{{ payment_rail_split.bsc_pct|floatformat:1 }}%</div>
+            <div class="metric-change">
+                {{ payment_rail_split.bsc|intcomma }} BSC vs
+                {{ payment_rail_split.algorand|intcomma }} Algorand
+                &middot; {{ payment_rail_split.confio|intcomma }} CONFIO
+            </div>
+        </div>
+    </div>
+    {% if send_rail_split.unclassified or payment_rail_split.unclassified %}
+    <p style="color:#92400e; background:#fef3c7; padding:12px; border-radius:8px; font-size:13px;">
+        ⚠️ {{ send_rail_split.unclassified }} send(s) and
+        {{ payment_rail_split.unclassified }} payment(s) carry a token_type this
+        page does not classify — the split above excludes them rather than
+        guessing a rail.
+    </p>
+    {% endif %}
+
     <!-- Daily Send Transactions -->
     <h2 class="section-title">Daily Send Transactions</h2>
     <div class="data-table">
@@ -157,8 +194,10 @@
                 <tr>
                     <th>Date</th>
                     <th>Total</th>
-                    <th>cUSD Count</th>
-                    <th>CONFIO Count</th>
+                    <th>cUSD</th>
+                    <th>cUSD+</th>
+                    <th>USDT</th>
+                    <th>CONFIO</th>
                     <th>Failed</th>
                 </tr>
             </thead>
@@ -168,6 +207,8 @@
                     <td>{{ day.day }}</td>
                     <td>{{ day.count }}</td>
                     <td>{{ day.cusd_count }}</td>
+                    <td>{{ day.cusd_plus_count }}</td>
+                    <td>{{ day.usdt_count }}</td>
                     <td>{{ day.confio_count }}</td>
                     <td>{{ day.failed_count }}</td>
                 </tr>
@@ -175,7 +216,7 @@
             </tbody>
         </table>
     </div>
-    
+
     <!-- Daily Payment Transactions -->
     <h2 class="section-title">Daily Payment Transactions</h2>
     <div class="data-table">
@@ -184,8 +225,10 @@
                 <tr>
                     <th>Date</th>
                     <th>Total</th>
-                    <th>cUSD Count</th>
-                    <th>CONFIO Count</th>
+                    <th>cUSD</th>
+                    <th>cUSD+</th>
+                    <th>USDT</th>
+                    <th>CONFIO</th>
                 </tr>
             </thead>
             <tbody>
@@ -194,6 +237,8 @@
                     <td>{{ day.day }}</td>
                     <td>{{ day.count }}</td>
                     <td>{{ day.cusd_count }}</td>
+                    <td>{{ day.cusd_plus_count }}</td>
+                    <td>{{ day.usdt_count }}</td>
                     <td>{{ day.confio_count }}</td>
                 </tr>
                 {% endfor %}

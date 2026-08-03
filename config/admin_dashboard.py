@@ -719,15 +719,22 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             created_at__gte=today_start
         ).exclude(status='FAILED').count()
         
-        # Conversion metrics
+        # Conversion metrics. `Conversion` carries BOTH rails since the
+        # savings sagas merged into it (2026-08-01), so an unfiltered count
+        # blurs an Algorand USDC swap with a BSC savings saga. Report the
+        # total and the per-rail split.
         from conversion.models import Conversion
-        context['conversions_today'] = Conversion.objects.filter(
-            created_at__gte=today_start
+        conversions_today_qs = Conversion.objects.filter(created_at__gte=today_start)
+        conversions_7d_qs = Conversion.objects.filter(created_at__gte=last_7_start)
+        context['conversions_today'] = conversions_today_qs.count()
+        context['conversions_last_7_days'] = conversions_7d_qs.count()
+        context['savings_conversions_today'] = conversions_today_qs.filter(
+            conversion_type__in=Conversion.SAVINGS_TYPES
         ).count()
-        context['conversions_last_7_days'] = Conversion.objects.filter(
-            created_at__gte=last_7_start
+        context['savings_conversions_last_7_days'] = conversions_7d_qs.filter(
+            conversion_type__in=Conversion.SAVINGS_TYPES
         ).count()
-        
+
         # Notification metrics
         from notifications.models import Notification, FCMDeviceToken
         context['notifications_sent_today'] = Notification.objects.filter(
@@ -794,10 +801,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         )
         context['usdc_to_cusd_volume'] = conversions_volume['usdc_to_cusd'] or Decimal('0')
         context['cusd_to_usdc_volume'] = conversions_volume['cusd_to_usdc'] or Decimal('0')
-        
+
         # Calculate net USDC inflow (positive means more USDC → cUSD)
         context['net_usdc_inflow'] = context['usdc_to_cusd_volume'] - context['cusd_to_usdc_volume']
-        
+
         # Live cUSD supply and collateral come from the cUSD contract, with a
         # database fallback if algod is unavailable.
         from blockchain.cusd_metrics import get_cusd_platform_metrics
@@ -806,7 +813,34 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['cusd_tvl'] = cusd_metrics.tvl_cusd
         context['cusd_metrics_source'] = cusd_metrics.source
         context['cusd_metrics_as_of'] = cusd_metrics.as_of
-        
+
+        # ── cUSD+ (BSC savings rail) ──────────────────────────────────────
+        # The second dollar rail. Its supply/collateral live in the BSC vault
+        # and its user-facing flow lives in the savings sagas, so it needs
+        # both a chain read and a database read — same shape as the cUSD
+        # block above, deliberately kept separate rather than summed: the
+        # two rails have different collateral (USDC vs USDY) and different
+        # failure modes, and one blended number would hide both.
+        from cusd_plus.metrics import (
+            get_bnb_autoconvert_stats,
+            get_cusd_plus_platform_metrics,
+            get_savings_saga_stats,
+            get_sponsorship_stats,
+        )
+        cusd_plus_metrics = get_cusd_plus_platform_metrics()
+        context['cusd_plus_metrics'] = cusd_plus_metrics
+        context['cusd_plus_circulating'] = cusd_plus_metrics.circulating_cusd_plus
+        context['cusd_plus_reserve'] = cusd_plus_metrics.usdy_reserve_usd
+        context['cusd_plus_source'] = cusd_plus_metrics.source
+        context['savings_stats'] = get_savings_saga_stats(since=rolling_30_start)
+
+        # Sponsorship + BNB rescue health. Every user-facing BSC action rides
+        # the 7702 sponsor, so its failure counters are the closest thing the
+        # BSC rail has to the Algorand balance-cache health above.
+        context['sponsorship_stats'] = get_sponsorship_stats(since=last_24h)
+        context['sponsorship_stats_7d'] = get_sponsorship_stats(since=last_7_start)
+        context['bnb_autoconvert_stats'] = get_bnb_autoconvert_stats()
+
         # Country breakdown for P2P
         country_stats = P2POffer.objects.filter(
             status='ACTIVE'
@@ -1093,11 +1127,30 @@ class ConfioAdminSite(AdminSiteOTPRequired):
 
             recent = qs.order_by('-created_at')[:10]
 
+            # Which rail the fiat actually landed on / left from. A ramp row
+            # is pinned to a destination at creation (RampTransaction.
+            # destination), so a single "cUSD delivered" label has been wrong
+            # for every cusd_plus row since the BSC rail opened.
+            destinations = list(
+                qs.filter(status='COMPLETED')
+                .values('destination')
+                .annotate(volume=Sum('final_amount'), count=Count('id'))
+                .order_by('-volume')
+            )
+            destination_labels = dict(
+                RampTransaction._meta.get_field('destination').choices or []
+            )
+            for row in destinations:
+                row['label'] = destination_labels.get(
+                    row['destination'], row['destination'] or 'unset'
+                )
+
             return {
                 'title': title,
                 'icon': icon,
                 'volume_label': volume_label,
                 'volume_change': volume_change,
+                'destinations': destinations,
                 'stats': {
                     'volume': volume,
                     'total_sessions': total_sessions,
@@ -1133,14 +1186,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             title='Koywe On-Ramp',
             icon='💸',
             volume_label='On-chain Deposited Volume',
-            volume_change='Verified cUSD delivered',
+            volume_change='Verified delivery (cUSD + cUSD+)',
         )
         context['koywe_offramp'] = build_koywe_section(
             direction='off_ramp',
             title='Koywe Off-Ramp',
             icon='🏦',
             volume_label='On-chain Sent Volume',
-            volume_change='Verified cUSD sent',
+            volume_change='Verified send (cUSD + cUSD+)',
         )
 
         return render(request, 'admin/dashboard.html', context)
@@ -1297,13 +1350,18 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             select={'day': 'date(send_sendtransaction.created_at)'}
         ).values('day').annotate(
             count=Count('id'),
-            cusd_count=Count('id', filter=Q(token_type='cUSD')),
+            # SendTransaction.TOKEN_TYPES stores 'CUSD', not 'cUSD' — the
+            # lowercase filter this used matched nothing and reported a flat
+            # zero cUSD column for the life of the page.
+            cusd_count=Count('id', filter=Q(token_type='CUSD')),
+            cusd_plus_count=Count('id', filter=Q(token_type='CUSD_PLUS')),
+            usdt_count=Count('id', filter=Q(token_type='USDT')),
             confio_count=Count('id', filter=Q(token_type='CONFIO')),
             failed_count=Count('id', filter=Q(status='FAILED'))
         ).order_by('day')
-        
+
         context['daily_sends'] = list(daily_sends)
-        
+
         # Payment transactions by day
         daily_payments = PaymentTransaction.objects.filter(
             created_at__gte=start_date
@@ -1312,11 +1370,39 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         ).values('day').annotate(
             count=Count('id'),
             cusd_count=Count('id', filter=Q(token_type='CUSD')),
+            cusd_plus_count=Count('id', filter=Q(token_type='CUSD_PLUS')),
+            usdt_count=Count('id', filter=Q(token_type='USDT')),
             confio_count=Count('id', filter=Q(token_type='CONFIO'))
         ).order_by('day')
-        
+
         context['daily_payments'] = list(daily_payments)
-        
+
+        # Rail split. `token_type` is what actually moved on-chain, so this
+        # is the migration read-out: how much of the volume has left the
+        # Algorand rail for BSC.
+        from conversion.models import Conversion
+
+        def _rail_split(queryset):
+            totals = queryset.aggregate(
+                algorand=Count('id', filter=Q(token_type__in=['CUSD', 'USDC', 'ALGO'])),
+                bsc=Count('id', filter=Q(token_type__in=['CUSD_PLUS', 'USDT'])),
+                confio=Count('id', filter=Q(token_type='CONFIO')),
+            )
+            counted = totals['algorand'] + totals['bsc'] + totals['confio']
+            # CONFIO trades on both chains, so it is reported on its own
+            # rather than folded into either rail's share.
+            dollar_total = totals['algorand'] + totals['bsc']
+            totals['bsc_pct'] = (totals['bsc'] / dollar_total * 100) if dollar_total else 0
+            totals['unclassified'] = queryset.count() - counted
+            return totals
+
+        context['send_rail_split'] = _rail_split(
+            SendTransaction.objects.filter(created_at__gte=start_date).exclude(status='FAILED')
+        )
+        context['payment_rail_split'] = _rail_split(
+            PaymentTransaction.objects.filter(created_at__gte=start_date).exclude(status='FAILED')
+        )
+
         # Transaction types breakdown
         transaction_types = {
             'P2P Trades': P2PTrade.objects.filter(
@@ -1329,10 +1415,17 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'Merchant Payments': PaymentTransaction.objects.filter(
                 created_at__gte=start_date
             ).exclude(status='FAILED').count(),
+            'Algorand Conversions': Conversion.objects.filter(
+                created_at__gte=start_date, is_deleted=False,
+            ).exclude(conversion_type__in=Conversion.SAVINGS_TYPES).count(),
+            'cUSD+ Savings Sagas': Conversion.objects.filter(
+                created_at__gte=start_date, is_deleted=False,
+                conversion_type__in=Conversion.SAVINGS_TYPES,
+            ).count(),
         }
-        
+
         context['transaction_types'] = transaction_types
-        
+
         # Success rates
         send_total = SendTransaction.objects.filter(created_at__gte=start_date).count()
         send_success = SendTransaction.objects.filter(
@@ -1358,8 +1451,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
     
     def blockchain_analytics_view(self, request):
         """Blockchain integration analytics (event/log tracking removed)"""
-        from blockchain.models import Balance, IndexerAssetCursor, ProcessedIndexerTransaction
-        
+        from blockchain.models import (
+            Balance, IndexerAssetCursor, ProcessedIndexerTransaction, SponsoredBatch,
+        )
+
         context = dict(
             self.each_context(request),
             title="Blockchain Analytics",
@@ -1479,7 +1574,27 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             created_at__gte=start_date
         ).count()
         context['recent_processed'] = ProcessedIndexerTransaction.objects.order_by('-created_at')[:20]
-        
+
+        # ── BNB Smart Chain (cUSD+ rail) ──────────────────────────────────
+        # Everything above this line is Algorand. The BSC rail has no
+        # Balance cache and no indexer (balances are read from the chain per
+        # request), so its health is a different set of numbers: scanner
+        # cursor lag, sponsor fuel, vault collateral, and the sponsored-batch
+        # outcome ledger.
+        from cusd_plus.metrics import (
+            get_bsc_scanner_health,
+            get_cusd_plus_platform_metrics,
+            get_sponsor_balance,
+            get_sponsorship_stats,
+        )
+        context['bsc_scanner'] = get_bsc_scanner_health()
+        context['bsc_sponsor'] = get_sponsor_balance()
+        context['cusd_plus_metrics'] = get_cusd_plus_platform_metrics()
+        context['bsc_sponsorship_stats'] = get_sponsorship_stats(since=start_date)
+        context['recent_sponsored_batches'] = SponsoredBatch.objects.select_related(
+            'user'
+        ).order_by('-created_at')[:20]
+
         return render(request, 'admin/blockchain_analytics.html', context)
 
     def blockchain_scan_now_view(self, request):
@@ -1913,6 +2028,10 @@ confio_admin_site.register(Financiera, FinancieraAdmin)
 confio_admin_site.register(FinancieraReview, FinancieraReviewAdmin)
 confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 
-from blockchain.models import SponsoredBatch
-from blockchain.admin import SponsoredBatchAdmin
+# EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
+# never registered, which left the BSC 'BNB' rows — the authoritative
+# allowlist for outbound native BNB — with no admin surface at all.
+from blockchain.models import PendingAutoSwap, SponsoredBatch
+from blockchain.admin import PendingAutoSwapAdmin, SponsoredBatchAdmin
 confio_admin_site.register(SponsoredBatch, SponsoredBatchAdmin)
+confio_admin_site.register(PendingAutoSwap, PendingAutoSwapAdmin)
