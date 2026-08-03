@@ -3475,16 +3475,20 @@ export const GET_CURRENT_BUSINESS_EMPLOYEES = gql`
         lastName
         phoneNumber
         phoneCountry
+        # id + accountType only. PayrollSetupWizard needs them to create payroll
+        # recipients; nothing reads an employee's on-chain address any more.
+        # Delegate reconciliation goes through payrollRailStatus, which resolves
+        # addresses SERVER-side and returns delegateEmployeeIds — the only way
+        # it can work on BSC, where the allowlist holds EVM addresses the client
+        # never receives.
+        #
+        # Seven screens consume this query. All seven were checked before this
+        # field was removed; an earlier attempt trimmed it on one consumer's
+        # evidence and broke delegate matching.
         accounts {
           id
           accountType
           accountIndex
-          # algorandAddress IS required here: PayrollDelegatesManageScreen
-          # compares it against the on-chain delegate list to reconcile who is
-          # already a delegate. Removing it silently made every employee fail
-          # to match. This query has seven screen consumers — check all of them
-          # before trimming a field.
-          algorandAddress
         }
       }
       role

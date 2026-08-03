@@ -56,7 +56,7 @@ export const PayrollDelegatesManageScreen = () => {
     variables: { includeInactive: false, first: 50 },
     fetchPolicy: 'cache-and-network',
   });
-  const { delegates, status, loading: delegatesLoading, refetch: refetchDelegates } = usePayrollDelegates();
+  const { status, loading: delegatesLoading, refetch: refetchDelegates } = usePayrollDelegates();
   const [mutateDelegates, { loading: mutating }] = useMutation(SET_BUSINESS_DELEGATES_BY_EMPLOYEE);
   const [delegateMap, setDelegateMap] = useState<Record<string, boolean>>({});
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
@@ -99,28 +99,26 @@ export const PayrollDelegatesManageScreen = () => {
         }
       }
 
-      // Find personal account address
-      const personalAccount = e.user?.accounts?.find(
-        (a: any) => a.accountType === 'personal' || a.account_type === 'personal'
-      );
-      const address = personalAccount?.algorandAddress;
-
-
-      // Normalize addresses to uppercase for comparison
-      const normalizedAddress = address?.trim().toUpperCase();
-      const normalizedDelegates = delegates.map((d: string) => d?.trim().toUpperCase());
-
-      // Check if address is in delegates list
+      // Deliberately NO address matching here.
+      //
+      // This branch runs only when payrollRailStatus gave us nothing — an old
+      // server, or a transient failure of that query. Comparing an employee's
+      // Algorand address against the allowlist only ever worked on the legacy
+      // rail: on BSC the allowlist holds EVM addresses this screen never
+      // receives, so the term could contribute a false negative and never a
+      // true positive. Dropping it also means employee addresses no longer
+      // have to cross the wire at all.
+      //
+      // What is left is rail-agnostic: the owner is always a delegate, and
+      // send_funds is the permission the delegate role carries. That is an
+      // approximation of on-chain truth, which is the honest status of any
+      // answer computed without the chain — the authoritative path above is
+      // the one that asks it.
       const role = (e.role || '').toLowerCase();
-      const isDelegate = role === 'owner' || hasSendFunds || (normalizedAddress && normalizedDelegates.includes(normalizedAddress));
-
-
-      // Owner is always a delegate, but should be in the list anyway.
-      // We rely on the list from the blockchain.
-      map[e.id] = !!isDelegate;
+      map[e.id] = role === 'owner' || hasSendFunds;
     });
     setDelegateMap(map);
-  }, [employees, delegates, status]);
+  }, [employees, status]);
 
   const toggleDelegate = useCallback(async (employeeId: string, name: string, current: boolean) => {
     const target = employees.find((e: any) => e.id === employeeId);
