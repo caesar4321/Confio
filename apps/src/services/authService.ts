@@ -564,24 +564,38 @@ export class AuthService {
           (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
         );
         expectedAddress = personalAccount?.algorandAddress || null;
-        // NOTE: bscAddress is deliberately NOT queried here — it is not on the
-        // GraphQL AccountType yet, and one unknown field fails the WHOLE query
-        // against an older server, which would silently drop the Algorand
-        // anchor too. BSC-only accounts therefore reach getOrCreateMasterSecret
-        // unanchored; that case is made safe on the client instead (an
-        // unanchored restore may no longer REPLACE an existing local secret).
-        // TODO: expose bsc_address on AccountType, then anchor on it here.
-        expectedEvmAddress = null;
-        if (expectedAddress || expectedEvmAddress) {
-          console.log('[AuthService] enableDriveBackup anchors fetched from server:', {
-            expectedAddress,
-            expectedEvmAddress,
-          });
-        } else {
-          console.log('[AuthService] enableDriveBackup: no server-side address found; proceeding without filter');
-        }
       } catch (meErr) {
         console.warn('[AuthService] Failed to fetch expectedAddress before Drive sync (proceeding without filter):', meErr);
+      }
+
+      // SEPARATE request, separate try/catch: bscAddress ships in the same
+      // release as this query, so against an older server it errors — and
+      // folding it into the query above would take the Algorand anchor down
+      // with it during the deploy window. BSC-only accounts (Algorand
+      // deprecated) have no algorandAddress at all, so this is their ONLY
+      // anchor; without it an unanchored Drive scan can adopt the oldest
+      // decryptable backup over a perfectly good local wallet.
+      try {
+        const { GET_MY_BSC_ADDRESSES } = await import('../apollo/queries');
+        const { data } = await apolloClient.query({
+          query: GET_MY_BSC_ADDRESSES,
+          fetchPolicy: 'network-only',
+        });
+        const personalAccount = (data?.userAccounts || []).find(
+          (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
+        );
+        expectedEvmAddress = personalAccount?.bscAddress || null;
+      } catch (bscErr) {
+        console.warn('[AuthService] Could not fetch the BSC anchor (older server?); continuing with whatever anchors we have:', bscErr);
+      }
+
+      if (expectedAddress || expectedEvmAddress) {
+        console.log('[AuthService] enableDriveBackup anchors fetched from server:', {
+          expectedAddress,
+          expectedEvmAddress,
+        });
+      } else {
+        console.log('[AuthService] enableDriveBackup: no server-side anchor available; proceeding without filter');
       }
 
       // Sync to Drive using the access token. If Drive already contains V2

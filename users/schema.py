@@ -848,8 +848,13 @@ class AccountType(DjangoObjectType):
 	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address', 'is_keyless_migrated')
-		# Note: algorand_address added back for payroll delegate matching
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address', 'bsc_address', 'is_keyless_migrated')
+		# Note: algorand_address added back for payroll delegate matching.
+		# bsc_address exposed so the client can anchor wallet recovery for
+		# BSC-only accounts (Algorand deprecated): without it, enableDriveBackup
+		# had no anchor at all for those users and an unanchored Drive scan can
+		# adopt the oldest decryptable backup. Both addresses are public
+		# on-chain identifiers, not secrets.
 	
 	@classmethod
 	def get_queryset(cls, queryset, info):

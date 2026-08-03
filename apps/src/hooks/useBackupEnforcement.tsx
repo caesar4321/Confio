@@ -83,7 +83,19 @@ export const useBackupEnforcement = () => {
                     // Unknown is not "clear to proceed". Reporting readiness
                     // here let a funded V1 user through whenever the pepper
                     // service or algod was briefly unreachable.
+                    //
+                    // Say so, though: failing closed in silence just makes the
+                    // user's deposit or purchase die with no explanation and
+                    // nothing to act on. This is a transient outage, so the
+                    // honest message is "try again", not "something is wrong
+                    // with your wallet".
                     console.warn('[BackupEnforcement] Migration status unknown; not reporting readiness.');
+                    setMigrationVisible(false);
+                    Alert.alert(
+                        'No pudimos verificar tu billetera',
+                        'No pudimos comprobar el estado de tu billetera en este momento. Revisa tu conexión e inténtalo de nuevo en unos segundos.',
+                        [{ text: 'Entendido' }]
+                    );
                     return false;
                 }
 

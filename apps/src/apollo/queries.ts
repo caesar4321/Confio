@@ -1007,6 +1007,24 @@ export const GET_MY_MIGRATION_STATUS = gql`
   }
 `;
 
+/**
+ * ISOLATED on purpose. bscAddress was added to AccountType in the same release
+ * as this query, and one unknown field fails the WHOLE request against an
+ * older server — folding it into GET_MY_MIGRATION_STATUS would take the
+ * algorandAddress anchor down with it during the deploy window. Callers run
+ * this in its own try/catch and degrade to "no BSC anchor" if it errors.
+ */
+export const GET_MY_BSC_ADDRESSES = gql`
+  query GetMyBscAddresses {
+    userAccounts {
+      id
+      accountType
+      accountIndex
+      bscAddress
+    }
+  }
+`;
+
 export const GET_MY_BALANCES = gql`
   query GetMyBalances {
     myBalances {

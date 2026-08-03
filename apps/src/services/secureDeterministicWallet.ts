@@ -873,15 +873,26 @@ async function fetchManifest(googleDriveStorage: any, accessToken: string): Prom
         // Normalise the fields we actually consume. Filtering out null was not
         // enough: `{"deviceHint": 1}` survives an object check and then throws
         // on `.toLowerCase()` downstream. Coerce or drop instead.
+        //
+        // An entry with no usable `id` is dropped outright rather than kept
+        // with `id: undefined`. Consumers key off `wallets.length` and derive
+        // hasBackup / Android-vs-iOS signals from the list, so an unusable
+        // entry inflated the count, triggered pointless Drive scans, and could
+        // contribute a device signal that fails an Apple restore closed.
         const wallets = parsed.wallets
-          .filter((entry: any) => !!entry && typeof entry === 'object')
+          .filter((entry: any) => !!entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id.length > 0)
           .map((entry: any) => ({
             ...entry,
-            id: typeof entry.id === 'string' ? entry.id : undefined,
+            id: entry.id,
             deviceHint: typeof entry.deviceHint === 'string' ? entry.deviceHint : undefined,
+            // Reused verbatim when the manifest is rewritten, so a non-string
+            // here would be persisted back into the file.
+            createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : undefined,
           }));
         if (wallets.length !== parsed.wallets.length) {
-          console.warn('[Manifest] Dropped malformed manifest entries.');
+          console.warn(
+            `[Manifest] Dropped ${parsed.wallets.length - wallets.length} malformed manifest entr${parsed.wallets.length - wallets.length === 1 ? 'y' : 'ies'}.`
+          );
         }
         return { ...parsed, wallets } as WalletManifest;
       }
