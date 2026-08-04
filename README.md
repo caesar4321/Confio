@@ -1,106 +1,158 @@
-# Confío: LATAM's Open Wallet for the Dollar Economy
+# Confío
 
-**Confío** is an open-source digital-dollar wallet and transaction platform
-designed for Latin America. It uses **cUSD on Algorand** for everyday payments
-and **cUSD+ on BNB Smart Chain** for USDY-backed dollar savings, with sponsored
-network fees and no crypto complexity.
+**Dollar finance built for Latin America — user-controlled money, distributed through trust.**
 
-Built for real people — not just crypto experts.
+[Website](https://confio.lat) · [Whitepaper](docs/whitepaper/README.md) · [Tokenomics](docs/tokenomics/README.md) · [BNB Smart Chain deployments](contracts/cusd_plus/DEPLOYMENT.md)
 
----
+Confío is a fully open-source, non-custodial financial application for Latin America. It combines dollar access, savings, transfers, merchant payments, payroll, and the $CONFIO ecosystem token in a familiar mobile experience. The current product system settles on **BNB Smart Chain**, while the application hides gas, approvals, contract calls, and blockchain addresses from everyday users.
 
-## 🌎 Why Confío?
+*Lo tuyo, tuyo. · Blockchain inside. Simple as PayPal.*
 
-In countries like Venezuela, Argentina, and beyond, inflation erodes trust in local currencies.
-Confío helps people access stable dollars, send remittances, and pay each other — simply and safely — using blockchain.
+## What Confío does
 
-> "Confío" means **"I trust"** in Spanish.
-> We open-source everything because **trust must be earned, not assumed**.
+- **Add and withdraw dollars:** connect local and international payment methods to BSC-USDT through integrated fiat providers.
+- **Save with cUSD+:** move USDT into an accumulating dollar balance backed by Ondo Finance's USDY and redeem it back to USDT. Yield is variable and not guaranteed.
+- **Send simply:** transfer to contacts without asking users to copy blockchain addresses or hold BNB for gas.
+- **Accept payments:** support merchant invoices and QR-centered payment flows with transparent on-chain settlement.
+- **Run payroll:** let businesses fund and authorize dollar payouts while recipients remain in control of their wallets.
+- **Participate in the ecosystem:** use the fixed-supply $CONFIO token for presale allocations, rewards, and disclosed ecosystem functions. $CONFIO does not back cUSD+ or user dollar balances.
 
----
+Additional tokenized-market products are evaluated separately and are not part of the current release.
 
-## 🚀 Key Features
+## Why Confío is different
 
-*   **Zero Complexity**: Log in with Google/Apple. No seed phrases to lose.
-*   **Gasless**: We sponsor transaction fees. Users just send money.
-*   **Stable**: cUSD (Confío Dollar) 1:1 backed by USDC.
-*   **Savings**: cUSD+ provides eligible users with variable USDY-backed yield exposure on BNB Smart Chain.
-*   **Accessible**:
-    *   **WhatsApp-like Experience**: Send money to any phone contact directly.
-    *   **Fiat On/Off Ramps**: Buy/Sell USDC with local payment methods and can convert it to cUSD.
-*   **Business Ready**: Dedicated business accounts with employee roles (Owner, Cashier, Manager) and payroll features.
+### User-controlled money
 
----
+Wallet keys are generated on the user's device, not held by Confío. Encrypted recovery material is stored in the user's personal cloud account, supporting familiar Google or Apple sign-in and device recovery without turning Confío into the wallet custodian.
 
-## 🔒 Security Architecture
+### Crypto complexity stays behind the interface
 
-Confío utilizes a **Cloud-Native Self-Custody** model.
+Normal in-app transactions are sponsored. Confío uses EIP-7702 signed batches for multi-step actions while keeping the user's authorization explicit and bounded. Users interact with dollar amounts and familiar actions rather than gas tokens, allowances, and contract calls.
 
- *   **Non-Custodial**: We never store your private keys. You own your funds.
- *   **Device-Generated**: Your key is generated on your device and encrypted in your personal cloud (Google Drive / iCloud). Only you have access.
- *   **Governed Contracts**: Critical operations use multi-party approval, including transparent Safe governance for cUSD+.
+### Local access, not a generic global interface
 
-> 📚 **Deep Dive**: [Account & Authentication Details](docs/security/ACCOUNT_AND_AUTH_DETAILS.md)
+Confío integrates country-specific bank, QR, and payment methods for Latin America and international access for diaspora corridors. Product surfaces, eligibility, and payment methods adapt to local operating realities.
 
----
+### Distribution through trust
 
-## 🧱 Tech Stack Overview
+Confío is built around a founder-led Spanish-language distribution channel and a long-running public relationship with the region it serves. The product competes on trust, local fit, and direct education rather than feature parity or cashback subsidies alone.
 
-*   **Mobile App**: React Native (iOS/Android)
-*   **Backend**: Django + GraphQL (Python)
-*   **Blockchains**: Algorand (payments) + BNB Smart Chain (cUSD+ savings)
-*   **Infrastructure**: AWS (Zurich, SW) & Cloudflare
+### Public by default
 
-> 📂 **File Structure**: [View Project Structure](docs/PROJECT_STRUCTURE.md)
+The mobile application, backend, smart contracts, and core documentation are open source. Deployed contracts are source-verified, and material control boundaries and risks are documented publicly.
 
----
+## Product architecture
 
-## 📚 Documentation
+| Component | Role |
+| --- | --- |
+| **USDT on BNB Smart Chain** | Funding, liquidity, transfers, and exit rail |
+| **cUSD+** | Primary savings and transaction balance backed by USDY held by the vault |
+| **Payment and payroll contracts** | Merchant settlement, fees, business escrow, and authorized payouts |
+| **$CONFIO** | Fixed-supply community and ecosystem token, separate from dollar backing |
+| **Sponsored transaction layer** | User-authorized EIP-7702 batches with network fees paid by Confío |
 
-*   **[English Whitepaper](docs/whitepaper/README.md)**: Product thesis, multi-chain architecture, business model, operating metrics, risks, and roadmap.
-*   **[Documentation Index](docs/README.md)**: Technical, security, legal, product, and operational references.
-*   **[Smart Contracts](contracts/README.md)**: Contract packages and product-specific deployment documentation.
+The product followed Ondo's production infrastructure onto BNB Smart Chain: USDY, the InstantManager subscription and redemption path, its reference-price oracle, and BSC-USDT liquidity. Payments, payroll, transfers, and $CONFIO were consolidated onto the same network to avoid bridges and fragmented balances inside the consumer experience.
 
----
+## Verified BNB Smart Chain contracts
 
-## 🛠️ Usage & Development
+| Contract | Address |
+| --- | --- |
+| cUSD+ vault | [`0x3C29417e…63Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
+| $CONFIO token | [`0xCcEb3F61…B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
+| $CONFIO presale vault | [`0x1a2dD9b4…f095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
+| $CONFIO reward vault | [`0x812b8d86…De730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
+| $CONFIO vesting vault | [`0xb873e4db…0bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
+| Invitation escrow | [`0xeFF0Af29…4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
+| Merchant payments | [`0x039Ebe91…7736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
+| Payroll vault | [`0x851cA801…d7299`](https://bscscan.com/address/0x851cA801c3028D4C0e651d29803f8e35D86d7299#code) |
+| Sponsored-batch delegate | [`0xC06BD197…bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 
-### Environment Setup (`CONFIO_ENV`)
+See the [deployment record](contracts/cusd_plus/DEPLOYMENT.md) for implementation addresses, migrations, superseded deployments, transaction references, and operational status.
 
-Confío loads settings based on the `CONFIO_ENV` flag.
+## Repository map
 
-| Environment | Use Case |
-| :--- | :--- |
-| `mainnet` | Production (Default) |
-| `testnet` | Local Development & QA |
+| Path | Contents |
+| --- | --- |
+| [`apps/`](apps/) | React Native application for iOS and Android |
+| [`config/`](config/) and backend packages | Django, GraphQL, authentication, payments, compliance, notifications, and operations |
+| [`contracts/cusd_plus/`](contracts/cusd_plus/) | Solidity contracts, Foundry tests, deployment scripts, and BSC records |
+| [`web/`](web/) | Public website and web product surfaces |
+| [`workers/`](workers/) | Background and scheduled workloads |
+| [`docs/`](docs/) | Product, security, legal, infrastructure, and operating documentation |
 
-**Local Development Command**:
+The repository still contains Algorand code and documentation used by the earlier product architecture and its migration. Those directories remain for historical verification and migration support; they are not the current settlement architecture described above.
+
+## Documentation
+
+- **Whitepaper:** [English — authoritative original](docs/whitepaper/README.md) · [Español](docs/whitepaper/README.es.md) · [한국어](docs/whitepaper/README.ko.md)
+- **$CONFIO tokenomics:** [English — authoritative original](docs/tokenomics/README.md) · [Español](docs/tokenomics/README.es.md) · [한국어](docs/tokenomics/README.ko.md)
+- **Security:** [Account and authentication architecture](docs/security/ACCOUNT_AND_AUTH_DETAILS.md)
+- **Contracts:** [BSC deployment record](contracts/cusd_plus/DEPLOYMENT.md)
+
+The English whitepaper and tokenomics documents are the authoritative originals. Translations are provided for convenience and may lag behind the English versions.
+
+## Development
+
+Confío is a production system with external infrastructure, compliance providers, and encrypted environment configuration. A source checkout can run local components, but end-to-end payment and blockchain flows require the appropriate test credentials and services.
+
+### Backend
+
 ```bash
-# Always set this for local dev!
+python -m venv myvenv
+source myvenv/bin/activate
+pip install -r requirements.txt
 export CONFIO_ENV=testnet
-
-# Run Backend
 python manage.py runserver
-
-# Run Mobile App
-cd apps && CONFIO_ENV=testnet yarn ios
 ```
 
----
+Run backend tests with:
 
-## 💬 Join the Community
+```bash
+CONFIO_ENV=testnet python manage.py test
+```
 
-Confío is more than a wallet — it's a mission to bring financial confidence to Latin America.
+### Mobile application
 
-*   🌐 **Website**: [confio.lat](https://confio.lat)
-*   📱 **TikTok**: [@julianmoonluna](https://tiktok.com/@julianmoonluna)
+```bash
+cd apps
+yarn install
+CONFIO_ENV=testnet yarn start
+```
 
----
+In a second terminal, run `CONFIO_ENV=testnet yarn ios` or `CONFIO_ENV=testnet yarn android` after completing the native React Native setup for that platform.
 
-## 📜 License
+### Web application
 
-MIT License — build freely, fork proudly, remix for your country.
+```bash
+cd web
+yarn install
+yarn start
+```
 
-## 🙏 Credits
+### BSC contracts
 
-Confío is led by Julian Moon, a Korean builder based in Latin America, inspired by the dream of trustworthy, borderless financial inclusion for everyone.
+The Solidity package uses Foundry and pinned dependencies:
+
+```bash
+cd contracts/cusd_plus
+npm install
+npm run setup:forge-std
+forge build
+forge test
+```
+
+Never broadcast a deployment or administrative transaction without reviewing the current [deployment record](contracts/cusd_plus/DEPLOYMENT.md) and environment safeguards.
+
+## Community
+
+- Website: [confio.lat](https://confio.lat)
+- TikTok: [@julianmoonluna](https://www.tiktok.com/@julianmoonluna)
+- GitHub: [caesar4321/Confio](https://github.com/caesar4321/Confio)
+
+## License
+
+Confío is released under the [MIT License](LICENSE).
+
+## Disclaimer
+
+This repository and its documentation are provided for informational and software-development purposes. Nothing here is investment, legal, tax, or financial advice, an offer of securities, or a guarantee of yield, liquidity, market value, product availability, or regulatory eligibility. Product access depends on jurisdiction, identity and compliance checks, provider availability, and applicable law.
