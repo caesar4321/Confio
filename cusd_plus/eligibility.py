@@ -1,10 +1,12 @@
 # Ondo issuer geo-eligibility for cUSD+ (USDY) and tokenized stocks.
 #
 # Source of truth: Ondo's published eligibility docs (verified 2026-07-04,
-# both lists are identical for USDY and Ondo Global Markets):
+# re-verified 2026-08-04 after the public BNB launch — UNCHANGED, and
+# Venezuela is still absent from the prohibited list; both lists are
+# identical for USDY and Ondo Global Markets):
 #   https://docs.ondo.finance/general-access-products/usdy/faq/eligibility
 #   https://docs.ondo.finance/ondo-global-markets/eligibility
-# Mirrored in our Terms v1.3.1 (users/legal/documents.py, section 9).
+# Mirrored in our Terms v1.4.0 (users/legal/documents.py, section 9).
 #
 # Signal: User.phone_country (2-letter ISO, set at phone verification).
 # Ondo also prohibits the occupied Ukraine regions (Crimea/DNR/LNR/Kherson/

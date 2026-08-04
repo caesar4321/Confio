@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.3.1',
-    'last_updated': '2026-07-04',
+    'version': '1.4.0',
+    'last_updated': '2026-08-04',
     'is_legally_binding': True,
     'sections': [
         {
@@ -21,6 +21,7 @@ TERMS = {
                 {'term': 'Servicios', 'definition': 'Incluye la billetera, transferencias y cualquier otra funcionalidad ofrecida por Confío.'},
                 {'term': 'Monedas', 'definition': 'Incluye cUSD, CONFIO y cualquier otra moneda soportada.'},
                 {'term': 'cUSD+', 'definition': 'Token que representa cUSD depositado en la función de ahorro con rendimiento, respaldado 1:1 por USDY de Ondo Finance.'},
+                {'term': 'USDT', 'definition': 'Stablecoin emitida por Tether, un tercero ajeno a Confío. Las recargas hacia la función de ahorro se acreditan primero en USDT sobre BNB Chain y se convierten a cUSD+ solo si usted es elegible conforme a la sección 9.'},
                 {'term': 'Acciones tokenizadas', 'definition': 'Tokens emitidos por terceros que representan exposición 1:1 a acciones reales de empresas de los Estados Unidos.'}
             ]
         },
@@ -37,7 +38,8 @@ TERMS = {
             'content': [
                 'Irreversibles una vez confirmadas en la blockchain',
                 'Sin cargo de gas para el usuario final',
-                'Procesadas a través de la blockchain Algorand'
+                'Procesadas a través de blockchains públicas: actualmente BNB Chain para el ahorro con rendimiento, las acciones tokenizadas y $CONFIO, y Algorand para los saldos de cUSD existentes',
+                'Podemos incorporar, migrar o dejar de soportar activos y redes. Si dejamos de soportar un activo o una red, se lo informaremos con antelación razonable y mantendremos disponible una vía para retirar o convertir su saldo.'
             ]
         },
         {
@@ -53,12 +55,14 @@ TERMS = {
         {
             'title': '6. Ahorro con Rendimiento (cUSD+)',
             'content': [
-                'Al usar la función de ahorro, su cUSD se convierte en cUSD+, un token respaldado 1:1 por USDY de Ondo Finance, un activo garantizado por bonos del Tesoro de los Estados Unidos y emitido por terceros.',
+                'Al usar la función de ahorro, su cUSD se convierte en cUSD+, un token respaldado 1:1 por USDY de Ondo Finance, un activo emitido por terceros y respaldado por bonos del Tesoro de los Estados Unidos de corto plazo, fondos de valores gubernamentales e instrumentos de efectivo.',
                 'El rendimiento es variable, se genera a través de USDY y puede cambiar día a día. No es una tasa fija, no está garantizado y puede diferir del mostrado en la app.',
                 'cUSD+ no es una cuenta de ahorro bancaria ni un depósito. No está protegido por seguros de depósito (como FDIC) ni por fondos de garantía estatales.',
                 'La conversión entre cUSD y cUSD+ depende de contratos inteligentes y de emisores o proveedores terceros; en condiciones excepcionales de mercado o técnicas, los retiros podrían demorarse o verse afectados.',
                 'Existen riesgos técnicos y de terceros, incluyendo errores en contratos inteligentes, cambios regulatorios y riesgo del emisor del activo de respaldo. En casos extremos puede perder parte o la totalidad del valor depositado.',
-                'Las tasas mostradas ya descuentan la comisión de Confío; cualquier costo adicional de una operación se muestra antes de confirmarla.'
+                'Las tasas mostradas ya descuentan la comisión de Confío; cualquier costo adicional de una operación se muestra antes de confirmarla.',
+                'Si usted no es elegible para el ahorro con rendimiento conforme a la sección 9, su recarga permanece en USDT: se muestra dentro de su cuenta de ahorro y puede enviarla, gastarla o retirarla en cualquier momento, pero no genera rendimiento ni está respaldada por USDY. En ese caso aplican los riesgos del emisor de USDT (Tether) y no los de Ondo Finance.',
+                'Los retiros y las conversiones de salida no están sujetos a restricciones geográficas: sus fondos siempre se pueden retirar.'
             ]
         },
         {
@@ -95,7 +99,9 @@ TERMS = {
                     'cUSD+ (USDY) y las acciones tokenizadas son emitidos por Ondo Finance y están sujetos, además, a las reglas de elegibilidad del emisor.',
                     'Estas funciones no están disponibles para personas ubicadas o residentes en: Estados Unidos, Canadá, Afganistán, Bielorrusia, Corea del Norte, Cuba, Irán, Libia, Myanmar, Rusia, Siria, Somalia, Sudán, Sudán del Sur, ni en las regiones ocupadas de Ucrania (Crimea, Donetsk, Luhansk, Jersón, Zaporiyia y Sebastopol).',
                     'En ciertas jurisdicciones solo están disponibles para inversionistas calificados o profesionales según la ley local, incluyendo Brasil, el Espacio Económico Europeo, el Reino Unido, Suiza, Hong Kong, Singapur y Malasia.',
-                    'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.'
+                    'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.',
+                    'Si usted no es elegible, puede seguir usando el resto de Confío con normalidad: recibir, enviar, pagar y retirar dólares digitales. Lo que no está disponible es la conversión a cUSD+ y la compra de acciones tokenizadas.',
+                    'Para aplicar estas reglas usamos el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP.'
                 ]
             }
         },
@@ -123,8 +129,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.3.0',
-    'last_updated': '2026-03-19',
+    'version': '1.3.1',
+    'last_updated': '2026-08-04',
     'is_legally_binding': True,
     'sections': [
         {
@@ -188,6 +194,7 @@ PRIVACY = {
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
                 'Cumplir con requisitos de KYC/AML',
+                'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP',
                 'Detectar abuso, proteger cuentas, evaluar integridad del dispositivo y monitorear riesgos de seguridad'
             ]
         },

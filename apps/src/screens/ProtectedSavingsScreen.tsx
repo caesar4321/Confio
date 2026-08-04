@@ -154,9 +154,9 @@ export const ProtectedSavingsScreen = () => {
           <Text style={styles.sectionBody}>
             <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>{' '}
             es tu dólar para ahorrar: cada dólar está respaldado 100% por
-            USDY, un token garantizado por bonos del Tesoro de EE.UU., y
-            genera rendimiento todos los días. La blockchain permite comprobar públicamente que
-            el respaldo existe.
+            USDY, un token de Ondo Finance respaldado por bonos del Tesoro de
+            EE.UU., y genera rendimiento todos los días. La blockchain permite
+            comprobar públicamente que el respaldo existe.
           </Text>
           <Text style={styles.sectionBody}>
             ¿Y <Text style={styles.inlineEmphasis}>cUSD</Text>? Sigue en
@@ -303,13 +303,24 @@ export const ProtectedSavingsScreen = () => {
             <Icon name="layers" size={20} color={colors.primary} />
             <Text style={styles.sectionTitle}>¿Qué es USDY?</Text>
           </View>
+          {/* Deepest in-app tier: this paragraph mirrors Ondo's OWN wording
+              for the BNB deployment, verbatim-translated, rather than a
+              conservative phrasing of our own. Source: "USDY Is Now Live on
+              BNB Chain" (ondo.finance/blog/usdy-is-live-on-bnb-chain,
+              2026-08-04) — "yield backed by short-term U.S. Treasuries, U.S.
+              Treasuries and government securities funds, or cash instruments",
+              which matches the Underlying Components list in the Sales Terms
+              Token Spec (not the legacy USDY LLC "99.86% Treasuries" figure).
+              The short one-liners elsewhere in the app are abbreviations of
+              this sentence and must never contradict it. */}
           <Text style={styles.sectionBody}>
             <Text style={styles.inlineEmphasis}>USDY</Text> es un token de{' '}
             <Text style={styles.inlineEmphasis}>Ondo Finance</Text> respaldado
-            por bonos del Tesoro de EE.UU. Esos bonos pagan interés todos los
-            días — ese interés es el rendimiento que recibe tu cUSD+. (USDC,
-            el respaldo de cUSD, es el dólar digital de Circle, con auditorías
-            públicas mensuales.)
+            por bonos del Tesoro de EE.UU. de corto plazo, fondos de valores
+            gubernamentales e instrumentos de efectivo. Esos activos pagan
+            interés todos los días — ese interés es el rendimiento que recibe
+            tu cUSD+. (USDC, el respaldo de cUSD, es el dólar digital de
+            Circle, con auditorías públicas mensuales.)
           </Text>
           <Text style={styles.sectionBody}>
             Las reservas de USDY se verifican por terceros independientes:
