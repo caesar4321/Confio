@@ -309,6 +309,22 @@ const authLink = setContext(async (operation, previousContext) => {
     return { headers: nextHeaders };
   }
 
+  // Pinned token: send exactly the JWT the caller verified, with no Keychain
+  // reread and no proactive refresh.
+  //
+  // For most operations, rereading is right — it picks up the freshest token.
+  // For an operation whose effect is bound to the token's ACCOUNT and cannot be
+  // undone, it is wrong: this link awaits App Check above, and an account
+  // switch landing in that window swaps the token between the caller's check
+  // and this read. updateAccountBscAddress writes to the JWT's account and
+  // refuses corrections forever, so it pins instead. Opt-in — nothing else
+  // changes behaviour.
+  const pinnedToken = previousContext?.pinnedAuthToken;
+  if (pinnedToken) {
+    nextHeaders['Authorization'] = `JWT ${pinnedToken}`;
+    return { headers: nextHeaders };
+  }
+
   try {
     let credentials;
     try {

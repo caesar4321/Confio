@@ -92,41 +92,215 @@ export async function registerAlgorandAddressChecked(
   }
 }
 
+/**
+ * True when the JWT we are about to send names the SAME account as the local
+ * active context. updateAccountBscAddress writes to the JWT-context account and
+ * the write is permanent (a different address is refused forever), so a
+ * mismatch here is unrecoverable: it burns the wrong account's slot AND the
+ * address, since one address may belong to only one account.
+ *
+ * The mismatch is reachable. checkAuthState aligns the token to a business
+ * context inside a try/catch and falls through on failure (or when the mutation
+ * returns no token at all), and it performs NO alignment for personal contexts
+ * when the access token is still valid — so a business JWT left behind by an
+ * interrupted switch survives into a personal cold start. Unknown alignment is
+ * NOT alignment: fail closed and let the next entry retry.
+ */
+async function verifiedTokenForContext(ctx: AccountContext): Promise<string | null> {
+  try {
+    const creds = await Keychain.getGenericPassword({
+      service: AUTH_KEYCHAIN_SERVICE,
+      username: AUTH_KEYCHAIN_USERNAME,
+    });
+    if (!creds || !creds.password) return null;
+    const accessToken = JSON.parse(creds.password)?.accessToken;
+    if (!accessToken) return null;
+    const claims = jwtDecode<CustomJwtPayload>(accessToken);
+
+    // Refuse a token Apollo is about to replace. The auth link proactively
+    // refreshes anything within 5 minutes of expiry using ONLY the refresh
+    // token, and switching accounts keeps the ORIGINAL personal-context
+    // refresh token — so the replacement can silently carry a different
+    // account than the one we just verified. That block does not honour
+    // `skipProactiveRefresh`, so checking the claims cannot help; the only
+    // safe move is to require a token that will still be current at send
+    // time. Registration is best-effort and marker-gated, so skipping a
+    // round costs nothing but the next app entry.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const REFRESH_WINDOW_SEC = 6 * 60; // 5-minute link window + 1-minute margin
+    if (!claims?.exp || claims.exp - nowSec < REFRESH_WINDOW_SEC) {
+      console.log('[AuthService] JWT is inside the proactive-refresh window; deferring');
+      return null;
+    }
+
+    const jwtType = String(claims?.account_type ?? 'personal');
+    const jwtIndex = Number(claims?.account_index ?? 0);
+    const jwtBusiness = claims?.business_id ?? claims?.businessId ?? null;
+
+    const ctxType = ctx.type === 'business' ? 'business' : 'personal';
+    if (jwtType !== ctxType) return null;
+
+    // Compared as strings: the claim's type differs by codepath, and the
+    // client's stored context always holds a string.
+    const ctxBusiness = ctx.businessId ? String(ctx.businessId) : null;
+    const tokenBusiness = jwtBusiness === null || jwtBusiness === undefined
+      ? null
+      : String(jwtBusiness);
+    if (ctxBusiness !== tokenBusiness) return null;
+
+    // account_index is deliberately NOT compared when a real business_id is
+    // present on both sides. The client keys every business at index 0
+    // (useAccountManager builds `business_<id>_0`), while SwitchAccountToken
+    // normalizes the claim to the business's ACTUAL row index — 1 for an
+    // owner's second business. Those legitimately disagree, so comparing them
+    // would gate second-and-later businesses out of registration forever.
+    //
+    // A NON-NULL business_id is what makes that safe, because it identifies
+    // the account on its own. Two null business_ids identify nothing: a
+    // business token for index 1 with no business_id would otherwise authorize
+    // an address derived for index 0. Fall through to the index comparison.
+    if (ctxType === 'business' && ctxBusiness !== null) return accessToken;
+    return jwtIndex === (ctx.index ?? 0) ? accessToken : null;
+  } catch (e) {
+    console.log('[AuthService] Could not verify JWT/account alignment:', e);
+    return null;
+  }
+}
+
+/**
+ * Registers the account's BSC address, retrying once if the session token
+ * rotated mid-flight.
+ *
+ * The retry is for liveness, not safety. A business cold start aligns the JWT
+ * in checkAuthState and then aligns it AGAIN from the profile effect, so a
+ * legitimate round can abort purely because the token was rewritten between
+ * the two verifications. One retry picks up the settled token. Attempts are
+ * bounded because every other abort reason is sticky, and a genuine mismatch
+ * must not spin.
+ */
 export async function ensureBscAddressRegistered(addressOverride?: string) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const outcome = await attemptBscRegistration(addressOverride);
+    if (outcome !== 'token_rotated') return;
+  }
+}
+
+type BscRegistrationOutcome = 'done' | 'token_rotated';
+
+/**
+ * True when two access tokens were issued to the same user.
+ *
+ * Both claims must be canonical positive integer ids — Django issues
+ * `user_id: user.id`. Stringifying first and comparing after would call
+ * degenerate pairs equal ("" vs "", false vs false, the string "undefined" vs
+ * a missing claim), and a value that is not an identity must never establish
+ * sameness.
+ */
+function sameTokenSubject(a: string, b: string): boolean {
+  const canonicalId = (v: unknown): string | null => {
+    // Numbers get the safe-integer check because Django uses BigAutoField and
+    // serializes user_id numerically: 9007199254740992 and ...93 decode to the
+    // SAME JavaScript number, so two distinct users would compare equal.
+    if (typeof v === 'number') {
+      return Number.isSafeInteger(v) && v > 0 ? String(v) : null;
+    }
+    // Not trimmed: " 42" is not a canonical id, and treating it as one would
+    // let a padded variant match the real thing.
+    if (typeof v === 'string') {
+      return /^[1-9][0-9]*$/.test(v) ? v : null;
+    }
+    return null;
+  };
+  try {
+    const ua = canonicalId(jwtDecode<CustomJwtPayload>(a)?.user_id);
+    const ub = canonicalId(jwtDecode<CustomJwtPayload>(b)?.user_id);
+    return ua !== null && ua === ub;
+  } catch {
+    return false;
+  }
+}
+
+async function attemptBscRegistration(addressOverride?: string): Promise<BscRegistrationOutcome> {
   try {
     const Keychain = await import('react-native-keychain');
-    const { getEvmAddressForDisplay, getActiveEvmWallet, evmAccountKey } =
-      await import('./secureDeterministicWallet');
+    const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
     // Resolve BY ACTIVE ACCOUNT: the mutation writes to the JWT-context
     // account, so the unkeyed "last derived" wallet slot could register a
     // personal address onto a business account (or vice versa) after a
     // switch — and the server refuses corrections (immutability guard).
-    let address = addressOverride ?? null;
-    if (!address) {
-      const ctx = await AuthService.getInstance().getActiveAccountContext();
-      const acctKey = evmAccountKey({
-        accountType: ctx.type === 'business' ? 'business' : 'personal',
-        accountIndex: ctx.index ?? 0,
-        businessId: ctx.businessId,
-      });
-      address = await getEvmAddressForDisplay(acctKey);
-      if (!address) {
-        // First open after the savings update: nothing persisted yet, so
-        // derive the sibling from the master secret (V2 only). Legacy V1
-        // wallets throw here and register NOTHING by design — they have no
-        // BSC address until master-secret migration makes them V2.
-        address = (await getActiveEvmWallet()).address;
-      }
+    const ctx = await AuthService.getInstance().getActiveAccountContext();
+    const tokenAtStart = await verifiedTokenForContext(ctx);
+    if (!tokenAtStart) {
+      console.log('[AuthService] Skipping BSC registration: JWT does not match the active account');
+      return 'done';
     }
-    if (!address) return;
+
+    // DERIVE, never trust a cached address. getEvmAddressForDisplay reads a
+    // keychain slot keyed only by account shape ("personal_0") — not by OAuth
+    // identity — and sign-out does not clear it. Trusting it would let a
+    // legacy V1 user on a shared device register the PREVIOUS user's address:
+    // no master secret, a BSC sibling they cannot sign for, and one more
+    // permanent wrong-address write. Deriving proves ownership by
+    // construction, because getActiveEvmWallet passes allowGenerate:false and
+    // throws when this identity has no master secret — which is exactly the
+    // V1 behaviour we want (register NOTHING until migration makes them V2).
+    //
+    // Derived from the CAPTURED ctx, not by letting getActiveEvmWallet re-read
+    // the active one. switchAccount persists the new active context BEFORE it
+    // writes the replacement JWT, so a re-read could hand back account B's
+    // address while the verified token still names account A — and the write
+    // is permanent.
+    const address = (await getActiveEvmWallet(ctx)).address;
+    if (!address) return 'done';
+    if (addressOverride && addressOverride.toLowerCase() !== address.toLowerCase()) {
+      console.log('[AuthService] Skipping BSC registration: caller address does not match the derived wallet');
+      return 'done';
+    }
     const markerService = `confio_bsc_registered_v1_${address.toLowerCase()}`;
     const marker = await Keychain.getGenericPassword({ service: markerService }).catch(() => null);
-    if (marker) return; // already registered from this device
+    if (marker) return 'done'; // already registered from this device
     const { UPDATE_ACCOUNT_BSC_ADDRESS } = await import('../apollo/queries');
     const { apolloClient } = await import('../apollo/client');
+    // Re-check BOTH halves immediately before sending. The gate above and this
+    // send are separated by a derivation and a keychain read; an account switch
+    // in that window moves the active context and the JWT independently, and
+    // ctx/address/JWT must still describe one account at send time.
+    const ctxNow = await AuthService.getInstance().getActiveAccountContext();
+    const sameCtx =
+      (ctxNow.type === 'business' ? 'business' : 'personal') ===
+        (ctx.type === 'business' ? 'business' : 'personal') &&
+      String(ctxNow.businessId ?? '') === String(ctx.businessId ?? '') &&
+      (ctxNow.index ?? 0) === (ctx.index ?? 0);
+    const verifiedToken = sameCtx ? await verifiedTokenForContext(ctx) : null;
+    // Byte-identical to the token verified BEFORE derivation, not merely
+    // another token that satisfies the same claims. Account shape is not an
+    // identity: every user's personal context is {personal, 0, no business},
+    // so a sign-out/sign-in to a DIFFERENT user mid-flow produces a token that
+    // passes every claim check while the address still belongs to the previous
+    // user. Requiring the same token makes the whole sequence one session.
+    if (!verifiedToken || verifiedToken !== tokenAtStart) {
+      console.log('[AuthService] BSC registration deferred: session or account moved after derivation');
+      // Only the SAME user's token being reissued is a rotation worth retrying
+      // (the duplicate business alignment on cold start). The claim check above
+      // compares account shape, and every user's personal context is
+      // {personal, 0, no business} — so without comparing user_id, a
+      // sign-out/sign-in as a different user would look like a rotation. That
+      // is a new session, not a retryable blip; stop and let the next app entry
+      // start it cleanly.
+      return verifiedToken && sameTokenSubject(tokenAtStart, verifiedToken)
+        ? 'token_rotated'
+        : 'done';
+    }
     const res = await apolloClient.mutate({
       mutation: UPDATE_ACCOUNT_BSC_ADDRESS,
       variables: { bscAddress: address },
+      // SEND EXACTLY THE TOKEN WE VERIFIED. Checking the Keychain and then
+      // letting the auth link read it again is not the same thing: the link
+      // awaits App Check first, and an account switch landing in that window
+      // would swap the token underneath a write the server never lets us undo.
+      // Pinning also bypasses both proactive-refresh blocks, so a refresh
+      // cannot substitute a personal-context token either.
+      context: { pinnedAuthToken: verifiedToken, skipProactiveRefresh: true },
     });
     if (res?.data?.updateAccountBscAddress?.success) {
       await Keychain.setGenericPassword('ok', '1', { service: markerService }).catch(() => {});
@@ -134,8 +308,10 @@ export async function ensureBscAddressRegistered(addressOverride?: string) {
     } else {
       console.log('BSC registration not accepted:', res?.data?.updateAccountBscAddress?.error);
     }
+    return 'done';
   } catch (e) {
     console.log('BSC address registration skipped (non-fatal, will retry):', e);
+    return 'done';
   }
 }
 
