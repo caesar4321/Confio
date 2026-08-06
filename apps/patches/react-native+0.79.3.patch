@@ -2,7 +2,7 @@ diff --git a/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js 
 index c0d7459..b975a33 100644
 --- a/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
 +++ b/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
-@@ -25,6 +25,157 @@ export type ModuleConfig = [
+@@ -25,6 +25,154 @@ export type ModuleConfig = [
  
  export type MethodType = 'async' | 'promise' | 'sync';
  

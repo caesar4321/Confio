@@ -41,7 +41,7 @@ index b6e27ee..46eca9f 100644
  // MARK: - Codegen Struct → NSDictionary Helpers
  
  - (NSDictionary *)configDictFrom:(JS::NativeSdkReactNative::VerificationConfig &)config
-@@ -122,9 +130,31 @@
+@@ -122,9 +130,36 @@
      return std::make_shared<facebook::react::NativeSdkReactNativeSpecJSI>(params);
  }
  
