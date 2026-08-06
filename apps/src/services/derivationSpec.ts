@@ -33,6 +33,10 @@ export const CONFIO_DERIVATION_SPEC = {
   // Legacy V1 wallets have no EVM sibling by design, so no V1 EVM info
   // prefix exists here.
 
+  // NOTE: Solana keys are also V2-only and use the master-secret domain
+  // 'confio|v2|solana|...' (solanaWallet.ts). The commented V1 prefix below
+  // remains reserved and is intentionally not used by the V2 derivation.
+
   // Future chain support - uncomment when implementing
   // arcInfoPrefix: 'confio/arc/v1',  // For Arc network
   // solanaInfoPrefix: 'confio/solana/v1',  // For Solana

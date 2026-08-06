@@ -37,6 +37,8 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 import logging
 import json
+import base64
+from django.core import signing
 from django.utils.translation import gettext as _
 from .legal.documents import TERMS, PRIVACY, DELETION
 from graphql import GraphQLError
@@ -846,18 +848,19 @@ class WalletAnchorsType(graphene.ObjectType):
 	"""
 	The caller's OWN personal-account addresses, for anchoring wallet recovery.
 
-	Both addresses derive from the same client-side master secret, so the client
+	All addresses derive from the same client-side master secret, so the client
 	only needs one of them to prove a candidate secret is the right one — but
 	BSC-only accounts (Algorand deprecated) have no algorand_address at all, and
 	without any anchor an unanchored Drive scan can adopt the oldest decryptable
 	backup over a good local wallet.
 
-	Returned together in ONE read on purpose: fetching them in two requests let
+	Returned together in ONE read on purpose: fetching them separately would let
 	the two anchors come from different wallet generations if a migration landed
 	in between, which could either resurrect a stale backup or deny a valid one.
 	"""
 	algorand_address = graphene.String()
 	bsc_address = graphene.String()
+	solana_address = graphene.String()
 
 
 class AccountType(DjangoObjectType):
@@ -877,7 +880,7 @@ class AccountType(DjangoObjectType):
 		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address', 'is_keyless_migrated')
 		# Note: algorand_address added back for payroll delegate matching.
 		#
-		# bsc_address is deliberately NOT here. AccountType is reachable via
+		# bsc_address and solana_address are deliberately NOT here. AccountType is reachable via
 		# UserType.accounts, and resolve_user(id:) lets ANY authenticated caller
 		# fetch ANY user ("can add more restrictions later"), so anything added
 		# to this type is readable for arbitrary users. An address is public
@@ -1920,6 +1923,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		return WalletAnchorsType(
 			algorand_address=account.algorand_address or None,
 			bsc_address=account.bsc_address or None,
+			solana_address=account.solana_address or None,
 		)
 
 	def resolve_user_accounts(self, info):
@@ -3631,6 +3635,147 @@ class UpdateAccountBscAddress(graphene.Mutation):
                 error="Esa dirección BSC ya está registrada en otra cuenta.",
             )
         return UpdateAccountBscAddress(success=True, error=None)
+
+
+SOLANA_REGISTRATION_SALT = 'confio.solana-address-registration.v1'
+
+
+def _canonical_solana_address(solana_address):
+    addr = (solana_address or '').strip()
+    try:
+        from solders.pubkey import Pubkey
+        if str(Pubkey.from_string(addr)) != addr:
+            raise ValueError('non-canonical')
+        return addr
+    except (ValueError, TypeError):
+        return None
+
+
+def _solana_registration_account(info):
+    user = getattr(info.context, 'user', None)
+    if not (user and getattr(user, 'is_authenticated', False)):
+        return None, None, "Authentication required"
+    from .jwt_context import get_jwt_business_context_with_validation
+    jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+    if not jwt_context:
+        return user, None, "Invalid account context"
+    account_type = jwt_context['account_type']
+    account_index = jwt_context['account_index']
+    business_id = jwt_context.get('business_id')
+    if account_type == 'business' and business_id:
+        account = Account.objects.filter(
+            business_id=business_id,
+            account_type='business',
+            deleted_at__isnull=True,
+        ).order_by('account_index').first()
+        if account and account.user_id != user.id:
+            return user, None, "Solo el dueño del negocio puede registrar la dirección Solana."
+    else:
+        account = Account.objects.filter(
+            user=user,
+            account_type=account_type,
+            account_index=account_index,
+            deleted_at__isnull=True,
+        ).first()
+    if not account:
+        return user, None, "Cuenta no encontrada"
+    return user, account, None
+
+
+class PrepareSolanaAddressRegistration(graphene.Mutation):
+    class Arguments:
+        solana_address = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+    challenge = graphene.String()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, solana_address):
+        addr = _canonical_solana_address(solana_address)
+        if not addr:
+            return cls(success=False, error="Invalid Solana address")
+        _user, account, error = _solana_registration_account(info)
+        if error:
+            return cls(success=False, error=error)
+        challenge = signing.dumps(
+            {'account_id': account.pk, 'address': addr},
+            salt=SOLANA_REGISTRATION_SALT,
+            compress=True,
+        )
+        return cls(success=True, challenge=challenge)
+
+
+class UpdateAccountSolanaAddress(graphene.Mutation):
+    """Register the V2 master-secret-derived Solana address for the JWT account."""
+    class Arguments:
+        solana_address = graphene.String(required=True)
+        challenge = graphene.String(required=True)
+        ownership_signature = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, solana_address, challenge, ownership_signature):
+        addr = _canonical_solana_address(solana_address)
+        if not addr:
+            return cls(success=False, error="Invalid Solana address")
+        user, account, error = _solana_registration_account(info)
+        if error:
+            return cls(success=False, error=error)
+        try:
+            from solders.pubkey import Pubkey
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            payload = signing.loads(
+                challenge,
+                salt=SOLANA_REGISTRATION_SALT,
+                max_age=600,
+            )
+            if payload != {'account_id': account.pk, 'address': addr}:
+                raise ValueError('challenge mismatch')
+            signature = base64.b64decode(ownership_signature, validate=True)
+            if len(signature) != 64:
+                raise ValueError('bad signature length')
+            Ed25519PublicKey.from_public_bytes(bytes(Pubkey.from_string(addr))).verify(
+                signature,
+                challenge.encode('utf-8'),
+            )
+        except Exception:
+            return cls(success=False, error="Invalid or expired Solana ownership proof")
+
+        try:
+            with db_transaction.atomic():
+                locked = Account.objects.select_for_update().get(
+                    pk=account.pk,
+                    deleted_at__isnull=True,
+                )
+                if locked.solana_address and locked.solana_address != addr:
+                    return cls(
+                        success=False,
+                        error="Esta cuenta ya tiene una dirección Solana registrada distinta.",
+                    )
+                if Account.objects.filter(
+                    solana_address=addr,
+                    deleted_at__isnull=True,
+                ).exclude(pk=locked.pk).exists():
+                    return cls(
+                        success=False,
+                        error="Esa dirección Solana ya está registrada en otra cuenta.",
+                    )
+                locked.solana_address = addr
+                locked.save(update_fields=['solana_address'])
+        except IntegrityError:
+            logger.warning(
+                "[solana_address] lost uniqueness race for account=%s user=%s",
+                account.pk,
+                user.id,
+            )
+            return cls(
+                success=False,
+                error="Esa dirección Solana ya está registrada en otra cuenta.",
+            )
+        return cls(success=True, error=None)
 
 
 class UpdateAccountAlgorandAddress(graphene.Mutation):
@@ -6049,6 +6194,8 @@ class Mutation(EmployeeMutations, FunnelMutations, graphene.ObjectType):
     update_business = UpdateBusiness.Field()
     update_account_algorand_address = UpdateAccountAlgorandAddress.Field()
     update_account_bsc_address = UpdateAccountBscAddress.Field()
+    prepare_solana_address_registration = PrepareSolanaAddressRegistration.Field()
+    update_account_solana_address = UpdateAccountSolanaAddress.Field()
     
     # Bank info mutations
     create_bank_info = CreateBankInfo.Field()

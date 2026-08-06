@@ -25,6 +25,7 @@ import { gql } from '@apollo/client';
 import { secureRandomBytes } from '../setup/entropyGuard';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
 import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet } from './evmWallet';
+import { deriveSolanaKeyFromMasterSecret, DerivedSolanaWallet } from './solanaWallet';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, strictBase64ToBytes, NonCanonicalBase64Error } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
@@ -271,9 +272,14 @@ export function generateClientSalt(
 // authService registers the address server-side (UpdateAccountBscAddress);
 // the cUSD+ ramp and vault flows read it via getDerivedEvmWallet().
 let lastDerivedEvmWallet: DerivedEvmWallet | null = null;
+let lastDerivedSolanaWallet: DerivedSolanaWallet | null = null;
 
 export function getDerivedEvmWallet(): DerivedEvmWallet | null {
   return lastDerivedEvmWallet;
+}
+
+export function getDerivedSolanaWallet(): DerivedSolanaWallet | null {
+  return lastDerivedSolanaWallet;
 }
 
 /**
@@ -288,6 +294,7 @@ export function getDerivedEvmWallet(): DerivedEvmWallet | null {
 export async function getActiveEvmWallet(
   ctxOverride?: { type: 'personal' | 'business'; index: number; businessId?: string },
 ): Promise<DerivedEvmWallet> {
+  const sessionEpoch = walletSessionEpoch;
   const { oauthStorage } = await import('./oauthStorageService');
   const oauth = await oauthStorage.getOAuthSubject();
   if (!oauth?.subject || !oauth?.provider) {
@@ -311,17 +318,51 @@ export async function getActiveEvmWallet(
     businessId: ctx.businessId,
   } as const;
   const wallet = deriveEvmKeyFromMasterSecret(masterSecret, opts);
+  if (sessionEpoch !== walletSessionEpoch || walletCleanupInProgress) {
+    throw new Error('Wallet session changed during EVM derivation');
+  }
   if (ctxOverride) {
     // Emergency-exit sweep of a non-active account: persist the address
     // per-account but do NOT clobber the "last derived" slot the ramp and
     // vault flows read for the ACTIVE account.
-    evmAddressMemory[evmAccountKey(opts)] = wallet.address;
-    Keychain.setGenericPassword('evm_address', wallet.address, {
-      service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${evmAccountKey(opts)}`,
-    }).catch(() => {});
+    cacheAndPersistEvmWallet(evmAccountKey(opts), wallet, false, sessionEpoch);
   } else {
-    cacheAndPersistEvmWallet(evmAccountKey(opts), wallet);
+    cacheAndPersistEvmWallet(evmAccountKey(opts), wallet, true, sessionEpoch);
   }
+  return wallet;
+}
+
+/** Derive the active account's Solana signer from the existing V2 secret. */
+export async function getActiveSolanaWallet(
+  ctxOverride?: { type: 'personal' | 'business'; index: number; businessId?: string },
+): Promise<DerivedSolanaWallet> {
+  const sessionEpoch = walletSessionEpoch;
+  const { oauthStorage } = await import('./oauthStorageService');
+  const oauth = await oauthStorage.getOAuthSubject();
+  if (!oauth?.subject || !oauth?.provider) {
+    throw new Error('Missing OAuth subject/provider for Solana signing');
+  }
+
+  let ctx = ctxOverride;
+  if (!ctx) {
+    const { AuthService } = await import('./authService');
+    ctx = await AuthService.getInstance().getActiveAccountContext();
+  }
+
+  const masterSecret = await getOrCreateMasterSecret(oauth.subject, undefined, {
+    allowGenerate: false,
+    provider: oauth.provider as 'google' | 'apple',
+  });
+  const opts = {
+    accountType: ctx.type === 'business' ? 'business' : 'personal',
+    accountIndex: ctx.index,
+    businessId: ctx.businessId,
+  } as const;
+  const wallet = deriveSolanaKeyFromMasterSecret(masterSecret, opts);
+  if (sessionEpoch !== walletSessionEpoch || walletCleanupInProgress) {
+    throw new Error('Wallet session changed during Solana derivation');
+  }
+  cacheAndPersistSolanaWallet(evmAccountKey(opts), wallet, !ctxOverride, sessionEpoch);
   return wallet;
 }
 
@@ -334,16 +375,16 @@ export async function getActiveEvmWallet(
  */
 export async function deriveAddressesForContext(
   ctx: { type: 'personal' | 'business'; index: number; businessId?: string },
-): Promise<{ algorand: string | null; evm: string | null }> {
+): Promise<{ algorand: string | null; evm: string | null; solana: string | null }> {
   try {
     const { oauthStorage } = await import('./oauthStorageService');
     const oauth = await oauthStorage.getOAuthSubject();
-    if (!oauth?.subject || !oauth?.provider) return { algorand: null, evm: null };
+    if (!oauth?.subject || !oauth?.provider) return { algorand: null, evm: null, solana: null };
     const masterSecret = await getOrCreateMasterSecret(oauth.subject, undefined, {
       allowGenerate: false,
       provider: oauth.provider as 'google' | 'apple',
     });
-    if (!masterSecret) return { algorand: null, evm: null };
+    if (!masterSecret) return { algorand: null, evm: null, solana: null };
     const opts = {
       accountType: ctx.type === 'business' ? 'business' : 'personal',
       accountIndex: ctx.index,
@@ -352,9 +393,10 @@ export async function deriveAddressesForContext(
     return {
       algorand: deriveWalletV2(masterSecret, opts).address,
       evm: deriveEvmKeyFromMasterSecret(masterSecret, opts).address,
+      solana: deriveSolanaKeyFromMasterSecret(masterSecret, opts).address,
     };
   } catch {
-    return { algorand: null, evm: null };
+    return { algorand: null, evm: null, solana: null };
   }
 }
 
@@ -366,6 +408,8 @@ export async function deriveAddressesForContext(
 // the DISPLAY always match the ACTIVE account — a single "last derived"
 // slot could show a personal address while a business account is active.
 const EVM_ADDR_KEYCHAIN_SERVICE = 'confio_evm_address_v1';
+const SOLANA_ADDR_KEYCHAIN_SERVICE = 'confio_solana_address_v1';
+const ADDRESS_SERVICE_REGISTRY = 'confio_wallet_address_service_registry_v1';
 
 /** Same account-key grammar as useAccountManager: personal_0, business_<id>_0 */
 export function evmAccountKey(opts: {
@@ -379,21 +423,96 @@ export function evmAccountKey(opts: {
 }
 
 const evmAddressMemory: Record<string, string> = {};
+const solanaAddressMemory: Record<string, string> = {};
+const evmAddressServices = new Set<string>();
+const solanaAddressServices = new Set<string>();
+let addressPersistenceQueue: Promise<void> = Promise.resolve();
+let walletSessionEpoch = 0;
+let walletCleanupInProgress = false;
 
-function cacheAndPersistEvmWallet(acctKey: string, wallet: DerivedEvmWallet): void {
-  lastDerivedEvmWallet = wallet;
+function parseAddressServiceRegistry(value: string | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((service): service is string => typeof service === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistAddress(
+  service: string,
+  username: string,
+  address: string,
+  expectedEpoch: number,
+): void {
+  if (walletCleanupInProgress || expectedEpoch !== walletSessionEpoch) return;
+  // Serialize registry updates and commit the registry before the address. A
+  // process crash can therefore never create a persistent address that a
+  // later logout does not know how to remove.
+  addressPersistenceQueue = addressPersistenceQueue
+    .then(async () => {
+      if (walletCleanupInProgress || expectedEpoch !== walletSessionEpoch) return;
+      const stored = await Keychain.getGenericPassword({ service: ADDRESS_SERVICE_REGISTRY });
+      if (walletCleanupInProgress || expectedEpoch !== walletSessionEpoch) return;
+      const services = new Set(parseAddressServiceRegistry(stored ? stored.password : undefined));
+      services.add(service);
+      await Keychain.setGenericPassword('address_services', JSON.stringify(Array.from(services)), {
+        service: ADDRESS_SERVICE_REGISTRY,
+      });
+      await Keychain.setGenericPassword(username, address, { service });
+    })
+    .catch(() => {});
+}
+
+function cacheAndPersistEvmWallet(
+  acctKey: string,
+  wallet: DerivedEvmWallet,
+  setAsActive: boolean = true,
+  expectedEpoch: number = walletSessionEpoch,
+): void {
+  if (walletCleanupInProgress || expectedEpoch !== walletSessionEpoch) return;
+  if (setAsActive) lastDerivedEvmWallet = wallet;
   evmAddressMemory[acctKey] = wallet.address;
-  Keychain.setGenericPassword('evm_address', wallet.address, {
-    service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${acctKey}`,
-  }).catch(() => {});
+  const service = `${EVM_ADDR_KEYCHAIN_SERVICE}_${acctKey}`;
+  evmAddressServices.add(service);
+  persistAddress(service, 'evm_address', wallet.address, expectedEpoch);
+}
+
+function cacheAndPersistSolanaWallet(
+  acctKey: string,
+  wallet: DerivedSolanaWallet,
+  setAsActive: boolean = true,
+  expectedEpoch: number = walletSessionEpoch,
+): void {
+  if (walletCleanupInProgress || expectedEpoch !== walletSessionEpoch) return;
+  if (setAsActive) lastDerivedSolanaWallet = wallet;
+  solanaAddressMemory[acctKey] = wallet.address;
+  const service = `${SOLANA_ADDR_KEYCHAIN_SERVICE}_${acctKey}`;
+  solanaAddressServices.add(service);
+  persistAddress(service, 'solana_address', wallet.address, expectedEpoch);
+}
+
+export async function getSolanaAddressForDisplay(accountKey: string): Promise<string | null> {
+  if (solanaAddressMemory[accountKey]) return solanaAddressMemory[accountKey];
+  try {
+    const service = `${SOLANA_ADDR_KEYCHAIN_SERVICE}_${accountKey}`;
+    solanaAddressServices.add(service);
+    const stored = await Keychain.getGenericPassword({ service });
+    return stored ? stored.password : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getEvmAddressForDisplay(accountKey: string): Promise<string | null> {
   if (evmAddressMemory[accountKey]) return evmAddressMemory[accountKey];
   try {
-    const stored = await Keychain.getGenericPassword({
-      service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${accountKey}`,
-    });
+    const service = `${EVM_ADDR_KEYCHAIN_SERVICE}_${accountKey}`;
+    evmAddressServices.add(service);
+    const stored = await Keychain.getGenericPassword({ service });
     return stored ? stored.password : null;
   } catch {
     return null;
@@ -578,6 +697,13 @@ function derivePersonalEvmAddress(masterSecret: Uint8Array): string {
   }).address.toLowerCase();
 }
 
+function derivePersonalSolanaAddress(masterSecret: Uint8Array): string {
+  return deriveSolanaKeyFromMasterSecret(masterSecret, {
+    accountType: 'personal',
+    accountIndex: 0,
+  }).address;
+}
+
 async function storeAddressBoundMasterSecret(
   credentialStorage: any,
   address: string | null | undefined,
@@ -615,9 +741,8 @@ const MIGRATION_TOMBSTONE_BYTES = utf8ToBytes('MIGRATED_TOMBSTONE');
 /**
  * ANCHOR SEMANTICS — read this before changing the comparisons.
  *
- * The Algorand address and the EVM address are BOTH deterministic functions of
- * the same 32-byte master secret (derivePersonalV2Address /
- * derivePersonalEvmAddress, both fixed at personal / index 0). So matching ONE
+ * The Algorand, EVM and Solana addresses are deterministic functions of
+ * the same 32-byte master secret (all fixed at personal / index 0). So matching ONE
  * supplied anchor already proves the secret is the one that produced it: short
  * of a hash collision, no other secret derives to that address.
  *
@@ -638,14 +763,20 @@ type AnchorVerdict = 'no-anchors' | 'match' | 'mismatch';
 
 function anchorVerdict(
   secret: Uint8Array,
-  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined
+  options: {
+    expectedAddress?: string | null;
+    expectedEvmAddress?: string | null;
+    expectedSolanaAddress?: string | null;
+  } | undefined
 ): AnchorVerdict {
   const wantAlgo = options?.expectedAddress || null;
   const wantEvm = options?.expectedEvmAddress ? options.expectedEvmAddress.toLowerCase() : null;
-  if (!wantAlgo && !wantEvm) return 'no-anchors';
+  const wantSolana = options?.expectedSolanaAddress || null;
+  if (!wantAlgo && !wantEvm && !wantSolana) return 'no-anchors';
 
   const algoMatches = wantAlgo ? derivePersonalV2Address(secret) === wantAlgo : null;
   const evmMatches = wantEvm ? derivePersonalEvmAddress(secret) === wantEvm : null;
+  const solanaMatches = wantSolana ? derivePersonalSolanaAddress(secret) === wantSolana : null;
 
   if (algoMatches === true && evmMatches === false) {
     console.error('[MasterSecret] STALE SERVER RECORD: secret matches the registered Algorand address but not the BSC one. Accepting on the Algorand anchor; the BSC record needs reconciliation.');
@@ -654,13 +785,24 @@ function anchorVerdict(
     console.error('[MasterSecret] STALE SERVER RECORD: secret matches the registered BSC address but not the Algorand one. Accepting on the BSC anchor; the Algorand record needs reconciliation.');
   }
 
-  return algoMatches === true || evmMatches === true ? 'match' : 'mismatch';
+  if (solanaMatches === true && (algoMatches === false || evmMatches === false)) {
+    console.error('[MasterSecret] STALE SERVER RECORD: secret matches the registered Solana address but another wallet anchor is stale. Accepting on the Solana anchor.');
+  }
+  if (solanaMatches === false && (algoMatches === true || evmMatches === true)) {
+    console.error('[MasterSecret] STALE SERVER RECORD: secret matches an existing wallet anchor but not the Solana one. Accepting the secret; the Solana record needs reconciliation.');
+  }
+
+  return algoMatches === true || evmMatches === true || solanaMatches === true ? 'match' : 'mismatch';
 }
 
 /** True unless the secret contradicts every anchor the caller supplied. */
 function matchesAnchors(
   secret: Uint8Array,
-  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined
+  options: {
+    expectedAddress?: string | null;
+    expectedEvmAddress?: string | null;
+    expectedSolanaAddress?: string | null;
+  } | undefined
 ): boolean {
   return anchorVerdict(secret, options) !== 'mismatch';
 }
@@ -673,7 +815,11 @@ function matchesAnchors(
  */
 function assertAnchors(
   secret: Uint8Array,
-  options: { expectedAddress?: string | null; expectedEvmAddress?: string | null } | undefined,
+  options: {
+    expectedAddress?: string | null;
+    expectedEvmAddress?: string | null;
+    expectedSolanaAddress?: string | null;
+  } | undefined,
   what: string
 ): void {
   if (anchorVerdict(secret, options) === 'mismatch') {
@@ -937,7 +1083,8 @@ async function findOldestRestorableDriveBackup(
   appBackupKey: string,
   Utf8: any,
   expectedAddress?: string | null,
-  expectedEvmAddress?: string | null
+  expectedEvmAddress?: string | null,
+  expectedSolanaAddress?: string | null
 ): Promise<OldestDriveBackupResult> {
   // A candidate must derive to EVERY anchor the caller supplied, not any one
   // of them. Google login supplies both the Algorand and the BSC address, and
@@ -948,7 +1095,7 @@ async function findOldestRestorableDriveBackup(
   // the oldest, which is the deliberate clean-device restore behaviour.
   // One definition of acceptance, shared with every other call site.
   const candidateMatchesAnchor = (decrypted: Uint8Array): boolean =>
-    matchesAnchors(decrypted, { expectedAddress, expectedEvmAddress });
+    matchesAnchors(decrypted, { expectedAddress, expectedEvmAddress, expectedSolanaAddress });
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
   const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
   const manifest = await fetchManifest(googleDriveStorage, accessToken);
@@ -977,7 +1124,7 @@ async function findOldestRestorableDriveBackup(
   // the cold-start Android login (no BlockStore) feel stuck on
   // "Verificando seguridad del dispositivo...". The targeted path is 1
   // listFiles + 1 downloadFile per manifest entry.
-  if ((expectedAddress || expectedEvmAddress) && manifest.wallets.length > 0) {
+  if ((expectedAddress || expectedEvmAddress || expectedSolanaAddress) && manifest.wallets.length > 0) {
     for (const entry of manifest.wallets) {
       if (!entry.id) continue;
       const filename = `confio_wallet_v2_${entry.id}.enc`;
@@ -1011,6 +1158,7 @@ async function findOldestRestorableDriveBackup(
           candidateAddress,
           expectedAddress,
           expectedEvmAddress,
+          expectedSolanaAddress,
         });
       } catch (e) {
         console.warn('[MasterSecret] Fast-path failed for manifest entry; falling back to full scan.', entry.id, e);
@@ -1107,6 +1255,7 @@ async function findOldestRestorableDriveBackup(
             candidateAddress,
             expectedAddress,
             expectedEvmAddress,
+            expectedSolanaAddress,
             deviceHint: candidate.deviceHint || 'unknown',
           });
           continue;
@@ -1580,6 +1729,8 @@ export async function getOrCreateMasterSecret(
      * restore because there is no local secret to compare against).
      */
     expectedEvmAddress?: string | null;
+    /** Solana recovery anchor derived from the same personal V2 secret. */
+    expectedSolanaAddress?: string | null;
     requireCloudSync?: boolean;
     /**
      * Reports whether the Drive backup upload in this call actually completed.
@@ -1645,7 +1796,7 @@ export async function getOrCreateMasterSecret(
       // guard below is Apple-only), so a corrupt alias could be silently
       // replaced with a DIFFERENT wallet that happens to live in the same
       // Drive. Refuse instead — the caller can retry once it knows the address.
-      if (!options?.expectedAddress && !options?.expectedEvmAddress) {
+      if (!options?.expectedAddress && !options?.expectedEvmAddress && !options?.expectedSolanaAddress) {
         throw new CorruptMasterSecretRecoveryError();
       }
 
@@ -1688,7 +1839,7 @@ export async function getOrCreateMasterSecret(
     let localWalletIdBytes = await credentialStorage.retrieveSecret(walletIdKey);
     let localWalletId = localWalletIdBytes ? decodeUtf8(localWalletIdBytes) : null;
 
-    if (localSecret && (options?.expectedAddress || options?.expectedEvmAddress)) {
+    if (localSecret && (options?.expectedAddress || options?.expectedEvmAddress || options?.expectedSolanaAddress)) {
       // EVERY supplied anchor must hold, not just the Algorand one. Google
       // login supplies both; checking only Algorand let a secret that derives
       // to the right Algorand address but the WRONG registered BSC address be
@@ -1697,6 +1848,7 @@ export async function getOrCreateMasterSecret(
         console.warn('[MasterSecret] Local subject-bound V2 secret does not match the server anchors. Checking address-bound restore alias.', {
           expectedAddress: options.expectedAddress,
           expectedEvmAddress: options.expectedEvmAddress,
+          expectedSolanaAddress: options.expectedSolanaAddress,
         });
         // A damaged SECONDARY alias must not abort anchored Drive recovery —
         // same reasoning as the corruption handler above, different branch.
@@ -1807,34 +1959,28 @@ export async function getOrCreateMasterSecret(
         APP_BACKUP_KEY,
         Utf8,
         options?.expectedAddress,
-        options?.expectedEvmAddress
+        options?.expectedEvmAddress,
+        options?.expectedSolanaAddress
       );
 
       if (restore.secret) {
         const restoredAddress = derivePersonalV2Address(restore.secret);
         const restoredDeviceHint = (restore.deviceHint || '').toLowerCase();
         const restoredFromAndroid = restoredDeviceHint.includes('android');
-        if (options?.expectedAddress && restoredAddress !== options.expectedAddress) {
+        if (!matchesAnchors(restore.secret, options)) {
           throw new Error(
             'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
           );
         }
 
-        // EVM anchor (BSC-only accounts): the restored secret must derive to
-        // the server-registered BSC address. A verified match doubles as
-        // proof this is the right wallet, so it bypasses the Apple
-        // cross-identity guard below (a clean device has no local secret to
-        // compare, which would otherwise abort every legitimate restore).
-        let evmAnchorValidated = false;
-        if (!options?.expectedAddress && options?.expectedEvmAddress) {
-          const restoredEvm = derivePersonalEvmAddress(restore.secret);
-          if (restoredEvm !== options.expectedEvmAddress.toLowerCase()) {
-            throw new Error(
-              'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
-            );
-          }
-          evmAnchorValidated = true;
-        }
+        // A non-Algorand anchor (BSC or Solana) also proves this is the right
+        // wallet and lets a clean-device Apple restore bypass the otherwise
+        // necessary cross-identity guard. The Drive candidate was already
+        // filtered through the shared any-valid-anchor rule above.
+        const nonAlgorandAnchorValidated =
+          !options?.expectedAddress &&
+          !!(options?.expectedEvmAddress || options?.expectedSolanaAddress) &&
+          matchesAnchors(restore.secret, options);
 
         // Cross-identity guards. Per the architectural rules: the
         //   differentiator is the OAuth PROVIDER, not the device platform.
@@ -1857,7 +2003,7 @@ export async function getOrCreateMasterSecret(
         if (
           options?.provider === 'apple' &&
           !options?.expectedAddress &&
-          !evmAnchorValidated &&
+          !nonAlgorandAnchorValidated &&
           (restore.manifestHasAndroidEntry ||
             multipleV2BackupsOnDrive ||
             restoredFromAndroid ||
@@ -1875,7 +2021,7 @@ export async function getOrCreateMasterSecret(
           // BSC-only account, whose bsc_address is not yet on AccountType, has
           // no anchor to pass) could overwrite a perfectly good local wallet
           // and then upload it as canonical. Keep what we have instead.
-          if (!options?.expectedAddress && !options?.expectedEvmAddress) {
+          if (!options?.expectedAddress && !options?.expectedEvmAddress && !options?.expectedSolanaAddress) {
             console.warn('[MasterSecret] Drive holds a different secret but no anchor was supplied; keeping the local secret rather than replacing it.');
             return localSecret;
           }
@@ -1904,7 +2050,7 @@ export async function getOrCreateMasterSecret(
 
         reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
       } else if (restore.foundAny) {
-        if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
+        if ((options?.expectedAddress || options?.expectedEvmAddress || options?.expectedSolanaAddress) && restore.foundDecryptable) {
           throw new Error('No encontramos en este Google Drive el respaldo de la billetera registrada para esta cuenta.');
         }
         throw new Error('[MasterSecret] Existing Drive wallet backups were found but none could be decrypted; refusing to generate a replacement secret.');
@@ -1996,7 +2142,7 @@ export async function getOrCreateMasterSecret(
         // passes an anchor WITHOUT allowGenerate:false, so without this the
         // flow minted a replacement, persisted it over the alias and uploaded
         // it as the user's backup.
-        if (options?.expectedAddress || options?.expectedEvmAddress) {
+        if (options?.expectedAddress || options?.expectedEvmAddress || options?.expectedSolanaAddress) {
           throw new Error(
             'No encontramos el respaldo de tu billetera en este dispositivo. Inicia sesión con la cuenta de Google donde guardaste tu respaldo para recuperarla.'
           );
@@ -2180,6 +2326,7 @@ function encryptBackupV2(secret: Uint8Array, passphrase: string): string {
     // that belongs to these addresses, without asking our server.
     algo: derivePersonalV2Address(secret),
     evm: derivePersonalEvmAddress(secret),
+    solana: derivePersonalSolanaAddress(secret),
   });
   const ct = nacl.secretbox(utf8ToBytes(inner), nonce, backupKeyBytes(passphrase));
   const envelope: BackupEnvelopeV2 = {
@@ -2217,7 +2364,12 @@ function decryptBackupV2(body: string, passphrase: string): Uint8Array | null {
     const secret = strictBase64ToBytes(inner.secret, MASTER_SECRET_BYTES);
     // The commitment must match what the secret actually derives to; a blob
     // whose payload and claimed identity disagree is not usable.
-    if (inner.algo !== derivePersonalV2Address(secret) || inner.evm !== derivePersonalEvmAddress(secret)) {
+    if (
+      inner.algo !== derivePersonalV2Address(secret) ||
+      inner.evm !== derivePersonalEvmAddress(secret) ||
+      // Backward-compatible with V2 envelopes written before Solana support.
+      (inner.solana !== undefined && inner.solana !== derivePersonalSolanaAddress(secret))
+    ) {
       console.warn('[MasterSecret] Drive backup identity commitment does not match its secret; rejecting.');
       return null;
     }
@@ -2330,8 +2482,12 @@ export function deriveWalletV2(
     accountType: string,
     accountIndex: number,
     businessId?: string
-  }
+  },
+  cacheContext?: { expectedEpoch?: number },
 ): DerivedWallet {
+  // Pure by default. Async callers that are authorized to publish sibling
+  // signer/display caches must opt in with the session epoch they captured
+  // before their first await; this prevents old-user work resuming post-logout.
   // Last line of defense. Every caller is supposed to have validated the
   // secret at its trust boundary, but this is the one function they all funnel
   // through, so enforce it here too: HKDF will happily stretch 4 bytes into a
@@ -2353,7 +2509,8 @@ export function deriveWalletV2(
   // Savings-chain sibling for V2: derived from the SAME master secret with
   // the EVM domain — without this, V2 (current-architecture) users would
   // never get a BSC address at all.
-  try {
+  const cacheEpoch = cacheContext?.expectedEpoch ?? walletSessionEpoch;
+  if (cacheContext) try {
     cacheAndPersistEvmWallet(
       evmAccountKey({
         accountType: (opts.accountType === 'business' ? 'business' : 'personal'),
@@ -2361,9 +2518,26 @@ export function deriveWalletV2(
         businessId: opts.businessId,
       }),
       deriveEvmKeyFromMasterSecret(clientSecret, opts),
+      true,
+      cacheEpoch,
     );
   } catch (e) {
     console.warn('[DeriveV2] EVM sibling derivation failed (non-fatal):', e);
+  }
+
+  if (cacheContext) try {
+    cacheAndPersistSolanaWallet(
+      evmAccountKey({
+        accountType: (opts.accountType === 'business' ? 'business' : 'personal'),
+        accountIndex: opts.accountIndex,
+        businessId: opts.businessId,
+      }),
+      deriveSolanaKeyFromMasterSecret(clientSecret, opts),
+      true,
+      cacheEpoch,
+    );
+  } catch (e) {
+    console.warn('[DeriveV2] Solana sibling derivation failed (non-fatal):', e);
   }
 
   return {
@@ -2561,6 +2735,7 @@ export class SecureDeterministicWalletService {
     businessId?: string,
     firebaseIdToken?: string
   ): Promise<DerivedWallet> {
+    const sessionEpoch = walletSessionEpoch;
     const startTime = Date.now();
     const perfLog = (step: string) => {
       console.log(`[WALLET-PERF] ${step}: ${Date.now() - startTime}ms`);
@@ -2617,10 +2792,13 @@ export class SecureDeterministicWalletService {
       // If masterSecret is genuinely absent, we fall back to V1 (Pepper/Salt) logic below.
 
       if (masterSecret) {
+        if (sessionEpoch !== walletSessionEpoch || walletCleanupInProgress) {
+          throw new Error('Wallet session changed during wallet restoration');
+        }
         console.log('[WalletService] ⚡️ V2 Master Secret found. Deriving V2 Wallet...');
         const wallet = deriveWalletV2(masterSecret, {
           iss, sub, aud, accountType, accountIndex, businessId
-        });
+        }, { expectedEpoch: sessionEpoch });
 
         // Store seed in memory for session
         const memKey = scope;
@@ -2822,6 +3000,9 @@ export class SecureDeterministicWalletService {
         const seed = hexToBytes(wallet.privSeedHex);
         const encryptedBlob = wrapSeed(seed, kek, pepperVersion, { derivationPepperHash: derivPepperHash, scope: currentScope, saltFingerprint });
 
+        if (sessionEpoch !== walletSessionEpoch || walletCleanupInProgress) {
+          throw new Error('Wallet session changed during wallet derivation');
+        }
         await Keychain.setInternetCredentials(
           cacheKey.server,
           cacheKey.username,
@@ -2835,6 +3016,9 @@ export class SecureDeterministicWalletService {
       }
 
       // Store the seed in memory-only cache for this session (no plaintext keychain!)
+      if (sessionEpoch !== walletSessionEpoch || walletCleanupInProgress) {
+        throw new Error('Wallet session changed during wallet derivation');
+      }
       const memKey = scope; // Just use scope as the key, no user ID needed
       this.inMemSeeds.set(memKey, wallet.privSeedHex);
       this.currentScope.set('current', scope); // Track current scope
@@ -3125,6 +3309,8 @@ export class SecureDeterministicWalletService {
    * This is called on sign-out to ensure complete cleanup
    */
   async clearWallet(): Promise<void> {
+    walletSessionEpoch += 1;
+    walletCleanupInProgress = true;
     try {
       console.log('Clearing ALL wallet data from memory and keychain...');
 
@@ -3141,6 +3327,34 @@ export class SecureDeterministicWalletService {
       this.cachedDerivationPepperByContext.clear();
       this.cachedKekPepperByCtxAndVersion.clear();
 
+      // Secret-bearing sibling wallets and account-only address caches must
+      // never survive a user switch. Track every generic-password service
+      // touched in this process so logout removes the corresponding entries.
+      lastDerivedEvmWallet = null;
+      lastDerivedSolanaWallet = null;
+      for (const key of Object.keys(evmAddressMemory)) delete evmAddressMemory[key];
+      for (const key of Object.keys(solanaAddressMemory)) delete solanaAddressMemory[key];
+      await addressPersistenceQueue;
+      const storedRegistry = await Keychain.getGenericPassword({ service: ADDRESS_SERVICE_REGISTRY });
+      const persistedServices = parseAddressServiceRegistry(
+        storedRegistry ? storedRegistry.password : undefined,
+      );
+      // The personal services cover entries written by app versions that
+      // predate the persistent registry.
+      const servicesToClear = new Set([
+        ...persistedServices,
+        ...evmAddressServices,
+        ...solanaAddressServices,
+        `${EVM_ADDR_KEYCHAIN_SERVICE}_personal_0`,
+        `${SOLANA_ADDR_KEYCHAIN_SERVICE}_personal_0`,
+      ]);
+      await Promise.allSettled([
+        ...Array.from(servicesToClear, service => Keychain.resetGenericPassword({ service })),
+        Keychain.resetGenericPassword({ service: ADDRESS_SERVICE_REGISTRY }),
+      ]);
+      evmAddressServices.clear();
+      solanaAddressServices.clear();
+
       // Clear ALL encrypted cache from keychain
       // Since all wallets for this app use the same server 'wallet.confio.app',
       // calling resetInternetCredentials will clear ALL wallet entries at once
@@ -3155,6 +3369,8 @@ export class SecureDeterministicWalletService {
       console.log('ALL wallet data cleared from memory and keychain');
     } catch (error) {
       console.error('Error clearing wallet:', error);
+    } finally {
+      walletCleanupInProgress = false;
     }
   }
 }

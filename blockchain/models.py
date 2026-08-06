@@ -426,3 +426,109 @@ class SponsoredBatch(models.Model):
 
     def __str__(self):
         return f'7702 {self.kind} x{self.num_calls} [{self.status}] {self.tx_hash or "pending"}'
+
+
+# ── Solana sponsorship ──────────────────────────────────────────────────
+class SolanaSponsorDailySpend(models.Model):
+    """Durable per-account fee reservation for one UTC day."""
+
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name='solana_sponsor_daily_spend',
+    )
+    day = models.DateField()
+    spent_lamports = models.BigIntegerField(default=0)
+    transaction_count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['account', 'day'],
+                name='solana_spend_account_day_unique',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(spent_lamports__gte=0),
+                name='solana_account_spend_nonnegative',
+            ),
+        ]
+
+
+class SolanaSponsorGlobalDailySpend(models.Model):
+    """Single locked row per UTC day for the relay-wide circuit breaker."""
+
+    day = models.DateField(unique=True)
+    spent_lamports = models.BigIntegerField(default=0)
+    transaction_count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(spent_lamports__gte=0),
+                name='solana_global_spend_nonnegative',
+            ),
+        ]
+
+
+class SolanaSponsorBalanceState(models.Model):
+    """Singleton lock and last observed sponsor balance across day rollovers."""
+
+    singleton = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    observed_balance_lamports = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(observed_balance_lamports__gte=0),
+                name='sol_sponsor_observed_balance_nonnegative',
+            ),
+        ]
+
+
+class SolanaSponsoredTransaction(models.Model):
+    """Pre-broadcast audit record and idempotency key for a sponsored message."""
+
+    STATUS_CHOICES = [
+        ('reserved', 'Fee reserved, broadcast not confirmed'),
+        ('signed', 'Sponsor signature recorded before RPC exposure'),
+        ('sent', 'RPC accepted transaction'),
+        ('unknown', 'Broadcast outcome unknown'),
+        ('confirmed_pending', 'Confirmed; awaiting a balance observation at that slot'),
+        ('confirmed', 'Transaction reached confirmed commitment'),
+        ('expired', 'Blockhash expired without a recorded transaction'),
+        ('failed', 'Failed before a sponsor signature was exposed'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='solana_sponsored_transactions',
+    )
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name='solana_sponsored_transactions',
+    )
+    message_hash = models.CharField(max_length=64, unique=True)
+    recent_blockhash = models.CharField(max_length=64)
+    confirmation_slot = models.BigIntegerField(null=True, blank=True)
+    fee_lamports = models.BigIntegerField()
+    signature = models.CharField(max_length=128, blank=True)
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='reserved')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['account', 'created_at'], name='sol_sponsor_acct_created'),
+            models.Index(fields=['status'], name='sol_sponsor_status_idx'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(fee_lamports__gte=0),
+                name='sol_sponsor_fee_nonnegative',
+            ),
+        ]

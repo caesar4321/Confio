@@ -1018,13 +1018,26 @@ export const GET_MY_MIGRATION_STATUS = gql`
  * algorandAddress anchor down with it during the deploy window. Callers run
  * this in its own try/catch and fall back to the older query.
  *
- * Both addresses come back together deliberately: fetching them separately let
- * the two anchors come from different wallet generations if a migration landed
+ * All addresses come back together deliberately: fetching them separately could
+ * let the anchors come from different wallet generations if a migration landed
  * in between. Server-side this is a self-only resolver, NOT fields on
  * AccountType, which is readable for arbitrary users via user(id:){ accounts }.
  */
 export const GET_MY_WALLET_ANCHORS = gql`
   query GetMyWalletAnchors {
+    myWalletAnchors {
+      algorandAddress
+      bscAddress
+      solanaAddress
+    }
+  }
+`;
+
+// Deploy-window fallback for a backend that already has myWalletAnchors but
+// predates the Solana field. Keeping BSC in this retry preserves the recovery
+// anchor for BSC-only users while mobile and backend versions overlap.
+export const GET_MY_WALLET_ANCHORS_V1 = gql`
+  query GetMyWalletAnchorsV1 {
     myWalletAnchors {
       algorandAddress
       bscAddress
@@ -1750,6 +1763,57 @@ export const UPDATE_ACCOUNT_BSC_ADDRESS = gql`
   mutation UpdateAccountBscAddress($bscAddress: String!) {
     updateAccountBscAddress(bscAddress: $bscAddress) {
       success
+      error
+    }
+  }
+`;
+
+export const PREPARE_SOLANA_ADDRESS_REGISTRATION = gql`
+  mutation PrepareSolanaAddressRegistration($solanaAddress: String!) {
+    prepareSolanaAddressRegistration(solanaAddress: $solanaAddress) {
+      success
+      challenge
+      error
+    }
+  }
+`;
+
+export const UPDATE_ACCOUNT_SOLANA_ADDRESS = gql`
+  mutation UpdateAccountSolanaAddress(
+    $solanaAddress: String!
+    $challenge: String!
+    $ownershipSignature: String!
+  ) {
+    updateAccountSolanaAddress(
+      solanaAddress: $solanaAddress
+      challenge: $challenge
+      ownershipSignature: $ownershipSignature
+    ) {
+      success
+      error
+    }
+  }
+`;
+
+export const PREPARE_SOLANA_SPONSORED_TRANSACTION = gql`
+  mutation PrepareSolanaSponsoredTransaction {
+    prepareSolanaSponsoredTransaction {
+      success
+      sponsorAddress
+      blockhash
+      lastValidBlockHeight
+      maxFeeLamports
+      error
+    }
+  }
+`;
+
+export const SPONSOR_SOLANA_TRANSACTION = gql`
+  mutation SponsorSolanaTransaction($transaction: String!) {
+    sponsorSolanaTransaction(transaction: $transaction) {
+      success
+      signature
+      feeLamports
       error
     }
   }

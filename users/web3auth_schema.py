@@ -19,6 +19,7 @@ User = get_user_model()
 class Web3AuthUserType(DjangoObjectType):
     algorand_address = graphene.String()
     bsc_address = graphene.String()
+    solana_address = graphene.String()
     is_phone_verified = graphene.Boolean()
     phone_key = graphene.String()
 
@@ -42,6 +43,14 @@ class Web3AuthUserType(DjangoObjectType):
             return getattr(account, 'bsc_address', None) if account else None
         except Exception as e:
             logger.error(f"Error resolving bsc_address: {e}")
+            return None
+
+    def resolve_solana_address(self, info):
+        try:
+            account = self.accounts.filter(account_type='personal', deleted_at__isnull=True).first()
+            return getattr(account, 'solana_address', None) if account else None
+        except Exception as e:
+            logger.error(f"Error resolving solana_address: {e}")
             return None
     
     def resolve_is_phone_verified(self, info):

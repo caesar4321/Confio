@@ -20,6 +20,11 @@ import { ApolloClient } from '@apollo/client';
 import { AccountManager, AccountContext } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
+import {
+  fetchCompatibleWalletAnchors,
+  isOlderWalletAnchorsSchemaError,
+} from './walletAnchorCompatibility';
+import * as nacl from 'tweetnacl';
 
 // Best-effort, SELF-HEALING registration of the BSC (savings chain)
 // address. Fires at sign-in, on every authenticated app open
@@ -317,6 +322,130 @@ async function attemptBscRegistration(addressOverride?: string): Promise<BscRegi
 
 async function registerBscAddressBestEffort() {
   return ensureBscAddressRegistered();
+}
+
+export async function ensureSolanaAddressRegistered(addressOverride?: string) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const outcome = await attemptSolanaRegistration(addressOverride);
+    if (outcome !== 'token_rotated') return;
+  }
+}
+
+async function attemptSolanaRegistration(addressOverride?: string): Promise<BscRegistrationOutcome> {
+  try {
+    const Keychain = await import('react-native-keychain');
+    const { getActiveSolanaWallet } = await import('./secureDeterministicWallet');
+    const ctx = await AuthService.getInstance().getActiveAccountContext();
+    const tokenAtStart = await verifiedTokenForContext(ctx);
+    if (!tokenAtStart) {
+      console.log('[AuthService] Skipping Solana registration: JWT does not match the active account');
+      return 'done';
+    }
+
+    // Derive from the captured context and current identity's master secret;
+    // never trust the display cache for an immutable server registration.
+    const wallet = await getActiveSolanaWallet(ctx);
+    const address = wallet.address;
+    if (!address) return 'done';
+    if (addressOverride && addressOverride !== address) {
+      console.log('[AuthService] Skipping Solana registration: caller address does not match the derived wallet');
+      return 'done';
+    }
+
+    const markerService = `confio_solana_registered_v1_${address}`;
+    const marker = await Keychain.getGenericPassword({ service: markerService }).catch(() => null);
+    if (marker) return 'done';
+
+    const ctxNow = await AuthService.getInstance().getActiveAccountContext();
+    const sameCtx =
+      (ctxNow.type === 'business' ? 'business' : 'personal') ===
+        (ctx.type === 'business' ? 'business' : 'personal') &&
+      String(ctxNow.businessId ?? '') === String(ctx.businessId ?? '') &&
+      (ctxNow.index ?? 0) === (ctx.index ?? 0);
+    const verifiedToken = sameCtx ? await verifiedTokenForContext(ctx) : null;
+    if (!verifiedToken || verifiedToken !== tokenAtStart) {
+      console.log('[AuthService] Solana registration deferred: session or account moved after derivation');
+      return verifiedToken && sameTokenSubject(tokenAtStart, verifiedToken)
+        ? 'token_rotated'
+        : 'done';
+    }
+
+    const {
+      PREPARE_SOLANA_ADDRESS_REGISTRATION,
+      UPDATE_ACCOUNT_SOLANA_ADDRESS,
+    } = await import('../apollo/queries');
+    const { apolloClient } = await import('../apollo/client');
+    const prepared = await apolloClient.mutate({
+      mutation: PREPARE_SOLANA_ADDRESS_REGISTRATION,
+      variables: { solanaAddress: address },
+      context: { pinnedAuthToken: verifiedToken, skipProactiveRefresh: true },
+    });
+    const challengeResult = prepared?.data?.prepareSolanaAddressRegistration;
+    if (!challengeResult?.success || !challengeResult?.challenge) {
+      console.log('Solana registration challenge not accepted:', challengeResult?.error);
+      return 'done';
+    }
+    const seed = new Uint8Array(
+      wallet.seedHex.match(/.{2}/g)?.map(byte => parseInt(byte, 16)) || [],
+    );
+    const ownershipSignature = bytesToBase64(
+      nacl.sign.detached(
+        stringToUtf8Bytes(challengeResult.challenge),
+        nacl.sign.keyPair.fromSeed(seed).secretKey,
+      ),
+    );
+    const res = await apolloClient.mutate({
+      mutation: UPDATE_ACCOUNT_SOLANA_ADDRESS,
+      variables: {
+        solanaAddress: address,
+        challenge: challengeResult.challenge,
+        ownershipSignature,
+      },
+      context: { pinnedAuthToken: verifiedToken, skipProactiveRefresh: true },
+    });
+    if (res?.data?.updateAccountSolanaAddress?.success) {
+      await Keychain.setGenericPassword('ok', '1', { service: markerService }).catch(() => {});
+      console.log('Registered Solana address');
+    } else {
+      console.log('Solana registration not accepted:', res?.data?.updateAccountSolanaAddress?.error);
+    }
+    return 'done';
+  } catch (e) {
+    console.log('Solana address registration skipped (non-fatal, will retry):', e);
+    return 'done';
+  }
+}
+
+async function registerChainAddressesBestEffort() {
+  await Promise.allSettled([
+    registerBscAddressBestEffort(),
+    ensureSolanaAddressRegistered(),
+  ]);
+}
+
+/**
+ * Read Solana only after the login JWT has been persisted. Keeping the field
+ * out of WEB3AUTH_LOGIN lets a new mobile build still authenticate against an
+ * older server. Only schema absence is backward-compatible; network, auth, and
+ * database errors must fail closed so a returning user cannot mint a replacement
+ * master secret while the server's recovery anchors are temporarily unreadable.
+ */
+async function fetchPostLoginSolanaAnchor(): Promise<string | null> {
+  try {
+    const { GET_MY_WALLET_ANCHORS } = await import('../apollo/queries');
+    const { data } = await apolloClient.query({
+      query: GET_MY_WALLET_ANCHORS,
+      fetchPolicy: 'network-only',
+    });
+    return data?.myWalletAnchors?.solanaAddress || null;
+  } catch (error: any) {
+    if (isOlderWalletAnchorsSchemaError(error)) {
+      console.log('[AuthService] Solana recovery anchor unavailable on older server schema');
+      return null;
+    }
+    console.error('[AuthService] Failed to verify Solana recovery anchor after login:', error);
+    throw new Error('No se pudo verificar la billetera. Intenta nuevamente.');
+  }
 }
 
 
@@ -730,6 +859,7 @@ export class AuthService {
       // longer derived to the server's address.
       let expectedAddress: string | null = null;
       let expectedEvmAddress: string | null = null;
+      let expectedSolanaAddress: string | null = null;
 
       // PREFERRED: both anchors in ONE read, from a self-only resolver.
       // Two separate reads let the anchors come from different wallet
@@ -737,18 +867,23 @@ export class AuthService {
       // resurrect a stale backup or deny a valid one.
       let anchorsResolved = false;
       try {
-        const { GET_MY_WALLET_ANCHORS } = await import('../apollo/queries');
-        const { data } = await apolloClient.query({
-          query: GET_MY_WALLET_ANCHORS,
-          fetchPolicy: 'network-only',
-        });
-        if (data?.myWalletAnchors) {
-          expectedAddress = data.myWalletAnchors.algorandAddress || null;
-          expectedEvmAddress = data.myWalletAnchors.bscAddress || null;
+        const {
+          GET_MY_WALLET_ANCHORS,
+          GET_MY_WALLET_ANCHORS_V1,
+        } = await import('../apollo/queries');
+        const anchors = await fetchCompatibleWalletAnchors(
+          document => apolloClient.query({ query: document, fetchPolicy: 'network-only' }),
+          GET_MY_WALLET_ANCHORS,
+          GET_MY_WALLET_ANCHORS_V1,
+        );
+        if (anchors) {
+          expectedAddress = anchors.algorandAddress || null;
+          expectedEvmAddress = anchors.bscAddress || null;
+          expectedSolanaAddress = anchors.solanaAddress || null;
           anchorsResolved = true;
         }
       } catch (anchorErr) {
-        console.warn('[AuthService] myWalletAnchors unavailable (older server?); falling back to the migration-status query:', anchorErr);
+        throw anchorErr;
       }
 
       // FALLBACK for the deploy window, when the server predates
@@ -771,10 +906,11 @@ export class AuthService {
         }
       }
 
-      if (expectedAddress || expectedEvmAddress) {
+      if (expectedAddress || expectedEvmAddress || expectedSolanaAddress) {
         console.log('[AuthService] enableDriveBackup anchors fetched from server:', {
           expectedAddress,
           expectedEvmAddress,
+          expectedSolanaAddress,
         });
       } else {
         console.log('[AuthService] enableDriveBackup: no server-side anchor available; proceeding without filter');
@@ -791,6 +927,7 @@ export class AuthService {
         requireCloudSync: true,
         expectedAddress,
         expectedEvmAddress,
+        expectedSolanaAddress,
       });
       console.log('[AuthService] Master secret synced to Drive');
 
@@ -1144,7 +1281,8 @@ export class AuthService {
       // chain — the BSC address is immutable server-side, so a fresh secret
       // would strand the funds on the original address.
       const serverBscAddress = authData.user?.bscAddress || null;
-      const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddress);
+      const serverSolanaAddress = await fetchPostLoginSolanaAnchor();
+      const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddress && !serverSolanaAddress);
       if (authData.isKeylessMigrated) {
         console.log('[AuthService] ⚡️ User is V2 Native/Migrated. Verifying Master Secret...', {
           isNewUser: !!authData.isNewUser,
@@ -1159,6 +1297,7 @@ export class AuthService {
             provider: 'google',
             expectedAddress: serverAlgorandAddress,
             expectedEvmAddress: serverBscAddress,
+            expectedSolanaAddress: serverSolanaAddress,
             // Token presence is not proof of upload: the sync can fail (or be
             // skipped by the verified-local fast path) and the server must not
             // be told the backup is verified in that case.
@@ -1180,6 +1319,7 @@ export class AuthService {
                 provider: 'google',
                 expectedAddress: serverAlgorandAddress,
                 expectedEvmAddress: serverBscAddress,
+                expectedSolanaAddress: serverSolanaAddress,
                 onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
               });
               console.log('[AuthService] ✅ Google V2 wallet recovered from Drive.');
@@ -1258,7 +1398,7 @@ export class AuthService {
           if (registration.success) {
             console.log('Updated server with Algorand address');
           }
-          registerBscAddressBestEffort();
+          registerChainAddressesBestEffort();
           // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
           try {
             const payload = registration.payload;
@@ -1305,7 +1445,7 @@ export class AuthService {
       } else {
         console.log('No server Algorand address — skipping Algorand wallet generation (deprecated, BSC-only)');
         perfLog('Algorand wallet skipped');
-        registerBscAddressBestEffort();
+        registerChainAddressesBestEffort();
       }
 
       // 8) Set default personal account context
@@ -1522,19 +1662,21 @@ export class AuthService {
       // never generate an Algorand address (the master secret is still
       // created below because the BSC wallet derives from it).
       const serverAlgorandAddressEarly = authData.user?.algorandAddress || null;
+      const serverBscAddressApple = authData.user?.bscAddress || null;
+      const serverSolanaAddressApple = await fetchPostLoginSolanaAnchor();
       if (!serverAlgorandAddressEarly) {
         console.log('No server Algorand address — skipping Algorand wallet generation (Apple, deprecated, BSC-only)');
         // The registered BSC address is the wallet anchor for BSC-only users:
         // it is immutable server-side, so silently minting a replacement
         // master secret would strand funds on the original address.
-        const serverBscAddressApple = authData.user?.bscAddress || null;
-        const allowAppleSecretGeneration = !!authData.isNewUser || !serverBscAddressApple;
+        const allowAppleSecretGeneration = !!authData.isNewUser || (!serverBscAddressApple && !serverSolanaAddressApple);
         const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
         try {
           await getOrCreateMasterSecret(appleSub, undefined, {
             allowGenerate: allowAppleSecretGeneration,
             provider: 'apple',
             expectedEvmAddress: serverBscAddressApple,
+            expectedSolanaAddress: serverSolanaAddressApple,
           });
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple master secret (BSC-only):', v2Err);
@@ -1553,6 +1695,7 @@ export class AuthService {
               allowGenerate: false,
               provider: 'apple',
               expectedEvmAddress: serverBscAddressApple,
+              expectedSolanaAddress: serverSolanaAddressApple,
             });
             console.log('[AuthService] Apple BSC-only wallet recovered from Google Drive.');
           } catch (driveRecoveryErr: any) {
@@ -1564,7 +1707,7 @@ export class AuthService {
           }
         }
         console.log('Master secret checked/created for Apple user (BSC-only)');
-        registerBscAddressBestEffort();
+        registerChainAddressesBestEffort();
         return await this.finishAppleSignIn(userCredential, authData, null);
       }
 
@@ -1596,12 +1739,14 @@ export class AuthService {
         // silently mint a replacement V2 wallet if local Keychain is empty.
         const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
         const serverAlgorandAddress = authData.user?.algorandAddress || null;
-        const allowV2SecretGeneration = !!authData.isNewUser || !serverAlgorandAddress;
+        const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddressApple && !serverSolanaAddressApple);
         try {
           await getOrCreateMasterSecret(appleSub, undefined, {
             allowGenerate: allowV2SecretGeneration,
             provider: 'apple',
             expectedAddress: serverAlgorandAddress,
+            expectedEvmAddress: serverBscAddressApple,
+            expectedSolanaAddress: serverSolanaAddressApple,
           });
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
@@ -1617,6 +1762,8 @@ export class AuthService {
                 allowGenerate: false,
                 provider: 'apple',
                 expectedAddress: serverAlgorandAddress,
+                expectedEvmAddress: serverBscAddressApple,
+                expectedSolanaAddress: serverSolanaAddressApple,
               });
               console.log('[AuthService] Apple V2 wallet recovered from Google Drive.');
             } catch (driveRecoveryErr: any) {
@@ -1654,7 +1801,7 @@ export class AuthService {
         if (registration.success) {
           console.log('Updated server with Algorand address (Apple)');
         }
-        registerBscAddressBestEffort();
+        registerChainAddressesBestEffort();
         // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
         try {
           const payload = registration.payload;
@@ -2713,7 +2860,10 @@ export class AuthService {
             const payload = data.switchAccountToken.payload || {};
             const isOwner = !payload.is_employee || payload.employee_role === 'owner';
             if (isOwner) {
-              void ensureBscAddressRegistered().catch(() => {});
+              void Promise.allSettled([
+                ensureBscAddressRegistered(),
+                ensureSolanaAddressRegistered(),
+              ]);
             }
           } catch { }
         }

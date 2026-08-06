@@ -11,13 +11,14 @@
  */
 import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes, bytesToHex } from '@noble/hashes/utils';
+import * as Keychain from 'react-native-keychain';
 
 const mockMemoryStore = new Map<string, Uint8Array>();
 
 jest.mock('react-native-keychain', () => ({
-  setGenericPassword: jest.fn(),
+  setGenericPassword: jest.fn().mockResolvedValue(true),
   getGenericPassword: jest.fn().mockResolvedValue(false),
-  resetGenericPassword: jest.fn(),
+  resetGenericPassword: jest.fn().mockResolvedValue(true),
   getInternetCredentials: jest.fn().mockResolvedValue(false),
   setInternetCredentials: jest.fn(),
   ACCESSIBLE: { AFTER_FIRST_UNLOCK: 'AfterFirstUnlock' },
@@ -44,6 +45,7 @@ jest.mock('../analyticsService', () => ({
   AnalyticsService: {
     logBackupAttempt: jest.fn(),
     logBackupFailed: jest.fn(),
+    logBackupSuccess: jest.fn(),
   },
 }));
 
@@ -77,8 +79,18 @@ jest.mock('../googleDriveStorage', () => ({
   },
 }));
 
-import { getOrCreateMasterSecret, deriveV2AddressPure } from '../secureDeterministicWallet';
+import {
+  getOrCreateMasterSecret,
+  deriveV2AddressPure,
+  deriveWalletV2,
+  getDerivedEvmWallet,
+  getDerivedSolanaWallet,
+  getEvmAddressForDisplay,
+  getSolanaAddressForDisplay,
+  secureDeterministicWallet,
+} from '../secureDeterministicWallet';
 import { deriveEvmKeyFromMasterSecret } from '../evmWallet';
+import { deriveSolanaKeyFromMasterSecret } from '../solanaWallet';
 import { googleDriveStorage } from '../googleDriveStorage';
 
 const USER_SUB = '111222333444555666777';
@@ -93,6 +105,10 @@ const expectedAddress = deriveV2AddressPure(MASTER_SECRET, {
   accountType: 'personal',
   accountIndex: 0,
 });
+const expectedSolanaAddress = deriveSolanaKeyFromMasterSecret(MASTER_SECRET, {
+  accountType: 'personal',
+  accountIndex: 0,
+}).address;
 
 const seedLocalVerifiedSecret = () => {
   mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
@@ -111,6 +127,80 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
   beforeEach(() => {
     mockMemoryStore.clear();
     jest.clearAllMocks();
+    (Keychain.setGenericPassword as jest.Mock).mockResolvedValue(true);
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValue(false);
+    (Keychain.resetGenericPassword as jest.Mock).mockResolvedValue(true);
+  });
+
+  it('clears sibling signer and address caches on sign-out', async () => {
+    deriveWalletV2(
+      MASTER_SECRET,
+      { accountType: 'personal', accountIndex: 0 },
+      {},
+    );
+    expect(getDerivedEvmWallet()).not.toBeNull();
+    expect(getDerivedSolanaWallet()).not.toBeNull();
+
+    await secureDeterministicWallet.clearWallet();
+
+    expect(getDerivedEvmWallet()).toBeNull();
+    expect(getDerivedSolanaWallet()).toBeNull();
+    await expect(getEvmAddressForDisplay('personal_0')).resolves.toBeNull();
+    await expect(getSolanaAddressForDisplay('personal_0')).resolves.toBeNull();
+  });
+
+  it('clears address services restored from the persistent registry after restart', async () => {
+    const coldStartService = 'confio_solana_address_v1_business_987_0';
+    (Keychain.getGenericPassword as jest.Mock).mockImplementation(async ({ service }) =>
+      service === 'confio_wallet_address_service_registry_v1'
+        ? { username: 'address_services', password: JSON.stringify([coldStartService]) }
+        : false,
+    );
+
+    await secureDeterministicWallet.clearWallet();
+
+    expect(Keychain.resetGenericPassword).toHaveBeenCalledWith({ service: coldStartService });
+    expect(Keychain.resetGenericPassword).toHaveBeenCalledWith({
+      service: 'confio_wallet_address_service_registry_v1',
+    });
+  });
+
+  it('prevents a stale persistence operation from recreating caches during sign-out', async () => {
+    let releaseRegistryRead!: (value: false) => void;
+    const blockedRegistryRead = new Promise<false>(resolve => {
+      releaseRegistryRead = resolve;
+    });
+    let registryReads = 0;
+    (Keychain.getGenericPassword as jest.Mock).mockImplementation(async ({ service }) => {
+      if (
+        service === 'confio_wallet_address_service_registry_v1' &&
+        registryReads++ === 0
+      ) {
+        return blockedRegistryRead;
+      }
+      return false;
+    });
+
+    deriveWalletV2(
+      MASTER_SECRET,
+      { accountType: 'personal', accountIndex: 0 },
+      {},
+    );
+    await Promise.resolve();
+    const clearing = secureDeterministicWallet.clearWallet();
+    deriveWalletV2(
+      MASTER_SECRET,
+      { accountType: 'personal', accountIndex: 0 },
+      {},
+    );
+
+    expect(getDerivedEvmWallet()).toBeNull();
+    expect(getDerivedSolanaWallet()).toBeNull();
+    releaseRegistryRead(false);
+    await clearing;
+
+    expect(getDerivedEvmWallet()).toBeNull();
+    expect(getDerivedSolanaWallet()).toBeNull();
   });
 
   it('uploads the backup when requireCloudSync is set, even if the local secret already matches the server address', async () => {
@@ -268,6 +358,19 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
     consoleError.mockRestore();
   });
 
+  it('accepts a Solana-only recovery anchor', async () => {
+    seedLocalVerifiedSecret();
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+
+    const secret = await getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google',
+      allowGenerate: false,
+      expectedSolanaAddress,
+    });
+
+    expect(secret).toEqual(MASTER_SECRET);
+  });
+
   // But a secret contradicting EVERY supplied anchor is simply the wrong
   // wallet, and must never be adopted or uploaded.
   it('rejects a secret that contradicts every supplied anchor', async () => {
@@ -370,6 +473,8 @@ describe('Drive backup format v2', () => {
       algo: deriveV2AddressPure(secret, { accountType: 'personal', accountIndex: 0 }),
       evm: deriveEvmKeyFromMasterSecret(secret, { accountType: 'personal', accountIndex: 0 })
         .address.toLowerCase(),
+      solana: deriveSolanaKeyFromMasterSecret(secret, { accountType: 'personal', accountIndex: 0 })
+        .address,
       ...overrides,
     });
     const ct = nacl.secretbox(utf8ToBytes(inner), nonce, sha256(utf8ToBytes(APP_BACKUP_KEY)));
@@ -402,6 +507,18 @@ describe('Drive backup format v2', () => {
       provider: 'google',
       allowGenerate: false,
       expectedAddress,
+    });
+
+    expect(secret).toEqual(MASTER_SECRET);
+  });
+
+  it('restores a pre-Solana v2 backup without a Solana commitment', async () => {
+    putOnDrive(sealV2(MASTER_SECRET, { solana: undefined }));
+
+    const secret = await getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google',
+      allowGenerate: false,
+      expectedSolanaAddress,
     });
 
     expect(secret).toEqual(MASTER_SECRET);

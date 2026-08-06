@@ -42,6 +42,10 @@ from .invite_send_mutations import (
     get_all_pending_invites_for_phone,
 )
 from .p2p_trade_mutations import P2PTradeMutations, P2PTradePrepareMutations
+from .solana_mutations import (
+    PrepareSolanaSponsoredTransaction,
+    SponsorSolanaTransaction,
+)
 
 
 class Query(graphene.ObjectType):
@@ -147,6 +151,8 @@ class Mutation(graphene.ObjectType):
     build_guardarian_offramp_transactions = BuildGuardarianOfframpTransactionsMutation.Field()
     submit_auto_swap_transactions = SubmitAutoSwapTransactionsMutation.Field()
     build_burn_and_send = BuildBurnAndSendMutation.Field()
+    prepare_solana_sponsored_transaction = PrepareSolanaSponsoredTransaction.Field()
+    sponsor_solana_transaction = SponsorSolanaTransaction.Field()
     
     # Business opt-in mutations
     check_business_opt_in = CheckBusinessOptInMutation.Field()

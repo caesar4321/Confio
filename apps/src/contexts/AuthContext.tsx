@@ -733,13 +733,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     // Handle auto opt-in after successful auth
     await ensureAssetOptIns();
 
-    // Background self-heal: register the BSC (savings chain) address for
-    // accounts whose sign-in predated the savings deploy. This covers the
+    // Background self-heal: register derived BSC and Solana addresses for
+    // accounts whose sign-in predated either chain deploy. This covers the
     // FRESH-LOGIN entry only — cold start runs its own inline flow in
-    // checkAuthState and calls ensureBscAddressRegistered there. Marker-gated
+    // checkAuthState and performs the same registration there. Marker-gated
     // and never blocks entry.
-    import('../services/authService').then(({ ensureBscAddressRegistered }) => {
-      void ensureBscAddressRegistered();
+    import('../services/authService').then(({ ensureBscAddressRegistered, ensureSolanaAddressRegistered }) => {
+      void Promise.allSettled([
+        ensureBscAddressRegistered(),
+        ensureSolanaAddressRegistered(),
+      ]);
     }).catch(() => { });
 
     // On iOS, Implicitly Report Safety (iCloud Keychain is auto-synced)
@@ -1121,14 +1124,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             // Fire-and-forget: retry asset opt-ins in case they failed on initial login
             ensureAssetOptIns().catch(() => {});
 
-            // Register the BSC (savings chain) address on cold start too. This
+            // Register the derived BSC and Solana addresses on cold start too. This
             // path does NOT go through completeAuthenticatedEntry, so without
             // this an existing user who UPDATES the app and reopens it (no
             // re-login) never registers — and send/bsc_flow.py's "abre Confío
             // para activar tu cuenta" nudge would be a lie. Marker-gated per
             // address, so it is a no-op after the first success.
-            import('../services/authService').then(({ ensureBscAddressRegistered }) => {
-              void ensureBscAddressRegistered();
+            import('../services/authService').then(({ ensureBscAddressRegistered, ensureSolanaAddressRegistered }) => {
+              void Promise.allSettled([
+                ensureBscAddressRegistered(),
+                ensureSolanaAddressRegistered(),
+              ]);
             }).catch(() => { });
 
             // Fire-and-forget prefetch of accounts to warm ProfileMenu

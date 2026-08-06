@@ -506,6 +506,11 @@ class Account(SoftDeleteModel):
         blank=True, null=True,
         help_text="BSC (savings chain) address for this account — derived client-side from the same seed (confio/evm/v1)"
     )
+    solana_address = models.CharField(
+        max_length=44,
+        blank=True, null=True,
+        help_text="Solana address for this account — derived client-side from the V2 master secret"
+    )
 
     # —————————————————————————————
     # audit‑style timestamps
@@ -539,6 +544,13 @@ class Account(SoftDeleteModel):
                 & ~models.Q(bsc_address='')
                 & models.Q(deleted_at__isnull=True),
                 name='uniq_account_bsc_address_ci',
+            ),
+            models.UniqueConstraint(
+                fields=['solana_address'],
+                condition=models.Q(solana_address__isnull=False)
+                & ~models.Q(solana_address='')
+                & models.Q(deleted_at__isnull=True),
+                name='uniq_account_solana_address',
             ),
         ]
         

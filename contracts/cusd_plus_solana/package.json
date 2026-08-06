@@ -1,0 +1,8 @@
+{
+  "name": "@confio/cusd-plus-solana",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/math.test.mjs"
+  }
+}
