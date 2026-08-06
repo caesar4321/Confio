@@ -2,6 +2,14 @@ diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/m
 index 1111111..2222222 100644
 --- a/node_modules/react-native-vision-camera/android/src/main/java/com/mrousavy/camera/react/CameraDevicesManager.kt
 +++ b/node_modules/react-native-vision-camera/android/src/main/java/com/mrousavy/camera/react/CameraDevicesManager.kt
+@@ -79,6 +79,7 @@ class CameraDevicesManager(private val reactContext: ReactApplicationContext) :
+   override fun initialize() {
+     super.initialize()
+     cameraManager.registerAvailabilityCallback(callback, null)
++    sendAvailableDevicesChangedEvent()
+   }
+ 
+   override fun invalidate() {
 @@ -98,6 +98,10 @@ class CameraDevicesManager(private val reactContext: ReactApplicationContext) :
    }
  
