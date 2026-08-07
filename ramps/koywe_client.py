@@ -108,6 +108,8 @@ _COUNTRY_ALPHA3 = {
     'US': 'USA',
 }
 
+_COUNTRY_ALPHA2 = {alpha3: alpha2 for alpha2, alpha3 in _COUNTRY_ALPHA3.items()}
+
 _ACCOUNT_TYPE_MAP = {
     'ahorro': 'savings',
     'ahorros': 'savings',
@@ -1224,19 +1226,46 @@ class KoyweClient:
         country_code must be ISO 3166-1 alpha-3 (e.g. 'COL', 'PER').
         Returns list of {bankCode, name, institutionName} dicts.
         """
-        url = f'{self.base_url}/rest/bank-info/{country_code.upper()}'
+        alpha3 = country_code.upper()
+        url = f'{self.base_url}/rest/bank-info/{alpha3}'
         try:
             resp = self.session.get(url, timeout=15)
-            if resp.status_code == 400:
+            if resp.ok:
+                data = resp.json()
+                if isinstance(data, list) and data:
+                    return data
+
+            # The legacy endpoint currently returns `bank account not found`
+            # for Bolivia even though the platform bank catalog is live.
+            # Fall back to the current reference-data endpoint used by the
+            # Koywe Platform API and normalize it to the legacy shape consumed
+            # by the rest of Confío.
+            alpha2 = _COUNTRY_ALPHA2.get(alpha3, alpha3)
+            fallback = self.session.get(
+                f'{self.base_url}/api/v1/banks',
+                params={'countrySymbol': alpha2},
+                timeout=15,
+            )
+            if not fallback.ok:
+                raise KoyweError(
+                    f'Koywe bank-info returned {resp.status_code} and bank catalog '
+                    f'returned {fallback.status_code} for {alpha3}'
+                )
+            fallback_data = fallback.json()
+            if not isinstance(fallback_data, list):
                 return []
-            if not resp.ok:
-                raise KoyweError(f'Koywe bank-info returned {resp.status_code} for {country_code}')
-            data = resp.json()
-            if not isinstance(data, list):
-                return []
-            return data
+            return [
+                {
+                    'bankCode': bank.get('value') or bank.get('bankCode') or bank.get('bank_code'),
+                    'name': bank.get('name') or '',
+                    'institutionName': bank.get('institutionName') or '',
+                }
+                for bank in fallback_data
+                if (bank.get('value') or bank.get('bankCode') or bank.get('bank_code'))
+                and bank.get('name')
+            ]
         except requests.RequestException as exc:
-            raise KoyweError(f'Koywe bank-info request failed for {country_code}: {exc}') from exc
+            raise KoyweError(f'Koywe bank-info request failed for {alpha3}: {exc}') from exc
 
     def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> tuple[dict[str, Any] | None, KoyweError | None]:
         """Preview quote tolerant of Koywe's min/max amount rejections.

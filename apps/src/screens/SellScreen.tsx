@@ -177,7 +177,6 @@ export const SellScreen = () => {
   const fiatCurrency = availability?.fiatCurrency || 'USD';
   const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.offRampEnabled && methods.length > 0;
-  const isBoliviaOffRampUnavailable = isKoyweCountry && availability?.countryCode === 'BO' && !availabilityLoading && methods.length === 0;
   const selectedMethod = useMemo(
     () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
     [methods, selectedMethodCode],
@@ -524,40 +523,6 @@ export const SellScreen = () => {
     // (the savings redeem rail). Converting this to its own navigation route
     // would silently break that param threading.
     return <LegacyGuardarianSellScreen />;
-  }
-
-  if (isBoliviaOffRampUnavailable) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <RampReveal delay={0}>
-            <RampHero
-              eyebrow="Retirar saldo"
-              title="Retiro en BOB no disponible"
-              subtitle="Por ahora en Bolivia solo está habilitada la Recarga. Cuando Koywe habilite retiros en BOB, aparecerán aquí."
-              onBack={() => navigation.goBack()}
-              compact={isCompact}
-            />
-          </RampReveal>
-
-          <RampReveal delay={80}>
-            <View style={styles.emptyStateCard}>
-              <View style={styles.emptyStateIconWrap}>
-                <Icon name="info" size={22} color={colors.primaryDark} />
-              </View>
-              <Text style={styles.emptyStateTitle}>{countryFlag ? `${countryFlag} ` : ''}Solo Recarga disponible</Text>
-              <Text style={styles.emptyStateText}>
-                Aún no puedes retirar a bolivianos desde Confío. Si quieres agregar saldo en Bolivia, usa Recarga con QR interoperable.
-              </Text>
-              <TouchableOpacity style={styles.primaryActionButton} onPress={() => navigation.replace('TopUp')}>
-                <Text style={styles.primaryActionButtonText}>Ir a Recarga</Text>
-              </TouchableOpacity>
-            </View>
-          </RampReveal>
-        </ScrollView>
-      </SafeAreaView>
-    );
   }
 
   return (
