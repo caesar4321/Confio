@@ -69,10 +69,8 @@ COUNTRY_METHODS = {
         "network_fee_fiat": Decimal("0.13"),
         "on_ramp_min_amount": Decimal("350"),
         "on_ramp_max_amount": Decimal("56000"),
-        # Refreshed dynamically from Koywe quotes. These static values are
-        # only the fallback when the provider is temporarily unavailable.
-        "off_ramp_min_amount": Decimal("36"),
-        "off_ramp_max_amount": Decimal("5310"),
+        "off_ramp_min_amount": Decimal("0"),
+        "off_ramp_max_amount": Decimal("0"),
         "methods": [
             {
                 "code": "QRI-BO",
@@ -85,18 +83,6 @@ COUNTRY_METHODS = {
                 "requires_email": False,
                 "supports_on_ramp": True,
                 "supports_off_ramp": False,
-            },
-            {
-                "code": "WIREBO",
-                "display_name": "Transferencia bancaria",
-                "provider_type": "bank",
-                "icon": "repeat",
-                "description": "Retiro en bolivianos a una cuenta bancaria a tu nombre.",
-                "requires_account_number": True,
-                "requires_phone": False,
-                "requires_email": False,
-                "supports_on_ramp": False,
-                "supports_off_ramp": True,
             },
         ],
     },
@@ -558,17 +544,6 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
                 "placeholder": "CPF, teléfono, email o aleatoria",
                 "required": False,
                 "helpText": "Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.",
-            },
-        ]
-    elif country_code == "BO" and code == "WIREBO":
-        schema["providerFields"] = [
-            {
-                "key": "bankName",
-                "label": "Banco receptor",
-                "placeholder": "Selecciona el banco",
-                "required": True,
-                "picker": "bank",
-                "helpText": "La cuenta debe pertenecer al mismo titular verificado en Confío.",
             },
         ]
     elif country_code == "MX" and code == "WIREMX":

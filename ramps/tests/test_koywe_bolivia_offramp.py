@@ -3,23 +3,24 @@ from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
 
-from ramps.koywe import build_ramp_field_schema, get_country_ramp_config
+from ramps.koywe import get_country_ramp_config
 from ramps.koywe_client import KoyweClient
+from ramps.schema import CreateRampOrder
 from ramps.tasks import refresh_koywe_ramp_limits
 
 
 class KoyweBoliviaOffRampConfigTests(SimpleTestCase):
-    def test_bolivia_exposes_bank_transfer_off_ramp(self):
+    def test_bolivia_exposes_on_ramp_only(self):
         config = get_country_ramp_config('BO')
-        wire = next(method for method in config['methods'] if method['code'] == 'WIREBO')
+        methods = config['methods']
 
-        self.assertTrue(wire['supports_off_ramp'])
-        self.assertFalse(wire['supports_on_ramp'])
-        self.assertTrue(wire['requires_account_number'])
+        self.assertEqual([method['code'] for method in methods], ['QRI-BO'])
+        self.assertTrue(methods[0]['supports_on_ramp'])
+        self.assertFalse(methods[0]['supports_off_ramp'])
         self.assertEqual(config['on_ramp_min_amount'], 350)
         self.assertEqual(config['on_ramp_max_amount'], 56000)
-        self.assertGreater(config['off_ramp_min_amount'], 0)
-        self.assertGreater(config['off_ramp_max_amount'], config['off_ramp_min_amount'])
+        self.assertEqual(config['off_ramp_min_amount'], 0)
+        self.assertEqual(config['off_ramp_max_amount'], 0)
 
     @patch('ramps.tasks.KoyweClient')
     def test_periodic_limit_refresh_includes_bob(self, client_class):
@@ -32,17 +33,29 @@ class KoyweBoliviaOffRampConfigTests(SimpleTestCase):
             client.get_dynamic_ramp_limits.call_args_list,
         )
 
-    def test_bolivia_wire_schema_requires_bank_picker(self):
-        config = get_country_ramp_config('BO')
-        wire = next(method for method in config['methods'] if method['code'] == 'WIREBO')
+    @patch('ramps.schema._employee_ramp_denial', return_value=None)
+    @patch('ramps.schema._get_wallet_upgrade_blocker', return_value=None)
+    @patch('ramps.schema._get_ramp_account_for_user', return_value=SimpleNamespace())
+    def test_real_order_mutation_blocks_bolivia_off_ramp(
+        self, _get_account, _wallet_blocker, _employee_denial
+    ):
+        info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(is_authenticated=True)))
 
-        schema = build_ramp_field_schema(country_code='BO', method=wire)
+        result = CreateRampOrder().mutate(
+            info,
+            direction='OFF_RAMP',
+            amount='36',
+            payment_method_code='WIREBO',
+            country_code='BO',
+            fiat_currency='BOB',
+            bank_info_id='463',
+        )
 
-        self.assertTrue(schema['accountField']['required'])
-        self.assertTrue(schema['showAccountTypeField'])
-        self.assertEqual(schema['providerFields'][0]['key'], 'bankName')
-        self.assertEqual(schema['providerFields'][0]['picker'], 'bank')
-        self.assertTrue(schema['providerFields'][0]['required'])
+        self.assertFalse(result.success)
+        self.assertEqual(
+            result.error,
+            'Retiro en BOB no está disponible por ahora. En Bolivia solo está habilitada la recarga.',
+        )
 
 
 class KoyweBoliviaBankCatalogTests(SimpleTestCase):
@@ -89,58 +102,4 @@ class KoyweBoliviaBankCatalogTests(SimpleTestCase):
             'https://api.koywe.test/api/v1/banks',
             params={'countrySymbol': 'BO'},
             timeout=15,
-        )
-
-
-class KoyweBoliviaBankAccountPayloadTests(SimpleTestCase):
-    def setUp(self):
-        self.client = KoyweClient()
-        self.client._request = Mock(return_value={'_id': 'bank-account-id'})
-
-    @patch.object(KoyweClient, 'ensure_account_profile', return_value='user@example.com')
-    @patch.object(KoyweClient, '_resolve_bank_code', return_value='BANCO_UNION')
-    def test_wirebo_uses_selected_bank_and_canonical_account_type(
-        self, resolve_bank_code, _ensure_account_profile
-    ):
-        bank_info = SimpleNamespace(
-            provider_metadata={'bankCode': 'BANCO_UNION'},
-            payment_method=SimpleNamespace(name='WIREBO'),
-            ramp_payment_method=None,
-            account_number='12345678',
-            phone_number=None,
-            email=None,
-            username=None,
-            bank=None,
-            account_type='ahorro',
-        )
-
-        result = self.client.create_bank_account(
-            bank_info=bank_info,
-            email='user@example.com',
-            country_code='BO',
-            fiat_symbol='BOB',
-            contact_profile={
-                'email': 'user@example.com',
-                'documentNumber': '7654321',
-                'documentType': 'CI',
-            },
-        )
-
-        self.assertEqual(result['_id'], 'bank-account-id')
-        resolve_bank_code.assert_called_once_with(
-            country_code='BOL', bank_code='BANCO_UNION'
-        )
-        self.client._request.assert_called_once_with(
-            'POST',
-            '/rest/bank-accounts',
-            email='user@example.com',
-            json_payload={
-                'countryCode': 'BOL',
-                'currencySymbol': 'BOB',
-                'email': 'user@example.com',
-                'documentNumber': '7654321',
-                'accountNumber': '12345678',
-                'bankCode': 'BANCO_UNION',
-                'accountType': 'savings',
-            },
         )
