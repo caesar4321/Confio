@@ -144,7 +144,10 @@ class GeoPolicy:
 
     name: str
     #: Phone countries refused outright.
-    phone_blocked: frozenset
+    # A callable is resolved at call time so operational country overlays can
+    # be changed through Django settings without duplicating this policy
+    # mechanism. Static issuer policies continue to use a frozenset.
+    phone_blocked: frozenset | Callable[[], object]
     #: Default refusal copy, shown to the user.
     message: str
     #: Per-country copy overrides (presale says something different for KR).
@@ -176,7 +179,10 @@ class GeoPolicy:
         country = phone_country_of(user)
         if not country:
             return self.allow_missing_phone
-        return country not in self.phone_blocked
+        blocked = self.phone_blocked
+        if callable(blocked):
+            blocked = blocked()
+        return country not in blocked
 
     # -- the full set
     def evaluate(self, user, meta: Mapping | None = None, *,
@@ -191,7 +197,10 @@ class GeoPolicy:
         if not country:
             if not self.allow_missing_phone:
                 return GeoDecision(False, self.message, 'phone')
-        elif country in self.phone_blocked:
+        phone_blocked = self.phone_blocked
+        if callable(phone_blocked):
+            phone_blocked = phone_blocked()
+        if country and country in phone_blocked:
             return GeoDecision(
                 False, self.phone_messages.get(country, self.message), 'phone')
 
@@ -199,7 +208,7 @@ class GeoPolicy:
         if callable(blocked):
             blocked = blocked()
         if blocked is None:
-            blocked = self.phone_blocked
+            blocked = phone_blocked
         if not blocked:
             return GeoDecision(True)
 

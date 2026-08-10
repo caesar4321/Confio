@@ -11,12 +11,7 @@
 export const CUSD_CONVERSION_UI_ENABLED = false;
 
 // STOCKS_TRADING_UI_ENABLED — the Comprar/Vender entry points on the
-// stocks surfaces (StockDetail CTAs + Buy/SellStock screens). OFF because
-// the execution layer is still a happy-path stub (onConfirm fakes success;
-// quotes are a hardcoded placeholder) and the Ondo GM delivery model is
-// unresolved. The server's stocksEnabled flag only gates VISIBILITY of the
-// stocks surfaces — it must be able to come back on (view-only: prices,
-// charts, positions) without exposing a fake trade flow in builds like
-// this one. Flip to true ONLY in a build where quotes and onConfirm are
-// wired to the real backend.
-export const STOCKS_TRADING_UI_ENABLED = false;
+// stocks surfaces (StockDetail CTAs + Buy/SellStock screens). The compiled
+// capability is ON; the server's stocksTradingEnabled / stocksBuyEnabled
+// fields remain the operational and jurisdiction-aware kill switches.
+export const STOCKS_TRADING_UI_ENABLED = true;

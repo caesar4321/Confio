@@ -23,15 +23,22 @@ from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 
 from cusd_plus import sponsor_7702
-from cusd_plus.eligibility import check_savings_mint_eligibility
+from cusd_plus.eligibility import (
+    check_savings_mint_eligibility,
+    check_stock_buy_eligibility,
+)
 from cusd_plus.tests.test_sponsor_7702 import (
     DELEGATE,
     USER,
     VAULT,
+    ROUTER,
+    STOCK,
     _approve_data,
     _call,
     _mint_data,
     _redeem_data,
+    _stock_data,
+    _word,
 )
 from cusd_plus.tests.test_bnb_autoconvert_relay import SIGNER_ADDR, _legacy_tx
 
@@ -77,6 +84,20 @@ class EligibilityGateTests(SimpleTestCase):
                         side_effect=RuntimeError('boom')):
             self.assertTrue(check_savings_mint_eligibility(
                 _user('VE'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
+
+    @override_settings(CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'])
+    def test_confio_stock_overlay_blocks_phone_or_ip_but_not_other_countries(self):
+        self.assertFalse(check_stock_buy_eligibility(
+            _user('BO'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
+        self.assertFalse(check_stock_buy_eligibility(
+            _user('VE'), {'HTTP_CF_IPCOUNTRY': 'BO'}))
+        self.assertTrue(check_stock_buy_eligibility(
+            _user('VE'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
+
+    @override_settings(CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[])
+    def test_ondo_ineligible_country_still_blocks_stock_buy(self):
+        self.assertFalse(check_stock_buy_eligibility(
+            _user('US'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
 
 
 @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT)
@@ -187,6 +208,46 @@ class SponsoredRailGateTests(SimpleTestCase):
             res = self._mutate(calls, _user('US', uid=24))
         gate.assert_not_called()
         self.assertNotEqual(res.error, 'mint_not_available')
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'],
+    )
+    def test_stock_buy_batch_refused_by_confio_country_overlay(self):
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        calls = [_call(VAULT, approve), _call(ROUTER, _stock_data(0))]
+        res = self._mutate(calls, _user('BO', uid=25))
+        self.assertEqual(res.error, 'trade_not_available')
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'],
+    )
+    def test_stock_sell_batch_remains_an_exit_for_blocked_country(self):
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        calls = [_call(STOCK, approve), _call(ROUTER, _stock_data(1))]
+        with mock.patch('cusd_plus.eligibility.check_stock_buy_eligibility') as gate:
+            res = self._mutate(calls, _user('BO', uid=26))
+        gate.assert_not_called()
+        self.assertNotEqual(res.error, 'trade_not_available')
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_stock_sell_batch_refused_by_ondo_issuer_country(self):
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        calls = [_call(STOCK, approve), _call(ROUTER, _stock_data(1))]
+        res = self._mutate(calls, _user('US', uid=27))
+        self.assertEqual(res.error, 'trade_not_available')
 
 
 class RampOrderGateRemovalTests(SimpleTestCase):

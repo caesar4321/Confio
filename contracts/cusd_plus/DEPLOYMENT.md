@@ -124,10 +124,16 @@ per-ARN enumeration is gone). Unwired in code until GM trading lands.
       via the Ondo dashboard, confirmed on-chain by the IM probe).
 - [ ] $1 live E2E (subscribeAndMint -> redeemToUsdt round trip) — vault
       needs ~1 USDT on BSC to run it
-- [ ] Router deploy (separate) once GM attestation ABI is wired — deploy
-      only from `d78315a8`+ (pre-fix `sellToSavings` forwarded the shares
-      floor as the IM's `minUsdyOut`, bricking every sell with honest
-      slippage params)
+- [x] Router deploy (separate) once GM attestation ABI is wired — UUPS proxy
+      deployed 2026-08-10 at `0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`,
+      proxy tx `0x6809c34e2483fa311ea60f0af183dc330a934dac0cfe1f531268f06706e9df8c`;
+      implementation `0xb502b25eF3Bb431e869374a4e0df30daF8EC44B3`, tx
+      `0x2f908d02b7cfed2d7891ce32751dd07a49c435982ff7bb11bf7c0bcb0c426046`.
+      Both contracts passed BscScan/Etherscan verification 2026-08-10. The
+      earlier non-upgradeable deployment at `0x57895513ad375B247d702D86DC545E8f880Cc8F6`
+      was never activated and is superseded. Trading remains
+      disabled pending Ondo address whitelisting, Safe sponsor registration,
+      fork rehearsal, and a minimum-size canary.
 - [x] ~~`lockUpgrades()` at the proven-stable milestone~~ — REMOVED from
       the contract 2026-07-20 (foot-gun: permanent Ondo oracle/IM
       dependency means a locked vault + Ondo migration = stranded funds;
@@ -410,7 +416,8 @@ was somewhere above the call, not that it approved the recipient).
   unaffected either way).
 - Storage: `isSponsor` APPENDED at slot 5; slots 0–4 unchanged and pinned
   by `test_storageLayout_pinnedToLiveProxy`.
-- **Future requirement:** when `ConfioStockRouter` is deployed it MUST get
+- **Future requirement:** when the standalone `contracts/ondo_stocks`
+  `ConfioStockRouter` is deployed it MUST get
   `setSponsor(router, true)` — `sellToSavings` mints to the user while the
   router is `msg.sender`, so without it every sell-into-savings reverts
   `recipient not caller`.

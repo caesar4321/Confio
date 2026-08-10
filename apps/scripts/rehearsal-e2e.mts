@@ -4,7 +4,7 @@
 //   Local (anvil, chainId 97):
 //     anvil --port 8555 --chain-id 97 &
 //     DEPLOYER_KEY=<anvil key> forge script script/DeployRehearsal.s.sol \
-//       --rpc-url http://127.0.0.1:8555 --broadcast   (in contracts/cusd_plus)
+//       --rpc-url http://127.0.0.1:8555 --broadcast   (in contracts/ondo_stocks)
 //     RPC_URL=http://127.0.0.1:8555 CHAIN_ID=97 DEPLOYER_KEY=... DEPLOYER_ADDR=... \
 //       npx tsx scripts/rehearsal-e2e.mts
 //   BSC testnet: same, with the public RPC + a faucet-funded deployer.
@@ -24,7 +24,7 @@ const RPC = process.env.RPC_URL || 'https://data-seed-prebsc-1-s1.bnbchain.org:8
 const CHAIN = BigInt(process.env.CHAIN_ID || '97');
 const A = JSON.parse(readFileSync(
   process.env.ADDRESSES_FILE
-    || new URL('../../contracts/cusd_plus/.rehearsal/testnet-addresses.json', import.meta.url).pathname,
+    || new URL('../../contracts/ondo_stocks/.rehearsal/testnet-addresses.json', import.meta.url).pathname,
   'utf8',
 ));
 // Deployer is DETERMINISTIC (fill(43) master secret via the app's own V2
@@ -51,11 +51,13 @@ const vaultI = new Interface([
   'function backingRatioBps() view returns (uint256)',
   'function balanceOf(address) view returns (uint256)',
   'function approve(address,uint256)',
+  'function setSponsor(address,bool)',
 ]);
 const oracleI = new Interface(['function setPrice(uint256)']);
 const routerI = new Interface([
-  'function buyWithSavings(address,uint256,uint256,uint256,bytes) returns (uint256)',
-  'function sellToSavings(address,uint256,uint256,uint256,bytes) returns (uint256)',
+  'function buyWithSavings((uint256 chainId,uint256 attestationId,bytes32 userId,address asset,uint256 price,uint256 quantity,uint256 expiration,uint8 side,bytes32 additionalData),bytes,uint256,uint256,uint256,uint256) returns (uint256)',
+  'function sellToSavings((uint256 chainId,uint256 attestationId,bytes32 userId,address asset,uint256 price,uint256 quantity,uint256 expiration,uint8 side,bytes32 additionalData),bytes,uint256,uint256,uint256) returns (uint256)',
+  'function accruedUsdtFees() view returns (uint256)',
 ]);
 
 const rpc = async (method: string, params: any[]) => {
@@ -98,14 +100,20 @@ console.log('user.bsc (V2-derived):', user.address, '| ethers agrees:', user.add
 const dep = { priv: DEP.privKeyHex, addr: DEP.address };
 const usd = (v: bigint) => Number(v / 10n ** 12n) / 1e6;
 
-// 1. gas dust (sponsorship pattern)
+// 1. Fund gas only for this legacy-signer rehearsal. Production stock trades
+// use EIP-7702 and leave the user address BNB-free.
 await sendTx(dep.priv, dep.addr, user.address, '', 30_000_000_000_000_000n); // 0.03 tBNB
-console.log('1 gas dust: OK');
+console.log('1 local rehearsal gas: OK');
 
 // 2. user self-mints test USDT + approves vault
 await sendTx(user.privKeyHex, user.address, A.USDT, erc20.encodeFunctionData('mint', [user.address, 1000n * 10n ** 18n]));
 await sendTx(user.privKeyHex, user.address, A.USDT, erc20.encodeFunctionData('approve', [A.VAULT, 2n ** 255n]));
 console.log('2 mint+approve USDT: OK');
+
+// Local rehearsal uses legacy user-signed transactions, so the user's own
+// origin stands in for the production KMS origin and must be registered
+// before any vault mint. Production uses the sponsored EIP-7702 batch.
+await sendTx(dep.priv, dep.addr, A.VAULT, vaultI.encodeFunctionData('setSponsor', [user.address, true]));
 
 // 3. save $500 → cUSD+
 await sendTx(user.privKeyHex, user.address, A.VAULT, vaultI.encodeFunctionData('subscribeAndMint', [500n * 10n ** 18n, 0, user.address]));
@@ -120,14 +128,25 @@ console.log('4 accrue: OK — pPlus =', Number(pPlus) / 1e18, '(expect 1.0085)')
 
 // 5. buy stock via router (explicit fee)
 await sendTx(user.privKeyHex, user.address, A.VAULT, vaultI.encodeFunctionData('approve', [A.ROUTER, 2n ** 255n]));
-await sendTx(user.privKeyHex, user.address, A.ROUTER, routerI.encodeFunctionData('buyWithSavings', [A.TSLAon, 100n * 10n ** 18n, 0, 0, '0x']));
+const now = BigInt(Math.floor(Date.now() / 1000));
+const buySpend = 100n * 10n ** 18n;
+const buyFee = (buySpend * 30n + 9969n) / 9970n;
+const buyQuote = [CHAIN, 1n, '0x' + '44'.repeat(32), A.TSLAon, 300n * 10n ** 18n,
+  buySpend / 300n, now + 300n, 0, '0x' + '00'.repeat(32)];
+await sendTx(user.privKeyHex, user.address, A.ROUTER, routerI.encodeFunctionData(
+  'buyWithSavings', [buyQuote, '0x', 100n * 10n ** 18n, buySpend, buySpend + buyFee, 30n],
+));
 const tsla = await balOf(A.TSLAon, user.address);
-const fee1 = await balOf(A.USDT, dep.addr);
-console.log('5 buyWithSavings: OK — TSLA =', Number(tsla) / 1e18, '| fee to treasury =', usd(fee1));
+const fee1 = BigInt(await view(A.ROUTER, routerI.encodeFunctionData('accruedUsdtFees', [])));
+console.log('5 buyWithSavings: OK — TSLA =', Number(tsla) / 1e18, '| fee accrued =', usd(fee1));
 
 // 6. sell back into savings
 await sendTx(user.privKeyHex, user.address, A.TSLAon, erc20.encodeFunctionData('approve', [A.ROUTER, 2n ** 255n]));
-await sendTx(user.privKeyHex, user.address, A.ROUTER, routerI.encodeFunctionData('sellToSavings', [A.TSLAon, tsla, 0, 0, '0x']));
+const sellQuote = [CHAIN, 2n, '0x' + '44'.repeat(32), A.TSLAon, 300n * 10n ** 18n,
+  tsla, now + 300n, 1, '0x' + '00'.repeat(32)];
+await sendTx(user.privKeyHex, user.address, A.ROUTER, routerI.encodeFunctionData(
+  'sellToSavings', [sellQuote, '0x', 99n * 10n ** 18n, 98n * 10n ** 18n, 30n],
+));
 console.log('6 sellToSavings: OK — cUSD+ =', usd(await balOf(A.VAULT, user.address)));
 
 // 7. redeem to USDT (the off-ramp leg)

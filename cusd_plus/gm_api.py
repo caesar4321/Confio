@@ -19,6 +19,8 @@ Endpoints (verified live 2026-07-07 with the read-only key):
 Cached in Django cache per Ondo's endpoint-caching guidance — one upstream
 call per TTL serves every app user.
 """
+import base64
+import binascii
 import logging
 
 import requests
@@ -54,6 +56,81 @@ def _get(path: str, params: dict | None = None) -> dict | list:
     return resp.json()
 
 
+def _post(path: str, payload: dict, *, write: bool) -> dict:
+    api_key = getattr(settings, 'ONDO_GM_WRITE_KEY' if write else 'ONDO_API_KEY', '')
+    if not api_key:
+        raise RuntimeError('ONDO_GM_WRITE_KEY not configured' if write else 'ONDO_API_KEY not configured')
+    resp = requests.post(
+        f'{BASE}{path}',
+        json=payload,
+        headers={'x-api-key': api_key, 'Content-Type': 'application/json'},
+        timeout=20,
+    )
+    if not resp.ok:
+        try:
+            detail = resp.json()
+            code = str(detail.get('code') or 'ONDO_ERROR')[:80]
+            message = str(detail.get('message') or code)[:200]
+        except Exception:  # noqa: BLE001
+            code, message = 'ONDO_ERROR', f'Ondo API returned HTTP {resp.status_code}'
+        raise GmApiError(code, message, resp.status_code)
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise GmApiError('BAD_ONDO_RESPONSE', 'Ondo API returned a non-object response', 502)
+    return data
+
+
+class GmApiError(RuntimeError):
+    def __init__(self, code: str, message: str, status_code: int):
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        super().__init__(f'{code}: {message}')
+
+
+def _trade_payload(symbol: str, side: str, notional_value: str, duration: str) -> dict:
+    if side not in ('buy', 'sell') or duration not in ('short', 'long'):
+        raise ValueError('invalid trade request')
+    return {
+        'chainId': 'bsc-56',
+        'symbol': symbol,
+        'side': side,
+        'notionalValue': notional_value,
+        'duration': duration,
+    }
+
+
+def soft_attestation(symbol: str, side: str, notional_value: str, duration: str = 'short') -> dict:
+    """Non-binding UI quote. It neither consumes attestation limits nor settles funds."""
+    return _post(
+        '/attestations/soft',
+        _trade_payload(symbol, side, notional_value, duration),
+        write=False,
+    )
+
+
+def binding_attestation(symbol: str, side: str, notional_value: str, duration: str = 'short') -> dict:
+    """Binding quote signed for Confío's registered BSC purchaser/router."""
+    return _post(
+        '/attestations',
+        _trade_payload(symbol, side, notional_value, duration),
+        write=True,
+    )
+
+
+def decode_attestation_bytes(value: str, *, size: int | None = None) -> str:
+    """Convert Ondo's base64 signature/additionalData into 0x-prefixed ABI bytes."""
+    try:
+        raw = base64.b64decode(value or '', validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned invalid base64', 502) from exc
+    if size is not None:
+        if len(raw) > size:
+            raise GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned oversized fixed bytes', 502)
+        raw = raw.ljust(size, b'\x00')
+    return '0x' + raw.hex()
+
+
 def _cached(key: str, ttl: int, fetch):
     data = cache.get(key)
     if data is None:
@@ -73,6 +150,11 @@ def market_status() -> dict:
 
 def asset_statuses() -> list:
     return _cached('gm_status_assets_v1', 60, lambda: _get('/status/assets'))
+
+
+def all_addresses() -> list:
+    """All GM token addresses; one day cache per Ondo's metadata guidance."""
+    return _cached('gm_all_addresses_v1', 24 * 3600, lambda: _get('/assets/all/addresses'))
 
 
 def ohlc(symbol: str, range_key: str) -> list:

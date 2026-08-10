@@ -4,16 +4,14 @@
 // confirm → processing → success. The quote line shows token quantity
 // (fractional shares) and the pass-through operation cost.
 //
-// Wiring points (stubbed until the GM backend proxy lands):
-// - getStockQuote(): becomes the RFQ/attestation soft-quote endpoint
-//   (short duration = tighter spread, long = extended validity, per Ondo).
-// - onConfirm(): binding attestation → on-chain settle from the cUSD+ vault.
+// Preview uses Ondo's non-binding soft quote; confirmation requests a fresh
+// binding attestation and settles it through the sponsored stock router.
 //
 // Empty-funds cross-sell: if cUSD+ can't cover the amount, the error links
 // straight into the savings funding flow — investing money always passes
 // through the sweep account, never around it.
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -42,27 +40,12 @@ import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import { buyStockWithSavings, getSoftStockQuote } from '../services/ondoStocks';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyStock'>;
 
-const MIN_AMOUNT_USD = 1;
-
-// TODO(gm): RFQ/attestation soft quote via backend proxy.
-const getStockQuote = (amountUsd: number, priceUsd: number) => {
-  // STUB, NOT PRICING — real cost = Ondo GM fee (schedule unknown until
-  // onboarding) + Confío markup (server-config). The split is an open
-  // pricing decision; do not anchor on 0.3%.
-  const costPct = 0.3;
-  const costUsd = amountUsd * (costPct / 100);
-  const netUsd = amountUsd - costUsd;
-  return {
-    costPct,
-    costUsd,
-    tokensOut: priceUsd > 0 ? netUsd / priceUsd : 0,
-    paused: false,
-  };
-};
+const MIN_AMOUNT_USD = 1.01; // leaves at least $1 net after the fixed 30 bps
 
 type Phase = 'input' | 'processing' | 'success';
 
@@ -70,32 +53,63 @@ export const BuyStockScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<BuyRoute>();
   const { formatNumber } = useNumberFormat();
-  const { byTicker, tradabilityFor } = useGmMarket();
-  const { savings } = useSavingsPortfolio();
+  const { savings, stocks, refetch } = useSavingsPortfolio();
+  const { byTicker, tradabilityFor } = useGmMarket(stocks.enabled);
 
   const stock = byTicker(route.params.ticker);
   const available = savings.balanceUsd;
 
   const [raw, setRaw] = useState('');
   const [phase, setPhase] = useState<Phase>('input');
+  const [softTokens, setSoftTokens] = useState(0);
+  const [softTokenWei, setSoftTokenWei] = useState(0n);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [tradeError, setTradeError] = useState<string | null>(null);
+  const [settledTokens, setSettledTokens] = useState(0);
 
   const amount = useMemo(() => {
     const v = parseFloat(raw.replace(',', '.'));
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
-  const quote = useMemo(
-    () => getStockQuote(amount, stock?.priceUsd ?? 0),
-    [amount, stock],
-  );
+  const quote = useMemo(() => ({
+    costPct: 0.3,
+    costUsd: amount * 0.003,
+    tokensOut: softTokens,
+    paused: quoteLoading || softTokens <= 0,
+  }), [amount, quoteLoading, softTokens]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTradeError(null);
+    setSoftTokens(0);
+    setSoftTokenWei(0n);
+    setQuoteLoading(false);
+    if (!stock || !stocks.buyEnabled || amount < MIN_AMOUNT_USD || amount > available) return;
+    setQuoteLoading(true);
+    const timer = setTimeout(() => {
+      getSoftStockQuote(stock.symbol, 'buy', amount)
+        .then((q) => {
+          if (!cancelled) {
+            const tokenWei = BigInt(q.tokenAmount);
+            setSoftTokenWei(tokenWei);
+            setSoftTokens(Number(tokenWei) / 1e18);
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) setTradeError(e instanceof Error ? e.message : 'No pudimos cotizar la compra.');
+        })
+        .finally(() => { if (!cancelled) setQuoteLoading(false); });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [amount, available, stock, stocks.buyEnabled]);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-  // Hard guard: onConfirm below is still a happy-path stub, so this screen
-  // must be unreachable (StockDetail hides the entry) AND self-defending —
-  // a deep link or future nav regression must never fake a purchase.
-  if (!STOCKS_TRADING_UI_ENABLED || !stock) {
+  // Deep-link defense: the server gate is authoritative even though the
+  // binary contains the execution client.
+  if (!STOCKS_TRADING_UI_ENABLED || !stocks.enabled || !stocks.buyEnabled || !stock) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: colors.text.secondary, textAlign: 'center', paddingHorizontal: 32 }}>
@@ -114,10 +128,22 @@ export const BuyStockScreen = () => {
   const canConfirm =
     amount >= MIN_AMOUNT_USD && !overBalance && !quote.paused && tradability !== 'closed';
 
-  const onConfirm = () => {
-    // TODO(gm): binding attestation + on-chain settle. Happy-path stub.
+  const onConfirm = async () => {
+    setTradeError(null);
     setPhase('processing');
-    setTimeout(() => setPhase('success'), 1600);
+    try {
+      const result = await buyStockWithSavings({
+        symbol: stock.symbol,
+        grossAmountUsd: amount,
+        minTokenAmountWei: (softTokenWei * 99n) / 100n,
+      });
+      setSettledTokens(Number(result.tokenAmountWei) / 1e18);
+      await refetch();
+      setPhase('success');
+    } catch (e) {
+      setTradeError(e instanceof Error ? e.message : 'No pudimos completar la compra.');
+      setPhase('input');
+    }
   };
 
   if (phase === 'success') {
@@ -128,7 +154,7 @@ export const BuyStockScreen = () => {
         <View style={styles.successWrap}>
           <SuccessHero
             title={`Ya tienes ${stock.ticker}`}
-            amount={`≈ ${formatNumber(quote.tokensOut, { maximumFractionDigits: 4 })} ${stock.ticker}`}
+            amount={`≈ ${formatNumber(settledTokens, { maximumFractionDigits: 4 })} ${stock.ticker}`}
             hint="Los dividendos se reinvierten automáticamente en el valor de tu posición. Puedes vender cuando quieras."
             icon={<TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={72} />}
           />
@@ -137,7 +163,7 @@ export const BuyStockScreen = () => {
             items={[
               { label: 'Invertiste desde tu ahorro', value: fmtUsd(amount) },
               { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
-              { label: 'Recibiste', value: `≈ ${formatNumber(quote.tokensOut, { maximumFractionDigits: 4 })} ${stock.ticker}`, color: colors.primaryDark },
+              { label: 'Recibiste', value: `≈ ${formatNumber(settledTokens, { maximumFractionDigits: 4 })} ${stock.ticker}`, color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
             ]}
@@ -277,6 +303,7 @@ export const BuyStockScreen = () => {
               </TouchableOpacity>
             </View>
           )}
+          {tradeError && <Text style={styles.hintError}>{tradeError}</Text>}
 
           <View style={{ flex: 1 }} />
 
@@ -298,7 +325,7 @@ export const BuyStockScreen = () => {
             )}
           </TouchableOpacity>
           <Text style={styles.confirmFootnote}>
-            Verás el precio final antes de confirmar. Las acciones pueden subir o bajar de valor.
+            Se actualizará la cotización al confirmar; si cambia más de 1%, no se ejecutará.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

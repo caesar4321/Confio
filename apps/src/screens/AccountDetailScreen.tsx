@@ -329,7 +329,7 @@ export const AccountDetailScreen = () => {
     const hoy = formatUsdDeltaAbs(ahorrosSavings.earnedTodayUsd);
     if (hoy) {
       savingsTickerParts.push(
-        `Hoy ${ahorrosSavings.earnedTodayUsd >= 0 ? '+' : '\u2212'}${hoy}`);
+        `Hoy \u2248 ${ahorrosSavings.earnedTodayUsd >= 0 ? '+' : '\u2212'}${hoy}`);
     }
     const mes = formatUsdDeltaAbs(ahorrosSavings.earnedMonthUsd);
     if (mes && ahorrosSavings.earnedMonthUsd > 0) {

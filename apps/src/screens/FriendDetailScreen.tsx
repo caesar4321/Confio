@@ -67,6 +67,13 @@ interface Friend {
   phone?: string;
   avatar: string;
   isOnConfio: boolean;
+  contactRecordId?: string;
+  confioUsername?: string;
+  confioFirstName?: string;
+  confioLastName?: string;
+  confioMatchedPhone?: string;
+  confioMatchWasInferred?: boolean;
+  phoneWasInferred?: boolean;
 }
 
 moment.locale('es');
@@ -85,6 +92,13 @@ export function FriendDetailScreen() {
     friendAvatar = '👤',
     friendPhone,
     isOnConfio = false,
+    friendContactRecordId,
+    friendConfioUsername,
+    friendConfioFirstName,
+    friendConfioLastName,
+    friendConfioMatchedPhone,
+    friendConfioMatchWasInferred = false,
+    friendPhoneWasInferred = false,
     friendStatusTier = null,
     friendIsReferralVerified = false,
   } = params;
@@ -95,7 +109,14 @@ export function FriendDetailScreen() {
     name: friendName,
     avatar: friendAvatar,
     phone: friendPhone,
-    isOnConfio: isOnConfio
+    isOnConfio: isOnConfio,
+    contactRecordId: friendContactRecordId || undefined,
+    confioUsername: friendConfioUsername || undefined,
+    confioFirstName: friendConfioFirstName || undefined,
+    confioLastName: friendConfioLastName || undefined,
+    confioMatchedPhone: friendConfioMatchedPhone || undefined,
+    confioMatchWasInferred: friendConfioMatchWasInferred,
+    phoneWasInferred: friendPhoneWasInferred,
   };
   
   // Early return with error state if essential params are missing
@@ -462,7 +483,14 @@ export function FriendDetailScreen() {
         name: friend.name,
         avatar: friend.avatar,
         isOnConfio: friend.isOnConfio,
-        phone: friend.phone || ''
+        phone: friend.phone || '',
+        contactRecordId: friend.contactRecordId,
+        confioUsername: friend.confioUsername,
+        confioFirstName: friend.confioFirstName,
+        confioLastName: friend.confioLastName,
+        confioMatchedPhone: friend.confioMatchedPhone,
+        confioMatchWasInferred: friend.confioMatchWasInferred,
+        phoneWasInferred: friend.phoneWasInferred,
       },
       tokenType: tokenType 
     });

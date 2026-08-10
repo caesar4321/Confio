@@ -6,16 +6,17 @@ Full lifecycle driven by the APP'S OWN SIGNER (`evmWallet.signLegacyTransaction`
 legacy type-0 + EIP-155) with the user wallet derived via the **V2
 master-secret path** (`deriveEvmKeyFromMasterSecret`) — exercising the gap
 fix live. ethers used only to ABI-encode calldata. Script:
-`apps/scripts/rehearsal-e2e.mts`; deploy: `script/DeployRehearsal.s.sol`.
+`apps/scripts/rehearsal-e2e.mts`; the standalone deployment and address file
+live under `../ondo_stocks/`, not this vault package.
 
 | Step | Result | Check |
 | --- | --- | --- |
-| 1 Gas dust (sponsor → user, 0.03 BNB) | OK | sponsorship pattern |
+| 1 Local rehearsal gas (deployer → user, 0.03 BNB) | OK | legacy-signer harness only; production uses EIP-7702 |
 | 2 Mint + approve test USDT | OK | |
 | 3 `subscribeAndMint` $500 | 500.000000 cUSD+ | 1:1 at $1.00 |
 | 4 Oracle +1% → `accrue()` | pPlus = **1.0085** exactly | 85/15 split on-network |
-| 5 `buyWithSavings` $100 of TSLA | 0.335158 shares; fee **0.302549 USDT** to treasury | explicit fee = 0.30% of 100.85 redeemed |
-| 6 `sellToSavings` | 499.400899 cUSD+ (shares) | round trip loses fees only |
+| 5 `buyWithSavings` $100 notional of TSLA | 0.333333 shares; fee **0.300903 USDT** accumulated in router | exact attested spend; accrued redemption excess returned to user |
+| 6 `sellToSavings` | 498.859692 cUSD+ remaining | net proceeds returned to savings; round trip loses only explicit fees |
 | 7 `redeemToUsdt` 50 shares | +50.425 USDT | 50 × pPlus |
 | Invariant | `backingRatioBps = 10016` | ≥ 10000; the +16bps IS Confío's surplus from the accrued yield |
 

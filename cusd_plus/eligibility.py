@@ -32,6 +32,8 @@ ONDO_QUALIFIED_ONLY = _EEA | frozenset({'BR', 'GB', 'CH', 'HK', 'SG', 'MY'})
 
 ONDO_BLOCKED = ONDO_PROHIBITED | ONDO_QUALIFIED_ONLY
 
+from django.conf import settings
+
 from security.geo import GeoPolicy
 
 # Shown to blocked users by the app; also returned from gated mutations.
@@ -53,6 +55,33 @@ ONDO_POLICY = GeoPolicy(
     ip_blocked=None,              # same list as phone
     ip_fails_open_on_error=True,  # a resolver outage must not strand an
                                   # attested-eligible user's mint
+)
+
+
+def _confio_stock_buy_blocked_countries():
+    """Live ISO-2 entry-only overlay controlled by Confío operations."""
+    configured = getattr(settings, 'CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES', ())
+    if isinstance(configured, str):
+        configured = configured.split(',')
+    return frozenset(
+        str(country).strip().upper()
+        for country in configured
+        if str(country).strip()
+    )
+
+
+STOCK_BUY_BLOCKED_MESSAGE = (
+    'Las compras de acciones no están disponibles en tu país. '
+    'Aún puedes vender tus posiciones existentes.'
+)
+
+CONFIO_STOCK_BUY_POLICY = GeoPolicy(
+    name='confio_stock_buy',
+    phone_blocked=_confio_stock_buy_blocked_countries,
+    message=STOCK_BUY_BLOCKED_MESSAGE,
+    allow_missing_phone=False,
+    ip_blocked=_confio_stock_buy_blocked_countries,
+    ip_fails_open_on_error=True,
 )
 
 
@@ -87,3 +116,16 @@ def check_savings_mint_eligibility(user, request_meta) -> bool:
     are NEVER gated on this.
     """
     return ONDO_POLICY.evaluate(user, request_meta or {}).allowed
+
+
+def check_stock_buy_eligibility(user, request_meta) -> bool:
+    """Issuer eligibility plus Confío's entry-only country overlay.
+
+    This function must only gate stock purchases. Stock sells are exits and
+    deliberately never call it.
+    """
+    meta = request_meta or {}
+    return (
+        ONDO_POLICY.evaluate(user, meta).allowed
+        and CONFIO_STOCK_BUY_POLICY.evaluate(user, meta).allowed
+    )

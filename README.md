@@ -4,7 +4,7 @@
 
 [Website](https://confio.lat) · [Whitepaper](docs/whitepaper/README.md) · [Tokenomics](docs/tokenomics/README.md) · [BNB Smart Chain deployments](contracts/cusd_plus/DEPLOYMENT.md)
 
-Confío is a fully open-source, non-custodial financial application for Latin America. It combines dollar access, savings, transfers, merchant payments, payroll, and the $CONFIO ecosystem token in a familiar mobile experience. The current product system settles on **BNB Smart Chain**, while the application hides gas, approvals, contract calls, and blockchain addresses from everyday users.
+Confío is a fully open-source, non-custodial financial application for Latin America. It combines dollar access, savings, transfers, merchant payments, payroll, staged eligible Ondo Stocks access, and the $CONFIO ecosystem token in a familiar mobile experience. The current product system settles on **BNB Smart Chain**, while the application hides gas, approvals, contract calls, and blockchain addresses from everyday users.
 
 *Lo tuyo, tuyo. · Blockchain inside. Simple as PayPal.*
 
@@ -15,9 +15,8 @@ Confío is a fully open-source, non-custodial financial application for Latin Am
 - **Send simply:** transfer to contacts without asking users to copy blockchain addresses or hold BNB for gas.
 - **Accept payments:** support merchant invoices and QR-centered payment flows with transparent on-chain settlement.
 - **Run payroll:** let businesses fund and authorize dollar payouts while recipients remain in control of their wallets.
+- **Access Ondo Stocks (staged):** once live trading is activated, eligible users can buy from cUSD+ and return sale proceeds to cUSD+ through a dedicated router with an explicit fixed 0.30% Confío fee on every completed purchase and sale.
 - **Participate in the ecosystem:** use the fixed-supply $CONFIO token for presale allocations, rewards, and disclosed ecosystem functions. $CONFIO does not back cUSD+ or user dollar balances.
-
-Additional tokenized-market products are evaluated separately and are not part of the current release.
 
 ## Why Confío is different
 
@@ -48,6 +47,7 @@ The mobile application, backend, smart contracts, and core documentation are ope
 | **USDT on BNB Smart Chain** | Funding, liquidity, transfers, and exit rail |
 | **cUSD+** | Primary savings and transaction balance backed by USDY held by the vault |
 | **Payment and payroll contracts** | Merchant settlement, fees, business escrow, and authorized payouts |
+| **Ondo Stocks router** | Staged user-authorized purchases from cUSD+ and sales back into cUSD+, with a fixed 0.30% explicit fee |
 | **$CONFIO** | Fixed-supply community and ecosystem token, separate from dollar backing |
 | **Sponsored transaction layer** | User-authorized EIP-7702 batches with network fees paid by Confío |
 
@@ -58,6 +58,7 @@ The product followed Ondo's production infrastructure onto BNB Smart Chain: USDY
 | Contract | Address |
 | --- | --- |
 | cUSD+ vault | [`0x3C29417e…63Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
+| Ondo Stocks router (UUPS proxy) | [`0x40c8e134…29c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | $CONFIO token | [`0xCcEb3F61…B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
 | $CONFIO presale vault | [`0x1a2dD9b4…f095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
 | $CONFIO reward vault | [`0x812b8d86…De730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |

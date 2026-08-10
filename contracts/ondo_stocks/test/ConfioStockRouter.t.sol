@@ -5,16 +5,17 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {CusdPlusVault} from "../CusdPlusVault.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {CusdPlusVault} from "cusd-plus/CusdPlusVault.sol";
 import {ConfioStockRouter, IGMTokenManager, GmQuote} from "../ConfioStockRouter.sol";
-import {MockToken, MockOracle, MockInstantManager} from "./CusdPlusVault.t.sol";
+import {MockToken, MockOracle, MockInstantManager} from "cusd-plus/test/CusdPlusVault.t.sol";
 
 /// Models the REAL GMTokenManager behavior verified on-chain 2026-07-31:
 /// mint credits the CALLER (no recipient param exists), redeem pays the
 /// CALLER, and a non-USDon deposit can refund surplus USDon to the caller.
 contract MockGMTokenManager is IGMTokenManager {
     MockToken public usdt;
-    MockToken public usdon;
+    MockToken internal usdonToken;
     uint256 public priceUsd = 300e18; // $300/share
 
     /// Leaves 1 wei of the approval unconsumed — models a partial fill.
@@ -24,21 +25,28 @@ contract MockGMTokenManager is IGMTokenManager {
 
     constructor(MockToken _usdt, MockToken _usdon) {
         usdt = _usdt;
-        usdon = _usdon;
+        usdonToken = _usdon;
     }
 
-    function setPartialFill(bool v) external { partialFill = v; }
-    function setUsdonRefund(uint256 v) external { usdonRefund = v; }
+    function usdon() external view returns (address) {
+        return address(usdonToken);
+    }
 
-    function mintWithAttestation(
-        GmQuote calldata quote,
-        bytes memory,
-        address depositToken,
-        uint256 depositTokenAmount
-    ) external returns (uint256) {
+    function setPartialFill(bool v) external {
+        partialFill = v;
+    }
+
+    function setUsdonRefund(uint256 v) external {
+        usdonRefund = v;
+    }
+
+    function mintWithAttestation(GmQuote calldata quote, bytes memory, address depositToken, uint256 depositTokenAmount)
+        external
+        returns (uint256)
+    {
         uint256 take = partialFill ? depositTokenAmount - 1 : depositTokenAmount;
-        IERC20(depositToken).transferFrom(msg.sender, address(this), take);
-        if (usdonRefund > 0) usdon.mint(msg.sender, usdonRefund);
+        require(IERC20(depositToken).transferFrom(msg.sender, address(this), take), "deposit transfer failed");
+        if (usdonRefund > 0) usdonToken.mint(msg.sender, usdonRefund);
         // The real contract: IRWALike(quote.asset).mint(_msgSender(), quote.quantity)
         MockToken(quote.asset).mint(msg.sender, quote.quantity);
         return quote.quantity;
@@ -51,10 +59,10 @@ contract MockGMTokenManager is IGMTokenManager {
         uint256 minimumReceiveAmount
     ) external returns (uint256) {
         uint256 take = partialFill ? quote.quantity - 1 : quote.quantity;
-        MockToken(quote.asset).transferFrom(msg.sender, address(this), take);
+        require(MockToken(quote.asset).transferFrom(msg.sender, address(this), take), "stock transfer failed");
         uint256 out = (quote.quantity * priceUsd) / 1e18;
         require(out >= minimumReceiveAmount, "gm: min receive");
-        MockToken(receiveToken).transfer(msg.sender, out);
+        require(MockToken(receiveToken).transfer(msg.sender, out), "proceeds transfer failed");
         return out;
     }
 }
@@ -63,7 +71,11 @@ contract MockGMTokenManager is IGMTokenManager {
 /// receive, not on what the router received.
 contract TaxedStock is ERC20 {
     constructor() ERC20("TAXon", "TAXon") {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
+
     function _update(address from, address to, uint256 value) internal override {
         if (from != address(0) && to != address(0)) {
             uint256 tax = value / 100;
@@ -86,7 +98,6 @@ contract ConfioStockRouterTest is Test {
     ConfioStockRouter router;
 
     address treasury = makeAddr("treasury");
-    address feeTreasury = makeAddr("feeTreasury");
     address user = makeAddr("user");
 
     bytes32 constant CONFIO_USER_ID = keccak256("confio-purchaser");
@@ -103,12 +114,10 @@ contract ConfioStockRouterTest is Test {
         usdt.mint(address(im), 100_000_000e18);
         usdy.mint(address(im), 100_000_000e18);
 
-        CusdPlusVault impl = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
+        CusdPlusVault impl = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
+        vault = CusdPlusVault(
+            address(new ERC1967Proxy(address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))))
         );
-        vault = CusdPlusVault(address(new ERC1967Proxy(
-            address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        )));
         // Two DIFFERENT registrations, easy to conflate:
         //  1. the router, so the vault accepts it minting FOR a user;
         //  2. the default tx.origin, standing in for Confío's KMS relay.
@@ -121,9 +130,9 @@ contract ConfioStockRouterTest is Test {
         gm = new MockGMTokenManager(usdt, usdon);
         usdt.mint(address(gm), 10_000_000e18);
 
-        router = new ConfioStockRouter(
-            address(vault), address(usdt), address(usdon),
-            address(gm), feeTreasury, treasury
+        ConfioStockRouter routerImpl = new ConfioStockRouter(address(vault), address(usdt), address(usdon), address(gm));
+        router = ConfioStockRouter(
+            address(new ERC1967Proxy(address(routerImpl), abi.encodeCall(ConfioStockRouter.initialize, (treasury))))
         );
         // sellToSavings mints TO THE USER while the router is msg.sender,
         // so the router must be a registered relay (2026-07-31 gate). This
@@ -131,9 +140,6 @@ contract ConfioStockRouterTest is Test {
         // sell-into-savings reverts "recipient not caller".
         vm.prank(treasury);
         vault.setSponsor(address(router), true);
-        vm.prank(treasury);
-        router.setStockFeeBps(30); // launch-config placeholder for tests only
-
         // User saves $3,000 first (sweep model: cUSD+ is the buying power)
         usdt.mint(user, 3000e18);
         vm.startPrank(user);
@@ -146,10 +152,7 @@ contract ConfioStockRouterTest is Test {
 
     // ── quote helpers (the server builds these from Ondo's attestation) ──
 
-    function _quote(address asset, uint256 quantity, uint8 side)
-        internal
-        returns (GmQuote memory q)
-    {
+    function _quote(address asset, uint256 quantity, uint8 side) internal returns (GmQuote memory q) {
         q = GmQuote({
             chainId: block.chainid,
             attestationId: nextAttestationId++,
@@ -165,12 +168,61 @@ contract ConfioStockRouterTest is Test {
 
     /// Quote for spending `sharesIn` of savings at par, net of the fee.
     function _buyQuote(address asset, uint256 sharesIn) internal returns (GmQuote memory) {
-        uint256 spend = sharesIn - (sharesIn * router.stockFeeBps()) / 10_000;
-        return _quote(asset, (spend * 1e18) / PRICE, 0);
+        return _quote(asset, (_buySpend(sharesIn) * 1e18) / PRICE, 0);
+    }
+
+    function _buySpend(uint256 sharesIn) internal pure returns (uint256) {
+        // Keep this helper local: an external view call here would consume a
+        // one-shot vm.prank before _buy reaches the router.
+        return Math.mulDiv(sharesIn, 9970, 10_000);
+    }
+
+    function _buyFee(uint256 spend) internal pure returns (uint256) {
+        return Math.mulDiv(spend, 30, 9970, Math.Rounding.Ceil);
+    }
+
+    function _buy(GmQuote memory q, uint256 sharesIn, uint256 maxFeeBps) internal returns (uint256) {
+        return router.buyWithSavings(q, "", sharesIn, _buySpend(sharesIn), 0, maxFeeBps);
     }
 
     function _sellQuote(address asset, uint256 quantity) internal returns (GmQuote memory) {
         return _quote(asset, quantity, 1);
+    }
+
+    function test_constructor_rejectsNonContractDependency() public {
+        vm.expectRevert(bytes("non-contract dependency"));
+        new ConfioStockRouter(user, address(usdt), address(usdon), address(gm));
+    }
+
+    function test_constructor_rejectsMismatchedGmUsdon() public {
+        MockToken otherUsdon = new MockToken("other USDon");
+        vm.expectRevert(bytes("gm usdon mismatch"));
+        new ConfioStockRouter(address(vault), address(usdt), address(otherUsdon), address(gm));
+    }
+
+    function test_implementationCannotBeInitialized() public {
+        ConfioStockRouter impl = new ConfioStockRouter(address(vault), address(usdt), address(usdon), address(gm));
+        vm.expectRevert();
+        impl.initialize(user);
+    }
+
+    function test_uupsUpgrade_isOwnerOnly_andPreservesState() public {
+        uint256 sharesIn = 300e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+        vm.prank(user);
+        _buy(q, sharesIn, 30);
+        uint256 feesBefore = router.accruedUsdtFees();
+
+        ConfioStockRouter nextImpl = new ConfioStockRouter(address(vault), address(usdt), address(usdon), address(gm));
+        vm.prank(user);
+        vm.expectRevert();
+        router.upgradeToAndCall(address(nextImpl), "");
+
+        vm.prank(treasury);
+        router.upgradeToAndCall(address(nextImpl), "");
+        assertEq(router.owner(), treasury, "owner preserved");
+        assertEq(router.accruedUsdtFees(), feesBefore, "fee accounting preserved");
+        assertEq(address(router.CUSD_PLUS()), address(vault), "immutable wiring preserved");
     }
 
     // ── core behavior ───────────────────────────────────────────────────
@@ -180,24 +232,47 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(tsla), sharesIn);
 
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, 0, 100);
+        uint256 stockOut = _buy(q, sharesIn, 100);
 
         // fee = 0.30% of the redeemed USDT, as an explicit transfer
         uint256 expectedFee = (600e18 * 30) / 10_000;
-        assertEq(usdt.balanceOf(feeTreasury), expectedFee, "explicit fee to treasury");
+        assertEq(router.accruedUsdtFees(), expectedFee, "fee accounted in router");
+        assertEq(usdt.balanceOf(address(router)), expectedFee, "fee retained in router");
         assertEq(stockOut, q.quantity, "user receives exactly the signed quantity");
         assertEq(tsla.balanceOf(user), stockOut, "stock delivered to user");
         assertEq(vault.balanceOf(user), 3000e18 - sharesIn, "savings reduced");
-        // router is a pipe: nothing rests
-        assertEq(usdt.balanceOf(address(router)), 0);
+        // Trade principal is swept; only the explicit fee rests in the router.
+        assertEq(usdt.balanceOf(address(router)), expectedFee);
         assertEq(tsla.balanceOf(address(router)), 0);
         assertEq(vault.balanceOf(address(router)), 0);
+    }
+
+    function test_buy_returnsAccrualAboveAttestedDebit() public {
+        uint256 sharesIn = 600e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+        uint256 attestedSpend = _buySpend(sharesIn);
+
+        // The quote was prepared at the old pPlus, then USDY accrued before
+        // execution. The vault redeems more than the quote+fee requires.
+        oracle.setPrice(1.019e18);
+        vm.prank(user);
+        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, attestedSpend, 0, 30);
+
+        uint256 fee = Math.mulDiv(attestedSpend, 30, 9970, Math.Rounding.Ceil);
+        // Vault share -> USDY and Instant Manager USDY -> USDT each round
+        // down independently, so mirror both conversions exactly.
+        uint256 oraclePrice = oracle.price();
+        uint256 redeemed = Math.mulDiv(Math.mulDiv(sharesIn, vault.pPlus(), oraclePrice), oraclePrice, 1e18);
+        assertEq(stockOut, q.quantity);
+        assertEq(router.accruedUsdtFees(), fee, "only fixed fee accrues");
+        assertEq(usdt.balanceOf(user), redeemed - attestedSpend - fee, "accrual excess returned");
+        assertEq(usdt.balanceOf(address(router)), fee, "no hidden excess retained");
     }
 
     function test_sell_reinvestsProceedsIntoSavings() public {
         GmQuote memory bq = _buyQuote(address(tsla), 600e18);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(bq, "", 600e18, 0, 100);
+        uint256 stockOut = _buy(bq, 600e18, 100);
         uint256 sharesBefore = vault.balanceOf(user);
 
         GmQuote memory sq = _sellQuote(address(tsla), stockOut);
@@ -209,10 +284,53 @@ contract ConfioStockRouterTest is Test {
         // round trip cost = buy fee + sell fee on the 600 that traded; the
         // untouched 2,400 of savings is unaffected (mock GM is spread-free)
         uint256 endValue = vault.balanceOf(user); // pPlus == 1e18 (no accrual)
-        uint256 expected = 2400e18 + (600e18 * 9970 / 10_000) * 9970 / 10_000;
+        uint256 expected = 2400e18 + Math.mulDiv(Math.mulDiv(600e18, 9970, 10_000), 9970, 10_000);
         assertApproxEqRel(endValue, expected, 0.0001e18);
-        assertEq(usdt.balanceOf(address(router)), 0, "router keeps nothing");
+        uint256 expectedFees = (600e18 * 30) / 10_000;
+        uint256 sellProceeds = (stockOut * PRICE) / 1e18;
+        expectedFees += (sellProceeds * 30) / 10_000;
+        assertEq(router.accruedUsdtFees(), expectedFees, "buy and sell fees accumulate");
+        assertEq(usdt.balanceOf(address(router)), router.accruedUsdtFees(), "router keeps only accrued fees");
         assertGe(vault.backingRatioBps(), 10_000, "vault invariant holds through trades");
+    }
+
+    function testFuzz_buyAndSell_feeReserveAlwaysSolvent(uint96 rawShares) public {
+        uint256 sharesIn = bound(uint256(rawShares), 1e18, 3000e18);
+        GmQuote memory bq = _buyQuote(address(tsla), sharesIn);
+
+        vm.prank(user);
+        uint256 stockOut = _buy(bq, sharesIn, 30);
+        uint256 expectedFees = _buyFee(_buySpend(sharesIn));
+        assertEq(router.accruedUsdtFees(), expectedFees);
+        assertEq(usdt.balanceOf(address(router)), expectedFees);
+
+        GmQuote memory sq = _sellQuote(address(tsla), stockOut);
+        vm.prank(user);
+        router.sellToSavings(sq, "", 0, 0, 30);
+
+        uint256 proceeds = (stockOut * PRICE) / 1e18;
+        expectedFees += (proceeds * 30) / 10_000;
+        assertEq(router.accruedUsdtFees(), expectedFees);
+        assertEq(usdt.balanceOf(address(router)), expectedFees);
+    }
+
+    function testFuzz_withdrawAndSweep_cannotInsolventFees(uint96 rawWithdraw, uint96 rawStray) public {
+        GmQuote memory q = _buyQuote(address(tsla), 600e18);
+        vm.prank(user);
+        _buy(q, 600e18, 30);
+
+        uint256 accrued = router.accruedUsdtFees();
+        uint256 withdraw = bound(uint256(rawWithdraw), 0, accrued);
+        uint256 stray = bound(uint256(rawStray), 0, 1_000_000e18);
+        usdt.mint(address(router), stray);
+
+        vm.startPrank(treasury);
+        router.withdrawFees(treasury, withdraw);
+        router.sweep(address(usdt), treasury, stray);
+        vm.stopPrank();
+
+        assertEq(router.accruedUsdtFees(), accrued - withdraw);
+        assertEq(usdt.balanceOf(address(router)), accrued - withdraw);
     }
 
     /// Regression: minSharesOut used to be forwarded as the vault's
@@ -222,7 +340,7 @@ contract ConfioStockRouterTest is Test {
     function test_sell_sharesFloor_enforced_whenUsdyAbovePar() public {
         GmQuote memory bq = _buyQuote(address(tsla), 600e18);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(bq, "", 600e18, 0, 100);
+        uint256 stockOut = _buy(bq, 600e18, 100);
 
         // USDY appreciates 1.9% (inside the 2% oracle jump guard)
         oracle.setPrice(1.019e18);
@@ -247,7 +365,7 @@ contract ConfioStockRouterTest is Test {
     function test_sell_sharesFloor_reverts_whenUnmet() public {
         GmQuote memory bq = _buyQuote(address(tsla), 600e18);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(bq, "", 600e18, 0, 100);
+        uint256 stockOut = _buy(bq, 600e18, 100);
 
         GmQuote memory sq = _sellQuote(address(tsla), stockOut);
         vm.prank(user);
@@ -255,24 +373,48 @@ contract ConfioStockRouterTest is Test {
         router.sellToSavings(sq, "", 0, type(uint256).max, 100);
     }
 
-    function test_fee_capped_and_ownerOnly() public {
-        vm.prank(treasury);
-        vm.expectRevert(bytes("fee above hard cap"));
-        router.setStockFeeBps(101);
-
-        vm.prank(user);
-        vm.expectRevert(); // non-owner
-        router.setStockFeeBps(10);
+    function test_fee_isFixedAtThirtyBps() public view {
+        assertEq(router.stockFeeBps(), 30);
     }
 
-    function test_zeroFee_isCleanPassThrough() public {
+    function test_ownerCanWithdrawOnlyAccruedFees() public {
+        GmQuote memory q = _buyQuote(address(tsla), 600e18);
+        vm.prank(user);
+        _buy(q, 600e18, 30);
+
+        uint256 accrued = router.accruedUsdtFees();
         vm.prank(treasury);
-        router.setStockFeeBps(0);
+        router.withdrawFees(treasury, accrued - 1);
+
+        assertEq(usdt.balanceOf(treasury), accrued - 1);
+        assertEq(router.accruedUsdtFees(), 1);
+        assertEq(usdt.balanceOf(address(router)), 1);
+
+        vm.prank(treasury);
+        vm.expectRevert(bytes("amount exceeds fees"));
+        router.withdrawFees(treasury, 2);
+    }
+
+    function test_nonOwnerCannotWithdrawFees() public {
+        vm.prank(user);
+        vm.expectRevert();
+        router.withdrawFees(user, 0);
+    }
+
+    function test_sweepCannotTakeAccruedFees_butCanRescueStrayUsdt() public {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(q, "", 300e18, 0, 100);
-        assertEq(stockOut, 1e18, "exactly one share at $300, no fee");
-        assertEq(usdt.balanceOf(feeTreasury), 0);
+        _buy(q, 300e18, 30);
+        uint256 accrued = router.accruedUsdtFees();
+        usdt.mint(address(router), 7e18);
+
+        vm.prank(treasury);
+        router.sweep(address(usdt), treasury, 7e18);
+        assertEq(usdt.balanceOf(address(router)), accrued);
+
+        vm.prank(treasury);
+        vm.expectRevert(bytes("amount includes fees"));
+        router.sweep(address(usdt), treasury, 1);
     }
 
     function test_pause_blocks_trades() public {
@@ -281,7 +423,7 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         vm.prank(user);
         vm.expectRevert();
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
     }
 
     function test_frozen_vault_user_cannot_trade() public {
@@ -290,7 +432,7 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         vm.prank(user);
         vm.expectRevert(bytes("address frozen"));
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
     }
 
     // ── AUDIT P2s (2026-07-31) ──────────────────────────────────────────
@@ -302,20 +444,17 @@ contract ConfioStockRouterTest is Test {
         MockToken other = new MockToken("NVDAon");
         GmQuote memory q = _buyQuote(address(other), 300e18);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(q, "", 300e18, 0, 100);
+        uint256 stockOut = _buy(q, 300e18, 100);
         assertEq(other.balanceOf(user), stockOut, "settled in the quoted asset");
         assertEq(tsla.balanceOf(user), 0, "untouched asset stays untouched");
     }
 
-    /// A fee raise cannot be slipped in front of an already-signed trade.
-    function test_maxFeeBps_blocksFeeRaiseAheadOfTrade() public {
+    /// The user's authorization must explicitly tolerate the fixed fee.
+    function test_maxFeeBps_rejectsTradeBelowFixedFee() public {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
-        vm.prank(treasury);
-        router.setStockFeeBps(100); // owner raises to the cap
-
         vm.prank(user);
         vm.expectRevert(bytes("fee above trade cap"));
-        router.buyWithSavings(q, "", 300e18, 0, 30); // trade committed to 0.30%
+        _buy(q, 300e18, 29); // trade accepts less than 0.30%
     }
 
     /// A partial fill would leave value here behind a live allowance.
@@ -324,13 +463,13 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         vm.prank(user);
         vm.expectRevert(bytes("gm: partial fill"));
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
     }
 
     function test_partialFill_reverts_onSell() public {
         GmQuote memory bq = _buyQuote(address(tsla), 600e18);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(bq, "", 600e18, 0, 100);
+        uint256 stockOut = _buy(bq, 600e18, 100);
 
         gm.setPartialFill(true);
         GmQuote memory sq = _sellQuote(address(tsla), stockOut);
@@ -346,44 +485,93 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(taxed), 300e18);
         vm.prank(user);
         vm.expectRevert(bytes("user short-changed"));
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
     }
 
-    /// GM refunds surplus USDon to the CALLER after a non-USDon deposit;
-    /// the router must not silently accumulate it.
-    function test_usdonDust_forwardedToTreasury() public {
+    /// GM refunds surplus USDon to the CALLER after a non-USDon deposit. It
+    /// belongs to the user and must not become owner-sweepable router value.
+    function test_usdonRefund_isForwardedToUser() public {
         gm.setUsdonRefund(1234);
         GmQuote memory q = _buyQuote(address(tsla), 300e18);
         vm.prank(user);
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
 
-        assertEq(usdon.balanceOf(feeTreasury), 1234, "dust swept to treasury");
-        assertEq(usdon.balanceOf(address(router)), 0, "router holds nothing at rest");
+        assertEq(usdon.balanceOf(user), 1234, "refund returned to funding user");
+        assertEq(usdon.balanceOf(address(router)), 0, "refund cannot be swept by owner");
+        assertEq(router.accruedUsdtFees(), (300e18 * 30) / 10_000);
     }
 
     // ── CODEX AUDIT 2026-07-31 ──────────────────────────────────────────
 
-    /// [P1] GM consumes only quantity*price and refunds the surplus to the
-    /// router. Without a cap on `spend`, that surplus leaves as "dust" to the
-    /// treasury — an unbounded implicit fee that bypasses MAX_FEE_BPS.
-    /// Sizing sharesIn well above the quote must now REVERT, not silently
-    /// transfer the difference to Confío.
+    /// GM consumes only quantity*price and refunds the surplus as USDon. A
+    /// percentage tolerance allowed a second hidden fee; only a micro-USDT
+    /// arithmetic remainder is now accepted.
     function test_overspendVsQuote_reverts() public {
         // Quote for $300 of stock, but spend $600 of savings.
         GmQuote memory q = _quote(address(tsla), (300e18 * 1e18) / PRICE, 0);
         vm.prank(user);
         vm.expectRevert(bytes("overspend vs quote"));
-        router.buyWithSavings(q, "", 600e18, 0, 100);
+        _buy(q, 600e18, 100);
     }
 
-    /// The legitimate case still works: sharesIn sized to the quote, with the
-    /// conversion buffer inside MAX_OVERSPEND_BPS.
-    function test_spendWithinOverspendBand_passes() public {
+    /// The legitimate case still works when sharesIn is sized to the quote.
+    function test_spendMatchingQuote_passes() public {
         uint256 sharesIn = 300e18;
         GmQuote memory q = _buyQuote(address(tsla), sharesIn);
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, 0, 100);
+        uint256 stockOut = _buy(q, sharesIn, 100);
         assertEq(stockOut, q.quantity);
+    }
+
+    function test_microUsdtQuoteRemainder_passes() public {
+        uint256 sharesIn = 300e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+        q.quantity -= 1; // quote cost is 300 wei below net spend
+
+        vm.prank(user);
+        assertEq(_buy(q, sharesIn, 30), q.quantity);
+    }
+
+    function test_quoteRemainderAboveMicroUsdt_reverts() public {
+        uint256 sharesIn = 300e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+        q.quantity -= router.MAX_QUOTE_REMAINDER() / 300 + 1;
+
+        vm.prank(user);
+        vm.expectRevert(bytes("overspend vs quote"));
+        _buy(q, sharesIn, 30);
+    }
+
+    function test_underspendVsQuote_reverts() public {
+        uint256 sharesIn = 300e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+        q.quantity += 1;
+
+        vm.prank(user);
+        vm.expectRevert(bytes("underspend vs quote"));
+        _buy(q, sharesIn, 30);
+    }
+
+    function test_wrongQuoteSide_revertsLocally() public {
+        GmQuote memory buy = _buyQuote(address(tsla), 300e18);
+        buy.side = 1;
+        vm.prank(user);
+        vm.expectRevert(bytes("wrong quote side"));
+        _buy(buy, 300e18, 30);
+
+        GmQuote memory sell = _sellQuote(address(tsla), 1e18);
+        sell.side = 0;
+        vm.prank(user);
+        vm.expectRevert(bytes("wrong quote side"));
+        router.sellToSavings(sell, "", 0, 0, 30);
+    }
+
+    function test_zeroPrice_revertsLocally() public {
+        GmQuote memory q = _buyQuote(address(tsla), 300e18);
+        q.price = 0;
+        vm.prank(user);
+        vm.expectRevert(bytes("zero price"));
+        _buy(q, 300e18, 30);
     }
 
     /// [P2] A zero-quantity quote would satisfy every downstream floor while
@@ -392,7 +580,7 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _quote(address(tsla), 0, 0);
         vm.prank(user);
         vm.expectRevert(bytes("zero quantity"));
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
     }
 
     /// [P2] Buy-side accounting must measure the router's own USDT delta, so
@@ -403,13 +591,13 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(tsla), sharesIn);
 
         vm.prank(user);
-        uint256 stockOut = router.buyWithSavings(q, "", sharesIn, 0, 100);
+        uint256 stockOut = _buy(q, sharesIn, 100);
 
         assertEq(stockOut, q.quantity, "trade sized by the vault delta only");
         // The stray USDT is untouched (still sweepable by the owner).
         uint256 expectedFee = (300e18 * 30) / 10_000;
-        assertEq(usdt.balanceOf(address(router)), 500e18 - 0, "stray USDT untouched");
-        assertEq(usdt.balanceOf(feeTreasury), expectedFee, "fee unchanged");
+        assertEq(usdt.balanceOf(address(router)), 500e18 + expectedFee, "stray USDT and fee remain distinct");
+        assertEq(router.accruedUsdtFees(), expectedFee, "only earned fee is accounted");
     }
 
     function test_wrongChainId_reverts() public {
@@ -417,7 +605,7 @@ contract ConfioStockRouterTest is Test {
         q.chainId = block.chainid + 1;
         vm.prank(user);
         vm.expectRevert(bytes("wrong chain"));
-        router.buyWithSavings(q, "", 300e18, 0, 100);
+        _buy(q, 300e18, 100);
     }
 
     // ── AUDIT REGRESSION (2026-07-31 [P1]) ───────────────────────────
@@ -445,7 +633,7 @@ contract ConfioStockRouterTest is Test {
         GmQuote memory q = _buyQuote(address(tsla), 1e18);
         vm.prank(user, user);
         vm.expectRevert("not sponsored");
-        router.buyWithSavings(q, "", 1e18, 0, 100);
+        _buy(q, 1e18, 100);
     }
 
     /// The gate must read the ORIGIN, not the router's own registration —

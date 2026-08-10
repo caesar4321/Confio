@@ -18,7 +18,8 @@
 
 import { useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
-import { useAuthReady } from '../contexts/AuthContext';
+import { useAuth, useAuthReady } from '../contexts/AuthContext';
+import { isOndoPhoneCountryEligible } from '../config/ondoEligibility';
 
 // Flags gate surfaces (savingsEnabled gates ENTRY only — Ahorrar CTA,
 // Convert; exits are never gated. The deposit mutation enforces
@@ -29,6 +30,8 @@ const GET_AHORRO_PORTFOLIO = gql`
     cusdPlusSummary {
       savingsEnabled
       stocksEnabled
+      stocksTradingEnabled
+      stocksBuyEnabled
       cusdDepositsPaused
       balanceUsd
       netApyPct
@@ -72,6 +75,8 @@ export interface SavingsPortfolio {
   };
   stocks: {
     enabled: boolean;
+    tradingEnabled: boolean;
+    buyEnabled: boolean;
     totalUsd: number;
     earnedTodayUsd: number;
     positions: StockPosition[];
@@ -104,6 +109,7 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
   // summary the balance rows would print as a confident $0.00. Same gate
   // GET_MY_BALANCES uses.
   const isAuthReady = useAuthReady();
+  const { userProfile } = useAuth();
   const { data, refetch, loading } = useQuery(GET_AHORRO_PORTFOLIO, {
     fetchPolicy: 'cache-and-network',
     pollInterval: 60_000, // matches the server-side GM cache TTL
@@ -118,7 +124,10 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
   // Stocks (Ondo GM): server flag = geo-eligible AND CUSD_PLUS_STOCKS_ENABLED.
   // Fail-closed before the answer — an investment surface appearing beats
   // one being yanked away from a blocked user.
-  const stocksEnabled: boolean = summary?.stocksEnabled ?? false;
+  const stocksEnabled: boolean = Boolean(
+    summary?.stocksEnabled
+    && isOndoPhoneCountryEligible(userProfile?.phoneCountry),
+  );
   // cUSD phase-out steering. Defaults to the shipped prod state (paused) so
   // the pre-answer frame renders the intended savings-first sheet instead of
   // flashing the legacy cUSD option and collapsing one round-trip later.
@@ -137,7 +146,7 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
     };
     // gmHoldings is null on GM upstream failure (never a fake price) —
     // Apollo keeps the last good payload cached across brief hiccups.
-    const positions: StockPosition[] = (data?.gmHoldings ?? []).map((h: any) => ({
+    const positions: StockPosition[] = (stocksEnabled ? data?.gmHoldings ?? [] : []).map((h: any) => ({
       symbol: h.symbol,
       ticker: h.ticker,
       name: h.name,
@@ -147,6 +156,8 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
     }));
     const stocks = {
       enabled: stocksEnabled,
+      tradingEnabled: stocksEnabled && Boolean(summary?.stocksTradingEnabled),
+      buyEnabled: stocksEnabled && Boolean(summary?.stocksBuyEnabled),
       totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
       // Day P&L implied by each position's 24h change:
       // value_now − value_now / (1 + pct/100), summed.

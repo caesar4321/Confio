@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal, ActivityIndicator, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
@@ -17,7 +17,14 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { inviteSendService } from '../services/inviteSendService';
-import { formatPhoneForDisplay } from '../hooks/useContactName';
+import { contactService } from '../services/contactService';
+import {
+  formatRecipientPhoneForDisplay,
+  inferredRecipientDiscoveryChanged,
+  isVerifiedInternationalRecipientPhone,
+  recipientConfirmationService,
+  recipientNeedsConfirmation,
+} from '../services/recipientConfirmationService';
 
 type TokenType = 'cusd' | 'confio' | 'cusd_plus';
 
@@ -74,6 +81,13 @@ type Friend = {
   algorandAddress?: string;
   userId?: string;
   id?: string; // Some screens pass 'id' instead of 'userId'
+  contactRecordId?: string;
+  confioUsername?: string;
+  confioFirstName?: string;
+  confioLastName?: string;
+  confioMatchedPhone?: string;
+  confioMatchWasInferred?: boolean;
+  phoneWasInferred?: boolean;
 };
 
 export const SendToFriendScreen = () => {
@@ -89,10 +103,76 @@ export const SendToFriendScreen = () => {
   // The server identifies a recipient by the FULL number, so always hand it
   // the international form when we have one. A bare local number resolves to
   // nobody — deliberately, since it names no country.
-  const friendInternationalPhone = friend.normalizedPhones?.find(p => p.startsWith('+'))
+  const friendInternationalPhone = friend.confioMatchedPhone
+    || friend.normalizedPhones?.find(p => p.startsWith('+'))
     || (friend.phone?.startsWith('+') ? friend.phone : '')
     || friend.phone
     || '';
+  const confioProfileName = [friend.confioFirstName, friend.confioLastName]
+    .map(value => value?.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' ');
+  const confioUsername = friend.confioUsername?.replace(/\s+/g, '').trim();
+  const confioIdentity = confioProfileName || (confioUsername ? `@${confioUsername}` : '');
+
+  const confirmInferredRecipient = async (): Promise<boolean> => {
+    const needsConfirmation = recipientNeedsConfirmation(
+      friend.isOnConfio,
+      friend.confioMatchWasInferred,
+      friend.phoneWasInferred,
+    );
+    if (!needsConfirmation) return true;
+    const senderId = userProfile?.id || '';
+    const matchedPhone = friend.confioMatchedPhone || friendInternationalPhone;
+    const recipientId = friend.isOnConfio
+      ? friend.userId || friend.id || ''
+      : matchedPhone ? `invite:${matchedPhone}` : '';
+    if (!senderId || !recipientId || !matchedPhone || (friend.isOnConfio && !confioIdentity)) {
+      Alert.alert(
+        'No pudimos verificar el destinatario',
+        'Faltan datos de la cuenta Confío vinculada a este contacto. Actualiza tus contactos e inténtalo de nuevo.',
+      );
+      return false;
+    }
+
+    const liveMatches = await contactService.checkConfioUsers([matchedPhone], apolloClient);
+    const liveMatch = liveMatches.get(matchedPhone);
+    if (inferredRecipientDiscoveryChanged(friend.isOnConfio, recipientId, liveMatch?.userId)) {
+      Alert.alert(
+        'El destinatario cambió',
+        'La cuenta vinculada a este número cambió desde la última sincronización. Actualiza tus contactos antes de enviar dinero.',
+      );
+      return false;
+    }
+
+    if (await recipientConfirmationService.isConfirmed(
+      senderId, friend.contactRecordId || friend.name, recipientId, matchedPhone,
+    )) return true;
+
+    return await new Promise<boolean>((resolve) => {
+      const usernameLine = confioUsername && confioProfileName ? `\nUsuario: @${confioUsername}` : '';
+      const identityCopy = friend.isOnConfio
+        ? `\n\nCuenta encontrada: ${confioIdentity}${usernameLine}`
+        : '\n\nEsta persona todavía no tiene una cuenta Confío. El dinero quedará vinculado a este número hasta que acepte la invitación.';
+      Alert.alert(
+        'Confirma el destinatario',
+        `${friend.name} está guardado sin código de país. Confío interpretó el número como ${formatRecipientPhoneForDisplay(matchedPhone)}.${identityCopy}\n\nConfirma que el país y el número son correctos antes de enviar dinero.`,
+        [
+          { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+          {
+            text: 'Sí, es la persona correcta',
+            onPress: async () => {
+              await recipientConfirmationService.confirm(
+                senderId, friend.contactRecordId || friend.name, recipientId, matchedPhone,
+              );
+              resolve(true);
+            },
+          },
+        ],
+        { cancelable: false },
+      );
+    });
+  };
 
   // Debug log to check friend data
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
@@ -262,8 +342,29 @@ export const SendToFriendScreen = () => {
       return;
     }
 
-    setIsProcessing(true);
+    const hasDirectConfioRecipientId = friend.isOnConfio && Boolean(friend.userId || friend.id);
+    if (!hasDirectConfioRecipientId && !isVerifiedInternationalRecipientPhone(friendInternationalPhone)) {
+      setErrorMessage('Este contacto no tiene un número internacional válido. Guárdalo con + y el código de país, sincroniza tus contactos e inténtalo de nuevo.');
+      setShowError(true);
+      return;
+    }
+
+    // Lock before awaiting the alert. Otherwise rapid taps can queue multiple
+    // confirmations and start the same send flow more than once.
     navLock.current = true;
+    try {
+      if (!(await confirmInferredRecipient())) {
+        navLock.current = false;
+        return;
+      }
+    } catch {
+      navLock.current = false;
+      setErrorMessage('No pudimos confirmar el destinatario. Inténtalo de nuevo.');
+      setShowError(true);
+      return;
+    }
+
+    setIsProcessing(true);
 
     try {
 
@@ -373,8 +474,14 @@ export const SendToFriendScreen = () => {
                   <Text style={[styles.friendAvatarText, { color: config.color }]}>{friend.avatar}</Text>
                 </View>
                 <Text style={styles.headerSubtitle}>{friend.name}</Text>
+                {friend.isOnConfio && (confioProfileName || confioUsername) && (
+                  <Text style={styles.headerIdentity}>
+                    Cuenta Confío: {confioProfileName || `@${confioUsername}`}
+                    {confioProfileName && confioUsername ? ` · @${confioUsername}` : ''}
+                  </Text>
+                )}
                 {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
-                  <Text style={styles.headerPhone}>{formatPhoneForDisplay(friend.phone)}</Text>
+                  <Text style={styles.headerPhone}>{formatRecipientPhoneForDisplay(friend.phone)}</Text>
                 )}
               </View>
             </View>
@@ -548,6 +655,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.white,
     opacity: 0.8,
+  },
+  headerIdentity: {
+    fontSize: 14,
+    color: colors.white,
+    opacity: 0.95,
+    marginBottom: 4,
   },
   balanceCard: {
     backgroundColor: colors.white,

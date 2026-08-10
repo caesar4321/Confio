@@ -109,6 +109,9 @@ application.json
 # Move build artifacts
 /contracts/build/
 
+# Rust / Anchor build artifacts
+**/target/
+
 # Heap dumps
 *.hprof
 

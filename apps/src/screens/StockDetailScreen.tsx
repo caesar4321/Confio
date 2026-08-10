@@ -46,14 +46,14 @@ export const StockDetailScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<DetailRoute>();
   const { formatNumber } = useNumberFormat();
-  const { byTicker, tradabilityFor } = useGmMarket();
   const { savings, stocks: stockHoldings } = useSavingsPortfolio();
+  const { byTicker, tradabilityFor } = useGmMarket(stockHoldings.enabled);
 
   const stock = byTicker(route.params.ticker);
   const position = stockHoldings.positions.find((p) => p.ticker === route.params.ticker);
 
   const [range, setRange] = useState<GmRange>('1D');
-  const { closes } = useGmOhlc(stock?.symbol, range);
+  const { closes } = useGmOhlc(stock?.symbol, range, stockHoldings.enabled);
 
   // Range chart from gmOhlc closes. On 1D the market sparkline stands in
   // until candles arrive (same real data source, coarser); deterministic
@@ -82,10 +82,10 @@ export const StockDetailScreen = () => {
       .join(' ');
   }, [series]);
 
-  if (!stock) {
+  if (!stockHoldings.enabled || !stock) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: colors.text.secondary }}>Acción no encontrada</Text>
+        <Text style={{ color: colors.text.secondary }}>Acciones no disponibles</Text>
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
           <Text style={{ color: colors.primaryDark, fontWeight: '600' }}>Volver</Text>
         </TouchableOpacity>
@@ -186,13 +186,13 @@ export const StockDetailScreen = () => {
         {/* CTAs + funding line (sweep model made visible). Trading entry
             is client-gated until the execution layer is real — never show
             a buy button that can't actually buy. */}
-        {STOCKS_TRADING_UI_ENABLED ? (
+        {STOCKS_TRADING_UI_ENABLED && stockHoldings.tradingEnabled ? (
           <>
             <View style={styles.ctaRow}>
               <TouchableOpacity
-                style={[styles.ctaBuy, tradability === 'closed' && styles.ctaDisabled]}
+                style={[styles.ctaBuy, (!stockHoldings.buyEnabled || tradability === 'closed') && styles.ctaDisabled]}
                 onPress={onComprar}
-                disabled={tradability === 'closed'}
+                disabled={!stockHoldings.buyEnabled || tradability === 'closed'}
                 activeOpacity={0.85}
               >
                 <Text style={styles.ctaBuyText}>Comprar</Text>

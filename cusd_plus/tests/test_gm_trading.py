@@ -1,0 +1,296 @@
+import base64
+import time
+from types import SimpleNamespace
+from unittest import mock
+
+from django.core.cache import cache
+from django.test import SimpleTestCase, override_settings
+
+from cusd_plus import gm_api
+from cusd_plus import gm_holdings
+from cusd_plus.schema import (
+    PrepareGmTrade,
+    Query,
+    _acquire_gm_quote_lock,
+    _bsc_rate_limited,
+    _normalize_gm_quote,
+    _stock_execution_ready,
+    _validated_gm_trade_request,
+)
+
+
+class GmApiTradingTests(SimpleTestCase):
+    def tearDown(self):
+        cache.clear()
+        gm_holdings._fallback_registry.cache_clear()
+        super().tearDown()
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
+        CUSD_PLUS_7702_ENABLED=True,
+        CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_execution_gate_requires_all_settlement_rails(self):
+        self.assertTrue(_stock_execution_ready())
+        with override_settings(CUSD_PLUS_7702_ENABLED=False):
+            self.assertFalse(_stock_execution_ready())
+        with override_settings(CUSD_PLUS_GM_TRADE_FEE_BPS=31):
+            self.assertFalse(_stock_execution_ready())
+
+    @override_settings(ONDO_API_KEY='read-key', ONDO_GM_WRITE_KEY='write-key')
+    def test_soft_and_binding_use_split_keys_and_bsc_chain(self):
+        response = mock.Mock(ok=True)
+        response.json.return_value = {'ok': True}
+        with mock.patch('cusd_plus.gm_api.requests.post', return_value=response) as post:
+            gm_api.soft_attestation('TSLAon', 'buy', '99.7', 'short')
+            gm_api.binding_attestation('TSLAon', 'buy', '99.7', 'short')
+        self.assertEqual(post.call_args_list[0].kwargs['headers']['x-api-key'], 'read-key')
+        self.assertEqual(post.call_args_list[1].kwargs['headers']['x-api-key'], 'write-key')
+        self.assertEqual(post.call_args_list[0].kwargs['json']['chainId'], 'bsc-56')
+        self.assertNotIn('userAddress', post.call_args_list[0].kwargs['json'])
+
+    @override_settings(CUSD_PLUS_GM_MAX_TRADE_USD=100_000)
+    def test_binding_quote_is_normalized_for_router_abi(self):
+        request = _validated_gm_trade_request('TSLAon', 'buy', '600', 'short')
+        data = {
+            'attestationId': '123',
+            'userId': '0x' + '44' * 32,
+            'chainId': '56',
+            'symbol': 'TSLAon',
+            'ticker': 'TSLA',
+            'assetAddress': '0x' + '55' * 20,
+            'side': '0',
+            'tokenAmount': str(2 * 10**18),
+            'price': str(300 * 10**18),
+            'expiration': int(time.time()) + 300,
+            'signature': base64.b64encode(b'\x66' * 65).decode(),
+            'additionalData': '',
+        }
+        quote = _normalize_gm_quote(data, request, binding=True)
+        self.assertTrue(quote['success'])
+        self.assertEqual(quote['notional_wei'], str(600 * 10**18))
+        self.assertEqual(quote['signature_hex'], '0x' + '66' * 65)
+        self.assertEqual(quote['additional_data_hex'], '0x' + '00' * 32)
+
+    @override_settings(CUSD_PLUS_GM_MAX_TRADE_USD=100_000)
+    def test_quote_arithmetic_outside_micro_usdt_is_rejected(self):
+        request = _validated_gm_trade_request('TSLAon', 'buy', '600', 'short')
+        data = {
+            'chainId': '56', 'symbol': 'TSLAon', 'ticker': 'TSLA',
+            'assetAddress': '0x' + '55' * 20, 'side': '0',
+            'tokenAmount': str(1 * 10**18), 'price': str(599 * 10**18),
+        }
+        with self.assertRaises(gm_api.GmApiError):
+            _normalize_gm_quote(data, request, binding=False)
+
+    @override_settings(CUSD_PLUS_GM_MAX_TRADE_USD=100_000)
+    def test_numeric_zero_buy_side_is_accepted(self):
+        request = _validated_gm_trade_request('TSLAon', 'buy', '600', 'short')
+        data = {
+            'chainId': 56, 'symbol': 'TSLAon', 'ticker': 'TSLA',
+            'assetAddress': '0x' + '55' * 20, 'side': 0,
+            'tokenAmount': str(2 * 10**18), 'price': str(300 * 10**18),
+        }
+        self.assertEqual(_normalize_gm_quote(data, request, binding=False)['side'], '0')
+
+    def test_structured_upstream_error_is_preserved(self):
+        response = mock.Mock(ok=False, status_code=403)
+        response.json.return_value = {'code': 'MARKET_CLOSED', 'message': 'market is closed'}
+        with override_settings(ONDO_API_KEY='read-key'), \
+             mock.patch('cusd_plus.gm_api.requests.post', return_value=response), \
+             self.assertRaises(gm_api.GmApiError) as ctx:
+            gm_api.soft_attestation('TSLAon', 'buy', '100', 'short')
+        self.assertEqual(ctx.exception.code, 'MARKET_CLOSED')
+
+    def test_holdings_registry_uses_official_bsc_addresses(self):
+        rows = [{
+            'symbol': 'TSLAon',
+            'addresses': [
+                {'networkChainId': 'ethereum-1', 'address': '0x' + '11' * 20, 'decimals': 18},
+                {'networkChainId': 'bsc-56', 'address': '0x' + '22' * 20, 'decimals': 18},
+            ],
+        }]
+        with mock.patch('cusd_plus.gm_holdings.Path.read_text', return_value='{}'), \
+             mock.patch('cusd_plus.gm_api.all_addresses', return_value=rows):
+            registry = gm_holdings.registry()
+        self.assertEqual(registry['TSLAon']['address'], '0x' + '22' * 20)
+
+    def test_holdings_registry_is_cached_across_requests(self):
+        rows = [{
+            'symbol': 'TSLAon',
+            'addresses': [{
+                'networkChainId': 'bsc-56',
+                'address': '0x' + '22' * 20,
+                'decimals': 18,
+            }],
+        }]
+        with mock.patch('cusd_plus.gm_holdings.Path.read_text', return_value='{}'), \
+             mock.patch('cusd_plus.gm_api.all_addresses', return_value=rows) as addresses:
+            self.assertEqual(gm_holdings.registry(), gm_holdings.registry())
+        addresses.assert_called_once()
+
+    def test_fresh_holdings_cache_skips_registry_lookup(self):
+        holder = '0x' + '77' * 20
+        cache.set(f'gm_hold:{holder}', {'TSLAon': 1.0}, 30)
+        with mock.patch('cusd_plus.gm_holdings.registry') as registry:
+            self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
+        registry.assert_not_called()
+
+    def test_empty_registry_outage_is_unknown_not_empty_portfolio(self):
+        with mock.patch('cusd_plus.gm_holdings.Path.read_text', return_value='{}'), \
+             mock.patch('cusd_plus.gm_api.all_addresses', side_effect=RuntimeError('down')):
+            self.assertIsNone(gm_holdings.registry())
+
+    def test_rate_limit_counts_atomically_to_the_configured_cap(self):
+        for _ in range(6):
+            self.assertFalse(_bsc_rate_limited(991, 'gm_firm_quote', 6))
+        self.assertTrue(_bsc_rate_limited(991, 'gm_firm_quote', 6))
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
+    def test_ondo_ineligible_user_cannot_read_stock_surfaces(self):
+        user = SimpleNamespace(is_authenticated=True, id=33, phone_country='US')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        query = Query()
+        with mock.patch('cusd_plus.gm_api.all_market') as market, \
+             mock.patch('cusd_plus.gm_api.ohlc') as ohlc, \
+             mock.patch('cusd_plus.schema._active_account') as account:
+            self.assertIsNone(query.resolve_gm_market(info))
+            self.assertEqual(query.resolve_gm_holdings(info), [])
+            self.assertEqual(query.resolve_gm_ohlc(info, 'TSLAon'), [])
+        market.assert_not_called()
+        ohlc.assert_not_called()
+        account.assert_not_called()
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'],
+    )
+    def test_soft_buy_quote_is_blocked_but_sell_quote_is_not_country_gated(self):
+        user = SimpleNamespace(is_authenticated=True, id=34, phone_country='BO')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        query = Query()
+        buy = query.resolve_gm_soft_quote(info, 'TSLAon', 'buy', '100')
+        self.assertEqual(buy.error_code, 'TRADE_NOT_AVAILABLE')
+        with mock.patch('cusd_plus.gm_api.soft_attestation',
+                        side_effect=gm_api.GmApiError('SELL_REACHED', 'sell reached', 400)):
+            sell = query.resolve_gm_soft_quote(info, 'TSLAon', 'sell', '100')
+        self.assertEqual(sell.error_code, 'SELL_REACHED')
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
+    def test_soft_sell_quote_is_blocked_by_ondo_issuer_country(self):
+        user = SimpleNamespace(is_authenticated=True, id=36, phone_country='US')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        with mock.patch('cusd_plus.gm_api.soft_attestation') as soft:
+            sell = Query().resolve_gm_soft_quote(info, 'TSLAon', 'sell', '100')
+        self.assertEqual(sell.error_code, 'TRADE_NOT_AVAILABLE')
+        soft.assert_not_called()
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
+        CUSD_PLUS_7702_ENABLED=True,
+        CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'],
+    )
+    def test_binding_buy_quote_is_blocked_by_confio_country_overlay(self):
+        user = SimpleNamespace(is_authenticated=True, id=35, phone_country='BO')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        account = SimpleNamespace(id=53, bsc_address='0x' + '33' * 20)
+        with mock.patch('cusd_plus.schema._active_account', return_value=account), \
+             mock.patch(
+                 'users.jwt_context.get_jwt_business_context_with_validation',
+                 return_value=None,
+             ), \
+             mock.patch('cusd_plus.gm_api.binding_attestation') as binding:
+            result = PrepareGmTrade().mutate(
+                info,
+                request_id='blocked_buy_123456',
+                symbol='TSLAon',
+                side='buy',
+                notional_value='100',
+                duration='short',
+            )
+        self.assertEqual(result.quote.error_code, 'TRADE_NOT_AVAILABLE')
+        binding.assert_not_called()
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
+        CUSD_PLUS_7702_ENABLED=True,
+        CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_binding_sell_quote_is_blocked_by_ondo_issuer_country(self):
+        user = SimpleNamespace(is_authenticated=True, id=37, phone_country='US')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        account = SimpleNamespace(id=54, bsc_address='0x' + '33' * 20)
+        with mock.patch('cusd_plus.schema._active_account', return_value=account), \
+             mock.patch(
+                 'users.jwt_context.get_jwt_business_context_with_validation',
+                 return_value=None,
+             ), \
+             mock.patch('cusd_plus.gm_api.binding_attestation') as binding:
+            result = PrepareGmTrade().mutate(
+                info,
+                request_id='blocked_sell_123456',
+                symbol='TSLAon',
+                side='sell',
+                notional_value='100',
+                duration='short',
+            )
+        self.assertEqual(result.quote.error_code, 'TRADE_NOT_AVAILABLE')
+        binding.assert_not_called()
+
+    def test_quote_lock_does_not_delete_a_reacquired_lease(self):
+        lock_key = 'gm:test:owner-safe-lock'
+        release = _acquire_gm_quote_lock(cache, lock_key, 30)
+        self.assertIsNotNone(release)
+        cache.set(lock_key, 'new-owner', 30)
+        release()
+        self.assertEqual(cache.get(lock_key), 'new-owner')
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
+        CUSD_PLUS_7702_ENABLED=True,
+        CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+        CUSD_PLUS_GM_MAX_TRADE_USD=100_000,
+    )
+    def test_binding_quote_retry_does_not_issue_while_same_id_is_in_flight(self):
+        request_id = 'retry_key_123456'
+        user = mock.Mock(is_authenticated=True, id=41, phone_country='CO')
+        account = mock.Mock(id=52, bsc_address='0x' + '33' * 20)
+        info = mock.Mock()
+        info.context.user = user
+        info.context.META = {}
+        cache.set(f'gm_firm_attestation:41:52:{request_id}:lock', 1, 30)
+
+        with mock.patch('cusd_plus.schema._active_account', return_value=account), \
+             mock.patch(
+                 'users.jwt_context.get_jwt_business_context_with_validation',
+                 return_value=None,
+             ), \
+             mock.patch('cusd_plus.eligibility.check_stock_buy_eligibility', return_value=True), \
+             mock.patch('cusd_plus.gm_api.binding_attestation') as binding:
+            result = PrepareGmTrade().mutate(
+                info,
+                request_id=request_id,
+                symbol='TSLAon',
+                side='buy',
+                notional_value='100',
+                duration='short',
+            )
+
+        self.assertEqual(result.quote.error_code, 'QUOTE_IN_PROGRESS')
+        binding.assert_not_called()

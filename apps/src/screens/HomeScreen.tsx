@@ -1851,10 +1851,9 @@ export const HomeScreen = () => {
                   from the old combined Ahorros hub): stocks have red days
                   and belong visually apart from the payment dollar. Shown
                   for stocks-enabled users and anyone still holding. */}
-              {/* Same rule as the savings row: the employee check belongs on
-                  the NUMBER, not the wallet. What remains here is the
-                  genuine emptiness test — no stocks and none enabled. */}
-              {(savingsPortfolio.stocks.enabled || savingsPortfolio.stocks.totalUsd > 0) && (
+              {/* Issuer eligibility is authoritative: cached holdings must
+                  never resurrect the U.S. stocks surface for a blocked geo. */}
+              {savingsPortfolio.stocks.enabled && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,

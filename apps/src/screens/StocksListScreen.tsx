@@ -37,8 +37,8 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 export const StocksListScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
-  const { session, stocks, loading } = useGmMarket();
   const { savings, stocks: myStocks } = useSavingsPortfolio();
+  const { session, stocks, loading } = useGmMarket(myStocks.enabled);
   const [search, setSearch] = useState('');
 
   // Every row carries BOTH numbers with the app-wide hierarchy: the big
@@ -73,6 +73,17 @@ export const StocksListScreen = () => {
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  if (!myStocks.enabled) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: colors.text.secondary }}>Acciones no disponibles</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
+          <Text style={{ color: colors.primaryDark, fontWeight: '600' }}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const renderRow = ({ item }: { item: GmStock }) => {
     const up = item.dayChangePct >= 0;
@@ -120,7 +131,7 @@ export const StocksListScreen = () => {
                 <Stop offset="1" stopColor={colors.primaryDark} />
               </SvgLinearGradient>
             </Defs>
-            <Rect width="100%" height="100%" fill="url(#accionesField)" />
+            <Rect width="100%" height="100%" fill="url(#stocksField)" />
             <Circle cx="105%" cy="35%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
           </Svg>
           <View style={styles.headerInner}>

@@ -75,7 +75,7 @@ const ethCall = async (to: string, data: string): Promise<string> => {
   return bscEthCall(to, data);
 };
 
-const currentAllowance = async (
+export const getErc20Allowance = async (
   owner: string, spender: string, token: string,
 ): Promise<bigint> => {
   const res = await ethCall(token, encodeCall('allowance(address,address)', [
@@ -113,7 +113,7 @@ export const subscribeUsdtToSavings = async (
     { type: 'uint', value: minUsdyOut },
     { type: 'address', value: from },
   ]);
-  const needsApprove = (await currentAllowance(from, vaultAddress, USDT_BSC)) < usdtWei;
+  const needsApprove = (await getErc20Allowance(from, vaultAddress, USDT_BSC)) < usdtWei;
 
   // ── 7702 sponsored path ──
   const sponsored = await fetchSponsored7702Params();
@@ -237,8 +237,12 @@ export const getVaultShares = async (
 
 /** Raw wallet USDT (18dp), read through the server relay like everything else. */
 export const getUsdtBalanceWei = async (owner: string): Promise<bigint> => {
+  return getErc20BalanceWei(USDT_BSC, owner);
+};
+
+export const getErc20BalanceWei = async (token: string, owner: string): Promise<bigint> => {
   const { selector, encodeAddress } = await import('./evmWallet');
-  const hex = await ethCall(USDT_BSC, selector('balanceOf(address)') + encodeAddress(owner));
+  const hex = await ethCall(token, selector('balanceOf(address)') + encodeAddress(owner));
   return hex && hex !== '0x' ? BigInt(hex) : 0n;
 };
 
@@ -275,11 +279,20 @@ export const predictRedeemUsdtOut = (
 
 /** Inverse of the above: shares to burn to net at least `usdtWei`. Rounds UP
  *  and adds a 1-wei-per-floor cushion, so the prediction never lands short. */
-const sharesForUsdtOut = (
+export const sharesForUsdtOut = (
   usdtWei: bigint, pPlusWad: bigint,
 ): bigint => {
   if (pPlusWad <= 0n || usdtWei <= 0n) return 0n;
   return (usdtWei * 10n ** 18n + pPlusWad - 1n) / pPlusWad + 2n;
+};
+
+/** Exact mirror of vault.subscribeAndMint at the current validated prices. */
+export const predictSubscribeSharesOut = (
+  usdtWei: bigint, pPlusWad: bigint, oraclePriceWad: bigint,
+): bigint => {
+  if (usdtWei <= 0n || pPlusWad <= 0n || oraclePriceWad <= 0n) return 0n;
+  const usdyOut = (usdtWei * 10n ** 18n) / oraclePriceWad;
+  return (usdyOut * oraclePriceWad) / pPlusWad;
 };
 
 /**

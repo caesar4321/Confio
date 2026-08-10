@@ -1,10 +1,18 @@
 # Confío Smart Contracts
 
-This directory contains all smart contracts and blockchain-related code for the Confío platform on Algorand.
+This directory contains Confío's Algorand, BNB Smart Chain, and Solana
+contracts. Each EVM product is maintained as its own Foundry package.
 
 ## Directory Structure
 
-The contracts are organized into 6 main categories:
+The contracts are organized by product and chain. Key packages include:
+
+### 🟡 [`cusd_plus/`](./cusd_plus)
+cUSD+ savings and supporting BSC contracts (Solidity/Foundry)
+
+### 📈 [`ondo_stocks/`](./ondo_stocks)
+Ondo Global Markets stock router on BSC, including its dedicated tests and
+deployment scripts. The fixed 0.30% USDT trade fee accumulates in the router.
 
 ### 📦 [`confio/`](./confio)
 CONFIO utility/governance token (1B fixed supply)

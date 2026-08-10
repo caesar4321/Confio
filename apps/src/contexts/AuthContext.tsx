@@ -10,7 +10,7 @@ import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client'
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { biometricAuthService } from '../services/biometricAuthService';
-import { setDefaultPhoneRegion } from '../services/contactService';
+import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 
 // Simple auth readiness gate to coordinate token-dependent queries
@@ -132,6 +132,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
   const deferredBootstrapOnActiveRef = useRef(false);
+
+  // Derive contact normalization only from the profile currently rendered by
+  // auth. Clearing or switching that profile clears the country immediately.
+  useEffect(() => {
+    const userProfile = isAuthenticated ? profileData?.userProfile : null;
+    setDefaultPhoneRegion(userProfile?.phoneCountry);
+    void contactService.setContactOwner(userProfile?.id, userProfile?.phoneCountry);
+  }, [isAuthenticated, profileData?.userProfile?.id, profileData?.userProfile?.phoneCountry]);
 
   const perfLog = (_label: string, _startTime: number, _extra?: Record<string, any>) => {};
 
@@ -334,8 +342,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         // Address-book numbers that omit a country code are read against the
         // user's OWN country. Without this every non-Venezuelan user's local
         // contacts parse as +58 and match the wrong person (or nobody).
-        setDefaultPhoneRegion(data?.me?.phoneCountry);
-
         setProfileData({
           userProfile: data?.me || null,
           businessProfile: undefined,

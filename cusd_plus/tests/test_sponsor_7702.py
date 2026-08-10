@@ -14,12 +14,15 @@ from django.test import SimpleTestCase, override_settings
 
 from eth_keys import keys
 from eth_utils import keccak
+from eth_abi import encode as abi_encode
 
 from cusd_plus import sponsor_7702
 from cusd_plus.sponsor_7702 import PolicyError
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
 DELEGATE = '0x' + '77' * 20
+ROUTER = '0x' + '88' * 20
+STOCK = '0x' + '99' * 20
 USDT = sponsor_7702.USDT_BSC
 CHAIN_ID = 56
 RUNTIME_CODE = '0x6080aabb'  # anything non-empty for the state override
@@ -52,12 +55,30 @@ def _call(to, data, value='0'):
     return {'to': to.lower(), 'value': value, 'data': data.lower()}
 
 
+def _stock_data(side=0, *, max_fee=30, expiration=None, min_usdt=None):
+    expiration = expiration or int(time.time()) + 300
+    quote = (CHAIN_ID, 123, b'\x44' * 32, STOCK, 300 * 10**18, 2 * 10**18,
+             expiration, side, b'\x00' * 32)
+    signature = b'\x55' * 65
+    if side == 0:
+        types = [sponsor_7702.GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256', 'uint256']
+        spend = 600 * 10**18
+        fee = (spend * 30 + 9969) // 9970
+        floor = min_usdt if min_usdt is not None else spend + fee
+        values = [quote, signature, 602 * 10**18, spend, floor, max_fee]
+        selector = sponsor_7702.SEL_STOCK_BUY
+    else:
+        types = [sponsor_7702.GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256']
+        floor = min_usdt if min_usdt is not None else 594 * 10**18
+        values = [quote, signature, floor, 588 * 10**18, max_fee]
+        selector = sponsor_7702.SEL_STOCK_SELL
+    return '0x' + selector + abi_encode(types, values).hex()
+
+
 def _intent_id(calls):
     """The generic rail's intentId derivation — kind from the selectors
     (mirror of cusd_plus/schema.py), source_id omitted."""
-    kind = 'redeem' if any(
-        c['data'][2:10] == sponsor_7702.SEL_REDEEM_TO_USDT for c in calls) else 'subscribe'
-    return sponsor_7702.intent_id_for(kind)
+    return sponsor_7702.intent_id_for(sponsor_7702.classify_calls_kind(calls))
 
 
 def _sign_intent(calls, nonce, deadline, key=USER_KEY, user_addr=USER):
@@ -145,6 +166,66 @@ class PolicyTests(SimpleTestCase):
             self._assert_rejected(
                 [_call(VAULT, _redeem_data(recipient='0x' + 'ee' * 20))],
                 'redeem_recipient_not_allowed')
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_stock_buy_and_sell_batches_accepted(self):
+        buy_approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        sell_approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        self._validate([_call(VAULT, buy_approve), _call(ROUTER, _stock_data(0))])
+        self._validate([_call(STOCK, sell_approve), _call(ROUTER, _stock_data(1))])
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_stock_batch_rejects_wrong_approval_token_and_fee(self):
+        approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
+        self._assert_rejected(
+            [_call(USDT, approve), _call(ROUTER, _stock_data(0))], 'bad_stock_batch')
+        self._assert_rejected([_call(ROUTER, _stock_data(0, max_fee=31))], 'bad_stock_fee_cap')
+
+        with override_settings(CUSD_PLUS_GM_TRADE_FEE_BPS=31):
+            self._assert_rejected(
+                [_call(ROUTER, _stock_data(0, max_fee=31))], 'bad_stock_fee_cap')
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_stock_batch_rejects_weak_slippage_floors(self):
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(0, min_usdt=1))], 'bad_stock_floor')
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(1, min_usdt=1))], 'bad_stock_floor')
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+    )
+    def test_stock_batch_rejects_expired_attestation(self):
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(0, expiration=int(time.time()) - 1))],
+            'bad_stock_expiration')
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+    )
+    def test_stock_batch_rejects_noncanonical_and_multiple_router_calls(self):
+        # Solidity's ABI decoder can ignore trailing words. The sponsor must
+        # bind only the one canonical byte representation the client signs.
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(0) + '00' * 32)],
+            'bad_calldata')
+        self._assert_rejected(
+            [_call(ROUTER, _stock_data(0)), _call(ROUTER, _stock_data(0))],
+            'multiple_stock_trades')
 
 
 class SignatureTests(SimpleTestCase):
@@ -677,8 +758,9 @@ class ReconcileSignedBatchesTests(SimpleTestCase):
             'payments.confirm_bsc_payment', args=[5, 99], countdown=10)
 
     def test_unmapped_kind_promotes_without_domain_task(self):
-        # invite_create settles via the batch receipt task alone.
-        batch = self._batch(kind='invite_create', source_id=3)
+        # Stock trades settle via the batch receipt task alone; chain state
+        # is the portfolio ledger, so there is no separate domain row/task.
+        batch = self._batch(kind='stock_buy', source_id=None)
         result, receipt_task, capp = self._run(batch, {'hash': self.TXH})
         self.assertEqual(batch.status, 'sent')
         receipt_task.apply_async.assert_called_once()

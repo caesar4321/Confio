@@ -229,7 +229,22 @@ export type MainStackParamList = {
   EmergencyExit: undefined;
   BlockedAccount: undefined;
   SendToFriend: {
-    friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
+    friend: {
+      id?: string;
+      userId?: string;
+      name: string;
+      avatar: string;
+      isOnConfio: boolean;
+      phone: string;
+      normalizedPhones?: string[];
+      contactRecordId?: string;
+      confioUsername?: string;
+      confioFirstName?: string;
+      confioLastName?: string;
+      confioMatchedPhone?: string;
+      confioMatchWasInferred?: boolean;
+      phoneWasInferred?: boolean;
+    };
     tokenType?: 'cusd' | 'confio' | 'cusd_plus';
   };
   FriendDetail: {
@@ -238,6 +253,13 @@ export type MainStackParamList = {
     friendAvatar: string;
     friendPhone?: string;
     isOnConfio: boolean;
+    friendContactRecordId?: string | null;
+    friendConfioUsername?: string | null;
+    friendConfioFirstName?: string | null;
+    friendConfioLastName?: string | null;
+    friendConfioMatchedPhone?: string | null;
+    friendConfioMatchWasInferred?: boolean;
+    friendPhoneWasInferred?: boolean;
     friendStatusTier?: string | null;
     friendIsReferralVerified?: boolean;
   };

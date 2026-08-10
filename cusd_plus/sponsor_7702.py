@@ -23,7 +23,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.core.cache import cache
 
-from eth_abi import encode as abi_encode
+from eth_abi import decode as abi_decode, encode as abi_encode
 from eth_utils import keccak
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,9 @@ SEL_APPROVE = _sel('approve(address,uint256)')                       # 095ea7b3
 SEL_TRANSFER = _sel('transfer(address,uint256)')                     # a9059cbb
 SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
+GM_QUOTE_ABI = '(uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32)'
+SEL_STOCK_BUY = _sel(f'buyWithSavings({GM_QUOTE_ABI},bytes,uint256,uint256,uint256,uint256)')
+SEL_STOCK_SELL = _sel(f'sellToSavings({GM_QUOTE_ABI},bytes,uint256,uint256,uint256)')
 SEL_PRESALE_BUY = _sel('buy(uint256,uint256)')                       # ConfioPresaleVault
 SEL_PAY = _sel('pay(bytes32,address,uint256,address,uint256,bytes)')  # ConfioPayContract v3
 # v4 carries the merchant routing INSIDE the signed terms, so an ineligible
@@ -86,6 +89,8 @@ GAS_PER_SELECTOR = {
     # path (pay from its USDT balance) or the expensive one (source it),
     # and its balance is routinely 0. Budget for the expensive path.
     SEL_REDEEM_TO_USDT: 750_000,
+    SEL_STOCK_BUY: 1_700_000,
+    SEL_STOCK_SELL: 1_900_000,
     SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
     SEL_PAY: 240_000,  # 2 transferFroms + invoice write + accrual + ecrecover/EIP712 auth
     # v4's redeem branch adds a vault call: Ondo redemption dominates
@@ -114,6 +119,10 @@ def delegate_address() -> str:
 
 def _vault_address() -> str:
     return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+
+
+def _stock_router_address() -> str:
+    return (getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', '') or '').lower()
 
 
 def _rpc(method, params):
@@ -351,6 +360,82 @@ def _word(data_hex: str, i: int) -> str:
     return data_hex[start:start + 64]
 
 
+def _decode_stock_call(call: dict) -> dict | None:
+    router = _stock_router_address()
+    if not router or call['to'] != router:
+        return None
+    if not getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False):
+        raise PolicyError('stock_trading_disabled')
+    if int(getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30)) != 30:
+        raise PolicyError('bad_stock_fee_cap')
+    try:
+        data = call['data']
+        if not data.startswith('0x') or len(data) > 4_096 or (len(data) - 2) % 2 != 0:
+            raise PolicyError('bad_calldata')
+        data_hex = data[2:].lower()
+        selector = data_hex[:8]
+        raw = bytes.fromhex(data_hex[8:])
+        if selector == SEL_STOCK_BUY:
+            types = [GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256', 'uint256']
+            decoded = abi_decode(types, raw)
+            quote, signature, shares, spend, min_usdt, max_fee = decoded
+            action = 'stock_buy'
+            if shares <= 0 or spend <= 0 or min_usdt <= 0:
+                raise PolicyError('bad_stock_floor')
+            quote_cost = quote[5] * quote[4] // 10 ** 18
+            if spend < quote_cost or spend - quote_cost > 10 ** 12:
+                raise PolicyError('bad_stock_notional')
+            fee_bps = 30
+            required_debit = spend + (spend * fee_bps + (10_000 - fee_bps) - 1) // (10_000 - fee_bps)
+            if min_usdt != required_debit:
+                raise PolicyError('bad_stock_floor')
+        elif selector == SEL_STOCK_SELL:
+            types = [GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256']
+            decoded = abi_decode(types, raw)
+            quote, signature, min_usdt, min_shares, max_fee = decoded
+            action = 'stock_sell'
+            if min_usdt <= 0 or min_shares <= 0:
+                raise PolicyError('bad_stock_floor')
+            quote_cost = quote[5] * quote[4] // 10 ** 18
+            if min_usdt < quote_cost * 99 // 100:
+                raise PolicyError('bad_stock_floor')
+        else:
+            raise PolicyError('selector_not_allowed')
+        # Reject trailing/non-canonical ABI bytes before interpreting fields.
+        if abi_encode(types, decoded) != raw:
+            raise PolicyError('bad_calldata')
+    except PolicyError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise PolicyError('bad_calldata') from exc
+
+    chain_id, attestation_id, user_id, asset, price, quantity, expiration, side, _additional = quote
+    expected_side = 0 if action == 'stock_buy' else 1
+    if chain_id != int(getattr(settings, 'BSC_CHAIN_ID', 56)) or side != expected_side:
+        raise PolicyError('bad_stock_quote')
+    if attestation_id <= 0 or int.from_bytes(user_id, 'big') == 0 or price <= 0 or quantity <= 0:
+        raise PolicyError('bad_stock_quote')
+    now = int(time.time())
+    if expiration <= now or expiration > now + 24 * 3600:
+        raise PolicyError('bad_stock_expiration')
+    if len(signature) != 65 or asset == '0x0000000000000000000000000000000000000000':
+        raise PolicyError('bad_stock_quote')
+    if max_fee != 30:
+        raise PolicyError('bad_stock_fee_cap')
+    return {'kind': action, 'asset': asset.lower(), 'quantity': quantity, 'shares': shares if action == 'stock_buy' else None}
+
+
+def classify_calls_kind(calls: list) -> str:
+    selectors = {c['data'][2:10].lower() for c in calls}
+    if SEL_STOCK_BUY in selectors:
+        return 'stock_buy'
+    if SEL_STOCK_SELL in selectors:
+        return 'stock_sell'
+    if SEL_REDEEM_TO_USDT in selectors:
+        return 'redeem'
+    return 'subscribe'
+
+
 def validate_policy(calls: list, user, user_addr: str) -> None:
     """Raise PolicyError unless every call is an allowlisted vault-flow
     action for THIS user. calls: [{'to','value','data'}] normalized lower.
@@ -362,6 +447,14 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
         raise PolicyError('vault_not_configured')
     user_word = user_addr.lower().replace('0x', '').rjust(64, '0')
 
+    stock_actions = [a for c in calls if (a := _decode_stock_call(c)) is not None]
+    if len(stock_actions) > 1:
+        raise PolicyError('multiple_stock_trades')
+    stock_action = stock_actions[0] if stock_actions else None
+    if stock_action and len(calls) > 2:
+        raise PolicyError('bad_stock_batch')
+    router = _stock_router_address()
+
     for c in calls:
         if int(c['value']) != 0:
             raise PolicyError('value_not_allowed')
@@ -371,7 +464,15 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
         data_hex = data[2:].lower()
         selector = data_hex[:8]
 
-        if c['to'] == USDT_BSC:
+        if stock_action:
+            if c['to'] == router:
+                continue
+            expected_token = vault if stock_action['kind'] == 'stock_buy' else stock_action['asset']
+            if c['to'] != expected_token or selector != SEL_APPROVE or len(data_hex) != 8 + 128:
+                raise PolicyError('bad_stock_batch')
+            if _word(data_hex, 0)[-40:] != router[2:]:
+                raise PolicyError('approve_spender_not_allowed')
+        elif c['to'] == USDT_BSC:
             if selector == SEL_APPROVE:
                 # approve: ONLY with the vault as spender.
                 if len(data_hex) != 8 + 128:

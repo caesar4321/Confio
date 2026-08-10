@@ -13,7 +13,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
-import ContactService, { contactService } from '../services/contactService';
+import ContactService, { contactService, hasDefaultPhoneRegion } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
@@ -454,14 +454,33 @@ export const ContactsScreen = () => {
     // Format contacts using the cached Confío status
     const formattedContacts = allContacts.map((contact, index) => {
       const e164Phone = contact.normalizedPhones?.find((phone: string) => phone.startsWith('+'));
+      const selectedPhone = contact.isOnConfio && contact.confioMatchedPhone
+        ? contact.confioMatchedPhone
+        : e164Phone;
+      const legacyExplicitMatch = selectedPhone && contact.phoneNumbers?.some((rawPhone: string) => {
+        const trimmed = rawPhone.trim();
+        return trimmed.startsWith('+') && `+${trimmed.replace(/\D/g, '')}` === selectedPhone;
+      });
+      const phoneWasInferred = selectedPhone
+        ? contact.inferredE164Phones?.includes(selectedPhone) ?? !legacyExplicitMatch
+        : false;
       return {
         id: contact.isOnConfio && contact.confioUserId ? contact.confioUserId : `contact_${index}`,
         name: contact.name || 'Sin nombre',
         avatar: contact.name ? contact.name.charAt(0).toUpperCase() : '?',
-        phone: e164Phone || (contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : ''),
+        phone: selectedPhone || (contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : ''),
         normalizedPhones: contact.normalizedPhones || [],
         isOnConfio: contact.isOnConfio || false,
         userId: contact.confioUserId || null,
+        contactRecordId: contact.id,
+        confioUsername: contact.confioUsername || null,
+        confioFirstName: contact.confioFirstName || null,
+        confioLastName: contact.confioLastName || null,
+        confioMatchedPhone: contact.confioMatchedPhone || null,
+        // Older caches predate match provenance. Treat those matches as
+        // inferred once so an upgrade cannot bypass recipient confirmation.
+        confioMatchWasInferred: contact.confioMatchWasInferred ?? (Boolean(contact.isOnConfio) && phoneWasInferred),
+        phoneWasInferred,
         algorandAddress: contact.confioAlgorandAddress || null,
         statusTier: (contact as any).statusTier || null,
         isReferralVerified: (contact as any).isReferralVerified || false,
@@ -486,10 +505,27 @@ export const ContactsScreen = () => {
 
   };
 
+  const restoreContactsAfterFailedSync = async () => {
+    const cachedContacts = await contactService.getAllContacts();
+    await displayContacts(cachedContacts);
+    Alert.alert(
+      'No pudimos actualizar tus contactos',
+      'Conservamos la última lista verificada. Revisa tu conexión e inténtalo de nuevo.',
+    );
+  };
+
   // Sync contacts with device
   const syncContacts = async () => {
     // Only for personal accounts
     if (!isPersonalAccount) {
+      return;
+    }
+
+    if (!hasDefaultPhoneRegion()) {
+      Alert.alert(
+        'País del teléfono no disponible',
+        'Espera a que termine de cargar tu perfil e intenta sincronizar de nuevo. Confío no adivinará el país de tus contactos.',
+      );
       return;
     }
 
@@ -502,9 +538,11 @@ export const ContactsScreen = () => {
         const allContacts = await contactService.getAllContacts();
 
         await displayContacts(allContacts);
+      } else {
+        await restoreContactsAfterFailedSync();
       }
     } catch (error) {
-      // Show empty state with sync button if error occurs
+      await restoreContactsAfterFailedSync();
     } finally {
       setIsLoadingContacts(false);
       setRefreshing(false);
@@ -563,6 +601,15 @@ export const ContactsScreen = () => {
       return;
     }
 
+    if (!hasDefaultPhoneRegion()) {
+      setRefreshing(false);
+      Alert.alert(
+        'País del teléfono no disponible',
+        'Espera a que termine de cargar tu perfil e intenta sincronizar de nuevo. Confío no adivinará el país de tus contactos.',
+      );
+      return;
+    }
+
     setIsLoadingContacts(true);
 
     // Clear existing contacts to show loading state
@@ -584,6 +631,8 @@ export const ContactsScreen = () => {
       if (success) {
         const allContacts = await contactService.getAllContacts();
         await displayContacts(allContacts);
+      } else {
+        await restoreContactsAfterFailedSync();
       }
     } else {
       // If no permission, try requesting again
@@ -594,6 +643,8 @@ export const ContactsScreen = () => {
         if (success) {
           const allContacts = await contactService.getAllContacts();
           await displayContacts(allContacts);
+        } else {
+          await restoreContactsAfterFailedSync();
         }
       }
     }
@@ -718,6 +769,13 @@ export const ContactsScreen = () => {
       friendAvatar: contact.avatar,
       friendPhone: contact.phone,
       isOnConfio: contact.isOnConfio || false,
+      friendContactRecordId: contact.contactRecordId || null,
+      friendConfioUsername: contact.confioUsername || null,
+      friendConfioFirstName: contact.confioFirstName || null,
+      friendConfioLastName: contact.confioLastName || null,
+      friendConfioMatchedPhone: contact.confioMatchedPhone || null,
+      friendConfioMatchWasInferred: contact.confioMatchWasInferred || false,
+      friendPhoneWasInferred: contact.phoneWasInferred || false,
       friendStatusTier: contact.statusTier || null,
       friendIsReferralVerified: contact.isReferralVerified || false,
     });

@@ -4,11 +4,10 @@
 // selling is not "cashing out of Confío" — the money returns to the sweep
 // account and resumes earning Treasury yield immediately. Copy says so.
 //
-// Wiring points (stubbed until the GM backend proxy lands):
-// - getSellQuote(): RFQ/attestation soft quote for the sell side.
-// - onConfirm(): binding attestation → on-chain settle into the cUSD+ vault.
+// Preview uses Ondo's non-binding soft quote; confirmation requests a fresh
+// binding redemption attestation and atomically settles back into cUSD+.
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -37,24 +36,21 @@ import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
+import { getSoftStockQuote, sellStockToSavings } from '../services/ondoStocks';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type SellRoute = RouteProp<MainStackParamList, 'SellStock'>;
 
 const MIN_AMOUNT_USD = 1;
 
-// TODO(gm): RFQ/attestation soft quote (sell side) via backend proxy.
-const getSellQuote = (amountUsd: number) => {
-  // STUB, NOT PRICING — real cost = Ondo GM fee (schedule unknown until
-  // onboarding) + Confío markup (server-config). The split is an open
-  // pricing decision; do not anchor on 0.3%.
+const getSellQuote = (amountUsd: number, ready: boolean, receiveUsd?: number) => {
   const costPct = 0.3;
   const costUsd = amountUsd * (costPct / 100);
   return {
     costPct,
     costUsd,
-    receiveUsd: amountUsd - costUsd,
-    paused: false,
+    receiveUsd: receiveUsd ?? amountUsd - costUsd,
+    paused: !ready,
   };
 };
 
@@ -64,30 +60,63 @@ export const SellStockScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<SellRoute>();
   const { formatNumber } = useNumberFormat();
-  const { byTicker, tradabilityFor } = useGmMarket();
-  const { stocks } = useSavingsPortfolio();
+  const { stocks, refetch } = useSavingsPortfolio();
+  const { byTicker, tradabilityFor } = useGmMarket(stocks.enabled);
 
   const stock = byTicker(route.params.ticker);
   const position = stocks.positions.find((p) => p.ticker === route.params.ticker);
   const available = position?.valueUsd ?? 0;
 
   const [raw, setRaw] = useState('');
+  const [sellAll, setSellAll] = useState(false);
   const [phase, setPhase] = useState<Phase>('input');
+  const [quoteReady, setQuoteReady] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [tradeError, setTradeError] = useState<string | null>(null);
+  const [settledReceiveUsd, setSettledReceiveUsd] = useState(0);
+  const [softNetWei, setSoftNetWei] = useState(0n);
 
   const amount = useMemo(() => {
     const v = parseFloat(raw.replace(',', '.'));
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
-  const quote = useMemo(() => getSellQuote(amount), [amount]);
+  const quote = useMemo(
+    () => getSellQuote(amount, quoteReady && !quoteLoading, softNetWei > 0n ? Number(softNetWei) / 1e18 : undefined),
+    [amount, quoteReady, quoteLoading, softNetWei],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setTradeError(null);
+    setQuoteReady(false);
+    setSoftNetWei(0n);
+    setQuoteLoading(false);
+    if (!stock || !stocks.enabled || !stocks.tradingEnabled || amount < MIN_AMOUNT_USD || amount > available) return;
+    setQuoteLoading(true);
+    const timer = setTimeout(() => {
+      getSoftStockQuote(stock.symbol, 'sell', amount)
+        .then((q) => {
+          if (!cancelled) {
+            const gross = (BigInt(q.tokenAmount) * BigInt(q.price)) / 10n ** 18n;
+            setSoftNetWei(gross - (gross * 30n) / 10_000n);
+            setQuoteReady(true);
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) setTradeError(e instanceof Error ? e.message : 'No pudimos cotizar la venta.');
+        })
+        .finally(() => { if (!cancelled) setQuoteLoading(false); });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [amount, available, stock, stocks.enabled, stocks.tradingEnabled]);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
-  // Hard guard: onConfirm below is still a happy-path stub, so this screen
-  // must be unreachable (StockDetail hides the entry) AND self-defending —
-  // a deep link or future nav regression must never fake a sale.
-  if (!STOCKS_TRADING_UI_ENABLED || !stock) {
+  // Deep-link defense: execution remains unavailable until the server has a
+  // deployed, registered router. Selling is not geo-gated once enabled.
+  if (!STOCKS_TRADING_UI_ENABLED || !stocks.enabled || !stocks.tradingEnabled || !stock) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: colors.text.secondary, textAlign: 'center', paddingHorizontal: 32 }}>
@@ -106,10 +135,23 @@ export const SellStockScreen = () => {
   const canConfirm =
     amount >= MIN_AMOUNT_USD && !overBalance && !quote.paused && tradability !== 'closed';
 
-  const onConfirm = () => {
-    // TODO(gm): binding attestation + on-chain settle. Happy-path stub.
+  const onConfirm = async () => {
+    setTradeError(null);
     setPhase('processing');
-    setTimeout(() => setPhase('success'), 1600);
+    try {
+      const result = await sellStockToSavings({
+        symbol: stock.symbol,
+        grossAmountUsd: amount,
+        sellAll,
+        minExpectedNetWei: (softNetWei * 99n) / 100n,
+      });
+      setSettledReceiveUsd(Number(result.expectedNetWei) / 1e18);
+      await refetch();
+      setPhase('success');
+    } catch (e) {
+      setTradeError(e instanceof Error ? e.message : 'No pudimos completar la venta.');
+      setPhase('input');
+    }
   };
 
   if (phase === 'success') {
@@ -120,7 +162,7 @@ export const SellStockScreen = () => {
         <View style={styles.successWrap}>
           <SuccessHero
             title="Vendido"
-            amount={fmtUsd(quote.receiveUsd)}
+            amount={fmtUsd(settledReceiveUsd)}
             hint="Ya está en tu ahorro (cUSD+) y sigue generando rendimiento desde ahora mismo."
           />
           <ReceiptCard
@@ -128,7 +170,7 @@ export const SellStockScreen = () => {
             items={[
               { label: 'Vendiste', value: fmtUsd(amount) },
               { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
-              { label: 'Recibido en tu ahorro', value: fmtUsd(quote.receiveUsd), color: colors.primaryDark },
+              { label: 'Recibido en tu ahorro', value: fmtUsd(settledReceiveUsd), color: colors.primaryDark },
               { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
               { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
             ]}
@@ -173,7 +215,10 @@ export const SellStockScreen = () => {
               <TextInput
                 style={styles.amountInput}
                 value={raw}
-                onChangeText={setRaw}
+                onChangeText={(value) => {
+                  setSellAll(false);
+                  setRaw(value);
+                }}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={colors.text.light}
@@ -186,7 +231,10 @@ export const SellStockScreen = () => {
                 Tu posición: {fmtUsd(available)}
               </Text>
               <TouchableOpacity
-                onPress={() => setRaw(available > 0 ? String(available) : '')}
+                onPress={() => {
+                  setSellAll(available > 0);
+                  setRaw(available > 0 ? String(available) : '');
+                }}
                 disabled={phase !== 'input' || available <= 0}
               >
                 <Text style={styles.maxBtn}>MAX</Text>
@@ -243,6 +291,7 @@ export const SellStockScreen = () => {
           {overBalance && (
             <Text style={styles.hintError}>Tu posición es {fmtUsd(available)}.</Text>
           )}
+          {tradeError && <Text style={styles.hintError}>{tradeError}</Text>}
 
           <View style={{ flex: 1 }} />
 
@@ -264,7 +313,7 @@ export const SellStockScreen = () => {
             )}
           </TouchableOpacity>
           <Text style={styles.confirmFootnote}>
-            Lo que recibas vuelve a tu ahorro y sigue generando rendimiento.
+            La cotización se actualiza al confirmar; lo recibido vuelve a tu ahorro.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

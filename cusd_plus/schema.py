@@ -1,9 +1,8 @@
 # Confío Dollar+ (cUSD+) — GraphQL seam for the savings product.
 #
-# STATUS: schema-only stubs. The build behind these resolvers is gated on the
-# whale deposit-intent signal (decision 68e9cd45); the app already renders
-# from this exact shape via useAhorrosPortfolio, so when the backend lands the
-# client swaps its memoized stub for these queries without reshaping.
+# STATUS: live cUSD+ and Ondo Stocks query/mutation seam. Execution remains
+# operationally fail-closed behind deployment/configuration flags; the schema
+# itself is shared by the Daphne API and the mobile client.
 #
 # Contract for the real implementation (locked decisions):
 # - net_apy_pct is SERVER-DERIVED: USDY oracle gross (RWADynamicOracle) minus
@@ -17,11 +16,182 @@
 #   switch. `paused` maps to the amber state in ConvertAhorroScreen.
 
 import logging
+import re
+import secrets
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 import graphene
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+_GM_SYMBOL_RE = re.compile(r'^[A-Za-z0-9]{1,24}$')
+_GM_ADDRESS_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
+_GM_BYTES32_RE = re.compile(r'^0x[0-9a-fA-F]{64}$')
+
+
+def _stock_execution_ready():
+    """Return True only when every server-controlled execution rail is wired."""
+    from django.conf import settings
+
+    return bool(
+        getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False)
+        and getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', '')
+        and getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
+        and getattr(settings, 'CUSD_PLUS_BATCH_DELEGATE_ADDRESS', '')
+        and getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30) == 30
+    )
+
+
+def _stock_surfaces_enabled(user, request_meta) -> bool:
+    """Issuer eligibility plus the global discovery kill switch."""
+    from django.conf import settings
+
+    return bool(
+        getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False)
+        and _stock_issuer_eligible(user, request_meta)
+    )
+
+
+def _stock_issuer_eligible(user, request_meta) -> bool:
+    """Ondo's acquisition/redemption policy, independent of UI switches."""
+    from .eligibility import ONDO_POLICY
+
+    return ONDO_POLICY.evaluate(user, request_meta or {}).allowed
+
+
+def _stock_buy_enabled(user, request_meta) -> bool:
+    """All visibility and country policy gates for a new stock purchase."""
+    from .eligibility import check_stock_buy_eligibility
+
+    return (
+        _stock_surfaces_enabled(user, request_meta)
+        and check_stock_buy_eligibility(user, request_meta)
+    )
+
+
+def _acquire_gm_quote_lock(cache, lock_key, timeout=30):
+    """Acquire an owner-safe quote lock and return its release callback.
+
+    Production uses django-redis' token-owned Lua lock. LocMemCache has no
+    distributed lock API, so tests/local development use a unique cache token
+    and only remove the key while they still own it.
+    """
+    if hasattr(cache, 'lock'):
+        lock = cache.lock(lock_key, timeout=timeout, blocking_timeout=0)
+        if not lock.acquire(blocking=False):
+            return None
+
+        def release():
+            try:
+                lock.release()
+            except Exception:  # expired/reacquired locks are not ours to delete
+                logger.warning('GM quote lock expired before release: %s', lock_key)
+
+        return release
+
+    token = secrets.token_urlsafe(24)
+    if not cache.add(lock_key, token, timeout):
+        return None
+
+    def release():
+        if cache.get(lock_key) == token:
+            cache.delete(lock_key)
+
+    return release
+
+
+def _validated_gm_trade_request(symbol, side, notional_value, duration):
+    from django.conf import settings
+
+    symbol = (symbol or '').strip()
+    side = (side or '').strip().lower()
+    duration = (duration or '').strip().lower()
+    if not _GM_SYMBOL_RE.fullmatch(symbol):
+        raise ValueError('BAD_SYMBOL')
+    if side not in ('buy', 'sell'):
+        raise ValueError('BAD_SIDE')
+    if duration not in ('short', 'long'):
+        raise ValueError('BAD_DURATION')
+    try:
+        amount = Decimal(str(notional_value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError('BAD_NOTIONAL') from exc
+    if not amount.is_finite() or amount < Decimal('1'):
+        raise ValueError('BAD_NOTIONAL')
+    if amount > Decimal(str(getattr(settings, 'CUSD_PLUS_GM_MAX_TRADE_USD', 100_000))):
+        raise ValueError('TRADE_TOO_LARGE')
+    amount = amount.quantize(Decimal('0.000000000000000001'), rounding=ROUND_DOWN)
+    return {
+        'symbol': symbol,
+        'side': side,
+        'notional_value': format(amount, 'f'),
+        'duration': duration,
+    }
+
+
+def _normalize_gm_quote(data, request, *, binding):
+    from . import gm_api
+
+    chain_id = str(data.get('chainId') or '')
+    # Ondo documents this as the strings "0"/"1", but accepting the JSON
+    # number 0 as an equivalent response avoids treating a valid buy as
+    # missing merely because an upstream serializer changed representation.
+    side_value = data.get('side')
+    side = '' if side_value is None else str(side_value)
+    asset = str(data.get('assetAddress') or '')
+    quantity = int(data.get('tokenAmount') or 0)
+    price = int(data.get('price') or 0)
+    notional_wei = int(Decimal(request['notional_value']) * Decimal(10 ** 18))
+    quote_cost = quantity * price // 10 ** 18
+    if chain_id != '56' or side != ('0' if request['side'] == 'buy' else '1'):
+        raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned a mismatched chain or side', 502)
+    if str(data.get('symbol') or '') != request['symbol'] or not _GM_ADDRESS_RE.fullmatch(asset):
+        raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned a mismatched asset', 502)
+    if quantity <= 0 or price <= 0 or notional_wei < quote_cost or notional_wei - quote_cost > 10 ** 12:
+        raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned inconsistent quote arithmetic', 502)
+
+    result = {
+        'success': True,
+        'chain_id': chain_id,
+        'symbol': request['symbol'],
+        'ticker': str(data.get('ticker') or ''),
+        'asset_address': asset,
+        'side': side,
+        'token_amount': str(quantity),
+        'price': str(price),
+        'notional_wei': str(notional_wei),
+    }
+    if binding:
+        attestation_id = int(data.get('attestationId') or 0)
+        expiration = int(data.get('expiration') or 0)
+        user_id = str(data.get('userId') or '')
+        signature = gm_api.decode_attestation_bytes(str(data.get('signature') or ''))
+        additional = gm_api.decode_attestation_bytes(str(data.get('additionalData') or ''), size=32)
+        if attestation_id <= 0 or expiration <= int(timezone.now().timestamp()):
+            raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned an expired attestation', 502)
+        if not _GM_BYTES32_RE.fullmatch(user_id) or len(bytes.fromhex(signature[2:])) != 65:
+            raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned malformed authentication fields', 502)
+        result.update({
+            'attestation_id': str(attestation_id),
+            'user_id': user_id,
+            'expiration': float(expiration),
+            'signature_hex': signature,
+            'additional_data_hex': additional,
+        })
+    return result
+
+
+def _gm_quote_error(exc):
+    from .gm_api import GmApiError
+
+    if isinstance(exc, GmApiError):
+        logger.warning('Ondo GM quote rejected: %s', exc)
+        return GmTradeQuoteType(success=False, error_code=exc.code, error_message=exc.message)
+    code = str(exc) if isinstance(exc, ValueError) else 'QUOTE_UNAVAILABLE'
+    if not isinstance(exc, ValueError):
+        logger.exception('Ondo GM quote failed')
+    return GmTradeQuoteType(success=False, error_code=code[:80], error_message='Quote unavailable')
 
 
 def _sweepable_usdt_usd(user, bsc_address) -> float:
@@ -52,6 +222,8 @@ class CusdPlusSummaryType(graphene.ObjectType):
         description='Raw USDT that may be auto-minted: a FRESH balance minus everything already committed (prepared sends, in-flight off-ramps, in-flight sagas). The client mints this, never the displayed balance.')
     savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo): phone country AND request IP country, the same full set the mint gate enforces. Gates ENTRY only — exits are never gated")
     stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
+    stocks_trading_enabled = graphene.Boolean(description="Binding GM attestations and router settlement are enabled")
+    stocks_buy_enabled = graphene.Boolean(description="Trading is enabled and this request is Ondo-entry eligible")
     cusd_deposits_paused = graphene.Boolean(description="cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)")
     usdt_balance_usd = graphene.Float(description="Raw wallet USDT-BSC (pre-mint, or held as 'Confío Dollar' by geo-ineligible users) — display-grade, cached")
     usdt_balance_wei = graphene.String(description="Same balance in exact wei (string; 18dp) for MAX-send and mint math")
@@ -74,6 +246,7 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     min_amount_usd = graphene.Float()
     paused = graphene.Boolean(description="Kill switch: pause all conversions regardless of cost")
     gm_trade_fee_bps = graphene.Int(description="Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative")
+    stock_router_address = graphene.String(description="Standalone ConfioStockRouter on BSC; null until deployed")
     vault_address = graphene.String(description="cUSD+ vault (proxy) on BSC — client targets this for leg C (subscribeAndMint/redeem)")
     # BNB auto-convert (mis-deposited BNB → USDT, the BSC mirror of the
     # ALGO→USDC auto-swap). Wei values travel as strings: they overflow
@@ -108,6 +281,25 @@ class GmAssetType(graphene.ObjectType):
 class GmMarketType(graphene.ObjectType):
     session = graphene.String(description="core | extended | off-hours | closed")
     assets = graphene.List(graphene.NonNull(GmAssetType))
+
+
+class GmTradeQuoteType(graphene.ObjectType):
+    success = graphene.Boolean(required=True)
+    error_code = graphene.String()
+    error_message = graphene.String()
+    attestation_id = graphene.String()
+    user_id = graphene.String()
+    chain_id = graphene.String()
+    symbol = graphene.String()
+    ticker = graphene.String()
+    asset_address = graphene.String()
+    side = graphene.String()
+    token_amount = graphene.String()
+    price = graphene.String()
+    expiration = graphene.Float()
+    signature_hex = graphene.String()
+    additional_data_hex = graphene.String()
+    notional_wei = graphene.String(description="Exact USDT notional supplied to GM and the router")
 
 
 class GmCandleType(graphene.ObjectType):
@@ -161,6 +353,13 @@ class Query(graphene.ObjectType):
         graphene.NonNull(lambda: CusdPlusConversionType),
     )
     gm_market = graphene.Field(GmMarketType)
+    gm_soft_quote = graphene.Field(
+        GmTradeQuoteType,
+        symbol=graphene.String(required=True),
+        side=graphene.String(required=True),
+        notional_value=graphene.String(required=True),
+        duration=graphene.String(default_value='short'),
+    )
     gm_holdings = graphene.List(
         graphene.NonNull(GmHoldingType),
         description="The JWT account's tokenized-stock positions (Multicall3 universe scan — chain is the registry)",
@@ -201,6 +400,8 @@ class Query(graphene.ObjectType):
     def resolve_gm_market(self, info):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
             return None
         from . import gm_api
         try:
@@ -244,9 +445,33 @@ class Query(graphene.ObjectType):
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return GmMarketType(session=session, assets=[a for _, a in ranked])
 
+    def resolve_gm_soft_quote(self, info, symbol, side, notional_value, duration='short'):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return GmTradeQuoteType(success=False, error_code='AUTH_REQUIRED')
+        if _bsc_rate_limited(user.id, 'gm_soft_quote', 30):
+            return GmTradeQuoteType(success=False, error_code='RATE_LIMITED')
+        try:
+            request = _validated_gm_trade_request(symbol, side, notional_value, duration)
+            meta = getattr(info.context, 'META', {})
+            # Ondo's issuer eligibility applies to acquisition AND redemption.
+            # Confío's optional overlay is entry-only, so eligible holders in
+            # an overlay-blocked country can still sell.
+            if not _stock_issuer_eligible(user, meta):
+                return GmTradeQuoteType(success=False, error_code='TRADE_NOT_AVAILABLE')
+            if request['side'] == 'buy' and not _stock_buy_enabled(user, meta):
+                return GmTradeQuoteType(success=False, error_code='TRADE_NOT_AVAILABLE')
+            from . import gm_api
+            data = gm_api.soft_attestation(**request)
+            return GmTradeQuoteType(**_normalize_gm_quote(data, request, binding=False))
+        except Exception as exc:  # noqa: BLE001
+            return _gm_quote_error(exc)
+
     def resolve_gm_holdings(self, info):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
+            return []
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
             return []
         account = _active_account(info)
         if account is None or not account.bsc_address:
@@ -297,6 +522,8 @@ class Query(graphene.ObjectType):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return []
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return []
         from . import gm_api
         if range not in gm_api.OHLC_RANGES:
             return []
@@ -321,7 +548,7 @@ class Query(graphene.ObjectType):
 
     def resolve_cusd_plus_summary(self, info):
         from django.conf import settings
-        from .eligibility import ONDO_POLICY
+        from .eligibility import ONDO_POLICY, check_stock_buy_eligibility
         from . import vault
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
@@ -330,7 +557,11 @@ class Query(graphene.ObjectType):
         # phone alone told users behind a blocked IP that they could save while
         # the relay refused them, so their deposits stranded. Same answer the
         # mint gate will give.
-        eligible = ONDO_POLICY.evaluate(user, getattr(info.context, 'META', {})).allowed
+        request_meta = getattr(info.context, 'META', {})
+        eligible = ONDO_POLICY.evaluate(user, request_meta).allowed
+        stocks_enabled = (
+            eligible and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False)
+        )
         # Real position: shares × pPlus, read live from the deployed vault
         # for the JWT account's bsc_address (0 until PP whitelisting + a
         # first mint; the ledger for earned_today/month lands with leg C).
@@ -376,8 +607,18 @@ class Query(graphene.ObjectType):
             earned_month_usd=0.0,
             savings_enabled=eligible,
             sweepable_usdt_usd=_sweepable_usdt_usd(user, bsc_address),
-            # Dark until the demand signal (decision 2dcfada5) AND geo-eligible.
-            stocks_enabled=eligible and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False),
+            # Discovery is visible only when the ops switch and issuer geo
+            # policy both allow it.
+            stocks_enabled=stocks_enabled,
+            # UI capability only. Eligible holders can still reach the sell
+            # execution endpoint if the discovery switch is later darkened;
+            # Ondo-ineligible jurisdictions remain blocked from redemption.
+            stocks_trading_enabled=(stocks_enabled and _stock_execution_ready()),
+            stocks_buy_enabled=(
+                stocks_enabled
+                and check_stock_buy_eligibility(user, request_meta)
+                and _stock_execution_ready()
+            ),
             cusd_deposits_paused=getattr(settings, 'CUSD_DEPOSITS_PAUSED', True),
             usdt_balance_usd=usdt_wei_int / (10 ** 18),
             usdt_balance_wei=str(usdt_wei_int),
@@ -419,9 +660,10 @@ class Query(graphene.ObjectType):
             confio_fee_bps=getattr(settings, 'CUSD_PLUS_CONVERT_FEE_BPS', 0),
             min_amount_usd=getattr(settings, 'CUSD_PLUS_MIN_CONVERT_USD', 1.0),
             paused=getattr(settings, 'CUSD_PLUS_CONVERSIONS_PAUSED', True),
-            # Launch config, set together with router.setStockFeeBps once
-            # Ondo's GM fee schedule is known — open pricing decision.
+            # Display mirror only; the deployed router's fixed 30 bps is
+            # authoritative and the sponsor policy requires exact parity.
             gm_trade_fee_bps=getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 0),
+            stock_router_address=getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', None) or None,
             vault_address=getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', None),
             bnb_auto_convert_enabled=getattr(settings, 'CUSD_PLUS_BNB_AUTOCONVERT_ENABLED', False),
             pancake_router=getattr(settings, 'CUSD_PLUS_PANCAKE_ROUTER', None),
@@ -641,11 +883,19 @@ BSC_READ_METHODS = {
 def _bsc_rate_limited(user_id, kind: str, per_minute: int) -> bool:
     from django.core.cache import cache
     key = f'bsc_relay_{kind}_{user_id}'
-    count = cache.get(key, 0)
-    if count >= per_minute:
-        return True
-    cache.set(key, count + 1, 60)
-    return False
+    # `get` followed by `set` loses increments when two Daphne workers race.
+    # `add`/`incr` map to atomic operations in the production Redis backend,
+    # so purchaser-attestation and sponsor limits remain real under retries.
+    if cache.add(key, 1, 60):
+        return False
+    try:
+        return cache.incr(key) > per_minute
+    except ValueError:
+        # The key may expire between add() and incr(). Re-create it as the
+        # first request in a fresh window; failing closed here would turn a
+        # harmless expiry race into a user-visible minute-long outage.
+        cache.set(key, 1, 60)
+        return False
 
 
 class BscRpcResult(graphene.ObjectType):
@@ -1009,9 +1259,13 @@ class SponsorBscBatch(graphene.Mutation):
             # The generic savings rail's kind (and thus the intentId the user
             # signed) is derived from the selectors; the client derives the
             # SAME value. source_id is omitted (no domain row here).
-            kind = 'redeem' if any(
-                c['data'][2:10] == sponsor_7702.SEL_REDEEM_TO_USDT for c in norm_calls
-            ) else 'subscribe'
+            kind = sponsor_7702.classify_calls_kind(norm_calls)
+            if kind in ('stock_buy', 'stock_sell'):
+                meta = getattr(info.context, 'META', {})
+                if not _stock_issuer_eligible(user, meta):
+                    return SponsorBscBatch(success=False, error='trade_not_available')
+                if kind == 'stock_buy' and not _stock_buy_enabled(user, meta):
+                    return SponsorBscBatch(success=False, error='trade_not_available')
             intent_id = sponsor_7702.intent_id_for(kind)
             digest = sponsor_7702.intent_digest(
                 norm_calls, nonce_i, deadline_i, user_addr, chain_id, intent_id)
@@ -1062,6 +1316,14 @@ class SponsorBscBatch(graphene.Mutation):
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind)
             broadcast_tx_hash = tx_hash  # past the point of no return
+            if kind in ('stock_buy', 'stock_sell'):
+                # Drop only fresh values. If the tx later reverts, the next
+                # scan simply observes the unchanged chain; if it executes,
+                # the client's receipt-triggered refetch sees the new state.
+                from django.core.cache import cache as _cache
+                from . import vault as _vault
+                _vault.invalidate_position(user_addr)
+                _cache.delete(f'gm_hold:{user_addr.lower()}')
             if mint_call is not None:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first
@@ -1191,9 +1453,110 @@ class RegisterBscUsdtArrival(graphene.Mutation):
         return RegisterBscUsdtArrival(success=True, recorded=recorded)
 
 
+class PrepareGmTrade(graphene.Mutation):
+    """Create one binding Ondo attestation for the JWT account.
+
+    The client supplies an idempotency key so a lost HTTP response reuses the
+    still-live attestation instead of consuming another purchaser limit.
+    Settlement remains non-custodial: this returns signed quote data; only the
+    user's subsequent EIP-712 batch signature can execute the router call.
+    """
+
+    class Arguments:
+        request_id = graphene.String(required=True)
+        symbol = graphene.String(required=True)
+        side = graphene.String(required=True)
+        notional_value = graphene.String(required=True)
+        duration = graphene.String(default_value='short')
+
+    quote = graphene.Field(GmTradeQuoteType)
+
+    def mutate(self, info, request_id, symbol, side, notional_value, duration='short'):
+        from django.conf import settings
+        from django.core.cache import cache
+
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='AUTH_REQUIRED'))
+        request_id = (request_id or '').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', request_id):
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='BAD_REQUEST_ID'))
+        if not getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False):
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='TRADING_DISABLED'))
+        if not getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', ''):
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='ROUTER_NOT_CONFIGURED'))
+        if (
+            not getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
+            or not getattr(settings, 'CUSD_PLUS_BATCH_DELEGATE_ADDRESS', '')
+        ):
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='SPONSOR_NOT_CONFIGURED'))
+        if getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30) != 30:
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='FEE_CONFIG_MISMATCH'))
+        account = _active_account(info)
+        if account is None or not account.bsc_address:
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='NO_BSC_ADDRESS'))
+
+        from users.jwt_context import get_jwt_business_context_with_validation
+        ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+        if ctx and ctx.get('account_type') == 'business':
+            if not get_jwt_business_context_with_validation(info, required_permission='send_funds'):
+                return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='PERMISSION_DENIED'))
+
+        try:
+            request = _validated_gm_trade_request(symbol, side, notional_value, duration)
+        except Exception as exc:  # noqa: BLE001
+            return PrepareGmTrade(quote=_gm_quote_error(exc))
+        meta = getattr(info.context, 'META', {})
+        if not _stock_issuer_eligible(user, meta):
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='TRADE_NOT_AVAILABLE'))
+        if request['side'] == 'buy':
+            if not _stock_buy_enabled(user, meta):
+                return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='TRADE_NOT_AVAILABLE'))
+
+        cache_key = f'gm_firm_attestation:{user.id}:{account.id}:{request_id}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            # The key is bound to the complete request, not merely the user.
+            if cached.get('_request') != request:
+                return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='IDEMPOTENCY_CONFLICT'))
+            return PrepareGmTrade(quote=GmTradeQuoteType(**cached['quote']))
+        if _bsc_rate_limited(user.id, 'gm_firm_quote', 6):
+            return PrepareGmTrade(quote=GmTradeQuoteType(success=False, error_code='RATE_LIMITED'))
+
+        # A binding attestation consumes the shared Ondo purchaser quota.
+        # Serialize identical request IDs across Daphne workers so an HTTP
+        # retry cannot mint two live attestations before either response is
+        # cached. The short lease prevents a crashed worker from wedging the
+        # request; the result cache below remains the idempotency authority.
+        lock_key = f'{cache_key}:lock'
+        release_lock = _acquire_gm_quote_lock(cache, lock_key, 30)
+        if release_lock is None:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                if cached.get('_request') != request:
+                    return PrepareGmTrade(
+                        quote=GmTradeQuoteType(success=False, error_code='IDEMPOTENCY_CONFLICT'))
+                return PrepareGmTrade(quote=GmTradeQuoteType(**cached['quote']))
+            return PrepareGmTrade(
+                quote=GmTradeQuoteType(success=False, error_code='QUOTE_IN_PROGRESS'))
+
+        try:
+            from . import gm_api
+            data = gm_api.binding_attestation(**request)
+            normalized = _normalize_gm_quote(data, request, binding=True)
+            ttl = max(1, min(1800, int(normalized['expiration'] - timezone.now().timestamp())))
+            cache.set(cache_key, {'_request': request, 'quote': normalized}, ttl)
+            return PrepareGmTrade(quote=GmTradeQuoteType(**normalized))
+        except Exception as exc:  # noqa: BLE001
+            return PrepareGmTrade(quote=_gm_quote_error(exc))
+        finally:
+            release_lock()
+
+
 class Mutation(graphene.ObjectType):
     start_cusd_plus_conversion = StartCusdPlusConversion.Field()
     advance_cusd_plus_conversion = AdvanceCusdPlusConversion.Field()
     submit_bsc_transaction = SubmitBscTransaction.Field()
     register_bsc_usdt_arrival = RegisterBscUsdtArrival.Field()
     sponsor_bsc_batch = SponsorBscBatch.Field()
+    prepare_gm_trade = PrepareGmTrade.Field()

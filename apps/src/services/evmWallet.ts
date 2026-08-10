@@ -534,9 +534,20 @@ export function hashBatchIntent(
  * intentId the server returned. */
 const SEL_REDEEM_TO_USDT = 'f4794519'; // redeemToUsdt(uint256,uint256,address)
 export function deriveIntentId(calls: BatchCall[]): string {
-  const kind = calls.some((c) => c.data.replace(/^0x/, '').slice(0, 8) === SEL_REDEEM_TO_USDT)
-    ? 'redeem'
-    : 'subscribe';
+  const selectors = new Set(calls.map((c) => c.data.replace(/^0x/, '').slice(0, 8)));
+  const stockBuy = selector(
+    'buyWithSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256,uint256)',
+  ).slice(2);
+  const stockSell = selector(
+    'sellToSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256)',
+  ).slice(2);
+  const kind = selectors.has(stockBuy)
+    ? 'stock_buy'
+    : selectors.has(stockSell)
+      ? 'stock_sell'
+      : selectors.has(SEL_REDEEM_TO_USDT)
+        ? 'redeem'
+        : 'subscribe';
   return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${kind}:`)));
 }
 

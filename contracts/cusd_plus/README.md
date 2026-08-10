@@ -125,21 +125,12 @@ Two footnotes:
   read < 10000), `surplusUsdy()`, plus the USDY balance of the vault address
   directly on BscScan.
 
-## ConfioStockRouter — GM trades with an explicit fee
+## Ondo Stocks integration
 
-`ConfioStockRouter.sol` is the sweep-model trade path: `buyWithSavings`
-(pull cUSD+ shares → vault.redeemToUsdt → fee slice to treasury → GM
-settle → stock to user) and `sellToSavings` (stock → GM settle → fee →
-vault.subscribeAndMint back to the user — proceeds literally keep
-earning). Confío's fee is an EXPLICIT on-chain USDT transfer, never a
-price markup, so "Sin comisiones ocultas" is contract-enforced; the rate
-is owner-settable under a 1% hard cap (launch config after Ondo's GM fee
-schedule — no number is anchored in code, default 0). The router never
-holds funds at rest and is replace-by-redeploy (stateless, unlike the
-vault). GM touchpoints are provisional and isolated in `_gmBuy/_gmSell`.
-7 tests cover fee exactness, reinvest round trip, cap/authz, zero-fee
-pass-through, slippage floors, pause, and frozen-user rejection — the
-vault backing invariant holds through trades.
+The GM trade router is maintained as the standalone
+[`contracts/ondo_stocks`](../ondo_stocks/README.md) Foundry package. It uses
+only this vault's minimal external interface. Its fixed 0.30% USDT fee is
+accounted and accumulated in the router until the owner Safe withdraws it.
 
 ## ConfioPresaleVault — $CONFIO presale on the "A" curve
 
@@ -241,12 +232,13 @@ migratedPool — is never sweepable. 26 tests (unit + fuzz) in
    depositTokenAmount)` / `redeemWithAttestation(quote, signature,
    receiveToken, minimumReceiveAmount)` with EIP-712 quotes signed by
    Ondo's attestation service; the caller must be **whitelisted and its
-   stored `userID` must match the quote** (per-user onboarding — the real
-   partnership blocker for a non-custodial router); `attestationId` replay
-   protection, `minimumDepositUSD`, per-user/per-token rate limits.
-   `_gmBuy/_gmSell` need attestation params added. Still open: partner fee
-   schedule (embedded in quote spread), which decides `stockFeeBps`, and
-   how distribution partners bulk-onboard users. A `GMTokenLimitOrder`
+   stored `userID` must match the quote**. The standalone router is therefore
+   the onboarded purchaser/caller, receives the GM token, and forwards it to
+   the user's wallet in the same transaction; `attestationId` replay
+   protection, `minimumDepositUSD`, and purchaser/token rate limits remain
+   enforced by GM. The router now uses these attestation parameters. Legal
+   approval for purchaser-of-record distribution remains a deployment gate.
+   A `GMTokenLimitOrder`
    contract also exists on BNB (future feature). Eligibility: prohibited =
    US/Canada/Cuba + sanctions; Brazil restricted to Qualified Investors —
    matches our existing geofence (US/CA/BR + sanctions) exactly.

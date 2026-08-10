@@ -6,8 +6,8 @@ pragma solidity ^0.8.24;
  * same mocks the unit tests use, so the app's own signer (evmWallet.ts) can
  * run real mint/trade/redeem transactions against a live network before any
  * Ondo dependency exists. NOT a production script: the rehearsal deployer
- * is treasury/owner/feeTreasury all at once, and fee bps are exercised at
- * a placeholder 30 (test-only; pricing remains an open decision).
+ * is treasury/owner. The production-fixed 30 bps fee accumulates in the
+ * router exactly as it does on BSC mainnet.
  *
  *   DEPLOYER_KEY=0x... forge script script/DeployRehearsal.s.sol \
  *     --rpc-url https://data-seed-prebsc-1-s1.bnbchain.org:8545 --broadcast
@@ -15,9 +15,9 @@ pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {CusdPlusVault} from "../CusdPlusVault.sol";
+import {CusdPlusVault} from "cusd-plus/CusdPlusVault.sol";
 import {ConfioStockRouter} from "../ConfioStockRouter.sol";
-import {MockToken, MockOracle, MockInstantManager} from "../test/CusdPlusVault.t.sol";
+import {MockToken, MockOracle, MockInstantManager} from "cusd-plus/test/CusdPlusVault.t.sol";
 import {MockGMTokenManager} from "../test/ConfioStockRouter.t.sol";
 
 contract DeployRehearsal is Script {
@@ -34,22 +34,20 @@ contract DeployRehearsal is Script {
         usdt.mint(address(im), 1_000_000e18);
         usdy.mint(address(im), 1_000_000e18);
 
-        CusdPlusVault impl = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
+        CusdPlusVault impl = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
+        CusdPlusVault vault = CusdPlusVault(
+            address(new ERC1967Proxy(address(impl), abi.encodeCall(CusdPlusVault.initialize, (deployer))))
         );
-        CusdPlusVault vault = CusdPlusVault(address(new ERC1967Proxy(
-            address(impl), abi.encodeCall(CusdPlusVault.initialize, (deployer))
-        )));
 
         MockToken usdon = new MockToken("USDon");
         MockGMTokenManager gm = new MockGMTokenManager(usdt, usdon);
         usdt.mint(address(gm), 1_000_000e18);
 
-        ConfioStockRouter router = new ConfioStockRouter(
-            address(vault), address(usdt), address(usdon),
-            address(gm), deployer, deployer
+        ConfioStockRouter routerImpl = new ConfioStockRouter(address(vault), address(usdt), address(usdon), address(gm));
+        ConfioStockRouter router = ConfioStockRouter(
+            address(new ERC1967Proxy(address(routerImpl), abi.encodeCall(ConfioStockRouter.initialize, (deployer))))
         );
-        router.setStockFeeBps(30); // rehearsal-only placeholder
+        vault.setSponsor(address(router), true);
 
         vm.stopBroadcast();
 

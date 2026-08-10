@@ -14,15 +14,16 @@ last-known fallback so a dead node degrades to a stale portfolio, never a
 vanished one. USD values are never stored — the resolver computes them
 from the globally cached GM market payload (display only, chain-first).
 
-The registry ships empty until Ondo's trading-integration docs (PP-gated)
-give us the contract addresses — the display API doesn't expose them
-(probed 2026-07-10). Empty registry = empty portfolio, honestly.
+The live registry comes from Ondo's `/assets/all/addresses` metadata endpoint
+and is cached server-side for one day. `gm_tokens.json` is only the deploy-time
+fallback snapshot, so an upstream outage never makes held positions vanish.
 """
 import json
 import logging
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
+import re
 
 from django.core.cache import cache
 from eth_abi import decode, encode
@@ -42,22 +43,59 @@ CHUNK = 250
 
 SCAN_TTL = 30
 SCAN_LAST_TTL = 7 * 24 * 3600
+REGISTRY_TTL = 24 * 3600
+REGISTRY_FALLBACK_TTL = 5 * 60
+REGISTRY_CACHE_KEY = 'gm_bsc_registry_v1'
 
 
 @lru_cache(maxsize=1)
-def registry() -> dict:
-    """symbol -> {'address': '0x…', 'decimals': int} for the GM universe."""
+def _fallback_registry() -> dict:
     path = Path(__file__).parent / 'gm_tokens.json'
     try:
-        return json.loads(path.read_text())
-    except FileNotFoundError:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError):
+        logger.exception('GM fallback registry is missing or malformed')
         return {}
 
 
-def _scan(user_bsc_address: str) -> dict:
+def registry() -> dict | None:
+    """BSC symbol -> address metadata from Ondo, with local outage fallback."""
+    cached = cache.get(REGISTRY_CACHE_KEY)
+    if cached is not None:
+        return cached
+    fallback = _fallback_registry()
+    try:
+        from . import gm_api
+        rows = gm_api.all_addresses()
+        live = {}
+        for row in rows:
+            symbol = str(row.get('symbol') or '')
+            for item in row.get('addresses') or []:
+                address = str(item.get('address') or '')
+                if (item.get('networkChainId') == 'bsc-56'
+                        and re.fullmatch(r'0x[0-9a-fA-F]{40}', address)):
+                    live[symbol] = {
+                        'address': address,
+                        'decimals': int(item.get('decimals') or 18),
+                    }
+                    break
+        result = live or fallback
+        if result:
+            cache.set(REGISTRY_CACHE_KEY, result, REGISTRY_TTL if live else REGISTRY_FALLBACK_TTL)
+        return result or None
+    except Exception:  # noqa: BLE001 — portfolio degrades to shipped snapshot
+        logger.warning('GM address registry unavailable; using local fallback', exc_info=True)
+        if fallback:
+            # Retry Ondo soon after an outage, but avoid a request stampede.
+            cache.set(REGISTRY_CACHE_KEY, fallback, REGISTRY_FALLBACK_TTL)
+        return fallback or None
+
+
+def _scan(user_bsc_address: str, token_registry: dict) -> dict:
     """One Multicall3 pass over the whole registry; returns nonzero
     balances as {symbol: units_float}. Raises on RPC failure."""
-    entries = list(registry().items())
+    entries = list(token_registry.items())
     holder_arg = encode(['address'], [user_bsc_address])
     held = {}
     for i in range(0, len(entries), CHUNK):
@@ -86,14 +124,17 @@ def holdings_units(user_bsc_address: str) -> dict | None:
     as an empty portfolio."""
     if not user_bsc_address:
         return {}
-    if not registry():
-        return {}
     key = user_bsc_address.lower()
     cached = cache.get(f'gm_hold:{key}')
     if cached is not None:
         return cached
+    token_registry = registry()
+    if token_registry is None:
+        return cache.get(f'gm_hold_last:{user_bsc_address.lower()}')
+    if not token_registry:
+        return {}
     try:
-        held = _scan(key)
+        held = _scan(key, token_registry)
     except Exception:  # noqa: BLE001 — degrade to stale, never to vanished
         logger.warning('GM holdings scan failed for %s', user_bsc_address, exc_info=True)
         return cache.get(f'gm_hold_last:{key}')

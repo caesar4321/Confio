@@ -76,16 +76,22 @@ const GM_OHLC = gql`
   }
 `;
 
-export const useGmOhlc = (symbol: string | undefined, range: GmRange) => {
+export const useGmOhlc = (
+  symbol: string | undefined,
+  range: GmRange,
+  enabled = true,
+) => {
   const { data, loading } = useQuery(GM_OHLC, {
     variables: { symbol, range },
-    skip: !symbol,
+    skip: !enabled || !symbol,
     fetchPolicy: 'cache-and-network',
   });
   return useMemo(() => {
-    const closes: number[] = (data?.gmOhlc ?? []).map((c: any) => c.close);
-    return { closes, loading: loading && closes.length === 0 };
-  }, [data, loading]);
+    const closes: number[] = enabled
+      ? (data?.gmOhlc ?? []).map((c: any) => c.close)
+      : [];
+    return { closes, loading: enabled && loading && closes.length === 0 };
+  }, [data, loading, enabled]);
 };
 
 // Deterministic fallback sparkline so charts render when the 24h series is
@@ -117,14 +123,17 @@ const colorFor = (ticker: string): string => {
 const logoFor = (ticker: string) =>
   `https://financialmodelingprep.com/image-stock/${ticker}.png`;
 
-export const useGmMarket = () => {
+export const useGmMarket = (enabled = true) => {
   const { data, loading } = useQuery(GM_MARKET, {
+    skip: !enabled,
     fetchPolicy: 'cache-and-network',
     pollInterval: 60_000, // matches the server-side cache TTL
   });
 
   return useMemo(() => {
-    const market = data?.gmMarket;
+    // `skip` does not erase Apollo's previous account cache. Explicitly
+    // discard it when the authoritative server visibility flag is false.
+    const market = enabled ? data?.gmMarket : null;
     const session: GmSession = (market?.session as GmSession) || 'core';
     const stocks: GmStock[] = (market?.assets || []).map((a: any) => ({
       symbol: a.symbol,
@@ -146,9 +155,9 @@ export const useGmMarket = () => {
     return {
       session,
       stocks,
-      loading: loading && stocks.length === 0,
+      loading: enabled && loading && stocks.length === 0,
       byTicker: (t: string) => stocks.find((s) => s.ticker === t),
       tradabilityFor,
     };
-  }, [data, loading]);
+  }, [data, loading, enabled]);
 };

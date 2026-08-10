@@ -3429,7 +3429,7 @@ type Query {
   """ISO 3166-2 states/provinces for the registration picker"""
   countrySubdivisions(countryCode: String!): [CountrySubdivisionType]
 
-  """Recent confirmed USDC outflows not yet backing a review"""
+  """Recent confirmed dollar-stable outflows not yet backing a review"""
   myReviewableUsdcSends: [ReviewableUsdcSendType]
 
   """
@@ -3443,6 +3443,7 @@ type Query {
   cusdPlusConvertParams: CusdPlusConvertParamsType
   cusdPlusConversionsInFlight: [CusdPlusConversionType!]
   gmMarket: GmMarketType
+  gmSoftQuote(symbol: String!, side: String!, notionalValue: String!, duration: String = "short"): GmTradeQuoteType
 
   """
   The JWT account's tokenized-stock positions (Multicall3 universe scan — chain is the registry)
@@ -3559,6 +3560,11 @@ type Query {
   businessCategories: [BusinessCategoryType]
   userVerifications(userId: ID): [IdentityVerificationType]
   userAccounts: [AccountType]
+
+  """
+  The authenticated caller's own personal-account chain addresses, used to anchor wallet recovery. Deliberately NOT fields on AccountType: that type is reachable via user(id:){ accounts } for arbitrary users.
+  """
+  myWalletAnchors: WalletAnchorsType
   accountBalance(tokenType: String!): String
   currentAccountPermissions: JSONString
   legalDocument(docType: String!, language: String): LegalDocumentType
@@ -3960,7 +3966,7 @@ type FinancieraType {
   """Digits-only E.164 without +, e.g. 584141234567"""
   whatsapp: String!
 
-  """Mandatory: accepts USDC over the Algorand network"""
+  """Mandatory: accepts USDT over BNB Smart Chain (BEP-20)"""
   supportsUsdcAlgorand: Boolean!
 
   """Has a physical storefront/local users can visit"""
@@ -3996,7 +4002,7 @@ type FinancieraType {
   rateReviewCount: Int
 
   """
-  Median USD received per 100 USDC sent, derived from reviews; null until 3+ distinct verified users have reviewed
+  Median USD received per 100 USDT sent, derived from reviews; null until 3+ distinct verified users have reviewed
   """
   avgReceivedPer100: Float
   isVerified: Boolean
@@ -4737,7 +4743,7 @@ type FinancieraReviewType {
   rating: Int!
 
   """
-  Token of the backing transaction; both are $1-pegged so the derived rate math is identical
+  Token of the backing transaction; all are $1-denominated so the derived rate math is identical
   """
   sentToken: FinancierasFinancieraReviewSentTokenChoices!
 
@@ -4749,12 +4755,18 @@ type FinancieraReviewType {
   comment: String!
   createdAt: DateTime!
 
-  """'sent' if user sold USDC/cUSD, 'received' if user bought"""
+  """'sent' if user sold USDT/cUSD+, 'received' if user bought"""
   direction: String
 }
 
 """An enumeration."""
 enum FinancierasFinancieraReviewSentTokenChoices {
+  """Tether USD"""
+  USDT
+
+  """Confío Dollar Plus"""
+  CUSD_PLUS
+
   """USD Coin"""
   USDC
 
@@ -4776,7 +4788,9 @@ type ReviewableUsdcSendType {
   """'sent' or 'received'"""
   direction: String
 
-  """'USDC' or 'CUSD' (withdrawals are always USDC)"""
+  """
+  'USDT' or 'CUSD_PLUS' on the BSC rail; legacy rows may be 'USDC'/'CUSD' (withdrawals are always USDC)
+  """
   token: String
   amountUsdc: Decimal
 
@@ -4821,6 +4835,12 @@ type CusdPlusSummaryType {
   """
   stocksEnabled: Boolean
 
+  """Binding GM attestations and router settlement are enabled"""
+  stocksTradingEnabled: Boolean
+
+  """Trading is enabled and this request is Ondo-entry eligible"""
+  stocksBuyEnabled: Boolean
+
   """
   cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)
   """
@@ -4862,6 +4882,9 @@ type CusdPlusConvertParamsType {
   Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative
   """
   gmTradeFeeBps: Int
+
+  """Standalone ConfioStockRouter on BSC; null until deployed"""
+  stockRouterAddress: String
 
   """
   cUSD+ vault (proxy) on BSC — client targets this for leg C (subscribeAndMint/redeem)
@@ -4941,6 +4964,27 @@ type GmAssetType {
   logoUrl: String
 }
 
+type GmTradeQuoteType {
+  success: Boolean!
+  errorCode: String
+  errorMessage: String
+  attestationId: String
+  userId: String
+  chainId: String
+  symbol: String
+  ticker: String
+  assetAddress: String
+  side: String
+  tokenAmount: String
+  price: String
+  expiration: Float
+  signatureHex: String
+  additionalDataHex: String
+
+  """Exact USDT notional supplied to GM and the router"""
+  notionalWei: String
+}
+
 """
 One tokenized-stock position of the JWT account. Units are fine to
 expose for stocks (market convention) — the never-expose-share-counts
@@ -5010,14 +5054,33 @@ type PayrollRailStatusType {
   """
   executionRail: String
 
-  """Token a run created now is denominated in (CUSD_PLUS on BSC)"""
+  """
+  Token a run created now is denominated in — CUSD_PLUS on BSC, or USDT for an Ondo-blocked employer whose float can only be raw
+  """
   tokenType: String
+
+  """
+  DEFAULT pool for a top-up: CUSD_PLUS or USDT. A hint, not a constraint — the client may fund or withdraw either pool explicitly. Names the asset fundableBalanceUsd is measured in.
+  """
+  fundingToken: String
+
+  """Payroll escrow parked as cUSD+ shares, in USD. null = unknown"""
+  escrowCusdPlusUsd: Float
+
+  """Payroll escrow parked as raw USDT, in USD. null = unknown"""
+  escrowUsdtUsd: Float
+
+  """Business wallet cUSD+ position a top-up could park, in USD"""
+  fundableCusdPlusUsd: Float
+
+  """Business wallet raw USDT a top-up could park, in USD"""
+  fundableUsdtUsd: Float
 
   """Payroll escrow, in USD"""
   vaultBalanceUsd: Float
 
   """
-  Business balance a top-up can draw from, in USD — the cUSD+ position on BSC
+  Business balance a top-up can draw from, in USD, measured in whatever fundingToken names — the cUSD+ position, or the raw USDT wallet balance for an Ondo-blocked employer
   """
   fundableBalanceUsd: Float
 
@@ -5256,6 +5319,24 @@ enum UsersEmployeeActivityLogActionChoices {
 
   """Settings Changed"""
   SETTINGS_CHANGED
+}
+
+"""
+The caller's OWN personal-account addresses, for anchoring wallet recovery.
+
+Both addresses derive from the same client-side master secret, so the client
+only needs one of them to prove a candidate secret is the right one — but
+BSC-only accounts (Algorand deprecated) have no algorand_address at all, and
+without any anchor an unanchored Drive scan can adopt the oldest decryptable
+backup over a good local wallet.
+
+Returned together in ONE read on purpose: fetching them in two requests let
+the two anchors come from different wallet generations if a migration landed
+in between, which could either resurrect a stale backup or deny a valid one.
+"""
+type WalletAnchorsType {
+  algorandAddress: String
+  bscAddress: String
 }
 
 type BankInfoType {
@@ -6025,6 +6106,16 @@ type Mutation {
     """Delegate intent nonce (nonces())"""
     nonce: String!
   ): SponsorBscBatch
+
+  """
+  Create one binding Ondo attestation for the JWT account.
+
+  The client supplies an idempotency key so a lost HTTP response reuses the
+  still-live attestation instead of consuming another purchaser limit.
+  Settlement remains non-custodial: this returns signed quote data; only the
+  user's subsequent EIP-712 batch signature can execute the router call.
+  """
+  prepareGmTrade(duration: String = "short", notionalValue: String!, requestId: String!, side: String!, symbol: String!): PrepareGmTrade
   registerFinanciera(
     cashLocal: Boolean = false
     cashUsd: Boolean = true
@@ -6055,7 +6146,7 @@ type Mutation {
   deleteFinanciera(financieraId: ID!): DeleteFinanciera
 
   """
-  Reviews must be anchored to a real USDC-Algorand transaction. The
+  Reviews must be anchored to a real USDT-BSC transaction. The
   transaction amount comes from the server, never from the client.
   """
   submitFinancieraReview(
@@ -6064,10 +6155,10 @@ type Mutation {
     rating: Int!
     receivedUsd: Decimal!
 
-    """Confirmed USDC send backing this review"""
+    """Confirmed dollar-stable send backing this review"""
     sendTransactionId: ID
 
-    """Completed USDC withdrawal backing this review"""
+    """Completed legacy USDC withdrawal backing this review"""
     usdcWithdrawalId: ID
   ): SubmitFinancieraReview
   reportFinanciera(financieraId: ID!, reason: String!): ReportFinanciera
@@ -6211,6 +6302,11 @@ type Mutation {
 
     """Also allowlist the caller's own signer — activation does this"""
     includeSelf: Boolean
+
+    """
+    Which escrow pool to fund/withdraw: CUSD_PLUS or USDT. Omit to use the business's default pool.
+    """
+    tokenType: String
   ): PrepareBscPayrollAdmin
 
   """
@@ -6220,6 +6316,11 @@ type Mutation {
   submitBscPayrollAdmin(
     action: String!
     allowed: Boolean
+
+    """
+    Echo prepare's asset. Safe to take from the client: it goes into the rebuilt calls the business signed, so a different pool fails signature recovery.
+    """
+    asset: Int
     authorization: BscPayrollAuthorizationInput
 
     """Unix seconds"""
@@ -7215,6 +7316,18 @@ input BscCallInput {
   data: String!
 }
 
+"""
+Create one binding Ondo attestation for the JWT account.
+
+The client supplies an idempotency key so a lost HTTP response reuses the
+still-live attestation instead of consuming another purchaser limit.
+Settlement remains non-custodial: this returns signed quote data; only the
+user's subsequent EIP-712 batch signature can execute the router call.
+"""
+type PrepareGmTrade {
+  quote: GmTradeQuoteType
+}
+
 type RegisterFinanciera {
   success: Boolean
   error: String
@@ -7244,7 +7357,7 @@ type DeleteFinanciera {
 }
 
 """
-Reviews must be anchored to a real USDC-Algorand transaction. The
+Reviews must be anchored to a real USDT-BSC transaction. The
 transaction amount comes from the server, never from the client.
 """
 type SubmitFinancieraReview {
@@ -7568,6 +7681,12 @@ type PrepareBscPayrollAdmin {
   errorName: String
   calls: [BscPayrollCallType]
   shares: String
+
+  """Escrow pool this batch touches: 0 = cUSD+ shares, 1 = raw USDT"""
+  asset: Int
+
+  """The same pool by name — what the top-up is denominated in"""
+  tokenType: String
   delegateAddress: String
   delegateAddresses: [String]
   intentId: String
