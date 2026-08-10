@@ -698,6 +698,7 @@ class StatsSummaryType(graphene.ObjectType):
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
     usdy_reserve = graphene.Float()  # USD value of the USDY backing cUSD+ (BSC vault)
+    ondo_stocks_tvl = graphene.Float()  # Cached market value held by confirmed Confío stock traders
     circulating_cusd = graphene.Float()
     presale_cusd_raised = graphene.Float()
     presale_cusd_raised_7d = graphene.Float()
@@ -1636,7 +1637,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v12'
+		cache_key = 'stats_summary_v13'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1702,6 +1703,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		).aggregate(total=Sum('cusd_amount'))['total'] or Decimal('0')
 
 		from django.conf import settings
+		from cusd_plus import gm_tvl
 		network = (getattr(settings, 'ALGORAND_NETWORK', '') or '').lower()
 		pera_base_url = 'https://testnet.explorer.perawallet.app' if network == 'testnet' else 'https://explorer.perawallet.app'
 		cusd_asset_id = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
@@ -1722,6 +1724,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			# total_value_locked, which is the cUSD/USDC side: the app shows
 			# one pill per rail, each labelled with its own asset.
 			'usdy_reserve': cusd_plus_vault.usdy_reserve_usd(),
+			'ondo_stocks_tvl': gm_tvl.value_usd(),
 			'circulating_cusd': circulating_cusd,
 			'presale_cusd_raised': float(presale_cusd_raised),
 			'presale_cusd_raised_7d': float(presale_cusd_raised_7d),

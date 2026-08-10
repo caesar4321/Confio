@@ -25,6 +25,15 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+
+@shared_task(name='cusd_plus.refresh_gm_tvl')
+def refresh_gm_tvl():
+    """Keep the Home Ondo Stocks TVL metric warm outside request latency."""
+    from .gm_tvl import refresh
+
+    return refresh()
+
+
 # RPC POOL, not a single URL (2026-07-31 incident): the public dataseed
 # family stopped serving eth_getLogs entirely ('limit exceeded' on every
 # range), which silently killed this scanner for weeks — cursor never set,

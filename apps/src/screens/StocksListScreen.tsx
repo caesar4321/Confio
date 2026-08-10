@@ -229,6 +229,24 @@ export const StocksListScreen = () => {
               <Image source={OndoLogo} style={styles.partnerLogo} />
               <Text style={styles.partnerBrand}>Ondo Finance</Text>
             </View>
+            <TouchableOpacity
+              style={styles.howItWorksRow}
+              onPress={() => navigation.navigate('OndoStocksInfo')}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Cómo funcionan las acciones de Estados Unidos"
+            >
+              <View style={styles.howItWorksIcon}>
+                <Icon name="info" size={16} color={colors.primaryDark} />
+              </View>
+              <View style={styles.howItWorksCopy}>
+                <Text style={styles.howItWorksTitle}>¿Cómo funciona?</Text>
+                <Text style={styles.howItWorksSub}>
+                  Respaldo, dividendos, costos y riesgos — sin letra chica
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={18} color={colors.text.light} />
+            </TouchableOpacity>
           </View>
         }
         ListEmptyComponent={
@@ -357,6 +375,30 @@ const styles = StyleSheet.create({
   partnerText: { fontSize: 12, color: colors.text.light },
   partnerLogo: { width: 16, height: 16, borderRadius: 4 },
   partnerBrand: { fontSize: 12, fontWeight: '700', color: colors.text.secondary },
+
+  howItWorksRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: colors.white,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  howItWorksIcon: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: colors.primaryLight,
+  },
+  howItWorksCopy: { flex: 1, marginLeft: 10 },
+  howItWorksTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  howItWorksSub: { marginTop: 2, fontSize: 11, lineHeight: 16, color: colors.text.secondary },
 
   footerDisclaimer: {
     fontSize: 11,

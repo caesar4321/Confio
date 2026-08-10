@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
@@ -15,6 +15,7 @@ type StatsSummary = {
   protectedSavings?: number | null;
   totalValueLocked?: number | null;
   presaleCusdRaised?: number | null;
+  ondoStocksTvl?: number | null;
 };
 
 // Latino-friendly number formatting: full numbers up to 999,999 with the
@@ -54,9 +55,13 @@ type Tile = {
 
 type HomeStatsSectionProps = {
   refreshNonce?: number;
+  showStocks?: boolean;
 };
 
-export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce = 0 }) => {
+export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
+  refreshNonce = 0,
+  showStocks = false,
+}) => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
   const { data, refetch } = useQuery(GET_STATS_SUMMARY, {
@@ -115,6 +120,15 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         descriptor: backingDescriptor,
         onPress: () => navigation.navigate('ProtectedSavings'),
       },
+      ...(showStocks ? [{
+        key: 'stocks',
+        icon: 'trending-up',
+        value: fmt(s?.ondoStocksTvl),
+        unit: 'USD',
+        label: 'Acciones',
+        descriptor: 'Valor invertido',
+        onPress: () => navigation.navigate('OndoStocksInfo'),
+      }] : []),
       {
         key: 'presale',
         icon: 'zap',
@@ -128,44 +142,76 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         onPress: () => navigation.navigate('ConfioPresale'),
       },
     ],
-    [s?.totalUsers, verified, tvl, backingDescriptor, s?.presaleCusdRaised,
+    [s?.totalUsers, verified, tvl, backingDescriptor, s?.ondoStocksTvl,
+     s?.presaleCusdRaised, showStocks,
      thousandsSeparator, decimalSeparator, navigation]
+  );
+
+  const renderTile = (tile: Tile, compactRail: boolean) => (
+    <TouchableOpacity
+      key={tile.key}
+      style={[styles.tile, compactRail && styles.railTile]}
+      activeOpacity={0.7}
+      onPress={tile.onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${tile.label}: ${tile.value}${tile.unit ? ` ${tile.unit}` : ''}. ${tile.descriptor}`}
+    >
+      <View style={styles.tileTopRow}>
+        <Icon name={tile.icon} size={13} color={colors.primary} />
+        <Icon name="chevron-right" size={14} color="#9CA3AF" />
+      </View>
+      <Text
+        style={styles.tileValue}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.65}
+      >
+        {tile.value}
+        {tile.unit ? <Text style={styles.tileUnit}> {tile.unit}</Text> : null}
+      </Text>
+      <Text
+        style={styles.tileLabel}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
+        {tile.label}
+      </Text>
+      <Text
+        style={[
+          styles.tileDescriptor,
+          tile.descriptorColor ? { color: tile.descriptorColor } : null,
+        ]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+      >
+        {tile.descriptor}
+      </Text>
+    </TouchableOpacity>
   );
 
   return (
     <View style={styles.container}>
-      <View style={styles.strip}>
-        {tiles.map((tile, idx) => (
-          <React.Fragment key={tile.key}>
-            {idx > 0 && <View style={styles.divider} />}
-            <TouchableOpacity style={styles.tile} activeOpacity={0.7} onPress={tile.onPress}>
-              <View style={styles.tileTopRow}>
-                <Icon name={tile.icon} size={13} color={colors.primary} />
-                <Icon name="chevron-right" size={14} color="#9CA3AF" />
-              </View>
-              <Text
-                style={styles.tileValue}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.65}
-              >
-                {tile.value}
-                {tile.unit ? <Text style={styles.tileUnit}> {tile.unit}</Text> : null}
-              </Text>
-              <Text style={styles.tileLabel}>{tile.label}</Text>
-              <Text
-                style={[
-                  styles.tileDescriptor,
-                  tile.descriptorColor ? { color: tile.descriptorColor } : null,
-                ]}
-                numberOfLines={1}
-              >
-                {tile.descriptor}
-              </Text>
-            </TouchableOpacity>
-          </React.Fragment>
-        ))}
-      </View>
+      {tiles.length > 3 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.railContent}
+          decelerationRate="fast"
+        >
+          {tiles.map(tile => renderTile(tile, true))}
+        </ScrollView>
+      ) : (
+        <View style={styles.strip}>
+          {tiles.map((tile, idx) => (
+            <React.Fragment key={tile.key}>
+              {idx > 0 && <View style={styles.divider} />}
+              {renderTile(tile, false)}
+            </React.Fragment>
+          ))}
+        </View>
+      )}
     </View>
   );
 };
@@ -194,6 +240,26 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     paddingHorizontal: 8,
+  },
+  railContent: {
+    gap: 8,
+    paddingRight: 16,
+  },
+  railTile: {
+    flex: 0,
+    width: 104,
+    minHeight: 86,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   tileTopRow: {
     flexDirection: 'row',

@@ -11,6 +11,7 @@ export const GET_STATS_SUMMARY = gql`
       usdyReserve
       presaleCusdRaised
       presaleCusdRaised7d
+      ondoStocksTvl
       statsSource
       cusdAssetPeraUrl
       usersByCountry {

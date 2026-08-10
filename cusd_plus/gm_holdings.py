@@ -5,9 +5,9 @@ Design (locked with Julian 2026-07-10, replacing a per-account holdings
 model): the ONLY durable state is a system-wide token registry
 (gm_tokens.json: symbol -> {address, decimals}, one entry per GM asset).
 A user's portfolio is discovered by scanning the whole registry against
-their address with Multicall3 — every balanceOf in ONE eth_call — so the
-chain stays the single source of truth and nothing can go invisible
-because a row wasn't created. No DB model, no sync jobs.
+their address with Multicall3 — balanceOf calls packed into 250-call
+chunks — so the chain stays the single source of truth and nothing can go
+invisible because a row wasn't created. No DB model, no sync jobs.
 
 Freshness mirrors vault.position_usd: 30s fresh cache per address, 7-day
 last-known fallback so a dead node degrades to a stale portfolio, never a
@@ -92,7 +92,13 @@ def registry() -> dict | None:
         return fallback or None
 
 
-def _scan(user_bsc_address: str, token_registry: dict) -> dict:
+def _scan(
+    user_bsc_address: str,
+    token_registry: dict,
+    *,
+    block_tag: str = 'latest',
+    require_complete: bool = False,
+) -> dict:
     """One Multicall3 pass over the whole registry; returns nonzero
     balances as {symbol: units_float}. Raises on RPC failure."""
     entries = list(token_registry.items())
@@ -106,10 +112,14 @@ def _scan(user_bsc_address: str, token_registry: dict) -> dict:
         ]
         # requireSuccess=False: one misbehaving token must not hide the rest.
         data = SEL_TRY_AGGREGATE + encode(['bool', '(address,bytes)[]'], [False, calls])
-        res = vault._rpc('eth_call', [{'to': MULTICALL3, 'data': '0x' + data.hex()}, 'latest'])
+        res = vault._rpc('eth_call', [{'to': MULTICALL3, 'data': '0x' + data.hex()}, block_tag])
         results = decode(['(bool,bytes)[]'], bytes.fromhex(res[2:]))[0]
+        if require_complete and len(results) != len(chunk):
+            raise RuntimeError('GM Multicall returned an incomplete result set')
         for (ok, ret), (symbol, item) in zip(results, chunk):
             if not ok or len(ret) < 32:
+                if require_complete:
+                    raise RuntimeError(f'GM balanceOf failed for {symbol}')
                 continue
             raw = int.from_bytes(ret[:32], 'big')
             if raw:

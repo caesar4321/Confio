@@ -5700,6 +5700,7 @@ type StatsSummaryType {
   protectedSavings: Float
   totalValueLocked: Float
   usdyReserve: Float
+  ondoStocksTvl: Float
   circulatingCusd: Float
   presaleCusdRaised: Float
   presaleCusdRaised7d: Float

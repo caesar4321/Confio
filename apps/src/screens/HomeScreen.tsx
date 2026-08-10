@@ -1662,7 +1662,10 @@ export const HomeScreen = () => {
         </Animated.View>
 
         {/* Crecimiento Confío stats */}
-        <HomeStatsSection refreshNonce={statsRefreshNonce} />
+        <HomeStatsSection
+          refreshNonce={statsRefreshNonce}
+          showStocks={savingsPortfolio.stocks.enabled}
+        />
 
         {/* Wallets Section */}
         <View style={styles.walletsSection}>

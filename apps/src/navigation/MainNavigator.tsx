@@ -22,6 +22,7 @@ import { ConvertSavingsScreen } from '../screens/ConvertSavingsScreen';
 import { WithdrawSavingsScreen } from '../screens/WithdrawSavingsScreen';
 import { ReceiveSavingsScreen } from '../screens/ReceiveSavingsScreen';
 import { SendUsdtScreen } from '../screens/SendUsdtScreen';
+import { OndoStocksInfoScreen } from '../screens/OndoStocksInfoScreen';
 import { StocksListScreen } from '../screens/StocksListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { BuyStockScreen } from '../screens/BuyStockScreen';
@@ -286,6 +287,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="SendUsdt"
           component={SendUsdtScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="OndoStocksInfo"
+          component={OndoStocksInfoScreen}
           options={{
             headerShown: false,
           }}
