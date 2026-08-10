@@ -148,8 +148,12 @@ def _normalize_gm_quote(data, request, *, binding):
         raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned a mismatched chain or side', 502)
     if str(data.get('symbol') or '') != request['symbol'] or not _GM_ADDRESS_RE.fullmatch(asset):
         raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned a mismatched asset', 502)
-    if quantity <= 0 or price <= 0 or notional_wei < quote_cost or notional_wei - quote_cost > 10 ** 12:
+    # Ondo may round the signed token quantity a few wei above or below the
+    # requested notional. Mirror the router's one-micro-USDT tolerance in
+    # either direction, and settle at no less than the signed quote cost.
+    if quantity <= 0 or price <= 0 or abs(notional_wei - quote_cost) > 10 ** 12:
         raise gm_api.GmApiError('BAD_ONDO_RESPONSE', 'Ondo returned inconsistent quote arithmetic', 502)
+    notional_wei = max(notional_wei, quote_cost)
 
     result = {
         'success': True,

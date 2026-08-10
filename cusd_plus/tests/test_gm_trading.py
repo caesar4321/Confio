@@ -86,6 +86,30 @@ class GmApiTradingTests(SimpleTestCase):
             _normalize_gm_quote(data, request, binding=False)
 
     @override_settings(CUSD_PLUS_GM_MAX_TRADE_USD=100_000)
+    def test_quote_cost_slightly_above_request_is_used_for_settlement(self):
+        request = _validated_gm_trade_request('TSLAon', 'buy', '1.0967', 'short')
+        requested = 1_096_700_000_000_000_000
+        data = {
+            'chainId': '56', 'symbol': 'TSLAon', 'ticker': 'TSLA',
+            'assetAddress': '0x' + '55' * 20, 'side': '0',
+            'tokenAmount': str(requested + 40), 'price': str(10**18),
+        }
+        quote = _normalize_gm_quote(data, request, binding=False)
+        self.assertEqual(quote['notional_wei'], str(requested + 40))
+
+    @override_settings(CUSD_PLUS_GM_MAX_TRADE_USD=100_000)
+    def test_quote_cost_above_request_by_more_than_micro_usdt_is_rejected(self):
+        request = _validated_gm_trade_request('TSLAon', 'buy', '1.0967', 'short')
+        requested = 1_096_700_000_000_000_000
+        data = {
+            'chainId': '56', 'symbol': 'TSLAon', 'ticker': 'TSLA',
+            'assetAddress': '0x' + '55' * 20, 'side': '0',
+            'tokenAmount': str(requested + 10**12 + 1), 'price': str(10**18),
+        }
+        with self.assertRaises(gm_api.GmApiError):
+            _normalize_gm_quote(data, request, binding=False)
+
+    @override_settings(CUSD_PLUS_GM_MAX_TRADE_USD=100_000)
     def test_numeric_zero_buy_side_is_accepted(self):
         request = _validated_gm_trade_request('TSLAon', 'buy', '600', 'short')
         data = {
