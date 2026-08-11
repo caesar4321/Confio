@@ -425,9 +425,9 @@ export const SellScreen = () => {
             const { fundUsdtDestination } = await import('../services/cusdPlusVault');
             const { microsToWei } = await import('../utils/tokenAmount');
             // ONE sponsored batch: the redeem (if a shortfall exists) and the
-            // payment to Guardarian ride the same transaction. As two calls
-            // the second hit the server's 30s per-address cooldown, leaving
-            // the shares burned and the order unfunded (audit [P1] #1).
+            // payment to Guardarian ride the same transaction. Atomicity
+            // prevents a failure between calls from leaving the shares burned
+            // while the provider order remains unfunded (audit [P1] #1).
             await fundUsdtDestination({
                 to: depositAddress,
                 amountWei: microsToWei(amountMicros),

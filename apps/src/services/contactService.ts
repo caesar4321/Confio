@@ -38,6 +38,26 @@ interface ContactMap {
   [phoneNumber: string]: StoredContact;
 }
 
+/**
+ * Progress for a running sync. `total` is 0 while a step cannot be measured
+ * (the native address-book read is a single opaque call), which the UI renders
+ * as an indeterminate bar instead of a fake percentage.
+ */
+export type ContactSyncPhase = 'reading' | 'normalizing' | 'matching' | 'saving';
+
+export interface ContactSyncProgress {
+  phase: ContactSyncPhase;
+  processed: number;
+  total: number;
+}
+
+export type ContactSyncProgressListener = (progress: ContactSyncProgress) => void;
+
+// A tight loop over thousands of contacts freezes the JS thread, which is what
+// makes a big address book feel hung. Yield every chunk so progress can paint.
+const NORMALIZE_CHUNK_SIZE = 150;
+const yieldToUiThread = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
+
 const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
@@ -269,7 +289,11 @@ export class ContactService {
   /**
    * Check which phone numbers are Confío users
    */
-  async checkConfioUsers(phoneNumbers: string[], apolloClient?: any): Promise<Map<string, any>> {
+  async checkConfioUsers(
+    phoneNumbers: string[],
+    apolloClient?: any,
+    onBatchDone?: (processed: number, total: number) => void,
+  ): Promise<Map<string, any>> {
     const confioUsersMap = new Map<string, any>();
 
     if (!apolloClient || phoneNumbers.length === 0) {
@@ -318,6 +342,7 @@ export class ContactService {
       if (returnedPhones.size !== requestedPhones.size) {
         throw new Error('Contact discovery omitted one or more phone numbers');
       }
+      onBatchDone?.(Math.min(i + batchSize, phoneNumbers.length), phoneNumbers.length);
     }
 
     return confioUsersMap;
@@ -327,7 +352,7 @@ export class ContactService {
    * Sync contacts from device and store in keychain
    * @param apolloClient - Apollo client for GraphQL queries
    */
-  async syncContacts(apolloClient?: any): Promise<boolean> {
+  async syncContacts(apolloClient?: any, onProgress?: ContactSyncProgressListener): Promise<boolean> {
     const syncGeneration = ++this.cacheGeneration;
     this.activeSyncGeneration = syncGeneration;
     try {
@@ -347,6 +372,10 @@ export class ContactService {
       );
       const contactsService = contactsServiceForOwner(ownerUserId, phoneRegion);
       const contactsArrayService = contactsServiceForOwner(ownerUserId, phoneRegion, true);
+      // A superseded sync must never move the progress bar of the current one.
+      const report = (phase: ContactSyncPhase, processed: number, total: number) => {
+        if (onProgress && syncContextIsCurrent()) onProgress({ phase, processed, total });
+      };
 
       const hasPermission = await this.hasContactPermission();
       if (!hasPermission) {
@@ -355,6 +384,7 @@ export class ContactService {
       if (!syncContextIsCurrent()) return false;
 
       // Get all contacts from device
+      report('reading', 0, 0);
       const contacts = await Contacts.getAll();
       if (!syncContextIsCurrent()) return false;
 
@@ -380,7 +410,16 @@ export class ContactService {
       const contactMap: ContactMap = {};
       const allPhoneNumbers: string[] = [];
 
-      for (const contact of contacts) {
+      report('normalizing', 0, contacts.length);
+      for (let index = 0; index < contacts.length; index++) {
+        const contact = contacts[index];
+        // Hand the JS thread back periodically: without this the progress text
+        // cannot repaint and a large address book looks frozen.
+        if (index > 0 && index % NORMALIZE_CHUNK_SIZE === 0) {
+          report('normalizing', index, contacts.length);
+          await yieldToUiThread();
+          if (!syncContextIsCurrent()) return false;
+        }
         if (!contact || !contact.phoneNumbers || contact.phoneNumbers.length === 0) {
           continue; // Skip contacts without phone numbers
         }
@@ -463,9 +502,12 @@ export class ContactService {
 
       if (apolloClient && allPhoneNumbers.length > 0 && canUpload) {
         const startCheck = Date.now();
+        const uniquePhoneNumbers = Array.from(new Set(allPhoneNumbers));
+        report('matching', 0, uniquePhoneNumbers.length);
         const confioUsersMap = await this.checkConfioUsers(
-          Array.from(new Set(allPhoneNumbers)),
+          uniquePhoneNumbers,
           apolloClient,
+          (processed, total) => report('matching', processed, total),
         );
         if (!syncContextIsCurrent()) return false;
 
@@ -569,6 +611,7 @@ export class ContactService {
       if (!syncContextIsCurrent()) return false;
 
       // Store in keychain
+      report('saving', 0, 0);
       const contactsData = JSON.stringify(contactMap);
       await Keychain.setInternetCredentials(
         contactsService,

@@ -125,6 +125,14 @@ class UnifiedTransactionTable(models.Model):
         on_delete=models.CASCADE,
         related_name='unified_transaction'
     )
+    sponsored_batch = models.OneToOneField(
+        'blockchain.SponsoredBatch',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='unified_transaction',
+        help_text='Sponsored BSC batch that durably owns this stock-trade row.',
+    )
     p2p_trade = models.OneToOneField(
         'p2p_exchange.P2PTrade',
         null=True,

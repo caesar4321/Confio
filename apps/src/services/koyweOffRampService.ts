@@ -215,8 +215,7 @@ export const tryFundKoyweOffRampInBackground = async ({
 // but hasn't minted. Both are spent by ONE sponsored batch — the redeem (to
 // the user's own address) and the payment ride the same transaction, so
 // there is no window where the shares are burned but the provider is
-// unfunded, and the server's 30s per-address sponsor cooldown is charged
-// once instead of rejecting the payment leg. See fundUsdtDestination.
+// unfunded. See fundUsdtDestination.
 const EVM_ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
 
 // Never a valid destination — the same list the server enforces.
@@ -284,9 +283,8 @@ export const tryFundKoyweSavingsOffRampInBackground = async ({
     const { fundUsdtDestination } = await import('./cusdPlusVault');
 
     // ONE sponsored batch: redeem the shortfall (if any) and pay Koywe
-    // together. Two separate sponsored calls tripped the server's 30s
-    // per-address cooldown on the second one, leaving the shares redeemed
-    // and the order unfunded (audit 2026-08-03 [P1]).
+    // together. This avoids leaving shares redeemed while the provider order
+    // remains unfunded if a second transaction fails (audit 2026-08-03 [P1]).
     const res = await fundUsdtDestination({
       to: destinationAddress,
       amountWei,

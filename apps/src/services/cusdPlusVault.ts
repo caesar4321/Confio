@@ -328,15 +328,10 @@ export class InsufficientWithdrawableError extends Error {
  * redeeming cUSD+ shares first if raw USDT doesn't cover it — as ONE
  * sponsored batch.
  *
- * Why one batch (audit 2026-08-03 [P1]): the redeem and the transfer used to
- * be two separate sponsored calls seconds apart, and SponsorBscBatch sets a
- * 30s per-address cooldown on success. The redeem landed, the transfer came
- * back `rate_limited`, and the only fallback is a self-signed tx needing BNB
- * the user structurally never has — so every vault-backed withdrawal ended
- * with the shares redeemed and the provider order unfunded. Batched, the
- * cooldown is set once, after both legs are already on the wire.
- *
- * Atomicity also removes the partial-state window entirely: if the redeem
+ * Why one batch (audit 2026-08-03 [P1]): the redeem and transfer used to be
+ * separate sponsored calls. A failure between them could leave the shares
+ * redeemed while the provider order remained unfunded. Atomicity removes
+ * that partial-state window entirely: if the redeem
  * under-delivers, the transfer reverts with it and nothing moved.
  *
  * Share sizing: only the shares actually needed are burned, and minUsdtOut is

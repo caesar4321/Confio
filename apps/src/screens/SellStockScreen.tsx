@@ -30,6 +30,8 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
+import { StockTradeSuccessContent } from '../components/common/StockTradeSuccessContent';
+import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoadingOverlay';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
@@ -159,7 +161,7 @@ export const SellStockScreen = () => {
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
-        <View style={styles.successWrap}>
+        <StockTradeSuccessContent>
           <SuccessHero
             title="Vendido"
             amount={fmtUsd(settledReceiveUsd)}
@@ -182,7 +184,7 @@ export const SellStockScreen = () => {
           >
             <Text style={styles.successCtaText}>Ver mi ahorro</Text>
           </TouchableOpacity>
-        </View>
+        </StockTradeSuccessContent>
       </View>
     );
   }
@@ -317,6 +319,11 @@ export const SellStockScreen = () => {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+      <StockTradeLoadingOverlay
+        visible={phase === 'processing'}
+        side="sell"
+        ticker={stock.ticker}
+      />
     </View>
   );
 };
@@ -415,7 +422,6 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
 
-  successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   successIcon: {
     width: 88,
     height: 88,

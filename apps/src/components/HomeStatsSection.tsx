@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
@@ -40,6 +40,17 @@ const formatLocale = (
   } catch {
     return `${r}`;
   }
+};
+
+const CONTAINER_PADDING = 16;
+const GRID_COLUMNS = 2;
+
+const chunkIntoRows = <T,>(items: T[]): T[][] => {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += GRID_COLUMNS) {
+    rows.push(items.slice(i, i + GRID_COLUMNS));
+  }
+  return rows;
 };
 
 type Tile = {
@@ -98,16 +109,16 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     formatLocale(value, thousandsSeparator, decimalSeparator);
 
   const tiles: Tile[] = useMemo(
-    () => [
-      {
+    () => {
+      const users: Tile = {
         key: 'users',
         icon: 'users',
         value: fmt(s?.totalUsers),
         label: 'Usuarios',
         descriptor: verified > 0 ? `Didit: ${fmt(verified)}` : 'Con teléfono',
         onPress: () => navigation.navigate('LatamCommunity'),
-      },
-      {
+      };
+      const savings: Tile = {
         key: 'savings',
         icon: 'shield',
         value: fmt(tvl),
@@ -119,8 +130,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         // only names the backing assets (see backingDescriptor above).
         descriptor: backingDescriptor,
         onPress: () => navigation.navigate('ProtectedSavings'),
-      },
-      ...(showStocks ? [{
+      };
+      const stocks: Tile = {
         key: 'stocks',
         icon: 'trending-up',
         value: fmt(s?.ondoStocksTvl),
@@ -128,8 +139,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         label: 'Acciones',
         descriptor: 'Valor invertido',
         onPress: () => navigation.navigate('OndoStocksInfo'),
-      }] : []),
-      {
+      };
+      const presale: Tile = {
         key: 'presale',
         icon: 'zap',
         value: fmt(s?.presaleCusdRaised),
@@ -140,21 +151,39 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         descriptor: '$CONFIO',
         descriptorColor: colors.violet,
         onPress: () => navigation.navigate('ConfioPresale'),
-      },
-    ],
+      };
+
+      // Order is PROOF FIRST, OFFER LAST, and it does not bend for layout.
+      //
+      // Usuarios / Ahorros / Acciones are verifiable facts about the network;
+      // Preventa is an ask. Preventa is also the raise's only passive surface
+      // on Home while we are raising (the banner above is claim-only by
+      // design), so there is standing pressure to promote it — don't. On a
+      // wallet whose entire pitch is safety, an ask sitting above the trust
+      // numbers costs more credibility than the extra taps are worth. If the
+      // raise needs a louder surface, it gets its OWN affordance; it does not
+      // get to outrank the proof inside the proof strip.
+      return showStocks
+        ? [users, savings, stocks, presale]
+        : [users, savings, presale];
+    },
     [s?.totalUsers, verified, tvl, backingDescriptor, s?.ondoStocksTvl,
      s?.presaleCusdRaised, showStocks,
      thousandsSeparator, decimalSeparator, navigation]
   );
 
-  const renderTile = (tile: Tile, compactRail: boolean) => (
+  const accessibilityLabelFor = (tile: Tile) =>
+    `${tile.label}: ${tile.value}${tile.unit ? ` ${tile.unit}` : ''}. ${tile.descriptor}`;
+
+  // Three tiles: the original one-row strip, untouched.
+  const renderStripTile = (tile: Tile) => (
     <TouchableOpacity
       key={tile.key}
-      style={[styles.tile, compactRail && styles.railTile]}
+      style={styles.tile}
       activeOpacity={0.7}
       onPress={tile.onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${tile.label}: ${tile.value}${tile.unit ? ` ${tile.unit}` : ''}. ${tile.descriptor}`}
+      accessibilityLabel={accessibilityLabelFor(tile)}
     >
       <View style={styles.tileTopRow}>
         <Icon name={tile.icon} size={13} color={colors.primary} />
@@ -191,23 +220,88 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     </TouchableOpacity>
   );
 
+  // Four tiles: 2x2. A grid cell is ~twice the width of a strip tile, so it
+  // does NOT reuse the strip's four stacked lines — that is what made the
+  // first grid attempt tall enough to shove the wallets down (four lines ≈
+  // 91pt per tile, ≈190pt for two rows, about two wallet cards of height for
+  // a stats block). Width is the resource we just gained and height is the
+  // one we cannot spend, so the cell spends the width instead: icon and value
+  // share one line, label and descriptor share the next. Two lines ≈ 56pt,
+  // so the whole grid lands near 128pt — every stat full size, nothing
+  // hidden, nothing scrolling.
+  const renderGridCell = (tile: Tile) => (
+    <TouchableOpacity
+      key={tile.key}
+      style={styles.cell}
+      activeOpacity={0.7}
+      onPress={tile.onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabelFor(tile)}
+    >
+      <View style={styles.cellValueRow}>
+        <Icon name={tile.icon} size={13} color={colors.primary} />
+        <Text
+          style={styles.cellValue}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+        >
+          {tile.value}
+          {tile.unit ? <Text style={styles.tileUnit}> {tile.unit}</Text> : null}
+        </Text>
+        <Icon name="chevron-right" size={14} color="#9CA3AF" />
+      </View>
+      {/* Label and descriptor merged onto one line. Sentence case, no
+          letter-spacing: the strip's uppercase treatment is ~15% wider and
+          "Usuarios · Didit: 1.234" does not survive it at half-container
+          width. The descriptor keeps its own color so Preventa's violet
+          accent still reads. */}
+      <Text
+        style={styles.cellMeta}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
+        {tile.label}
+        <Text style={styles.cellMetaSeparator}> · </Text>
+        <Text style={tile.descriptorColor ? { color: tile.descriptorColor } : undefined}>
+          {tile.descriptor}
+        </Text>
+      </Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
       {tiles.length > 3 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.railContent}
-          decelerationRate="fast"
-        >
-          {tiles.map(tile => renderTile(tile, true))}
-        </ScrollView>
+        // One card with a hairline cross rather than four separate bordered
+        // cards: four borders and four shadows is a lot of visual weight for
+        // a section that sits directly above the wallets, and the single
+        // container matches the three-tile strip it replaces.
+        <View style={[styles.card, styles.grid]}>
+          {chunkIntoRows(tiles).map((row, rowIdx) => (
+            <React.Fragment key={row.map(t => t.key).join('-')}>
+              {rowIdx > 0 && <View style={styles.rowDivider} />}
+              <View style={styles.gridRow}>
+                {row.map((tile, idx) => (
+                  <React.Fragment key={tile.key}>
+                    {idx > 0 && <View style={styles.divider} />}
+                    {renderGridCell(tile)}
+                  </React.Fragment>
+                ))}
+                {/* Odd tile count would leave a half-width cell stretched
+                    across the row; hold the column instead. */}
+                {row.length === 1 && <View style={styles.cell} />}
+              </View>
+            </React.Fragment>
+          ))}
+        </View>
       ) : (
-        <View style={styles.strip}>
+        <View style={[styles.card, styles.strip]}>
           {tiles.map((tile, idx) => (
             <React.Fragment key={tile.key}>
               {idx > 0 && <View style={styles.divider} />}
-              {renderTile(tile, false)}
+              {renderStripTile(tile)}
             </React.Fragment>
           ))}
         </View>
@@ -218,13 +312,11 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 16,
+    paddingHorizontal: CONTAINER_PADDING,
     marginTop: 4,
     marginBottom: 0,
   },
-  strip: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
+  card: {
     backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1,
@@ -237,29 +329,56 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
+  // Three tiles side by side.
+  strip: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+  },
+  // Two rows of two, stacked.
+  grid: {
+    flexDirection: 'column',
+  },
   tile: {
     flex: 1,
     paddingHorizontal: 8,
   },
-  railContent: {
-    gap: 8,
-    paddingRight: 16,
+  gridRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
   },
-  railTile: {
-    flex: 0,
-    width: 104,
-    minHeight: 86,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+  cell: {
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    justifyContent: 'center',
+  },
+  cellValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cellValue: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primary,
+    includeFontPadding: false,
+  },
+  cellMeta: {
+    fontSize: 10,
+    color: colors.dark,
+    marginTop: 3,
+    fontWeight: '700',
+  },
+  cellMetaSeparator: {
+    color: '#9CA3AF',
+    fontWeight: '600',
+  },
+  rowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E7EB',
+    marginHorizontal: 4,
+    marginVertical: 10,
   },
   tileTopRow: {
     flexDirection: 'row',

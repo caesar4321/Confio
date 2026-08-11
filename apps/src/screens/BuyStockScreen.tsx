@@ -34,6 +34,8 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
 import { ReceiptCard } from '../components/common/ReceiptCard';
+import { StockTradeSuccessContent } from '../components/common/StockTradeSuccessContent';
+import { StockTradeLoadingOverlay } from '../components/common/StockTradeLoadingOverlay';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { CUSD_CONVERSION_UI_ENABLED, STOCKS_TRADING_UI_ENABLED } from '../config/features';
@@ -151,7 +153,7 @@ export const BuyStockScreen = () => {
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
-        <View style={styles.successWrap}>
+        <StockTradeSuccessContent>
           <SuccessHero
             title={`Ya tienes ${stock.ticker}`}
             amount={`≈ ${formatNumber(settledTokens, { maximumFractionDigits: 4 })} ${stock.ticker}`}
@@ -175,7 +177,7 @@ export const BuyStockScreen = () => {
           >
             <Text style={styles.successCtaText}>Ver mi posición</Text>
           </TouchableOpacity>
-        </View>
+        </StockTradeSuccessContent>
       </View>
     );
   }
@@ -329,6 +331,11 @@ export const BuyStockScreen = () => {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+      <StockTradeLoadingOverlay
+        visible={phase === 'processing'}
+        side="buy"
+        ticker={stock.ticker}
+      />
     </View>
   );
 };
@@ -429,7 +436,6 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
 
-  successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   successTitle: { fontSize: 20, fontWeight: '700', color: colors.text.primary, marginTop: 20 },
   successAmount: { fontSize: 34, fontWeight: 'bold', color: colors.primaryDark, marginTop: 10 },
   successHint: {

@@ -10,15 +10,49 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {gql, useQuery} from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import {Header} from '../navigation/Header';
 import {colors} from '../config/theme';
 import {MainStackParamList} from '../types/navigation';
 import {useSavingsPortfolio} from '../hooks/useSavingsPortfolio';
+import {useGmMarket} from '../hooks/useGmMarket';
+import {useCurrency} from '../hooks/useCurrency';
+import {GET_STATS_SUMMARY} from '../apollo/queries';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 const ONDO_STOCKS_URL = 'https://ondo.finance/ondo-stocks';
+
+// The trade fee is an env-driven server setting (CUSD_PLUS_GM_TRADE_FEE_BPS),
+// and the router's on-chain stockFeeBps is authoritative above even that — so
+// this screen must never carry the number as a literal. Own query rather than
+// reusing the trading service's: this screen only needs the fee, and an
+// education screen should not fail because a trading field moved.
+const STOCK_FEE = gql`
+  query OndoStocksInfoFee {
+    cusdPlusConvertParams {
+      gmTradeFeeBps
+    }
+  }
+`;
+
+// 30 bps -> "0,30". Comma is the decimal mark in the app's Spanish copy.
+const formatFeePercent = (bps: number) => (bps / 100).toFixed(2).replace('.', ',');
+
+// Same shape as ProtectedSavingsScreen's, so the two hero pills that quote a
+// Home stat read identically. null stays "—": unknown is not zero.
+const formatWhole = (n: number | null | undefined, sep: string) => {
+  if (n == null) return '—';
+  const r = Math.round(n);
+  try {
+    return new Intl.NumberFormat('en-US', {maximumFractionDigits: 0})
+      .format(r)
+      .replace(/,/g, sep);
+  } catch {
+    return `${r}`;
+  }
+};
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -45,6 +79,51 @@ const ExplanationRow = ({
 export const OndoStocksInfoScreen = () => {
   const navigation = useNavigation<NavProp>();
   const {stocks} = useSavingsPortfolio();
+
+  // Hooks must run before the eligibility return below, so both are wired
+  // here and simply skip themselves when the product is off.
+  const {currency} = useCurrency();
+  const {stocks: marketAssets} = useGmMarket(stocks.enabled);
+  const {data: feeData} = useQuery(STOCK_FEE, {
+    skip: !stocks.enabled,
+    fetchPolicy: 'cache-and-network',
+  });
+  // Every other stat tile on Home lands on a screen that repeats its number
+  // (Usuarios -> LatamCommunity, Ahorros -> ProtectedSavings, Preventa ->
+  // ConfioPresale). Acciones was the one that didn't, so the tap dead-ended
+  // on a number the user came here to see. Same query and same field the
+  // Home tile reads, so the two can never disagree.
+  const {data: statsData} = useQuery(GET_STATS_SUMMARY, {
+    skip: !stocks.enabled,
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
+  });
+
+  // useGmMarket returns an EMPTY list while loading and on upstream failure
+  // (its documented honesty rule — never a fake price), so a bare
+  // `marketAssets.length` would render "0 acciones" as if that were a fact.
+  // Treat unknown as unknown and drop to the countless phrasing instead.
+  const assetCount = marketAssets.length;
+  const catalogLabel =
+    assetCount > 0 ? `${assetCount} acciones y ETFs` : 'Acciones y ETFs de EE.UU.';
+
+  // gm_tvl refuses to publish a partial scan, so this field is legitimately
+  // null whenever the aggregation or a held-asset price failed. Render the
+  // pill only when there is a real figure — a "US$0 en acciones" pill would
+  // read as "nobody is invested" rather than "we don't know right now".
+  const stocksTvl: number | null | undefined = statsData?.statsSummary?.ondoStocksTvl;
+  const stocksTvlLabel =
+    stocksTvl != null ? formatWhole(stocksTvl, currency.thousandsSeparator) : null;
+
+  // Same rule for the fee: assert a rate only once the server has told us one.
+  const feeBps: number | null | undefined =
+    feeData?.cusdPlusConvertParams?.gmTradeFeeBps;
+  const feeSentence =
+    feeBps == null
+      ? 'Confío cobra una comisión sobre cada compra y venta completada.'
+      : feeBps === 0
+        ? 'Por ahora Confío no cobra comisión por operar.'
+        : `Confío cobra un ${formatFeePercent(feeBps)}% sobre cada compra y venta completada.`;
 
   // The navigation entry points are hidden for blocked jurisdictions, but
   // the screen also fails closed for stale navigation state and deep links.
@@ -107,12 +186,23 @@ export const OndoStocksInfoScreen = () => {
           <View style={styles.heroPills}>
             <View style={styles.heroPill}>
               <Icon name="bar-chart-2" size={14} color={colors.primaryDark} />
-              <Text style={styles.heroPillText}>400+ activos</Text>
+              <Text style={styles.heroPillText}>{catalogLabel}</Text>
             </View>
             <View style={styles.heroPill}>
               <Icon name="clock" size={14} color={colors.primaryDark} />
-              <Text style={styles.heroPillText}>Mercado 24/5</Text>
+              {/* Not "24/5": weekend trading is a PER-ASSET flag (GmAssetType
+                  .offHours), so a blanket claim here contradicted both the
+                  schema and this screen's own hours copy two sections down. */}
+              <Text style={styles.heroPillText}>24/5 y algunos fines de semana</Text>
             </View>
+            {stocksTvlLabel && (
+              <View style={styles.heroPill}>
+                <Icon name="trending-up" size={14} color={colors.primaryDark} />
+                <Text style={styles.heroPillText}>
+                  US${stocksTvlLabel} en acciones
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -170,8 +260,8 @@ export const OndoStocksInfoScreen = () => {
             </Text>
           </View>
           <Text style={styles.sectionBody}>
-            Confío cobra un 0,30% en cada compra y venta completada. La app te
-            muestra la cotización y el resultado estimado antes de confirmar.
+            {feeSentence} La app te muestra la cotización y el resultado
+            estimado antes de confirmar.
           </Text>
           <Text style={styles.sectionBody}>
             La mayoría de los activos opera de forma continua durante la semana.

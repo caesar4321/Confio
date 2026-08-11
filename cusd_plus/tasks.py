@@ -480,7 +480,7 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         # escrow to the business with no row behind it, and that money then
         # vanished from the ledger. Ownership, not the address, is the test.
         key = ('0x' + log['topics'][2][-40:]).lower()
-        if (sender in system_addrs or sender in registered) \
+        if (sender in system_addrs or sender in registered or sender == '0x' + '0' * 40) \
                 and _source_row_covers(log['transactionHash'], key):
             continue  # already recorded by whichever feature moved it
         account_id = registered.get(key)
@@ -616,6 +616,7 @@ def _system_addresses() -> set:
         'BSC_REWARD_VAULT_ADDRESS',
         'BSC_VESTING_VAULT_ADDRESS',
         'BSC_INVITE_ESCROW_ADDRESS',
+        'CUSD_PLUS_STOCK_ROUTER_ADDRESS',
     )
     out = set()
     for n in names:
@@ -686,6 +687,19 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
             return True
     except Exception:  # noqa: BLE001
         logger.exception('payroll ownership check failed for %s', tx_hash)
+    try:
+        # Stock trades have no separate domain row. SponsoredBatch is their
+        # durable receipt, so claim the router's USDT/cUSD+ settlement before
+        # the generic scanner can call it an external-wallet deposit.
+        from blockchain.models import SponsoredBatch
+        if SponsoredBatch.objects.filter(
+                tx_hash__iexact=tx_hash,
+                kind__in=('stock_buy', 'stock_sell'),
+                user_bsc_address__iexact=r,
+                status__in=('signed', 'sent', 'confirmed')).exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('stock ownership check failed for %s', tx_hash)
     return False
 
 
@@ -1254,6 +1268,18 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             return
         raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    if batch.kind in ('stock_buy', 'stock_sell'):
+        # A confirmed trade without its account-history row is not a complete
+        # settlement. Write the exact event-backed row before making the batch
+        # terminal, so a transient DB failure leaves it retryable/reconcilable.
+        from .unified import sync_unified_from_stock_batch
+        try:
+            sync_unified_from_stock_batch(
+                batch, receipt, require_event=True, strict=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('stock history sync failed for %s: %s', batch.tx_hash, exc)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
@@ -1374,6 +1400,40 @@ def reconcile_signed_batches():
 
     out.update(_converge_presale_buys(grace_min))
     return out
+
+
+@shared_task(name='cusd_plus.reconcile_stock_batches')
+def reconcile_stock_batches():
+    """Re-drive stock receipts lost after broadcast or after retry exhaustion.
+
+    Stock trades have no separate domain confirmer, so their SponsoredBatch
+    receipt task is the only component that finalizes history. Bound recovery
+    to the normal operational window; very old rows need a human chain check
+    instead of an unbounded task storm.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+    from blockchain.models import SponsoredBatch
+
+    now = timezone.now()
+    grace_min = int(getattr(settings, 'CUSD_PLUS_SIGNED_GRACE_MIN', 3))
+    give_up_h = int(getattr(settings, 'CUSD_PLUS_RECOVERY_GIVE_UP_HOURS', 6))
+    stuck = list(SponsoredBatch.objects.filter(
+        kind__in=('stock_buy', 'stock_sell'),
+        status='sent',
+        updated_at__lt=now - timedelta(minutes=grace_min),
+        created_at__gte=now - timedelta(hours=give_up_h),
+    ).order_by('id')[:100])
+    requeued = 0
+    for batch in stuck:
+        won = SponsoredBatch.objects.filter(pk=batch.pk, status='sent').update(
+            updated_at=now)
+        if not won:
+            continue
+        check_sponsored_batch_receipt.apply_async(args=[batch.id], countdown=3)
+        requeued += 1
+    return {'requeued': requeued}
 
 
 def _converge_presale_buys(grace_min: int) -> dict:

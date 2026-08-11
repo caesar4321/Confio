@@ -360,13 +360,14 @@ def _word(data_hex: str, i: int) -> str:
     return data_hex[start:start + 64]
 
 
-def _decode_stock_call(call: dict) -> dict | None:
+def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
+    """Decode the router call, optionally ignoring only current ops gates."""
     router = _stock_router_address()
     if not router or call['to'] != router:
         return None
-    if not getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False):
+    if not historical and not getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False):
         raise PolicyError('stock_trading_disabled')
-    if int(getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30)) != 30:
+    if not historical and int(getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30)) != 30:
         raise PolicyError('bad_stock_fee_cap')
     try:
         data = call['data']
@@ -399,6 +400,7 @@ def _decode_stock_call(call: dict) -> dict | None:
             quote_cost = quote[5] * quote[4] // 10 ** 18
             if min_usdt < quote_cost * 99 // 100:
                 raise PolicyError('bad_stock_floor')
+            required_debit = quote_cost - (quote_cost * 30 // 10_000)
         else:
             raise PolicyError('selector_not_allowed')
         # Reject trailing/non-canonical ABI bytes before interpreting fields.
@@ -416,13 +418,21 @@ def _decode_stock_call(call: dict) -> dict | None:
     if attestation_id <= 0 or int.from_bytes(user_id, 'big') == 0 or price <= 0 or quantity <= 0:
         raise PolicyError('bad_stock_quote')
     now = int(time.time())
-    if expiration <= now or expiration > now + 24 * 3600:
+    if expiration <= 0 or (not historical and (expiration <= now or expiration > now + 24 * 3600)):
         raise PolicyError('bad_stock_expiration')
     if len(signature) != 65 or asset == '0x0000000000000000000000000000000000000000':
         raise PolicyError('bad_stock_quote')
     if max_fee != 30:
         raise PolicyError('bad_stock_fee_cap')
-    return {'kind': action, 'asset': asset.lower(), 'quantity': quantity, 'shares': shares if action == 'stock_buy' else None}
+    return {
+        'kind': action,
+        'asset': asset.lower(),
+        'quantity': quantity,
+        'shares': shares if action == 'stock_buy' else None,
+        # Dollar value removed from savings on buy, or returned on sell.
+        # Receipt events replace this calldata estimate with exact values.
+        'history_amount_wei': required_debit,
+    }
 
 
 def classify_calls_kind(calls: list) -> str:

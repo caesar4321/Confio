@@ -13,7 +13,12 @@ import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
-import ContactService, { contactService, hasDefaultPhoneRegion } from '../services/contactService';
+import ContactService, {
+  contactService,
+  hasDefaultPhoneRegion,
+  type ContactSyncProgress as ContactSyncProgressState,
+} from '../services/contactService';
+import { ContactSyncProgress } from '../components/common/ContactSyncProgress';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
@@ -343,6 +348,7 @@ export const ContactsScreen = () => {
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<ContactSyncProgressState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [contactsFromDevice, setContactsFromDevice] = useState<any[]>([]);
   const [hasContactPermission, setHasContactPermission] = useState<boolean | null>(null);
@@ -530,8 +536,9 @@ export const ContactsScreen = () => {
     }
 
     setIsLoadingContacts(true);
+    setSyncProgress(null);
     try {
-      const success = await contactService.syncContacts(apolloClient);
+      const success = await contactService.syncContacts(apolloClient, setSyncProgress);
 
       if (success) {
         // Get all contacts from device
@@ -545,6 +552,7 @@ export const ContactsScreen = () => {
       await restoreContactsAfterFailedSync();
     } finally {
       setIsLoadingContacts(false);
+      setSyncProgress(null);
       setRefreshing(false);
     }
   };
@@ -611,6 +619,7 @@ export const ContactsScreen = () => {
     }
 
     setIsLoadingContacts(true);
+    setSyncProgress(null);
 
     // Clear existing contacts to show loading state
     setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
@@ -627,7 +636,7 @@ export const ContactsScreen = () => {
         }
       }
       // Manual refresh - always sync
-      const success = await contactService.syncContacts(apolloClient);
+      const success = await contactService.syncContacts(apolloClient, setSyncProgress);
       if (success) {
         const allContacts = await contactService.getAllContacts();
         await displayContacts(allContacts);
@@ -639,7 +648,7 @@ export const ContactsScreen = () => {
       const granted = await contactService.requestContactPermission();
       if (granted) {
         setHasContactPermission(true);
-        const success = await contactService.syncContacts(apolloClient);
+        const success = await contactService.syncContacts(apolloClient, setSyncProgress);
         if (success) {
           const allContacts = await contactService.getAllContacts();
           await displayContacts(allContacts);
@@ -651,6 +660,7 @@ export const ContactsScreen = () => {
 
     setRefreshing(false);
     setIsLoadingContacts(false);
+    setSyncProgress(null);
   };
 
   // Use focus effect to refresh contacts when screen comes into focus
@@ -1741,10 +1751,10 @@ export const ContactsScreen = () => {
       {/* Loading overlay - only show for manual refresh and for personal accounts */}
       {isPersonalAccount && (isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>
-            {isInitialLoad ? 'Cargando contactos...' : 'Sincronizando contactos...'}
-          </Text>
+          <ContactSyncProgress
+            progress={syncProgress}
+            fallbackLabel={isInitialLoad ? 'Cargando contactos...' : 'Sincronizando contactos...'}
+          />
         </View>
       )}
     </>

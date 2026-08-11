@@ -1865,8 +1865,17 @@ export const HomeScreen = () => {
                   onPress={() => navigation.navigate('StocksList')}
                 >
                   <View style={styles.walletCardContent}>
-                    <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
-                      <Image source={cUSDPlusLogo} style={styles.walletLogo} />
+                    {/* NOT a token logo: this slot holds 400+ tickers, not one
+                        asset, so there is nothing to put in the white coin
+                        circle the dollar rows use — it wore the cUSD+ mark and
+                        read as a second Confío Dollar+ row. Same trending-up
+                        glyph the Acciones stat tile uses, on the emerald fill,
+                        so the row is legibly a CATEGORY next to the coins.
+                        Ondo's logo is deliberately not it: they issue the
+                        shares, they don't own the slot (attribution stays the
+                        "En alianza con" line inside the hub). */}
+                    <View style={styles.walletLogoContainer}>
+                      <Icon name="trending-up" size={22} color={colors.white} />
                     </View>
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName}>Acciones de EE.UU.</Text>

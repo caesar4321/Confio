@@ -1165,7 +1165,6 @@ class SponsorBscBatch(graphene.Mutation):
         import time as _time
 
         from django.conf import settings
-        from django.core.cache import cache
 
         from . import sponsor_7702
 
@@ -1195,27 +1194,12 @@ class SponsorBscBatch(graphene.Mutation):
             return SponsorBscBatch(success=False, error='disabled')
         if not sponsor_7702.delegate_address():
             return SponsorBscBatch(success=False, error='delegate_not_configured')
-        if _bsc_rate_limited(user.id, 'sponsor7702', 5):
-            return SponsorBscBatch(success=False, error='rate_limited')
-
         # JWT-bound address: the intent must be signed by THIS account's
         # registered BSC key — never a client-supplied address.
         user_addr = _active_bsc_address(info)
         if not user_addr:
             return SponsorBscBatch(success=False, error='no_bsc_address')
         user_addr = user_addr.lower()
-
-        # Per-address cooldown. There is NO daily cap: it was a canary guard
-        # that counted every sponsored operation, so a few ordinary sends or
-        # redeems used up the budget and the user's savings mint — the one
-        # thing they were waiting on — got refused for the rest of the day.
-        # Sponsor gas on BSC is a fraction of a cent and the address is
-        # JWT-bound to the caller's own registered key, so there is nothing
-        # here worth farming. The 30s per-address cooldown and the per-user
-        # rate limit above still bound the request rate.
-        rl_key = f'cusd_plus_7702_cooldown_{user_addr}'
-        if cache.get(rl_key):
-            return SponsorBscBatch(success=False, error='rate_limited')
 
         # Normalize + structural caps.
         if not calls or len(calls) > 4:
@@ -1360,7 +1344,6 @@ class SponsorBscBatch(graphene.Mutation):
                 return SponsorBscBatch(success=True, tx_hash=broadcast_tx_hash, execution=None)
             return SponsorBscBatch(success=False, error=str(exc)[:200])
 
-        cache.set(rl_key, 1, 30)  # 30s per-address cooldown
         return SponsorBscBatch(success=True, tx_hash=tx_hash,
                                execution=getattr(batch, 'executed_early', None))
 

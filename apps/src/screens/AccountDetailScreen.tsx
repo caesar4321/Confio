@@ -775,8 +775,10 @@ export const AccountDetailScreen = () => {
           }
         }
 
-        // Check if this is an external deposit
-        const isExternalDeposit = !isReward && type === 'received' && tx.senderType?.toLowerCase() === 'external';
+        // A stock sale is an internal Ondo settlement, not money deposited
+        // by a stranger, even though Ondo has no Confío user identity.
+        const isStockMovement = tx.description?.startsWith('Ondo Stocks: ');
+        const isExternalDeposit = !isStockMovement && !isReward && type === 'received' && tx.senderType?.toLowerCase() === 'external';
         const rewardDescription = isReward ? (tx.displayDescription || tx.description || 'Recompensa por referidos') : undefined;
         const presaleDescription = isPresale ? (tx.displayDescription || tx.description || 'Compra de preventa $CONFIO') : undefined;
 
@@ -1008,6 +1010,9 @@ export const AccountDetailScreen = () => {
 
   // Helper functions for transaction display
   const getTransactionTitle = (transaction: Transaction) => {
+    const stockTitle = transaction.description?.startsWith('Ondo Stocks: ')
+      ? transaction.description.slice('Ondo Stocks: '.length)
+      : undefined;
 
     // Debug payment transactions
     if (transaction.type === 'payment') {
@@ -1015,9 +1020,9 @@ export const AccountDetailScreen = () => {
 
     switch (transaction.type) {
       case 'received':
-        return `Recibido de ${transaction.from}`;
+        return stockTitle || `Recibido de ${transaction.from}`;
       case 'sent':
-        return `Enviado a ${transaction.to}`;
+        return stockTitle || `Enviado a ${transaction.to}`;
       case 'exchange':
         return `Conversión ${transaction.from} → ${transaction.to}`;
       case 'ramp':
@@ -1058,6 +1063,9 @@ export const AccountDetailScreen = () => {
   // matching the app-wide icon-chip grammar. Sent stays neutral — outgoing
   // money is not an alert.
   const getTransactionVisual = (transaction: Transaction): { icon: string; color: string; bg: string } => {
+    if (transaction.description?.startsWith('Ondo Stocks: ')) {
+      return { icon: 'trending-up', color: colors.primaryDark, bg: colors.primarySoft };
+    }
     switch (transaction.type) {
       case 'received':
         return { icon: 'arrow-down', color: colors.primaryDark, bg: colors.primarySoft };
@@ -1289,7 +1297,8 @@ export const AccountDetailScreen = () => {
     const isPresaleTransaction = transaction.type === 'presale';
 
     // Determine if counterparty is an external wallet (no phone + address present + no user)
-    const isExternalSent = transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
+    const isStockMovement = transaction.description?.startsWith('Ondo Stocks: ');
+    const isExternalSent = !isStockMovement && transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
     // senderType is the server's own answer about the SENDER, so it settles a
     // received row on its own. The fallback below cannot: hasCounterpartyUser
     // is derived from counterpartyUser, which on a send row is the RECIPIENT —
@@ -1297,7 +1306,7 @@ export const AccountDetailScreen = () => {
     // phone, no user" and call a known Confío sender an external wallet.
     const senderTypeKnown = typeof (transaction as any).senderType === 'string'
       && !!(transaction as any).senderType;
-    const isExternalReceived = transaction.type === 'received' && (
+    const isExternalReceived = !isStockMovement && transaction.type === 'received' && (
       senderTypeKnown
         ? (transaction as any).senderType.toLowerCase() === 'external'
         : (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
@@ -1316,12 +1325,15 @@ export const AccountDetailScreen = () => {
     // Create enhanced transaction title with contact name
     const getEnhancedTransactionTitle = () => {
       let baseTitle = '';
+      const stockTitle = transaction.description?.startsWith('Ondo Stocks: ')
+        ? transaction.description.slice('Ondo Stocks: '.length)
+        : undefined;
       switch (transaction.type) {
         case 'received':
-          baseTitle = `Recibido de ${contactInfo.displayName}`;
+          baseTitle = stockTitle || `Recibido de ${contactInfo.displayName}`;
           break;
         case 'sent':
-          baseTitle = `Enviado a ${contactInfo.displayName}`;
+          baseTitle = stockTitle || `Enviado a ${contactInfo.displayName}`;
           break;
         case 'exchange':
           baseTitle = `Conversión ${transaction.from} → ${transaction.to}`;
@@ -1428,6 +1440,8 @@ export const AccountDetailScreen = () => {
           fromPhone: transaction.fromPhone,
           toPhone: transaction.toPhone,
           note: undefined,
+          description: transaction.description,
+          isStockMovement,
           avatar: transaction.from ? transaction.from.charAt(0) :
             transaction.to ? transaction.to.charAt(0) : undefined,
           location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
@@ -1449,6 +1463,8 @@ export const AccountDetailScreen = () => {
               const to = transaction.conversionToToken || pair?.to;
               return from && to ? `${from} → ${to}` : undefined;
             })() :
+            isStockMovement
+              ? transaction.description?.slice('Ondo Stocks: '.length) :
             transaction.type === 'ramp' && transaction.rampDirection === 'off_ramp' ? 'Retiro' :
             transaction.type === 'ramp' ? 'Recarga' :
             transaction.type === 'humanitarian' ? transaction.description :

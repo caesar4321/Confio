@@ -819,7 +819,13 @@ export const TransactionDetailScreen = () => {
     || (transactionData as any)?.recipientUser?.id;
   const lacksCounterpartyUserId = (routeTypeLower === 'sent' || routeTypeLower === 'received')
     && !routeCounterpartyUserId;
+  // Ondo rows are owned directly by SponsoredBatch, not SendTransaction.
+  // Their route payload is already complete; querying sendTransaction(id:
+  // unified-row-id) only produces a misleading not-found request and flash.
+  const isStockMovement = Boolean((transactionData as any)?.isStockMovement)
+    || String((transactionData as any)?.description || '').startsWith('Ondo Stocks: ');
   const needsFetch = Boolean(
+    !isStockMovement &&
     (transactionData?.id || transactionData?.transaction_id) &&
     (lacksPhonesForSend || !hasValidInternalId || routeInviteNeedsId || lacksCounterpartyUserId)
   );

@@ -7,9 +7,12 @@ and checked field by field.
 Runs without a database (ledger writes and JWT lookups are mocked):
     myvenv/bin/python manage.py test cusd_plus.tests.test_sponsor_7702
 """
+import json
 import time
 from unittest import mock
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, override_settings
 
 from eth_keys import keys
@@ -177,6 +180,19 @@ class PolicyTests(SimpleTestCase):
         sell_approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
         self._validate([_call(VAULT, buy_approve), _call(ROUTER, _stock_data(0))])
         self._validate([_call(STOCK, sell_approve), _call(ROUTER, _stock_data(1))])
+
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=False,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=31,
+    )
+    def test_historical_stock_decode_survives_later_ops_switches(self):
+        action = sponsor_7702._decode_stock_call(
+            _call(ROUTER, _stock_data(0, expiration=int(time.time()) - 3600)),
+            historical=True,
+        )
+        self.assertEqual(action['kind'], 'stock_buy')
+        self.assertGreater(action['history_amount_wei'], 600 * 10**18)
 
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
@@ -422,6 +438,17 @@ class SponsorBscBatchTests(SimpleTestCase):
         res, *_ = self._mutate()
         self.assertNotEqual(res.error, 'daily_cap')
 
+    def test_no_per_user_or_address_sponsorship_cap(self):
+        """Valid signed batches are bounded by policy and nonces, not time."""
+        from django.core.cache import cache
+
+        # A stale key from the retired cooldown must be inert after deploy.
+        cache.set(f'cusd_plus_7702_cooldown_{USER}', 1, 60)
+        for _ in range(7):
+            res, ledger, _ = self._mutate(delegated=True)
+            self.assertTrue(res.success, res.error)
+            ledger.create.assert_called_once()
+
     # ── signatures & authorization ──
 
     def test_foreign_intent_signature_rejected(self):
@@ -549,9 +576,10 @@ class ReceiptCheckerTests(SimpleTestCase):
     BLK = 100
     BLKHASH = '0x' + 'cd' * 32
 
-    def _batch(self, delegate_nonce=NONCE):
+    def _batch(self, delegate_nonce=NONCE, kind='subscribe'):
         return mock.Mock(status='sent', tx_hash=self.TXH, user_bsc_address=USER,
-                         delegate_nonce=delegate_nonce, block_number=None, block_hash='')
+                         delegate_nonce=delegate_nonce, block_number=None, block_hash='',
+                         kind=kind)
 
     def _exec_log(self, nonce=NONCE):
         from cusd_plus.tasks import _BATCH_EXECUTED_TOPIC
@@ -600,6 +628,16 @@ class ReceiptCheckerTests(SimpleTestCase):
         self._run(batch, self._receipt(logs=[self._exec_log()]))
         self.assertEqual(batch.status, 'confirmed')
         self.assertEqual(batch.block_number, self.BLK)
+
+    def test_stock_history_failure_keeps_batch_retryable(self):
+        batch = self._batch(kind='stock_buy')
+        receipt = self._receipt(logs=[self._exec_log()])
+        with mock.patch(
+                'cusd_plus.unified.sync_unified_from_stock_batch',
+                side_effect=RuntimeError('database unavailable')) as sync:
+            self._run(batch, receipt)
+        sync.assert_called_once_with(batch, receipt, require_event=True, strict=True)
+        self.assertEqual(batch.status, 'sent')
 
     def test_finalized_tag_settles_without_waiting_for_depth(self):
         """BSC finalizes in ~2 blocks (a validator-set commitment), so once
@@ -767,6 +805,41 @@ class ReconcileSignedBatchesTests(SimpleTestCase):
         capp.send_task.assert_not_called()
 
 
+class ReconcileStockBatchesTests(SimpleTestCase):
+    def test_sent_stock_receipt_is_requeued_with_compare_and_set(self):
+        from cusd_plus import tasks
+
+        batch = mock.Mock(id=44, pk=44)
+        selected = mock.MagicMock()
+        selected.order_by.return_value.__getitem__.return_value = [batch]
+        claimed = mock.MagicMock()
+        claimed.update.return_value = 1
+        with mock.patch('blockchain.models.SponsoredBatch.objects') as objects, \
+             mock.patch.object(tasks, 'check_sponsored_batch_receipt') as receipt_task:
+            objects.filter.side_effect = [selected, claimed]
+            result = tasks.reconcile_stock_batches()
+        self.assertEqual(result, {'requeued': 1})
+        receipt_task.apply_async.assert_called_once_with(args=[44], countdown=3)
+        first_filter = objects.filter.call_args_list[0].kwargs
+        self.assertEqual(first_filter['kind__in'], ('stock_buy', 'stock_sell'))
+        self.assertEqual(first_filter['status'], 'sent')
+
+    def test_terminalized_stock_is_not_requeued(self):
+        from cusd_plus import tasks
+
+        batch = mock.Mock(id=44, pk=44)
+        selected = mock.MagicMock()
+        selected.order_by.return_value.__getitem__.return_value = [batch]
+        lost_race = mock.MagicMock()
+        lost_race.update.return_value = 0
+        with mock.patch('blockchain.models.SponsoredBatch.objects') as objects, \
+             mock.patch.object(tasks, 'check_sponsored_batch_receipt') as receipt_task:
+            objects.filter.side_effect = [selected, lost_race]
+            result = tasks.reconcile_stock_batches()
+        self.assertEqual(result, {'requeued': 0})
+        receipt_task.apply_async.assert_not_called()
+
+
 @override_settings(CUSD_PLUS_SUBMIT_RECEIPT_POLL_S=0)
 class WaitForExecutionBrieflyTests(SimpleTestCase):
     """The brief post-broadcast look that lets the client skip its own poll.
@@ -900,3 +973,142 @@ class WaitForExecutionBrieflyTests(SimpleTestCase):
 
         with override_settings(CUSD_PLUS_SUBMIT_RECEIPT_WAIT_MS=0):
             self.assertIsNone(self._run(rpc))
+
+
+@override_settings(CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER)
+class StockHistoryTests(SimpleTestCase):
+    TXH = '0x' + 'de' * 32
+
+    def _batch(self, side):
+        return mock.Mock(
+            id=91,
+            kind='stock_buy' if side == 0 else 'stock_sell',
+            tx_hash=self.TXH,
+            user_bsc_address=USER,
+            calls_json=json.dumps([_call(ROUTER, _stock_data(side))]),
+            created_at=mock.sentinel.created_at,
+        )
+
+    def _receipt(self, kind, principal, fee):
+        signature = (
+            'StockBought(address,address,uint256,uint256,uint256,uint256,uint256)'
+            if kind == 'stock_buy'
+            else 'StockSold(address,address,uint256,uint256,uint256,uint256,uint256)'
+        )
+        return {'logs': [{
+            'address': ROUTER,
+            'topics': [
+                '0x' + keccak(text=signature).hex(),
+                '0x' + USER[2:].rjust(64, '0'),
+                '0x' + STOCK[2:].rjust(64, '0'),
+            ],
+            'data': '0x' + abi_encode(
+                ['uint256'] * 5,
+                [123, 2 * 10**18, principal, fee, 2 * 10**18],
+            ).hex(),
+        }]}
+
+    def _sync(self, side, principal, fee):
+        from cusd_plus.unified import sync_unified_from_stock_batch
+
+        account = mock.Mock(
+            user=mock.Mock(username='julian', phone_number='+51'),
+            business=None,
+            business_id=None,
+        )
+        account.user.get_full_name.return_value = 'Julian'
+        row = mock.Mock(pk=77)
+        with mock.patch('users.models.Account.objects') as accounts, \
+             mock.patch('users.models_unified.UnifiedTransactionTable.objects') as rows, \
+             mock.patch('send.models.SendTransaction.all_objects') as sends, \
+             mock.patch('cusd_plus.unified._stock_symbol', return_value='TSLA'):
+            accounts.filter.return_value.select_related.return_value.first.return_value = account
+            rows.update_or_create.return_value = (row, True)
+            batch = self._batch(side)
+            sync_unified_from_stock_batch(
+                batch, self._receipt(batch.kind, principal, fee))
+        return rows, sends
+
+    def test_buy_creates_outgoing_stock_receipt_with_exact_event_amount(self):
+        rows, _ = self._sync(0, 600 * 10**18, 2 * 10**18)
+        defaults = rows.update_or_create.call_args.kwargs['defaults']
+        self.assertEqual(defaults['amount'], '602')
+        self.assertEqual(defaults['token_type'], 'CUSD_PLUS')
+        self.assertEqual(defaults['from_address'], USER)
+        self.assertEqual(defaults['to_address'], ROUTER.lower())
+        self.assertEqual(
+            defaults['description'], 'Ondo Stocks: Compra de TSLA')
+        self.assertEqual(
+            rows.update_or_create.call_args.kwargs['sponsored_batch'].id, 91)
+
+    def test_sell_creates_incoming_stock_receipt_and_hides_false_deposit(self):
+        rows, sends = self._sync(1, 600 * 10**18, 2 * 10**18)
+        defaults = rows.update_or_create.call_args.kwargs['defaults']
+        self.assertEqual(defaults['amount'], '598')
+        self.assertEqual(defaults['sender_type'], 'business')
+        self.assertEqual(defaults['from_address'], ROUTER.lower())
+        self.assertEqual(defaults['to_address'], USER)
+        rows.filter.return_value.exclude.return_value.update.assert_called_once()
+        sends.filter.return_value.update.assert_called_once()
+
+    def test_exact_event_must_match_quoted_stock(self):
+        from cusd_plus.unified import sync_unified_from_stock_batch
+
+        batch = self._batch(0)
+        receipt = self._receipt(batch.kind, 600 * 10**18, 2 * 10**18)
+        receipt['logs'][0]['topics'][2] = '0x' + ('aa' * 20).rjust(64, '0')
+        with mock.patch('users.models.Account.objects') as accounts:
+            accounts.filter.return_value.select_related.return_value.first.return_value = mock.Mock()
+            with self.assertRaisesRegex(ValueError, 'no matching exact settlement event'):
+                sync_unified_from_stock_batch(
+                    batch, receipt, require_event=True, strict=True)
+
+    def test_backfill_fetches_receipt_and_writes_strict_exact_row(self):
+        batch = self._batch(1)
+        batch.status = 'confirmed'
+        receipt = self._receipt(batch.kind, 600 * 10**18, 2 * 10**18)
+        receipt['status'] = '0x1'
+        queryset = mock.MagicMock()
+        queryset.order_by.return_value = queryset
+        queryset.count.return_value = 1
+        queryset.iterator.return_value = iter([batch])
+        with mock.patch(
+                'blockchain.models.SponsoredBatch.objects.filter',
+                return_value=queryset), \
+             mock.patch('cusd_plus.management.commands.backfill_stock_history._rpc',
+                        return_value=receipt), \
+             mock.patch(
+                 'cusd_plus.management.commands.backfill_stock_history.sync_unified_from_stock_batch'
+             ) as sync:
+            call_command('backfill_stock_history')
+        sync.assert_called_once_with(batch, receipt, require_event=True, strict=True)
+
+    def test_backfill_check_fails_loudly_when_rows_are_missing(self):
+        queryset = mock.MagicMock()
+        queryset.order_by.return_value = queryset
+        queryset.count.return_value = 1
+        with mock.patch(
+                'blockchain.models.SponsoredBatch.objects.filter',
+                return_value=queryset):
+            with self.assertRaisesRegex(CommandError, '1 confirmed stock trades'):
+                call_command('backfill_stock_history', check=True)
+
+    def test_stock_batch_claims_scanner_settlement(self):
+        from cusd_plus.tasks import _source_row_covers
+
+        with mock.patch('send.models.SendTransaction.all_objects') as sends, \
+             mock.patch('users.models_unified.UnifiedTransactionTable.objects') as unified, \
+             mock.patch('presale.models.PresalePurchase.objects') as presale, \
+             mock.patch('payments.models.PaymentTransaction.objects') as payments, \
+             mock.patch('payroll.models.PayrollItem.objects') as payroll, \
+             mock.patch('blockchain.models.SponsoredBatch.objects') as batches:
+            sends.filter.return_value.exists.return_value = False
+            unified.filter.return_value.exists.return_value = False
+            presale.filter.return_value.exists.return_value = False
+            payments.filter.return_value.filter.return_value.exists.return_value = False
+            payroll.filter.return_value.exists.return_value = False
+            batches.filter.return_value.exists.return_value = True
+            self.assertTrue(_source_row_covers(self.TXH, USER))
+            kwargs = batches.filter.call_args.kwargs
+            self.assertEqual(kwargs['kind__in'], ('stock_buy', 'stock_sell'))
+            self.assertEqual(kwargs['user_bsc_address__iexact'], USER)
