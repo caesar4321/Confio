@@ -20,7 +20,8 @@ from decimal import Decimal
 from typing import Optional
 
 from django.core.cache import cache
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, DecimalField, Q, Sum
+from django.db.models.functions import Cast
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -254,6 +255,143 @@ def get_sponsorship_stats(*, since=None) -> dict:
         'unresolved_all_time': rows.filter(status__in=('signed', 'sent')).count(),
         'failed_all_time': rows.filter(status__in=SPONSOR_FAILURE_STATUSES).count(),
     }
+
+
+def get_stock_trade_stats(*, since=None) -> dict:
+    """Database-backed Ondo Stocks activity and settlement metrics.
+
+    ``SponsoredBatch`` is the attempt/finality ledger. The linked unified row
+    is the exact event-backed USD value shown in account history, so volumes
+    intentionally come from that row rather than calldata estimates. A count
+    of confirmed batches without a unified row is surfaced as an integrity
+    alert instead of silently reducing volume.
+    """
+    from blockchain.models import SponsoredBatch
+    from users.models_unified import UnifiedTransactionTable
+
+    rows = SponsoredBatch.objects.filter(kind__in=('stock_buy', 'stock_sell'))
+    windowed = rows if since is None else rows.filter(created_at__gte=since)
+    by_status = {
+        row['status']: row['count']
+        for row in windowed.values('status').annotate(count=Count('id'))
+    }
+
+    confirmed = windowed.filter(status='confirmed')
+    settlements = UnifiedTransactionTable.objects.filter(
+        sponsored_batch__in=confirmed,
+        deleted_at__isnull=True,
+        status='CONFIRMED',
+        amount_denomination='USD_VALUE',
+    )
+    amount = Cast(
+        'amount',
+        output_field=DecimalField(max_digits=38, decimal_places=18),
+    )
+    volumes = settlements.aggregate(
+        buy=Sum(amount, filter=Q(sponsored_batch__kind='stock_buy')),
+        sell=Sum(amount, filter=Q(sponsored_batch__kind='stock_sell')),
+    )
+    buy_volume = volumes['buy'] or Decimal('0')
+    sell_volume = volumes['sell'] or Decimal('0')
+    confirmed_count = confirmed.count()
+    settlement_count = settlements.count()
+
+    return {
+        'total': windowed.count(),
+        'buy_attempts': windowed.filter(kind='stock_buy').count(),
+        'sell_attempts': windowed.filter(kind='stock_sell').count(),
+        'confirmed': confirmed_count,
+        'confirmed_buys': confirmed.filter(kind='stock_buy').count(),
+        'confirmed_sells': confirmed.filter(kind='stock_sell').count(),
+        'unique_traders': confirmed.values('user_id').distinct().count(),
+        'buy_volume': buy_volume,
+        'sell_volume': sell_volume,
+        'total_volume': buy_volume + sell_volume,
+        'failed': sum(by_status.get(status, 0) for status in SPONSOR_FAILURE_STATUSES),
+        'unresolved': by_status.get('signed', 0) + by_status.get('sent', 0),
+        'unresolved_all_time': rows.filter(status__in=('signed', 'sent')).count(),
+        'failed_all_time': rows.filter(status__in=SPONSOR_FAILURE_STATUSES).count(),
+        'history_missing': max(0, confirmed_count - settlement_count),
+        'by_status': by_status,
+    }
+
+
+def get_stock_router_metrics(*, use_cache: bool = True) -> dict:
+    """Live stock-router state for operations; never raises.
+
+    Accrued fees are contract accounting, while the raw USDT balance can also
+    include accidental transfers. Reporting both keeps the admin from calling
+    sweepable USDT revenue. Values are cached briefly because the main admin
+    dashboard is refreshed far more often than this state changes.
+    """
+    from django.conf import settings
+
+    address = (getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', '') or '').strip()
+    base = {
+        'wired': bool(address),
+        'address': address or None,
+        'stocks_enabled': bool(getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False)),
+        'trading_enabled': bool(getattr(settings, 'CUSD_PLUS_STOCK_TRADING_ENABLED', False)),
+        'fee_bps_configured': int(getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 30)),
+    }
+    if not address:
+        return {
+            **base,
+            'accrued_usdt_fees': None,
+            'router_usdt_balance': None,
+            'fee_bps_onchain': None,
+            'paused': None,
+            'source': 'unconfigured',
+        }
+
+    cache_key = f'ondo_stock_router_metrics:v1:{address.lower()}'
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached:
+            return {**base, **cached}
+
+    try:
+        from eth_utils import keccak
+        from .tasks import _rpc
+
+        def _selector(signature):
+            return '0x' + keccak(text=signature)[:4].hex()
+
+        def _call_uint(to, signature, suffix=''):
+            result = _rpc(
+                'eth_call',
+                [{'to': to, 'data': _selector(signature) + suffix}, 'latest'],
+                timeout=6,
+            )
+            return int(result, 16)
+
+        accrued = _call_uint(address, 'accruedUsdtFees()')
+        fee_bps = _call_uint(address, 'stockFeeBps()')
+        paused = bool(_call_uint(address, 'paused()'))
+        usdt_word = _call_uint(address, 'USDT()')
+        usdt = '0x' + usdt_word.to_bytes(32, 'big')[-20:].hex()
+        router_word = address.lower().removeprefix('0x').rjust(64, '0')
+        usdt_balance = _call_uint(usdt, 'balanceOf(address)', router_word)
+        chain = {
+            'accrued_usdt_fees': Decimal(accrued) / WAD,
+            'router_usdt_balance': Decimal(usdt_balance) / WAD,
+            'fee_bps_onchain': fee_bps,
+            'paused': paused,
+            'source': 'bsc',
+        }
+        if use_cache:
+            cache.set(cache_key, chain, 30)
+        return {**base, **chain}
+    except Exception as exc:  # noqa: BLE001 — ops page must remain available
+        logger.warning('Unable to read Ondo stock router state from BSC: %s', exc)
+        return {
+            **base,
+            'accrued_usdt_fees': None,
+            'router_usdt_balance': None,
+            'fee_bps_onchain': None,
+            'paused': None,
+            'source': 'unavailable',
+        }
 
 
 def get_bsc_scanner_health() -> dict:

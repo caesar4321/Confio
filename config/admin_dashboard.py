@@ -826,6 +826,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             get_cusd_plus_platform_metrics,
             get_savings_saga_stats,
             get_sponsorship_stats,
+            get_stock_router_metrics,
+            get_stock_trade_stats,
         )
         cusd_plus_metrics = get_cusd_plus_platform_metrics()
         context['cusd_plus_metrics'] = cusd_plus_metrics
@@ -840,6 +842,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['sponsorship_stats'] = get_sponsorship_stats(since=last_24h)
         context['sponsorship_stats_7d'] = get_sponsorship_stats(since=last_7_start)
         context['bnb_autoconvert_stats'] = get_bnb_autoconvert_stats()
+
+        # Ondo Stocks is executed through the sponsorship rail but needs its
+        # own product/ops view: sponsorship health alone cannot say whether a
+        # batch was a buy or sell, how much settled, whether history exists,
+        # or how much fee remains withdrawable in the router.
+        context['stock_stats_24h'] = get_stock_trade_stats(since=last_24h)
+        context['stock_stats_30d'] = get_stock_trade_stats(since=rolling_30_start)
+        context['stock_router_metrics'] = get_stock_router_metrics()
 
         # Country breakdown for P2P
         country_stats = P2POffer.objects.filter(
@@ -1949,6 +1959,40 @@ confio_admin_site.register(RampTransaction, RampTransactionAdmin)
 confio_admin_site.register(RampUserAddress, RampUserAddressAdmin)
 confio_admin_site.register(RampWebhookEvent, RampWebhookEventAdmin)
 
+# Persistent provider accounts and named/omnibus money flows
+from payment_accounts.admin import (
+    EligibilityPolicyAdmin,
+    FinancialAccountAdmin,
+    MoneyFlowAdmin,
+    MoneyOperationAdmin,
+    ProviderProfileAdmin,
+)
+from payment_accounts.models import (
+    AccountCapability,
+    EligibilityDecision,
+    EligibilityPolicy,
+    FinancialAccount,
+    FundingInstruction,
+    LedgerEntry,
+    MoneyFlow,
+    MoneyOperation,
+    PayoutDestination,
+    ProviderProfile,
+    ProviderWebhookEvent,
+)
+
+confio_admin_site.register(EligibilityPolicy, EligibilityPolicyAdmin)
+confio_admin_site.register(ProviderProfile, ProviderProfileAdmin)
+confio_admin_site.register(FinancialAccount, FinancialAccountAdmin)
+confio_admin_site.register(MoneyFlow, MoneyFlowAdmin)
+confio_admin_site.register(MoneyOperation, MoneyOperationAdmin)
+confio_admin_site.register(FundingInstruction)
+confio_admin_site.register(AccountCapability)
+confio_admin_site.register(LedgerEntry)
+confio_admin_site.register(ProviderWebhookEvent)
+confio_admin_site.register(EligibilityDecision)
+confio_admin_site.register(PayoutDestination)
+
 # USDC Transaction models
 from usdc_transactions.models import USDCDeposit, USDCWithdrawal, GuardarianTransaction
 from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin, GuardarianTransactionAdmin
@@ -2031,7 +2075,8 @@ confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
 # EVM sponsorship ledger + cross-rail auto-swap queue. PendingAutoSwap was
 # never registered, which left the BSC 'BNB' rows — the authoritative
 # allowlist for outbound native BNB — with no admin surface at all.
-from blockchain.models import PendingAutoSwap, SponsoredBatch
-from blockchain.admin import PendingAutoSwapAdmin, SponsoredBatchAdmin
+from blockchain.models import OndoStockTrade, PendingAutoSwap, SponsoredBatch
+from blockchain.admin import OndoStockTradeAdmin, PendingAutoSwapAdmin, SponsoredBatchAdmin
 confio_admin_site.register(SponsoredBatch, SponsoredBatchAdmin)
+confio_admin_site.register(OndoStockTrade, OndoStockTradeAdmin)
 confio_admin_site.register(PendingAutoSwap, PendingAutoSwapAdmin)

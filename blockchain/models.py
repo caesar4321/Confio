@@ -426,3 +426,19 @@ class SponsoredBatch(models.Model):
 
     def __str__(self):
         return f'7702 {self.kind} x{self.num_calls} [{self.status}] {self.tx_hash or "pending"}'
+
+
+class OndoStockTrade(SponsoredBatch):
+    """Stock-only admin view over the immutable sponsorship audit ledger.
+
+    Ondo trades do not have a second mutable domain model: the sponsored
+    batch is the durable execution record and its linked unified row is the
+    exact user-facing settlement.  A proxy gives operations a dedicated
+    surface without creating a competing source of truth or another table
+    that could drift from chain finality.
+    """
+
+    class Meta:
+        proxy = True
+        verbose_name = 'Ondo stock trade'
+        verbose_name_plural = 'Ondo stock trades'

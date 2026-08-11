@@ -3076,6 +3076,13 @@ class CreateDiditVerificationSession(graphene.Mutation):
             account_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
             account_type = account_ctx.get('account_type') or 'personal'
             business_id = account_ctx.get('business_id')
+            if account_type == 'business':
+                from users.jwt_context import is_business_employee
+
+                if not business_id or is_business_employee(user, business_id):
+                    raise DiditAPIError(
+                        'Only the business owner can start business verification'
+                    )
 
             session_data = create_didit_session(
                 user=user,

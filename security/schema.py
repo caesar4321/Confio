@@ -303,8 +303,9 @@ class SecurityQuery(graphene.ObjectType):
         user = info.context.user
         if not user.is_authenticated:
             return None
-        # Return latest verification for the specified business context
+        # Never expose another user's business verification by guessable ID.
         return IdentityVerification.objects.filter(
+            user=user,
             risk_factors__account_type='business',
             risk_factors__business_id=str(business_id)
         ).order_by('-created_at').first()

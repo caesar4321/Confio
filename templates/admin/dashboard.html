@@ -1630,6 +1630,99 @@
     </p>
     {% endif %}
 
+    <!-- Ondo Stocks: product settlement + router fee accounting -->
+    <h2 class="section-title">Ondo Stocks</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Trades (24h)</div>
+            <div class="metric-value">{{ stock_stats_24h.confirmed|intcomma }}</div>
+            <div class="metric-change">
+                {{ stock_stats_24h.confirmed_buys|intcomma }} buys &middot;
+                {{ stock_stats_24h.confirmed_sells|intcomma }} sells &middot;
+                {{ stock_stats_30d.confirmed|intcomma }} confirmed in 30d
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Settled Volume (30d)</div>
+            <div class="metric-value">${{ stock_stats_30d.total_volume|floatformat:2|intcomma }}</div>
+            <div class="metric-change">
+                Buy debits ${{ stock_stats_30d.buy_volume|floatformat:2|intcomma }} &middot;
+                sell proceeds ${{ stock_stats_30d.sell_volume|floatformat:2|intcomma }}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Unique Traders (30d)</div>
+            <div class="metric-value">{{ stock_stats_30d.unique_traders|intcomma }}</div>
+            <div class="metric-change">
+                {{ stock_stats_30d.buy_attempts|intcomma }} buy attempts &middot;
+                {{ stock_stats_30d.sell_attempts|intcomma }} sell attempts
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Trading State</div>
+            <div class="metric-value" style="font-size: 18px;">
+                {% if not stock_router_metrics.wired %}
+                <span class="negative">Not configured</span>
+                {% elif stock_router_metrics.source == 'unavailable' %}
+                <span class="negative">Chain unreadable</span>
+                {% elif stock_router_metrics.paused %}
+                <span class="negative">Paused</span>
+                {% elif stock_router_metrics.stocks_enabled and stock_router_metrics.trading_enabled %}
+                Live
+                {% elif stock_router_metrics.stocks_enabled %}
+                Discovery only
+                {% else %}
+                Hidden
+                {% endif %}
+            </div>
+            <div class="metric-change">
+                On-chain fee {{ stock_router_metrics.fee_bps_onchain|default:"—" }} bps &middot;
+                configured {{ stock_router_metrics.fee_bps_configured }} bps
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Accrued Router Fees</div>
+            <div class="metric-value">
+                {% if stock_router_metrics.accrued_usdt_fees is not None %}
+                ${{ stock_router_metrics.accrued_usdt_fees|floatformat:6|intcomma }}
+                {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+            </div>
+            <div class="metric-change">
+                {% if stock_router_metrics.router_usdt_balance is not None %}
+                Raw router balance ${{ stock_router_metrics.router_usdt_balance|floatformat:6|intcomma }}
+                {% else %}Router balance unreadable{% endif %}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Ops Attention</div>
+            <div class="metric-value {% if stock_stats_30d.unresolved_all_time or stock_stats_30d.failed_all_time or stock_stats_30d.history_missing %}negative{% endif %}">
+                {{ stock_stats_30d.unresolved_all_time|add:stock_stats_30d.failed_all_time|add:stock_stats_30d.history_missing|intcomma }}
+            </div>
+            <div class="metric-change">
+                {{ stock_stats_30d.unresolved_all_time }} unresolved &middot;
+                {{ stock_stats_30d.failed_all_time }} failed &middot;
+                {{ stock_stats_30d.history_missing }} missing history
+            </div>
+        </div>
+    </div>
+    <p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
+        Volumes use exact event-backed account-history settlements. Router USDT
+        can include accidental transfers; only accrued fees are withdrawable as revenue.
+    </p>
+    <div style="margin-bottom: 20px;">
+        <a href="{% url 'confio_admin:blockchain_ondostocktrade_changelist' %}"
+            class="action-button secondary" style="margin-right: 10px;">Ondo Stock Trades</a>
+        {% if stock_router_metrics.address %}
+        <a href="https://bscscan.com/address/{{ stock_router_metrics.address }}" target="_blank" rel="noopener"
+            class="action-button secondary">Router on BscScan</a>
+        {% endif %}
+    </div>
+
     <!-- BSC sponsorship: the rail every user-facing BSC action rides -->
     <h2 class="section-title">BSC Sponsorship (EIP-7702)</h2>
     <div class="metrics-grid">

@@ -183,6 +183,7 @@ if settings.DEBUG:
 from .views import index
 from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 from ramps.views import koywe_webhook
+from payment_accounts.views import cobre_webhook, infinia_webhook
 from security.views import didit_webhook
 from users.funnel_ingest import funnel_ingest
 from content_ingestion.views import enqueue_ai_context_commit, enqueue_telegram_sync
@@ -191,6 +192,8 @@ from content_ingestion.views import enqueue_ai_context_commit, enqueue_telegram_
 urlpatterns += [
     path('api/didit/webhook/', didit_webhook, name='didit_webhook'),
     path('api/koywe/webhook/', koywe_webhook, name='koywe_webhook'),
+    path('api/payment-accounts/cobre/webhook/', cobre_webhook, name='cobre_payment_webhook'),
+    path('api/payment-accounts/infinia/webhook/', infinia_webhook, name='infinia_payment_webhook'),
     path('api/funnel/ingest/', funnel_ingest, name='funnel_ingest'),
     path('api/content-ingestion/telegram-sync/', enqueue_telegram_sync, name='content_ingestion_telegram_sync'),
     path('api/content-ingestion/ai-context/', enqueue_ai_context_commit, name='content_ingestion_ai_context'),

@@ -1,13 +1,20 @@
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from achievements.models import ReferralRewardEvent, UserReferral
-from security.didit import create_didit_session, sync_didit_session, verify_didit_webhook_signature
-from security.didit import DiditConfigurationError
+from security.didit import (
+    DiditAPIError,
+    DiditConfigurationError,
+    create_didit_session,
+    sync_didit_session,
+    verify_didit_webhook_signature,
+)
 from security.models import IdentityVerification, SuspiciousActivity
+from security.schema import SecurityQuery
 
 User = get_user_model()
 
@@ -39,6 +46,55 @@ class DiditIntegrationTests(TestCase):
         response.json.return_value = payload
         return response
 
+    def test_business_kyc_query_does_not_expose_another_users_verification(self):
+        other = User.objects.create_user(
+            username='other-business-owner',
+            password='secret123',
+            firebase_uid='other-business-owner-firebase',
+        )
+        IdentityVerification.objects.create(
+            user=other,
+            verified_first_name='Private Company',
+            verified_last_name='Business',
+            verified_date_of_birth=date(2020, 1, 1),
+            verified_nationality='COL',
+            verified_address='Private address',
+            verified_city='Bogota',
+            verified_state='Cundinamarca',
+            verified_country='COL',
+            document_type='national_id',
+            document_number='private-tax-id',
+            document_issuing_country='COL',
+            status='verified',
+            risk_factors={'account_type': 'business', 'business_id': '42'},
+        )
+        info = SimpleNamespace(context=SimpleNamespace(user=self.user))
+
+        result = SecurityQuery().resolve_business_kyc_status(info, business_id='42')
+
+        self.assertIsNone(result)
+
+    @patch('security.didit.requests.request')
+    def test_sync_rejects_session_owned_by_another_confio_user(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_other',
+            'status': 'Approved',
+            'vendor_data': '{"user_id":999999,"account_type":"personal"}',
+        })
+
+        with self.assertRaisesRegex(DiditAPIError, 'different Confio user'):
+            sync_didit_session(session_id='sess_other', expected_user=self.user)
+
+    @patch('security.didit.requests.request')
+    def test_sync_rejects_session_without_confio_user_binding(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_unbound',
+            'status': 'Approved',
+        })
+
+        with self.assertRaisesRegex(DiditAPIError, 'missing its Confio user binding'):
+            sync_didit_session(session_id='sess_unbound', expected_user=self.user)
+
     @patch('security.didit.requests.request')
     def test_create_session_uses_business_workflow_and_vendor_data(self, mock_request):
         mock_request.return_value = self._mock_response({
@@ -63,7 +119,16 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(kwargs['headers']['x-api-key'], 'test-api-key')
         self.assertEqual(kwargs['json']['workflow_id'], 'workflow-business')
         self.assertEqual(kwargs['json']['callback'], 'https://confio.lat/api/didit/webhook/')
-        self.assertEqual(kwargs['json']['vendor_data'], '{"user_id":1,"account_type":"business","business_id":"42"}')
+        self.assertEqual(
+            kwargs['json']['vendor_data'],
+            f'{{"user_id":{self.user.id},"account_type":"business","business_id":"42"}}',
+        )
+
+    @patch('security.didit.requests.request')
+    def test_business_session_requires_business_id_before_network(self, mock_request):
+        with self.assertRaisesRegex(DiditConfigurationError, 'requires a business ID'):
+            create_didit_session(user=self.user, account_type='business')
+        mock_request.assert_not_called()
 
     @patch('security.didit.requests.request')
     def test_create_session_uses_phone_country_workflow_for_personal_accounts(self, mock_request):
@@ -112,7 +177,7 @@ class DiditIntegrationTests(TestCase):
         mock_request.return_value = self._mock_response({
             'session_id': 'sess_123',
             'status': 'Approved',
-            'vendor_data': '{"user_id":1,"account_type":"personal"}',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
             'first_name': 'Ana',
             'last_name': 'Perez',
             'date_of_birth': '1994-07-21',
@@ -120,6 +185,7 @@ class DiditIntegrationTests(TestCase):
                 'nationality': 'VEN',
                 'document_type': 'passport',
                 'document_number': 'P123456',
+                'front_image': 'https://media.didit.example/front.jpg?signature=secret',
                 'issuing_state': 'VEN',
                 'expiration_date': '2030-12-31',
                 'parsed_address': {
@@ -146,13 +212,15 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(verification.document_type, 'passport')
         self.assertEqual(verification.document_number, 'P123456')
         self.assertEqual(verification.document_issuing_country, 'VEN')
+        stored_session = verification.risk_factors['didit']['session']
+        self.assertNotIn('front_image', stored_session['id_verifications'][0])
 
     @patch('security.didit.requests.request')
     def test_sync_session_extracts_mexico_address_and_prefers_document_postal_code(self, mock_request):
         mock_request.return_value = self._mock_response({
             'session_id': 'sess_mex_address',
             'status': 'Approved',
-            'vendor_data': '{"user_id":1,"account_type":"personal"}',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
             'first_name': 'Martin',
             'last_name': 'De Jesus Neri',
             'date_of_birth': '1989-11-03',
@@ -246,7 +314,7 @@ class DiditIntegrationTests(TestCase):
         mock_request.return_value = self._mock_response({
             'session_id': 'sess_dup',
             'status': 'Approved',
-            'vendor_data': '{"user_id":1,"account_type":"personal"}',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
             'first_name': 'Ana',
             'last_name': 'Perez',
             'date_of_birth': '1994-07-21',
@@ -267,7 +335,8 @@ class DiditIntegrationTests(TestCase):
             }],
         })
 
-        synced, _ = sync_didit_session(session_id='sess_dup', expected_user=self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            synced, _ = sync_didit_session(session_id='sess_dup', expected_user=self.user)
 
         verification.refresh_from_db()
         synced.refresh_from_db()
@@ -374,7 +443,7 @@ class DiditIntegrationTests(TestCase):
         mock_request.return_value = self._mock_response({
             'session_id': 'sess_dup_2',
             'status': 'Approved',
-            'vendor_data': '{"user_id":1,"account_type":"personal"}',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
             'first_name': 'Ana',
             'last_name': 'Perez',
             'date_of_birth': '1994-07-21',
@@ -395,7 +464,8 @@ class DiditIntegrationTests(TestCase):
             }],
         })
 
-        synced, _ = sync_didit_session(session_id='sess_dup_2', expected_user=self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            synced, _ = sync_didit_session(session_id='sess_dup_2', expected_user=self.user)
 
         synced.refresh_from_db()
         later_referral.refresh_from_db()

@@ -161,6 +161,26 @@ def _normalize_didit_payload(value: Any) -> Any:
     return value
 
 
+_DIDIT_TRANSIENT_MEDIA_KEYS = {
+    'portrait_image', 'front_image', 'back_image', 'full_front_image',
+    'full_back_image', 'front_video', 'back_video', 'reference_image',
+    'video_url', 'file_url', 'session_url', 'kyc_session_url',
+}
+
+
+def _without_transient_didit_media(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_transient_didit_media(item)
+            for key, item in value.items()
+            if key not in _DIDIT_TRANSIENT_MEDIA_KEYS
+            and not key.endswith('_image_url')
+        }
+    if isinstance(value, list):
+        return [_without_transient_didit_media(item) for item in value]
+    return value
+
+
 def _canonicalize_didit_payload(raw_body: bytes) -> str | None:
     try:
         payload = json.loads(raw_body.decode('utf-8'))
@@ -246,6 +266,13 @@ def build_didit_callback_url(request=None) -> str | None:
 
 
 def create_didit_session(*, user, account_type: str = 'personal', business_id: str | None = None, callback_url: str | None = None) -> dict[str, Any]:
+    account_type = str(account_type or '').strip().lower()
+    if account_type not in {'personal', 'business'}:
+        raise DiditConfigurationError('Unsupported Didit account context')
+    if account_type == 'business' and not business_id:
+        raise DiditConfigurationError('Business verification requires a business ID')
+    if account_type == 'personal':
+        business_id = None
     phone_country = str(getattr(user, 'phone_country', '') or '').strip().upper()
     vendor_data = {
         'user_id': user.id,
@@ -346,6 +373,44 @@ def ensure_pending_didit_verification(*, user, session_id: str, account_type: st
 
 
 def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
+    if response_payload.get('session_kind') == 'business':
+        registry_checks = response_payload.get('registry_checks') or []
+        registry = next(
+            (
+                item for item in registry_checks
+                if isinstance(item, dict)
+                and str(item.get('status') or '').strip().lower() == 'approved'
+            ),
+            registry_checks[0] if registry_checks else {},
+        )
+        company = registry.get('company') or {}
+        addresses = company.get('addresses') or []
+        address = addresses[0] if addresses and isinstance(addresses[0], dict) else {}
+        country = _normalize_iso3(
+            _first_non_empty(address.get('country_code'), company.get('country_code'))
+        )
+        company_name = str(company.get('company_name') or 'Verified Business').strip()
+        return {
+            'verified_first_name': company_name[:100],
+            'verified_last_name': 'Business',
+            'verified_date_of_birth': _parse_date(company.get('incorporation_date')) or date(1900, 1, 1),
+            'verified_nationality': country,
+            'verified_address': _first_non_empty(
+                address.get('address'), address.get('line_1'), company.get('registered_address'),
+                'Verified by Didit',
+            ),
+            'verified_address_neighborhood': '',
+            'verified_city': address.get('city') or 'Unknown City',
+            'verified_state': address.get('state') or address.get('region') or 'Unknown State',
+            'verified_country': country,
+            'verified_postal_code': address.get('postal_code') or '',
+            'document_type': 'national_id',
+            'document_number': _first_non_empty(
+                company.get('tax_number'), company.get('registration_number')
+            ),
+            'document_issuing_country': country,
+            'document_expiry_date': None,
+        }
     id_verification = {}
     id_verifications = response_payload.get('id_verifications')
     if isinstance(id_verifications, list) and id_verifications:
@@ -479,10 +544,15 @@ def _map_didit_status(response_payload: dict[str, Any]) -> str:
 
 
 def _resolve_user_from_payload(response_payload: dict[str, Any], expected_user=None):
+    vendor_data = _safe_json_loads(response_payload.get('vendor_data'))
     if expected_user is not None:
+        vendor_user_id = vendor_data.get('user_id')
+        if not vendor_user_id:
+            raise DiditAPIError('Didit session is missing its Confio user binding')
+        if str(vendor_user_id) != str(expected_user.id):
+            raise DiditAPIError('Didit session belongs to a different Confio user')
         return expected_user
 
-    vendor_data = _safe_json_loads(response_payload.get('vendor_data'))
     user_id = vendor_data.get('user_id')
     if not user_id:
         return None
@@ -490,6 +560,36 @@ def _resolve_user_from_payload(response_payload: dict[str, Any], expected_user=N
         return User.objects.get(id=user_id)
     except User.DoesNotExist:
         return None
+
+
+def retrieve_didit_decision(
+    *,
+    session_id: str,
+    expected_user=None,
+    expected_account_type: str | None = None,
+    expected_business_id: str | None = None,
+) -> dict[str, Any]:
+    response_payload = _didit_request('GET', f'/v3/session/{session_id}/decision/')
+    user = _resolve_user_from_payload(response_payload, expected_user=expected_user)
+    if user is None:
+        raise DiditAPIError('Could not match Didit session to a Confio user')
+    vendor_data = _safe_json_loads(response_payload.get('vendor_data'))
+    account_type = str(vendor_data.get('account_type') or 'personal')
+    business_id = str(vendor_data.get('business_id') or '')
+    if expected_account_type and account_type != expected_account_type:
+        raise DiditAPIError('Didit session does not match the active account type')
+    if expected_business_id and business_id != str(expected_business_id):
+        raise DiditAPIError('Didit KYB session does not match the active business')
+    return response_payload
+
+
+def retrieve_linked_didit_decision(*, session_id: str) -> dict[str, Any]:
+    """Fetch a child KYC session whose ID came from an authenticated KYB decision."""
+    return _didit_request('GET', f'/v3/session/{session_id}/decision/')
+
+
+def verification_values_from_didit_decision(response_payload: dict[str, Any]) -> dict[str, Any]:
+    return _extract_verification_payload(response_payload)
 
 
 def _notify_verification_status_change(
@@ -538,7 +638,10 @@ def _notify_verification_status_change(
 
 
 def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[IdentityVerification, dict[str, Any]]:
-    response_payload = _didit_request('GET', f'/v3/session/{session_id}/decision/')
+    response_payload = retrieve_didit_decision(
+        session_id=session_id,
+        expected_user=expected_user,
+    )
     user = _resolve_user_from_payload(response_payload, expected_user=expected_user)
     if user is None:
         raise DiditAPIError('Could not match Didit session to a Confio user')
@@ -565,7 +668,9 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
         'session_id': session_id,
         'status': response_payload.get('status'),
         'raw_status': response_payload.get('status'),
-        'session': response_payload,
+        # Didit media links are short-lived credentials. Persist the decision
+        # facts needed for audit/backfills, never the signed media URLs.
+        'session': _without_transient_didit_media(response_payload),
     }
     if account_type == 'business':
         risk_factors['account_type'] = 'business'

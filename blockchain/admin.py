@@ -1,9 +1,13 @@
 import logging
+from decimal import Decimal, InvalidOperation
 
 from django.contrib import admin
+from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
+from django.utils.html import format_html
 from .models import (
-    Balance, IndexerAssetCursor, PendingAutoSwap, ProcessedIndexerTransaction,
-    SponsoredBatch,
+    Balance, IndexerAssetCursor, OndoStockTrade, PendingAutoSwap,
+    ProcessedIndexerTransaction, SponsoredBatch,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,3 +123,73 @@ class SponsoredBatchAdmin(admin.ModelAdmin):
     # nonce and waiting for finality — which is a piece of infrastructure, not
     # an admin action. Until that exists, a stuck batch is escalated by the
     # reconciler's give-up ERROR and resolved by engineering, not by a button.
+
+
+@admin.register(OndoStockTrade)
+class OndoStockTradeAdmin(SponsoredBatchAdmin):
+    """Read-only stock projection of the sponsored execution ledger.
+
+    The linked unified row carries the exact event-backed USD settlement used
+    by account history. Pending and failed attempts remain visible even though
+    they do not have a settlement row yet.
+    """
+
+    list_display = (
+        'id', 'trade_side', 'stock_symbol', 'settled_usd', 'user', 'status',
+        'user_bsc_address', 'transaction_link', 'block_number', 'created_at',
+    )
+    list_display_links = None
+    list_filter = ('kind', 'status', 'created_at')
+    search_fields = (
+        'tx_hash', 'user_bsc_address', 'user__username', 'user__email',
+        'unified_transaction__description',
+    )
+    date_hierarchy = 'created_at'
+
+    def get_queryset(self, request):
+        return (
+            super().get_queryset(request)
+            .filter(kind__in=('stock_buy', 'stock_sell'))
+            .select_related('unified_transaction')
+        )
+
+    @admin.display(description='Side', ordering='kind')
+    def trade_side(self, obj):
+        return 'Buy' if obj.kind == 'stock_buy' else 'Sell'
+
+    @staticmethod
+    def _settlement(obj):
+        try:
+            return obj.unified_transaction
+        except ObjectDoesNotExist:
+            return None
+
+    @admin.display(description='Stock')
+    def stock_symbol(self, obj):
+        row = self._settlement(obj)
+        description = (getattr(row, 'description', '') or '').strip()
+        marker = ' de '
+        return description.rsplit(marker, 1)[-1] if marker in description else '—'
+
+    @admin.display(description='Settled USD')
+    def settled_usd(self, obj):
+        row = self._settlement(obj)
+        try:
+            value = Decimal(row.amount)
+        except (AttributeError, InvalidOperation, TypeError):
+            return '—'
+        return f'${value:,.2f}'
+
+    @admin.display(description='Transaction')
+    def transaction_link(self, obj):
+        if not obj.tx_hash:
+            return '—'
+        explorer = (
+            'https://testnet.bscscan.com'
+            if int(getattr(settings, 'BSC_CHAIN_ID', 56)) == 97
+            else 'https://bscscan.com'
+        )
+        return format_html(
+            '<a href="{}/tx/{}" target="_blank" rel="noopener">{}…</a>',
+            explorer, obj.tx_hash, obj.tx_hash[:12],
+        )
