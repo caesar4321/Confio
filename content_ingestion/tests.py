@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import date
 
@@ -303,6 +304,7 @@ class CanonicalPromotionValidationTests(SimpleTestCase):
     @override_settings(
         GEMINI_API_KEY='test-key',
         GEMINI_MODEL='gemini-3.5-flash',
+        CONFIO_AI_CANONICAL_PROMOTION_MODEL='gemini-3.5-flash',
     )
     @patch('content_ingestion.canonical_promotion.render_retrieved_knowledge', return_value='Known memory')
     @patch('content_ingestion.canonical_promotion.requests.post')
@@ -337,6 +339,43 @@ class CanonicalPromotionValidationTests(SimpleTestCase):
             payload['generationConfig']['responseMimeType'],
             'application/json',
         )
+        render_memory.assert_called_once()
+
+    @override_settings(
+        OPENAI_API_KEY='test-key',
+        CONFIO_AI_CANONICAL_PROMOTION_MODEL='gpt-5.6-luna',
+        CONFIO_AI_CANONICAL_PROMOTION_REASONING_EFFORT='low',
+    )
+    @patch('content_ingestion.canonical_promotion.render_retrieved_knowledge', return_value='Known memory')
+    @patch('content_ingestion.canonical_promotion.requests.post')
+    def test_extractor_uses_luna_structured_outputs(self, post, render_memory):
+        from content_ingestion.canonical_promotion import _extract_candidates
+
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            'output_text': json.dumps({
+                'candidates': [{
+                    'category': 'decisions',
+                    'statement': 'Confio prioritizes Telegram as its internal interface.',
+                    'evidence_quote': 'We decided to ship Telegram first.',
+                    'source_turn_ids': [1],
+                    'confidence': 0.97,
+                    'requires_review': False,
+                    'reason': 'Explicit decision.',
+                }],
+            }),
+        }
+
+        candidates = _extract_candidates([self._turn(pk=1)])
+
+        self.assertEqual(candidates[0]['category'], 'decisions')
+        self.assertEqual(post.call_args.args[0], 'https://api.openai.com/v1/responses')
+        payload = post.call_args.kwargs['json']
+        self.assertEqual(payload['model'], 'gpt-5.6-luna')
+        self.assertEqual(payload['reasoning'], {'effort': 'low'})
+        self.assertEqual(payload['text']['format']['type'], 'json_schema')
+        self.assertTrue(payload['text']['format']['strict'])
+        self.assertIn('Understood. Telegram first.', payload['input'])
         render_memory.assert_called_once()
 
 
@@ -556,7 +595,9 @@ class AIProviderRoutingTests(SimpleTestCase):
         self.assertIn('finishReason: SAFETY', str(ctx.exception))
         self.assertIn('HARM_CATEGORY_DANGEROUS_CONTENT=MEDIUM blocked', str(ctx.exception))
 
-    @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
+    @override_settings(
+        OPENAI_API_KEY='', GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview'
+    )
     @patch('content_ingestion.ai_client.requests.post')
     def test_complete_with_images_sends_inline_data(self, post):
         from content_ingestion.ai_client import complete_with_images
@@ -574,6 +615,52 @@ class AIProviderRoutingTests(SimpleTestCase):
         self.assertEqual(parts[0]['inline_data']['mime_type'], 'image/png')
         self.assertEqual(parts[0]['inline_data']['data'], 'YWJj')
         self.assertEqual(parts[1]['text'], 'Describe esta imagen')
+
+    @override_settings(
+        OPENAI_API_KEY='key', GEMINI_API_KEY='fallback-key',
+        CONFIO_AI_IMAGE_MODEL='gpt-5.6-luna',
+        CONFIO_AI_DAILY_REASONING_EFFORT='low',
+    )
+    @patch('content_ingestion.ai_client.requests.post')
+    def test_complete_with_images_uses_luna_first(self, post):
+        from content_ingestion.ai_client import complete_with_images
+
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {'output_text': 'luna image analysis'}
+
+        out = complete_with_images('Describe esta imagen', [('image/png', b'abc')], system='SYS')
+
+        self.assertEqual(out, 'luna image analysis')
+        self.assertEqual(post.call_count, 1)
+        payload = post.call_args.kwargs['json']
+        self.assertEqual(payload['model'], 'gpt-5.6-luna')
+        self.assertEqual(payload['reasoning'], {'effort': 'low'})
+        content = payload['input'][0]['content']
+        self.assertEqual(content[0], {'type': 'input_text', 'text': 'Describe esta imagen'})
+        self.assertEqual(content[1]['type'], 'input_image')
+        self.assertEqual(content[1]['image_url'], 'data:image/png;base64,YWJj')
+
+    @override_settings(OPENAI_API_KEY='key', GEMINI_API_KEY='fallback-key')
+    @patch('content_ingestion.ai_client.requests.post')
+    def test_explicit_gpt_image_can_use_frontier_model(self, post):
+        from content_ingestion.ai_client import complete_with_images
+
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {'output_text': 'sol image analysis'}
+
+        out = complete_with_images(
+            'Describe esta imagen',
+            [('image/png', b'abc')],
+            system='SYS',
+            provider='openai',
+            model='gpt-5.6-sol',
+            reasoning_effort='medium',
+        )
+
+        self.assertEqual(out, 'sol image analysis')
+        payload = post.call_args.kwargs['json']
+        self.assertEqual(payload['model'], 'gpt-5.6-sol')
+        self.assertEqual(payload['reasoning'], {'effort': 'medium'})
 
     @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
     @patch('content_ingestion.ai_client.requests.get')
@@ -932,7 +1019,7 @@ class TelegramImageRoutingTests(SimpleTestCase):
         complete_images.assert_called_once()
         agent_prompt = run_with_tools.call_args.args[0]
         self.assertIn('Visible text: principio de la sospecha.', agent_prompt)
-        self.assertIn('Análisis real de la imagen vía Gemini', agent_prompt)
+        self.assertIn('Análisis real de la imagen vía modelo visual', agent_prompt)
 
 
 class TelegramAnswerTimeoutTests(SimpleTestCase):
@@ -1188,7 +1275,8 @@ class ToolLoopTests(SimpleTestCase):
 
     @override_settings(
         OPENAI_API_KEY='x', CLAUDE_API_KEY='', CONFIO_AI_AGENT_BACKEND='openai',
-        OPENAI_MODEL='gpt-4.1-mini', CONFIO_AI_AGENT_MODEL='', CONFIO_AI_AGENT_MAX_TOKENS=8000,
+        CONFIO_AI_DAILY_MODEL='gpt-5.6-luna', CONFIO_AI_DAILY_REASONING_EFFORT='low',
+        CONFIO_AI_AGENT_MODEL='', CONFIO_AI_AGENT_MAX_TOKENS=8000,
     )
     def test_run_with_tools_native_openai_loop(self):
         from content_ingestion import ai_agent
@@ -1206,14 +1294,22 @@ class ToolLoopTests(SimpleTestCase):
             hits['n'] += 1
             return 'A, B'
 
-        with patch('content_ingestion.ai_agent._openai_post', side_effect=lambda key, payload: next(responses)):
+        payloads = []
+
+        def openai_post(key, payload):
+            payloads.append(payload)
+            return next(responses)
+
+        with patch('content_ingestion.ai_agent._openai_post', side_effect=openai_post):
             out = ai_agent.run_with_tools('¿videos?', 'gemini', 'SYS', {'get_chat_videos': videos_tool})
         self.assertEqual(hits['n'], 1)
         self.assertIn('videos', out)
+        self.assertEqual(payloads[0]['model'], 'gpt-5.6-luna')
+        self.assertEqual(payloads[0]['reasoning'], {'effort': 'low'})
 
     @override_settings(
         OPENAI_API_KEY='x', GEMINI_API_KEY='x', CLAUDE_API_KEY='',
-        CONFIO_AI_AGENT_BACKEND='gemini', OPENAI_MODEL='gpt-5.5',
+        CONFIO_AI_AGENT_BACKEND='openai', OPENAI_MODEL='gpt-5.6-sol',
         GEMINI_MODEL='gemini-3-flash-preview', CONFIO_AI_AGENT_MODEL='',
         CONFIO_AI_AGENT_MAX_TOKENS=8000,
     )
@@ -1230,10 +1326,13 @@ class ToolLoopTests(SimpleTestCase):
             out = ai_agent.run_with_tools(
                 'hi', 'openai', 'SYS', {'search_knowledge': lambda args: 'unused'},
                 backend='openai',
+                model='gpt-5.6-sol',
+                reasoning_effort='medium',
             )
 
         self.assertEqual(out, 'frontier')
-        self.assertEqual(payloads[0]['model'], 'gpt-5.5')
+        self.assertEqual(payloads[0]['model'], 'gpt-5.6-sol')
+        self.assertEqual(payloads[0]['reasoning'], {'effort': 'medium'})
 
     @override_settings(
         CONFIO_AI_AGENT_BACKEND='gemini', GEMINI_API_KEY='x', OPENAI_API_KEY='', CLAUDE_API_KEY='',

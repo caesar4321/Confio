@@ -1,9 +1,9 @@
 """The tool-use loop behind the Telegram agent.
 
 Primary path: native function-calling. The model emits structured tool calls with
-JSON arguments (no fragile `TOOL ...` text parsing). The default backend is Gemini
-Flash; explicit provider commands and memory writes can route to their configured
-frontier or write backend.
+JSON arguments (no fragile `TOOL ...` text parsing). The default backend is GPT-5.6
+Luna; explicit provider commands and media can route to their configured frontier
+or multimodal backend.
 
 Each tool keeps its simple `callable(args: str) -> str` interface and is exposed
 with a single string `input` argument; the tool's docstring documents the format.
@@ -43,13 +43,23 @@ _TOOL_INPUT_DESC = (
 )
 
 
-def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STEPS, backend=None):
+def run_with_tools(
+    prompt,
+    provider,
+    system,
+    tools,
+    *,
+    max_steps=DEFAULT_MAX_STEPS,
+    backend=None,
+    model=None,
+    reasoning_effort=None,
+):
     """Answer `prompt`, letting the model call `tools` (name -> callable(str) -> str).
 
     `backend` overrides CONFIO_AI_AGENT_BACKEND for this call (e.g. memory writes
     use a robust backend that doesn't mangle large function-call arguments).
 
-    Native function-calling. Backend = CONFIO_AI_AGENT_BACKEND (default 'gemini'):
+    Native function-calling. Backend = CONFIO_AI_AGENT_BACKEND (default 'openai'):
     'gemini'/'grok'/'deepseek' via their OpenAI-compatible /chat/completions,
     'openai' via the Responses API, 'claude' via the Messages API. Falls back to the
     next available backend, then to the text-protocol loop on `provider`.
@@ -57,12 +67,16 @@ def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STE
     if not tools:
         return complete_text(prompt, provider, system=system)
 
-    primary = (backend or getattr(settings, 'CONFIO_AI_AGENT_BACKEND', 'gemini') or 'gemini').strip().lower()
+    primary = (backend or getattr(settings, 'CONFIO_AI_AGENT_BACKEND', 'openai') or 'openai').strip().lower()
     # Try the chosen backend first, then other configured ones. Robust backends first
     # in the fallback (a fallback usually means the primary's API key is missing).
     order = [primary] + [b for b in ('claude', 'openai', 'gemini', 'grok', 'deepseek') if b != primary]
     for candidate in order:
-        runner = _agent_runner(candidate)
+        runner = _agent_runner(
+            candidate,
+            model=model if candidate == primary else None,
+            reasoning_effort=reasoning_effort if candidate == primary else None,
+        )
         if runner is not None:
             return runner(prompt, system, tools, max_steps=max_steps)
     return _run_text_protocol(prompt, provider, system, tools, max_steps=max_steps)
@@ -86,11 +100,18 @@ _CHAT_COMPLETIONS_BACKENDS = {
 }
 
 
-def _agent_runner(backend):
+def _agent_runner(backend, *, model=None, reasoning_effort=None):
     """Callable(prompt, system, tools, *, max_steps) for `backend`, or None when its
     API key isn't configured."""
     if backend == 'openai' and getattr(settings, 'OPENAI_API_KEY', ''):
-        return lambda p, s, t, *, max_steps: _run_native_openai(p, s, t, max_steps=max_steps)
+        return lambda p, s, t, *, max_steps: _run_native_openai(
+            p,
+            s,
+            t,
+            max_steps=max_steps,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
     if backend == 'claude' and getattr(settings, 'CLAUDE_API_KEY', ''):
         return lambda p, s, t, *, max_steps: _run_native_claude(p, s, t, max_steps=max_steps)
     cfg = _CHAT_COMPLETIONS_BACKENDS.get(backend)
@@ -253,9 +274,25 @@ def _openai_post(api_key, payload):
     return response.json()
 
 
-def _run_native_openai(prompt, system, tools, *, max_steps):
+def _run_native_openai(
+    prompt,
+    system,
+    tools,
+    *,
+    max_steps,
+    model=None,
+    reasoning_effort=None,
+):
     api_key = settings.OPENAI_API_KEY
-    model = getattr(settings, 'CONFIO_AI_AGENT_MODEL', '') or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+    model = (
+        model
+        or getattr(settings, 'CONFIO_AI_AGENT_MODEL', '')
+        or getattr(settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-5.6-luna')
+    )
+    reasoning_effort = (
+        reasoning_effort
+        or getattr(settings, 'CONFIO_AI_DAILY_REASONING_EFFORT', 'low')
+    )
     max_tokens = getattr(settings, 'CONFIO_AI_AGENT_MAX_TOKENS', 8000)
     specs = _openai_tool_specs(tools)
 
@@ -266,6 +303,8 @@ def _run_native_openai(prompt, system, tools, *, max_steps):
         'tools': specs,
         'max_output_tokens': max_tokens,
     }
+    if reasoning_effort:
+        payload['reasoning'] = {'effort': reasoning_effort}
     for _ in range(max_steps):
         data = _openai_post(api_key, payload)
         calls = [it for it in (data.get('output') or []) if it.get('type') == 'function_call']
@@ -299,13 +338,18 @@ def _run_native_openai(prompt, system, tools, *, max_steps):
             'input': outputs,
             'max_output_tokens': max_tokens,
         }
+        if reasoning_effort:
+            payload['reasoning'] = {'effort': reasoning_effort}
 
-    final = _openai_post(api_key, {
+    final_payload = {
         'model': model,
         'previous_response_id': payload.get('previous_response_id'),
         'input': [{'role': 'user', 'content': 'Responde ahora al usuario con lo que tengas, sin más herramientas.'}],
         'max_output_tokens': max_tokens,
-    })
+    }
+    if reasoning_effort:
+        final_payload['reasoning'] = {'effort': reasoning_effort}
+    final = _openai_post(api_key, final_payload)
     return _openai_text(final) or '(respuesta vacía)'
 
 

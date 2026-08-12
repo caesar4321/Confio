@@ -87,6 +87,18 @@ def _system_text(system: str | None) -> str:
     return getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '')
 
 
+def _openai_output_text(data: dict) -> str:
+    text = data.get('output_text')
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    chunks = []
+    for item in data.get('output', []) or []:
+        for content in item.get('content', []) or []:
+            if content.get('type') in {'output_text', 'text'} and content.get('text'):
+                chunks.append(content['text'])
+    return '\n'.join(chunks).strip()
+
+
 def complete_text(prompt: str, provider: str | None = None, *, system: str | None = None) -> str:
     """Run a single completion. `provider` overrides CONFIO_AI_PROVIDER when given;
     `system` overrides the system prompt (e.g. base prompt + knowledge base)."""
@@ -109,35 +121,31 @@ def complete_script(prompt: str, *, system: str | None = None) -> str:
 
     model = getattr(settings, 'OPENAI_MODEL', 'gpt-5.5')
     max_tokens = getattr(settings, 'CONFIO_AI_SCRIPT_MAX_TOKENS', 7000)
+    payload = {
+        'model': model,
+        'instructions': _system_text(system),
+        'input': prompt,
+        'max_output_tokens': max_tokens,
+    }
+    reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+    if reasoning_effort:
+        payload['reasoning'] = {'effort': reasoning_effort}
     response = requests.post(
         'https://api.openai.com/v1/responses',
         headers={
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
         },
-        json={
-            'model': model,
-            'instructions': _system_text(system),
-            'input': prompt,
-            'max_output_tokens': max_tokens,
-        },
+        json=payload,
         timeout=180,
     )
     if response.status_code >= 400:
         raise AIClientError(f'OpenAI script request failed: {response.status_code} {response.text[:500]}')
 
     data = response.json()
-    text = data.get('output_text')
+    text = _openai_output_text(data)
     if text:
-        return text.strip()
-
-    chunks = []
-    for item in data.get('output', []):
-        for content in item.get('content', []):
-            if content.get('type') in {'output_text', 'text'} and content.get('text'):
-                chunks.append(content['text'])
-    if chunks:
-        return '\n'.join(chunks).strip()
+        return text
     raise AIClientError('OpenAI script response did not include text output.')
 
 
@@ -167,11 +175,28 @@ def complete_with_images(
     images: list[tuple[str, bytes]],
     *,
     system: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
-    """Analyze image bytes with Gemini vision input plus the user's text/context."""
+    """Analyze image bytes with Luna vision, falling back to Gemini vision."""
     prompt = _trim_prompt(prompt)
     if not images:
         raise AIClientError('No images provided.')
+    provider = normalize_provider(provider) if provider else None
+    if provider != 'gemini' and _provider_api_key('openai'):
+        try:
+            return _complete_openai_images(
+                prompt,
+                _system_text(system),
+                images=images[:8],
+                model=model,
+                reasoning_effort=reasoning_effort,
+            )
+        except AIClientError:
+            if not _provider_api_key('gemini'):
+                raise
+            logger.warning('OpenAI image analysis failed; falling back to Gemini.', exc_info=True)
     return _complete_gemini(prompt, _system_text(system), images=images[:8])
 
 
@@ -281,40 +306,87 @@ def _synthesis_prompt(prompt: str, answers: dict[str, str], ordered: list[str]) 
     )
 
 
-def _complete_openai(prompt: str, system: str = '') -> str:
-    api_key = _provider_api_key('openai')
-    if not api_key:
-        raise AIClientError('OpenAI is selected, but OPENAI_API_KEY is not configured.')
+def _complete_openai_images(
+    prompt: str,
+    system: str,
+    *,
+    images: list[tuple[str, bytes]],
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> str:
+    import base64
 
-    model = getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+    api_key = _provider_api_key('openai')
+    model = model or getattr(settings, 'CONFIO_AI_IMAGE_MODEL', '') or getattr(
+        settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-5.6-luna'
+    )
+    content = [{'type': 'input_text', 'text': prompt}]
+    for mime_type, image_bytes in images:
+        encoded = base64.b64encode(image_bytes).decode('ascii')
+        content.append({
+            'type': 'input_image',
+            'image_url': f'data:{mime_type};base64,{encoded}',
+        })
+    payload = {
+        'model': model,
+        'instructions': system,
+        'input': [{'role': 'user', 'content': content}],
+        'max_output_tokens': getattr(settings, 'CONFIO_AI_AGENT_MAX_TOKENS', 8000),
+    }
+    reasoning_effort = reasoning_effort or getattr(
+        settings, 'CONFIO_AI_DAILY_REASONING_EFFORT', 'low'
+    )
+    if reasoning_effort:
+        payload['reasoning'] = {'effort': reasoning_effort}
     response = requests.post(
         'https://api.openai.com/v1/responses',
         headers={
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
         },
-        json={
-            'model': model,
-            'instructions': system,
-            'input': prompt,
+        json=payload,
+        timeout=60,
+    )
+    if response.status_code >= 400:
+        raise AIClientError(
+            f'OpenAI image request failed: {response.status_code} {response.text[:500]}'
+        )
+    text = _openai_output_text(response.json())
+    if text:
+        return text
+    raise AIClientError('OpenAI image response did not include text output.')
+
+
+def _complete_openai(prompt: str, system: str = '') -> str:
+    api_key = _provider_api_key('openai')
+    if not api_key:
+        raise AIClientError('OpenAI is selected, but OPENAI_API_KEY is not configured.')
+
+    model = getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+    payload = {
+        'model': model,
+        'instructions': system,
+        'input': prompt,
+    }
+    reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+    if reasoning_effort:
+        payload['reasoning'] = {'effort': reasoning_effort}
+    response = requests.post(
+        'https://api.openai.com/v1/responses',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
         },
+        json=payload,
         timeout=60,
     )
     if response.status_code >= 400:
         raise AIClientError(f'OpenAI request failed: {response.status_code} {response.text[:500]}')
 
     data = response.json()
-    text = data.get('output_text')
+    text = _openai_output_text(data)
     if text:
-        return text.strip()
-
-    chunks = []
-    for item in data.get('output', []):
-        for content in item.get('content', []):
-            if content.get('type') in {'output_text', 'text'} and content.get('text'):
-                chunks.append(content['text'])
-    if chunks:
-        return '\n'.join(chunks).strip()
+        return text
     raise AIClientError('OpenAI response did not include text output.')
 
 

@@ -197,13 +197,10 @@ def reject_review_candidate(candidate_id: int, *, reason: str = '') -> Canonical
 
 
 def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
-    api_key = getattr(settings, 'GEMINI_API_KEY', '')
-    if not api_key:
-        raise RuntimeError('GEMINI_API_KEY is not configured for canonical promotion.')
     model = getattr(
-        settings, 'CONFIO_AI_CANONICAL_PROMOTION_MODEL', 'gemini-3.5-flash-lite'
+        settings, 'CONFIO_AI_CANONICAL_PROMOTION_MODEL', 'gpt-5.6-luna'
     ) or getattr(
-        settings, 'GEMINI_MODEL', 'gemini-3.6-flash'
+        settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-5.6-luna'
     )
     user_query = '\n'.join(turn.user_text for turn in turns)
     current_memory = render_retrieved_knowledge(
@@ -250,6 +247,7 @@ def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
                 'maxItems': 8,
                 'items': {
                     'type': 'object',
+                    'additionalProperties': False,
                     'properties': {
                         'category': {'type': 'string', 'enum': sorted(CANONICAL_CATEGORIES)},
                         'statement': {'type': 'string'},
@@ -266,8 +264,68 @@ def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
                 },
             },
         },
+        'additionalProperties': False,
         'required': ['candidates'],
     }
+    if model.startswith('gpt-'):
+        data = _extract_candidates_openai(model, system, prompt, schema)
+    else:
+        data = _extract_candidates_gemini(model, system, prompt, schema)
+    return data.get('candidates') or []
+
+
+def _extract_candidates_openai(model: str, system: str, prompt: str, schema: dict) -> dict:
+    api_key = getattr(settings, 'OPENAI_API_KEY', '')
+    if not api_key:
+        raise RuntimeError('OPENAI_API_KEY is not configured for canonical promotion.')
+    payload = {
+        'model': model,
+        'instructions': system,
+        'input': prompt,
+        'text': {
+            'format': {
+                'type': 'json_schema',
+                'name': 'canonical_memory_candidates',
+                'strict': True,
+                'schema': schema,
+            },
+        },
+        'max_output_tokens': 8000,
+    }
+    reasoning_effort = getattr(
+        settings, 'CONFIO_AI_CANONICAL_PROMOTION_REASONING_EFFORT', 'low'
+    )
+    if reasoning_effort:
+        payload['reasoning'] = {'effort': reasoning_effort}
+    response = requests.post(
+        'https://api.openai.com/v1/responses',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        json=payload,
+        timeout=120,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f'Canonical promotion extraction failed: {response.status_code} {response.text[:400]}'
+        )
+    response_data = response.json()
+    text = response_data.get('output_text') or '\n'.join(
+        part.get('text', '')
+        for item in response_data.get('output', []) or []
+        for part in item.get('content', []) or []
+        if part.get('type') in {'output_text', 'text'} and part.get('text')
+    )
+    if not text:
+        raise RuntimeError('Canonical promotion extraction returned no JSON text.')
+    return json.loads(text)
+
+
+def _extract_candidates_gemini(model: str, system: str, prompt: str, schema: dict) -> dict:
+    api_key = getattr(settings, 'GEMINI_API_KEY', '')
+    if not api_key:
+        raise RuntimeError('GEMINI_API_KEY is not configured for canonical promotion.')
     response = requests.post(
         f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
         params={'key': api_key},
@@ -277,7 +335,6 @@ def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
             'generationConfig': {
                 'responseMimeType': 'application/json',
                 'responseJsonSchema': schema,
-                'temperature': 0,
             },
         },
         timeout=120,
@@ -294,8 +351,7 @@ def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
     ]
     if not texts:
         raise RuntimeError('Canonical promotion extraction returned no JSON text.')
-    data = json.loads('\n'.join(texts))
-    return data.get('candidates') or []
+    return json.loads('\n'.join(texts))
 
 
 def _store_candidates(

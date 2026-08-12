@@ -387,6 +387,15 @@ class Command(BaseCommand):
         request_text = request_text or user_prompt
         routing_text = routing_text or request_text
         youtube_urls = extract_youtube_urls(routing_text)
+        image_provider = force_backend if force_backend in {'openai', 'gemini'} else None
+        image_model = (
+            getattr(settings, 'OPENAI_MODEL', 'gpt-5.6-sol')
+            if force_backend == 'openai' else None
+        )
+        image_reasoning_effort = (
+            getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+            if force_backend == 'openai' else None
+        )
         # Write turn = explicit /memory command OR a clearly-worded save/push/update intent
         # (precise detection, not loose keywords). Even then, the system prompt + the model
         # are the final gate on whether to actually call a write tool — casual chat never
@@ -440,6 +449,9 @@ class Command(BaseCommand):
                     user_prompt,
                     images,
                     media_system,
+                    provider=image_provider,
+                    model=image_model,
+                    reasoning_effort=image_reasoning_effort,
                 )
                 images = []
             if videos and memory_write_request:
@@ -447,9 +459,19 @@ class Command(BaseCommand):
                 user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, media_system)
                 videos = []
             if images and not memory_write_request:
-                logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
+                logger.info(
+                    'Routing %s Telegram image(s) to %s vision',
+                    len(images),
+                    image_model or image_provider or 'Luna with Gemini fallback',
+                )
                 return await asyncio.to_thread(
-                    complete_with_images, user_prompt, images, system=media_system
+                    complete_with_images,
+                    user_prompt,
+                    images,
+                    system=media_system,
+                    provider=image_provider,
+                    model=image_model,
+                    reasoning_effort=image_reasoning_effort,
                 )
             if videos:
                 logger.info('Routing %s Telegram video(s) to Gemini video analysis', len(videos))
@@ -471,8 +493,22 @@ class Command(BaseCommand):
                 getattr(settings, 'CONFIO_AI_AGENT_WRITE_BACKEND', 'openai')
                 if memory_write_request else force_backend
             )
+            agent_model = None
+            reasoning_effort = None
+            if force_backend == 'openai':
+                # Explicit /gpt uses the frontier model. Ambient and memory-write
+                # OpenAI turns intentionally stay on the cheaper daily Luna model.
+                agent_model = getattr(settings, 'OPENAI_MODEL', 'gpt-5.6-sol')
+                reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
             return await asyncio.to_thread(
-                run_with_tools, user_prompt, provider, system, tools, backend=write_backend
+                run_with_tools,
+                user_prompt,
+                provider,
+                system,
+                tools,
+                backend=write_backend,
+                model=agent_model,
+                reasoning_effort=reasoning_effort,
             )
         return await asyncio.to_thread(debate, user_prompt, system=system)
 
@@ -481,6 +517,10 @@ class Command(BaseCommand):
         user_prompt: str,
         images: list[tuple[str, bytes]],
         system: str,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         analysis_prompt = (
             f'{user_prompt}\n\n'
@@ -495,12 +535,15 @@ class Command(BaseCommand):
                 analysis_prompt,
                 images,
                 system=system,
+                provider=provider,
+                model=model,
+                reasoning_effort=reasoning_effort,
             )
         except AIClientError as exc:
             analysis = f'No se pudo completar el análisis visual antes de escribir memoria: {exc}'
         return (
             f'{user_prompt}\n\n'
-            '## Análisis real de la imagen vía Gemini\n'
+            '## Análisis real de la imagen vía modelo visual\n'
             f'{analysis}\n\n'
             'Usa este análisis visual como evidencia para la respuesta o memoria. '
             'No afirmes que la imagen no era accesible.'
