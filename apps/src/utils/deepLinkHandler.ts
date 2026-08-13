@@ -39,8 +39,9 @@ type ReferralStrategyResult = {
 
 export class DeepLinkHandler {
   private navigation: NavigationContainerRef<any> | null = null;
-  private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
   private linkListenerSetup = false;
+  private referralListeners = new Set<() => void>();
 
   constructor() {}
 
@@ -48,12 +49,23 @@ export class DeepLinkHandler {
     this.navigation = navigation;
   }
 
-  async init() {
-    if (this.initialized) {
-      return;
-    }
+  addReferralListener(listener: () => void) {
+    this.referralListeners.add(listener);
+    return () => this.referralListeners.delete(listener);
+  }
 
-    this.initialized = true;
+  private notifyReferralListeners() {
+    this.referralListeners.forEach(listener => listener());
+  }
+
+  async init() {
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.initialize();
+    }
+    return this.initializationPromise;
+  }
+
+  private async initialize() {
     this.setupLinkListener();
     await this.handleInitialLink();
   }
@@ -85,7 +97,7 @@ export class DeepLinkHandler {
 
       // Check for deferred deep link (stored from previous app launch)
       const deferredLink = await this.getDeferredLink();
-      if (deferredLink && this.isWithinTimeout(deferredLink)) {
+      if (deferredLink) {
         await this.processDeferredLink(deferredLink);
       }
     } catch (error) {
@@ -272,6 +284,21 @@ export class DeepLinkHandler {
       const parsedUrl = new URL(url);
       const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
 
+      // Public referral links are /invite/{username}. When the app is already
+      // installed, Android App Links / iOS Universal Links deliver that URL
+      // directly instead of going through the store referrer. Preserve it for
+      // HomeScreen, which owns the authenticated setReferrer mutation.
+      if (pathParts[0] === 'invite' && pathParts.length >= 2) {
+        await this.storeDeferredLink({
+          type: 'referral',
+          payload: decodeURIComponent(pathParts[1]),
+          timestamp: Date.now(),
+          metadata: this.metadataFromUrl(parsedUrl),
+        });
+        this.notifyReferralListeners();
+        return;
+      }
+
       // Handle different URL patterns
       // confio.lat/app/referral/[payload]
       // confio.lat/app/achievement/[payload]
@@ -285,28 +312,13 @@ export class DeepLinkHandler {
           type,
           payload,
           timestamp: Date.now(),
-          metadata: {
-            invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
-            sourceType: parsedUrl.searchParams.get('source_type') || undefined,
-            clickId: parsedUrl.searchParams.get('click_id') || undefined,
-            sessionId: parsedUrl.searchParams.get('session_id') || undefined,
-            channel: parsedUrl.searchParams.get('channel') || undefined,
-            platform: parsedUrl.searchParams.get('platform') || undefined,
-            country: parsedUrl.searchParams.get('country') || undefined,
-            utmSource: parsedUrl.searchParams.get('utm_source') || undefined,
-            utmMedium: parsedUrl.searchParams.get('utm_medium') || undefined,
-            utmCampaign: parsedUrl.searchParams.get('utm_campaign') || undefined,
-            utmContent: parsedUrl.searchParams.get('utm_content') || undefined,
-            utmTerm: parsedUrl.searchParams.get('utm_term') || undefined,
-            ttclid: parsedUrl.searchParams.get('ttclid') || undefined,
-            fbclid: parsedUrl.searchParams.get('fbclid') || undefined,
-            gclid: parsedUrl.searchParams.get('gclid') || undefined,
-          },
+          metadata: this.metadataFromUrl(parsedUrl),
         };
 
         // For referral links, always store as deferred so HomeScreen can handle the mutation
         if (type === 'referral' || type === 'influencer') {
           await this.storeDeferredLink(linkData);
+          this.notifyReferralListeners();
           return;
         }
 
@@ -326,31 +338,36 @@ export class DeepLinkHandler {
           type: 'referral',
           payload: referrer,
           timestamp: Date.now(),
-          metadata: {
-            invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
-            sourceType: parsedUrl.searchParams.get('source_type') || undefined,
-            clickId: parsedUrl.searchParams.get('click_id') || undefined,
-            sessionId: parsedUrl.searchParams.get('session_id') || undefined,
-            channel: parsedUrl.searchParams.get('channel') || undefined,
-            platform: parsedUrl.searchParams.get('platform') || undefined,
-            country: parsedUrl.searchParams.get('country') || undefined,
-            utmSource: parsedUrl.searchParams.get('utm_source') || undefined,
-            utmMedium: parsedUrl.searchParams.get('utm_medium') || undefined,
-            utmCampaign: parsedUrl.searchParams.get('utm_campaign') || undefined,
-            utmContent: parsedUrl.searchParams.get('utm_content') || undefined,
-            utmTerm: parsedUrl.searchParams.get('utm_term') || undefined,
-            ttclid: parsedUrl.searchParams.get('ttclid') || undefined,
-            fbclid: parsedUrl.searchParams.get('fbclid') || undefined,
-            gclid: parsedUrl.searchParams.get('gclid') || undefined,
-          },
+          metadata: this.metadataFromUrl(parsedUrl),
         };
 
         // Always store referral links as deferred so HomeScreen can handle the mutation
         await this.storeDeferredLink(linkData);
+        this.notifyReferralListeners();
       }
     } catch (error) {
       console.error('Error handling deep link:', error);
     }
+  }
+
+  private metadataFromUrl(parsedUrl: URL): DeepLinkData['metadata'] {
+    return {
+      invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
+      sourceType: parsedUrl.searchParams.get('source_type') || undefined,
+      clickId: parsedUrl.searchParams.get('click_id') || undefined,
+      sessionId: parsedUrl.searchParams.get('session_id') || undefined,
+      channel: parsedUrl.searchParams.get('channel') || undefined,
+      platform: parsedUrl.searchParams.get('platform') || undefined,
+      country: parsedUrl.searchParams.get('country') || undefined,
+      utmSource: parsedUrl.searchParams.get('utm_source') || undefined,
+      utmMedium: parsedUrl.searchParams.get('utm_medium') || undefined,
+      utmCampaign: parsedUrl.searchParams.get('utm_campaign') || undefined,
+      utmContent: parsedUrl.searchParams.get('utm_content') || undefined,
+      utmTerm: parsedUrl.searchParams.get('utm_term') || undefined,
+      ttclid: parsedUrl.searchParams.get('ttclid') || undefined,
+      fbclid: parsedUrl.searchParams.get('fbclid') || undefined,
+      gclid: parsedUrl.searchParams.get('gclid') || undefined,
+    };
   }
 
   private async processDeepLink(linkData: DeepLinkData) {
@@ -404,10 +421,13 @@ export class DeepLinkHandler {
   }
 
   private async processDeferredLink(linkData: DeepLinkData) {
-    // Special handling for referral links - check 48h window
-    if ((linkData.type === 'referral' || linkData.type === 'influencer') &&
-      !this.isWithinTimeout(linkData)) {
-      await this.clearDeferredLink();
+    if (linkData.type === 'referral' || linkData.type === 'influencer') {
+      if (!this.isWithinTimeout(linkData)) {
+        await this.clearDeferredLink();
+      }
+      // Do not navigate or clear a valid referral here. HomeScreen consumes it
+      // only after authentication and clears it after setReferrer succeeds or
+      // returns a permanent error.
       return;
     }
 
@@ -477,8 +497,9 @@ export class DeepLinkHandler {
 
   // Public method to check and process deferred links after login
   async checkDeferredLinks() {
+    await this.init();
     const deferredLink = await this.getDeferredLink();
-    if (deferredLink && this.isWithinTimeout(deferredLink)) {
+    if (deferredLink) {
       await this.processDeferredLink(deferredLink);
     }
   }

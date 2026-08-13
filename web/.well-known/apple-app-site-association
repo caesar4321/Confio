@@ -6,7 +6,8 @@
         "appID": "XFJB7SA87Q.com.Confio.Confio",
         "paths": [
           "/verify/*",
-          "/pay/*"
+          "/pay/*",
+          "/invite/*"
         ]
       }
     ]

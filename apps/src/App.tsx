@@ -108,6 +108,9 @@ const AppContent: React.FC = () => {
     messagingService.initialize(false, false).catch(error => {
       console.error('Failed to bootstrap messaging handlers:', error);
     });
+    deepLinkHandler.init().catch(error => {
+      console.error('[App] Failed to initialize deep link attribution:', error);
+    });
   }, []);
 
   return (

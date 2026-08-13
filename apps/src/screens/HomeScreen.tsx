@@ -377,10 +377,17 @@ export const HomeScreen = () => {
 
   // Check for deferred referral link and register automatically
   useEffect(() => {
+    let processing = false;
+
     const checkDeferredReferral = async () => {
-      if (!isAuthenticated) return;
+      if (!isAuthenticated || processing) return;
+      processing = true;
 
       try {
+        // Wait for cold-start URL / Play Install Referrer / IP fallback capture.
+        // Without this handshake Home can read Keychain before attribution has
+        // finished and never retry, leaving the qualifying deposit orphaned.
+        await deepLinkHandler.init();
         const link = await deepLinkHandler.getDeferredLink();
         if (link && link.type === 'referral') {
           // Submit to backend
@@ -477,10 +484,20 @@ export const HomeScreen = () => {
         } else {
           Alert.alert('Error', 'Error de conexión. Intenta de nuevo.', [{ text: 'Entendido', onPress: () => { } }]);
         }
+      } finally {
+        processing = false;
       }
     };
 
-    checkDeferredReferral();
+    // Cold-start attribution is consumed by the initial check. A listener also
+    // covers invite links opened while an authenticated Home screen is already
+    // mounted, when the authentication dependency would otherwise not change.
+    const unsubscribe = deepLinkHandler.addReferralListener(() => {
+      void checkDeferredReferral();
+    });
+    void checkDeferredReferral();
+
+    return unsubscribe;
   }, [isAuthenticated, setReferrerMutation, refetchMyBalances, checkReferralStatus]);
 
   // Check referral status on mount to determine if ghost field should show
