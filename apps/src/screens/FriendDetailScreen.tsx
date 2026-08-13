@@ -169,7 +169,7 @@ export function FriendDetailScreen() {
 
   // State management
   const [showTokenSelection, setShowTokenSelection] = useState(false);
-  // Gating for the send sheet, identical to ContactsScreen: the cUSD+ option
+  // Gating for the send sheet, identical to TransferScreen: the cUSD+ option
   // is an EXIT and stays visible whenever the user holds anything.
   const { savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd } = useSavingsPortfolio();
   const cusdDepositsPaused = savingsInfo.cusdDepositsPaused;

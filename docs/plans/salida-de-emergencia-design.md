@@ -98,6 +98,17 @@ feature was rejected; the clock rationale stands on its own.)
    - cUSD+ → `redeemToUsdt` (verified permissionless; only raw-USDY
      redeem is owner-gated) → send **USDT-BSC**
    - USDC/USDT already held, and CONFIO (no backing), transfer as-is.
+   - Ondo Stocks → transfer each held stock token as-is to the external BSC
+     wallet. The canonical BSC token-address allowlist is generated into the
+     mobile bundle from `cusd_plus/gm_tokens.json`. Generation is append-only:
+     contracts shipped by an earlier release remain allowed even if Ondo later
+     delists a stock or rotates its contract. Emergency Exit never trusts
+     symbols, wallet token lists, explorer metadata, Confío, or Ondo APIs at
+     runtime. Balances are read through Multicall3 in 250-token chunks and
+     positive balances are sent in individually checkpointed transactions.
+     Newly listed stocks require an app release before Emergency Exit recognizes
+     them; this release lag is an explicit tradeoff for a small, deterministic,
+     server-independent trust surface.
    Fallback = raw token transfer, only when the redeem leg is dead
    (cUSD: contract paused; cUSD+: Ondo IM down / PP offboarded), with an
    explicit "this token needs a redemption tool outside Confío" warning.

@@ -20,7 +20,7 @@ export type AuthStackParamList = {
 // Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
-  Contacts: undefined;
+  Transfer: undefined;
   Employees: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
@@ -167,7 +167,7 @@ export type MainStackParamList = {
   Sell: { destination?: 'cusd' | 'cusd_plus' } | undefined;
   ConvertSavings: undefined;
   WithdrawSavings: undefined;
-  ReceiveSavings: { destination?: 'cusd_plus' | 'usdt' } | undefined;
+  ReceiveSavings: { destination?: 'cusd_plus' | 'usdt' | 'confio' } | undefined;
   SendUsdt: { token?: 'usdt' | 'cusd_plus' | 'confio' } | undefined;
   OndoStocksInfo: undefined;
   StocksList: undefined;

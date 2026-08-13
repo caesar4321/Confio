@@ -6,7 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../types/navigation';
 import { HomeScreen } from '../screens/HomeScreen';
-import { ContactsScreen } from '../screens/ContactsScreen';
+import { TransferScreen } from '../screens/TransferScreen';
 import EmployeesScreen from '../screens/EmployeesScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
@@ -166,16 +166,19 @@ export const BottomTabNavigator = () => {
   // Check if account is business (using normalized type)
   const isBusinessAccount = accountType === 'business';
 
-  const contactsTitle = useMemo(
-    () => (isBusinessAccount ? 'Empleados' : 'Contactos'),
+  // Two different tabs share this header. The personal tab is no longer an
+  // address book — it routes money (local rails, crypto addresses, contacts),
+  // so it reads "Transferir"; the business tab is still the employee roster.
+  const peopleTabTitle = useMemo(
+    () => (isBusinessAccount ? 'Empleados' : 'Transferir'),
     [isBusinessAccount]
   );
 
-  const ContactsHeader = useCallback(() => (
+  const PeopleTabHeader = useCallback(() => (
     <Header
       navigation={navigation}
       isHomeScreen={false}
-      title={contactsTitle}
+      title={peopleTabTitle}
       onProfilePress={undefined}
       onNotificationPress={undefined}
       backgroundColor="#fff"
@@ -184,7 +187,7 @@ export const BottomTabNavigator = () => {
       unreadNotifications={0}
       currentAccountAvatar="U"
     />
-  ), [navigation, contactsTitle]);
+  ), [navigation, peopleTabTitle]);
 
   // Memoize tab options to ensure they update when activeAccount changes
   const scanTabOptions = useMemo(() => ({
@@ -262,19 +265,19 @@ export const BottomTabNavigator = () => {
             name="Employees" 
             component={EmployeesScreen}
             options={{
-              header: () => <ContactsHeader />, // reuse header style
+              header: () => <PeopleTabHeader />, // reuse header style
               tabBarLabel: 'Empleados',
               tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
             }}
           />
         ) : (
-          <Tabs.Screen 
-            name="Contacts" 
-            component={ContactsScreen}
+          <Tabs.Screen
+            name="Transfer"
+            component={TransferScreen}
             options={{
-              header: () => <ContactsHeader />,
-              tabBarLabel: 'Contactos',
-              tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
+              header: () => <PeopleTabHeader />,
+              tabBarLabel: 'Transferir',
+              tabBarIcon: ({ color, size }: any) => <Icon name="repeat" size={size} color={color} />
             }}
           />
         )}

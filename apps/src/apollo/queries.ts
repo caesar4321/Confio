@@ -4479,3 +4479,34 @@ export const DELETE_FINANCIERA = gql`
     }
   }
 `;
+
+// Local payment accounts (payment_accounts app: Cobre Bre-B, Infinia virtual
+// accounts). Kept as its OWN query, never merged into a shared one: an app
+// build that ships a field before every server has it fails the WHOLE query
+// it sits in, so a new surface must not be able to blank out Home. Callers
+// use errorPolicy 'all' — `myPaymentAccounts` returns an empty list for
+// users with no accounts, which is currently everyone.
+export const GET_MY_PAYMENT_ACCOUNTS = gql`
+  query GetMyPaymentAccounts {
+    myPaymentAccounts {
+      internalId
+      provider
+      country
+      asset
+      status
+      ownershipStructure
+      availableBalance
+      fundingInstructions {
+        internalId
+        kind
+        status
+        displayValue
+        holderDisplayName
+      }
+      capabilities {
+        capability
+        status
+      }
+    }
+  }
+`;

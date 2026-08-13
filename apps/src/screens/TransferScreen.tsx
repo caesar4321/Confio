@@ -10,6 +10,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import USDTLogo from '../assets/png/USDT.png';
 import Icon from 'react-native-vector-icons/Feather';
+import Clipboard from '@react-native-clipboard/clipboard';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
@@ -22,6 +23,19 @@ import { ContactSyncProgress } from '../components/common/ContactSyncProgress';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
+import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
+import { useRampCountry } from '../hooks/useRampCountry';
+import {
+  countryFlag,
+  countryName,
+  COMING_SOON_NOTE,
+  getReceiveRails,
+  getSendRails,
+  RECEIVE_ROW_SUBTITLE,
+  SEND_ROW_SUBTITLE,
+  toIso2,
+  type LocalRail,
+} from '../config/localRails';
 import { useApolloClient, useMutation, gql, useQuery } from '@apollo/client';
 import { useAccount } from '../contexts/AccountContext';
 import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
@@ -46,7 +60,7 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
   return phoneNumber;
 };
 
-type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
+type TransferScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 
 // Memoized ContactCard component moved outside to prevent recreation
@@ -267,8 +281,8 @@ const SearchInput = React.memo(({
   );
 });
 
-export const ContactsScreen = () => {
-  const navigation = useNavigation<ContactsScreenNavigationProp>();
+export const TransferScreen = () => {
+  const navigation = useNavigation<TransferScreenNavigationProp>();
   const apolloClient = useApolloClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
@@ -696,10 +710,10 @@ export const ContactsScreen = () => {
   const handleReceiveRailInterest = (rail: string, label: string) => {
     setShowReceiveSelection(false);
     // House funnel (FunnelEvent table, admin-visible) + Firebase dual-emit.
-    AnalyticsService.logFunnelEvent('receive_rail_interest', { rail, stage: 'tap' });
+    AnalyticsService.logFunnelEvent('receive_rail_interest', { rail, stage: 'tap' }, { sourceType: 'rail_interest', channel: 'receive' });
     Alert.alert(
       label,
-      'Aún no está disponible. ¿Quieres que te avisemos cuando lo esté?',
+      'Esta red estará disponible próximamente. ¿Quieres que te avisemos cuando puedas recibir por aquí?',
       [
         { text: 'Solo miraba', style: 'cancel' },
         {
@@ -708,7 +722,7 @@ export const ContactsScreen = () => {
             AnalyticsService.logFunnelEvent('receive_rail_interest', {
               rail,
               stage: 'confirmed',
-            });
+            }, { sourceType: 'rail_interest', channel: 'receive' });
             Alert.alert(
               '¡Anotado!',
               'Te avisamos apenas esté listo. Si lo necesitas pronto, ' +
@@ -723,6 +737,128 @@ export const ContactsScreen = () => {
   const handleSendWithAddress = () => {
     setShowSendTokenSelection(true);
   };
+
+  // ---------------------------------------------------------------------
+  // Local rails (bancos y billeteras) — Bre-B, CLABE, alias/CVU, Pix, QR.
+  //
+  // These sit ABOVE the crypto address rows on purpose: sending to a bank or
+  // to Nequi/Yape/Mercado Pago is what almost everyone came here to do, while
+  // sending to a chain address is an advanced move most users never make.
+  // "billetera" here means a fintech wallet (the LATAM meaning); a blockchain
+  // destination is always "dirección", never "wallet".
+  // ---------------------------------------------------------------------
+  const [showLocalSendSelection, setShowLocalSendSelection] = useState(false);
+  const [showLocalReceiveSelection, setShowLocalReceiveSelection] = useState(false);
+  // Phone country is an ORDERING hint only — it puts the user's own rail
+  // first and decides nothing else. `isBlocked` from this hook is deliberately
+  // NOT consulted: it encodes where Koywe/Guardarian operate, and the local
+  // rails are a different network entirely. Venezuelans resident in Colombia
+  // are an explicitly ALLOWED Cobre cohort, so reusing the ramp block would
+  // shut out the exact cohort the seeded policy was written for.
+  const { countryCode: phoneCountryHint } = useRampCountry();
+  const { receivable: receivableLocalAccounts } = useLocalPaymentAccounts();
+
+  const localSendRails = useMemo(
+    () => getSendRails(phoneCountryHint),
+    [phoneCountryHint],
+  );
+  const localReceiveRails = useMemo(
+    () => getReceiveRails(phoneCountryHint),
+    [phoneCountryHint],
+  );
+
+  // Same two-stage demand probe the crypto receive sheet uses: a bare tap is
+  // curiosity, the confirmation is the real signal. Every corridor is a probe
+  // until its provider flag is on server-side, so this is the honest answer
+  // rather than a "próximamente" screen that teaches nothing.
+  const handleLocalRailInterest = useCallback((rail: LocalRail, direction: 'send' | 'receive') => {
+    setShowLocalSendSelection(false);
+    setShowLocalReceiveSelection(false);
+    AnalyticsService.logFunnelEvent('local_rail_interest', {
+      rail: rail.id,
+      country: rail.country,
+      direction,
+      stage: 'tap',
+    }, { sourceType: 'rail_interest', channel: direction });
+    Alert.alert(
+      `${rail.title} · ${countryName(rail.country)}`,
+      direction === 'send'
+        ? 'Este medio estará disponible próximamente. ¿Quieres que te avisemos cuando puedas enviar por aquí?'
+        : 'Este medio estará disponible próximamente. ¿Quieres que te avisemos cuando puedas recibir por aquí?',
+      [
+        { text: 'Solo miraba', style: 'cancel' },
+        {
+          text: 'Sí, avísame',
+          onPress: () => {
+            AnalyticsService.logFunnelEvent('local_rail_interest', {
+              rail: rail.id,
+              country: rail.country,
+              direction,
+              stage: 'confirmed',
+            }, { sourceType: 'rail_interest', channel: direction });
+            Alert.alert(
+              '¡Anotado!',
+              'Te avisamos apenas esté listo. Si lo necesitas pronto, escríbenos al soporte y te damos prioridad.',
+            );
+          },
+        },
+      ],
+    );
+  }, []);
+
+  const railToOption = useCallback(
+    (rail: LocalRail, direction: 'send' | 'receive') => ({
+      icon: rail.status === 'live' ? (direction === 'send' ? 'send' : 'download') : 'clock',
+      title: `${countryFlag(rail.country)}  ${rail.title}`.trim(),
+      subtitle: rail.subtitle,
+      note: rail.status === 'live' ? undefined : COMING_SOON_NOTE,
+      onPress: () => handleLocalRailInterest(rail, direction),
+    }),
+    [handleLocalRailInterest],
+  );
+
+  const handleSendToLocalMethod = useCallback(() => {
+    setShowLocalSendSelection(true);
+  }, []);
+
+  const handleReceiveToLocalAccount = useCallback(() => {
+    setShowLocalReceiveSelection(true);
+  }, []);
+
+  // Copying IS the whole job of a receiving key — you paste it into WhatsApp
+  // and someone pays you. Until the dedicated details screen exists (with QR
+  // and share), the sheet does the one thing that makes the key useful, so a
+  // provisioned account is never stranded behind an unbuilt screen.
+  const handleCopyLocalKey = useCallback((value: string, label: string) => {
+    setShowLocalReceiveSelection(false);
+    Clipboard.setString(value);
+    Alert.alert('Copiado', `Tu ${label} se copió. Compártela con quien te va a pagar.`);
+  }, []);
+
+  // A user's OWN accounts lead the receive sheet as real, live rows; the
+  // corridors we cannot open yet follow as probes. Both providers sit behind
+  // server flags that default to False, so this list is empty for everyone
+  // today — which is exactly why the probes below it have to carry the sheet.
+  const activeLocalReceiveOptions = useMemo(
+    () =>
+      receivableLocalAccounts.flatMap(account =>
+        account.fundingInstructions
+          .filter(instruction => instruction.status === 'active' && !!instruction.displayValue)
+          .map(instruction => ({
+            icon: 'download',
+            title: `${countryFlag(account.country)}  ${instruction.displayValue}`.trim(),
+            subtitle: instruction.holderDisplayName
+              ? `A nombre de ${instruction.holderDisplayName} · toca para copiar`
+              : 'Toca para copiar',
+            onPress: () =>
+              handleCopyLocalKey(
+                instruction.displayValue,
+                instruction.kind === 'breb_key' ? 'llave Bre-B' : 'cuenta',
+              ),
+          })),
+      ),
+    [receivableLocalAccounts, handleCopyLocalKey],
+  );
 
   const handleSendTokenSelection = (tokenType: 'cusd' | 'confio' | 'usdc') => {
     setShowSendTokenSelection(false);
@@ -829,41 +965,35 @@ export const ContactsScreen = () => {
     }
   }, [navigation]);
 
+  // Activate/deactivate and remove are BUILT — they live on EmployeeDetail
+  // (UPDATE_BUSINESS_EMPLOYEE / REMOVE_BUSINESS_EMPLOYEE), which also carries
+  // the role and permission editors. These two used to raise a "Funcionalidad
+  // Pendiente" alert behind a TODO: the remove one fired *after* a destructive
+  // confirmation, so the user answered "¿Estás seguro?" and nothing happened.
+  // Send both to the screen that can actually do the work instead.
+  const openEmployeeDetail = useCallback((contact: any) => {
+    navigation.navigate('EmployeeDetail', {
+      employeeId: contact.id,
+      employeeName: contact.name,
+      employeePhone: contact.phone,
+      employeeRole: contact.role,
+      isActive: contact.isActive,
+      employeeData: contact.employeeData || contact.employee,
+    });
+  }, [navigation]);
+
   // Handle employee actions menu (three dots button)
   const handleEmployeeActions = useCallback((contact: any) => {
     Alert.alert(
       'Acciones del Empleado',
       `${contact.name}\nRol: ${getRoleLabel(contact.role)}\nEstado: ${contact.isActive ? 'Activo' : 'Inactivo'}`,
       [
-        { text: contact.isActive ? 'Desactivar' : 'Activar', onPress: () => handleToggleEmployee(contact) },
-        { text: 'Remover', onPress: () => handleRemoveEmployee(contact), style: 'destructive' },
+        { text: contact.isActive ? 'Desactivar' : 'Activar', onPress: () => openEmployeeDetail(contact) },
+        { text: 'Remover', onPress: () => openEmployeeDetail(contact), style: 'destructive' },
         { text: 'Cancelar', style: 'cancel' }
       ]
     );
-  }, []);
-
-  const handleToggleEmployee = useCallback(async (contact: any) => {
-    // TODO: Implement employee activation/deactivation
-    Alert.alert('Funcionalidad Pendiente', 'La activación/desactivación de empleados estará disponible pronto.');
-  }, []);
-
-  const handleRemoveEmployee = useCallback(async (contact: any) => {
-    Alert.alert(
-      'Confirmar Eliminación',
-      `¿Estás seguro de que quieres remover a ${contact.name} como empleado?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Remover',
-          style: 'destructive',
-          onPress: async () => {
-            // TODO: Implement employee removal
-            Alert.alert('Funcionalidad Pendiente', 'La eliminación de empleados estará disponible pronto.');
-          }
-        }
-      ]
-    );
-  }, []);
+  }, [openEmployeeDetail]);
 
   const handleCancelInvitation = useCallback(async (contact: any) => {
     try {
@@ -1261,6 +1391,53 @@ export const ContactsScreen = () => {
             </View>
           ) : (
             <View style={styles.actionButtons}>
+              {/* Local rails first. Sending to a bank or to Nequi/Yape/Mercado
+                  Pago is the mainstream errand; a chain address is an advanced
+                  move most users never make, so crypto sits in its own labelled
+                  group below rather than competing for the top of the screen. */}
+              <Text style={styles.actionGroupLabel}>TRANSFERENCIAS LOCALES</Text>
+
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleSendToLocalMethod}
+                accessibilityRole="button"
+                accessibilityLabel="Enviar a banco o billetera"
+              >
+                <View style={styles.actionButtonContent}>
+                  <View style={styles.actionIconContainer}>
+                    <Icon name="home" size={20} color={colors.white} />
+                  </View>
+                  <View style={styles.actionTextContainer}>
+                    <Text style={styles.actionButtonTitle}>Enviar a banco o billetera</Text>
+                    <Text style={styles.actionButtonSubtitle}>{SEND_ROW_SUBTITLE}</Text>
+                  </View>
+                </View>
+                <Icon name="chevron-right" size={20} color={colors.text.light} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleReceiveToLocalAccount}
+                accessibilityRole="button"
+                accessibilityLabel="Recibir por cuenta local"
+              >
+                <View style={styles.actionButtonContent}>
+                  <View style={styles.actionIconContainer}>
+                    <Icon name="download" size={20} color={colors.white} />
+                  </View>
+                  <View style={styles.actionTextContainer}>
+                    <Text style={styles.actionButtonTitle}>Recibir por cuenta local</Text>
+                    <Text style={styles.actionButtonSubtitle}>{RECEIVE_ROW_SUBTITLE}</Text>
+                  </View>
+                </View>
+                <Icon name="chevron-right" size={20} color={colors.text.light} />
+              </TouchableOpacity>
+
+              {/* "dirección" everywhere below, never "wallet": in Argentina a
+                  billetera IS Mercado Pago / Naranja X, so calling a chain
+                  address a wallet points people at the wrong product. */}
+              <Text style={[styles.actionGroupLabel, styles.actionGroupLabelSpaced]}>CRIPTO</Text>
+
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleSendWithAddress}
@@ -1273,7 +1450,7 @@ export const ContactsScreen = () => {
                   </View>
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
-                    <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
+                    <Text style={styles.actionButtonSubtitle}>A una dirección cripto</Text>
                   </View>
                 </View>
                 <Icon name="chevron-right" size={20} color={colors.text.light} />
@@ -1291,7 +1468,7 @@ export const ContactsScreen = () => {
                   </View>
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
-                    <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
+                    <Text style={styles.actionButtonSubtitle}>Comparte tu dirección cripto</Text>
                   </View>
                 </View>
                 <Icon name="chevron-right" size={20} color={colors.text.light} />
@@ -1303,7 +1480,7 @@ export const ContactsScreen = () => {
     );
 
     return HeaderContent;
-  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount, isPersonalAccount]);
+  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount, isPersonalAccount, handleSendToLocalMethod, handleReceiveToLocalAccount]);
 
   const ListEmptyComponent = useCallback(() => {
     // For business accounts
@@ -1579,6 +1756,31 @@ export const ContactsScreen = () => {
         />
 
         <RouteSheet
+          visible={showLocalSendSelection}
+          title="¿A dónde quieres enviar?"
+          onClose={() => setShowLocalSendSelection(false)}
+          options={localSendRails.map(rail => railToOption(rail, 'send'))}
+        />
+        <RouteSheet
+          visible={showLocalReceiveSelection}
+          title="¿Dónde quieres recibir?"
+          onClose={() => setShowLocalReceiveSelection(false)}
+          options={[
+            ...activeLocalReceiveOptions,
+            ...localReceiveRails
+              // A corridor the user already has an active account for would
+              // otherwise appear twice: once as their real key, once as a
+              // probe inviting them to ask for what they already own.
+              .filter(
+                rail =>
+                  !receivableLocalAccounts.some(
+                    account => toIso2(account.country) === rail.country,
+                  ),
+              )
+              .map(rail => railToOption(rail, 'receive')),
+          ]}
+        />
+        <RouteSheet
           visible={showReceiveSelection}
           title="¿Qué quieres recibir?"
           onClose={() => setShowReceiveSelection(false)}
@@ -1612,6 +1814,21 @@ export const ContactsScreen = () => {
                 });
               },
             }] : []),
+            // CONFIO shares the very same BSC address as the dollar rails —
+            // one BEP-20 address holds every token — so this row exists purely
+            // to say "yes, you can receive CONFIO here" with CONFIO's own
+            // network warning. Without it the sheet implied USDT was the only
+            // thing this address accepts.
+            {
+              icon: 'zap',
+              image: CONFIOLogo,
+              title: 'Confío · $CONFIO',
+              subtitle: 'Red BNB Smart Chain (BEP-20) · moneda de gobernanza y utilidad',
+              onPress: () => {
+                setShowReceiveSelection(false);
+                navigation.navigate('ReceiveSavings', { destination: 'confio' });
+              },
+            },
             // Demand probes stay VISIBLE everywhere: they measure rail-level
             // demand, destination-neutral. When a rail ships it offers the
             // two-world choice (usar → cUSD / ahorrar → cUSD+) mirroring
@@ -1622,21 +1839,24 @@ export const ContactsScreen = () => {
               // "move your USD account to Confío" demand specifically.
               icon: 'clock',
               title: 'USDC · USDT (Polygon)',
-              subtitle: 'Red Polygon · aún no disponible · tócalo y te avisamos',
+              subtitle: 'Red Polygon',
+              note: COMING_SOON_NOTE,
               onPress: () =>
                 handleReceiveRailInterest('polygon', 'USDC / USDT (Polygon)'),
             },
             {
               icon: 'clock',
               title: 'USDC · USDT (Ethereum)',
-              subtitle: 'Red Ethereum (ERC-20) · aún no disponible · tócalo y te avisamos',
+              subtitle: 'Red Ethereum (ERC-20)',
+              note: COMING_SOON_NOTE,
               onPress: () =>
                 handleReceiveRailInterest('eth_erc20', 'USDC / USDT (Ethereum)'),
             },
             {
               icon: 'clock',
               title: 'USDT (Tron)',
-              subtitle: 'Red Tron (TRC-20) · aún no disponible · tócalo y te avisamos',
+              subtitle: 'Red Tron (TRC-20)',
+              note: COMING_SOON_NOTE,
               onPress: () => handleReceiveRailInterest('usdt_tron', 'USDT (Tron)'),
             },
           ]}
@@ -1649,16 +1869,12 @@ export const ContactsScreen = () => {
             // BSC lineup leads (cUSD phase-out, 2026-07-31): the Algorand
             // cUSD/CONFIO address-sends are deprecated — the only Algorand
             // exit left is USDC, funded by redeeming the old cUSD.
-            {
-              icon: 'dollar-sign',
-              image: cUSDPlusLogo,
-              title: 'Confío Dollar · $cUSD+',
-              subtitle: 'Red BNB Smart Chain (BEP-20) · tu dólar principal',
-              onPress: () => {
-                setShowSendTokenSelection(false);
-                navigation.navigate('SendUsdt', { token: 'cusd_plus' });
-              },
-            },
+            // cUSD+ is deliberately ABSENT from the address sheet. It is an
+            // accumulating share, not a transferable payment unit, and an
+            // address-send of it is almost always a mistake the user cannot
+            // undo. Sending cUSD+ to a person still works through the contact
+            // flow, where the recipient is a Confío account rather than a raw
+            // address typed by hand.
             {
               icon: 'zap',
               image: CONFIOLogo,
@@ -1850,7 +2066,23 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   actionButtons: {
-    gap: 8,
+    gap: 10,
+  },
+  // Matches `sectionTitle` below: the contact list's group headings sit a few
+  // rows further down the same screen, so a second, slightly-different label
+  // style would read as a mistake rather than a distinction.
+  actionGroupLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: colors.text.secondary,
+    // Asymmetric on purpose: a group label belongs to the rows BELOW it, so
+    // it sits closer to them (10px gap) than to the group above (10+14).
+    marginBottom: 0,
+  },
+  actionGroupLabelSpaced: {
+    marginTop: 14,
   },
   employeeWelcomeContainer: {
     backgroundColor: colors.neutral,

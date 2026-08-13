@@ -25,6 +25,7 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'signup_completed',
     'financiera_whatsapp_tapped',
     'receive_rail_interest',
+    'local_rail_interest',
 })
 
 

@@ -1766,7 +1766,7 @@ export const AccountDetailScreen = () => {
 
   const handleSend = useCallback(() => {
     // @ts-ignore - Navigation type mismatch, but should work at runtime
-    navigation.navigate('BottomTabs', { screen: 'Contacts' });
+    navigation.navigate('BottomTabs', { screen: 'Transfer' });
   }, [navigation]);
 
   // Retirar mirrors Home: where no ramp provider operates, point to the

@@ -20,7 +20,11 @@ export type ClientFunnelEvent =
     | 'claim_entry_viewed'
     | 'signup_completed'
     | 'financiera_whatsapp_tapped'
-    | 'receive_rail_interest';
+    | 'receive_rail_interest'
+    // Local fiat rails (Bre-B, CLABE, alias/CVU, Pix, QR). Which corridor
+    // people ask for decides which one we build and which virtual accounts
+    // are worth paying to open.
+    | 'local_rail_interest';
 
 export const AnalyticsService = {
     /**

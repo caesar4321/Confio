@@ -54,6 +54,7 @@ import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
   installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BscExitResult, BscExitStep,
 } from '../services/emergencyExit/bscExit';
+import { isOutcomeUnknown } from '../services/evmWallet';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -77,15 +78,26 @@ const CHECKLIST = [
 const STEP_NAMES: Record<string, string> = {
   redeemCusdPlus: 'Canjear tu ahorro por USDT',
   transferUsdt: 'Enviar USDT',
+  transferConfio: 'Enviar CONFIO',
 };
-const stepName = (id: string): string => STEP_NAMES[id] ?? id;
+const stockSymbolFromStep = (id: string): string | null =>
+  id.startsWith('ondoStock:') ? (id.split(':')[1] || 'Ondo Stock') : null;
+const stepName = (id: string): string => {
+  const symbol = stockSymbolFromStep(id);
+  return symbol ? `Enviar ${symbol}` : STEP_NAMES[id] ?? id;
+};
 
 // What the blocking overlay says while each send is in flight. The exit is
-// two transactions on a public RPC — silence here is what made the first
+// multiple transactions on public RPCs — silence here is what made the first
 // drill feel broken.
 const STEP_WAIT: Record<string, string> = {
   redeemCusdPlus: 'Canjeando tu ahorro por USDT…',
   transferUsdt: 'Enviando tu USDT…',
+  transferConfio: 'Enviando tu CONFIO…',
+};
+const stepWait = (step: BscExitStep): string => {
+  const symbol = stockSymbolFromStep(step);
+  return symbol ? `Enviando tus acciones ${symbol}…` : STEP_WAIT[step] ?? 'Enviando tus fondos…';
 };
 
 // USDT-BSC is 18 decimals. Two decimals is the app's dollar grammar.
@@ -137,6 +149,8 @@ export const EmergencyExitScreen: React.FC = () => {
   const [bscRunning, setBscRunning] = useState(false);
   const [bscResult, setBscResult] = useState<BscExitResult | null>(null);
   const [bscError, setBscError] = useState<string | null>(null);
+  const [bscPending, setBscPending] = useState(false);
+  const [bscPendingTx, setBscPendingTx] = useState<string | null>(null);
   // What the overlay is currently waiting on (null = generic).
   const [bscPhase, setBscPhase] = useState<string | null>(null);
   // Destination as it was at execution time — the result card must not
@@ -229,7 +243,7 @@ export const EmergencyExitScreen: React.FC = () => {
       setBscGasShortWei(null);
       gasAddrRef.current = null;
       // Results/errors belong to the previously selected account.
-      setBscResult(null); setBscError(null); setSentTo(null);
+      setBscResult(null); setBscError(null); setBscPending(false); setBscPendingTx(null); setSentTo(null);
       try {
         const ctx = { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } as const;
         const { deriveAddressesForContext } = await import('../services/secureDeterministicWallet');
@@ -282,7 +296,7 @@ export const EmergencyExitScreen: React.FC = () => {
     const ok = await biometricAuthService.authenticate('Confirmar salida de emergencia (BNB Smart Chain)');
     if (!ok) return;
     const dest = bscDest.trim();
-    setBscRunning(true); setBscError(null); setBscPhase(null); setSentTo(dest);
+    setBscRunning(true); setBscError(null); setBscPending(false); setBscPendingTx(null); setBscPhase(null); setSentTo(dest);
     try {
       const wallet = await getActiveEvmWallet(
         selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined,
@@ -294,17 +308,32 @@ export const EmergencyExitScreen: React.FC = () => {
         minUsdtOutWei: 0n, // oracle guard + fully-backed assert protect pricing; IM has no book
         accountKey,
         store: emergencyStore,
-        onStep: (step: BscExitStep) => setBscPhase(STEP_WAIT[step] ?? null),
+        onStep: (step: BscExitStep) => setBscPhase(stepWait(step)),
       });
       setBscResult(result);
       // An exit that actually broadcast SPENDS the 24h unlock: the wait is
       // per-episode anti-coercion, not a one-time toll. Never on failure —
       // a half-moved exit must stay retryable now, not in a day.
-      if (result.sentNow.length) await consumeExitCooloff(emergencyStore, accountKey);
+      if (result.sentNow.length) {
+        try {
+          await consumeExitCooloff(emergencyStore, accountKey);
+        } catch (e) {
+          // Chain success is final. A local anti-coercion bookkeeping failure
+          // must not turn it into a false “retry” state after funds moved.
+          console.warn('[EmergencyExit] cooloff consumption failed', e);
+        }
+      }
       // The result card carries the degraded case (headline + explanation);
       // an Alert on top of it would just be a second thing to dismiss.
     } catch (e: any) {
-      setBscError(e?.message || String(e));
+      if (e?.partialResult) setBscResult(e.partialResult as BscExitResult);
+      if (isOutcomeUnknown(e)) {
+        setBscPending(true);
+        setBscPendingTx(typeof e?.txHash === 'string' ? e.txHash : null);
+        setBscError('La transacción fue enviada, pero la red aún no confirmó el resultado.');
+      } else {
+        setBscError(e?.message || String(e));
+      }
     } finally {
       setBscRunning(false);
       setBscPhase(null);
@@ -360,7 +389,7 @@ export const EmergencyExitScreen: React.FC = () => {
   })();
 
   // ── Stage: 1 = wait/status, 2 = destination+confirm, 3 = done-ish ─────
-  const anyResult = !!bscResult;
+  const anyResult = !!bscResult || bscPending;
   const stage = eligible || anyResult ? 2 : 1;
 
   const renderWaitCard = () => {
@@ -515,7 +544,8 @@ export const EmergencyExitScreen: React.FC = () => {
   // Read sentNow, NEVER txids: txids can replay hashes from an interrupted
   // earlier attempt, and a headline built on those claimed "tu dinero
   // salió" for a run that broadcast nothing at all.
-  const outcome: 'none' | 'error' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
+  const outcome: 'none' | 'error' | 'pending' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
+    if (bscPending) return 'pending';
     if (bscError) return 'error';
     if (!bscResult) return 'none';
     if (!bscResult.sentNow.length) {
@@ -549,6 +579,10 @@ export const EmergencyExitScreen: React.FC = () => {
       icon: 'x-circle', tone: colors.error.text,
       title: 'No se pudo completar',
     },
+    pending: {
+      icon: 'clock', tone: colors.warning.text,
+      title: 'La transacción sigue pendiente',
+    },
   } as const;
 
   const outcomeSub = (): string => {
@@ -558,23 +592,31 @@ export const EmergencyExitScreen: React.FC = () => {
         // '0' means this run proved no amount (resumed run, or the chain
         // didn't log a credit) — say what moved without inventing a number.
         const wei = bscResult?.usdtToDest ?? '0';
+        const stocksSent = bscResult?.sentNow.some((step) => step.startsWith('ondoStock:'));
+        const stocks = stocksSent ? ' y tus acciones Ondo' : '';
         return wei !== '0'
-          ? `Enviamos $${fmtUsdt(wei)} USDT a ${to}. Puede tardar un minuto en aparecer en tu billetera.`
-          : `Enviamos tu saldo a ${to}. Puede tardar un minuto en aparecer en tu billetera.`;
+          ? `Enviamos $${fmtUsdt(wei)} USDT${stocks} a ${to}. Puede tardar un minuto en aparecer en tu billetera.`
+          : `Enviamos tu saldo${stocks} a ${to}. Puede tardar un minuto en aparecer en tu billetera.`;
       }
-      case 'degraded':
-        return `Tu ahorro no pudo canjearse por USDT (el servicio de Ondo no respondió), así que enviamos los tokens cUSD+ tal cual a ${to}. Son tuyos: para canjearlos necesitarás una herramienta externa.`;
+      case 'degraded': {
+        const stocksSent = bscResult?.sentNow.some((step) => step.startsWith('ondoStock:'));
+        return `Tu ahorro no pudo canjearse por USDT (el servicio de Ondo no respondió), así que enviamos cUSD+ sin canjear${stocksSent ? ' junto con tus acciones Ondo' : ''} a ${to}. Son tuyos: para canjear cUSD+ necesitarás una herramienta externa.`;
+      }
       case 'already':
-        return 'Los envíos de este intento ya se habían hecho, así que no se repitieron. Puedes comprobarlos abajo.';
+        return bscResult?.degraded.includes('redeemCusdPlus')
+          ? 'El intento anterior envió tu cUSD+ sin canjear porque Ondo no respondió. No se repitió el envío; puedes comprobarlo abajo.'
+          : 'Los envíos de este intento ya se habían hecho, así que no se repitieron. Puedes comprobarlos abajo.';
       case 'empty':
         return 'Esta cuenta no tenía saldo en BNB Smart Chain. No se envió ninguna transacción y no se cobró ninguna comisión.';
+      case 'pending':
+        return 'La red recibió la transacción, pero no confirmó el resultado a tiempo. Compruébala en BscScan antes de volver a intentar para no enviar dos veces.';
       default:
         return `${bscError} — puedes reintentar; los pasos completados no se repiten.`;
     }
   };
 
   // Nothing left to send for this account+destination.
-  const exitDone = outcome === 'ok' || outcome === 'degraded' || outcome === 'already';
+  const exitDone = outcome === 'ok' || outcome === 'degraded' || outcome === 'already' || outcome === 'pending';
 
   const renderOutcome = () => {
     if (outcome === 'none') return null;
@@ -591,6 +633,15 @@ export const EmergencyExitScreen: React.FC = () => {
             <Text style={styles.verifyLabel}>Compruébalo tú mismo</Text>
             {renderProgress(bscResult, (tx) => `https://bscscan.com/tx/${tx}`)}
           </>
+        )}
+        {outcome === 'pending' && bscPendingTx && (
+          <TouchableOpacity
+            style={styles.progressRow}
+            onPress={() => Linking.openURL(`https://bscscan.com/tx/${bscPendingTx}`).catch(() => {})}
+          >
+            <Icon name="external-link" size={15} color={colors.primaryDark} />
+            <Text style={styles.progressText}>Ver transacción pendiente en BscScan</Text>
+          </TouchableOpacity>
         )}
       </View>
     );
@@ -745,7 +796,7 @@ export const EmergencyExitScreen: React.FC = () => {
               <Text style={styles.cardTitle}>Cómo funciona</Text>
               {[
                 ['map-pin', 'Eliges la billetera de destino — una que sea tuya.'],
-                ['send', 'Tu dinero sale como USDT, directo por la blockchain.'],
+                ['send', 'Tu ahorro sale como USDT y tus acciones Ondo se transfieren directamente por la blockchain.'],
                 ['zap', 'En una emergencia real (Confío inaccesible por más de 24 horas), no hay espera: la salida es inmediata.'],
               ].map(([icon, text], i) => (
                 <View key={i} style={styles.howRow}>
@@ -827,7 +878,7 @@ export const EmergencyExitScreen: React.FC = () => {
                 <View style={styles.chainWarnRow}>
                   <Icon name="check-circle" size={13} color={colors.primaryDark} />
                   <Text style={[styles.chainWarnText, { color: colors.primaryDark }]}>
-                    En BNB Smart Chain no hay que activar nada — el USDT llega directo.
+                    En BNB Smart Chain no hay que activar nada — el USDT y las acciones Ondo llegan directo.
                   </Text>
                 </View>
               )}

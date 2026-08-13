@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "generate:ondo-registry": "node scripts/generate-ondo-stock-registry.mjs",
+    "check:ondo-registry": "node scripts/generate-ondo-stock-registry.mjs --check",
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "jest",

@@ -302,7 +302,7 @@ export const TransactionSuccessScreen = () => {
   };
 
   const handleViewContacts = () => {
-    (navigation as any).navigate('BottomTabs', { screen: 'Contacts' });
+    (navigation as any).navigate('BottomTabs', { screen: 'Transfer' });
   };
 
   const displayId = (transactionData as any).internalId || (transactionData as any).transactionId || 'pendiente';

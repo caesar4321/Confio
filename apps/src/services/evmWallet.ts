@@ -249,6 +249,11 @@ export interface BscReceipt {
   logs?: BscLog[];
 }
 
+/** One non-blocking receipt read for callers that durably reconcile a
+ * previously broadcast transaction before deciding whether a retry is safe. */
+export const bscGetTransactionReceipt = async (txHash: string): Promise<BscReceipt | null> =>
+  rpcCall('eth_getTransactionReceipt', [txHash]);
+
 /** keccak256("BatchExecuted(uint256,uint256)") — ConfioBatchDelegate emits
  *  it, as the user's own EOA, with the consumed intent nonce as topic 1. */
 export const BATCH_EXECUTED_TOPIC =
@@ -617,6 +622,8 @@ export const sendCall = async (params: {
     { nonce, gasPriceWei, gasLimit, to, valueWei, data, chainId: BSC_NETWORK.chainId },
     privKeyHex,
   );
-  const hash = await bscSendRawTransaction(signed.rawTx);
-  return bscWaitForReceipt(hash);
+  // The signed raw transaction determines its hash locally. Never let an
+  // RPC choose which hash we poll/reconcile after it accepts the broadcast.
+  await bscSendRawTransaction(signed.rawTx);
+  return bscWaitForReceipt(signed.txHash);
 };

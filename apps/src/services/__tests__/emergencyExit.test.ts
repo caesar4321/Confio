@@ -264,6 +264,7 @@ describe('bsc exit checkpoint', () => {
   const WALLET = { address: '0x' + '11'.repeat(20), privKeyHex: '00' } as any;
   const DEST = '0x' + '22'.repeat(20);
   const VAULT = '0x' + '33'.repeat(20);
+  const CONFIO = '0xcceb3f6127fa9160a26a1b85857ca4c9d56b3fa8';
   const ACCOUNT_KEY = 'personal_0';
   const ONE_TOKEN = '0x' + (10n ** 18n).toString(16).padStart(64, '0');
 
@@ -281,14 +282,19 @@ describe('bsc exit checkpoint', () => {
   // token, so both legs have something to send unless a checkpoint stops them.
   const loadExit = (sendCall: jest.Mock) => {
     jest.resetModules();
+    jest.doMock('../../config/ondoStockTokens.generated', () => ({
+      BUNDLED_ONDO_STOCK_TOKENS: [],
+    }));
     jest.doMock('../evmWallet', () => ({
       bscBnbBalance: async () => 0n,
       bscGasPrice: async () => 100_000_000n,
-      bscEthCall: async () => ONE_TOKEN,
+      bscEthCall: async (to: string) =>
+        to.toLowerCase() === CONFIO ? '0x' + '0'.repeat(64) : ONE_TOKEN,
       sendCall,
       selector: () => '0xdeadbeef',
       encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
       encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
     }));
     return require('../emergencyExit/bscExit');
@@ -336,6 +342,20 @@ describe('bsc exit checkpoint', () => {
     expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
   });
 
+  it('ignores a checkpoint timestamp from the future after a device clock rollback', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const key = `confio_emergency_bsc_ck_v2_${ACCOUNT_KEY}_${DEST.toLowerCase()}`;
+    const store = memStore({
+      [key]: JSON.stringify({
+        ts: Date.now() + 60 * 60 * 1000,
+        steps: { redeemCusdPlus: '0xold', transferUsdt: '0xold' },
+      }),
+    });
+    const res = await run(mod, store);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+  });
+
   it('a FRESH checkpoint still resumes — and reports nothing sent now', async () => {
     const send = okSend();
     const mod = loadExit(send);
@@ -363,9 +383,106 @@ describe('bsc exit checkpoint', () => {
     expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
   });
 
+  it('transfers only the canonical CONFIO contract balance', async () => {
+    const send = okSend();
+    jest.resetModules();
+    jest.doMock('../../config/ondoStockTokens.generated', () => ({
+      BUNDLED_ONDO_STOCK_TOKENS: [],
+    }));
+    jest.doMock('../evmWallet', () => ({
+      bscBnbBalance: async () => 0n,
+      bscGasPrice: async () => 100_000_000n,
+      bscEthCall: async (to: string) =>
+        to.toLowerCase() === CONFIO ? ONE_TOKEN : '0x' + '0'.repeat(64),
+      sendCall: send,
+      selector: () => '0xdeadbeef',
+      encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
+      encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
+      setBscTransport: () => {},
+    }));
+    const mod = require('../emergencyExit/bscExit');
+    const res = await run(mod, memStore());
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toMatchObject({ to: mod.BUNDLED_CONFIO_ADDRESS });
+    expect(res.sentNow).toEqual(['transferConfio']);
+  });
+
+  it('does not raw-transfer cUSD+ while a broadcast redeem outcome is unknown', async () => {
+    const timeout = Object.assign(new Error('bsc tx timeout: 0x1234'), { broadcast: true });
+    const send = jest.fn(async () => { throw timeout; });
+    jest.resetModules();
+    jest.doMock('../../config/ondoStockTokens.generated', () => ({
+      BUNDLED_ONDO_STOCK_TOKENS: [],
+    }));
+    jest.doMock('../evmWallet', () => ({
+      bscBnbBalance: async () => 0n,
+      bscGasPrice: async () => 100_000_000n,
+      bscEthCall: async (to: string) =>
+        to.toLowerCase() === VAULT.toLowerCase() ? ONE_TOKEN : '0x' + '0'.repeat(64),
+      sendCall: send,
+      selector: () => '0xdeadbeef',
+      encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
+      encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
+      setBscTransport: () => {},
+    }));
+    const mod = require('../emergencyExit/bscExit');
+
+    await expect(run(mod, memStore())).rejects.toBe(timeout);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves a raw-redeem warning and partial receipts across a retry', async () => {
+    const definitive = new Error('rpc rejected before broadcast');
+    const okReceipt = {
+      status: '0x1', transactionHash: '0x' + 'ab'.repeat(32), blockNumber: '0x1', logs: [],
+    };
+    const send = jest.fn()
+      .mockRejectedValueOnce(definitive) // redeem failed definitively
+      .mockResolvedValueOnce(okReceipt) // raw cUSD+ transfer succeeded
+      .mockRejectedValueOnce(definitive) // pre-held USDT failed
+      .mockResolvedValueOnce(okReceipt); // USDT succeeds on retry
+    jest.resetModules();
+    jest.doMock('../../config/ondoStockTokens.generated', () => ({
+      BUNDLED_ONDO_STOCK_TOKENS: [],
+    }));
+    jest.doMock('../evmWallet', () => ({
+      bscBnbBalance: async () => 0n,
+      bscGasPrice: async () => 100_000_000n,
+      bscEthCall: async (to: string) =>
+        [VAULT.toLowerCase(), '0x55d398326f99059ff775485246999027b3197955'].includes(to.toLowerCase())
+          ? ONE_TOKEN
+          : '0x' + '0'.repeat(64),
+      sendCall: send,
+      selector: () => '0xdeadbeef',
+      encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
+      encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      isOutcomeUnknown: () => false,
+      setBscTransport: () => {},
+    }));
+    const mod = require('../emergencyExit/bscExit');
+    const store = memStore();
+
+    await expect(run(mod, store)).rejects.toMatchObject({
+      partialResult: {
+        degraded: ['redeemCusdPlus'],
+        sentNow: ['redeemCusdPlus'],
+      },
+    });
+    const retry = await run(mod, store);
+    expect(retry.degraded).toEqual(['redeemCusdPlus']);
+    expect(retry.sentNow).toEqual(['transferUsdt']);
+    expect(retry.txids).not.toHaveProperty('__degraded:redeemCusdPlus');
+  });
+
   it('records skipped legs without counting them as sent', async () => {
     const send = okSend();
     jest.resetModules();
+    jest.doMock('../../config/ondoStockTokens.generated', () => ({
+      BUNDLED_ONDO_STOCK_TOKENS: [],
+    }));
     jest.doMock('../evmWallet', () => ({
       bscBnbBalance: async () => 0n,
       bscGasPrice: async () => 100_000_000n,
@@ -374,13 +491,18 @@ describe('bsc exit checkpoint', () => {
       selector: () => '0xdeadbeef',
       encodeUint: (v: bigint) => v.toString(16).padStart(64, '0'),
       encodeAddress: (a: string) => a.slice(2).padStart(64, '0'),
+      isOutcomeUnknown: (error: any) => Boolean(error?.broadcast),
       setBscTransport: () => {},
     }));
     const mod = require('../emergencyExit/bscExit');
     const res = await run(mod, memStore());
     expect(send).not.toHaveBeenCalled();
     expect(res.sentNow).toEqual([]);
-    expect(res.txids).toEqual({ redeemCusdPlus: 'skipped_zero', transferUsdt: 'skipped_zero' });
+    expect(res.txids).toEqual({
+      redeemCusdPlus: 'skipped_zero',
+      transferUsdt: 'skipped_zero',
+      transferConfio: 'skipped_zero',
+    });
   });
 });
 

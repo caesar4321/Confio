@@ -830,6 +830,49 @@
         </table>
     </div>
 
+    <div class="data-table">
+        <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+            Rail Interest — demand probes (90d)
+            <span style="font-weight: 400; color: #6b7280;">
+                · {{ rail_interest_totals.rails|default:"0" }} rails
+                · {{ rail_interest_totals.taps|default:"0"|intcomma }} taps
+                · {{ rail_interest_totals.confirmed|default:"0"|intcomma }} confirmed
+            </span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Rail</th>
+                    <th>Direction</th>
+                    <th style="text-align: right;">Taps</th>
+                    <th style="text-align: right;">Confirmed</th>
+                    <th style="text-align: right;">Tap → Confirm</th>
+                    <th>Countries</th>
+                    <th>Last seen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rail_interest %}
+                <tr>
+                    <td>{{ row.rail }}</td>
+                    <td>{{ row.direction }}</td>
+                    <td style="text-align: right;">{{ row.taps|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.confirmed|intcomma }}</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.conversion_pct|floatformat:1 }}%</td>
+                    <td>{{ row.countries }}</td>
+                    <td>{{ row.last_seen|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" style="padding: 16px; color: #6b7280;">
+                        No rail interest recorded in the last 90 days.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
     <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-bottom: 30px;">
         <div class="data-table" style="margin-bottom: 0;">
             <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">

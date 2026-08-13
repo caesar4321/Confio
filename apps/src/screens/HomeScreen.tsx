@@ -1013,7 +1013,7 @@ export const HomeScreen = () => {
           label: 'Enviar',
           icon: 'send',
           color: colors.primary,
-          route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
+          route: () => navigation.navigate('BottomTabs', { screen: 'Transfer' }),
         },
         {
           id: 'pay',
@@ -1061,7 +1061,7 @@ export const HomeScreen = () => {
         label: 'Enviar',
         icon: 'send',
         color: colors.primary,
-        route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
+        route: () => navigation.navigate('BottomTabs', { screen: 'Transfer' }),
       },
       {
         id: 'pay',

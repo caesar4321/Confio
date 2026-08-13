@@ -398,6 +398,62 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             source_type='referral_link',
             created_at__gte=funnel_last_90_start,
         )
+        # --- Rail interest (demand probes) ---------------------------------
+        # Rails we do NOT support yet stay visible in the receive/send sheets;
+        # a tap is curiosity and the follow-up confirmation is real demand.
+        # These never showed up anywhere in this dashboard because every panel
+        # above filters on source_type ('send_invite' / 'referral_link') and
+        # the probes were emitted with none — so the only way to read them was
+        # the raw FunnelEvent changelist. They decide which corridor we build
+        # next and which virtual accounts are worth paying to open, so they get
+        # their own panel. Aggregated in Python: the rail and stage live inside
+        # the JSON `properties`, not in indexed columns.
+        rail_interest_rows = FunnelEvent.objects.filter(
+            event_name__in=['receive_rail_interest', 'local_rail_interest'],
+            created_at__gte=funnel_last_90_start,
+        ).values('event_name', 'properties', 'country', 'created_at')
+
+        rail_totals = {}
+        for row in rail_interest_rows:
+            props = row['properties'] or {}
+            rail = str(props.get('rail') or '—')
+            direction = str(props.get('direction') or ('receive' if row['event_name'] == 'receive_rail_interest' else '—'))
+            key = (rail, direction)
+            bucket = rail_totals.setdefault(key, {
+                'rail': rail,
+                'direction': direction,
+                'taps': 0,
+                'confirmed': 0,
+                'countries': set(),
+                'last_seen': None,
+            })
+            # Probes emitted before the two-stage split (2026-07-06) carry no
+            # `stage`. Counting them as taps keeps the historical total honest;
+            # they can never be confirmations.
+            if str(props.get('stage') or 'tap') == 'confirmed':
+                bucket['confirmed'] += 1
+            else:
+                bucket['taps'] += 1
+            if row['country']:
+                bucket['countries'].add(row['country'])
+            if bucket['last_seen'] is None or row['created_at'] > bucket['last_seen']:
+                bucket['last_seen'] = row['created_at']
+
+        rail_interest = []
+        for bucket in rail_totals.values():
+            rail_interest.append({
+                **bucket,
+                'countries': ', '.join(sorted(bucket['countries'])) or '—',
+                'conversion_pct': _pct(bucket['confirmed'], bucket['taps']),
+            })
+        rail_interest.sort(key=lambda item: (-item['confirmed'], -item['taps']))
+        context['rail_interest'] = rail_interest
+        context['rail_interest_totals'] = {
+            'taps': sum(item['taps'] for item in rail_interest),
+            'confirmed': sum(item['confirmed'] for item in rail_interest),
+            'rails': len(rail_interest),
+        }
+
         referral_event_names = [
             'referral_whatsapp_share_tapped',
             'referral_link_clicked',

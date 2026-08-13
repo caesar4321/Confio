@@ -21,15 +21,18 @@ import {
   bscBnbBalance,
   bscGasPrice,
   bscEthCall,
+  bscGetTransactionReceipt,
   sendCall,
   selector,
   encodeUint,
   encodeAddress,
   setBscTransport,
+  isOutcomeUnknown,
   DerivedEvmWallet,
 } from '../evmWallet';
 import { CHAIN_ENDPOINTS } from './chainClock';
 import type { KVStore } from './reachability';
+import { BUNDLED_ONDO_STOCK_TOKENS } from '../../config/ondoStockTokens.generated';
 
 // Bundled chain wiring (design doc: "token addresses/ABIs ship in the app
 // bundle") — in an outage the config query that normally serves the vault
@@ -40,6 +43,9 @@ import type { KVStore } from './reachability';
 // it from Node against mainnet (same value as cusdPlusVault.USDT_BSC).
 export const BUNDLED_VAULT_ADDRESS = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1';
 const USDT_BSC = '0x55d398326f99059fF775485246999027B3197955';
+export const BUNDLED_CONFIO_ADDRESS = '0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8';
+const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const ONDO_BALANCE_CHUNK = 250;
 
 /** keccak256("Transfer(address,address,uint256)") — same constant as
  *  cusd_plus/tasks.py TRANSFER_TOPIC. */
@@ -113,18 +119,96 @@ const erc20Balance = async (token: string, addr: string): Promise<bigint> => {
   return BigInt(ret === '0x' ? 0 : ret);
 };
 
+export interface OndoStockHolding {
+  symbol: string;
+  address: string;
+  balanceWei: bigint;
+}
+
+const word = (value: bigint | number): string => BigInt(value).toString(16).padStart(64, '0');
+
+/** ABI encode Multicall3.tryAggregate(false, balanceOf calls). Kept local so
+ * Emergency Exit does not pull a wallet SDK—or a server—into its trust path. */
+export const encodeStockBalanceMulticall = (
+  owner: string,
+  tokens: readonly { address: string }[],
+): string => {
+  const calls = tokens.map(({ address }) => {
+    const callData = selector('balanceOf(address)') + encodeAddress(owner);
+    const raw = callData.slice(2);
+    const padded = raw.padEnd(Math.ceil(raw.length / 64) * 64, '0');
+    return address.slice(2).padStart(64, '0') + word(64) + word(raw.length / 2) + padded;
+  });
+  let cursor = tokens.length * 32;
+  const offsets = calls.map((call) => {
+    const offset = word(cursor);
+    cursor += call.length / 2;
+    return offset;
+  }).join('');
+  const array = word(tokens.length) + offsets + calls.join('');
+  return selector('tryAggregate(bool,(address,bytes)[])') + word(0) + word(64) + array;
+};
+
+const readAbiWord = (hex: string, byteOffset: number): bigint => {
+  const start = byteOffset * 2;
+  const value = hex.slice(start, start + 64);
+  if (value.length !== 64) throw new Error('malformed Multicall response');
+  return BigInt('0x' + value);
+};
+
+/** Decode Multicall3's (bool success, bytes returnData)[] result. */
+export const decodeStockBalanceMulticall = (result: string, expected: number): bigint[] => {
+  const hex = result.startsWith('0x') ? result.slice(2) : result;
+  const arrayStart = Number(readAbiWord(hex, 0));
+  const count = Number(readAbiWord(hex, arrayStart));
+  if (count !== expected) throw new Error('unexpected Multicall result count');
+  const headsStart = arrayStart + 32;
+  const balances: bigint[] = [];
+  for (let i = 0; i < count; i++) {
+    const tupleStart = headsStart + Number(readAbiWord(hex, headsStart + i * 32));
+    const success = readAbiWord(hex, tupleStart) !== 0n;
+    const bytesStart = tupleStart + Number(readAbiWord(hex, tupleStart + 32));
+    const length = Number(readAbiWord(hex, bytesStart));
+    // A failed/short inner call is not a zero balance. Treating it as zero
+    // would let one flaky token/RPC disappear from an allegedly complete
+    // emergency exit.
+    if (!success || length !== 32) throw new Error('Ondo balance call failed');
+    balances.push(readAbiWord(hex, bytesStart + 32));
+  }
+  return balances;
+};
+
+/** Read the entire bundled Ondo universe in two eth_call requests today.
+ * Contract addresses—not symbols or token metadata—are the allowlist. */
+export const readBundledOndoStockHoldings = async (owner: string): Promise<OndoStockHolding[]> => {
+  const holdings: OndoStockHolding[] = [];
+  for (let start = 0; start < BUNDLED_ONDO_STOCK_TOKENS.length; start += ONDO_BALANCE_CHUNK) {
+    const tokens = BUNDLED_ONDO_STOCK_TOKENS.slice(start, start + ONDO_BALANCE_CHUNK);
+    const result = await bscEthCall(MULTICALL3, encodeStockBalanceMulticall(owner, tokens));
+    const balances = decodeStockBalanceMulticall(result, tokens.length);
+    balances.forEach((balanceWei, index) => {
+      if (balanceWei > 0n) holdings.push({ ...tokens[index], balanceWei });
+    });
+  }
+  return holdings;
+};
+
 export interface BscExitPlan {
   cusdPlusShares: bigint;
   usdtWei: bigint;
+  confioWei: bigint;
   bnbWei: bigint;
-  steps: Array<'redeemCusdPlus' | 'transferUsdt'>;
+  ondoStocks: OndoStockHolding[];
+  steps: Array<'redeemCusdPlus' | 'transferUsdt' | 'transferConfio' | 'transferOndoStocks'>;
 }
 
 export const planBscExit = async (address: string, vaultAddress: string): Promise<BscExitPlan> => {
-  const [cusdPlusShares, usdtWei, bnbWei] = await Promise.all([
+  const [cusdPlusShares, usdtWei, confioWei, bnbWei, ondoStocks] = await Promise.all([
     erc20Balance(vaultAddress, address),
     erc20Balance(USDT_BSC, address),
+    erc20Balance(BUNDLED_CONFIO_ADDRESS, address),
     bscBnbBalance(address),
+    readBundledOndoStockHoldings(address),
   ]);
   const steps: BscExitPlan['steps'] = [];
   if (cusdPlusShares > 0n) steps.push('redeemCusdPlus');
@@ -132,12 +216,14 @@ export const planBscExit = async (address: string, vaultAddress: string): Promis
   // carries whatever the redeem just delivered if redeem paid the user
   // (it pays the destination directly — this step covers pre-held USDT).
   if (usdtWei > 0n) steps.push('transferUsdt');
+  if (confioWei > 0n) steps.push('transferConfio');
+  if (ondoStocks.length > 0) steps.push('transferOndoStocks');
   // Deliberately NO BNB sweep (decision 2026-07-22, mirrors Algorand):
   // user BNB ≈ sponsor dust + a Direct-mode gas top-up's leftover cents.
   // Sweeping would leak sponsor dust through polished UI and strip the
   // account of gas it may need for stray future deposits to the old
   // address. Zero native outflow ⇒ zero farming-detector interaction.
-  return { cusdPlusShares, usdtWei, bnbWei, steps };
+  return { cusdPlusShares, usdtWei, confioWei, bnbWei, ondoStocks, steps };
 };
 
 /** BNB the user must hold for Direct-mode gas, for the top-up screen. */
@@ -146,8 +232,14 @@ export const estimateBscExitGasWei = async (plan: BscExitPlan): Promise<bigint> 
   if (gasPrice < 100_000_000n) gasPrice = 100_000_000n;
   gasPrice = (gasPrice * 12n) / 10n;
   let units = 0n;
-  if (plan.steps.includes('redeemCusdPlus')) units += 700_000n; // IM redeem path, measured-class budget
+  // Reserve both the attempted redeem and the 120k raw-share fallback. A
+  // reverted redeem still consumes gas before the fallback can run.
+  if (plan.steps.includes('redeemCusdPlus')) units += 820_000n;
   if (plan.steps.includes('transferUsdt')) units += 80_000n;
+  if (plan.steps.includes('transferConfio')) units += 80_000n;
+  // Ondo tokens can execute compliance hooks. Budget conservatively; the
+  // actual send uses eth_estimateGas rather than a brittle fixed ceiling.
+  units += BigInt(plan.ondoStocks.length) * 200_000n;
   return gasPrice * units;
 };
 
@@ -156,7 +248,7 @@ export const estimateBscExitGasWei = async (plan: BscExitPlan): Promise<bigint> 
 export interface BscExitResult {
   completed: string[];
   txids: Record<string, string>;
-  /** Steps skipped because their leg is dead (screen must warn + offer raw fallback). */
+  /** Steps completed through a degraded fallback (screen must warn). */
   degraded: string[];
   /**
    * Steps this run actually BROADCAST. `txids` can carry hashes from an
@@ -175,7 +267,14 @@ export interface BscExitResult {
   usdtToDest: string;
 }
 
-export type BscExitStep = 'redeemCusdPlus' | 'transferUsdt';
+export type BscExitStep =
+  | 'redeemCusdPlus'
+  | 'transferUsdt'
+  | 'transferConfio'
+  | `ondoStock:${string}:${string}`;
+
+const stockStep = ({ symbol, address }: OndoStockHolding): BscExitStep =>
+  `ondoStock:${symbol}:${address.toLowerCase()}`;
 
 // v2 key: v1 checkpoints were written WITHOUT a timestamp and were never
 // cleared, so a completed exit left a permanent "already done" record. A
@@ -193,6 +292,9 @@ const ckKey = (accountKey: string, dest: string) =>
  * a clock jump only costs a re-read of live balances.
  */
 const CK_TTL_MS = 30 * 60 * 1000;
+const DEGRADED_REDEEM_CK = '__degraded:redeemCusdPlus';
+const PENDING_CK_PREFIX = '__pending:';
+const PENDING_DEGRADED_CK_PREFIX = '__pendingDegraded:';
 
 interface Checkpoint { ts: number; steps: Record<string, string>; }
 
@@ -202,11 +304,16 @@ const loadCk = async (store: KVStore, key: string): Promise<Record<string, strin
   try {
     const parsed = JSON.parse(raw) as Partial<Checkpoint>;
     // No ts = a v1-shaped blob that slipped through; treat as expired.
-    if (typeof parsed?.ts !== 'number' || Date.now() - parsed.ts > CK_TTL_MS) {
+    const steps = parsed.steps && typeof parsed.steps === 'object' ? parsed.steps : {};
+    const hasPending = Object.keys(steps).some((step) => step.startsWith(PENDING_CK_PREFIX));
+    const age = typeof parsed?.ts === 'number' ? Date.now() - parsed.ts : Number.POSITIVE_INFINITY;
+    // Ordinary checkpoints expire. A broadcast transaction does not: its
+    // receipt must be reconciled before a retry can safely use another nonce.
+    if (!hasPending && (age < 0 || age > CK_TTL_MS)) {
       await store.del(key);
       return {};
     }
-    return parsed.steps ?? {};
+    return steps;
   } catch {
     return {};
   }
@@ -222,7 +329,7 @@ export const executeBscExit = async (params: {
   store: KVStore;
   /**
    * Fires immediately before each on-chain send. The exit can take tens of
-   * seconds across two transactions, so the screen names what it is waiting
+   * seconds across multiple transactions, so the screen names what it is waiting
    * on instead of showing one undifferentiated spinner.
    */
   onStep?: (step: BscExitStep) => void;
@@ -233,11 +340,13 @@ export const executeBscExit = async (params: {
 
   const restore = installEmergencyBscTransport();
   const key = ckKey(accountKey, dest);
-  const ck = await loadCk(store, key);
+  const ck: Record<string, string> = {};
   const completed: string[] = [];
   const degraded: string[] = [];
   const sentNow: string[] = [];
   let usdtToDest = 0n;
+  let activeStep: string | null = null;
+  let activeDegraded = false;
 
   const record = async (step: string, txid: string) => {
     ck[step] = txid;
@@ -245,13 +354,62 @@ export const executeBscExit = async (params: {
     completed.push(step);
     if (!txid.startsWith('skipped')) sentNow.push(step);
   };
+  const resultSoFar = (): BscExitResult => ({
+    completed: [...completed],
+    txids: Object.fromEntries(Object.entries(ck).filter(([step]) => !step.startsWith('__'))),
+    degraded: [...degraded],
+    sentNow: [...sentNow],
+    usdtToDest: usdtToDest.toString(),
+  });
+  const persistCheckpoint = () =>
+    store.set(key, JSON.stringify({ ts: Date.now(), steps: ck }));
+  const pendingError = (txHash: string) => Object.assign(
+    new Error(`bsc tx still pending: ${txHash}`),
+    { broadcast: true, txHash },
+  );
+  const reconcilePending = async () => {
+    for (const [marker, txHash] of Object.entries(ck)) {
+      if (!marker.startsWith(PENDING_CK_PREFIX)) continue;
+      const step = marker.slice(PENDING_CK_PREFIX.length);
+      const receipt = await bscGetTransactionReceipt(txHash);
+      if (!receipt) throw pendingError(txHash);
+
+      delete ck[marker];
+      const degradedMarker = PENDING_DEGRADED_CK_PREFIX + step;
+      const wasDegraded = Boolean(ck[degradedMarker]);
+      delete ck[degradedMarker];
+      if (receipt.status === '0x1') {
+        ck[step] = txHash;
+        completed.push(step);
+        if (wasDegraded) ck[DEGRADED_REDEEM_CK] = '1';
+        if (!wasDegraded && (step === 'redeemCusdPlus' || step === 'transferUsdt')) {
+          usdtToDest += usdtCreditedTo(receipt, dest);
+        }
+      } else if (receipt.status !== '0x0') {
+        // Unknown receipt shape: retain the pending marker and fail closed.
+        ck[marker] = txHash;
+        if (wasDegraded) ck[degradedMarker] = '1';
+        throw pendingError(txHash);
+      }
+      await persistCheckpoint();
+    }
+  };
 
   try {
+    // Keep this inside the restoration boundary. Device storage can fail;
+    // that must never leave the emergency public-RPC transport installed
+    // for the rest of the app session.
+    Object.assign(ck, await loadCk(store, key));
+    await reconcilePending();
+    if (ck[DEGRADED_REDEEM_CK]) degraded.push('redeemCusdPlus');
+
     // 1. cUSD+ → USDT paid straight to the destination.
     if (!ck.redeemCusdPlus) {
       const shares = await erc20Balance(vaultAddress, wallet.address);
       if (shares > 0n) {
         onStep?.('redeemCusdPlus');
+        activeStep = 'redeemCusdPlus';
+        activeDegraded = false;
         try {
           const receipt = await sendCall({
             from: wallet.address,
@@ -266,10 +424,16 @@ export const executeBscExit = async (params: {
           });
           usdtToDest += usdtCreditedTo(receipt, dest);
           await record('redeemCusdPlus', receipt.transactionHash);
+          activeStep = null;
         } catch (e) {
+          // A receipt timeout means the redeem was broadcast and can still
+          // settle. Sending the raw shares before its outcome is known is an
+          // unsafe fallback and can waste the user's remaining emergency gas.
+          if (isOutcomeUnknown(e)) throw e;
           // Ondo leg dead (paused vault, tripped guard, IM outage): fall
           // back to a raw share transfer so value at least MOVES, and
           // surface the degradation for the screen's warning.
+          activeDegraded = true;
           const receipt = await sendCall({
             from: wallet.address,
             privKeyHex: wallet.privKeyHex,
@@ -277,8 +441,11 @@ export const executeBscExit = async (params: {
             data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(shares),
             gasLimit: 120_000n,
           });
+          ck[DEGRADED_REDEEM_CK] = '1';
+          if (!degraded.includes('redeemCusdPlus')) degraded.push('redeemCusdPlus');
           await record('redeemCusdPlus', receipt.transactionHash);
-          degraded.push('redeemCusdPlus');
+          activeStep = null;
+          activeDegraded = false;
         }
       } else {
         await record('redeemCusdPlus', 'skipped_zero');
@@ -290,6 +457,8 @@ export const executeBscExit = async (params: {
       const usdt = await erc20Balance(USDT_BSC, wallet.address);
       if (usdt > 0n) {
         onStep?.('transferUsdt');
+        activeStep = 'transferUsdt';
+        activeDegraded = false;
         const receipt = await sendCall({
           from: wallet.address,
           privKeyHex: wallet.privKeyHex,
@@ -299,9 +468,70 @@ export const executeBscExit = async (params: {
         });
         usdtToDest += usdtCreditedTo(receipt, dest);
         await record('transferUsdt', receipt.transactionHash);
+        activeStep = null;
       } else {
         await record('transferUsdt', 'skipped_zero');
       }
+    }
+
+    // 3. Canonical CONFIO-BSC only. A token with the same symbol at any
+    // other address is ignored.
+    if (!ck.transferConfio) {
+      const confio = await erc20Balance(BUNDLED_CONFIO_ADDRESS, wallet.address);
+      if (confio > 0n) {
+        onStep?.('transferConfio');
+        activeStep = 'transferConfio';
+        activeDegraded = false;
+        const receipt = await sendCall({
+          from: wallet.address,
+          privKeyHex: wallet.privKeyHex,
+          to: BUNDLED_CONFIO_ADDRESS,
+          data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(confio),
+          gasLimit: 80_000n,
+        });
+        await record('transferConfio', receipt.transactionHash);
+        activeStep = null;
+      } else {
+        await record('transferConfio', 'skipped_zero');
+      }
+    }
+
+    // 4. Every official Ondo Stock known to this app release. The registry
+    // is compiled into the client; symbols are labels only and arbitrary
+    // wallet tokens are never inspected or transferred.
+    const stockFailures: string[] = [];
+    const stocks = await readBundledOndoStockHoldings(wallet.address);
+    for (const stock of stocks) {
+      const step = stockStep(stock);
+      if (ck[step]) continue;
+      onStep?.(step);
+      activeStep = step;
+      activeDegraded = false;
+      let receipt: Awaited<ReturnType<typeof sendCall>>;
+      try {
+        receipt = await sendCall({
+          from: wallet.address,
+          privKeyHex: wallet.privKeyHex,
+          to: stock.address,
+          data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(stock.balanceWei),
+        });
+      } catch (e) {
+        // Do not advance to another nonce while a broadcast transaction can
+        // still mine. The user must reconcile that hash first.
+        if (isOutcomeUnknown(e)) throw e;
+        // Continue with the other stocks. Completed sends are checkpointed;
+        // a retry re-reads balances and attempts only what remains.
+        stockFailures.push(stock.symbol);
+        activeStep = null;
+        continue;
+      }
+      // Keep checkpoint failures outside the transfer catch. The token did
+      // move; reporting it as a failed stock transfer would be false.
+      await record(step, receipt.transactionHash);
+      activeStep = null;
+    }
+    if (stockFailures.length) {
+      throw new Error(`No se pudieron enviar estas acciones: ${stockFailures.join(', ')}`);
     }
 
     // Every step resolved, so this attempt is over: drop the checkpoint.
@@ -310,9 +540,28 @@ export const executeBscExit = async (params: {
     // balance is not a double-spend risk — each step re-reads live
     // balances and the chain enforces the rest.
     await store.del(key);
+  } catch (e) {
+    if (isOutcomeUnknown(e) && activeStep && typeof (e as any)?.txHash === 'string') {
+      ck[PENDING_CK_PREFIX + activeStep] = (e as any).txHash;
+      if (activeDegraded) ck[PENDING_DEGRADED_CK_PREFIX + activeStep] = '1';
+      try {
+        await persistCheckpoint();
+      } catch (checkpointError) {
+        // Preserve the broadcast/unknown error and hash for the UI. Replacing
+        // it with a storage error would wrongly invite an immediate retry.
+        (e as any).checkpointError = checkpointError;
+      }
+    }
+    // A later leg can fail after earlier assets already moved. Carry those
+    // receipts to the screen so the user can verify reality instead of seeing
+    // a generic error that hides successful transactions.
+    if (e && typeof e === 'object') {
+      (e as any).partialResult = resultSoFar();
+    }
+    throw e;
   } finally {
     restore();
   }
 
-  return { completed, txids: ck, degraded, sentNow, usdtToDest: usdtToDest.toString() };
+  return resultSoFar();
 };

@@ -34,14 +34,22 @@ import { colors } from '../config/theme';
 import { getEvmAddressForDisplay, evmAccountKey } from '../services/secureDeterministicWallet';
 import { useAccountManager } from '../hooks/useAccountManager';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import CONFIOLogo from '../assets/png/CONFIO.png';
 
-// Steps 1-3 are pure network mechanics, identical for both variants; only
-// step 4 (what the money becomes) branches on the destination.
-const stepsFor = (isSavings: boolean) => [
-  {
-    title: 'En tu exchange o billetera, elige enviar USDT',
-    body: 'Binance, OKX, Bybit, Trust Wallet — donde tengas tus USDT.',
-  },
+// Steps 1-3 are pure network mechanics — the BSC address is the SAME for
+// every BEP-20 token, so only the token name and step 4 (what the money
+// becomes) vary. CONFIO is the third variant: same address, same network
+// warning, but it is a governance/utility token that never becomes a dollar.
+const stepsFor = (destination: Destination) => [
+  destination === 'confio'
+    ? {
+        title: 'En tu billetera, elige enviar CONFIO',
+        body: 'El token CONFIO (BEP-20) en BNB Smart Chain.',
+      }
+    : {
+        title: 'En tu exchange o billetera, elige enviar USDT',
+        body: 'Binance, OKX, Bybit, Trust Wallet — donde tengas tus USDT.',
+      },
   {
     title: 'Selecciona la red BNB Smart Chain (BEP-20)',
     body: 'Es el paso más importante. Otras redes no llegan a esta dirección.',
@@ -50,7 +58,12 @@ const stepsFor = (isSavings: boolean) => [
     title: 'Pega tu dirección y envía',
     body: 'Copia la dirección de arriba. Llega en 1–2 minutos.',
   },
-  isSavings
+  destination === 'confio'
+    ? {
+        title: 'Abre Confío',
+        body: 'Lo recibido aparece en tu saldo CONFIO.',
+      }
+    : destination === 'cusd_plus'
     ? {
         title: 'Abre Confío y confirma',
         body: 'Lo recibido se vuelve tu ahorro (cUSD+) y empieza a generar rendimiento.',
@@ -61,13 +74,26 @@ const stepsFor = (isSavings: boolean) => [
       },
 ];
 
+type Destination = 'cusd_plus' | 'usdt' | 'confio';
+
+// One place decides what token this screen is about, so the header, the
+// network warning, the share message and the QR caption can never disagree
+// about which asset the address expects.
+const TOKEN = {
+  confio: { symbol: 'CONFIO', logo: CONFIOLogo },
+  dollar: { symbol: 'USDT', logo: cUSDPlusLogo },
+} as const;
+
 export const ReceiveSavingsScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<MainStackParamList, 'ReceiveSavings'>>();
   // Variant: 'cusd_plus' (default — silent mint into savings) vs 'usdt'
   // (geo-ineligible: the money stays raw, branded "Confío Dollar").
-  const isSavings = (route.params?.destination ?? 'cusd_plus') === 'cusd_plus';
-  const STEPS = stepsFor(isSavings);
+  const destination: Destination = route.params?.destination ?? 'cusd_plus';
+  const isSavings = destination === 'cusd_plus';
+  const isConfio = destination === 'confio';
+  const token = isConfio ? TOKEN.confio : TOKEN.dollar;
+  const STEPS = stepsFor(destination);
   const [copied, setCopied] = useState(false);
 
   // Derived at sign-in alongside the Algorand key (registered server-side);
@@ -113,8 +139,8 @@ export const ReceiveSavingsScreen = () => {
       await Share.share({
         title: isSavings ? 'Dirección de ahorro Confío' : 'Dirección Confío',
         message:
-          `Esta es mi dirección para recibir USDT en Confío:\n${address}\n\n` +
-          'Importante: solo USDT por la red BNB Smart Chain (BEP-20).',
+          `Esta es mi dirección para recibir ${token.symbol} en Confío:\n${address}\n\n` +
+          `Importante: solo ${token.symbol} por la red BNB Smart Chain (BEP-20).`,
       });
     } catch {}
   };
@@ -127,7 +153,7 @@ export const ReceiveSavingsScreen = () => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
             <Icon name="arrow-left" size={24} color={colors.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Recibir USDT</Text>
+          <Text style={styles.headerTitle}>Recibir {token.symbol}</Text>
           <View style={styles.headerIconBtn} />
         </View>
       </SafeAreaView>
@@ -173,7 +199,7 @@ export const ReceiveSavingsScreen = () => {
             <View style={styles.warnCard}>
               <Icon name="alert-triangle" size={18} color="#B45309" />
               <Text style={styles.warnText}>
-                Envía únicamente <Text style={styles.warnStrong}>USDT</Text> por la red{' '}
+                Envía únicamente <Text style={styles.warnStrong}>{token.symbol}</Text> por la red{' '}
                 <Text style={styles.warnStrong}>BNB Smart Chain (BEP-20)</Text>. Enviar por
                 otra red (TRC-20, ERC-20, Polygon…) o enviar otros tokens resultará en
                 pérdida permanente de los fondos.
@@ -182,9 +208,15 @@ export const ReceiveSavingsScreen = () => {
 
             {/* What it becomes: per-variant semantic, with the brand mark */}
             <View style={styles.becomesCard}>
-              <Image source={cUSDPlusLogo} style={styles.becomesLogo} />
+              <Image source={token.logo} style={styles.becomesLogo} />
               <Text style={styles.becomesText}>
-                {isSavings ? (
+                {isConfio ? (
+                  <>
+                    Lo que recibas queda disponible en tu saldo{' '}
+                    <Text style={styles.warnStrong}>CONFIO</Text>, la moneda de gobernanza
+                    y utilidad de Confío.
+                  </>
+                ) : isSavings ? (
                   <>
                     Lo que recibas aquí se convierte en tu ahorro{' '}
                     <Text style={styles.warnStrong}>(Confío Dollar+)</Text> y genera rendimiento

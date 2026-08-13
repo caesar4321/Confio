@@ -413,8 +413,10 @@ export const NotificationScreen = () => {
         return;
       }
       if (url.endsWith('send') || url.includes('send?')) {
-        // Generic send link -> Go to Contacts to pick recipient
-        (navigation as any).navigate('Contacts');
+        // Transfer is a bottom-tab route, not a MainStack screen. Target the
+        // nested navigator explicitly so notification deep links resolve from
+        // anywhere in the main stack.
+        navigation.navigate('BottomTabs', { screen: 'Transfer' });
         return;
       }
       if (url.includes('wallet')) {
