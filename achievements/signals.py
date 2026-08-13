@@ -311,31 +311,56 @@ def _award_referral_pair(user):
 @receiver(post_save, sender=UserReferral)
 def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs):
     """When a referral exists, link and process any pending reward events."""
+    if instance.deleted_at or instance.status == 'inactive':
+        return
+
     if created:
         notify_referral_joined(instance)
 
-    users_to_check = [u for u in [instance.referred_user, instance.referrer_user] if u]
-    if not users_to_check:
+    referred_user = instance.referred_user
+    if not referred_user:
         return
 
-    pending_events = ReferralRewardEvent.objects.filter(
-        user__in=users_to_check,
-        referral__isnull=True,
-        reward_status='pending',
-        trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
-    )
+    if created:
+        pending_events = ReferralRewardEvent.objects.filter(
+            user=referred_user,
+            referral__isnull=True,
+            reward_status='pending',
+            trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
+        ).order_by('occurred_at', 'id')
 
-    for event in pending_events:
-        event.referral = instance
-        event.save(update_fields=['referral', 'updated_at'])
-        sync_referral_reward_for_event(
-            event.user,
-            EventContext(
-                event=event.trigger,
-                amount=event.amount,
-                metadata=event.metadata,
-            ),
-        )
+        for event in pending_events:
+            event.referral = instance
+            event.save(update_fields=['referral', 'updated_at'])
+            sync_referral_reward_for_event(
+                event.user,
+                EventContext(
+                    event=event.trigger,
+                    amount=event.amount,
+                    metadata=event.metadata,
+                ),
+            )
+
+        instance.refresh_from_db()
+        if instance.reward_status in {'eligible', 'claimed'}:
+            # Events before the winner can also remain pending (for example a
+            # below-threshold top-up followed by a qualifying conversion), so
+            # reconcile the whole attached set after every orphan is processed.
+            duplicate_events = ReferralRewardEvent.objects.filter(
+                user=referred_user,
+                referral=instance,
+                reward_status='pending',
+                trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
+            )
+            for duplicate_event in duplicate_events:
+                duplicate_event.reward_status = 'skipped'
+                duplicate_event.error = (
+                    'Recompensa ya otorgada por el primer evento válido '
+                    f'({instance.reward_event or "referido"}).'
+                )
+                duplicate_event.save(
+                    update_fields=['reward_status', 'error', 'updated_at']
+                )
 
     # Reward sync updates a separately queried UserReferral instance. Refresh
     # this post-save instance before maintaining placeholders; otherwise an
@@ -360,21 +385,29 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
         placeholder_status = role_status
 
         if role_status != "pending":
-            # Only remove the placeholder once the concrete reward event exists.
-            real_event_exists = ReferralRewardEvent.objects.filter(
-                user=user,
-                referral=instance,
-                actor_role=role,
-                trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
-            ).exists()
-            if real_event_exists:
-                ReferralRewardEvent.objects.filter(
+            if role == "referrer":
+                # The referrer's referral_pending row is itself their concrete
+                # reward ledger entry. Keep its earned/claimed status; unlike
+                # the referee, no separate top_up/conversion row is created for
+                # this user.
+                placeholder_status = role_status
+            else:
+                # Only remove the referee placeholder once their concrete
+                # qualifying event exists.
+                real_event_exists = ReferralRewardEvent.objects.filter(
                     user=user,
-                    trigger="referral_pending",
                     referral=instance,
-                ).delete()
-                return
-            placeholder_status = "pending"
+                    actor_role=role,
+                    trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
+                ).exists()
+                if real_event_exists:
+                    ReferralRewardEvent.objects.filter(
+                        user=user,
+                        trigger="referral_pending",
+                        referral=instance,
+                    ).delete()
+                    return
+                placeholder_status = "pending"
 
         defaults = {
             "user": user,

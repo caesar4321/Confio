@@ -229,6 +229,19 @@ def notify_referral_stage(referral: UserReferral, event_ctx: EventContext) -> No
     if not template:
         return
 
+    transaction.on_commit(
+        lambda: _notify_referral_stage(referral, event_ctx, template),
+        robust=True,
+    )
+
+
+def _notify_referral_stage(
+    referral: UserReferral,
+    event_ctx: EventContext,
+    template: Dict[str, Any],
+) -> None:
+    """Create stage notifications only after the surrounding write commits."""
+
     referral_id = referral.id
     friend_name = _user_label(referral.referred_user)
 
@@ -275,6 +288,11 @@ def notify_referral_stage(referral: UserReferral, event_ctx: EventContext) -> No
 
 def notify_referral_joined(referral: UserReferral) -> None:
     """Notify referrer and referee that the link is active."""
+    transaction.on_commit(lambda: _notify_referral_joined(referral), robust=True)
+
+
+def _notify_referral_joined(referral: UserReferral) -> None:
+    """Create joined notifications only after the referral commits."""
     referred_name = _user_label(referral.referred_user)
     if referral.referrer_user:
         create_notification(
@@ -311,6 +329,15 @@ def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None
     """
     if not referral.referred_user or referee_confio <= Decimal("0"):
         return
+
+    transaction.on_commit(
+        lambda: _notify_reward_ready(referral, referee_confio),
+        robust=True,
+    )
+
+
+def _notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None:
+    """Create the earned notification only after reward state commits."""
 
     amount_str = f"{referee_confio:.2f}"
     friend_name = _user_label(referral.referrer_user) if referral.referrer_user else ""

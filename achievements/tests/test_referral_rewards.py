@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 from algosdk import account
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import transaction
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from achievements.models import ReferralRewardEvent, UserReferral
@@ -22,6 +23,7 @@ from security.models import IdentityVerification
 from users.models import Account
 
 
+@override_settings(BSC_REWARD_ENABLED=False)
 class ReferralRewardServiceTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -71,7 +73,7 @@ class ReferralRewardServiceTests(TestCase):
         self.push_patch.stop()
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
-    def test_send_event_triggers_reward(self, mock_service):
+    def test_top_up_event_triggers_reward(self, mock_service):
         mock_instance = mock_service.return_value
         mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.return_value = RewardSyncResult(
@@ -82,15 +84,16 @@ class ReferralRewardServiceTests(TestCase):
             box_name="deadbeef",
         )
 
-        sync_referral_reward_for_event(
-            self.referred,
-            EventContext(event="send", amount=Decimal("25")),
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            sync_referral_reward_for_event(
+                self.referred,
+                EventContext(event="top_up", amount=Decimal("25")),
+            )
 
         self.referral.refresh_from_db()
-        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="send")
+        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
         self.assertEqual(self.referral.reward_status, "eligible")
-        self.assertEqual(self.referral.reward_event, "send")
+        self.assertEqual(self.referral.reward_event, "top_up")
         self.assertEqual(self.referral.reward_tx_id, "TEST-TX")
         self.assertEqual(event.reward_status, "eligible")
         self.assertEqual(event.reward_tx_id, "TEST-TX")
@@ -99,8 +102,8 @@ class ReferralRewardServiceTests(TestCase):
         self.assertEqual(call_kwargs["reward_cusd_micro"], 5_000_000)
         self.assertEqual(call_kwargs["referee_confio_micro"], 20_000_000)
         self.assertEqual(call_kwargs["referrer_confio_micro"], 20_000_000)
-        notif_count = Notification.objects.filter(notification_type=NotificationTypeChoices.REFERRAL_EVENT_SEND).count()
-        self.assertEqual(notif_count, 2)
+        notif_count = Notification.objects.filter(notification_type=NotificationTypeChoices.REFERRAL_EVENT_TOP_UP).count()
+        self.assertEqual(notif_count, 1)
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_conversion_below_threshold_does_not_trigger(self, mock_service):
@@ -118,10 +121,10 @@ class ReferralRewardServiceTests(TestCase):
 
         result = sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="send", amount=Decimal("30")),
+            EventContext(event="top_up", amount=Decimal("30")),
         )
         self.assertIsNone(result)
-        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="send")
+        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
         self.assertIsNone(event.referral)
         self.assertEqual(event.reward_status, "pending")
         mock_service.assert_not_called()
@@ -132,6 +135,14 @@ class ReferralRewardServiceTests(TestCase):
         self.referral.delete()
         sync_referral_reward_for_event(
             self.referred,
+            EventContext(event="top_up", amount=Decimal("25")),
+        )
+        sync_referral_reward_for_event(
+            self.referred,
+            EventContext(event="conversion_usdc_to_cusd", amount=Decimal("25")),
+        )
+        sync_referral_reward_for_event(
+            self.referrer,
             EventContext(event="top_up", amount=Decimal("25")),
         )
         self.assertFalse(mock_service.called)
@@ -162,6 +173,18 @@ class ReferralRewardServiceTests(TestCase):
         event.refresh_from_db()
         self.assertEqual(event.reward_status, "eligible")
         self.assertEqual(event.referral_id, new_referral.id)
+        conversion = ReferralRewardEvent.objects.get(
+            user=self.referred,
+            trigger="conversion_usdc_to_cusd",
+        )
+        self.assertEqual(conversion.referral_id, new_referral.id)
+        self.assertEqual(conversion.reward_status, "skipped")
+        unrelated_referrer_event = ReferralRewardEvent.objects.get(
+            user=self.referrer,
+            trigger="top_up",
+        )
+        self.assertIsNone(unrelated_referrer_event.referral_id)
+        self.assertEqual(unrelated_referrer_event.reward_status, "pending")
         new_referral.refresh_from_db()
         self.assertEqual(new_referral.reward_status, "eligible")
         referrer_event = ReferralRewardEvent.objects.get(
@@ -184,7 +207,7 @@ class ReferralRewardServiceTests(TestCase):
         ReferralRewardEvent.objects.create(
             referral=self.referral,
             user=self.referred,
-            trigger="send",
+            trigger="top_up",
             actor_role="referee",
             amount=Decimal("25"),
             occurred_at=timezone.now(),
@@ -195,33 +218,89 @@ class ReferralRewardServiceTests(TestCase):
 
         result = sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="send", amount=Decimal("30")),
+            EventContext(event="top_up", amount=Decimal("30")),
         )
 
         self.assertEqual(result, self.referral)
         mock_service.assert_not_called()
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
-    def test_referrer_event_uses_referrer_role(self, mock_service):
+    def test_event_before_winner_is_reconciled_after_orphan_processing(self, mock_service):
+        self.referral.delete()
+        ReferralRewardEvent.objects.create(
+            user=self.referred,
+            trigger="top_up",
+            actor_role="referee",
+            amount=Decimal("10"),
+            occurred_at=timezone.now(),
+            reward_status="pending",
+        )
+        sync_referral_reward_for_event(
+            self.referred,
+            EventContext(event="conversion_usdc_to_cusd", amount=Decimal("25")),
+        )
+
         mock_instance = mock_service.return_value
         mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.return_value = RewardSyncResult(
-            tx_id="REFERRER-TX",
-            confirmed_round=321,
+            tx_id="CONVERSION-WINS",
+            confirmed_round=457,
             referee_confio_micro=20_000_000,
             referrer_confio_micro=20_000_000,
-            box_name="cafebabe",
+            box_name="conversionbox",
         )
 
+        referral = UserReferral.objects.create(
+            referred_user=self.referred,
+            referrer_identifier="@referrer",
+            referrer_user=self.referrer,
+        )
+
+        top_up = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
+        conversion = ReferralRewardEvent.objects.get(
+            user=self.referred,
+            trigger="conversion_usdc_to_cusd",
+        )
+        referral.refresh_from_db()
+        self.assertEqual(referral.reward_event, "conversion_usdc_to_cusd")
+        self.assertEqual(top_up.reward_status, "skipped")
+        self.assertEqual(conversion.reward_status, "eligible")
+        mock_instance.mark_eligibility.assert_called_once()
+
+    @override_settings(BSC_REWARD_ENABLED=True)
+    @patch("presale.price_utils.get_confio_current_price", return_value=Decimal("0.25"))
+    @patch("achievements.services.referral_rewards.ConfioRewardsService")
+    def test_bsc_reward_is_recorded_in_database_without_chain_write(
+        self,
+        mock_service,
+        _mock_price,
+    ):
         sync_referral_reward_for_event(
-            self.referrer,
-            EventContext(event="p2p_trade", amount=Decimal("60")),
+            self.referred,
+            EventContext(event="top_up", amount=Decimal("25")),
         )
 
-        event = ReferralRewardEvent.objects.get(user=self.referrer, trigger="p2p_trade")
-        self.assertEqual(event.actor_role, "referrer")
+        self.referral.refresh_from_db()
+        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
+        self.assertEqual(self.referral.reward_status, "eligible")
+        self.assertEqual(self.referral.reward_tx_id, "bsc-db")
+        self.assertEqual(self.referral.reward_referee_confio, Decimal("20"))
         self.assertEqual(event.reward_status, "eligible")
-        self.assertEqual(event.reward_tx_id, "REFERRER-TX")
+        self.assertEqual(event.reward_tx_id, "bsc-db")
+        mock_service.assert_not_called()
+
+    @patch("achievements.services.referral_rewards.ConfioRewardsService")
+    def test_referrer_activity_does_not_qualify_the_friend(self, mock_service):
+        result = sync_referral_reward_for_event(
+            self.referrer,
+            EventContext(event="top_up", amount=Decimal("60")),
+        )
+
+        event = ReferralRewardEvent.objects.get(user=self.referrer, trigger="top_up")
+        self.assertIsNone(result)
+        self.assertIsNone(event.referral_id)
+        self.assertEqual(event.reward_status, "pending")
+        mock_service.assert_not_called()
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_service_failure_marks_event_failed(self, mock_service):
@@ -231,10 +310,10 @@ class ReferralRewardServiceTests(TestCase):
 
         sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="payment", amount=Decimal("30")),
+            EventContext(event="top_up", amount=Decimal("30")),
         )
 
-        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="payment")
+        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
         self.referral.refresh_from_db()
         self.assertEqual(event.reward_status, "failed")
         self.assertEqual(self.referral.reward_status, "pending")
@@ -254,15 +333,15 @@ class ReferralRewardServiceTests(TestCase):
 
         sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="send", amount=Decimal("25")),
+            EventContext(event="top_up", amount=Decimal("25")),
         )
         sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="send", amount=Decimal("40")),
+            EventContext(event="top_up", amount=Decimal("40")),
         )
 
         mock_instance.mark_eligibility.assert_called_once()
-        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="send")
+        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
         self.assertEqual(event.amount, Decimal("25"))
         self.assertEqual(event.reward_tx_id, "UNIQUE-TX")
 
@@ -280,7 +359,7 @@ class ReferralRewardServiceTests(TestCase):
 
         sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="send", amount=Decimal("25")),
+            EventContext(event="top_up", amount=Decimal("25")),
         )
 
         referrer_event = ReferralRewardEvent.objects.get(
@@ -358,11 +437,11 @@ class ReferralRewardServiceTests(TestCase):
 
         sync_referral_reward_for_event(
             duplicate_user,
-            EventContext(event="send", amount=Decimal("25")),
+            EventContext(event="top_up", amount=Decimal("25")),
         )
 
         later_referral.refresh_from_db()
-        event = ReferralRewardEvent.objects.get(user=duplicate_user, trigger="send")
+        event = ReferralRewardEvent.objects.get(user=duplicate_user, trigger="top_up")
         self.assertEqual(later_referral.reward_status, "failed")
         self.assertEqual(later_referral.referee_reward_status, "failed")
         self.assertEqual(event.reward_status, "failed")
@@ -402,11 +481,12 @@ class ReferralRewardServiceTests(TestCase):
             username="referred_for_notifications",
             password="test-pass",
         )
-        new_referral = UserReferral.objects.create(
-            referred_user=new_referee,
-            referrer_identifier="@referrer2",
-            referrer_user=self.referrer,
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            new_referral = UserReferral.objects.create(
+                referred_user=new_referee,
+                referrer_identifier="@referrer2",
+                referrer_user=self.referrer,
+            )
         friend_joined = Notification.objects.filter(
             user=new_referral.referrer_user,
             notification_type=NotificationTypeChoices.REFERRAL_FRIEND_JOINED,
@@ -417,3 +497,25 @@ class ReferralRewardServiceTests(TestCase):
         ).count()
         self.assertEqual(friend_joined, 1)
         self.assertEqual(reminder, 1)
+
+    def test_referral_notifications_are_discarded_when_transaction_rolls_back(self):
+        new_referee = get_user_model().objects.create_user(
+            username="rolled_back_referee",
+            password="test-pass",
+        )
+        before_count = Notification.objects.count()
+
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            try:
+                with transaction.atomic():
+                    UserReferral.objects.create(
+                        referred_user=new_referee,
+                        referrer_identifier="@referrer",
+                        referrer_user=self.referrer,
+                    )
+                    raise RuntimeError("force rollback")
+            except RuntimeError:
+                pass
+
+        self.assertEqual(callbacks, [])
+        self.assertEqual(Notification.objects.count(), before_count)
