@@ -20,7 +20,7 @@ A Cloudflare Workers-based link shortener for Confio's WhatsApp share links duri
    - iOS → TestFlight with referral data
    - Android → Play Store with referrer parameter
    - Desktop → Landing page with campaign data
-5. **Post-Install**: App reads referral data and navigates to achievements
+5. **Post-Install**: App preserves the referral through signup, then registers it after authentication
 
 ## Admin Panel
 
@@ -98,9 +98,9 @@ wrangler deploy
 ## Integration with React Native
 
 The app includes a deep link handler that:
-1. Checks for deferred links on app launch
-2. Processes referral data after login
-3. Navigates to appropriate screens
-4. Clears expired links
+1. Captures deferred store attribution and installed-app `/invite/{username}` links on launch
+2. Keeps valid referral data through signup and authentication
+3. Registers the referrer from the authenticated Home screen
+4. Clears the referral after registration or when its 48-hour window expires
 
 See `/apps/src/utils/deepLinkHandler.ts` for implementation.
