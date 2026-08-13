@@ -15,12 +15,29 @@
 //     bottom before this was capped.
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, ImageSourcePropType } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, useWindowDimensions, ImageSourcePropType } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { useAppSafeArea } from '../hooks/useAppSafeArea';
 
 export interface RouteOption {
+  /**
+   * Stable key. REQUIRED whenever titles can repeat — six rails are called
+   * "Cuenta bancaria", and duplicate React keys silently reuse the wrong row's
+   * state. Titles used to be unique only because each carried a flag emoji.
+   */
+  id?: string;
+  /**
+   * Country flag, rendered in its OWN fixed-width cell before the title.
+   *
+   * It used to be concatenated (`${flag}  ${title}`), which broke alignment on
+   * Android: emoji come from the system emoji font while the text comes from
+   * Roboto, the two runs are measured separately, and flag glyphs do not all
+   * advance the same width. Titles therefore started at a different x on every
+   * row — most visible on the shortest one, "Pix", which looked indented. A
+   * fixed-width cell makes every title share one left edge on both platforms.
+   */
+  flag?: string;
   /** Feather icon name; ignored when `image` is provided. */
   icon: string;
   /** Token/brand logo — takes the icon slot when provided. */
@@ -52,15 +69,32 @@ export const RouteSheet = ({
   onClose: () => void;
 }) => {
   const { bottom } = useAppSafeArea();
+  const { height } = useWindowDimensions();
+  // Bound the LIST in real pixels rather than leaning on the sheet's
+  // percentage maxHeight to constrain it.
+  //
+  // The percentage cap alone did not work: `maxHeight: '85%'` limits how tall
+  // the sheet may DRAW, but the ScrollView inside still measured itself at its
+  // full content height, so it had nothing to scroll within — it simply got
+  // painted past the sheet's edge and the overflow disappeared. Adding
+  // flexShrink was not enough either, because a flex child only shrinks when
+  // the container's own height is already resolved, and here it is resolved
+  // from that same content.
+  //
+  // An explicit pixel maxHeight makes the ScrollView's viewport smaller than
+  // its content unconditionally, which is the only state in which it scrolls.
+  // 0.62 leaves room for the handle, the title, the safe-area inset and enough
+  // backdrop above the sheet to still read as dismissable.
+  const listMaxHeight = Math.round(height * 0.62);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={styles.sheet}>
+        <View style={styles.sheet} onStartShouldSetResponder={() => true}>
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
           <ScrollView
-            style={styles.optionScroll}
+            style={[styles.optionScroll, { maxHeight: listMaxHeight }]}
             // Keep breathing room even on devices that report a zero inset;
             // otherwise the last rail sits flush against the sheet edge.
             contentContainerStyle={{ paddingBottom: Math.max(bottom, 24) }}
@@ -72,7 +106,7 @@ export const RouteSheet = ({
           >
             {options.map((o) => (
               <TouchableOpacity
-                key={o.title}
+                key={o.id ?? o.title}
                 style={[styles.option, o.disabled && { opacity: 0.45 }]}
                 disabled={o.disabled}
                 onPress={() => {
@@ -89,7 +123,10 @@ export const RouteSheet = ({
                   </View>
                 )}
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.optionTitle}>{o.title}</Text>
+                  <View style={styles.optionTitleRow}>
+                    {o.flag ? <Text style={styles.optionFlag}>{o.flag}</Text> : null}
+                    <Text style={styles.optionTitle}>{o.title}</Text>
+                  </View>
                   <Text style={styles.optionSubtitle}>{o.subtitle}</Text>
                   {o.note ? <Text style={styles.optionNote}>{o.note}</Text> : null}
                 </View>
@@ -97,7 +134,7 @@ export const RouteSheet = ({
               </TouchableOpacity>
             ))}
           </ScrollView>
-        </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     </Modal>
   );
@@ -121,7 +158,16 @@ const styles = StyleSheet.create({
     maxHeight: '85%',
   },
   optionScroll: {
+    // flexGrow 0 → a two-option world picker hugs its content instead of
+    // rendering as a half-screen slab of white.
+    // flexShrink 1 → and a twelve-rail list is allowed to shrink INSIDE the
+    // sheet's maxHeight and scroll. This pair is not redundant: Yoga defaults
+    // flexShrink to 0 (unlike web CSS, which defaults to 1), so with only
+    // flexGrow set the ScrollView could neither grow nor shrink. It kept its
+    // full content height, overflowed the capped sheet, and the last row was
+    // clipped off the bottom with no way to scroll to it.
     flexGrow: 0,
+    flexShrink: 1,
   },
   handle: {
     alignSelf: 'center',
@@ -154,7 +200,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   optionImage: { width: 40, height: 40, borderRadius: 20 },
-  optionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  optionTitleRow: { flexDirection: 'row', alignItems: 'center' },
+  // Fixed width, centred glyph: the title's left edge is then independent of
+  // how wide a given flag happens to render.
+  optionFlag: { fontSize: 15, width: 22, marginRight: 8, textAlign: 'center' },
+  optionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, flexShrink: 1 },
   optionSubtitle: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   optionNote: { fontSize: 12, color: colors.text.light, marginTop: 3 },
 });

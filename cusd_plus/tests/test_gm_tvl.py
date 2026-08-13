@@ -17,8 +17,18 @@ class GmTvlTests(SimpleTestCase):
             'AAPLon': {'address': '0x' + '22' * 20, 'decimals': 18},
         }
         market = [
-            {'primaryMarket': {'symbol': 'TSLAon', 'price': '100'}},
-            {'primaryMarket': {'symbol': 'AAPLon', 'price': '50'}},
+            {
+                'primaryMarket': {
+                    'symbol': 'TSLAon', 'price': '100', 'priceChangePct24h': '2.5',
+                },
+                'underlyingMarket': {'ticker': 'TSLA', 'name': 'Tesla, Inc.'},
+            },
+            {
+                'primaryMarket': {
+                    'symbol': 'AAPLon', 'price': '50', 'priceChangePct24h': '-1.25',
+                },
+                'underlyingMarket': {'ticker': 'AAPL', 'name': 'Apple Inc.'},
+            },
         ]
         first = '0x' + 'aa' * 20
         second = '0x' + 'bb' * 20
@@ -35,7 +45,13 @@ class GmTvlTests(SimpleTestCase):
 
         self.assertEqual(result['value_usd'], 225.0)
         self.assertEqual(result['accounts_scanned'], 2)
+        self.assertEqual(result['holder_wallets'], 2)
         self.assertEqual(result['positions'], 2)
+        self.assertEqual([a['ticker'] for a in result['assets']], ['TSLA', 'AAPL'])
+        self.assertEqual(result['assets'][0]['value_usd'], 200.0)
+        self.assertAlmostEqual(result['assets'][0]['share_pct'], 200 / 225 * 100)
+        self.assertEqual(result['assets'][0]['holders'], 1)
+        self.assertEqual(result['assets'][0]['day_change_pct'], 2.5)
         self.assertEqual(result['as_of_block'], 0x123)
         rpc.assert_called_once_with('eth_blockNumber', [])
         self.assertEqual(scan.call_args_list[0].kwargs['block_tag'], '0x123')
@@ -53,6 +69,8 @@ class GmTvlTests(SimpleTestCase):
 
         self.assertEqual(result['value_usd'], 0.0)
         self.assertEqual(result['accounts_scanned'], 0)
+        self.assertEqual(result['holder_wallets'], 0)
+        self.assertEqual(result['assets'], [])
         registry.assert_not_called()
         market.assert_not_called()
         rpc.assert_not_called()
@@ -119,6 +137,47 @@ class GmTvlTests(SimpleTestCase):
             self.assertIsNone(gm_tvl.refresh())
 
         self.assertEqual(gm_tvl.value_usd(), 91.25)
+
+    def test_refresh_marks_the_same_units_to_the_latest_market_price(self):
+        registry = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        address = '0x' + 'aa' * 20
+        market = [
+            {'primaryMarket': {'symbol': 'TSLAon', 'price': '100'}},
+        ]
+        with mock.patch.object(gm_tvl, '_participant_addresses', return_value=[address]), \
+             mock.patch('cusd_plus.gm_holdings.registry', return_value=registry), \
+             mock.patch('cusd_plus.gm_api.all_market', return_value=market), \
+             mock.patch('cusd_plus.vault._rpc', return_value='0x123'), \
+             mock.patch('cusd_plus.gm_holdings._scan', return_value={'TSLAon': 2.0}):
+            first = gm_tvl.refresh()
+            market[0]['primaryMarket']['price'] = '125'
+            second = gm_tvl.refresh()
+
+        self.assertEqual(first['value_usd'], 200.0)
+        self.assertEqual(second['value_usd'], 250.0)
+        self.assertEqual(second['assets'][0]['price_usd'], 125.0)
+
+    def test_community_asset_rollup_combines_units_and_unique_wallets(self):
+        registry = {'TSLAon': {'address': '0x' + '11' * 20, 'decimals': 18}}
+        participants = ['0x' + 'aa' * 20, '0x' + 'bb' * 20]
+        market = [{
+            'primaryMarket': {'symbol': 'TSLAon', 'price': '100'},
+            'underlyingMarket': {'ticker': 'TSLA', 'name': 'Tesla'},
+        }]
+        with mock.patch.object(gm_tvl, '_participant_addresses', return_value=participants), \
+             mock.patch('cusd_plus.gm_holdings.registry', return_value=registry), \
+             mock.patch('cusd_plus.gm_api.all_market', return_value=market), \
+             mock.patch('cusd_plus.vault._rpc', return_value='0x123'), \
+             mock.patch('cusd_plus.gm_holdings._scan', side_effect=[
+                 {'TSLAon': 2.0}, {'TSLAon': 1.25},
+             ]):
+            result = gm_tvl.refresh()
+
+        self.assertEqual(result['value_usd'], 325.0)
+        self.assertEqual(result['holder_wallets'], 2)
+        self.assertEqual(result['positions'], 2)
+        self.assertEqual(result['assets'][0]['units'], 3.25)
+        self.assertEqual(result['assets'][0]['holders'], 2)
 
     def test_locmem_release_does_not_delete_a_successor_lock(self):
         release = gm_tvl._acquire_lock()

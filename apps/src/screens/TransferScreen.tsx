@@ -808,8 +808,12 @@ export const TransferScreen = () => {
 
   const railToOption = useCallback(
     (rail: LocalRail, direction: 'send' | 'receive') => ({
+      // `id` matters here: six rails share the title "Cuenta bancaria", so
+      // without it React would key three of them identically.
+      id: rail.id,
       icon: rail.status === 'live' ? (direction === 'send' ? 'send' : 'download') : 'clock',
-      title: `${countryFlag(rail.country)}  ${rail.title}`.trim(),
+      flag: countryFlag(rail.country),
+      title: rail.title,
       subtitle: rail.subtitle,
       note: rail.status === 'live' ? undefined : COMING_SOON_NOTE,
       onPress: () => handleLocalRailInterest(rail, direction),
@@ -845,8 +849,10 @@ export const TransferScreen = () => {
         account.fundingInstructions
           .filter(instruction => instruction.status === 'active' && !!instruction.displayValue)
           .map(instruction => ({
+            id: instruction.internalId,
             icon: 'download',
-            title: `${countryFlag(account.country)}  ${instruction.displayValue}`.trim(),
+            flag: countryFlag(account.country),
+            title: instruction.displayValue,
             subtitle: instruction.holderDisplayName
               ? `A nombre de ${instruction.holderDisplayName} · toca para copiar`
               : 'Toca para copiar',

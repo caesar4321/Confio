@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import {
+  AppState,
+  type AppStateStatus,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+} from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
@@ -14,6 +21,7 @@ type StatsSummary = {
   diditVerifiedUsers?: number | null;
   protectedSavings?: number | null;
   totalValueLocked?: number | null;
+  usdyReserve?: number | null;
   presaleCusdRaised?: number | null;
   ondoStocksTvl?: number | null;
 };
@@ -76,10 +84,14 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
   const { data, refetch } = useQuery(GET_STATS_SUMMARY, {
-    fetchPolicy: 'cache-and-network',
-    nextFetchPolicy: 'cache-first',
+    // The server owns the one universal snapshot. Never promote a prior
+    // device-local Apollo result to authoritative on a later execution.
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'network-only',
+    pollInterval: 300_000, // follows the server's marked-to-market stock snapshot cadence
   });
   const previousRefreshNonce = useRef(refreshNonce);
+  const previousAppState = useRef<AppStateStatus | null>(AppState.currentState);
 
   useEffect(() => {
     if (refreshNonce === previousRefreshNonce.current) return;
@@ -87,23 +99,45 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     refetch().catch(() => {});
   }, [refreshNonce, refetch]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      const returningToForeground =
+        previousAppState.current != null &&
+        /inactive|background/.test(previousAppState.current) &&
+        nextState === 'active';
+      previousAppState.current = nextState;
+      if (returningToForeground) {
+        refetch().catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, [refetch]);
+
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = currency.thousandsSeparator;
   const decimalSeparator = currency.decimalSeparator;
   // Savings spans BOTH rails now: cUSD (USDC 1:1) and cUSD+ (USDY, valued
   // at the oracle). Summed here rather than server-side so each stat field
   // keeps one meaning — ProtectedSavings shows them per-rail.
-  const cusdTvl = s?.totalValueLocked ?? s?.protectedSavings ?? 0;
-  const usdyReserve = (s as any)?.usdyReserve ?? 0;
-  const tvl = cusdTvl + usdyReserve;
+  const cusdTvl = s?.totalValueLocked ?? s?.protectedSavings ?? null;
+  const usdyReserve = s?.usdyReserve ?? 0;
+  // Missing network data is unknown, not a real zero. This matters now that
+  // the universal server snapshot deliberately bypasses Apollo's local read.
+  const tvl = cusdTvl == null ? null : cusdTvl + usdyReserve;
   // cUSD phase-out (2026-07-31): the descriptor names ONLY the assets that
   // actually back the figure, so it retires "USDC" by itself as cUSD drains
   // into cUSD+ — no follow-up release, and never a backing claim the
   // composition doesn't support. Threshold, not zero: a dust remainder of
   // cUSD shouldn't keep a deprecated ticker on the home screen forever.
-  const cusdShare = tvl > 0 ? cusdTvl / tvl : 1;
+  const cusdShare = cusdTvl != null && tvl != null && tvl > 0 ? cusdTvl / tvl : 1;
   const backingDescriptor =
-    cusdShare < 0.01 ? 'USDY' : usdyReserve <= 0 ? 'USDC' : 'USDC · USDY';
+    tvl == null
+      ? 'Reservas'
+      : cusdShare < 0.01
+        ? 'USDY'
+        : usdyReserve <= 0
+          ? 'USDC'
+          : 'USDC · USDY';
   const verified = s?.diditVerifiedUsers ?? 0;
   const fmt = (value: number | null | undefined) =>
     formatLocale(value, thousandsSeparator, decimalSeparator);
@@ -137,7 +171,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         value: fmt(s?.ondoStocksTvl),
         unit: 'USD',
         label: 'Acciones',
-        descriptor: 'Valor invertido',
+        // This is marked to market every background refresh, not cost basis.
+        descriptor: 'Valor de mercado',
         onPress: () => navigation.navigate('OndoStocksInfo'),
       };
       const presale: Tile = {

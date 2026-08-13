@@ -326,6 +326,30 @@ class GmHoldingType(graphene.ObjectType):
     day_change_pct = graphene.Float()
 
 
+class GmCommunityAssetType(graphene.ObjectType):
+    """Privacy-safe aggregate position. Wallets and per-asset holder counts
+    stay on the staff dashboard, not in the client API."""
+    symbol = graphene.String(required=True)
+    ticker = graphene.String(required=True)
+    name = graphene.String(required=True)
+    value_usd = graphene.Float(required=True)
+    share_pct = graphene.Float(required=True)
+
+
+class GmCommunityType(graphene.ObjectType):
+    value_usd = graphene.Float(required=True)
+    holder_wallets = graphene.Int(required=True)
+    positions = graphene.Int(required=True)
+    as_of_block = graphene.Int()
+    updated_at = graphene.DateTime(required=True)
+    assets = graphene.NonNull(
+        graphene.List(graphene.NonNull(GmCommunityAssetType))
+    )
+
+
+GM_COMMUNITY_MIN_ASSET_HOLDERS = 3
+
+
 _NAME_NOISE = (
     ' Common Stock', ' Class A', ' Class B', ' Class C', ', Inc.', ' Inc.',
     ' Corporation', ' Corp.', ' Holdings', ' Ltd.', ' PLC', ' N.V.', ' S.A.',
@@ -357,6 +381,10 @@ class Query(graphene.ObjectType):
         graphene.NonNull(lambda: CusdPlusConversionType),
     )
     gm_market = graphene.Field(GmMarketType)
+    gm_community = graphene.Field(
+        GmCommunityType,
+        description="Marked-to-market aggregate holdings for eligible users; never settlement volume",
+    )
     gm_soft_quote = graphene.Field(
         GmTradeQuoteType,
         symbol=graphene.String(required=True),
@@ -400,6 +428,48 @@ class Query(graphene.ObjectType):
             return BscRpcResult(result=_json.dumps(_rpc(method, parsed)))
         except Exception as exc:  # noqa: BLE001
             return BscRpcResult(error=str(exc)[:200])
+
+    def resolve_gm_community(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        from django.utils.dateparse import parse_datetime
+        from . import gm_tvl
+
+        snapshot = gm_tvl.snapshot()
+        if snapshot is None:
+            return None
+        updated_at = parse_datetime(snapshot.get('updated_at', ''))
+        if updated_at is None:
+            # A malformed/legacy cache entry is unknown, not a fresh zero.
+            return None
+        # Do not turn an aggregate into a single-wallet position disclosure
+        # while adoption is still small. Staff retain the full breakdown in
+        # the admin dashboard; the public list begins at three holder wallets.
+        public_assets = (
+            asset for asset in snapshot.get('assets', [])
+            if int(asset.get('holders', 0)) >= GM_COMMUNITY_MIN_ASSET_HOLDERS
+        )
+        assets = [
+            {
+                'symbol': asset['symbol'],
+                'ticker': asset['ticker'],
+                'name': _display_name(asset.get('name') or asset['ticker']),
+                'value_usd': float(asset['value_usd']),
+                'share_pct': float(asset['share_pct']),
+            }
+            for asset in list(public_assets)[:10]
+        ]
+        return GmCommunityType(
+            value_usd=float(snapshot['value_usd']),
+            holder_wallets=int(snapshot.get('holder_wallets', 0)),
+            positions=int(snapshot.get('positions', 0)),
+            as_of_block=snapshot.get('as_of_block'),
+            updated_at=updated_at,
+            assets=assets,
+        )
 
     def resolve_gm_market(self, info):
         user = getattr(info.context, 'user', None)

@@ -1,7 +1,7 @@
 import React from 'react';
 import renderer, { ReactTestInstance, ReactTestRenderer, act } from 'react-test-renderer';
+import {AppState, type AppStateStatus} from 'react-native';
 
-const mockNavigate = jest.fn();
 const statsSummary = {
   totalUsers: 12345,
   diditVerifiedUsers: 987,
@@ -10,9 +10,26 @@ const statsSummary = {
   presaleCusdRaised: 6789,
   ondoStocksTvl: 4321,
 };
+const mockNavigate = jest.fn();
+const mockRefetch = jest.fn(() => Promise.resolve());
+const mockRemoveAppStateListener = jest.fn();
+const mockUseQuery = jest.fn(
+  (_query: any, _options: any): {
+    data: {statsSummary: typeof statsSummary} | undefined;
+    refetch: typeof mockRefetch;
+  } => ({
+    data: {statsSummary},
+    refetch: mockRefetch,
+  }),
+);
+let appStateHandler: ((state: AppStateStatus) => void) | undefined;
+jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, handler) => {
+  appStateHandler = handler;
+  return {remove: mockRemoveAppStateListener} as any;
+});
 
 jest.mock('@apollo/client', () => ({
-  useQuery: () => ({ data: { statsSummary }, refetch: jest.fn() }),
+  useQuery: (query: any, options: any) => mockUseQuery(query, options),
   gql: (s: TemplateStringsArray) => s,
 }));
 jest.mock('@react-navigation/native', () => ({
@@ -50,6 +67,12 @@ const render = (showStocks: boolean): ReactTestRenderer => {
 };
 
 describe('HomeStatsSection layout', () => {
+  beforeEach(() => {
+    mockRefetch.mockClear();
+    mockRemoveAppStateListener.mockClear();
+    appStateHandler = undefined;
+  });
+
   it('lays 4 tiles out as 2 rows of 2, all rendered', () => {
     const tree = render(true);
     // Every tile is really in the tree — nothing clipped or scrolled away.
@@ -74,5 +97,53 @@ describe('HomeStatsSection layout', () => {
     const tree = render(true);
     const usuarios = tileLabels(tree.root)[0];
     expect(usuarios).toContain('12.345');
+  });
+
+  it('never presents missing network data as zero savings', () => {
+    mockUseQuery.mockImplementationOnce(() => ({
+      data: undefined,
+      refetch: mockRefetch,
+    }));
+
+    const ahorros = tileLabels(render(true).root)[1];
+    expect(ahorros).toContain('— USD');
+    expect(ahorros).not.toContain('0 USD');
+  });
+
+  it('labels the stock figure as current market value rather than cost basis', () => {
+    const acciones = tileLabels(render(true).root)[2];
+    expect(acciones).toContain('Valor de mercado');
+    expect(acciones).not.toContain('Valor invertido');
+  });
+
+  it('refreshes marked-to-market stats on the server snapshot cadence', () => {
+    render(true);
+    expect(mockUseQuery).toHaveBeenCalledWith(
+      'GET_STATS_SUMMARY',
+      expect.objectContaining({
+        fetchPolicy: 'network-only',
+        nextFetchPolicy: 'network-only',
+        pollInterval: 300_000,
+      }),
+    );
+  });
+
+  it('refetches the universal snapshot after returning to the foreground', async () => {
+    render(true);
+
+    await act(async () => {
+      appStateHandler?.('background');
+      appStateHandler?.('active');
+    });
+
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes the foreground listener when the section unmounts', () => {
+    const tree = render(true);
+
+    act(() => tree.unmount());
+
+    expect(mockRemoveAppStateListener).toHaveBeenCalledTimes(1);
   });
 });

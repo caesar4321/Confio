@@ -1,25 +1,22 @@
 import React from 'react';
 import renderer, {ReactTestRenderer, act} from 'react-test-renderer';
 
-const STATS = 'GET_STATS_SUMMARY';
 const FEE = 'OndoStocksInfoFee';
 
-let mockStatsPayload: any;
 let mockFeePayload: any;
 let mockMarketAssets: any[];
+const mockUseQuery = jest.fn((query: any, _options: any) => {
+  if (typeof query === 'string' && query.includes(FEE)) {
+    return {data: mockFeePayload, loading: false};
+  }
+  return {data: undefined, loading: false};
+});
 
 // gql is mocked to return the query body so useQuery can tell the two apart.
 jest.mock('@apollo/client', () => ({
   gql: (strings: TemplateStringsArray) => strings.join(''),
-  useQuery: (query: any) => {
-    if (query === STATS) return {data: mockStatsPayload, loading: false};
-    if (typeof query === 'string' && query.includes(FEE)) {
-      return {data: mockFeePayload, loading: false};
-    }
-    return {data: undefined, loading: false};
-  },
+  useQuery: (query: any, options: any) => mockUseQuery(query, options),
 }));
-jest.mock('../../apollo/queries', () => ({GET_STATS_SUMMARY: 'GET_STATS_SUMMARY'}));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({navigate: jest.fn(), goBack: jest.fn()}),
 }));
@@ -33,6 +30,7 @@ jest.mock('../../hooks/useGmMarket', () => ({
 jest.mock('../../hooks/useCurrency', () => ({
   useCurrency: () => ({currency: {thousandsSeparator: '.', decimalSeparator: ','}}),
 }));
+jest.mock('../../components/TickerLogo', () => ({TickerLogo: 'TickerLogo'}));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 
 import {OndoStocksInfoScreen} from '../OndoStocksInfoScreen';
@@ -55,8 +53,25 @@ const render = (): string => {
 };
 
 beforeEach(() => {
-  mockStatsPayload = {statsSummary: {ondoStocksTvl: 12345}};
-  mockFeePayload = {cusdPlusConvertParams: {gmTradeFeeBps: 30}};
+  mockUseQuery.mockClear();
+  mockFeePayload = {
+    cusdPlusConvertParams: {gmTradeFeeBps: 30},
+    gmCommunity: {
+      valueUsd: 12345,
+      holderWallets: 3,
+      positions: 7,
+      updatedAt: '2026-08-13T12:34:00Z',
+      assets: [
+        {
+          symbol: 'TSLAon',
+          ticker: 'TSLA',
+          name: 'Tesla',
+          valueUsd: 2500,
+          sharePct: 20.25,
+        },
+      ],
+    },
+  };
   mockMarketAssets = new Array(438).fill({});
 });
 
@@ -65,8 +80,28 @@ describe('OndoStocksInfoScreen headline figures', () => {
     expect(render()).toContain('12.345');
   });
 
+  it('shows the same marked-to-market community holdings snapshot', () => {
+    const text = render();
+    const compact = text.replace(/\s+/g, '');
+    expect(text).toContain('En qué invierte la comunidad');
+    expect(text).toContain('TSLA');
+    expect(compact).toContain('US$2.500,00');
+    expect(compact).toContain('20,3%');
+    expect(text).toContain('3 carteras con posiciones');
+    expect(text).toContain('7 posiciones');
+    expect(text).toContain('Datos al');
+  });
+
+  it('refreshes the community snapshot while the screen remains open', () => {
+    render();
+    expect(mockUseQuery).toHaveBeenCalledWith(
+      expect.stringContaining(FEE),
+      expect.objectContaining({pollInterval: 300_000}),
+    );
+  });
+
   it('hides the TVL pill entirely when the aggregation is unknown', () => {
-    mockStatsPayload = {statsSummary: {ondoStocksTvl: null}};
+    mockFeePayload.gmCommunity = null;
     const text = render();
     // Neither a fake zero nor a dangling em dash.
     expect(text).not.toContain('en acciones');
@@ -98,7 +133,7 @@ describe('OndoStocksInfoScreen headline figures', () => {
   });
 
   it('tracks a changed fee instead of the old hardcoded rate', () => {
-    mockFeePayload = {cusdPlusConvertParams: {gmTradeFeeBps: 45}};
+    mockFeePayload.cusdPlusConvertParams.gmTradeFeeBps = 45;
     expect(render()).toContain('0,45%');
   });
 });

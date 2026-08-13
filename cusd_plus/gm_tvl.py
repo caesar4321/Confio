@@ -13,7 +13,7 @@ without making a database ledger the balance source of truth.
 """
 import logging
 import secrets
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -22,9 +22,9 @@ from . import gm_api, gm_holdings, vault
 
 logger = logging.getLogger(__name__)
 
-TVL_CACHE_KEY = 'gm_confio_tvl_v1'
-TVL_LAST_CACHE_KEY = 'gm_confio_tvl_last_v1'
-TVL_LOCK_KEY = 'gm_confio_tvl_refresh_lock_v1'
+TVL_CACHE_KEY = 'gm_confio_tvl_v2'
+TVL_LAST_CACHE_KEY = 'gm_confio_tvl_last_v2'
+TVL_LOCK_KEY = 'gm_confio_tvl_refresh_lock_v2'
 TVL_TTL = 10 * 60
 # Do not present a week-old financial aggregate as current when the UI has no
 # stale badge. One hour tolerates several missed runs, then honestly shows "—".
@@ -48,17 +48,32 @@ def _participant_addresses() -> list[str]:
     )
 
 
-def _price_by_symbol() -> dict[str, Decimal]:
-    prices = {}
+def _market_by_symbol() -> dict[str, dict]:
+    """Current display-price metadata keyed by the on-chain GM symbol."""
+    assets = {}
     for item in gm_api.all_market():
         primary = item.get('primaryMarket') or {}
+        underlying = item.get('underlyingMarket') or {}
         symbol = str(primary.get('symbol') or '')
         price = primary.get('price')
         if symbol and price is not None:
-            value = Decimal(str(price))
+            try:
+                value = Decimal(str(price))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
             if value.is_finite() and value > 0:
-                prices[symbol] = value
-    return prices
+                try:
+                    change = Decimal(str(primary.get('priceChangePct24h') or 0))
+                except (InvalidOperation, TypeError, ValueError):
+                    # Decorative field must not invalidate the financial total.
+                    change = Decimal('0')
+                assets[symbol] = {
+                    'price': value,
+                    'ticker': str(underlying.get('ticker') or symbol.removesuffix('on')),
+                    'name': str(underlying.get('name') or underlying.get('ticker') or ''),
+                    'day_change_pct': float(change) if change.is_finite() else 0.0,
+                }
+    return assets
 
 
 def _acquire_lock():
@@ -92,8 +107,8 @@ def _acquire_lock():
 def _publish(result: dict) -> dict:
     cache.set(TVL_CACHE_KEY, result, TVL_TTL)
     cache.set(TVL_LAST_CACHE_KEY, result, TVL_LAST_TTL)
-    # statsSummary has its own short cache. Invalidate both the prior and
-    # current versions so the new aggregate is visible on the next read.
+    # statsSummary has its own short cache. Invalidate recent versions so a
+    # rolling deploy cannot keep serving the prior shape/value.
     cache.delete('stats_summary_v12')
     cache.delete('stats_summary_v13')
     return result
@@ -115,7 +130,9 @@ def refresh() -> dict | None:
             return _publish({
                 'value_usd': 0.0,
                 'accounts_scanned': 0,
+                'holder_wallets': 0,
                 'positions': 0,
+                'assets': [],
                 'as_of_block': None,
                 'updated_at': timezone.now().isoformat(),
             })
@@ -124,8 +141,8 @@ def refresh() -> dict | None:
         if token_registry is None:
             raise RuntimeError('GM token registry unavailable')
 
-        prices = _price_by_symbol()
-        if token_registry and not prices:
+        market = _market_by_symbol()
+        if token_registry and not market:
             raise RuntimeError('GM prices unavailable')
 
         # All balanceOf calls in this refresh observe one canonical height,
@@ -136,6 +153,9 @@ def refresh() -> dict | None:
 
         total = Decimal('0')
         positions = 0
+        holder_wallets = 0
+        units_by_asset: dict[str, Decimal] = {}
+        holders_by_asset: dict[str, int] = {}
         for address in participants:
             units_by_symbol = gm_holdings._scan(
                 address,
@@ -143,19 +163,43 @@ def refresh() -> dict | None:
                 block_tag=block_tag,
                 require_complete=True,
             )
+            if units_by_symbol:
+                holder_wallets += 1
             for symbol, units in units_by_symbol.items():
-                price = prices.get(symbol)
-                if price is None:
+                asset = market.get(symbol)
+                if asset is None:
                     # Do not publish a knowingly understated number. A held,
                     # halted or newly-listed asset still needs a real price.
                     raise RuntimeError(f'No live price for held GM asset {symbol}')
-                total += Decimal(str(units)) * price
+                units_decimal = Decimal(str(units))
+                total += units_decimal * asset['price']
+                units_by_asset[symbol] = units_by_asset.get(symbol, Decimal('0')) + units_decimal
+                holders_by_asset[symbol] = holders_by_asset.get(symbol, 0) + 1
                 positions += 1
+
+        assets = []
+        for symbol, units in units_by_asset.items():
+            market_asset = market[symbol]
+            value = units * market_asset['price']
+            assets.append({
+                'symbol': symbol,
+                'ticker': market_asset['ticker'],
+                'name': market_asset['name'],
+                'units': float(units),
+                'price_usd': float(market_asset['price']),
+                'value_usd': float(value),
+                'share_pct': float(value / total * 100) if total else 0.0,
+                'holders': holders_by_asset[symbol],
+                'day_change_pct': market_asset['day_change_pct'],
+            })
+        assets.sort(key=lambda item: (-item['value_usd'], item['ticker']))
 
         result = {
             'value_usd': float(total),
             'accounts_scanned': len(participants),
+            'holder_wallets': holder_wallets,
             'positions': positions,
+            'assets': assets,
             'as_of_block': block_number,
             'updated_at': timezone.now().isoformat(),
         }

@@ -906,6 +906,19 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['stock_stats_24h'] = get_stock_trade_stats(since=last_24h)
         context['stock_stats_30d'] = get_stock_trade_stats(since=rolling_30_start)
         context['stock_router_metrics'] = get_stock_router_metrics()
+        # Same chain-derived, marked-to-market snapshot served to the app.
+        # Never substitute settlement volume: volume is a flow, while this is
+        # the current value of tokens still held by Confío stock traders.
+        from cusd_plus import gm_tvl
+        from django.utils.dateparse import parse_datetime
+        stock_portfolio = gm_tvl.snapshot()
+        if stock_portfolio is not None:
+            stock_portfolio = dict(stock_portfolio)
+            stock_portfolio['assets'] = list(stock_portfolio.get('assets', []))
+            stock_portfolio['updated_at_dt'] = parse_datetime(
+                stock_portfolio.get('updated_at', '')
+            )
+        context['stock_portfolio'] = stock_portfolio
 
         # Country breakdown for P2P
         country_stats = P2POffer.objects.filter(

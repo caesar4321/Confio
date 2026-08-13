@@ -3,6 +3,7 @@ import time
 from types import SimpleNamespace
 from unittest import mock
 
+import graphene
 from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 
@@ -180,13 +181,120 @@ class GmApiTradingTests(SimpleTestCase):
         query = Query()
         with mock.patch('cusd_plus.gm_api.all_market') as market, \
              mock.patch('cusd_plus.gm_api.ohlc') as ohlc, \
+             mock.patch('cusd_plus.gm_tvl.snapshot') as community, \
              mock.patch('cusd_plus.schema._active_account') as account:
             self.assertIsNone(query.resolve_gm_market(info))
+            self.assertIsNone(query.resolve_gm_community(info))
             self.assertEqual(query.resolve_gm_holdings(info), [])
             self.assertEqual(query.resolve_gm_ohlc(info, 'TSLAon'), [])
         market.assert_not_called()
         ohlc.assert_not_called()
+        community.assert_not_called()
         account.assert_not_called()
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
+    def test_eligible_user_gets_privacy_safe_marked_to_market_community_stats(self):
+        user = SimpleNamespace(is_authenticated=True, id=35, phone_country='CO')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        snapshot = {
+            'value_usd': 325.0,
+            'holder_wallets': 3,
+            'positions': 3,
+            'as_of_block': 123,
+            'updated_at': '2026-08-13T12:34:00+00:00',
+            'assets': [{
+                'symbol': 'TSLAon',
+                'ticker': 'TSLA',
+                'name': 'Tesla, Inc.',
+                'units': 3.25,
+                'price_usd': 100.0,
+                'value_usd': 325.0,
+                'share_pct': 100.0,
+                'holders': 3,
+                'day_change_pct': 1.5,
+            }],
+        }
+        with mock.patch('cusd_plus.gm_tvl.snapshot', return_value=snapshot):
+            result = Query().resolve_gm_community(info)
+
+        self.assertEqual(result.value_usd, 325.0)
+        self.assertEqual(result.holder_wallets, 3)
+        self.assertEqual(result.positions, 3)
+        self.assertEqual(result.assets, [{
+            'symbol': 'TSLAon',
+            'ticker': 'TSLA',
+            'name': 'Tesla',
+            'value_usd': 325.0,
+            'share_pct': 100.0,
+        }])
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
+    def test_community_graphql_contract_uses_camel_case_client_fields(self):
+        context = SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, id=35, phone_country='CO'),
+            META={'HTTP_CF_IPCOUNTRY': 'CO'},
+        )
+        snapshot = {
+            'value_usd': 325.0,
+            'holder_wallets': 3,
+            'positions': 3,
+            'as_of_block': 123,
+            'updated_at': '2026-08-13T12:34:00+00:00',
+            'assets': [{
+                'symbol': 'TSLAon', 'ticker': 'TSLA', 'name': 'Tesla',
+                'value_usd': 325.0, 'share_pct': 100.0, 'holders': 3,
+            }],
+        }
+        schema = graphene.Schema(query=Query)
+        with mock.patch('cusd_plus.gm_tvl.snapshot', return_value=snapshot):
+            result = schema.execute(
+                '{ gmCommunity { valueUsd holderWallets positions updatedAt '
+                'assets { symbol ticker name valueUsd sharePct } } }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data['gmCommunity']['valueUsd'], 325.0)
+        self.assertEqual(result.data['gmCommunity']['holderWallets'], 3)
+        self.assertEqual(result.data['gmCommunity']['assets'][0]['ticker'], 'TSLA')
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
+    def test_community_hides_assets_held_by_fewer_than_three_wallets(self):
+        context = SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, id=35, phone_country='CO'),
+            META={'HTTP_CF_IPCOUNTRY': 'CO'},
+        )
+        snapshot = {
+            'value_usd': 100.0,
+            'holder_wallets': 2,
+            'positions': 2,
+            'as_of_block': 123,
+            'updated_at': '2026-08-13T12:34:00+00:00',
+            'assets': [{
+                'symbol': 'TSLAon', 'ticker': 'TSLA', 'name': 'Tesla',
+                'value_usd': 100.0, 'share_pct': 100.0, 'holders': 2,
+            }],
+        }
+        schema = graphene.Schema(query=Query)
+        with mock.patch('cusd_plus.gm_tvl.snapshot', return_value=snapshot):
+            result = schema.execute(
+                '{ gmCommunity { valueUsd assets { ticker } } }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data['gmCommunity']['valueUsd'], 100.0)
+        self.assertEqual(result.data['gmCommunity']['assets'], [])
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=False)
+    def test_hidden_stock_surface_never_reads_community_snapshot(self):
+        user = SimpleNamespace(is_authenticated=True, id=36, phone_country='CO')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        with mock.patch('cusd_plus.gm_tvl.snapshot') as snapshot:
+            self.assertIsNone(Query().resolve_gm_community(info))
+        snapshot.assert_not_called()
 
     @override_settings(
         CUSD_PLUS_STOCKS_ENABLED=True,
@@ -284,6 +392,7 @@ class GmApiTradingTests(SimpleTestCase):
         self.assertEqual(cache.get(lock_key), 'new-owner')
 
     @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
         CUSD_PLUS_7702_ENABLED=True,
@@ -305,6 +414,7 @@ class GmApiTradingTests(SimpleTestCase):
                  'users.jwt_context.get_jwt_business_context_with_validation',
                  return_value=None,
              ), \
+             mock.patch('cusd_plus.schema._stock_issuer_eligible', return_value=True), \
              mock.patch('cusd_plus.eligibility.check_stock_buy_eligibility', return_value=True), \
              mock.patch('cusd_plus.gm_api.binding_attestation') as binding:
             result = PrepareGmTrade().mutate(

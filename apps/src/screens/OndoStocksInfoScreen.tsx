@@ -18,7 +18,7 @@ import {MainStackParamList} from '../types/navigation';
 import {useSavingsPortfolio} from '../hooks/useSavingsPortfolio';
 import {useGmMarket} from '../hooks/useGmMarket';
 import {useCurrency} from '../hooks/useCurrency';
-import {GET_STATS_SUMMARY} from '../apollo/queries';
+import {TickerLogo} from '../components/TickerLogo';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
@@ -26,13 +26,26 @@ const ONDO_STOCKS_URL = 'https://ondo.finance/ondo-stocks';
 
 // The trade fee is an env-driven server setting (CUSD_PLUS_GM_TRADE_FEE_BPS),
 // and the router's on-chain stockFeeBps is authoritative above even that — so
-// this screen must never carry the number as a literal. Own query rather than
-// reusing the trading service's: this screen only needs the fee, and an
-// education screen should not fail because a trading field moved.
-const STOCK_FEE = gql`
+// this screen must never carry the number as a literal. This eligible-only
+// query also returns the privacy-safe community rollup from the same snapshot
+// as the Home market-value figure.
+const STOCK_INFO = gql`
   query OndoStocksInfoFee {
     cusdPlusConvertParams {
       gmTradeFeeBps
+    }
+    gmCommunity {
+      valueUsd
+      holderWallets
+      positions
+      updatedAt
+      assets {
+        symbol
+        ticker
+        name
+        valueUsd
+        sharePct
+      }
     }
   }
 `;
@@ -55,6 +68,14 @@ const formatWhole = (n: number | null | undefined, sep: string) => {
 };
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
+
+type CommunityStock = {
+  symbol: string;
+  ticker: string;
+  name: string;
+  valueUsd: number;
+  sharePct: number;
+};
 
 const ExplanationRow = ({
   icon,
@@ -84,21 +105,11 @@ export const OndoStocksInfoScreen = () => {
   // here and simply skip themselves when the product is off.
   const {currency} = useCurrency();
   const {stocks: marketAssets} = useGmMarket(stocks.enabled);
-  const {data: feeData} = useQuery(STOCK_FEE, {
+  const {data: feeData} = useQuery(STOCK_INFO, {
     skip: !stocks.enabled,
     fetchPolicy: 'cache-and-network',
+    pollInterval: 300_000,
   });
-  // Every other stat tile on Home lands on a screen that repeats its number
-  // (Usuarios -> LatamCommunity, Ahorros -> ProtectedSavings, Preventa ->
-  // ConfioPresale). Acciones was the one that didn't, so the tap dead-ended
-  // on a number the user came here to see. Same query and same field the
-  // Home tile reads, so the two can never disagree.
-  const {data: statsData} = useQuery(GET_STATS_SUMMARY, {
-    skip: !stocks.enabled,
-    fetchPolicy: 'cache-and-network',
-    nextFetchPolicy: 'cache-first',
-  });
-
   // useGmMarket returns an EMPTY list while loading and on upstream failure
   // (its documented honesty rule — never a fake price), so a bare
   // `marketAssets.length` would render "0 acciones" as if that were a fact.
@@ -111,9 +122,39 @@ export const OndoStocksInfoScreen = () => {
   // null whenever the aggregation or a held-asset price failed. Render the
   // pill only when there is a real figure — a "US$0 en acciones" pill would
   // read as "nobody is invested" rather than "we don't know right now".
-  const stocksTvl: number | null | undefined = statsData?.statsSummary?.ondoStocksTvl;
+  const stocksTvl: number | null | undefined = feeData?.gmCommunity?.valueUsd;
   const stocksTvlLabel =
     stocksTvl != null ? formatWhole(stocksTvl, currency.thousandsSeparator) : null;
+  const communityStocks: CommunityStock[] =
+    feeData?.gmCommunity?.assets ?? [];
+  const communityHolderWallets: number | null | undefined =
+    feeData?.gmCommunity?.holderWallets;
+  const communityPositions: number | null | undefined =
+    feeData?.gmCommunity?.positions;
+  const communityUpdatedAt: string | null | undefined =
+    feeData?.gmCommunity?.updatedAt;
+  const communityUpdatedLabel = (() => {
+    if (!communityUpdatedAt) return null;
+    const date = new Date(communityUpdatedAt);
+    if (!Number.isFinite(date.getTime())) return null;
+    return date.toLocaleString('es-419', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  })();
+  const marketByTicker = new Map(marketAssets.map(asset => [asset.ticker, asset]));
+  const formatUsd = (value: number) => {
+    const rendered = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+    return rendered
+      .replace(/,/g, '__THOUSANDS__')
+      .replace('.', currency.decimalSeparator)
+      .replace(/__THOUSANDS__/g, currency.thousandsSeparator);
+  };
 
   // Same rule for the fee: assert a rate only once the server has told us one.
   const feeBps: number | null | undefined =
@@ -205,6 +246,59 @@ export const OndoStocksInfoScreen = () => {
             )}
           </View>
         </View>
+
+        {communityStocks.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeadingRow}>
+              <Icon name="pie-chart" size={20} color={colors.primaryDark} />
+              <Text style={styles.sectionTitleInline}>
+                En qué invierte la comunidad
+              </Text>
+            </View>
+            <Text style={styles.communityIntro}>
+              Posiciones actuales agregadas, valoradas con los precios de
+              mercado de Ondo. No mostramos identidades ni billeteras.
+            </Text>
+            {communityStocks.map(asset => {
+              const marketAsset = marketByTicker.get(asset.ticker);
+              return (
+                <View key={asset.symbol} style={styles.communityRow}>
+                  <TickerLogo
+                    ticker={asset.ticker}
+                    color={marketAsset?.color ?? '#334155'}
+                    logoUrl={marketAsset?.logoUrl}
+                    size={38}
+                  />
+                  <View style={styles.communityIdentity}>
+                    <Text style={styles.communityTicker}>{asset.ticker}</Text>
+                    <Text style={styles.communityName} numberOfLines={1}>
+                      {asset.name || marketAsset?.name || asset.ticker}
+                    </Text>
+                  </View>
+                  <View style={styles.communityValueColumn}>
+                    <Text style={styles.communityValue}>
+                      US${formatUsd(asset.valueUsd)}
+                    </Text>
+                    <Text style={styles.communityShare}>
+                      {asset.sharePct.toFixed(1).replace('.', currency.decimalSeparator)}%
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+            <Text style={styles.communityFootnote}>
+              {communityHolderWallets != null
+                ? `${communityHolderWallets} ${communityHolderWallets === 1 ? 'cartera con posiciones' : 'carteras con posiciones'} · `
+                : ''}
+              {communityPositions != null
+                ? `${communityPositions} ${communityPositions === 1 ? 'posición' : 'posiciones'} · `
+                : ''}
+              {communityUpdatedLabel
+                ? `Datos al ${communityUpdatedLabel}.`
+                : 'Datos de la última valoración disponible.'}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>¿Cómo funciona?</Text>
@@ -426,6 +520,31 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: colors.text.secondary,
     marginBottom: 10,
+  },
+  communityIntro: {
+    marginBottom: 4,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.text.secondary,
+  },
+  communityRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  communityIdentity: {flex: 1, marginLeft: 11, marginRight: 8},
+  communityTicker: {fontSize: 14, fontWeight: '800', color: colors.text.primary},
+  communityName: {marginTop: 2, fontSize: 12, color: colors.text.secondary},
+  communityValueColumn: {alignItems: 'flex-end'},
+  communityValue: {fontSize: 13, fontWeight: '700', color: colors.text.primary},
+  communityShare: {marginTop: 2, fontSize: 11, color: colors.text.light},
+  communityFootnote: {
+    marginTop: 10,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.text.light,
   },
   explanationRow: {
     flexDirection: 'row',

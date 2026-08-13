@@ -1724,6 +1724,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			# total_value_locked, which is the cUSD/USDC side: the app shows
 			# one pill per rail, each labelled with its own asset.
 			'usdy_reserve': cusd_plus_vault.usdy_reserve_usd(),
+			# Current chain balances × current Ondo display prices. This is a
+			# marked-to-market holdings metric, intentionally distinct from the
+			# settled buy/sell volume shown in operations.
 			'ondo_stocks_tvl': gm_tvl.value_usd(),
 			'circulating_cusd': circulating_cusd,
 			'presale_cusd_raised': float(presale_cusd_raised),

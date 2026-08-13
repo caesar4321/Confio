@@ -60,6 +60,14 @@
         color: #ef4444;
     }
 
+    .positive {
+        color: #10b981;
+    }
+
+    .negative {
+        color: #ef4444;
+    }
+
     .section-title {
         font-size: 24px;
         font-weight: 700;
@@ -1677,6 +1685,32 @@
     <h2 class="section-title">Ondo Stocks</h2>
     <div class="metrics-grid">
         <div class="metric-card">
+            <div class="metric-label">Current Market Value</div>
+            <div class="metric-value">
+                {% if stock_portfolio %}
+                ${{ stock_portfolio.value_usd|floatformat:2|intcomma }}
+                {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+            </div>
+            <div class="metric-change">
+                Live token balances &times; current Ondo prices
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Current Holder Wallets</div>
+            <div class="metric-value">
+                {% if stock_portfolio %}{{ stock_portfolio.holder_wallets|intcomma }}
+                {% else %}<span style="color:#9ca3af;">unavailable</span>{% endif %}
+            </div>
+            <div class="metric-change">
+                {% if stock_portfolio %}
+                {{ stock_portfolio.positions|intcomma }} open positions &middot;
+                {{ stock_portfolio.accounts_scanned|intcomma }} trader wallets scanned
+                {% else %}No current snapshot{% endif %}
+            </div>
+        </div>
+
+        <div class="metric-card">
             <div class="metric-label">Trades (24h)</div>
             <div class="metric-value">{{ stock_stats_24h.confirmed|intcomma }}</div>
             <div class="metric-change">
@@ -1754,9 +1788,51 @@
         </div>
     </div>
     <p style="color:#6b7280; font-size:13px; margin:0 0 12px;">
-        Volumes use exact event-backed account-history settlements. Router USDT
-        can include accidental transfers; only accrued fees are withdrawable as revenue.
+        Current market value is marked to market from BSC balances and Ondo display prices;
+        it is not historical purchase cost. Volumes use exact event-backed settlements.
+        Router USDT can include accidental transfers; only accrued fees are withdrawable as revenue.
+        {% if stock_portfolio.updated_at_dt %}
+        Snapshot: {{ stock_portfolio.updated_at_dt|date:"Y-m-d H:i:s T" }}, BSC block
+        {{ stock_portfolio.as_of_block|default:"—" }}.
+        {% endif %}
     </p>
+
+    {% if stock_portfolio.assets %}
+    <h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">Current Community Holdings</h3>
+    <div class="data-table" style="border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom:20px;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background: #f9fafb;">
+                <tr>
+                    <th style="padding:12px; text-align:left;">Stock</th>
+                    <th style="padding:12px; text-align:right;">Holders</th>
+                    <th style="padding:12px; text-align:right;">Units</th>
+                    <th style="padding:12px; text-align:right;">Price</th>
+                    <th style="padding:12px; text-align:right;">Market value</th>
+                    <th style="padding:12px; text-align:right;">Share</th>
+                    <th style="padding:12px; text-align:right;">24h</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in stock_portfolio.assets %}
+                <tr>
+                    <td style="padding:12px;">
+                        <strong>{{ asset.ticker }}</strong>
+                        {% if asset.name %}<div style="font-size:12px;color:#6b7280;">{{ asset.name }}</div>{% endif %}
+                    </td>
+                    <td style="padding:12px; text-align:right;">{{ asset.holders|intcomma }}</td>
+                    <td style="padding:12px; text-align:right;">{{ asset.units|floatformat:6|intcomma }}</td>
+                    <td style="padding:12px; text-align:right;">${{ asset.price_usd|floatformat:2|intcomma }}</td>
+                    <td style="padding:12px; text-align:right;"><strong>${{ asset.value_usd|floatformat:2|intcomma }}</strong></td>
+                    <td style="padding:12px; text-align:right;">{{ asset.share_pct|floatformat:1 }}%</td>
+                    <td style="padding:12px; text-align:right;" class="{% if asset.day_change_pct < 0 %}negative{% else %}positive{% endif %}">
+                        {{ asset.day_change_pct|floatformat:2 }}%
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
     <div style="margin-bottom: 20px;">
         <a href="{% url 'confio_admin:blockchain_ondostocktrade_changelist' %}"
             class="action-button secondary" style="margin-right: 10px;">Ondo Stock Trades</a>
