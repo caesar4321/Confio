@@ -132,7 +132,7 @@ class ReferralRewardServiceTests(TestCase):
         self.referral.delete()
         sync_referral_reward_for_event(
             self.referred,
-            EventContext(event="send", amount=Decimal("25")),
+            EventContext(event="top_up", amount=Decimal("25")),
         )
         self.assertFalse(mock_service.called)
 
@@ -155,13 +155,28 @@ class ReferralRewardServiceTests(TestCase):
             status='active',
         )
         self.assertEqual(
-            ReferralRewardEvent.objects.filter(user=self.referred, trigger="send").count(),
+            ReferralRewardEvent.objects.filter(user=self.referred, trigger="top_up").count(),
             1
         )
-        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="send")
+        event = ReferralRewardEvent.objects.get(user=self.referred, trigger="top_up")
         event.refresh_from_db()
         self.assertEqual(event.reward_status, "eligible")
         self.assertEqual(event.referral_id, new_referral.id)
+        new_referral.refresh_from_db()
+        self.assertEqual(new_referral.reward_status, "eligible")
+        referrer_event = ReferralRewardEvent.objects.get(
+            user=self.referrer,
+            trigger="referral_pending",
+            referral=new_referral,
+        )
+        self.assertEqual(referrer_event.reward_status, "eligible")
+        self.assertFalse(
+            ReferralRewardEvent.objects.filter(
+                user=self.referred,
+                trigger="referral_pending",
+                referral=new_referral,
+            ).exists()
+        )
         mock_instance.mark_eligibility.assert_called_once()
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")

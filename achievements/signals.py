@@ -337,6 +337,12 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
             ),
         )
 
+    # Reward sync updates a separately queried UserReferral instance. Refresh
+    # this post-save instance before maintaining placeholders; otherwise an
+    # earned referrer event can be downgraded back to pending using stale role
+    # statuses from before the orphan event was processed.
+    instance.refresh_from_db()
+
     # Ensure the referred user sees a placeholder pending reward in the app.
     def ensure_pending_event(user, role: str, stage_meta: str, reward_amount: Decimal):
         if not user:
