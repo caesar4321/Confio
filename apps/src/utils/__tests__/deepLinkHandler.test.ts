@@ -4,6 +4,7 @@ const mockGetInternetCredentials = jest.fn();
 const mockSetInternetCredentials = jest.fn();
 const mockGetInstallReferrerInfo = jest.fn();
 let linkListener: ((event: { url: string }) => void) | undefined;
+let storedPassword: string | null;
 
 jest.mock('react-native', () => ({
   Linking: {
@@ -31,8 +32,14 @@ import { DeepLinkHandler } from '../deepLinkHandler';
 describe('DeepLinkHandler referral attribution', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetInternetCredentials.mockResolvedValue(false);
-    mockSetInternetCredentials.mockResolvedValue(undefined);
+    storedPassword = null;
+    mockGetInternetCredentials.mockImplementation(async () => storedPassword === null ? false : ({
+      username: 'deferred_link',
+      password: storedPassword,
+    }));
+    mockSetInternetCredentials.mockImplementation(async (_service, _username, password) => {
+      storedPassword = password;
+    });
     mockAddEventListener.mockImplementation((_event, listener) => {
       linkListener = listener;
       return { remove: jest.fn() };
@@ -97,6 +104,52 @@ describe('DeepLinkHandler referral attribution', () => {
     });
   });
 
+  it('retries initialization after listener setup fails', async () => {
+    mockGetInitialURL.mockResolvedValue(null);
+    mockAddEventListener
+      .mockImplementationOnce(() => { throw new Error('native listener unavailable'); })
+      .mockImplementationOnce((_event, listener) => {
+        linkListener = listener;
+        return { remove: jest.fn() };
+      });
+
+    const handler = new DeepLinkHandler();
+    await expect(handler.init()).rejects.toThrow('native listener unavailable');
+    await expect(handler.init()).resolves.toBeUndefined();
+
+    expect(mockAddEventListener).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries cold-start attribution after secure storage fails', async () => {
+    mockGetInitialURL.mockResolvedValue('https://confio.lat/invite/WILBERHL');
+    mockSetInternetCredentials
+      .mockRejectedValueOnce(new Error('keychain unavailable'))
+      .mockImplementation(async (_service, _username, password) => {
+        storedPassword = password;
+      });
+
+    const handler = new DeepLinkHandler();
+    await expect(handler.init()).rejects.toThrow('keychain unavailable');
+    await expect(handler.init()).resolves.toBeUndefined();
+
+    expect(JSON.parse(storedPassword!)).toMatchObject({
+      type: 'referral',
+      payload: 'WILBERHL',
+    });
+  });
+
+  it('does not let an older referral clear a newer warm-app referral', async () => {
+    const older = { type: 'referral', payload: 'FIRST', timestamp: 1 } as const;
+    const newer = { type: 'referral', payload: 'SECOND', timestamp: 2 } as const;
+    storedPassword = JSON.stringify(newer);
+
+    const handler = new DeepLinkHandler();
+    await expect(handler.clearDeferredLink(older)).resolves.toBe(false);
+
+    expect(JSON.parse(storedPassword!)).toEqual(newer);
+    expect(mockSetInternetCredentials).not.toHaveBeenCalled();
+  });
+
   it('does not clear a valid deferred referral during navigation readiness checks', async () => {
     const pending = {
       type: 'referral',
@@ -104,10 +157,7 @@ describe('DeepLinkHandler referral attribution', () => {
       timestamp: Date.now(),
     };
     mockGetInitialURL.mockResolvedValue(null);
-    mockGetInternetCredentials.mockResolvedValue({
-      username: 'deferred_link',
-      password: JSON.stringify(pending),
-    });
+    storedPassword = JSON.stringify(pending);
 
     const handler = new DeepLinkHandler();
     await handler.checkDeferredLinks();
@@ -122,10 +172,7 @@ describe('DeepLinkHandler referral attribution', () => {
       timestamp: Date.now() - (49 * 60 * 60 * 1000),
     };
     mockGetInitialURL.mockResolvedValue(null);
-    mockGetInternetCredentials.mockResolvedValue({
-      username: 'deferred_link',
-      password: JSON.stringify(expired),
-    });
+    storedPassword = JSON.stringify(expired);
 
     const handler = new DeepLinkHandler();
     await handler.init();
@@ -135,5 +182,20 @@ describe('DeepLinkHandler referral attribution', () => {
       'deferred_link',
       'null',
     );
+  });
+
+  it('clears retired influencer attribution instead of retaining it forever', async () => {
+    const influencer = {
+      type: 'influencer',
+      payload: 'legacy-campaign',
+      timestamp: Date.now(),
+    };
+    mockGetInitialURL.mockResolvedValue(null);
+    storedPassword = JSON.stringify(influencer);
+
+    const handler = new DeepLinkHandler();
+    await handler.init();
+
+    expect(storedPassword).toBe('null');
   });
 });

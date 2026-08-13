@@ -352,6 +352,8 @@ export const HomeScreen = () => {
 
   // State for deferred referral success modal
   const [showDeferredReferralSuccess, setShowDeferredReferralSuccess] = useState(false);
+  const deferredReferralProcessingRef = useRef(false);
+  const deferredReferralCheckPendingRef = useRef(false);
 
   // Helper function to format error messages (same as ReferralInputModal)
   const formatReferralErrorMessage = (rawMessage: string | undefined): string => {
@@ -377,11 +379,14 @@ export const HomeScreen = () => {
 
   // Check for deferred referral link and register automatically
   useEffect(() => {
-    let processing = false;
-
     const checkDeferredReferral = async () => {
-      if (!isAuthenticated || processing) return;
-      processing = true;
+      if (!isAuthenticated) return;
+      if (deferredReferralProcessingRef.current) {
+        deferredReferralCheckPendingRef.current = true;
+        return;
+      }
+      deferredReferralProcessingRef.current = true;
+      deferredReferralCheckPendingRef.current = false;
 
       try {
         // Wait for cold-start URL / Play Install Referrer / IP fallback capture.
@@ -391,15 +396,15 @@ export const HomeScreen = () => {
         const link = await deepLinkHandler.getDeferredLink();
         if (link && link.type === 'referral') {
           // Submit to backend
-          const attributionData = link.metadata ? {
-            ...link.metadata,
+          const attributionData = {
+            ...(link.metadata || {}),
             referral_code: link.payload,
             attach_method: 'deferred_link',
-          } : undefined;
+          };
           const { data, errors } = await setReferrerMutation({
             variables: {
               referrerIdentifier: link.payload,
-              attributionData: attributionData ? JSON.stringify(attributionData) : undefined,
+              attributionData: JSON.stringify(attributionData),
             }
           });
 
@@ -419,7 +424,7 @@ export const HomeScreen = () => {
             // 2. Suspicious/Abuse: CLEAR link, SILENCE alert (to avoid loop)
             const isSuspicious = /suspicious/i.test(errorMessage) || /unusual/i.test(friendly) || /inusual/i.test(friendly);
             if (isSuspicious) {
-              await deepLinkHandler.clearDeferredLink();
+              await deepLinkHandler.clearDeferredLink(link);
               return;
             }
 
@@ -432,7 +437,7 @@ export const HomeScreen = () => {
               /already/i.test(errorMessage) || /ya tienes/i.test(friendly) || /registrado/i.test(friendly);
 
             if (isLogicError) {
-              await deepLinkHandler.clearDeferredLink();
+              await deepLinkHandler.clearDeferredLink(link);
               Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
               return;
             }
@@ -444,7 +449,7 @@ export const HomeScreen = () => {
 
           if (data?.setReferrer?.success) {
             // Clear the deferred link after successful submission
-            await deepLinkHandler.clearDeferredLink();
+            await deepLinkHandler.clearDeferredLink(link);
             // Refetch balances to show the locked reward
             refetchMyBalances();
             checkReferralStatus();
@@ -452,26 +457,34 @@ export const HomeScreen = () => {
             setShowDeferredReferralSuccess(true);
           } else {
             // Ensure friendly message is a string
-            const friendly = String(formatReferralErrorMessage(data?.setReferrer?.error) || 'Error desconocido');
+            const rawError = String(
+              data?.setReferrer?.error || data?.setReferrer?.message || 'Error desconocido'
+            );
+            const friendly = String(formatReferralErrorMessage(rawError) || 'Error desconocido');
 
             // Check if already registered/claimed or suspicious - clear silently without showing alert
             const shouldSuppressError =
-              data?.setReferrer?.message?.includes('already') ||
-              data?.setReferrer?.message?.includes('Ya registraste') ||
-              data?.setReferrer?.error?.includes('already') ||
-              data?.setReferrer?.error?.includes('Ya registraste') ||
-              /suspicious/i.test(data?.setReferrer?.error || '') ||
-              /suspicious/i.test(data?.setReferrer?.message || '');
+              /already|ya registraste|ya tienes/i.test(rawError) ||
+              /suspicious|unusual|inusual/i.test(rawError);
 
 
             if (shouldSuppressError) {
               // Clear the deferred link silently - user already has a referrer or flagged as suspicious
               try {
-                await deepLinkHandler.clearDeferredLink();
+                await deepLinkHandler.clearDeferredLink(link);
               } catch (clearErr) {
+                console.warn('[Referral] Failed to clear completed deferred link:', clearErr);
               }
             } else {
-              // Show alert for other errors with explicit button object
+              // Mutation payload failures are business validation errors unless
+              // the server explicitly asks us to retry. Clearing every other
+              // payload error prevents invalid/self/business-account links
+              // from replaying on every Home mount.
+              const isRetryable = /rate limit|demasiadas veces|intenta de nuevo|conexión|connection/i.test(rawError);
+              if (!isRetryable) {
+                await deepLinkHandler.clearDeferredLink(link);
+              }
+              Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
             }
           }
         }
@@ -485,7 +498,11 @@ export const HomeScreen = () => {
           Alert.alert('Error', 'Error de conexión. Intenta de nuevo.', [{ text: 'Entendido', onPress: () => { } }]);
         }
       } finally {
-        processing = false;
+        deferredReferralProcessingRef.current = false;
+        if (deferredReferralCheckPendingRef.current) {
+          deferredReferralCheckPendingRef.current = false;
+          void checkDeferredReferral();
+        }
       }
     };
 

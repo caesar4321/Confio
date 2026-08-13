@@ -51,16 +51,30 @@ export class DeepLinkHandler {
 
   addReferralListener(listener: () => void) {
     this.referralListeners.add(listener);
-    return () => this.referralListeners.delete(listener);
+    return () => {
+      this.referralListeners.delete(listener);
+    };
   }
 
   private notifyReferralListeners() {
-    this.referralListeners.forEach(listener => listener());
+    this.referralListeners.forEach(listener => {
+      try {
+        listener();
+      } catch (error) {
+        console.error('Error notifying referral listener:', error);
+      }
+    });
   }
 
   async init() {
     if (!this.initializationPromise) {
-      this.initializationPromise = this.initialize();
+      const attempt = this.initialize();
+      this.initializationPromise = attempt;
+      attempt.catch(() => {
+        if (this.initializationPromise === attempt) {
+          this.initializationPromise = null;
+        }
+      });
     }
     return this.initializationPromise;
   }
@@ -102,6 +116,7 @@ export class DeepLinkHandler {
       }
     } catch (error) {
       console.error('Error handling initial link:', error);
+      throw error;
     }
   }
 
@@ -270,13 +285,15 @@ export class DeepLinkHandler {
       return;
     }
 
-    this.linkListenerSetup = true;
     // Listen for links when app is running
     Linking.addEventListener('url', (event) => {
       if (event.url) {
-        this.handleDeepLink(event.url);
+        this.handleDeepLink(event.url).catch(error => {
+          console.error('Error handling warm deep link:', error);
+        });
       }
     });
+    this.linkListenerSetup = true;
   }
 
   private async handleDeepLink(url: string) {
@@ -316,7 +333,12 @@ export class DeepLinkHandler {
         };
 
         // For referral links, always store as deferred so HomeScreen can handle the mutation
-        if (type === 'referral' || type === 'influencer') {
+        // The influencer program is retired. Do not retain legacy campaign
+        // links forever or let them overwrite a valid friend referral.
+        if (type === 'influencer') {
+          return;
+        }
+        if (type === 'referral') {
           await this.storeDeferredLink(linkData);
           this.notifyReferralListeners();
           return;
@@ -347,6 +369,7 @@ export class DeepLinkHandler {
       }
     } catch (error) {
       console.error('Error handling deep link:', error);
+      throw error;
     }
   }
 
@@ -377,18 +400,6 @@ export class DeepLinkHandler {
     }
 
     switch (linkData.type) {
-      case 'referral':
-      case 'influencer':
-        // Navigate to achievements screen with referral data
-        // Or if we want to show it on HomeScreen, we might just store it in context?
-        // But for now, let's keep existing navigation behavior if applicable
-        // The user wants HomeScreen to update.
-        this.navigation.navigate('Achievements', {
-          referralData: linkData.payload,
-          referralType: linkData.type
-        });
-        break;
-
       case 'achievement':
         // Navigate to specific achievement
         this.navigation.navigate('Achievements', {
@@ -403,27 +414,18 @@ export class DeepLinkHandler {
         break;
     }
 
-    // Clear deferred link after processing
-    // await this.clearDeferredLink(); 
-    // WAIT: The user wants to show "Locked Reward" UNTIL it is unlocked.
-    // If we clear it, we lose the info that the user was referred.
-    // However, usually we send this to the backend upon signup.
-    // If logic is "Show on Home Screen" even before signup?
-    // "Apps/src/screens/HomeScreen.tsx" uses `userProfile` so it assumes logged in.
-    // If the user logs in, we should send this referral code to the backend.
-
-    // For the "Locked Reward" display in HomeScreen:
-    // It should check if the user HAS a referrer pending.
-    // If we claim it (send to backend), the backend should return the status "Locked".
-    // So we don't need to keep it in local storage indefinitely if the backend knows.
-
-    await this.clearDeferredLink();
+    await this.clearDeferredLink(linkData);
   }
 
   private async processDeferredLink(linkData: DeepLinkData) {
-    if (linkData.type === 'referral' || linkData.type === 'influencer') {
+    if (linkData.type === 'influencer') {
+      await this.clearDeferredLink(linkData);
+      return;
+    }
+
+    if (linkData.type === 'referral') {
       if (!this.isWithinTimeout(linkData)) {
-        await this.clearDeferredLink();
+        await this.clearDeferredLink(linkData);
       }
       // Do not navigate or clear a valid referral here. HomeScreen consumes it
       // only after authentication and clears it after setReferrer succeeds or
@@ -463,6 +465,7 @@ export class DeepLinkHandler {
       );
     } catch (error) {
       console.error('Error storing deferred link:', error);
+      throw error;
     }
   }
 
@@ -480,8 +483,17 @@ export class DeepLinkHandler {
     }
   }
 
-  public async clearDeferredLink() {
+  public async clearDeferredLink(expected?: DeepLinkData) {
     try {
+      if (expected) {
+        const current = await this.getDeferredLink();
+        if (!current ||
+          current.type !== expected.type ||
+          current.payload !== expected.payload ||
+          current.timestamp !== expected.timestamp) {
+          return false;
+        }
+      }
       // WORKAROUND: resetInternetCredentials checks arguments as array of maps on some Android versions
       // causing ClassCastException: String cannot be cast to ReadableNativeMap
       // Instead, we overwrite with "null" string which getDeferredLink handles.
@@ -490,8 +502,10 @@ export class DeepLinkHandler {
         'deferred_link',
         'null'
       );
+      return true;
     } catch (error) {
       console.error('Error clearing deferred link:', error);
+      return false;
     }
   }
 
