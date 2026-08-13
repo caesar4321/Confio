@@ -67,6 +67,10 @@ import { useAutoSwap } from '../hooks/useAutoSwap';
 import { useBnbAutoConvert } from '../hooks/useBnbAutoConvert';
 import { useSavingsResume } from '../hooks/useSavingsResume';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
+import {
+  consumeDeferredReferral,
+  formatDeferredReferralError,
+} from '../utils/deferredReferralRegistration';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
@@ -355,28 +359,6 @@ export const HomeScreen = () => {
   const deferredReferralProcessingRef = useRef(false);
   const deferredReferralCheckPendingRef = useRef(false);
 
-  // Helper function to format error messages (same as ReferralInputModal)
-  const formatReferralErrorMessage = (rawMessage: string | undefined): string => {
-    if (!rawMessage) {
-      return 'Error al registrar referidor';
-    }
-
-    if (/rate limit/i.test(rawMessage)) {
-      const minutesMatch = rawMessage.match(/(\d+)\s*minutes?/i);
-      if (minutesMatch) {
-        const minutes = minutesMatch[1];
-        return `Has intentado demasiadas veces. Por favor espera ${minutes} minuto${minutes === '1' ? '' : 's'} antes de intentar nuevamente.`;
-      }
-      return 'Has intentado demasiadas veces. Por favor espera unos minutos antes de intentar nuevamente.';
-    }
-
-    if (/suspicious/i.test(rawMessage)) {
-      return 'Detectamos actividad inusual. Por favor contacta a soporte.';
-    }
-
-    return rawMessage;
-  };
-
   // Check for deferred referral link and register automatically
   useEffect(() => {
     const checkDeferredReferral = async () => {
@@ -392,107 +374,26 @@ export const HomeScreen = () => {
         // Wait for cold-start URL / Play Install Referrer / IP fallback capture.
         // Without this handshake Home can read Keychain before attribution has
         // finished and never retry, leaving the qualifying deposit orphaned.
-        await deepLinkHandler.init();
-        const link = await deepLinkHandler.getDeferredLink();
-        if (link && link.type === 'referral') {
-          // Submit to backend
-          const attributionData = {
-            ...(link.metadata || {}),
-            referral_code: link.payload,
-            attach_method: 'deferred_link',
-          };
-          const { data, errors } = await setReferrerMutation({
-            variables: {
-              referrerIdentifier: link.payload,
-              attributionData: JSON.stringify(attributionData),
-            }
-          });
+        const outcome = await consumeDeferredReferral({
+          init: () => deepLinkHandler.init(),
+          getDeferredLink: () => deepLinkHandler.getDeferredLink(),
+          clearDeferredLink: link => deepLinkHandler.clearDeferredLink(link),
+          setReferrer: variables => setReferrerMutation({ variables }),
+          alert: (title, message) => Alert.alert(title, message, [{ text: 'Entendido' }]),
+        });
 
-
-          // Handle GraphQL errors
-          if (errors && errors.length > 0) {
-            const errorMessage = errors[0].message;
-            const friendly = formatReferralErrorMessage(errorMessage);
-
-            // 1. Rate Limits: KEEP link, SHOW alert
-            const isRateLimit = /rate limit/i.test(errorMessage) || /demasiadas veces/i.test(friendly);
-            if (isRateLimit) {
-              Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
-              return;
-            }
-
-            // 2. Suspicious/Abuse: CLEAR link, SILENCE alert (to avoid loop)
-            const isSuspicious = /suspicious/i.test(errorMessage) || /unusual/i.test(friendly) || /inusual/i.test(friendly);
-            if (isSuspicious) {
-              await deepLinkHandler.clearDeferredLink(link);
-              return;
-            }
-
-            // 3. Logic Errors (Self-referral, Invalid code, Already has referrer): CLEAR link, SHOW alert
-            // These are permanent errors, so we must clear the link to stop the loop.
-            const isLogicError =
-              /own referrer/i.test(errorMessage) || /propio referidor/i.test(friendly) ||
-              /not found/i.test(errorMessage) || /no encontrado/i.test(friendly) ||
-              /invalid/i.test(errorMessage) || /inválido/i.test(friendly) ||
-              /already/i.test(errorMessage) || /ya tienes/i.test(friendly) || /registrado/i.test(friendly);
-
-            if (isLogicError) {
-              await deepLinkHandler.clearDeferredLink(link);
-              Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
-              return;
-            }
-
-            // 4. Unknown/Network Errors: KEEP link, SHOW alert (user might retry)
-            Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
-            return;
-          }
-
-          if (data?.setReferrer?.success) {
-            // Clear the deferred link after successful submission
-            await deepLinkHandler.clearDeferredLink(link);
+        if (outcome === 'success') {
             // Refetch balances to show the locked reward
             refetchMyBalances();
             checkReferralStatus();
             // Show success modal
             setShowDeferredReferralSuccess(true);
-          } else {
-            // Ensure friendly message is a string
-            const rawError = String(
-              data?.setReferrer?.error || data?.setReferrer?.message || 'Error desconocido'
-            );
-            const friendly = String(formatReferralErrorMessage(rawError) || 'Error desconocido');
-
-            // Check if already registered/claimed or suspicious - clear silently without showing alert
-            const shouldSuppressError =
-              /already|ya registraste|ya tienes/i.test(rawError) ||
-              /suspicious|unusual|inusual/i.test(rawError);
-
-
-            if (shouldSuppressError) {
-              // Clear the deferred link silently - user already has a referrer or flagged as suspicious
-              try {
-                await deepLinkHandler.clearDeferredLink(link);
-              } catch (clearErr) {
-                console.warn('[Referral] Failed to clear completed deferred link:', clearErr);
-              }
-            } else {
-              // Mutation payload failures are business validation errors unless
-              // the server explicitly asks us to retry. Clearing every other
-              // payload error prevents invalid/self/business-account links
-              // from replaying on every Home mount.
-              const isRetryable = /rate limit|demasiadas veces|intenta de nuevo|conexión|connection/i.test(rawError);
-              if (!isRetryable) {
-                await deepLinkHandler.clearDeferredLink(link);
-              }
-              Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
-            }
-          }
         }
       } catch (err: any) {
         // Try to extract a meaningful error message
         const errorMessage = err?.graphQLErrors?.[0]?.message || err?.message;
         if (errorMessage) {
-          const friendly = String(formatReferralErrorMessage(errorMessage) || 'Error desconocido');
+          const friendly = String(formatDeferredReferralError(errorMessage) || 'Error desconocido');
           Alert.alert('Error', friendly, [{ text: 'Entendido', onPress: () => { } }]);
         } else {
           Alert.alert('Error', 'Error de conexión. Intenta de nuevo.', [{ text: 'Entendido', onPress: () => { } }]);
