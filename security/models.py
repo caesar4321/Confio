@@ -17,6 +17,22 @@ def normalize_document_number(value: str | None) -> str:
     return re.sub(r'[^A-Z0-9]', '', str(value).upper())
 
 
+def normalize_brazilian_cpf(value: object) -> str | None:
+    """Return a digits-only CPF when both check digits are valid."""
+    cpf = re.sub(r'\D', '', str(value or ''))
+    if len(cpf) != 11 or len(set(cpf)) == 1:
+        return None
+    for position in (9, 10):
+        total = sum(
+            int(cpf[index]) * ((position + 1) - index)
+            for index in range(position)
+        )
+        check_digit = (total * 10 % 11) % 10
+        if check_digit != int(cpf[position]):
+            return None
+    return cpf
+
+
 class IdentityVerification(SoftDeleteModel):
     """Model for storing KYC/AML verification documents and information"""
     

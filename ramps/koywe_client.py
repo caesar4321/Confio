@@ -9,6 +9,8 @@ from urllib.parse import quote
 import requests
 from django.conf import settings
 from django.core.cache import cache
+
+from security.models import normalize_brazilian_cpf
 from ramps.koywe import RAMP_NETWORK_DISPLAY, RAMP_USDC_ALGORAND_NOTE
 
 logger = logging.getLogger(__name__)
@@ -724,19 +726,34 @@ class KoyweClient:
         return self._request('POST', f'/rest/orders/{order_id}/txHash', email=email, json_payload=payload)
 
     def _normalize_contact_profile(self, *, contact_profile: dict[str, Any] | None, country_code: str) -> dict[str, Any]:
+        normalized_country = _COUNTRY_ALPHA2.get(
+            str(country_code or '').strip().upper(),
+            str(country_code or '').strip().upper(),
+        )
         if not contact_profile:
+            if normalized_country == 'BR':
+                raise KoyweError(
+                    'No pudimos validar tu CPF. Vuelve a completar la verificación de identidad o contacta soporte.'
+                )
             return {}
         normalized = dict(contact_profile)
         document_type = normalized.get('documentType')
         document_number = normalized.get('documentNumber')
+        if normalized_country == 'BR':
+            cpf = normalize_brazilian_cpf(document_number)
+            if not cpf:
+                raise KoyweError(
+                    'No pudimos validar tu CPF. Vuelve a completar la verificación de identidad o contacta soporte.'
+                )
+            document_number = cpf
         if document_number:
             resolved_document_type = self._resolve_document_type(
-                country_code=country_code,
+                country_code=normalized_country,
                 document_type=document_type,
             )
             normalized['documentType'] = resolved_document_type
             normalized['documentNumber'] = _normalize_koywe_document_number(
-                country_code=country_code,
+                country_code=normalized_country,
                 document_type=resolved_document_type,
                 document_number=document_number,
             )

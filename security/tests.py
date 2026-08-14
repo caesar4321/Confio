@@ -11,16 +11,23 @@ from security.didit import (
     DiditConfigurationError,
     _extract_verification_payload,
     create_didit_session,
+    resolve_brazilian_cpf_for_verification,
     sync_didit_session,
     verify_didit_webhook_signature,
 )
-from security.models import IdentityVerification, SuspiciousActivity
+from security.models import IdentityVerification, SuspiciousActivity, normalize_brazilian_cpf
+from ramps.koywe_client import KoyweClient, KoyweError
 from security.schema import SecurityQuery
 
 User = get_user_model()
 
 
 class DiditPayloadExtractionTests(SimpleTestCase):
+    def test_brazilian_cpf_validator_normalizes_and_checks_digits(self):
+        self.assertEqual(normalize_brazilian_cpf('529.982.247-25'), '52998224725')
+        self.assertIsNone(normalize_brazilian_cpf('123.456.789-01'))
+        self.assertIsNone(normalize_brazilian_cpf('111.111.111-11'))
+
     def test_prefers_brazilian_tax_number_over_rg(self):
         extracted = _extract_verification_payload({
             'first_name': 'Vitoria',
@@ -53,6 +60,85 @@ class DiditPayloadExtractionTests(SimpleTestCase):
         })
 
         self.assertEqual(extracted['document_number'], '123456789')
+
+    def test_rejects_conflicting_brazilian_cpf_fields(self):
+        extracted = _extract_verification_payload({
+            'tax_number': '529.982.247-25',
+            'id_verifications': [{
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {'tax_number': '168.995.350-09'},
+            }],
+        })
+
+        self.assertEqual(extracted['document_number'], '123456789')
+
+    def test_koywe_normalizes_valid_brazilian_cpf(self):
+        profile = KoyweClient()._normalize_contact_profile(
+            contact_profile={
+                'documentNumber': '529.982.247-25',
+                'documentType': 'national_id',
+            },
+            country_code='BR',
+        )
+
+        self.assertEqual(profile['documentNumber'], '52998224725')
+        self.assertEqual(profile['documentType'], 'CPF')
+
+    def test_koywe_blocks_invalid_brazilian_cpf_before_provider_call(self):
+        with self.assertRaisesRegex(KoyweError, 'validar tu CPF'):
+            KoyweClient()._normalize_contact_profile(
+                contact_profile={
+                    'documentNumber': '123456789',
+                    'documentType': 'national_id',
+                },
+                country_code='BR',
+            )
+
+    def test_koywe_requires_brazilian_cpf_before_provider_call(self):
+        with self.assertRaisesRegex(KoyweError, 'validar tu CPF'):
+            KoyweClient()._normalize_contact_profile(
+                contact_profile={'documentType': 'national_id'},
+                country_code='BRA',
+            )
+
+    @patch('security.didit.IdentityVerification.objects')
+    def test_recovers_one_cpf_from_matching_prior_attempt(self, objects_mock):
+        current = SimpleNamespace(
+            pk=3,
+            user_id=7,
+            verified_first_name='André',
+            verified_last_name='Silva',
+            verified_date_of_birth=date(1990, 2, 3),
+            document_issuing_country='BRA',
+            document_number='123456789',
+            risk_factors={'didit': {'session': {
+                'id_verifications': [{'extra_fields': {'tax_number': '12345678901'}}],
+            }}},
+        )
+        prior = SimpleNamespace(
+            pk=2,
+            user_id=7,
+            verified_first_name='Andre',
+            verified_last_name='Silva',
+            verified_date_of_birth=date(1990, 2, 3),
+            document_issuing_country='BRA',
+            document_number='987654321',
+            risk_factors={'didit': {'session': {
+                'id_verifications': [{'extra_fields': {'tax_number': '529.982.247-25'}}],
+            }}},
+        )
+        attempts_queryset = Mock()
+        attempts_queryset.exclude.return_value = [prior]
+        collision_queryset = Mock()
+        collision_queryset.exclude.return_value.exists.return_value = False
+        objects_mock.filter.side_effect = [attempts_queryset, collision_queryset]
+
+        cpf, source_ids = resolve_brazilian_cpf_for_verification(current)
+
+        self.assertEqual(cpf, '52998224725')
+        self.assertEqual(source_ids, [2])
 
 
 @override_settings(

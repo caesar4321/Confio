@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 import re
+import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -14,7 +15,7 @@ from django.utils import timezone
 
 from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
-from security.models import IdentityVerification
+from security.models import IdentityVerification, normalize_brazilian_cpf
 from users.models import Business
 
 logger = logging.getLogger(__name__)
@@ -123,19 +124,85 @@ def _document_postal_code(value: Any) -> str:
     return matches[-1] if matches else ''
 
 
-def _valid_brazilian_cpf(value: Any) -> str | None:
-    cpf = re.sub(r'\D', '', str(value or ''))
-    if len(cpf) != 11 or len(set(cpf)) == 1:
-        return None
-    for position in (9, 10):
-        total = sum(
-            int(cpf[index]) * ((position + 1) - index)
-            for index in range(position)
+def _brazilian_cpfs_from_didit_payload(payload: dict[str, Any]) -> set[str]:
+    """Extract CPF candidates only from Didit's CPF/tax-specific fields."""
+    candidates: list[Any] = [
+        payload.get('tax_number'),
+        payload.get('taxNumber'),
+        payload.get('cpf'),
+        payload.get('personal_number'),
+    ]
+    id_verifications = payload.get('id_verifications') or []
+    if not isinstance(id_verifications, list):
+        id_verifications = []
+    for item in id_verifications:
+        if not isinstance(item, dict):
+            continue
+        extra_fields = item.get('extra_fields') or {}
+        if not isinstance(extra_fields, dict):
+            extra_fields = {}
+        candidates.extend((
+            item.get('tax_number'),
+            item.get('taxNumber'),
+            item.get('cpf'),
+            item.get('personal_number'),
+            extra_fields.get('tax_number'),
+            extra_fields.get('taxNumber'),
+            extra_fields.get('cpf'),
+        ))
+    return {cpf for value in candidates if (cpf := normalize_brazilian_cpf(value))}
+
+
+def _single_brazilian_cpf_from_didit_payload(payload: dict[str, Any]) -> str | None:
+    candidates = _brazilian_cpfs_from_didit_payload(payload)
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def _normalized_identity_name(value: Any) -> str:
+    normalized = unicodedata.normalize('NFKD', str(value or ''))
+    return ''.join(char for char in normalized if char.isalnum()).casefold()
+
+
+def resolve_brazilian_cpf_for_verification(verification: IdentityVerification) -> tuple[str | None, list[int]]:
+    """Resolve one collision-free CPF from this identity's matching Didit attempts."""
+    identity_key = (
+        _normalized_identity_name(verification.verified_first_name),
+        _normalized_identity_name(verification.verified_last_name),
+        verification.verified_date_of_birth,
+        str(verification.document_issuing_country or '').upper(),
+    )
+    candidates: dict[str, set[int]] = {}
+    attempts = IdentityVerification.objects.filter(
+        user_id=verification.user_id,
+        document_issuing_country='BRA',
+    ).exclude(pk=verification.pk)
+    attempts = [verification, *attempts]
+    for attempt in attempts:
+        attempt_key = (
+            _normalized_identity_name(attempt.verified_first_name),
+            _normalized_identity_name(attempt.verified_last_name),
+            attempt.verified_date_of_birth,
+            str(attempt.document_issuing_country or '').upper(),
         )
-        check_digit = (total * 10 % 11) % 10
-        if check_digit != int(cpf[position]):
-            return None
-    return cpf
+        if attempt_key != identity_key:
+            continue
+        session = ((attempt.risk_factors or {}).get('didit') or {}).get('session') or {}
+        attempt_cpfs = _brazilian_cpfs_from_didit_payload(session) if isinstance(session, dict) else set()
+        stored_cpf = normalize_brazilian_cpf(attempt.document_number)
+        if stored_cpf:
+            attempt_cpfs.add(stored_cpf)
+        for cpf in attempt_cpfs:
+            candidates.setdefault(cpf, set()).add(attempt.pk)
+
+    if len(candidates) != 1:
+        return None, []
+    cpf, source_ids = next(iter(candidates.items()))
+    collision = IdentityVerification.objects.filter(
+        document_issuing_country='BRA',
+        document_number_normalized=cpf,
+        status='verified',
+    ).exclude(user_id=verification.user_id).exists()
+    return (None, []) if collision else (cpf, sorted(source_ids))
 
 
 def _safe_json_loads(value: Any) -> dict[str, Any]:
@@ -504,7 +571,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         # requires the holder's CPF. Didit returns that CPF separately in the
         # document's extra fields. Never replace it with invalid OCR output.
         document_number = _first_non_empty(
-            _valid_brazilian_cpf(extra_fields.get('tax_number')),
+            _single_brazilian_cpf_from_didit_payload(response_payload),
             document_number,
         )
     if issuing_country_iso3 in {'CHL', 'COL', 'MEX'}:
@@ -719,6 +786,20 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     verification.document_expiry_date = extracted['document_expiry_date']
     verification.status = status
     verification.risk_factors = risk_factors
+    if (
+        status == 'verified'
+        and verification.document_issuing_country == 'BRA'
+        and not normalize_brazilian_cpf(verification.document_number)
+    ):
+        recovered_cpf, source_ids = resolve_brazilian_cpf_for_verification(verification)
+        if recovered_cpf:
+            verification.document_number = recovered_cpf
+            risk_factors['document_number_recovery'] = {
+                'source': 'matching_didit_attempts',
+                'source_verification_ids': source_ids,
+                'recovered_at': timezone.now().isoformat(),
+                'reason': 'approved_brazil_identity_missing_valid_cpf',
+            }
     if status == 'verified' and verification.verified_at is None:
         verification.verified_at = timezone.now()
     if status != 'rejected':
