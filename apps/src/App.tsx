@@ -50,7 +50,7 @@ const Navigation: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) {
       // Initialize messaging service when user is authenticated
-      // Force token refresh to ensure new users get registered
+      // Force server registration to repair any missing/stale user-token row.
       console.log('[App] User authenticated, initializing messaging service...');
       messagingService.initialize(true).catch(error => {
         console.error('Failed to initialize messaging service:', error);
@@ -60,12 +60,6 @@ const Navigation: React.FC = () => {
       console.log('[App] Initializing push notification service...');
       pushNotificationService.initialize().catch(error => {
         console.error('Failed to initialize push notification service:', error);
-      });
-
-      // Also ensure token is registered for the current user
-      // This handles the case where permissions are already granted
-      messagingService.ensureTokenRegisteredForCurrentUser().catch(error => {
-        console.error('Failed to ensure token registration:', error);
       });
     }
   }, [isAuthenticated]);

@@ -270,6 +270,7 @@ class ContentItemAdmin(admin.ModelAdmin):
         'platform_clicks_tiktok',
         'platform_clicks_youtube',
         'published_at',
+        'push_claimed_at',
         'push_sent_at',
         'send_in_app',
         'send_push',
@@ -287,7 +288,7 @@ class ContentItemAdmin(admin.ModelAdmin):
     )
     search_fields = ('title', 'body', 'tag', 'channel__title', 'channel__slug')
     autocomplete_fields = ('channel', 'author_user', 'owner_user', 'owner_business')
-    readonly_fields = ('created_at', 'updated_at', 'push_sent_at')
+    readonly_fields = ('created_at', 'updated_at', 'push_claimed_at', 'push_sent_at')
     list_select_related = ('channel', 'author_user', 'owner_user', 'owner_business')
     date_hierarchy = 'published_at'
     ordering = ('-published_at', '-created_at')
@@ -316,6 +317,7 @@ class ContentItemAdmin(admin.ModelAdmin):
                     'notification_priority',
                     'send_in_app',
                     'send_push',
+                    'push_claimed_at',
                     'push_sent_at',
                 )
             },

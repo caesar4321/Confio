@@ -192,6 +192,7 @@ class ContentItem(models.Model):
     )
     send_push = models.BooleanField(default=False)
     send_in_app = models.BooleanField(default=True)
+    push_claimed_at = models.DateTimeField(null=True, blank=True)
     push_sent_at = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

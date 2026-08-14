@@ -60,6 +60,7 @@ class MessagingService {
   private channelCreated: boolean = false;
   private pendingNotificationData: any | null = null;
   private pendingNotificationRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private registrationInFlight: { key: string; promise: Promise<void> } | null = null;
 
   constructor() {
     this.instanceId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -78,10 +79,10 @@ class MessagingService {
     return globalMessagingInstance;
   }
 
-  async initialize(forceTokenRefresh: boolean = false, registerCurrentUser: boolean = true) {
+  async initialize(forceServerRegistration: boolean = false, registerCurrentUser: boolean = true) {
     try {
       console.log(
-        `[MessagingService] Initializing with forceTokenRefresh=${forceTokenRefresh}, registerCurrentUser=${registerCurrentUser}`
+        `[MessagingService] Initializing with forceServerRegistration=${forceServerRegistration}, registerCurrentUser=${registerCurrentUser}`
       );
 
       // Check current permission status
@@ -119,7 +120,7 @@ class MessagingService {
         // Always get a fresh token and register it for the current user
         // This is crucial for multi-user support on the same device
         console.log('[MessagingService] Getting FCM token for current user...');
-        await this.getFCMToken();
+        await this.getFCMToken(forceServerRegistration);
       }
 
       console.log('[MessagingService] Initialization complete');
@@ -233,7 +234,7 @@ class MessagingService {
     }
   }
 
-  async getFCMToken(): Promise<string | null> {
+  async getFCMToken(forceServerRegistration: boolean = false): Promise<string | null> {
     try {
       // Check if we have a stored token
       let storedToken: string | null = null;
@@ -262,8 +263,10 @@ class MessagingService {
       // Get current token from Firebase
       const currentToken = await messaging().getToken();
 
-      // If token changed or new token, register it
-      if (currentToken && currentToken !== storedToken) {
+      // Register changed tokens and honor explicit server re-registration.
+      // The latter repairs a missing server row even when Firebase kept the
+      // same device token in Keychain.
+      if (currentToken && (forceServerRegistration || currentToken !== storedToken)) {
         await this.registerToken(currentToken);
         await Keychain.setInternetCredentials(
           FCM_TOKEN_SERVICE,
@@ -280,30 +283,63 @@ class MessagingService {
     }
   }
 
-  private async registerToken(token: string) {
-    try {
-      if (!this.deviceId) {
-        console.error('No device ID available');
-        return;
+  private async registerToken(token: string): Promise<void> {
+    if (!this.deviceId) {
+      const error = new Error('No device ID available');
+      recordCrashError(error);
+      throw error;
+    }
+
+    const registrationKey = `${this.deviceId}:${token}`;
+    if (this.registrationInFlight) {
+      if (this.registrationInFlight.key === registrationKey) {
+        return this.registrationInFlight.promise;
       }
 
+      // Preserve token-refresh ordering: an older token must finish before a
+      // newer token is registered and deactivates it on the same device.
+      try {
+        await this.registrationInFlight.promise;
+      } catch {
+        // A newer token should still get its own registration attempt.
+      }
+      return this.registerToken(token);
+    }
+
+    const deviceId = this.deviceId;
+    const registrationPromise = (async () => {
       const deviceName = await DeviceInfo.getDeviceName();
       const appVersion = DeviceInfo.getVersion();
 
-      await apolloClient.mutate({
+      const result = await apolloClient.mutate({
         mutation: REGISTER_FCM_TOKEN,
         variables: {
           token,
           deviceType: Platform.OS,
-          deviceId: this.deviceId,
+          deviceId,
           deviceName,
           appVersion,
         },
       });
 
+      if (result.data?.registerFcmToken?.success !== true) {
+        throw new Error('Server did not confirm FCM token registration');
+      }
+
       console.log('FCM token registered successfully');
+    })();
+    this.registrationInFlight = { key: registrationKey, promise: registrationPromise };
+
+    try {
+      await registrationPromise;
     } catch (error) {
       console.error('Error registering FCM token:', error);
+      recordCrashError(error);
+      throw error;
+    } finally {
+      if (this.registrationInFlight?.promise === registrationPromise) {
+        this.registrationInFlight = null;
+      }
     }
   }
 

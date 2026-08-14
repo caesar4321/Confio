@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from typing import Dict, List, Tuple
 
 from django.db.models import Q
@@ -24,11 +25,16 @@ logger = logging.getLogger(__name__)
 CHANNEL_ID_MESSAGES = 'messages'
 CHANNEL_ID_DISCOVER = 'discover'
 MAX_PUSH_CONTENT_BODY_CHARS = 240
+CONTENT_PUSH_CLAIM_TTL = timedelta(minutes=10)
 DISCOVER_TAG_COLORS = {
     'VIDEO': '#FF4444',
     'NEWS': '#F59E0B',
     'TEXT': '#1DB587',
 }
+
+
+class ContentPushInProgress(RuntimeError):
+    """Another worker owns the delivery lease for this content item."""
 
 
 def _content_push_body_preview(item: ContentItem) -> str:
@@ -438,17 +444,43 @@ def send_content_item_push(content_item_id: int) -> Dict[str, int]:
     if item.push_sent_at is not None:
         return {'sent': 0, 'failed': 0}
 
-    push_surface = _get_push_surface(item)
-    if push_surface == ContentSurfaceType.DISCOVER:
-        result = _send_discover_push(item)
-    else:
-        result = _send_channel_push(item)
+    claim_time = timezone.now()
+    stale_before = claim_time - CONTENT_PUSH_CLAIM_TTL
+    claimed = (
+        ContentItem.objects.filter(id=content_item_id, push_sent_at__isnull=True)
+        .filter(Q(push_claimed_at__isnull=True) | Q(push_claimed_at__lt=stale_before))
+        .update(push_claimed_at=claim_time, updated_at=claim_time)
+    )
+    if claimed == 0:
+        if ContentItem.objects.filter(id=content_item_id, push_sent_at__isnull=False).exists():
+            return {'sent': 0, 'failed': 0}
+        raise ContentPushInProgress(f'Push delivery already in progress for content item {content_item_id}')
 
-    if result.get('sent', 0) == 0 and result.get('failed', 0) > 0:
-        raise RuntimeError(f'Push delivery failed for content item {item.id}')
+    try:
+        push_surface = _get_push_surface(item)
+        if push_surface == ContentSurfaceType.DISCOVER:
+            result = _send_discover_push(item)
+        else:
+            result = _send_channel_push(item)
 
-    item.push_sent_at = timezone.now()
-    item.save(update_fields=['push_sent_at', 'updated_at'])
+        if result.get('sent', 0) == 0 and result.get('failed', 0) > 0:
+            raise RuntimeError(f'Push delivery failed for content item {item.id}')
+    except Exception:
+        ContentItem.objects.filter(
+            id=content_item_id,
+            push_claimed_at=claim_time,
+            push_sent_at__isnull=True,
+        ).update(push_claimed_at=None, updated_at=timezone.now())
+        raise
+
+    sent_at = timezone.now()
+    finalized = ContentItem.objects.filter(
+        id=content_item_id,
+        push_claimed_at=claim_time,
+        push_sent_at__isnull=True,
+    ).update(push_claimed_at=None, push_sent_at=sent_at, updated_at=sent_at)
+    if finalized != 1:
+        raise RuntimeError(f'Lost push delivery claim for content item {content_item_id}')
     logger.info(
         'Inbox content push sent',
         extra={

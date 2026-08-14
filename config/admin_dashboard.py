@@ -33,6 +33,23 @@ from send.models import SendTransaction
 from payments.models import PaymentTransaction
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 from inbox.models import ContentPlatformClick
+
+
+def get_fcm_reachability_metrics(now=None):
+    """Return token-level and user-level FCM reachability without signup filters."""
+    from notifications.models import FCMDeviceToken
+
+    now = now or timezone.now()
+    active_tokens = FCMDeviceToken.objects.filter(is_active=True)
+    return {
+        'active_users': active_tokens.values('user_id').distinct().count(),
+        'recent_users': active_tokens.filter(
+            last_used__gte=now - timedelta(days=30)
+        ).values('user_id').distinct().count(),
+        'active_tokens': active_tokens.values('token').distinct().count(),
+    }
+
+
 class ConfioAdminSite(AdminSiteOTPRequired):
     """Custom admin site with enhanced dashboard"""
     site_header = 'Confío Admin Panel'
@@ -89,11 +106,9 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             context['new_users_last_7_days'] / context['all_signups_last_7_days'] * 100
             if context['all_signups_last_7_days'] else 0
         )
-        context['fcm_active_users'] = real_users.filter(fcm_tokens__is_active=True).distinct().count()
-        context['fcm_recent_users'] = real_users.filter(
-            fcm_tokens__is_active=True,
-            fcm_tokens__last_used__gte=now - timedelta(days=30)
-        ).distinct().count()
+        fcm_reachability = get_fcm_reachability_metrics(now)
+        context['fcm_active_users'] = fcm_reachability['active_users']
+        context['fcm_recent_users'] = fcm_reachability['recent_users']
         context['users_with_verification'] = IdentityVerification.objects.values('user').distinct().count()
         context['verified_users'] = IdentityVerification.objects.filter(
             status='verified'
@@ -792,7 +807,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         ).count()
 
         # Notification metrics
-        from notifications.models import Notification, FCMDeviceToken
+        from notifications.models import Notification
         context['notifications_sent_today'] = Notification.objects.filter(
             created_at__gte=today_start
         ).count()
@@ -800,9 +815,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             created_at__gte=today_start,
             push_sent=True
         ).count()
-        active_fcm_queryset = FCMDeviceToken.objects.filter(is_active=True)
-        context['active_fcm_tokens'] = active_fcm_queryset.values('token').distinct().count()
-        context['reachable_push_users'] = active_fcm_queryset.values('user_id').distinct().count()
+        context['active_fcm_tokens'] = fcm_reachability['active_tokens']
+        context['reachable_push_users'] = fcm_reachability['active_users']
         context['last_broadcast'] = Notification.objects.filter(
             is_broadcast=True
         ).order_by('-created_at').first()

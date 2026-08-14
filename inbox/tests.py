@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -18,7 +19,8 @@ from .models import (
     SupportMessage,
     SupportSenderType,
 )
-from .schema import PortalDeleteContentItem, Query
+from .push_service import ContentPushInProgress, send_content_item_push
+from .schema import PortalDeleteContentItem, PortalSaveContentItem, Query
 
 
 class MockInfo:
@@ -116,7 +118,7 @@ class PortalContentMutationTests(TestCase):
         self.staff.is_verified = lambda: True
         self.info = MockInfo(self.staff)
         self.channel = Channel.objects.create(
-            slug='confio-news',
+            slug='test-confio-news',
             kind=ChannelKind.NEWS,
             title='Confío News',
         )
@@ -137,7 +139,8 @@ class PortalContentMutationTests(TestCase):
             rank=1,
         )
 
-        result = PortalDeleteContentItem.mutate(
+        result = PortalDeleteContentItem.mutate.__wrapped__(
+            PortalDeleteContentItem,
             None,
             self.info,
             content_item_id=item.id,
@@ -147,6 +150,87 @@ class PortalContentMutationTests(TestCase):
         self.assertEqual(result.deleted_content_item_id, str(item.id))
         self.assertFalse(ContentItem.objects.filter(id=item.id).exists())
         self.assertFalse(ContentSurface.objects.filter(content_item_id=item.id).exists())
+
+    @patch('inbox.tasks.send_content_item_push_task.delay')
+    def test_publishing_from_portal_enqueues_exactly_one_push(self, enqueue_push):
+        with self.captureOnCommitCallbacks(execute=True):
+            result = PortalSaveContentItem.mutate.__wrapped__(
+                PortalSaveContentItem,
+                None,
+                self.info,
+                channel_slug=self.channel.slug,
+                item_type='NEWS',
+                status=ContentStatus.PUBLISHED,
+                title='One publication',
+                body='One delivery',
+                send_push=True,
+                send_in_app=True,
+                surfaces=[ContentSurfaceType.CHANNEL],
+            )
+
+        self.assertTrue(result.success)
+        enqueue_push.assert_called_once_with(int(result.content_item.id))
+
+
+class ContentPushDeliveryClaimTests(TestCase):
+    def setUp(self):
+        self.author = User.objects.create_user(
+            username='push-author',
+            email='push-author@example.com',
+            password='testpass123',
+            firebase_uid='firebase-push-author',
+            is_staff=True,
+        )
+        self.channel = Channel.objects.create(
+            slug='push-news',
+            kind=ChannelKind.NEWS,
+            title='Push News',
+        )
+        self.item = ContentItem.objects.create(
+            channel=self.channel,
+            author_user=self.author,
+            owner_type='SYSTEM',
+            item_type='NEWS',
+            status=ContentStatus.PUBLISHED,
+            title='Push claim test',
+            body='Body',
+            published_at=timezone.now(),
+            send_push=True,
+        )
+
+    @patch('inbox.push_service._send_channel_push')
+    def test_active_claim_blocks_a_duplicate_worker(self, send_channel_push):
+        self.item.push_claimed_at = timezone.now()
+        self.item.save(update_fields=['push_claimed_at', 'updated_at'])
+
+        with self.assertRaises(ContentPushInProgress):
+            send_content_item_push(self.item.id)
+
+        send_channel_push.assert_not_called()
+
+    @patch('inbox.push_service._send_channel_push')
+    def test_stale_claim_is_recovered_and_finalized(self, send_channel_push):
+        send_channel_push.return_value = {'sent': 3, 'failed': 0}
+        self.item.push_claimed_at = timezone.now() - timedelta(minutes=11)
+        self.item.save(update_fields=['push_claimed_at', 'updated_at'])
+
+        result = send_content_item_push(self.item.id)
+
+        self.assertEqual(result, {'sent': 3, 'failed': 0})
+        self.item.refresh_from_db()
+        self.assertIsNone(self.item.push_claimed_at)
+        self.assertIsNotNone(self.item.push_sent_at)
+
+    @patch('inbox.push_service._send_channel_push')
+    def test_failed_delivery_releases_claim_for_retry(self, send_channel_push):
+        send_channel_push.side_effect = RuntimeError('FCM unavailable')
+
+        with self.assertRaisesRegex(RuntimeError, 'FCM unavailable'):
+            send_content_item_push(self.item.id)
+
+        self.item.refresh_from_db()
+        self.assertIsNone(self.item.push_claimed_at)
+        self.assertIsNone(self.item.push_sent_at)
 
 
 class DiscoverStructuredDataTests(TestCase):

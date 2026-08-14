@@ -14,7 +14,7 @@ from firebase_admin import credentials, messaging
 from firebase_admin.exceptions import FirebaseError
 
 from .models import FCMDeviceToken, NotificationPreference
-from django.db import models
+from django.db import models, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -607,50 +607,41 @@ def register_device_token(
     Returns:
         FCMDeviceToken instance
     """
-    # First, deactivate any old tokens for this user on the same device
-    # This handles the case where a device gets a new FCM token
-    old_tokens = FCMDeviceToken.objects.filter(
-        user=user,
-        device_id=device_id
-    ).exclude(token=token)
-    
-    if old_tokens.exists():
-        logger.info(f"Deactivating {old_tokens.count()} old tokens for user {user.id} on device {device_id}")
-        old_tokens.update(
+    # Serialize registrations for one user. Older app versions can issue
+    # overlapping registration mutations during startup, and update_or_create
+    # alone can race when the (user, token) row does not exist yet.
+    with transaction.atomic():
+        user.__class__.objects.select_for_update().only('pk').get(pk=user.pk)
+        registration_time = timezone.now()
+
+        old_tokens = FCMDeviceToken.objects.filter(
+            user=user,
+            device_id=device_id,
+        ).exclude(token=token)
+        deactivated_count = old_tokens.update(
             is_active=False,
-            updated_at=timezone.now()
+            updated_at=registration_time,
         )
-    
-    # Now register/update the token for this user
-    # Use (user, token) as the unique lookup
-    device_token, created = FCMDeviceToken.objects.update_or_create(
-        user=user,
-        token=token,
-        defaults={
-            'device_type': device_type,
-            'device_id': device_id,
-            'device_name': device_name or '',
-            'app_version': app_version or '',
-            'is_active': True,
-            'last_used': timezone.now(),
-            'failure_count': 0,
-            'last_failure': None,
-            'last_failure_reason': ''
-        }
-    )
-    
-    if not created:
-        # Token exists for this user, update device info if changed
-        if device_token.device_id != device_id:
-            logger.info(f"User {user.id} moved to different device: {device_token.device_id} -> {device_id}")
-        
-        device_token.device_id = device_id
-        device_token.device_type = device_type
-        device_token.device_name = device_name or device_token.device_name
-        device_token.app_version = app_version or device_token.app_version
-        device_token.is_active = True
-        device_token.last_used = timezone.now()
-        device_token.save()
+        if deactivated_count:
+            logger.info(
+                f"Deactivating {deactivated_count} old tokens for user {user.id} on device {device_id}"
+            )
+
+        device_token, created = FCMDeviceToken.objects.update_or_create(
+            user=user,
+            token=token,
+            defaults={
+                'device_type': device_type,
+                'device_id': device_id,
+                'device_name': device_name or '',
+                'app_version': app_version or '',
+                'is_active': True,
+                'last_used': registration_time,
+                'failure_count': 0,
+                'last_failure': None,
+                'last_failure_reason': '',
+            },
+        )
     
     logger.info(f"FCM token {'created' if created else 'updated'} for user {user.id}, device {device_id}, token ends with ...{token[-10:]}")
     

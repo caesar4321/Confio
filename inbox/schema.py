@@ -1,7 +1,6 @@
 import graphene
 import logging
 import os
-from django.db import transaction
 from django.db.models import Case, IntegerField, Q, Value, When
 from django.conf import settings
 from django.utils import timezone
@@ -30,7 +29,6 @@ from .models import (
     VisibilityPolicy,
 )
 from .push_service import send_support_reply_push, send_support_staff_push
-from .tasks import send_content_item_push_task
 
 logger = logging.getLogger(__name__)
 
@@ -1296,24 +1294,6 @@ class PortalSaveContentItem(graphene.Mutation):
             item.surfaces.exclude(surface__in=normalized_surfaces).delete()
             for surface in normalized_surfaces:
                 item.surfaces.update_or_create(surface=surface, defaults={'is_pinned': False})
-
-        should_send_push_now = (
-            item.status == ContentStatus.PUBLISHED
-            and item.send_push
-            and item.published_at is not None
-            and item.push_sent_at is None
-        )
-        if should_send_push_now:
-            def _send_portal_publish_push():
-                try:
-                    send_content_item_push_task.delay(item.id)
-                except Exception:
-                    logger.exception(
-                        'Failed to send portal publication push',
-                        extra={'content_item_id': item.id},
-                    )
-
-            transaction.on_commit(_send_portal_publish_push)
 
         item.refresh_from_db()
         return PortalSaveContentItem(
