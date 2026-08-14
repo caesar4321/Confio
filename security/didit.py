@@ -3,7 +3,6 @@ import hmac
 import json
 import logging
 import re
-import unicodedata
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -214,11 +213,6 @@ def _single_brazilian_cpf_from_didit_payload(payload: dict[str, Any]) -> str | N
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
-def _normalized_identity_name(value: Any) -> str:
-    normalized = unicodedata.normalize('NFKD', str(value or ''))
-    return ''.join(char for char in normalized if char.isalnum()).casefold()
-
-
 def _enforce_brazilian_cpf_database_validation(
     *,
     status: str,
@@ -241,62 +235,6 @@ def _enforce_brazilian_cpf_database_validation(
         'review_required_at': timezone.now().isoformat(),
     }
     return 'pending'
-
-
-def resolve_brazilian_cpf_for_verification(verification: IdentityVerification) -> tuple[str | None, list[int]]:
-    """Resolve one collision-free CPF from this identity's matching Didit attempts."""
-    identity_key = (
-        _normalized_identity_name(verification.verified_first_name),
-        _normalized_identity_name(verification.verified_last_name),
-        verification.verified_date_of_birth,
-        str(verification.document_issuing_country or '').upper(),
-    )
-    candidates: dict[str, set[int]] = {}
-    attempts = IdentityVerification.objects.filter(
-        user_id=verification.user_id,
-        document_issuing_country='BRA',
-    ).exclude(pk=verification.pk)
-    attempts = [verification, *attempts]
-    for attempt in attempts:
-        attempt_key = (
-            _normalized_identity_name(attempt.verified_first_name),
-            _normalized_identity_name(attempt.verified_last_name),
-            attempt.verified_date_of_birth,
-            str(attempt.document_issuing_country or '').upper(),
-        )
-        if attempt_key != identity_key:
-            continue
-        session = ((attempt.risk_factors or {}).get('didit') or {}).get('session') or {}
-        attempt_cpfs: set[str] = set()
-        database_validation_present = False
-        authoritative_cpf = None
-        if isinstance(session, dict):
-            database_validation_present, authoritative_cpf = (
-                _authoritative_brazilian_cpf_from_database_validation(session)
-            )
-            if authoritative_cpf:
-                attempt_cpfs.add(authoritative_cpf)
-            elif not database_validation_present:
-                attempt_cpfs = _brazilian_cpfs_from_didit_payload(session)
-        stored_cpf = normalize_brazilian_cpf(attempt.document_number)
-        if stored_cpf and not (
-            isinstance(session, dict)
-            and database_validation_present
-            and not authoritative_cpf
-        ):
-            attempt_cpfs.add(stored_cpf)
-        for cpf in attempt_cpfs:
-            candidates.setdefault(cpf, set()).add(attempt.pk)
-
-    if len(candidates) != 1:
-        return None, []
-    cpf, source_ids = next(iter(candidates.items()))
-    collision = IdentityVerification.objects.filter(
-        document_issuing_country='BRA',
-        document_number_normalized=cpf,
-        status='verified',
-    ).exclude(user_id=verification.user_id).exists()
-    return (None, []) if collision else (cpf, sorted(source_ids))
 
 
 def _safe_json_loads(value: Any) -> dict[str, Any]:
@@ -898,21 +836,6 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
         risk_factors=risk_factors,
     )
     verification.status = status
-    if (
-        status == 'verified'
-        and verification.document_issuing_country == 'BRA'
-        and not extracted.get('brazilian_cpf_database_validation_present')
-        and not normalize_brazilian_cpf(verification.document_number)
-    ):
-        recovered_cpf, source_ids = resolve_brazilian_cpf_for_verification(verification)
-        if recovered_cpf:
-            verification.document_number = recovered_cpf
-            risk_factors['document_number_recovery'] = {
-                'source': 'matching_didit_attempts',
-                'source_verification_ids': source_ids,
-                'recovered_at': timezone.now().isoformat(),
-                'reason': 'approved_brazil_identity_missing_valid_cpf',
-            }
     if status == 'verified' and verification.verified_at is None:
         verification.verified_at = timezone.now()
     if status != 'rejected':

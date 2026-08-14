@@ -12,7 +12,6 @@ from security.didit import (
     _enforce_brazilian_cpf_database_validation,
     _extract_verification_payload,
     create_didit_session,
-    resolve_brazilian_cpf_for_verification,
     sync_didit_session,
     verify_didit_webhook_signature,
 )
@@ -221,44 +220,6 @@ class DiditPayloadExtractionTests(SimpleTestCase):
                 contact_profile={'documentType': 'national_id'},
                 country_code='BRA',
             )
-
-    @patch('security.didit.IdentityVerification.objects')
-    def test_recovers_one_cpf_from_matching_prior_attempt(self, objects_mock):
-        current = SimpleNamespace(
-            pk=3,
-            user_id=7,
-            verified_first_name='André',
-            verified_last_name='Silva',
-            verified_date_of_birth=date(1990, 2, 3),
-            document_issuing_country='BRA',
-            document_number='123456789',
-            risk_factors={'didit': {'session': {
-                'id_verifications': [{'extra_fields': {'tax_number': '12345678901'}}],
-            }}},
-        )
-        prior = SimpleNamespace(
-            pk=2,
-            user_id=7,
-            verified_first_name='Andre',
-            verified_last_name='Silva',
-            verified_date_of_birth=date(1990, 2, 3),
-            document_issuing_country='BRA',
-            document_number='987654321',
-            risk_factors={'didit': {'session': {
-                'id_verifications': [{'extra_fields': {'tax_number': '529.982.247-25'}}],
-            }}},
-        )
-        attempts_queryset = Mock()
-        attempts_queryset.exclude.return_value = [prior]
-        collision_queryset = Mock()
-        collision_queryset.exclude.return_value.exists.return_value = False
-        objects_mock.filter.side_effect = [attempts_queryset, collision_queryset]
-
-        cpf, source_ids = resolve_brazilian_cpf_for_verification(current)
-
-        self.assertEqual(cpf, '52998224725')
-        self.assertEqual(source_ids, [2])
-
 
 @override_settings(
     DIDIT_API_KEY='test-api-key',
