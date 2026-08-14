@@ -354,6 +354,124 @@ def _didit_request(method: str, path: str, *, payload: dict[str, Any] | None = N
         raise DiditAPIError('Didit API returned invalid JSON') from exc
 
 
+def validate_brazilian_cpf_with_didit(
+    *,
+    cpf: str,
+    date_of_birth: date,
+    vendor_data: str,
+) -> dict[str, Any]:
+    """Run Didit's standalone Receita Federal CPF lookup."""
+    normalized_cpf = normalize_brazilian_cpf(cpf)
+    if not normalized_cpf:
+        raise DiditAPIError('A valid Brazilian CPF is required')
+    if not isinstance(date_of_birth, date):
+        raise DiditAPIError('A valid date of birth is required')
+
+    headers = _didit_headers()
+    headers.pop('Content-Type', None)
+    fields = {
+        'issuing_state': (None, 'BRA'),
+        'services': (None, 'bra_cpf'),
+        'tax_number': (None, normalized_cpf),
+        'date_of_birth': (None, date_of_birth.isoformat()),
+        'vendor_data': (None, str(vendor_data)),
+    }
+    try:
+        response = requests.request(
+            'POST',
+            _didit_url('/v3/database-validation/'),
+            headers=headers,
+            files=fields,
+            timeout=DIDIT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError('response is not an object')
+        return payload
+    except requests.RequestException as exc:
+        logger.exception('Didit API request failed: POST /v3/database-validation/')
+        raise DiditAPIError(str(exc)) from exc
+    except ValueError as exc:
+        logger.exception('Didit API returned invalid CPF validation JSON')
+        raise DiditAPIError('Didit API returned invalid JSON') from exc
+
+
+_BRA_CPF_RETRYABLE_OUTCOMES = {'REGISTRY_UNAVAILABLE', 'REGISTRY_ERROR'}
+
+
+def classify_brazilian_cpf_database_validation(
+    payload: dict[str, Any],
+    *,
+    expected_cpf: str,
+) -> tuple[str, dict[str, Any]]:
+    """Classify a standalone bra_cpf result and return PII-minimized evidence."""
+    normalized_expected = normalize_brazilian_cpf(expected_cpf)
+    validations = payload.get('validations') or []
+    if not isinstance(validations, list):
+        validations = []
+    service_results = [
+        item for item in validations
+        if isinstance(item, dict)
+        and str(item.get('service_id') or '').strip().lower() == 'bra_cpf'
+    ]
+    validation = service_results[0] if len(service_results) == 1 else {}
+    field_matches = validation.get('validation') or {}
+    if not isinstance(field_matches, dict):
+        field_matches = {}
+    outcome_code = str(validation.get('outcome_code') or '').strip().upper()
+    source_data = validation.get('source_data') or {}
+    if not isinstance(source_data, dict):
+        source_data = {}
+    source_cpf = normalize_brazilian_cpf(source_data.get('identification_number'))
+
+    evidence = {
+        'service_id': 'bra_cpf',
+        'cpf_sha256': hashlib.sha256((normalized_expected or '').encode('ascii')).hexdigest(),
+        'request_id': str(payload.get('request_id') or ''),
+        'provider_status': str(payload.get('status') or ''),
+        'match_type': str(payload.get('match_type') or ''),
+        'outcome_code': outcome_code,
+        'field_matches': {
+            key: str(field_matches.get(key) or '')
+            for key in ('identification_number', 'date_of_birth')
+        },
+    }
+    is_full_match = (
+        bool(normalized_expected)
+        and len(service_results) == 1
+        and str(payload.get('status') or '').strip().lower() == 'approved'
+        and str(payload.get('match_type') or '').strip().lower() == 'full_match'
+        and outcome_code == 'MATCH'
+        and str(field_matches.get('identification_number') or '').strip().lower() == 'full_match'
+        and str(field_matches.get('date_of_birth') or '').strip().lower() == 'full_match'
+        and source_cpf == normalized_expected
+    )
+    if is_full_match:
+        return 'full_match', evidence
+    if len(service_results) != 1 or not outcome_code or outcome_code in _BRA_CPF_RETRYABLE_OUTCOMES:
+        return 'retryable', evidence
+    return 'review_required', evidence
+
+
+def is_authoritative_brazilian_cpf_backfill(evidence: Any, *, cpf: str) -> bool:
+    """Verify that stored backfill evidence is a full match for the current CPF."""
+    normalized_cpf = normalize_brazilian_cpf(cpf)
+    if not normalized_cpf or not isinstance(evidence, dict):
+        return False
+    field_matches = evidence.get('field_matches') or {}
+    return (
+        evidence.get('result') == 'full_match'
+        and evidence.get('service_id') == 'bra_cpf'
+        and str(evidence.get('provider_status') or '').strip().lower() == 'approved'
+        and str(evidence.get('match_type') or '').strip().lower() == 'full_match'
+        and str(evidence.get('outcome_code') or '').strip().upper() == 'MATCH'
+        and str(field_matches.get('identification_number') or '').strip().lower() == 'full_match'
+        and str(field_matches.get('date_of_birth') or '').strip().lower() == 'full_match'
+        and evidence.get('cpf_sha256') == hashlib.sha256(normalized_cpf.encode('ascii')).hexdigest()
+    )
+
+
 def _workflow_id_for_account(account_type: str, phone_country: str | None = None) -> str:
     business_workflow = getattr(settings, 'DIDIT_BUSINESS_WORKFLOW_ID', '') or ''
     workflow_map = getattr(settings, 'DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY', {}) or {}

@@ -9,10 +9,13 @@ from achievements.models import ReferralRewardEvent, UserReferral
 from security.didit import (
     DiditAPIError,
     DiditConfigurationError,
+    classify_brazilian_cpf_database_validation,
     _enforce_brazilian_cpf_database_validation,
     _extract_verification_payload,
     create_didit_session,
+    is_authoritative_brazilian_cpf_backfill,
     sync_didit_session,
+    validate_brazilian_cpf_with_didit,
     verify_didit_webhook_signature,
 )
 from security.models import IdentityVerification, SuspiciousActivity, normalize_brazilian_cpf
@@ -23,6 +26,88 @@ User = get_user_model()
 
 
 class DiditPayloadExtractionTests(SimpleTestCase):
+    @override_settings(DIDIT_API_KEY='test-key', DIDIT_API_URL='https://didit.test')
+    @patch('security.didit.requests.request')
+    def test_standalone_cpf_validation_uses_multipart_without_json_header(self, request):
+        response = Mock()
+        response.json.return_value = {'request_id': 'req-1', 'validations': []}
+        request.return_value = response
+
+        result = validate_brazilian_cpf_with_didit(
+            cpf='529.982.247-25',
+            date_of_birth=date(1990, 1, 2),
+            vendor_data='confio-user-1',
+        )
+
+        self.assertEqual(result['request_id'], 'req-1')
+        kwargs = request.call_args.kwargs
+        self.assertEqual(request.call_args.args[:2], ('POST', 'https://didit.test/v3/database-validation/'))
+        self.assertNotIn('Content-Type', kwargs['headers'])
+        self.assertEqual(kwargs['files']['tax_number'], (None, '52998224725'))
+        self.assertEqual(kwargs['files']['date_of_birth'], (None, '1990-01-02'))
+
+    @patch('security.didit.requests.request')
+    def test_standalone_cpf_validation_rejects_invalid_cpf_before_network(self, request):
+        with self.assertRaises(DiditAPIError):
+            validate_brazilian_cpf_with_didit(
+                cpf='12345678901',
+                date_of_birth=date(1990, 1, 2),
+                vendor_data='confio-user-1',
+            )
+        request.assert_not_called()
+
+    def test_classifies_authoritative_standalone_cpf_match(self):
+        result, evidence = classify_brazilian_cpf_database_validation({
+            'request_id': 'req-1',
+            'status': 'Approved',
+            'match_type': 'full_match',
+            'validations': [{
+                'service_id': 'bra_cpf',
+                'outcome_code': 'MATCH',
+                'source_data': {'identification_number': '52998224725'},
+                'validation': {
+                    'identification_number': 'full_match',
+                    'date_of_birth': 'full_match',
+                },
+            }],
+        }, expected_cpf='529.982.247-25')
+
+        self.assertEqual(result, 'full_match')
+        self.assertNotIn('source_data', evidence)
+        evidence['result'] = result
+        self.assertTrue(is_authoritative_brazilian_cpf_backfill(
+            evidence,
+            cpf='52998224725',
+        ))
+        self.assertFalse(is_authoritative_brazilian_cpf_backfill(
+            evidence,
+            cpf='16899535009',
+        ))
+
+    def test_classifies_registry_unavailable_as_retryable(self):
+        result, _ = classify_brazilian_cpf_database_validation({
+            'validations': [{
+                'service_id': 'bra_cpf',
+                'outcome_code': 'REGISTRY_UNAVAILABLE',
+            }],
+        }, expected_cpf='52998224725')
+        self.assertEqual(result, 'retryable')
+
+    def test_classifies_conclusive_mismatch_for_review(self):
+        result, _ = classify_brazilian_cpf_database_validation({
+            'status': 'In Review',
+            'match_type': 'partial_match',
+            'validations': [{
+                'service_id': 'bra_cpf',
+                'outcome_code': 'PARTIAL_MATCH',
+                'validation': {
+                    'identification_number': 'full_match',
+                    'date_of_birth': 'no_match',
+                },
+            }],
+        }, expected_cpf='52998224725')
+        self.assertEqual(result, 'review_required')
+
     def test_brazilian_cpf_validator_normalizes_and_checks_digits(self):
         self.assertEqual(normalize_brazilian_cpf('529.982.247-25'), '52998224725')
         self.assertIsNone(normalize_brazilian_cpf('123.456.789-01'))
