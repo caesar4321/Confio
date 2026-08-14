@@ -219,6 +219,30 @@ def _normalized_identity_name(value: Any) -> str:
     return ''.join(char for char in normalized if char.isalnum()).casefold()
 
 
+def _enforce_brazilian_cpf_database_validation(
+    *,
+    status: str,
+    document_issuing_country: str,
+    extracted: dict[str, Any],
+    risk_factors: dict[str, Any],
+) -> str:
+    """Route inconsistent bra_cpf approvals to review instead of trusting OCR."""
+    if not (
+        status == 'verified'
+        and document_issuing_country == 'BRA'
+        and extracted.get('brazilian_cpf_database_validation_present')
+        and not extracted.get('brazilian_cpf_database_validation_valid')
+    ):
+        return status
+    risk_factors['requires_review'] = True
+    risk_factors['brazilian_cpf_validation'] = {
+        'source': 'didit_bra_cpf',
+        'result': 'not_full_match',
+        'review_required_at': timezone.now().isoformat(),
+    }
+    return 'pending'
+
+
 def resolve_brazilian_cpf_for_verification(verification: IdentityVerification) -> tuple[str | None, list[int]]:
     """Resolve one collision-free CPF from this identity's matching Didit attempts."""
     identity_key = (
@@ -866,22 +890,14 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     verification.document_number = extracted['document_number'] or verification.document_number
     verification.document_issuing_country = extracted['document_issuing_country']
     verification.document_expiry_date = extracted['document_expiry_date']
-    verification.status = status
     verification.risk_factors = risk_factors
-    if (
-        status == 'verified'
-        and verification.document_issuing_country == 'BRA'
-        and extracted.get('brazilian_cpf_database_validation_present')
-        and not extracted.get('brazilian_cpf_database_validation_valid')
-    ):
-        status = 'pending'
-        verification.status = status
-        risk_factors['requires_review'] = True
-        risk_factors['brazilian_cpf_validation'] = {
-            'source': 'didit_bra_cpf',
-            'result': 'not_full_match',
-            'review_required_at': timezone.now().isoformat(),
-        }
+    status = _enforce_brazilian_cpf_database_validation(
+        status=status,
+        document_issuing_country=verification.document_issuing_country,
+        extracted=extracted,
+        risk_factors=risk_factors,
+    )
+    verification.status = status
     if (
         status == 'verified'
         and verification.document_issuing_country == 'BRA'

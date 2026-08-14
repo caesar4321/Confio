@@ -9,6 +9,7 @@ from achievements.models import ReferralRewardEvent, UserReferral
 from security.didit import (
     DiditAPIError,
     DiditConfigurationError,
+    _enforce_brazilian_cpf_database_validation,
     _extract_verification_payload,
     create_didit_session,
     resolve_brazilian_cpf_for_verification,
@@ -128,6 +129,42 @@ class DiditPayloadExtractionTests(SimpleTestCase):
         self.assertEqual(extracted['document_number'], '123456789')
         self.assertTrue(extracted['brazilian_cpf_database_validation_present'])
         self.assertFalse(extracted['brazilian_cpf_database_validation_valid'])
+
+    def test_failed_bra_cpf_result_routes_top_level_approval_to_review(self):
+        risk_factors = {}
+
+        status = _enforce_brazilian_cpf_database_validation(
+            status='verified',
+            document_issuing_country='BRA',
+            extracted={
+                'brazilian_cpf_database_validation_present': True,
+                'brazilian_cpf_database_validation_valid': False,
+            },
+            risk_factors=risk_factors,
+        )
+
+        self.assertEqual(status, 'pending')
+        self.assertTrue(risk_factors['requires_review'])
+        self.assertEqual(
+            risk_factors['brazilian_cpf_validation']['result'],
+            'not_full_match',
+        )
+
+    def test_valid_bra_cpf_result_preserves_verified_status(self):
+        risk_factors = {}
+
+        status = _enforce_brazilian_cpf_database_validation(
+            status='verified',
+            document_issuing_country='BRA',
+            extracted={
+                'brazilian_cpf_database_validation_present': True,
+                'brazilian_cpf_database_validation_valid': True,
+            },
+            risk_factors=risk_factors,
+        )
+
+        self.assertEqual(status, 'verified')
+        self.assertEqual(risk_factors, {})
 
     def test_does_not_replace_brazilian_rg_with_invalid_tax_number(self):
         extracted = _extract_verification_payload({
