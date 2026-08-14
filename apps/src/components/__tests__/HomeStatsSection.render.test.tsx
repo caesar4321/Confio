@@ -112,7 +112,7 @@ describe('HomeStatsSection layout', () => {
 
   it('labels the stock figure as current market value rather than cost basis', () => {
     const acciones = tileLabels(render(true).root)[2];
-    expect(acciones).toContain('Valor de mercado');
+    expect(acciones).toContain('Valor total invertido');
     expect(acciones).not.toContain('Valor invertido');
   });
 

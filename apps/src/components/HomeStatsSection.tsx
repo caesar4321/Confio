@@ -172,7 +172,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         unit: 'USD',
         label: 'Acciones',
         // This is marked to market every background refresh, not cost basis.
-        descriptor: 'Valor de mercado',
+        descriptor: 'Valor total invertido',
         onPress: () => navigation.navigate('OndoStocksInfo'),
       };
       const presale: Tile = {
