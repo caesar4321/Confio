@@ -47,6 +47,88 @@ class DiditPayloadExtractionTests(SimpleTestCase):
         self.assertEqual(extracted['document_number'], '52998224725')
         self.assertEqual(extracted['document_issuing_country'], 'BRA')
 
+    def test_prefers_authoritative_bra_cpf_over_conflicting_ocr(self):
+        extracted = _extract_verification_payload({
+            'id_verifications': [{
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {'tax_number': '168.995.350-09'},
+            }],
+            'database_validations': [{
+                'status': 'Approved',
+                'match_type': 'full_match',
+                'screened_data': {'tax_number': '529.982.247-25'},
+                'validations': [{
+                    'service_id': 'bra_cpf',
+                    'outcome_code': 'MATCH',
+                    'validation': {
+                        'identification_number': 'full_match',
+                        'date_of_birth': 'full_match',
+                    },
+                    'source_data': {'identification_number': '52998224725'},
+                }],
+            }],
+        })
+
+        self.assertEqual(extracted['document_number'], '52998224725')
+        self.assertTrue(extracted['brazilian_cpf_database_validation_present'])
+        self.assertTrue(extracted['brazilian_cpf_database_validation_valid'])
+
+    def test_does_not_fallback_to_ocr_when_bra_cpf_does_not_match(self):
+        extracted = _extract_verification_payload({
+            'id_verifications': [{
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {'tax_number': '529.982.247-25'},
+            }],
+            'database_validations': [{
+                'status': 'Declined',
+                'match_type': 'no_match',
+                'screened_data': {'tax_number': '529.982.247-25'},
+                'validations': [{
+                    'service_id': 'bra_cpf',
+                    'outcome_code': 'NO_MATCH',
+                    'validation': {
+                        'identification_number': 'no_match',
+                        'date_of_birth': 'no_match',
+                    },
+                }],
+            }],
+        })
+
+        self.assertEqual(extracted['document_number'], '123456789')
+        self.assertTrue(extracted['brazilian_cpf_database_validation_present'])
+        self.assertFalse(extracted['brazilian_cpf_database_validation_valid'])
+
+    def test_rejects_conflicting_bra_cpf_registry_values(self):
+        extracted = _extract_verification_payload({
+            'id_verifications': [{
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+            }],
+            'database_validations': [{
+                'status': 'Approved',
+                'match_type': 'full_match',
+                'screened_data': {'tax_number': '529.982.247-25'},
+                'validations': [{
+                    'service_id': 'bra_cpf',
+                    'outcome_code': 'MATCH',
+                    'validation': {
+                        'identification_number': 'full_match',
+                        'date_of_birth': 'full_match',
+                    },
+                    'source_data': {'identification_number': '16899535009'},
+                }],
+            }],
+        })
+
+        self.assertEqual(extracted['document_number'], '123456789')
+        self.assertTrue(extracted['brazilian_cpf_database_validation_present'])
+        self.assertFalse(extracted['brazilian_cpf_database_validation_valid'])
+
     def test_does_not_replace_brazilian_rg_with_invalid_tax_number(self):
         extracted = _extract_verification_payload({
             'id_verifications': [{
@@ -336,6 +418,91 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(verification.document_issuing_country, 'VEN')
         stored_session = verification.risk_factors['didit']['session']
         self.assertNotIn('front_image', stored_session['id_verifications'][0])
+
+    @patch('security.didit.requests.request')
+    def test_sync_uses_authoritative_bra_cpf_database_match(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_bra_cpf_match',
+            'status': 'Approved',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
+            'first_name': 'Ana',
+            'last_name': 'Perez',
+            'date_of_birth': '1994-07-21',
+            'id_verifications': [{
+                'nationality': 'BRA',
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {'tax_number': '168.995.350-09'},
+            }],
+            'database_validations': [{
+                'status': 'Approved',
+                'match_type': 'full_match',
+                'screened_data': {'tax_number': '529.982.247-25'},
+                'validations': [{
+                    'service_id': 'bra_cpf',
+                    'outcome_code': 'MATCH',
+                    'validation': {
+                        'identification_number': 'full_match',
+                        'date_of_birth': 'full_match',
+                    },
+                    'source_data': {'identification_number': '52998224725'},
+                }],
+            }],
+        })
+
+        verification, _ = sync_didit_session(
+            session_id='sess_bra_cpf_match',
+            expected_user=self.user,
+        )
+
+        self.assertEqual(verification.status, 'verified')
+        self.assertEqual(verification.document_number, '52998224725')
+        self.assertFalse((verification.risk_factors or {}).get('requires_review', False))
+
+    @patch('security.didit.requests.request')
+    def test_sync_routes_approved_bra_cpf_no_match_to_review(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_bra_cpf_no_match',
+            'status': 'Approved',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
+            'first_name': 'Ana',
+            'last_name': 'Perez',
+            'date_of_birth': '1994-07-21',
+            'id_verifications': [{
+                'nationality': 'BRA',
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {'tax_number': '529.982.247-25'},
+            }],
+            'database_validations': [{
+                'status': 'Declined',
+                'match_type': 'no_match',
+                'screened_data': {'tax_number': '529.982.247-25'},
+                'validations': [{
+                    'service_id': 'bra_cpf',
+                    'outcome_code': 'NO_MATCH',
+                    'validation': {
+                        'identification_number': 'no_match',
+                        'date_of_birth': 'no_match',
+                    },
+                }],
+            }],
+        })
+
+        verification, _ = sync_didit_session(
+            session_id='sess_bra_cpf_no_match',
+            expected_user=self.user,
+        )
+
+        self.assertEqual(verification.status, 'pending')
+        self.assertEqual(verification.document_number, '123456789')
+        self.assertTrue(verification.risk_factors['requires_review'])
+        self.assertEqual(
+            verification.risk_factors['brazilian_cpf_validation']['result'],
+            'not_full_match',
+        )
 
     @patch('security.didit.requests.request')
     def test_sync_session_extracts_mexico_address_and_prefers_document_postal_code(self, mock_request):

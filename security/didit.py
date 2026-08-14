@@ -153,6 +153,62 @@ def _brazilian_cpfs_from_didit_payload(payload: dict[str, Any]) -> set[str]:
     return {cpf for value in candidates if (cpf := normalize_brazilian_cpf(value))}
 
 
+def _authoritative_brazilian_cpf_from_database_validation(
+    payload: dict[str, Any],
+) -> tuple[bool, str | None]:
+    """Return whether bra_cpf ran and its single fully matched CPF, if any."""
+    raw_checks = payload.get('database_validations') or payload.get('database_validation') or []
+    if isinstance(raw_checks, dict):
+        raw_checks = [raw_checks]
+    if not isinstance(raw_checks, list):
+        raw_checks = []
+
+    found_bra_cpf = False
+    matched_cpfs: set[str] = set()
+    for check in raw_checks:
+        if not isinstance(check, dict):
+            continue
+        validations = check.get('validations') or []
+        if not isinstance(validations, list):
+            continue
+        screened_data = check.get('screened_data') or {}
+        if not isinstance(screened_data, dict):
+            screened_data = {}
+        for validation in validations:
+            if not isinstance(validation, dict):
+                continue
+            if str(validation.get('service_id') or '').strip().lower() != 'bra_cpf':
+                continue
+            found_bra_cpf = True
+            field_matches = validation.get('validation') or {}
+            if not isinstance(field_matches, dict):
+                field_matches = {}
+            if not (
+                str(check.get('status') or '').strip().lower() == 'approved'
+                and str(check.get('match_type') or '').strip().lower() == 'full_match'
+                and str(validation.get('outcome_code') or '').strip().upper() == 'MATCH'
+                and str(field_matches.get('identification_number') or '').strip().lower() == 'full_match'
+                and str(field_matches.get('date_of_birth') or '').strip().lower() == 'full_match'
+            ):
+                continue
+
+            source_data = validation.get('source_data') or {}
+            if not isinstance(source_data, dict):
+                source_data = {}
+            candidates = {
+                cpf
+                for value in (
+                    screened_data.get('tax_number'),
+                    source_data.get('identification_number'),
+                )
+                if (cpf := normalize_brazilian_cpf(value))
+            }
+            if len(candidates) == 1:
+                matched_cpfs.update(candidates)
+
+    return found_bra_cpf, next(iter(matched_cpfs)) if len(matched_cpfs) == 1 else None
+
+
 def _single_brazilian_cpf_from_didit_payload(payload: dict[str, Any]) -> str | None:
     candidates = _brazilian_cpfs_from_didit_payload(payload)
     return next(iter(candidates)) if len(candidates) == 1 else None
@@ -187,9 +243,23 @@ def resolve_brazilian_cpf_for_verification(verification: IdentityVerification) -
         if attempt_key != identity_key:
             continue
         session = ((attempt.risk_factors or {}).get('didit') or {}).get('session') or {}
-        attempt_cpfs = _brazilian_cpfs_from_didit_payload(session) if isinstance(session, dict) else set()
+        attempt_cpfs: set[str] = set()
+        database_validation_present = False
+        authoritative_cpf = None
+        if isinstance(session, dict):
+            database_validation_present, authoritative_cpf = (
+                _authoritative_brazilian_cpf_from_database_validation(session)
+            )
+            if authoritative_cpf:
+                attempt_cpfs.add(authoritative_cpf)
+            elif not database_validation_present:
+                attempt_cpfs = _brazilian_cpfs_from_didit_payload(session)
         stored_cpf = normalize_brazilian_cpf(attempt.document_number)
-        if stored_cpf:
+        if stored_cpf and not (
+            isinstance(session, dict)
+            and database_validation_present
+            and not authoritative_cpf
+        ):
             attempt_cpfs.add(stored_cpf)
         for cpf in attempt_cpfs:
             candidates.setdefault(cpf, set()).add(attempt.pk)
@@ -492,6 +562,8 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
             ),
             'document_issuing_country': country,
             'document_expiry_date': None,
+            'brazilian_cpf_database_validation_present': False,
+            'brazilian_cpf_database_validation_valid': False,
         }
     id_verification = {}
     id_verifications = response_payload.get('id_verifications')
@@ -567,13 +639,21 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
     if not isinstance(extra_fields, dict):
         extra_fields = {}
     if issuing_country_iso3 == 'BRA':
-        # Brazilian identity cards carry an RG document number, while Koywe
-        # requires the holder's CPF. Didit returns that CPF separately in the
-        # document's extra fields. Never replace it with invalid OCR output.
-        document_number = _first_non_empty(
-            _single_brazilian_cpf_from_didit_payload(response_payload),
-            document_number,
+        database_validation_present, authoritative_cpf = (
+            _authoritative_brazilian_cpf_from_database_validation(response_payload)
         )
+        if authoritative_cpf:
+            document_number = authoritative_cpf
+        elif not database_validation_present:
+            # Legacy Brazilian workflows expose CPF as OCR tax data. Keep this
+            # checksum-validated fallback only when bra_cpf did not run.
+            document_number = _first_non_empty(
+                _single_brazilian_cpf_from_didit_payload(response_payload),
+                document_number,
+            )
+    else:
+        database_validation_present = False
+        authoritative_cpf = None
     if issuing_country_iso3 in {'CHL', 'COL', 'MEX'}:
         document_number = _first_non_empty(
             id_verification.get('personal_number'),
@@ -617,6 +697,8 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         'document_expiry_date': _parse_date(
             _first_non_empty(id_verification.get('expiration_date'), response_payload.get('expiration_date'))
         ),
+        'brazilian_cpf_database_validation_present': database_validation_present,
+        'brazilian_cpf_database_validation_valid': bool(authoritative_cpf),
     }
 
 
@@ -789,6 +871,21 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     if (
         status == 'verified'
         and verification.document_issuing_country == 'BRA'
+        and extracted.get('brazilian_cpf_database_validation_present')
+        and not extracted.get('brazilian_cpf_database_validation_valid')
+    ):
+        status = 'pending'
+        verification.status = status
+        risk_factors['requires_review'] = True
+        risk_factors['brazilian_cpf_validation'] = {
+            'source': 'didit_bra_cpf',
+            'result': 'not_full_match',
+            'review_required_at': timezone.now().isoformat(),
+        }
+    if (
+        status == 'verified'
+        and verification.document_issuing_country == 'BRA'
+        and not extracted.get('brazilian_cpf_database_validation_present')
         and not normalize_brazilian_cpf(verification.document_number)
     ):
         recovered_cpf, source_ids = resolve_brazilian_cpf_for_verification(verification)
