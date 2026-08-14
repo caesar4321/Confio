@@ -123,6 +123,21 @@ def _document_postal_code(value: Any) -> str:
     return matches[-1] if matches else ''
 
 
+def _valid_brazilian_cpf(value: Any) -> str | None:
+    cpf = re.sub(r'\D', '', str(value or ''))
+    if len(cpf) != 11 or len(set(cpf)) == 1:
+        return None
+    for position in (9, 10):
+        total = sum(
+            int(cpf[index]) * ((position + 1) - index)
+            for index in range(position)
+        )
+        check_digit = (total * 10 % 11) % 10
+        if check_digit != int(cpf[position]):
+            return None
+    return cpf
+
+
 def _safe_json_loads(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -481,6 +496,17 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         response_payload.get('document_number'),
         response_payload.get('personal_number'),
     )
+    extra_fields = id_verification.get('extra_fields')
+    if not isinstance(extra_fields, dict):
+        extra_fields = {}
+    if issuing_country_iso3 == 'BRA':
+        # Brazilian identity cards carry an RG document number, while Koywe
+        # requires the holder's CPF. Didit returns that CPF separately in the
+        # document's extra fields. Never replace it with invalid OCR output.
+        document_number = _first_non_empty(
+            _valid_brazilian_cpf(extra_fields.get('tax_number')),
+            document_number,
+        )
     if issuing_country_iso3 in {'CHL', 'COL', 'MEX'}:
         document_number = _first_non_empty(
             id_verification.get('personal_number'),

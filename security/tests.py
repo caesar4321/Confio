@@ -3,12 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from achievements.models import ReferralRewardEvent, UserReferral
 from security.didit import (
     DiditAPIError,
     DiditConfigurationError,
+    _extract_verification_payload,
     create_didit_session,
     sync_didit_session,
     verify_didit_webhook_signature,
@@ -17,6 +18,41 @@ from security.models import IdentityVerification, SuspiciousActivity
 from security.schema import SecurityQuery
 
 User = get_user_model()
+
+
+class DiditPayloadExtractionTests(SimpleTestCase):
+    def test_prefers_brazilian_tax_number_over_rg(self):
+        extracted = _extract_verification_payload({
+            'first_name': 'Vitoria',
+            'last_name': 'Silva',
+            'date_of_birth': '1994-07-21',
+            'id_verifications': [{
+                'nationality': 'BRA',
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {
+                    'tax_number': '529.982.247-25',
+                },
+            }],
+        })
+
+        self.assertEqual(extracted['document_number'], '52998224725')
+        self.assertEqual(extracted['document_issuing_country'], 'BRA')
+
+    def test_does_not_replace_brazilian_rg_with_invalid_tax_number(self):
+        extracted = _extract_verification_payload({
+            'id_verifications': [{
+                'document_type': 'Identity Card',
+                'document_number': '123456789',
+                'issuing_state': 'BRA',
+                'extra_fields': {
+                    'tax_number': '12345678901',
+                },
+            }],
+        })
+
+        self.assertEqual(extracted['document_number'], '123456789')
 
 
 @override_settings(
