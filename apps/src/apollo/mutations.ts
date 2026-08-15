@@ -166,6 +166,9 @@ export const WEB3AUTH_LOGIN = gql`
       optInTransactions
       isKeylessMigrated
       isNewUser
+      requiresBackupCompletion
+      walletReenrollmentRequired
+      walletReenrollmentPreparationToken
       walletReenrollmentAllowed
       walletReenrollmentChallenge
       walletReenrollmentGrant

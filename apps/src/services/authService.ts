@@ -38,6 +38,18 @@ const COMPLETE_WALLET_REENROLLMENT = gql`
   }
 `;
 
+const PREPARE_WALLET_REENROLLMENT = gql`
+  mutation PrepareWalletReenrollment($preparationToken: String!) {
+    prepareWalletReenrollment(preparationToken: $preparationToken) {
+      success
+      error
+      walletReenrollmentAllowed
+      walletReenrollmentChallenge
+      walletReenrollmentGrant
+    }
+  }
+`;
+
 // Best-effort, SELF-HEALING registration of the BSC (savings chain)
 // address. Fires at sign-in, on every authenticated app open
 // (completeAuthenticatedEntry), after account switches, and from savings
@@ -1095,6 +1107,87 @@ export class AuthService {
         void emitNewUserSignupOnce(authData.user?.id, 'google');
       }
 
+      const invalidateBackendSession = async (reason: string) => {
+        let cleared = false;
+        try {
+          cleared = await Keychain.resetGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME,
+          });
+        } catch (clearError) {
+          console.error(`[AuthService] Failed to clear session ${reason}:`, clearError);
+        }
+        if (!cleared) {
+          // Some Keychain implementations transiently fail deletion. An
+          // invalid payload prevents cold start from accepting a partial JWT.
+          await Keychain.setGenericPassword(
+            AUTH_KEYCHAIN_USERNAME,
+            JSON.stringify({ accessToken: '', refreshToken: '' }),
+            {
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME,
+              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
+            },
+          );
+        }
+      };
+
+      // Authentication itself is deliberately DB-only. The server normally
+      // returns a background-precomputed grant; this branch only supports a
+      // transitional server that explicitly requests the separate preflight.
+      if (authData.walletReenrollmentRequired) {
+        try {
+          if (!authData.walletReenrollmentPreparationToken || !authData.accessToken) {
+            throw new Error(
+              'No pudimos iniciar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
+            );
+          }
+          onProgress?.('Verificando tu billetera anterior...');
+          perfLog('Starting wallet reenrollment preflight');
+          const { data: preparationData } = await apolloClient.mutate({
+            mutation: PREPARE_WALLET_REENROLLMENT,
+            variables: {
+              preparationToken: authData.walletReenrollmentPreparationToken,
+            },
+            context: {
+              pinnedAuthToken: authData.accessToken,
+              skipProactiveRefresh: true,
+            },
+          });
+          const preparation = preparationData?.prepareWalletReenrollment;
+          perfLog('Wallet reenrollment preflight completed');
+          if (!preparation?.success) {
+            throw new Error(
+              preparation?.error ||
+              'No pudimos verificar tu billetera anterior. Inténtalo de nuevo.'
+            );
+          }
+          authData.walletReenrollmentAllowed = !!preparation.walletReenrollmentAllowed;
+          if (authData.walletReenrollmentAllowed) {
+            authData.walletReenrollmentChallenge = preparation.walletReenrollmentChallenge;
+            authData.walletReenrollmentGrant = preparation.walletReenrollmentGrant;
+          }
+        } catch (preparationError) {
+          throw preparationError;
+        }
+      }
+
+      if (authData.walletReenrollmentAllowed) {
+        // Do not discard a valid prior session for a local prerequisite error.
+        // These values are already known before any destructive work starts.
+        if (!driveAccessToken) {
+          throw new Error(
+            'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
+          );
+        }
+        if (!authData.walletReenrollmentChallenge || !authData.walletReenrollmentGrant) {
+          throw new Error(
+            'No pudimos autorizar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
+          );
+        }
+        await invalidateBackendSession('before wallet reenrollment');
+      }
+
       const persistBackendTokens = async () => {
         if (!authData.accessToken) {
           console.error('No auth tokens received from Web3Auth login');
@@ -1153,27 +1246,6 @@ export class AuthService {
       // Main and skip the login response that carries the reenrollment grant.
       if (!authData.walletReenrollmentAllowed) {
         await persistBackendTokens();
-      } else {
-        let priorSessionCleared = false;
-        try {
-          priorSessionCleared = await Keychain.resetGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME,
-          });
-        } catch (clearError) {
-          console.error('[AuthService] Failed to clear session before reenrollment:', clearError);
-        }
-        if (!priorSessionCleared) {
-          await Keychain.setGenericPassword(
-            AUTH_KEYCHAIN_USERNAME,
-            JSON.stringify({ accessToken: '', refreshToken: '' }),
-            {
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
-            },
-          );
-        }
       }
 
       // Historical self-heal: a small set of Google accounts generated a V2
@@ -1267,33 +1339,10 @@ export class AuthService {
           // cold-start path: it would enter Main and generic BSC registration
           // could fill bsc_address while the legacy Algorand anchor remains,
           // permanently suppressing reenrollment eligibility.
-          let partialSessionInvalidated = false;
           try {
-            partialSessionInvalidated = await Keychain.resetGenericPassword({
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME,
-            });
-          } catch (clearError) {
-            console.error('[AuthService] Failed to clear partial reenrollment session:', clearError);
-          }
-          if (!partialSessionInvalidated) {
-            try {
-              // Some Keychain implementations transiently fail deletion. An
-              // invalid payload is still safer than retaining a valid JWT:
-              // cold start cannot authenticate it, and the backend also blocks
-              // generic BSC registration until reenrollment commits atomically.
-              await Keychain.setGenericPassword(
-                AUTH_KEYCHAIN_USERNAME,
-                JSON.stringify({ accessToken: '', refreshToken: '' }),
-                {
-                  service: AUTH_KEYCHAIN_SERVICE,
-                  username: AUTH_KEYCHAIN_USERNAME,
-                  accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
-                },
-              );
-            } catch (invalidateError) {
-              console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
-            }
+            await invalidateBackendSession('after wallet reenrollment failure');
+          } catch (invalidateError) {
+            console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
           }
           throw reenrollmentError;
         }
@@ -1320,7 +1369,14 @@ export class AuthService {
           allowV2SecretGeneration,
         });
         const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-        const tokenForDrive = enableDrive ? driveAccessToken : undefined;
+        // A brand-new account has no Drive wallet to restore. Create its local
+        // secret immediately and move the network upload to BackupCompletion;
+        // making an empty Drive scan/upload part of authentication made first
+        // login take seconds (or hang on a poor connection). Returning users
+        // still receive Drive here when it may be needed for recovery.
+        const tokenForDrive = enableDrive && !authData.isNewUser
+          ? driveAccessToken
+          : undefined;
         try {
           await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
             allowGenerate: allowV2SecretGeneration,
@@ -1506,7 +1562,10 @@ export class AuthService {
       console.log('Phone verification status from backend:', isPhoneVerified);
 
       // 10) Return user info with Algorand address
-      let requiresBackupCompletion = Platform.OS === 'android';
+      // The login mutation already owns this state. Avoid a second
+      // network-only profile query on every sign-in just to read it again.
+      let requiresBackupCompletion = !!authData.requiresBackupCompletion
+        || (!!authData.isNewUser && enableDrive && !driveSyncSucceeded);
 
       // Report backup status only if Drive was enabled AND sync actually succeeded.
       // Backup is mandatory, so Android stays blocked in BackupCompletion until the
@@ -1515,28 +1574,20 @@ export class AuthService {
         try {
           const { reportBackupStatus } = await import('./secureDeterministicWallet');
           const reportSucceeded = await reportBackupStatus('google_drive');
+          if (reportSucceeded) {
+            requiresBackupCompletion = false;
+          }
           console.log('[AuthService] Backup status reported for Google sign-in:', reportSucceeded);
         } catch (e) {
           console.warn('[AuthService] Failed to report backup status:', e);
         }
       }
 
-      try {
-        const { GET_ME } = await import('../apollo/queries');
-        const { data } = await apolloClient.query({
-          query: GET_ME,
-          fetchPolicy: 'network-only',
-        });
-        requiresBackupCompletion = !!data?.me?.requiresBackupCompletion;
-        console.log('[AuthService] Post-login backup checkpoint:', {
-          requiresBackupCompletion,
-          backupProvider: data?.me?.backupProvider,
-          driveRequested: enableDrive,
-          driveSyncSucceeded,
-        });
-      } catch (checkpointErr) {
-        console.warn('[AuthService] Failed to fetch backup checkpoint after Google sign-in:', checkpointErr);
-      }
+      console.log('[AuthService] Post-login backup checkpoint:', {
+        requiresBackupCompletion,
+        driveRequested: enableDrive,
+        driveSyncSucceeded,
+      });
 
       const result = {
         userInfo: {

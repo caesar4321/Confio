@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3/files';
+const DRIVE_REQUEST_TIMEOUT_MS = 12_000;
 const DRIVE_AUTH_ERROR_MESSAGE = 'No pudimos acceder a Google Drive. Vuelve a tocar Reintentar respaldo y elige la cuenta de Google correcta.';
 
 export interface DriveFile {
@@ -37,6 +38,25 @@ async function createDriveError(operation: string, response: Response): Promise<
     return new GoogleDriveStorageError(operation, response.status, rawResponse);
 }
 
+async function driveFetch(
+    operation: string,
+    url: string,
+    init: RequestInit,
+): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DRIVE_REQUEST_TIMEOUT_MS);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error: any) {
+        if (error?.name === 'AbortError') {
+            throw new GoogleDriveStorageError(operation, 0, 'request_timeout');
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 /**
  * Service to interact with Google Drive AppData folder via REST API.
  * 
@@ -58,7 +78,8 @@ export const googleDriveStorage = {
                 query += ` and name='${filename}'`;
             }
 
-            const response = await fetch(
+            const response = await driveFetch(
+                'list',
                 `${DRIVE_API_URL}?spaces=appDataFolder&q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime)`,
                 {
                     method: 'GET',
@@ -94,7 +115,7 @@ export const googleDriveStorage = {
             }
             url += '?alt=media';
 
-            const response = await fetch(url, {
+            const response = await driveFetch('download', url, {
                 method: 'GET',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
@@ -118,7 +139,8 @@ export const googleDriveStorage = {
      */
     async listRevisions(accessToken: string, fileId: string): Promise<any[]> {
         try {
-            const response = await fetch(
+            const response = await driveFetch(
+                'revisions',
                 `${DRIVE_API_URL}/${fileId}/revisions?fields=revisions(id,modifiedTime,keepForever,size)`,
                 {
                     method: 'GET',
@@ -164,7 +186,7 @@ export const googleDriveStorage = {
                 content +
                 closeDelim;
 
-            const response = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart`, {
+            const response = await driveFetch('upload', `${DRIVE_UPLOAD_URL}?uploadType=multipart`, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
@@ -193,7 +215,7 @@ export const googleDriveStorage = {
      */
     async updateFile(accessToken: string, fileId: string, content: string): Promise<void> {
         try {
-            const response = await fetch(`${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media`, {
+            const response = await driveFetch('update', `${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media`, {
                 method: 'PATCH',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,

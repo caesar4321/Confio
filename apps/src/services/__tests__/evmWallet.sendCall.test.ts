@@ -15,12 +15,13 @@ describe('EIP-191 ownership proof', () => {
       'account_id:2',
       `old_algorand_address:${'A'.repeat(58)}`,
       'old_bsc_address:',
+      'inspection_round:12345',
       'nonce:test',
     ].join('\n');
 
     expect(signEip191Message(message, '11'.repeat(32))).toBe(
-      '0x792cbb03f8dc9324d3d36fc50b829748fdb0256c2a09f9086ef0bc638ecebd54' +
-      '2817617cbe1707c6ca1064b8da6976c7f4b0627a8685a1d1980df7f0ac34d2291b'
+      '0x855b8b9713d386a876d343b5b288d4c1eadce061fd072ded565963d3251fe2e41' +
+      '61eaaa88cd72e442d4dc52e1b1f152a47283ac3eb33aa96b2c314a0232ed34b1c'
     );
   });
 });
