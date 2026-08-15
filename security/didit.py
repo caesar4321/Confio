@@ -407,7 +407,10 @@ def classify_brazilian_cpf_database_validation(
 ) -> tuple[str, dict[str, Any]]:
     """Classify a standalone bra_cpf result and return PII-minimized evidence."""
     normalized_expected = normalize_brazilian_cpf(expected_cpf)
-    validations = payload.get('validations') or []
+    result_payload = payload.get('database_validation') or payload
+    if not isinstance(result_payload, dict):
+        result_payload = {}
+    validations = result_payload.get('validations') or []
     if not isinstance(validations, list):
         validations = []
     service_results = [
@@ -428,9 +431,9 @@ def classify_brazilian_cpf_database_validation(
     evidence = {
         'service_id': 'bra_cpf',
         'cpf_sha256': hashlib.sha256((normalized_expected or '').encode('ascii')).hexdigest(),
-        'request_id': str(payload.get('request_id') or ''),
-        'provider_status': str(payload.get('status') or ''),
-        'match_type': str(payload.get('match_type') or ''),
+        'request_id': str(payload.get('request_id') or result_payload.get('request_id') or ''),
+        'provider_status': str(result_payload.get('status') or ''),
+        'match_type': str(result_payload.get('match_type') or ''),
         'outcome_code': outcome_code,
         'field_matches': {
             key: str(field_matches.get(key) or '')
@@ -440,8 +443,8 @@ def classify_brazilian_cpf_database_validation(
     is_full_match = (
         bool(normalized_expected)
         and len(service_results) == 1
-        and str(payload.get('status') or '').strip().lower() == 'approved'
-        and str(payload.get('match_type') or '').strip().lower() == 'full_match'
+        and str(result_payload.get('status') or '').strip().lower() == 'approved'
+        and str(result_payload.get('match_type') or '').strip().lower() == 'full_match'
         and outcome_code == 'MATCH'
         and str(field_matches.get('identification_number') or '').strip().lower() == 'full_match'
         and str(field_matches.get('date_of_birth') or '').strip().lower() == 'full_match'

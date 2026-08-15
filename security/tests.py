@@ -59,20 +59,23 @@ class DiditPayloadExtractionTests(SimpleTestCase):
     def test_classifies_authoritative_standalone_cpf_match(self):
         result, evidence = classify_brazilian_cpf_database_validation({
             'request_id': 'req-1',
-            'status': 'Approved',
-            'match_type': 'full_match',
-            'validations': [{
-                'service_id': 'bra_cpf',
-                'outcome_code': 'MATCH',
-                'source_data': {'identification_number': '52998224725'},
-                'validation': {
-                    'identification_number': 'full_match',
-                    'date_of_birth': 'full_match',
-                },
-            }],
+            'database_validation': {
+                'status': 'Approved',
+                'match_type': 'full_match',
+                'validations': [{
+                    'service_id': 'bra_cpf',
+                    'outcome_code': 'MATCH',
+                    'source_data': {'identification_number': '52998224725'},
+                    'validation': {
+                        'identification_number': 'full_match',
+                        'date_of_birth': 'full_match',
+                    },
+                }],
+            },
         }, expected_cpf='529.982.247-25')
 
         self.assertEqual(result, 'full_match')
+        self.assertEqual(evidence['request_id'], 'req-1')
         self.assertNotIn('source_data', evidence)
         evidence['result'] = result
         self.assertTrue(is_authoritative_brazilian_cpf_backfill(
