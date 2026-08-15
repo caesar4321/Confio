@@ -19,6 +19,7 @@ from security.didit import (
     verify_didit_webhook_signature,
 )
 from security.models import IdentityVerification, SuspiciousActivity, normalize_brazilian_cpf
+from security.views import _is_standalone_cpf_backfill_webhook
 from ramps.koywe_client import KoyweClient, KoyweError
 from security.schema import SecurityQuery
 
@@ -26,6 +27,26 @@ User = get_user_model()
 
 
 class DiditPayloadExtractionTests(SimpleTestCase):
+    def test_recognizes_standalone_cpf_backfill_webhook(self):
+        self.assertTrue(_is_standalone_cpf_backfill_webhook({
+            'vendor_data': 'confio-cpf-backfill-543',
+            'database_validation': {'validations': []},
+        }))
+        self.assertTrue(_is_standalone_cpf_backfill_webhook({
+            'vendor_data': 'confio-user-10629',
+            'database_validation': {'validations': []},
+        }))
+
+    def test_does_not_ignore_regular_didit_session_webhook(self):
+        self.assertFalse(_is_standalone_cpf_backfill_webhook({
+            'vendor_data': '{"user_id": 10629}',
+            'database_validation': {'validations': []},
+        }))
+        self.assertFalse(_is_standalone_cpf_backfill_webhook({
+            'vendor_data': 'confio-cpf-backfill-543',
+            'status': 'Approved',
+        }))
+
     @override_settings(DIDIT_API_KEY='test-key', DIDIT_API_URL='https://didit.test')
     @patch('security.didit.requests.request')
     def test_standalone_cpf_validation_uses_multipart_without_json_header(self, request):

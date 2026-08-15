@@ -83,7 +83,7 @@ class Command(BaseCommand):
                 response = validate_brazilian_cpf_with_didit(
                     cpf=cpf,
                     date_of_birth=verification.verified_date_of_birth,
-                    vendor_data=f'confio-user-{verification.user_id}',
+                    vendor_data=f'confio-cpf-backfill-{verification.id}',
                 )
                 result, evidence = classify_brazilian_cpf_database_validation(
                     response,

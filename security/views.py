@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -8,6 +9,32 @@ from django.views.decorators.http import require_POST
 from security.didit import DiditAPIError, sync_didit_session, verify_didit_webhook_signature
 
 logger = logging.getLogger(__name__)
+
+
+_CPF_BACKFILL_VENDOR_DATA = re.compile(r'confio-(?:user|cpf-backfill)-\d+')
+
+
+def _is_standalone_cpf_backfill_webhook(payload):
+    containers = [
+        payload,
+        payload.get('data'),
+        payload.get('session'),
+        payload.get('database_validation'),
+    ]
+    vendor_data = next((
+        item.get('vendor_data')
+        for item in containers
+        if isinstance(item, dict) and item.get('vendor_data')
+    ), '')
+    has_database_validation = any(
+        isinstance(item, dict)
+        and ('database_validation' in item or 'validations' in item)
+        for item in containers
+    )
+    return bool(
+        has_database_validation
+        and _CPF_BACKFILL_VENDOR_DATA.fullmatch(str(vendor_data or ''))
+    )
 
 
 @csrf_exempt
@@ -41,6 +68,10 @@ def didit_webhook(request):
     except json.JSONDecodeError:
         logger.warning('Didit webhook rejected due to invalid JSON: test=%s', test_webhook)
         return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+
+    if _is_standalone_cpf_backfill_webhook(payload):
+        logger.info('Didit standalone CPF backfill webhook acknowledged')
+        return JsonResponse({'ok': True, 'ignored': 'standalone_cpf_backfill'})
 
     webhook_type = payload.get('webhook_type') or payload.get('type')
     session_id = (
