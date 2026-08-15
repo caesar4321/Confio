@@ -1877,8 +1877,19 @@ export async function getOrCreateMasterSecret(
         await credentialStorage.storeSecret(ACL_FLAG_KEY, new Uint8Array([1]));
       }
 
-      // Implicit iCloud Safety Report
-      reportBackupStatus('icloud').catch(e => console.warn('[BackupHealth] iCloud report failed', e));
+      // Implicit iCloud Safety Report. Reenrollment deliberately leaves an
+      // invalid Keychain session in place until the wallet transition commits,
+      // so its request-scoped JWT must be used here too. Await the pinned call
+      // to ensure no auth-link cleanup can outlive the later session write.
+      const iCloudReport = reportBackupStatus(
+        'icloud',
+        options?.backupReportAuthToken,
+      );
+      if (options?.backupReportAuthToken) {
+        await iCloudReport;
+      } else {
+        iCloudReport.catch(e => console.warn('[BackupHealth] iCloud report failed', e));
+      }
     }
     // -------------------------------
 

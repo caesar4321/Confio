@@ -240,7 +240,7 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
     expect(onCloudSyncResult).toHaveBeenCalledWith(true);
   });
 
-  it('pins reenrollment backup reports to the request-scoped login JWT', async () => {
+  it('pins every reenrollment backup report to the request-scoped login JWT', async () => {
     seedLocalVerifiedSecret();
     (apolloClient.mutate as jest.Mock).mockResolvedValue({
       data: { reportBackupStatus: { success: true, error: null } },
@@ -253,13 +253,18 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
       backupReportAuthToken: 'reenrollment-login-jwt',
     });
 
-    await Promise.resolve();
-    expect(apolloClient.mutate).toHaveBeenCalledWith(expect.objectContaining({
-      context: expect.objectContaining({
-        pinnedAuthToken: 'reenrollment-login-jwt',
-        skipProactiveRefresh: true,
-      }),
-    }));
+    // The RN Jest preset runs as iOS, so this call emits both the implicit
+    // iCloud ACL report and the explicit Drive upload report. Neither may fall
+    // back to the intentionally invalidated Keychain session.
+    expect(apolloClient.mutate).toHaveBeenCalledTimes(2);
+    for (const [mutationOptions] of (apolloClient.mutate as jest.Mock).mock.calls) {
+      expect(mutationOptions).toEqual(expect.objectContaining({
+        context: expect.objectContaining({
+          pinnedAuthToken: 'reenrollment-login-jwt',
+          skipProactiveRefresh: true,
+        }),
+      }));
+    }
   });
 
   it('keeps the login fast path (no Drive calls) when cloud sync is not required', async () => {
