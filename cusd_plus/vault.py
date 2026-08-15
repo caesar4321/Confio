@@ -28,6 +28,7 @@ SEL_PPLUS = _sel('pPlus()')
 SEL_TOTAL_SUPPLY = _sel('totalSupply()')
 SEL_BACKING = _sel('backingRatioBps()')
 SEL_TOTAL_OWED = _sel('totalOwedUsd()')
+SEL_SURPLUS_USDY = _sel('surplusUsdy(uint256)')
 SEL_RANGES = _sel('ranges(uint256)')  # Ondo RWADynamicOracle rate schedule
 SEL_GET_PRICE = _sel('getPrice()')     # oracle: USD per USDY, 1e18
 SEL_YIELD_SHARE = _sel('CONFIO_YIELD_SHARE_BPS()')
@@ -108,6 +109,24 @@ def backing_ratio_bps() -> int:
     if not addr:
         return 0
     return _call(addr, SEL_BACKING)
+
+
+def uncollected_yield_earnings_usd_wad() -> int:
+    """Confío's currently withdrawable vault surplus, valued in USD (1e18).
+
+    The vault withholds Confío's yield share as USDY surplus rather than
+    minting separate fee tokens. Use lastOraclePrice, the guard-approved
+    accounting snapshot used by collectFees(), so pending holder accrual is
+    never misreported as Confío revenue. This is the uncollected balance, not
+    lifetime earnings: collectFees() legitimately reduces it.
+    """
+    addr = vault_address()
+    if not addr:
+        return 0
+    price = last_oracle_price_wad(fresh=True)
+    data = SEL_SURPLUS_USDY + hex(price)[2:].rjust(64, '0')
+    surplus_usdy = _call(addr, data)
+    return surplus_usdy * price // (10 ** 18)
 
 
 def last_oracle_price_wad(fresh: bool = False) -> int:

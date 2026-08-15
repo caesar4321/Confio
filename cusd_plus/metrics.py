@@ -48,6 +48,10 @@ class CUSDPlusPlatformMetrics:
     backing_ratio_bps: Optional[int]
     gross_apy_pct: Optional[float]
     net_apy_pct: Optional[float]
+    # Current owner-withdrawable surplus in USD. This is accumulated but
+    # uncollected yield earnings, not an all-time revenue counter.
+    uncollected_yield_earnings_usd: Optional[Decimal]
+    confio_yield_share_bps: Optional[int]
     # None when the exit is open; a reason string when a redeem would revert.
     redeem_blocked_reason: Optional[str]
     source: str
@@ -82,6 +86,8 @@ def _unavailable(wired: bool, address: Optional[str], source: str) -> CUSDPlusPl
         backing_ratio_bps=None,
         gross_apy_pct=None,
         net_apy_pct=None,
+        uncollected_yield_earnings_usd=None,
+        confio_yield_share_bps=None,
         redeem_blocked_reason=None,
         source=source,
         as_of=timezone.now(),
@@ -91,7 +97,9 @@ def _unavailable(wired: bool, address: Optional[str], source: str) -> CUSDPlusPl
 def get_cusd_plus_platform_metrics(*, use_cache: bool = True) -> CUSDPlusPlatformMetrics:
     """Read the live cUSD+ vault. Never raises — an ops dashboard that 500s
     because a BSC node blipped is worse than one that says "unavailable"."""
-    cache_key = "cusd_plus_platform_metrics:v1"
+    # Versioned because these frozen dataclass instances are serialized into
+    # shared cache; a new field must never inherit an older object shape.
+    cache_key = "cusd_plus_platform_metrics:v2"
     if use_cache:
         cached = cache.get(cache_key)
         if cached:
@@ -126,6 +134,15 @@ def get_cusd_plus_platform_metrics(*, use_cache: bool = True) -> CUSDPlusPlatfor
     except Exception:  # noqa: BLE001
         logger.warning("cUSD+ APY read failed", exc_info=True)
         gross, net = None, None
+    try:
+        uncollected_yield_earnings_usd = (
+            Decimal(vault.uncollected_yield_earnings_usd_wad()) / WAD
+        )
+        confio_yield_share_bps = vault.confio_yield_share_bps()
+    except Exception:  # noqa: BLE001
+        logger.warning("cUSD+ yield earnings read failed", exc_info=True)
+        uncollected_yield_earnings_usd = None
+        confio_yield_share_bps = None
 
     metrics = CUSDPlusPlatformMetrics(
         wired=True,
@@ -137,6 +154,8 @@ def get_cusd_plus_platform_metrics(*, use_cache: bool = True) -> CUSDPlusPlatfor
         backing_ratio_bps=backing_ratio_bps,
         gross_apy_pct=gross,
         net_apy_pct=net,
+        uncollected_yield_earnings_usd=uncollected_yield_earnings_usd,
+        confio_yield_share_bps=confio_yield_share_bps,
         redeem_blocked_reason=vault.redeem_blocked_reason(),
         source="bsc",
         as_of=timezone.now(),

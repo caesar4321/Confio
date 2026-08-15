@@ -233,6 +233,20 @@
                 <small>{{ cusd_plus_metrics.redeem_blocked_reason|default:'redeemToUsdt available' }}</small>
             </div>
             <div class="metric-card">
+                <div class="metric-label">Confío Yield Earnings</div>
+                <div class="metric-value" style="font-size: 22px;">
+                    {% if cusd_plus_metrics.uncollected_yield_earnings_usd is not None %}
+                    ${{ cusd_plus_metrics.uncollected_yield_earnings_usd|floatformat:2 }}
+                    {% else %}<span style="color:#999;">unavailable</span>{% endif %}
+                </div>
+                <small>
+                    Accumulated, uncollected on-chain
+                    {% if cusd_plus_metrics.confio_yield_share_bps is not None %}
+                    &middot; {{ cusd_plus_metrics.confio_yield_share_bps }} bps share
+                    {% endif %}
+                </small>
+            </div>
+            <div class="metric-card">
                 <div class="metric-label">Vault</div>
                 <div class="metric-value" style="font-size: 13px; word-break: break-all;">
                     {{ cusd_plus_metrics.address|default:'not configured' }}
