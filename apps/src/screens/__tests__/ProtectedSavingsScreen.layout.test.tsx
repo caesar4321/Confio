@@ -42,11 +42,32 @@ describe('ProtectedSavingsScreen section headings', () => {
 
     const heading = tree.root
       .findAllByType(Text)
-      .find(node => node.props.children === 'Rendimiento anual');
+      .find(node => node.props.children === 'Rendimiento todos los días');
 
     expect(heading).toBeDefined();
     expect(StyleSheet.flatten(heading!.props.style)).toEqual(
       expect.objectContaining({flexShrink: 1}),
     );
+  });
+
+  it('explains that annual APY still accumulates daily without a fixed term', () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<ProtectedSavingsScreen />);
+    });
+
+    const copy = tree.root
+      .findAllByType(Text)
+      .flatMap(node =>
+        Array.isArray(node.props.children)
+          ? node.props.children
+          : [node.props.children],
+      )
+      .filter(child => typeof child === 'string')
+      .join(' ');
+
+    expect(copy).toContain('La tasa que ves es anual (APY)');
+    expect(copy).toContain('acumula rendimiento todos los días');
+    expect(copy).toContain('No tienes que esperar un plazo fijo');
   });
 });

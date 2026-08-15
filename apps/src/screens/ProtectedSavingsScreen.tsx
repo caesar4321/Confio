@@ -244,11 +244,12 @@ export const ProtectedSavingsScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="trending-up" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Rendimiento anual</Text>
+            <Text style={styles.sectionTitle}>Rendimiento todos los días</Text>
           </View>
           <Text style={styles.sectionBody}>
-            La tasa que ves es anual (APY). Tu ahorro acumula una pequeña parte
-            del rendimiento cada día.
+            La tasa que ves es anual (APY), pero tu ahorro acumula rendimiento
+            todos los días. No tienes que esperar un plazo fijo para verlo
+            crecer.
           </Text>
 
           {/* Rates are LIVE from the server (Ondo's on-chain oracle) when
