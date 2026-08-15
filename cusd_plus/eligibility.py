@@ -58,12 +58,22 @@ ONDO_POLICY = GeoPolicy(
 )
 
 
+# Confío product-policy defaults. Unlike the issuer lists above, this overlay
+# blocks only new stock purchases; it does not affect USDY or stock exits.
+CONFIO_STOCK_BUY_BLOCKED_DEFAULTS = frozenset({'CO'})
+
+
 def _confio_stock_buy_blocked_countries():
-    """Live ISO-2 entry-only overlay controlled by Confío operations."""
+    """ISO-2 entry-only overlay controlled by Confío operations.
+
+    Colombia is a product-policy default: USDY remains available there, while
+    new stock purchases are disabled and existing positions remain sellable.
+    The environment setting can add more countries without removing Colombia.
+    """
     configured = getattr(settings, 'CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES', ())
     if isinstance(configured, str):
         configured = configured.split(',')
-    return frozenset(
+    return CONFIO_STOCK_BUY_BLOCKED_DEFAULTS | frozenset(
         str(country).strip().upper()
         for country in configured
         if str(country).strip()
@@ -94,8 +104,9 @@ def is_ondo_eligible(user) -> bool:
     in hand is what told users behind a blocked IP that they could save while
     the relay refused them.
 
-    Exits (from_savings, sells) must NEVER be gated on this — funds are
-    always withdrawable.
+    USDY exits must never be gated on this helper. Stock redemptions use the
+    request-aware issuer policy separately; they never use Confío's buy-only
+    country overlay.
     """
     return ONDO_POLICY.phone_eligible(user)
 

@@ -72,6 +72,15 @@ class EligibilityGateTests(SimpleTestCase):
         self.assertTrue(check_savings_mint_eligibility(
             _user('VE'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
 
+    @override_settings(CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[])
+    def test_colombia_allows_usdy_but_blocks_new_stock_purchases(self):
+        colombia = {'HTTP_CF_IPCOUNTRY': 'CO'}
+        peru = {'HTTP_CF_IPCOUNTRY': 'PE'}
+
+        self.assertTrue(check_savings_mint_eligibility(_user('CO'), colombia))
+        self.assertFalse(check_stock_buy_eligibility(_user('CO'), peru))
+        self.assertFalse(check_stock_buy_eligibility(_user('PE'), colombia))
+
     def test_unresolvable_ip_fails_open(self):
         # No header, no usable IP: get_country_for_ip returns None without
         # touching the DB (private/absent IPs short-circuit).
@@ -88,11 +97,11 @@ class EligibilityGateTests(SimpleTestCase):
     @override_settings(CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'])
     def test_confio_stock_overlay_blocks_phone_or_ip_but_not_other_countries(self):
         self.assertFalse(check_stock_buy_eligibility(
-            _user('BO'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
+            _user('BO'), {'HTTP_CF_IPCOUNTRY': 'PE'}))
         self.assertFalse(check_stock_buy_eligibility(
             _user('VE'), {'HTTP_CF_IPCOUNTRY': 'BO'}))
         self.assertTrue(check_stock_buy_eligibility(
-            _user('VE'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
+            _user('VE'), {'HTTP_CF_IPCOUNTRY': 'PE'}))
 
     @override_settings(CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[])
     def test_ondo_ineligible_country_still_blocks_stock_buy(self):
@@ -214,12 +223,12 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
         CUSD_PLUS_GM_TRADE_FEE_BPS=30,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
     )
-    def test_stock_buy_batch_refused_by_confio_country_overlay(self):
+    def test_colombia_stock_buy_batch_refused_by_confio_country_overlay(self):
         approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
         calls = [_call(VAULT, approve), _call(ROUTER, _stock_data(0))]
-        res = self._mutate(calls, _user('BO', uid=25))
+        res = self._mutate(calls, _user('CO', uid=25))
         self.assertEqual(res.error, 'trade_not_available')
 
     @override_settings(
@@ -227,13 +236,13 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
         CUSD_PLUS_GM_TRADE_FEE_BPS=30,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['BO'],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
     )
-    def test_stock_sell_batch_remains_an_exit_for_blocked_country(self):
+    def test_colombia_stock_sell_batch_remains_an_exit(self):
         approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
         calls = [_call(STOCK, approve), _call(ROUTER, _stock_data(1))]
         with mock.patch('cusd_plus.eligibility.check_stock_buy_eligibility') as gate:
-            res = self._mutate(calls, _user('BO', uid=26))
+            res = self._mutate(calls, _user('CO', uid=26))
         gate.assert_not_called()
         self.assertNotEqual(res.error, 'trade_not_available')
 
