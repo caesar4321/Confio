@@ -697,9 +697,14 @@ class WalletReenrollmentProofTestCase(SimpleTestCase):
             self.account,
             {'eligible': False, 'reason': 'inspection_failed'},
         )
+        unproven_funding = _store_wallet_reenrollment_assessment(
+            self.account,
+            {'eligible': False, 'reason': 'unproven_funding'},
+        )
 
         self.assertEqual(permanent['status'], 'ineligible')
         self.assertEqual(transient['status'], 'retry')
+        self.assertEqual(unproven_funding['status'], 'ineligible')
 
     @patch('users.web3auth_schema.Account.objects.filter')
     def test_assessment_lease_is_atomic_and_owner_checked(self, filter_mock):

@@ -36,6 +36,10 @@ WALLET_REENROLLMENT_PERMANENT_REFUSALS = {
     'asset_activity',
     'unsupported_transaction',
     'history_too_large',
+    # A wallet whose complete, round-pinned history cannot prove sponsor
+    # funding is not safe to retire. Treat that as a terminal refusal instead
+    # of retrying the same immutable history forever during rollout prewarm.
+    'unproven_funding',
 }
 
 
