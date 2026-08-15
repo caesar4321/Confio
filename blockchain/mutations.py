@@ -14,7 +14,7 @@ from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
 from achievements.referral_security import get_referral_reward_summary
-from users.models import Account
+from users.models import Account, RetiredWalletAddress
 from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
 from .constants import (
@@ -1130,6 +1130,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             # Note: recipient_address might already be set from the parameter
             resolved_recipient_address = None
             recipient_user = None  # Track the actual recipient user object for notifications
+            recipient_user_account = None
             
             # Priority 1: User ID lookup (Confío users)
             if recipient_user_id:
@@ -1186,14 +1187,25 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     return cls(success=False, error='Invalid recipient Algorand address format')
                 resolved_recipient_address = recipient_address
                 logger.info(f"Using direct Algorand address: {resolved_recipient_address[:10]}...")
-                
-                # Attempt to look up the user by their Algorand address
-                try:
-                    matching_account = Account.objects.filter(algorand_address=resolved_recipient_address).select_related('user').first()
+
+                # Serialize the active-address lookup with reenrollment. If
+                # reenrollment already owns this row lock, PostgreSQL waits and
+                # re-evaluates the predicate; the tombstone written by that
+                # transaction is then visible before this prepare can proceed.
+                from django.db import transaction as db_transaction
+                with db_transaction.atomic():
+                    matching_account = Account.objects.select_for_update().filter(
+                        algorand_address=resolved_recipient_address,
+                        deleted_at__isnull=True,
+                    ).select_related('user').first()
+                    if RetiredWalletAddress.is_retired(
+                        RetiredWalletAddress.CHAIN_ALGORAND,
+                        resolved_recipient_address,
+                    ):
+                        return cls(success=False, error='This wallet address has been retired')
                     if matching_account:
+                        recipient_user_account = matching_account
                         recipient_user = matching_account.user
-                except Exception:
-                    pass
             
             else:
                 return cls(success=False, error='Recipient identification required (user_id, phone, or address)')
@@ -1274,6 +1286,54 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create sponsored transaction'))
+
+            # A prepared Algorand group remains valid after this request
+            # returns. For an internal recipient, reserve the exact address
+            # while holding the same Account row lock used by wallet
+            # reenrollment; otherwise reenrollment could retire the address
+            # before the sender submits this already sponsor-signed group.
+            if recipient_user_account is not None:
+                from django.db import transaction as db_transaction
+                from send.models import SendTransaction
+
+                with db_transaction.atomic():
+                    locked_recipient = Account.objects.select_for_update().filter(
+                        pk=recipient_user_account.pk,
+                        deleted_at__isnull=True,
+                    ).first()
+                    current_recipient = (
+                        getattr(locked_recipient, 'algorand_address', None) or ''
+                    )
+                    if current_recipient != resolved_recipient_address:
+                        return cls(success=False, error='Recipient address changed; prepare the send again')
+
+                    SendTransaction.objects.update_or_create(
+                        sender_user=user,
+                        idempotency_key=result['group_id'],
+                        defaults={
+                            'recipient_user': recipient_user,
+                            'recipient_business': (
+                                locked_recipient.business
+                                if locked_recipient.account_type == 'business'
+                                else None
+                            ),
+                            'sender_address': user_account.algorand_address,
+                            'recipient_address': resolved_recipient_address,
+                            'amount': amount_decimal,
+                            'token_type': asset_type_upper,
+                            'memo': (note or '')[:500],
+                            'status': 'PENDING',
+                            'sender_type': (
+                                'business' if user_account.account_type == 'business'
+                                else 'user'
+                            ),
+                            'recipient_type': (
+                                'business' if locked_recipient.account_type == 'business'
+                                else 'user'
+                            ),
+                            'bsc_calls_json': '',
+                        },
+                    )
             
             # Do not send push/in-app notifications here; use optimistic UI on client.
             # Push notifications will be sent after on-chain confirmation by the worker.
@@ -1335,6 +1395,50 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 return cls(success=False, error='Not authenticated')
             
             logger.info(f"Submitting {'sponsored group' if is_sponsored else 'solo transaction'} for user {user.id}")
+
+            # Validate any internal-recipient reservation before broadcasting.
+            # The reservation remains PENDING/SUBMITTED until the chain worker
+            # settles it, so reenrollment cannot pass between this check and
+            # the eventual transfer landing.
+            prepared_reservation = None
+            if is_sponsored:
+                try:
+                    import base64
+                    import msgpack
+                    from django.db import transaction as db_transaction
+                    from send.models import SendTransaction
+
+                    decoded = msgpack.unpackb(base64.b64decode(signed_user_txn), raw=False)
+                    txn_dict = decoded.get('txn', {}) if isinstance(decoded, dict) else {}
+                    group_bytes = txn_dict.get('grp')
+                    group_id = group_bytes.hex() if isinstance(group_bytes, bytes) else ''
+                    if group_id:
+                        prepared_reservation = SendTransaction.objects.filter(
+                            sender_user=user,
+                            idempotency_key=group_id,
+                            status='PENDING',
+                            bsc_calls_json='',
+                            deleted_at__isnull=True,
+                        ).select_related('recipient_user', 'recipient_business').first()
+                    if prepared_reservation is not None:
+                        if prepared_reservation.created_at < timezone.now() - timedelta(hours=24):
+                            prepared_reservation.status = 'FAILED'
+                            prepared_reservation.error_message = 'Prepared Algorand send expired before submission'
+                            prepared_reservation.save(update_fields=['status', 'error_message', 'updated_at'])
+                            return cls(success=False, error='Prepared send expired; prepare it again')
+                        with db_transaction.atomic():
+                            locked_recipient = Account.objects.select_for_update().filter(
+                                algorand_address=prepared_reservation.recipient_address,
+                                deleted_at__isnull=True,
+                            ).first()
+                            if (
+                                getattr(locked_recipient, 'algorand_address', None)
+                                != prepared_reservation.recipient_address
+                            ):
+                                return cls(success=False, error='Recipient address changed; prepare the send again')
+                except Exception as reservation_error:
+                    logger.exception('Could not validate prepared recipient reservation')
+                    return cls(success=False, error=f'Could not validate prepared send: {reservation_error}')
             
             # Submit the transaction(s) using async function
             loop = asyncio.new_event_loop()
@@ -1523,9 +1627,7 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 except Exception:
                     pass
 
-                stx, created = SendTransaction.all_objects.update_or_create(
-                    transaction_hash=axfer_txid or result['tx_id'],
-                    defaults={
+                send_defaults = {
                         'sender_user': user,
                         'recipient_user': recipient_user,
                         'recipient_business': recipient_business,
@@ -1542,7 +1644,21 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                         'sender_phone': sender_phone,
                         'recipient_phone': recipient_phone,
                     }
-                )
+                if prepared_reservation is not None:
+                    for field, value in send_defaults.items():
+                        setattr(prepared_reservation, field, value)
+                    prepared_reservation.transaction_hash = axfer_txid or result['tx_id']
+                    prepared_reservation.save(update_fields=[
+                        *send_defaults.keys(),
+                        'transaction_hash',
+                        'updated_at',
+                    ])
+                    stx, created = prepared_reservation, False
+                else:
+                    stx, created = SendTransaction.all_objects.update_or_create(
+                        transaction_hash=axfer_txid or result['tx_id'],
+                        defaults=send_defaults,
+                    )
                 logger.info(f"SendTransaction persisted for tx {result['tx_id']} (created={created})")
 
                 if token_type == 'CONFIO':

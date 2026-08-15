@@ -26,6 +26,7 @@ from pathlib import Path
 import re
 
 from django.core.cache import cache
+from django.conf import settings
 from eth_abi import decode, encode
 from eth_utils import keccak
 
@@ -48,6 +49,51 @@ REGISTRY_FALLBACK_TTL = 5 * 60
 REGISTRY_CACHE_KEY = 'gm_bsc_registry_v1'
 
 
+def _parse_bsc_registry(rows, *, strict: bool = False) -> dict:
+    if not isinstance(rows, list):
+        raise RuntimeError('Ondo GM address registry is not a list')
+    registry = {}
+    addresses = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            if strict:
+                raise RuntimeError('Ondo GM address registry contains a malformed row')
+            continue
+        symbol = str(row.get('symbol') or '').strip()
+        items = row.get('addresses') or []
+        if not isinstance(items, list):
+            if strict:
+                raise RuntimeError('Ondo GM address registry contains malformed addresses')
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                if strict:
+                    raise RuntimeError('Ondo GM address registry contains malformed addresses')
+                continue
+            if item.get('networkChainId') != 'bsc-56':
+                continue
+            address = str(item.get('address') or '')
+            if not symbol or not re.fullmatch(r'0x[0-9a-fA-F]{40}', address):
+                if strict:
+                    raise RuntimeError('Ondo GM address registry contains invalid BSC metadata')
+                continue
+            address_key = address.lower()
+            if strict and (symbol in registry or address_key in addresses):
+                raise RuntimeError('Ondo GM address registry contains duplicate BSC metadata')
+            try:
+                decimals = int(item.get('decimals') or 18)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError('Ondo GM address registry contains invalid decimals') from exc
+            if not 0 <= decimals <= 36:
+                if strict:
+                    raise RuntimeError('Ondo GM address registry contains invalid decimals')
+                continue
+            registry[symbol] = {'address': address, 'decimals': decimals}
+            addresses.add(address_key)
+            break
+    return registry
+
+
 @lru_cache(maxsize=1)
 def _fallback_registry() -> dict:
     path = Path(__file__).parent / 'gm_tokens.json'
@@ -68,18 +114,7 @@ def registry() -> dict | None:
     try:
         from . import gm_api
         rows = gm_api.all_addresses()
-        live = {}
-        for row in rows:
-            symbol = str(row.get('symbol') or '')
-            for item in row.get('addresses') or []:
-                address = str(item.get('address') or '')
-                if (item.get('networkChainId') == 'bsc-56'
-                        and re.fullmatch(r'0x[0-9a-fA-F]{40}', address)):
-                    live[symbol] = {
-                        'address': address,
-                        'decimals': int(item.get('decimals') or 18),
-                    }
-                    break
+        live = _parse_bsc_registry(rows)
         result = live or fallback
         if result:
             cache.set(REGISTRY_CACHE_KEY, result, REGISTRY_TTL if live else REGISTRY_FALLBACK_TTL)
@@ -90,6 +125,50 @@ def registry() -> dict | None:
             # Retry Ondo soon after an outage, but avoid a request stampede.
             cache.set(REGISTRY_CACHE_KEY, fallback, REGISTRY_FALLBACK_TTL)
         return fallback or None
+
+
+def audit_registry() -> dict:
+    """Fresh, fail-closed GM universe for irreversible wallet retirement.
+
+    Unlike ``registry()``, this never reads the day cache and never substitutes
+    the shipped snapshot for a failed live fetch. The returned universe is the
+    union of live and shipped addresses: a delisted legacy token can still hold
+    value, while the fresh response covers tokens added after the snapshot.
+    """
+    from . import gm_api
+
+    fallback = _fallback_registry()
+    live = _parse_bsc_registry(gm_api.all_addresses_fresh(), strict=True)
+    if not live:
+        raise RuntimeError('Ondo GM address registry is empty')
+    # A fixed, reviewed authoritative floor catches truncated-but-valid JSON.
+    # Percentage tolerances are unsafe here: with hundreds of assets they can
+    # silently omit dozens of contracts during an irreversible retirement.
+    minimum_live = int(getattr(
+        settings,
+        'CUSD_PLUS_GM_AUDIT_MIN_LIVE_ASSETS',
+        438,
+    ))
+    if minimum_live <= 0:
+        raise RuntimeError('Ondo GM audit minimum is not configured')
+    if len(live) < minimum_live:
+        raise RuntimeError(
+            f'Ondo GM address registry is incomplete ({len(live)} < {minimum_live})'
+        )
+
+    combined = {}
+    seen_addresses = set()
+    for source_name, source in (('snapshot', fallback), ('live', live)):
+        for symbol, item in source.items():
+            address_key = str(item['address']).lower()
+            if address_key in seen_addresses:
+                continue
+            key = symbol
+            if key in combined:
+                key = f'{symbol}@{source_name}:{address_key}'
+            combined[key] = item
+            seen_addresses.add(address_key)
+    return combined
 
 
 def _scan(

@@ -32,6 +32,7 @@ from decimal import Decimal
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -106,20 +107,49 @@ def sync_presale_migration_credits() -> dict:
                 )
             continue
 
-        account = Account.objects.filter(
-            user_id=user_id,
-            account_type='personal',
-            deleted_at__isnull=True,
-        ).exclude(bsc_address__isnull=True).exclude(bsc_address='').first()
-        if not account or not _ADDR_RE.match(account.bsc_address or ''):
-            skipped_unlinked += 1
-            continue
-        PresaleMigrationCredit.objects.create(
-            user_id=user_id,
-            bsc_address=account.bsc_address,
-            confio_amount=total,
-        )
-        created += 1
+        # Reenrollment locks the same primary personal Account row before it
+        # replaces an address. Read the address and create/get the historical
+        # credit while holding that lock so neither operation can miss the
+        # other's safety record.
+        with transaction.atomic():
+            account = (
+                Account.objects.select_for_update()
+                .filter(
+                    user_id=user_id,
+                    account_type='personal',
+                    account_index=0,
+                    deleted_at__isnull=True,
+                )
+                .first()
+            )
+            if not account or not _ADDR_RE.match(account.bsc_address or ''):
+                skipped_unlinked += 1
+                continue
+
+            credit, credit_created = PresaleMigrationCredit.objects.get_or_create(
+                user_id=user_id,
+                defaults={
+                    'bsc_address': account.bsc_address,
+                    'confio_amount': total,
+                },
+            )
+            if credit_created:
+                created += 1
+            elif credit.confio_amount < total:
+                # Another sync may have created the row after `existing` was
+                # snapshotted. Preserve the normal resync/manual-top-up rules.
+                if credit.status == 'pending':
+                    credit.confio_amount = total
+                    credit.save(update_fields=['confio_amount', 'updated_at'])
+                    updated += 1
+                else:
+                    needs_manual += 1
+                    logger.warning(
+                        '[PRESALE][MIGRATION] user %s bought %s more CONFIO after its '
+                        'credit was %s (row has %s, DB total %s) — needs a manual '
+                        'top-up credit', user_id, total - credit.confio_amount,
+                        credit.status, credit.confio_amount, total,
+                    )
 
     logger.info(
         f"[PRESALE][MIGRATION] sync: created={created} updated={updated} "

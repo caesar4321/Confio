@@ -1,4 +1,4 @@
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.contrib.auth import get_user_model
 from graphene_django.utils.testing import GraphQLTestCase
 from graphql_jwt.testcases import JSONWebTokenTestCase
@@ -357,6 +357,49 @@ class MigrationSafetyTestCase(SimpleTestCase):
         self.assertFalse(result['eligible'])
         self.assertEqual(result['reason'], 'inspection_failed')
 
+    def test_reenrollment_blocks_recent_prepared_algorand_inbound(self):
+        from types import SimpleNamespace
+        from users.web3auth_schema import _inspect_wallet_reenrollment
+
+        reservation_query = mock.Mock()
+        reservation_query.filter.return_value = reservation_query
+        reservation_query.exists.return_value = True
+        account = SimpleNamespace(algorand_address='A' * 58)
+
+        with patch(
+            'send.models.SendTransaction.objects.filter',
+            return_value=reservation_query,
+        ), patch('blockchain.algorand_client.get_algod_client') as algod_mock:
+            result = _inspect_wallet_reenrollment(account)
+
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'pending_inbound_algorand_send')
+        algod_mock.assert_not_called()
+
+    def test_reenrollment_blocks_retryable_humanitarian_release(self):
+        from types import SimpleNamespace
+        from users.web3auth_schema import _inspect_wallet_reenrollment
+
+        empty_send_query = mock.Mock()
+        empty_send_query.filter.return_value = empty_send_query
+        empty_send_query.exists.return_value = False
+        release_query = mock.Mock()
+        release_query.exists.return_value = True
+        account = SimpleNamespace(algorand_address='A' * 58)
+
+        with patch(
+            'send.models.SendTransaction.objects.filter',
+            return_value=empty_send_query,
+        ), patch(
+            'humanitarian.models.HumanitarianRelease.objects.filter',
+            return_value=release_query,
+        ), patch('blockchain.algorand_client.get_algod_client') as algod_mock:
+            result = _inspect_wallet_reenrollment(account)
+
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'pending_humanitarian_release')
+        algod_mock.assert_not_called()
+
 
 class WalletReenrollmentProofTestCase(SimpleTestCase):
     def setUp(self):
@@ -450,6 +493,7 @@ class WalletReenrollmentProofTestCase(SimpleTestCase):
         ))
 
 
+@override_settings(BSC_VESTING_VAULT_ADDRESS='0x' + ('9' * 40))
 class StaleBscReenrollmentSafetyTestCase(SimpleTestCase):
     def _inspect(
         self,
@@ -459,6 +503,10 @@ class StaleBscReenrollmentSafetyTestCase(SimpleTestCase):
         rpc_error=None,
         pending_send=False,
         pending_payroll=False,
+        ramp_history=False,
+        vesting_allocated=0,
+        vesting_claimed=0,
+        rpc_calls=None,
     ):
         from types import SimpleNamespace
         from users.web3auth_schema import _inspect_stale_bsc_reenrollment
@@ -476,22 +524,38 @@ class StaleBscReenrollmentSafetyTestCase(SimpleTestCase):
         send_query.exclude.return_value = send_query
         payroll_query = mock.Mock()
         payroll_query.exists.return_value = pending_payroll
+        ramp_query = mock.Mock()
+        ramp_query.exists.return_value = ramp_history
 
         def rpc(method, params):
+            if rpc_calls is not None:
+                rpc_calls.append((method, params))
             if rpc_error:
                 raise rpc_error
-            return native if method == 'eth_getBalance' else nonce
+            if method == 'eth_blockNumber':
+                return '0xabc'
+            if method == 'eth_getBalance':
+                return native
+            if method == 'eth_getTransactionCount':
+                return nonce
+            if (
+                method == 'eth_call'
+                and (params[0].get('to') or '').lower() == ('0x' + ('9' * 40))
+            ):
+                words = (vesting_allocated, vesting_claimed, 0, 0)
+                return '0x' + ''.join(value.to_bytes(32, 'big').hex() for value in words)
+            return '0x0'
 
         with patch('blockchain.models.SponsoredBatch.objects.filter', return_value=empty_query), \
              patch('conversion.models.Conversion.objects.filter', return_value=empty_query), \
              patch('send.models.SendTransaction.objects.filter', return_value=send_query), \
              patch('send.models.PhoneInvite.objects.filter', return_value=empty_query), \
              patch('payroll.models.PayrollItem.objects.filter', return_value=payroll_query), \
-             patch('ramps.models.RampTransaction.objects.filter', return_value=empty_query), \
+             patch('ramps.models.RampTransaction.objects.filter', return_value=ramp_query), \
              patch('presale.models.PresaleMigrationCredit.objects.filter', return_value=empty_query), \
              patch('cusd_plus.vault._rpc', side_effect=rpc), \
              patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
-             patch('cusd_plus.gm_holdings.registry', return_value={}):
+             patch('cusd_plus.gm_holdings.audit_registry', return_value={}):
             return _inspect_stale_bsc_reenrollment(account)
 
     def test_allows_only_zero_state_unused_bsc_anchor(self):
@@ -512,6 +576,33 @@ class StaleBscReenrollmentSafetyTestCase(SimpleTestCase):
             self._inspect(pending_payroll=True)['reason'],
             'pending_inbound_payroll',
         )
+
+    def test_ambiguous_koywe_address_reservation_blocks_reenrollment(self):
+        result = self._inspect(ramp_history=True)
+
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'ramp_history')
+
+    def test_rejects_contract_held_vesting_grant(self):
+        calls = []
+        result = self._inspect(
+            vesting_allocated=100,
+            vesting_claimed=40,
+            rpc_calls=calls,
+        )
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'vesting_grant')
+        vesting_calls = [
+            params for method, params in calls
+            if method == 'eth_call'
+            and (params[0].get('to') or '').lower() == ('0x' + ('9' * 40))
+        ]
+        self.assertEqual(len(vesting_calls), 1)
+        self.assertEqual(vesting_calls[0][1], '0xabc')
+
+    def test_fully_claimed_vesting_grant_does_not_block(self):
+        result = self._inspect(vesting_allocated=100, vesting_claimed=100)
+        self.assertTrue(result['eligible'])
 
     def test_fails_closed_when_bsc_state_is_unavailable(self):
         result = self._inspect(rpc_error=TimeoutError('rpc unavailable'))
@@ -569,6 +660,7 @@ class WalletReenrollmentMutationTestCase(TestCase):
 
     @patch('users.web3auth_schema._inspect_wallet_reenrollment')
     def test_atomically_retires_old_address_and_registers_bsc(self, inspect_mock):
+        from users.models import RetiredWalletAddress
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
 
         inspect_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
@@ -586,6 +678,12 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertIsNone(self.account.algorand_address)
         self.assertEqual(self.account.bsc_address, self.NEW_BSC_ADDRESS)
         self.assertTrue(self.account.is_keyless_migrated)
+        retired = RetiredWalletAddress.objects.get(
+            chain=RetiredWalletAddress.CHAIN_ALGORAND,
+            address=self.OLD_ADDRESS,
+        )
+        self.assertEqual(retired.account, self.account)
+        self.assertEqual(retired.user, self.user)
 
     @patch('users.web3auth_schema._inspect_wallet_reenrollment')
     def test_leaves_account_unchanged_when_chain_recheck_refuses(self, inspect_mock):
@@ -658,6 +756,7 @@ class WalletReenrollmentMutationTestCase(TestCase):
         inspect_algo_mock,
         inspect_bsc_mock,
     ):
+        from users.models import RetiredWalletAddress
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
 
         self.account.bsc_address = '0x' + ('3' * 40)
@@ -678,6 +777,15 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertIsNone(self.account.algorand_address)
         self.assertEqual(self.account.bsc_address, self.NEW_BSC_ADDRESS)
         self.assertTrue(self.account.is_keyless_migrated)
+        self.assertSetEqual(
+            set(RetiredWalletAddress.objects.filter(account=self.account).values_list(
+                'chain', 'address'
+            )),
+            {
+                (RetiredWalletAddress.CHAIN_ALGORAND, self.OLD_ADDRESS),
+                (RetiredWalletAddress.CHAIN_BSC, old_bsc.lower()),
+            },
+        )
 
     @patch('users.web3auth_schema._inspect_stale_bsc_reenrollment')
     @patch('users.web3auth_schema._inspect_wallet_reenrollment')

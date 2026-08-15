@@ -156,6 +156,65 @@ class GmApiTradingTests(SimpleTestCase):
             self.assertEqual(gm_holdings.registry(), gm_holdings.registry())
         addresses.assert_called_once()
 
+    @override_settings(CUSD_PLUS_GM_AUDIT_MIN_LIVE_ASSETS=1)
+    def test_audit_registry_uses_fresh_live_metadata_and_unions_snapshot(self):
+        snapshot_address = '0x' + '11' * 20
+        live_address = '0x' + '22' * 20
+        fallback = {
+            'OLDon': {'address': snapshot_address, 'decimals': 18},
+        }
+        rows = [{
+            'symbol': 'NEWon',
+            'addresses': [{
+                'networkChainId': 'bsc-56',
+                'address': live_address,
+                'decimals': 18,
+            }],
+        }]
+        with mock.patch.object(gm_holdings, '_fallback_registry', return_value=fallback), \
+             mock.patch('cusd_plus.gm_api.all_addresses_fresh', return_value=rows) as fresh, \
+             mock.patch('cusd_plus.gm_api.all_addresses') as cached:
+            registry = gm_holdings.audit_registry()
+        fresh.assert_called_once_with()
+        cached.assert_not_called()
+        self.assertEqual(
+            {item['address'].lower() for item in registry.values()},
+            {snapshot_address.lower(), live_address.lower()},
+        )
+
+    @override_settings(CUSD_PLUS_GM_AUDIT_MIN_LIVE_ASSETS=10)
+    def test_audit_registry_fails_closed_on_truncated_live_metadata(self):
+        fallback = {
+            f'SYM{i}': {'address': f'0x{i:040x}', 'decimals': 18}
+            for i in range(10)
+        }
+        rows = [{
+            'symbol': 'ONLYon',
+            'addresses': [{
+                'networkChainId': 'bsc-56',
+                'address': '0x' + '22' * 20,
+                'decimals': 18,
+            }],
+        }]
+        with mock.patch.object(gm_holdings, '_fallback_registry', return_value=fallback), \
+             mock.patch('cusd_plus.gm_api.all_addresses_fresh', return_value=rows), \
+             self.assertRaisesRegex(RuntimeError, 'incomplete'):
+            gm_holdings.audit_registry()
+
+    def test_audit_registry_propagates_fresh_fetch_failure(self):
+        with mock.patch('cusd_plus.gm_api.all_addresses_fresh', side_effect=TimeoutError('down')), \
+             self.assertRaises(TimeoutError):
+            gm_holdings.audit_registry()
+
+    def test_audit_registry_fails_closed_on_malformed_live_metadata(self):
+        with mock.patch.object(gm_holdings, '_fallback_registry', return_value={}), \
+             mock.patch(
+                 'cusd_plus.gm_api.all_addresses_fresh',
+                 return_value=[{'symbol': 'BADon', 'addresses': 'not-a-list'}],
+             ), \
+             self.assertRaisesRegex(RuntimeError, 'malformed addresses'):
+            gm_holdings.audit_registry()
+
     def test_fresh_holdings_cache_skips_registry_lookup(self):
         holder = '0x' + '77' * 20
         cache.set(f'gm_hold:{holder}', {'TSLAon': 1.0}, 30)

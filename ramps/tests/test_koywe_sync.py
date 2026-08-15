@@ -2,11 +2,220 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase
+import requests
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase
 
 from ramps import schema as ramps_schema
-from ramps.koywe_client import KoyweClient, KoyweError
-from ramps.koywe_sync import build_koywe_instruction_snapshot, _merge_koywe_metadata
+from ramps.koywe_client import (
+    KoyweClient,
+    KoyweError,
+    KoyweMinimumAmountError,
+    KoyweOrderCreationAmbiguousError,
+)
+from ramps.koywe_sync import (
+    build_koywe_instruction_snapshot,
+    _merge_koywe_metadata,
+    upsert_koywe_ramp_transaction,
+)
+from ramps.models import RampTransaction
+from ramps.tasks import poll_koywe_ramp_transactions
+from users.models import Account
+
+
+User = get_user_model()
+
+
+class KoyweOrderAmbiguityTests(SimpleTestCase):
+    def _client_with_response(self, response):
+        client = KoyweClient()
+        client.authenticate = mock.Mock(return_value='token')
+        client.session = mock.Mock()
+        client.session.request.return_value = response
+        return client
+
+    def test_transport_failure_during_create_post_is_typed_as_ambiguous(self):
+        client = KoyweClient()
+        client.authenticate = mock.Mock(return_value='token')
+        client.session = mock.Mock()
+        client.session.request.side_effect = requests.Timeout('response lost')
+
+        with self.assertRaises(KoyweOrderCreationAmbiguousError):
+            client.create_order(
+                quote_id='quote-1',
+                email='owner@example.com',
+                destination_address='0x' + ('1' * 40),
+                external_id='confio-ramp-on_ramp-test',
+            )
+
+    def test_server_error_after_create_post_is_ambiguous(self):
+        response = mock.Mock(ok=False, status_code=503)
+        response.json.return_value = {'message': 'temporarily unavailable'}
+        client = self._client_with_response(response)
+
+        with self.assertRaises(KoyweOrderCreationAmbiguousError):
+            client.create_order(
+                quote_id='quote-1',
+                external_id='confio-ramp-on_ramp-test',
+            )
+
+    def test_malformed_success_after_create_post_is_ambiguous(self):
+        response = mock.Mock(ok=True, status_code=200)
+        response.json.return_value = {'status': 'WAITING'}
+        client = self._client_with_response(response)
+
+        with self.assertRaises(KoyweOrderCreationAmbiguousError):
+            client.create_order(
+                quote_id='quote-1',
+                external_id='confio-ramp-on_ramp-test',
+            )
+
+    def test_validation_rejection_after_create_post_remains_definitive(self):
+        response = mock.Mock(ok=False, status_code=400)
+        response.json.return_value = {'message': 'invalid destinationAddress'}
+        client = self._client_with_response(response)
+
+        with self.assertRaises(KoyweError) as raised:
+            client.create_order(
+                quote_id='quote-1',
+                external_id='confio-ramp-on_ramp-test',
+            )
+        self.assertNotIsInstance(raised.exception, KoyweOrderCreationAmbiguousError)
+
+    def test_conflict_after_create_post_is_ambiguous(self):
+        response = mock.Mock(ok=False, status_code=409)
+        response.json.return_value = {'message': 'externalId already exists'}
+        client = self._client_with_response(response)
+
+        with self.assertRaises(KoyweOrderCreationAmbiguousError):
+            client.create_order(
+                quote_id='quote-1',
+                external_id='confio-ramp-on_ramp-test',
+            )
+
+
+class KoyweAddressReservationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            username='koywe-reservation-owner',
+            firebase_uid='koywe-reservation-owner-uid',
+        )
+        self.account = Account.objects.create(
+            user=self.user,
+            account_type='personal',
+            account_index=0,
+            bsc_address='0x' + ('1' * 40),
+        )
+        self.info = SimpleNamespace(
+            context=SimpleNamespace(user=self.user, META={}),
+        )
+
+    def _mutate_with_error(self, error):
+        client = mock.Mock(is_configured=True)
+        client.create_ramp_order.side_effect = error
+        with mock.patch('ramps.schema.KoyweClient', return_value=client), \
+             mock.patch('ramps.schema._employee_ramp_denial', return_value=None), \
+             mock.patch('ramps.schema._get_wallet_upgrade_blocker', return_value=None), \
+             mock.patch('ramps.schema._resolve_ramp_country_code', return_value='PE'), \
+             mock.patch('ramps.schema._get_ramp_account_for_user', return_value=self.account), \
+             mock.patch('ramps.schema._get_koywe_auth_email', return_value='owner@example.com'), \
+             mock.patch('ramps.schema._store_koywe_auth_email'), \
+             mock.patch(
+                 'ramps.schema._get_koywe_contact_profile',
+                 return_value={'activity': 'EMPLOYEE'},
+             ):
+            return ramps_schema.CreateRampOrder().mutate(
+                self.info,
+                direction='ON_RAMP',
+                amount='100',
+                payment_method_code='WIREPE',
+                country_code='PE',
+                fiat_currency='PEN',
+                destination='cusd_plus',
+            )
+
+    def test_definitive_order_rejection_releases_address_reservation(self):
+        result = self._mutate_with_error(
+            KoyweMinimumAmountError(
+                'below minimum', actual='100', minimum='200', currency='PEN'
+            )
+        )
+
+        self.assertFalse(result.success)
+        self.assertFalse(RampTransaction.objects.exists())
+
+    def test_ambiguous_order_post_retains_searchable_address_reservation(self):
+        result = self._mutate_with_error(
+            KoyweOrderCreationAmbiguousError('timeout after POST')
+        )
+
+        self.assertFalse(result.success)
+        reservation = RampTransaction.objects.get()
+        self.assertEqual(reservation.provider_order_id, '')
+        self.assertTrue(reservation.external_id)
+        self.assertEqual(
+            reservation.metadata['wallet_address_reservation_state'],
+            'ambiguous_order_creation',
+        )
+        self.assertEqual(reservation.metadata['reconcile_key'], reservation.external_id)
+
+    def test_provider_response_reuses_precreated_address_reservation(self):
+        reservation = RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            external_id='confio-ramp-reservation-1',
+            actor_type='user',
+            actor_address='0x' + ('1' * 40),
+            destination='cusd_plus',
+            metadata={'wallet_address_reserved': True},
+        )
+
+        ramp_tx = upsert_koywe_ramp_transaction(
+            actor_user=None,
+            actor_business=None,
+            actor_type='user',
+            actor_display_name='Test User',
+            actor_address='0x' + ('1' * 40),
+            direction='ON_RAMP',
+            destination='cusd_plus',
+            country_code='PE',
+            fiat_currency='PEN',
+            payment_method_code='WIREPE',
+            payment_method_display='Transferencia',
+            order_id='koywe-order-1',
+            external_id='confio-ramp-reservation-1',
+            amount_in='100',
+            amount_out='25',
+            next_action_url=None,
+            auth_email='user@example.com',
+            order_payload={'status': 'WAITING'},
+        )
+
+        self.assertEqual(ramp_tx.pk, reservation.pk)
+        self.assertEqual(RampTransaction.objects.count(), 1)
+        self.assertEqual(ramp_tx.provider_order_id, 'koywe-order-1')
+        self.assertEqual(
+            ramp_tx.metadata['wallet_address_reservation_state'],
+            'provider_order_recorded',
+        )
+
+
+class KoyweReservationPollingTests(SimpleTestCase):
+    @mock.patch('ramps.tasks.KoyweClient')
+    @mock.patch('ramps.tasks.RampTransaction.objects.filter')
+    def test_poller_excludes_reservations_without_provider_order(self, filter_mock, client_mock):
+        queryset = mock.Mock()
+        queryset.exclude.return_value = queryset
+        queryset.order_by.return_value = queryset
+        queryset.exists.return_value = False
+        filter_mock.return_value = queryset
+        client_mock.return_value.is_configured = True
+
+        result = poll_koywe_ramp_transactions()
+
+        queryset.exclude.assert_called_once_with(provider_order_id='')
+        self.assertEqual(result, 'No pending Koywe ramps')
 
 
 class KoyweInstructionSnapshotTests(SimpleTestCase):

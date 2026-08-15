@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from blockchain.algorand_client import get_algod_client
 from blockchain.kms_manager import get_kms_signer_from_settings
+from users.models import Account, RetiredWalletAddress
 
 from .models import HumanitarianCampaign, HumanitarianDonation, HumanitarianRelease
 
@@ -25,6 +26,39 @@ class HumanitarianReleaseService:
         self.algod = get_algod_client()
         self.signer = get_kms_signer_from_settings(role='admin')
 
+    def _validate_recipient_wallet(self, release: HumanitarianRelease) -> None:
+        """Serialize linked-user payouts with wallet reenrollment.
+
+        The release row remains a reenrollment blocker while it is draft or
+        failed, so after this short Account lock is released the destructive
+        mutation still cannot retire the checked address before submission.
+        """
+        linked_user = None
+        if release.kind == 'reimbursement' and release.donation_id:
+            linked_user = release.donation.donor_user
+        elif release.volunteer_application_id:
+            linked_user = release.volunteer_application.user
+
+        with db_transaction.atomic():
+            if linked_user is not None:
+                account = Account.objects.select_for_update().filter(
+                    user=linked_user,
+                    account_type='personal',
+                    account_index=0,
+                    deleted_at__isnull=True,
+                ).first()
+                current_address = getattr(account, 'algorand_address', None) or ''
+                if current_address != release.recipient_address:
+                    raise ValueError(
+                        'Release recipient wallet changed; update the release before submitting'
+                    )
+
+            if RetiredWalletAddress.is_retired(
+                RetiredWalletAddress.CHAIN_ALGORAND,
+                release.recipient_address,
+            ):
+                raise ValueError('Release recipient wallet has been retired')
+
     def submit_release(self, release: HumanitarianRelease, admin_user=None) -> str:
         if release.status not in ('draft', 'failed'):
             raise ValueError('Only draft or failed releases can be submitted')
@@ -36,6 +70,8 @@ class HumanitarianReleaseService:
         else:
             if not release.volunteer_application or release.volunteer_application.status != 'approved':
                 raise ValueError('Volunteer application must be approved before release')
+
+        self._validate_recipient_wallet(release)
 
         app_id = int(
             release.campaign.algorand_app_id

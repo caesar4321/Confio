@@ -503,6 +503,25 @@ def upsert_koywe_ramp_transaction(
         provider='koywe',
         provider_order_id=order_id,
     ).first()
+    if existing is None and external_id:
+        # CreateRampOrder writes an address-bound reservation before calling
+        # Koywe. Reuse that row once the provider responds instead of leaving
+        # a permanent placeholder plus a second transaction.
+        existing = RampTransaction.objects.filter(
+            provider='koywe',
+            external_id=external_id,
+        ).order_by('created_at').first()
+
+    merged_metadata = _merge_koywe_metadata(
+        existing_metadata=(existing.metadata if existing else None),
+        payment_method_code=payment_method_code,
+        payment_method_display=payment_method_display,
+        next_action_url=next_action_url,
+        auth_email=auth_email,
+        order_payload=order_payload,
+    )
+    if order_id:
+        merged_metadata['wallet_address_reservation_state'] = 'provider_order_recorded'
 
     defaults = {
         'destination': destination,
@@ -533,21 +552,16 @@ def upsert_koywe_ramp_transaction(
         ),
         'final_amount': final_amount,
         'status_detail': status_detail,
-        'metadata': _merge_koywe_metadata(
-            existing_metadata=(existing.metadata if existing else None),
-            payment_method_code=payment_method_code,
-            payment_method_display=payment_method_display,
-            next_action_url=next_action_url,
-            auth_email=auth_email,
-            order_payload=order_payload,
-        ),
+        'metadata': merged_metadata,
         'completed_at': completed_at,
     }
-    ramp_tx, _ = RampTransaction.objects.update_or_create(
-        provider='koywe',
-        provider_order_id=order_id,
-        defaults=defaults,
-    )
+    if existing is not None:
+        for field, value in defaults.items():
+            setattr(existing, field, value)
+        existing.save(update_fields=[*defaults.keys(), 'updated_at'])
+        ramp_tx = existing
+    else:
+        ramp_tx = RampTransaction.objects.create(**defaults)
     return ramp_tx
 
 

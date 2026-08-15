@@ -98,7 +98,7 @@ def poll_koywe_ramp_transactions():
         provider='koywe',
         created_at__gte=threshold,
         status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'],
-    ).order_by('-created_at')
+    ).exclude(provider_order_id='').order_by('-created_at')
 
     if not pending_ramps.exists():
         return 'No pending Koywe ramps'
@@ -130,4 +130,3 @@ def poll_koywe_ramp_transactions():
             logger.exception('Unexpected Koywe poll failure for %s', ramp_tx.provider_order_id)
 
     return f'Polled {checked_count} Koywe ramps, updated {updated_count}'
-

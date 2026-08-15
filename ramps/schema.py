@@ -1,5 +1,6 @@
 import logging
 import re
+import uuid
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -25,6 +27,7 @@ from ramps.koywe_client import (
     KoyweError,
     KoyweMaximumAmountError,
     KoyweMinimumAmountError,
+    KoyweOrderCreationAmbiguousError,
 )
 from ramps.koywe import (
     COUNTRY_METHODS,
@@ -855,6 +858,49 @@ class UpsertRampUserAddress(graphene.Mutation):
         return cls(success=True, error=None, ramp_address=ramp_address)
 
 
+def _release_proven_empty_koywe_reservation(reservation, *, account_id: int) -> None:
+    """Remove a placeholder only when Koywe definitively created no order."""
+    if reservation is None:
+        return
+    with transaction.atomic():
+        Account.objects.select_for_update().filter(
+            pk=account_id,
+            deleted_at__isnull=True,
+        ).first()
+        RampTransaction.objects.filter(
+            pk=reservation.pk,
+            provider='koywe',
+            provider_order_id='',
+        ).delete()
+
+
+def _mark_ambiguous_koywe_reservation(reservation) -> None:
+    """Keep an unresolved create POST visible and searchable by external id."""
+    if reservation is None:
+        return
+    metadata = dict(reservation.metadata or {})
+    metadata.update({
+        'wallet_address_reservation_state': 'ambiguous_order_creation',
+        'ambiguous_at': timezone.now().isoformat(),
+        'reconcile_key': reservation.external_id,
+        'reconciliation': (
+            'Koywe does not expose an external-id lookup in the current '
+            'integration; verify this key with Koywe before release.'
+        ),
+    })
+    RampTransaction.objects.filter(pk=reservation.pk).update(
+        status_detail='Koywe order creation outcome unresolved',
+        metadata=metadata,
+        updated_at=timezone.now(),
+    )
+    logger.error(
+        'Koywe create outcome ambiguous; retaining wallet reservation '
+        'pk=%s external_id=%s',
+        reservation.pk,
+        reservation.external_id,
+    )
+
+
 class CreateRampOrder(graphene.Mutation):
     class Arguments:
         direction = graphene.String(required=True)
@@ -882,6 +928,7 @@ class CreateRampOrder(graphene.Mutation):
         if normalized_direction not in {'ON_RAMP', 'OFF_RAMP'}:
             return RampOrderType(success=False, error='direction must be ON_RAMP or OFF_RAMP')
 
+        address_reservation = None
         try:
             # Canonicalize to the 6dp grain the on-chain transfer actually
             # moves, truncating. The client already sends a canonical value;
@@ -1039,7 +1086,10 @@ class CreateRampOrder(graphene.Mutation):
                 getattr(getattr(user, 'ramp_user_address', None), 'auth_email', '') or ''
             ).strip().lower()
             _store_koywe_auth_email(user=user, auth_email=koywe_email)
-            external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
+            external_id = (
+                f'confio-ramp-{normalized_direction.lower()}-'
+                f'{timezone.now().strftime("%Y%m%d%H%M%S")}-{uuid.uuid4().hex[:12]}'
+            )
             contact_profile = _get_koywe_contact_profile(
                 user=user,
                 country_code=resolved_country_code,
@@ -1058,6 +1108,56 @@ class CreateRampOrder(graphene.Mutation):
                     success=False,
                     error=f'Actualiza la app y completa {", ".join(missing_profile_fields)} en tu dirección para usar Koywe.',
                 )
+
+            actor_business = current_account.business if current_account.account_type == 'business' else None
+            actor_type = 'business' if current_account.account_type == 'business' else 'user'
+            actor_display_name = current_account.display_name or user.get_full_name() or user.username or ''
+            actor_address = (
+                current_account.bsc_address if savings_rail
+                else current_account.algorand_address
+            ) or ''
+
+            # Koywe may accept an order before its HTTP response reaches us.
+            # Persist the destination first while holding the same Account row
+            # lock used by wallet reenrollment. That makes an in-flight order
+            # visible to the destructive stale-address gate even while the
+            # external request is still running.
+            if savings_rail:
+                with transaction.atomic():
+                    locked_account = Account.objects.select_for_update().filter(
+                        pk=current_account.pk,
+                        deleted_at__isnull=True,
+                    ).first()
+                    locked_address = (
+                        getattr(locked_account, 'bsc_address', None) or ''
+                    ).lower()
+                    if not locked_account or locked_address != actor_address.lower():
+                        return RampOrderType(
+                            success=False,
+                            error='La dirección de ahorro cambió. Vuelve a intentar.',
+                        )
+                    address_reservation = RampTransaction.objects.create(
+                        provider='koywe',
+                        direction=normalized_direction.lower(),
+                        status='PENDING',
+                        provider_order_id='',
+                        external_id=external_id,
+                        country_code=(resolved_country_code or '').upper(),
+                        actor_user=user,
+                        actor_business=actor_business,
+                        actor_type=actor_type,
+                        actor_display_name=actor_display_name,
+                        actor_address=actor_address,
+                        destination='cusd_plus',
+                        fiat_currency=fiat_currency or _get_country_fiat_currency(resolved_country_code),
+                        final_currency=('CUSD+' if normalized_direction == 'ON_RAMP' else 'USDT BSC'),
+                        status_detail='Koywe order creation reserved',
+                        metadata={
+                            'wallet_address_reserved': True,
+                            'wallet_address_reservation_state': 'creating_order',
+                            'reconcile_key': external_id,
+                        },
+                    )
             result = client.create_ramp_order(
                 direction=normalized_direction,
                 amount=decimal_amount,
@@ -1078,24 +1178,44 @@ class CreateRampOrder(graphene.Mutation):
                     prior_auth_email=previous_auth_email,
                 ),
             )
+        except KoyweOrderCreationAmbiguousError as exc:
+            _mark_ambiguous_koywe_reservation(address_reservation)
+            return RampOrderType(
+                success=False,
+                error=(
+                    'Koywe no confirmó si creó la orden. No vuelvas a intentarlo; '
+                    'soporte debe verificarla primero.'
+                ),
+            )
         except KoyweConfigurationError as exc:
+            _release_proven_empty_koywe_reservation(
+                address_reservation, account_id=current_account.pk)
             return RampOrderType(success=False, error=str(exc))
         except KoyweMinimumAmountError as exc:
+            _release_proven_empty_koywe_reservation(
+                address_reservation, account_id=current_account.pk)
             logger.info('Koywe ramp order below minimum: %s', exc)
             return RampOrderType(
                 success=False,
                 error=_format_minimum_amount_error(exc, normalized_direction),
             )
         except KoyweMaximumAmountError as exc:
+            _release_proven_empty_koywe_reservation(
+                address_reservation, account_id=current_account.pk)
             logger.info('Koywe ramp order above maximum: %s', exc)
             return RampOrderType(
                 success=False,
                 error=_format_maximum_amount_error(exc, normalized_direction),
             )
         except KoyweError as exc:
+            _release_proven_empty_koywe_reservation(
+                address_reservation, account_id=current_account.pk)
             logger.warning('Koywe ramp order failed: %s', exc)
             return RampOrderType(success=False, error=str(exc))
         except Exception as exc:
+            # Unknown application failures may happen after Koywe accepted the
+            # POST. Fail closed exactly like a transport timeout.
+            _mark_ambiguous_koywe_reservation(address_reservation)
             logger.exception('Unexpected Koywe ramp order failure')
             return RampOrderType(success=False, error='Unexpected Koywe error while creating the order')
 

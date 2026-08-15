@@ -21,7 +21,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from cusd_plus.sponsor_7702 import (
     PolicyError,
@@ -484,7 +484,7 @@ class SubmitValidatorTests(SimpleTestCase):
                 [call], self._tx(), self._meta([call], 'send_usdt', CONFIO_TOKEN))
 
 
-class RecipientResolutionTests(SimpleTestCase):
+class RecipientResolutionTests(TestCase):
     def test_invalid_evm_address_rejected(self):
         _, _, _, err = bsc_flow._resolve_recipient(None, None, '0x1234')
         self.assertEqual(err, 'invalid_recipient_address')
@@ -492,6 +492,20 @@ class RecipientResolutionTests(SimpleTestCase):
     def test_nothing_supplied(self):
         _, _, _, err = bsc_flow._resolve_recipient(None, None, None)
         self.assertEqual(err, 'recipient_required')
+
+    def test_retired_raw_bsc_address_rejected(self):
+        from users.models import RetiredWalletAddress
+
+        RetiredWalletAddress.objects.create(
+            chain=RetiredWalletAddress.CHAIN_BSC,
+            address=RECIPIENT.upper(),
+        )
+        _, _, _, err = bsc_flow._resolve_recipient(None, None, RECIPIENT)
+        self.assertEqual(err, 'retired_recipient_address')
+        self.assertEqual(
+            RetiredWalletAddress.objects.get().address,
+            RECIPIENT.lower(),
+        )
 
 
 @override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_SEND_ENABLED=True)

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 
@@ -13,14 +13,16 @@ from achievements.models import (
 from blockchain.mutations import (
     AlgorandSponsoredSendMutation,
     OFFICIAL_APP_REQUIRED_ERROR,
+    SubmitSponsoredGroupMutation,
     _extract_signed_txn_payload,
 )
 from blockchain.auto_swap_state import ensure_pending_usdc_auto_swap
 from blockchain.algorand_account_manager import AlgorandAccountManager
 from blockchain.models import PendingAutoSwap
 from conversion.models import Conversion
+from send.models import SendTransaction
 from usdc_transactions.models import USDCDeposit
-from users.models import User, Account
+from users.models import User, Account, RetiredWalletAddress
 
 
 class SignedTxnPayloadExtractionTest(SimpleTestCase):
@@ -47,6 +49,75 @@ class SignedTxnPayloadExtractionTest(SimpleTestCase):
         )
 
         self.assertEqual(_extract_signed_txn_payload(signed_txn), raw_txn)
+
+
+class PreparedRecipientReservationSubmitTest(TestCase):
+    def test_submit_locks_secondary_account_by_reserved_address(self):
+        import base64
+        import msgpack
+
+        sender = User.objects.create_user(
+            username='secondary-reservation-sender',
+            email='secondary-reservation-sender@example.com',
+            password='password123',
+            firebase_uid='uid-secondary-reservation-sender',
+        )
+        recipient = User.objects.create_user(
+            username='secondary-reservation-recipient',
+            email='secondary-reservation-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-secondary-reservation-recipient',
+        )
+        recipient_account = Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=1,
+            algorand_address='B' * 58,
+        )
+        group = b'g' * 32
+        reservation = SendTransaction.objects.create(
+            sender_user=sender,
+            recipient_user=recipient,
+            sender_address='A' * 58,
+            recipient_address=recipient_account.algorand_address,
+            amount=Decimal('5'),
+            token_type='CUSD',
+            status='PENDING',
+            idempotency_key=group.hex(),
+            bsc_calls_json='',
+        )
+        signed_user_txn = base64.b64encode(msgpack.packb({
+            'txn': {
+                'grp': group,
+                'type': 'axfer',
+                'snd': b'a' * 32,
+                'arcv': b'b' * 32,
+                'xaid': 1,
+                'aamt': 5_000_000,
+            },
+        }, use_bin_type=True)).decode()
+        info = SimpleNamespace(context=SimpleNamespace(user=sender))
+
+        with patch(
+            'blockchain.mutations.algorand_sponsor_service.submit_sponsored_group',
+            new_callable=AsyncMock,
+            return_value={
+                'success': True,
+                'tx_id': 'T' * 52,
+                'confirmed_round': None,
+                'fees_saved': 0.002,
+            },
+        ):
+            result = SubmitSponsoredGroupMutation.mutate(
+                None,
+                info,
+                signed_user_txn=signed_user_txn,
+                signed_sponsor_txn='signed-sponsor',
+            )
+
+        self.assertTrue(result.success)
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, 'SUBMITTED')
 
 
 class ConsumedDepositRecoveryTest(TestCase):
@@ -127,7 +198,11 @@ class FakeAlgodClient:
                 {
                     'asset-id': AlgorandAccountManager.CONFIO_ASSET_ID,
                     'amount': 2_000_000_000,  # 2000 CONFIO assuming 6 decimals
-                }
+                },
+                {
+                    'asset-id': AlgorandAccountManager.CUSD_ASSET_ID,
+                    'amount': 2_000_000_000,
+                },
             ],
             'amount': 5_000_000,
             'min-balance': 1_000_000,
@@ -219,7 +294,12 @@ class ReferralWithdrawalPolicyTest(TestCase):
         )
 
         # Dummy GraphQL info/context objects.
-        self.context = SimpleNamespace(user=self.user, META={})
+        self.context = SimpleNamespace(
+            user=self.user,
+            META={},
+            headers={},
+            _app_check_verified=True,
+        )
         self.info = SimpleNamespace(context=self.context)
 
         # Silence notification side effects during tests.
@@ -413,5 +493,61 @@ class ReferralWithdrawalPolicyTest(TestCase):
                 asset_type='CONFIO',
             )
 
-        self.assertTrue(result.success)
+        self.assertTrue(result.success, result.error)
         self.assertIsNone(result.error)
+
+    def test_internal_recipient_address_is_reserved_before_prepared_group_returns(self):
+        recipient = User.objects.create_user(
+            username='prepared-send-recipient',
+            email='prepared-send-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-prepared-send-recipient',
+        )
+        recipient_account = Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=0,
+            algorand_address='B' * 58,
+        )
+
+        ctx_patch, algod_patch, sponsor_patch = self._patch_context()
+        with ctx_patch, algod_patch, sponsor_patch:
+            result = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_user_id=recipient.id,
+                amount=5,
+                asset_type='CUSD',
+            )
+
+        self.assertTrue(result.success, result.error)
+        reservation = SendTransaction.objects.get(
+            sender_user=self.user,
+            idempotency_key='fake-group',
+        )
+        self.assertEqual(reservation.status, 'PENDING')
+        self.assertEqual(reservation.recipient_user, recipient)
+        self.assertEqual(reservation.recipient_address, recipient_account.algorand_address)
+        self.assertEqual(reservation.bsc_calls_json, '')
+
+    def test_raw_send_rejects_retired_algorand_destination(self):
+        RetiredWalletAddress.objects.create(
+            chain=RetiredWalletAddress.CHAIN_ALGORAND,
+            address='B' * 58,
+            account=self.account,
+            user=self.user,
+        )
+
+        ctx_patch, algod_patch, sponsor_patch = self._patch_context()
+        with ctx_patch, algod_patch, sponsor_patch as sponsor_mock:
+            result = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_address='B' * 58,
+                amount=5,
+                asset_type='CUSD',
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn('retired', result.error.lower())
+        sponsor_mock.assert_not_called()

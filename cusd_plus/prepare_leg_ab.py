@@ -19,6 +19,7 @@ from algosdk.logic import get_application_address
 from algosdk.v2client import models
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction as db_transaction
 from django.utils import timezone
 
 from . import allbridge_math
@@ -34,6 +35,60 @@ SWAP_AND_BRIDGE_SELECTOR_METHOD = Method(
           Argument(arg_type='uint64')],
     returns=Returns('void'),
 )
+
+
+def _create_conversion_for_current_addresses(*, account_id: int,
+                                             expected_algorand_address: str,
+                                             expected_bsc_address: str,
+                                             amount: Decimal,
+                                             receive_usd: Decimal):
+    """Persist the blocker row only if the signed group's owners are current.
+
+    Wallet reenrollment takes this same Account row lock before deciding that
+    an old address is safe to replace. Keeping the final address check and
+    Conversion creation under the lock gives the operations a strict ordering:
+    reenrollment either happens first (and this pack is discarded), or this
+    row exists before reenrollment performs its history checks.
+    """
+    from conversion.models import Conversion
+    from users.models import Account
+
+    with db_transaction.atomic():
+        locked_account = (
+            Account.objects.select_for_update()
+            .filter(pk=account_id, deleted_at__isnull=True)
+            .first()
+        )
+        if locked_account is None:
+            return None
+
+        current_algorand_address = locked_account.algorand_address
+        current_bsc_address = (locked_account.bsc_address or '').lower()
+        if (
+            current_algorand_address != expected_algorand_address
+            or current_bsc_address != expected_bsc_address
+        ):
+            return None
+
+        return Conversion.objects.create(
+            actor_user=(
+                locked_account.user
+                if locked_account.account_type == 'personal' else None
+            ),
+            actor_business=(
+                locked_account.business
+                if locked_account.account_type == 'business' else None
+            ),
+            actor_type=(
+                'user' if locked_account.account_type == 'personal' else 'business'
+            ),
+            actor_display_name=locked_account.display_name or '',
+            conversion_type='to_savings',
+            from_amount=amount,
+            to_amount=receive_usd.quantize(Decimal('0.000001')),
+            actor_address=current_algorand_address,
+            user_bsc_address=current_bsc_address,
+        )
 
 
 def _token_info():
@@ -284,7 +339,6 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
     """Build prefix, verify tail, compose, sponsor-sign. Returns pack dict."""
     from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
     from blockchain.algorand_client import get_algod_client
-    from conversion.models import Conversion
 
     user_address = account.algorand_address
     bsc_address = (account.bsc_address or '').lower()
@@ -399,17 +453,22 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
         2: builder.signer.sign_transaction_msgpack(burn_call),
     }
 
-    conv = Conversion.objects.create(
-        actor_user=account.user if account.account_type == 'personal' else None,
-        actor_business=account.business if account.account_type == 'business' else None,
-        actor_type='user' if account.account_type == 'personal' else 'business',
-        actor_display_name=account.display_name or '',
-        conversion_type='to_savings',
-        from_amount=amount,
-        to_amount=receive_usd.quantize(Decimal('0.000001')),  # rule-8 server quote
-        actor_address=user_address,
-        user_bsc_address=bsc_address,
+    # Serialize the final ownership snapshot and the intent row against wallet
+    # reenrollment. Signing above is harmless if the snapshot went stale: the
+    # pack is never returned, and no client can submit it.
+    conv = _create_conversion_for_current_addresses(
+        account_id=account.id,
+        expected_algorand_address=user_address,
+        expected_bsc_address=bsc_address,
+        amount=amount,
+        receive_usd=receive_usd,
     )
+    if conv is None:
+        logger.warning(
+            'leg-AB account addresses changed before persistence for account %s',
+            account.id,
+        )
+        return {'success': False, 'error': 'account_addresses_changed'}
 
     return {
         'success': True,

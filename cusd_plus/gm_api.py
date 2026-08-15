@@ -157,6 +157,15 @@ def all_addresses() -> list:
     return _cached('gm_all_addresses_v1', 24 * 3600, lambda: _get('/assets/all/addresses'))
 
 
+def all_addresses_fresh() -> list:
+    """Fetch the GM address universe without display caches or fallbacks.
+
+    Irreversible wallet-safety decisions must distinguish a live authoritative
+    response from the deliberately stale-tolerant metadata used by UI views.
+    """
+    return _get('/assets/all/addresses')
+
+
 def ohlc(symbol: str, range_key: str) -> list:
     """Candles for one asset. range_key must be in OHLC_RANGES."""
     interval, rng = OHLC_RANGES[range_key]

@@ -60,6 +60,14 @@ class KoyweConfigurationError(KoyweError):
     pass
 
 
+class KoyweOrderCreationAmbiguousError(KoyweError):
+    """The create-order POST may have reached Koywe, but no response arrived.
+
+    Callers must retain their external-id reservation until operations can
+    reconcile it. Retrying with a new external id could create a second order.
+    """
+
+
 class KoyweMinimumAmountError(KoyweError):
     def __init__(self, message: str, *, currency: str | None = None, actual: str | None = None, minimum: str | None = None):
         super().__init__(message)
@@ -357,7 +365,7 @@ class KoyweClient:
         cache.set(cache_key, token, timeout=60 * 45)
         return token
 
-    def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True) -> dict[str, Any]:
+    def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True, ambiguous_on_transport: bool = False) -> dict[str, Any]:
         headers = {'Content-Type': 'application/json'}
         normalized_email = str(email or '').strip() or None
         if auth:
@@ -372,7 +380,22 @@ class KoyweClient:
                 timeout=self.timeout,
             )
         except requests.RequestException as exc:
+            if ambiguous_on_transport:
+                raise KoyweOrderCreationAmbiguousError(
+                    f'Koywe order creation outcome is unknown: {exc}'
+                ) from exc
             raise KoyweError(f'Koywe request failed: {method} {path}: {exc}') from exc
+        if ambiguous_on_transport:
+            status_code = int(response.status_code)
+            # Only responses that prove the provider rejected the request may
+            # release the address reservation. Timeout/conflict/rate-limit and
+            # every server error can race with successful order creation.
+            definitive_rejection = status_code in {400, 401, 403, 404, 422}
+            if not response.ok and not definitive_rejection:
+                raise KoyweOrderCreationAmbiguousError(
+                    'Koywe order creation returned an unresolved response after '
+                    f'the POST (HTTP {status_code})'
+                )
         return self._parse_response(response, f'Koywe request failed: {method} {path}')
 
     def _parse_response(self, response: requests.Response, default_message: str) -> dict[str, Any]:
@@ -513,7 +536,20 @@ class KoyweClient:
             payload['destinationAddress'] = destination_address
         if external_id:
             payload['externalId'] = external_id
-        return self._request('POST', '/rest/orders', email=email, json_payload=payload)
+        order = self._request(
+            'POST',
+            '/rest/orders',
+            email=email,
+            json_payload=payload,
+            ambiguous_on_transport=True,
+        )
+        if not isinstance(order, dict) or not (
+            order.get('_id') or order.get('id') or order.get('orderId')
+        ):
+            raise KoyweOrderCreationAmbiguousError(
+                'Koywe order creation returned an invalid success response'
+            )
+        return order
 
     def get_order(self, *, order_id: str, email: str | None = None) -> dict[str, Any]:
         return self._request('GET', f'/rest/orders/{order_id}', email=email)
@@ -687,7 +723,7 @@ class KoyweClient:
             payment_provider=payment_provider,
         )
 
-        order_id = str(enriched_order.get('_id') or enriched_order.get('id') or enriched_order.get('orderId') or quote_id)
+        order_id = str(enriched_order.get('_id') or enriched_order.get('id') or enriched_order.get('orderId'))
         next_action_url = self._extract_action_url(enriched_order)
         next_step = self._determine_next_step(direction=normalized_direction, next_action_url=next_action_url, order=enriched_order)
         return KoyweOrderResult(

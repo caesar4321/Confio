@@ -131,7 +131,7 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     recipient_user is set for internal recipients even when their address is
     missing — the caller needs it to send the activation nudge."""
     from django.contrib.auth import get_user_model
-    from users.models import Account
+    from users.models import Account, RetiredWalletAddress
     User = get_user_model()
 
     if recipient_user_id:
@@ -161,12 +161,22 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
         if not EVM_ADDR_RE.match(recipient_address):
             return None, None, None, 'invalid_recipient_address'
         addr = recipient_address.lower()
-        # Reverse lookup for display + internal-recipient notifications.
-        match = Account.objects.filter(bsc_address__iexact=addr).select_related(
-            'user', 'business').first()
-        if match:
-            return match.user, match.business, addr, None
-        return None, None, addr, None
+        # Serialize reverse lookup with reenrollment. A concurrent address
+        # replacement either sees the later SendTransaction reservation or
+        # commits its tombstone before this lookup is allowed to continue.
+        with transaction.atomic():
+            match = Account.objects.select_for_update(of=('self',)).filter(
+                bsc_address__iexact=addr,
+                deleted_at__isnull=True,
+            ).select_related('user', 'business').first()
+            if RetiredWalletAddress.is_retired(
+                RetiredWalletAddress.CHAIN_BSC,
+                addr,
+            ):
+                return None, None, None, 'retired_recipient_address'
+            if match:
+                return match.user, match.business, addr, None
+            return None, None, addr, None
 
     return None, None, None, 'recipient_required'
 

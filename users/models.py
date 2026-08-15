@@ -569,6 +569,7 @@ class Account(SoftDeleteModel):
             business_name = self.business.name if self.business else f"Negocio {self.account_index}"
             return f"Negocio - {business_name}"
 
+
     @property
     def avatar_letter(self):
         """Get the avatar letter for this account"""
@@ -593,6 +594,78 @@ class Account(SoftDeleteModel):
         if self.account_type == 'business':
             return self.business
         return None
+
+
+class RetiredWalletAddress(models.Model):
+    """A wallet destination permanently retired by the self-heal flow.
+
+    These rows are intentionally not soft-deletable: forgetting a retired
+    destination would let a later raw-address send strand funds there.
+    Addresses are normalized before insertion (lowercase for BSC; uppercase
+    for Algorand), so the simple database uniqueness constraint is also
+    chain-canonical.
+    """
+
+    CHAIN_ALGORAND = 'algorand'
+    CHAIN_BSC = 'bsc'
+    CHAIN_CHOICES = (
+        (CHAIN_ALGORAND, 'Algorand'),
+        (CHAIN_BSC, 'BSC'),
+    )
+
+    chain = models.CharField(max_length=16, choices=CHAIN_CHOICES)
+    address = models.CharField(max_length=66)
+    account = models.ForeignKey(
+        Account,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='retired_wallet_addresses',
+    )
+    user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='retired_wallet_addresses',
+    )
+    retired_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('chain', 'address'),
+                name='uniq_retired_wallet_chain_address',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=('account', 'chain'), name='ret_wallet_account_chain_idx'),
+            models.Index(fields=('user', 'chain'), name='ret_wallet_user_chain_idx'),
+        ]
+
+    @classmethod
+    def normalize_address(cls, chain, address):
+        value = str(address or '').strip()
+        if chain == cls.CHAIN_BSC:
+            return value.lower()
+        if chain == cls.CHAIN_ALGORAND:
+            return value.upper()
+        raise ValueError('Unsupported wallet chain')
+
+    @classmethod
+    def is_retired(cls, chain, address):
+        normalized = cls.normalize_address(chain, address)
+        return bool(normalized) and cls.objects.filter(
+            chain=chain,
+            address=normalized,
+        ).exists()
+
+    def save(self, *args, **kwargs):
+        self.address = self.normalize_address(self.chain, self.address)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.chain}:{self.address}'
 
 # --- Signals to sync display name ---
 @receiver(post_save, sender=User)

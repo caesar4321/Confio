@@ -83,6 +83,46 @@ class PresaleMigrationCreditPipelineTest(TestCase):
         res3 = sync_presale_migration_credits()
         self.assertEqual(res3['created'], 1)
 
+    def test_sync_uses_primary_personal_account_reenrollment_lock_scope(self):
+        user = _mk_user('primary-unlinked')
+        Account.objects.create(
+            user=user,
+            account_type='personal',
+            account_index=1,
+            bsc_address=BSC_ADDR,
+        )
+        self._purchase(user, '25')
+
+        result = sync_presale_migration_credits()
+
+        self.assertEqual(result['created'], 0)
+        self.assertEqual(result['awaiting_bsc_address'], 1)
+        self.assertFalse(PresaleMigrationCredit.objects.filter(user=user).exists())
+
+    def test_sync_reconciles_credit_created_after_initial_snapshot(self):
+        user = _mk_user('concurrent-credit', BSC_ADDR)
+        self._purchase(user, '40')
+        credit = PresaleMigrationCredit.objects.create(
+            user=user,
+            bsc_address=BSC_ADDR,
+            confio_amount=Decimal('10'),
+        )
+
+        # Model a second worker creating the row after this worker loaded its
+        # initial `existing` snapshot. The locked get_or_create must recover
+        # the row and apply the same pending-credit resync semantics.
+        with mock.patch.object(
+            PresaleMigrationCredit.objects,
+            'all',
+            return_value=[],
+        ):
+            result = sync_presale_migration_credits()
+
+        credit.refresh_from_db()
+        self.assertEqual(result['created'], 0)
+        self.assertEqual(result['updated'], 1)
+        self.assertEqual(credit.confio_amount, Decimal('40'))
+
     @override_settings(BSC_PRESALE_VAULT_ADDRESS=VAULT)
     def test_batch_queues_rows_and_encodes_calldata(self):
         linked = _mk_user('linked', BSC_ADDR)

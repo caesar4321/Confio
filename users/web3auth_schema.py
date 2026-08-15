@@ -7,9 +7,10 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta
-from .models import Account, WalletPepper, WalletDerivationPepper
+from .models import Account, RetiredWalletAddress, WalletPepper, WalletDerivationPepper
 from .migration_safety import (
     inspect_address_migration_risk,
     inspect_sponsored_empty_wallet_reenrollment,
@@ -95,6 +96,34 @@ def _verify_wallet_reenrollment_grant(grant, user, account, address, signature):
 
 def _inspect_wallet_reenrollment(account):
     from blockchain.algorand_client import get_algod_client, get_indexer_client
+    from django.db.models import Q
+    from humanitarian.models import HumanitarianRelease
+    from send.models import SendTransaction
+
+    # A sponsor-signed Algorand group prepared for this internal recipient can
+    # remain valid after the prepare request returns. New prepares persist an
+    # address-bound reservation under this same Account row lock. Keep recent
+    # unsubmitted reservations (longer than Algorand's maximum transaction
+    # lifetime) and every submitted transfer as hard blockers.
+    reservation_cutoff = timezone.now() - timedelta(hours=24)
+    if SendTransaction.objects.filter(
+        recipient_address=account.algorand_address,
+        bsc_calls_json='',
+        deleted_at__isnull=True,
+    ).filter(
+        Q(status='PENDING', created_at__gte=reservation_cutoff)
+        | Q(status__in=('SPONSORING', 'SIGNED', 'SUBMITTED', 'AML_REVIEW'))
+    ).exists():
+        return {'eligible': False, 'reason': 'pending_inbound_algorand_send'}
+
+    # Draft and retryable humanitarian releases are contract-held cUSD
+    # entitlements. They have not reached the chain yet, so Indexer history
+    # alone cannot prove this address safe to retire.
+    if HumanitarianRelease.objects.filter(
+        recipient_address=account.algorand_address,
+        status__in=('draft', 'failed'),
+    ).exists():
+        return {'eligible': False, 'reason': 'pending_humanitarian_release'}
 
     return inspect_sponsored_empty_wallet_reenrollment(
         get_algod_client(),
@@ -191,10 +220,35 @@ def _inspect_stale_bsc_reenrollment(account):
             if token_balance:
                 return {'eligible': False, 'reason': 'token_balance'}
 
-        registry = gm_holdings.registry()
-        if registry is None:
-            return {'eligible': False, 'reason': 'stock_registry_unavailable'}
-        if registry and gm_holdings._scan(
+        vesting_address = (
+            getattr(settings, 'BSC_VESTING_VAULT_ADDRESS', '') or ''
+        ).strip()
+        if vesting_address:
+            if not re.fullmatch(r'0x[0-9a-fA-F]{40}', vesting_address):
+                raise RuntimeError('invalid vesting vault address')
+            from eth_utils import keccak
+
+            grant_data = (
+                '0x'
+                + keccak(text='grants(address)')[:4].hex()
+                + address.lower().removeprefix('0x').rjust(64, '0')
+            )
+            raw_grant = vault._rpc(
+                'eth_call',
+                [{'to': vesting_address, 'data': grant_data}, block_tag],
+            )
+            grant_bytes = bytes.fromhex((raw_grant or '').removeprefix('0x'))
+            if len(grant_bytes) != 128:
+                raise RuntimeError('invalid vesting grant response')
+            allocated = int.from_bytes(grant_bytes[0:32], 'big')
+            claimed = int.from_bytes(grant_bytes[32:64], 'big')
+            if claimed > allocated:
+                raise RuntimeError('invalid vesting grant state')
+            if allocated > claimed:
+                return {'eligible': False, 'reason': 'vesting_grant'}
+
+        registry = gm_holdings.audit_registry()
+        if gm_holdings._scan(
             address,
             registry,
             block_tag=block_tag,
@@ -1462,6 +1516,41 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
 
                 old_address = account.algorand_address
                 old_bsc_address = account.bsc_address
+
+                retired_destinations = [
+                    (
+                        RetiredWalletAddress.CHAIN_ALGORAND,
+                        RetiredWalletAddress.normalize_address(
+                            RetiredWalletAddress.CHAIN_ALGORAND,
+                            old_address,
+                        ),
+                    ),
+                ]
+                if old_bsc_address and old_bsc_address.lower() != address.lower():
+                    retired_destinations.append((
+                        RetiredWalletAddress.CHAIN_BSC,
+                        RetiredWalletAddress.normalize_address(
+                            RetiredWalletAddress.CHAIN_BSC,
+                            old_bsc_address,
+                        ),
+                    ))
+
+                # A destination may only ever retire from the account that
+                # owned it. Check every row before writing any so an unexpected
+                # historical collision cannot leave a partial audit record.
+                for chain, retired_address in retired_destinations:
+                    if RetiredWalletAddress.objects.filter(
+                        chain=chain,
+                        address=retired_address,
+                    ).exclude(account=account).exists():
+                        return cls(success=False, error='Previous wallet address is already retired')
+                for chain, retired_address in retired_destinations:
+                    RetiredWalletAddress.objects.get_or_create(
+                        chain=chain,
+                        address=retired_address,
+                        defaults={'account': account, 'user': user},
+                    )
+
                 account.algorand_address = None
                 account.bsc_address = address
                 account.is_keyless_migrated = True
