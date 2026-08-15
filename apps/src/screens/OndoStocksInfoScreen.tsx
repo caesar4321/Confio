@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Alert,
   Image,
   Linking,
   ScrollView,
@@ -18,6 +19,7 @@ import {MainStackParamList} from '../types/navigation';
 import {useSavingsPortfolio} from '../hooks/useSavingsPortfolio';
 import {useGmMarket} from '../hooks/useGmMarket';
 import {useCurrency} from '../hooks/useCurrency';
+import {useAuthReady} from '../contexts/AuthContext';
 import {TickerLogo} from '../components/TickerLogo';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
@@ -33,6 +35,7 @@ const STOCK_INFO = gql`
   query OndoStocksInfoFee {
     cusdPlusConvertParams {
       gmTradeFeeBps
+      stockRouterAddress
     }
     gmCommunity {
       valueUsd
@@ -50,8 +53,19 @@ const STOCK_INFO = gql`
   }
 `;
 
+// Account-specific and deliberately separate from the shared market/config
+// query. During an account switch, useAuthReady pauses this network-only read
+// until the JWT points at the new account, preventing a cached old address
+// from becoming the destination of the proof link.
+const STOCK_WALLET_ADDRESS = gql`
+  query OndoStocksWalletAddress {
+    stockWalletAddress
+  }
+`;
+
 // 30 bps -> "0,30". Comma is the decimal mark in the app's Spanish copy.
-const formatFeePercent = (bps: number) => (bps / 100).toFixed(2).replace('.', ',');
+const formatFeePercent = (bps: number) =>
+  (bps / 100).toFixed(2).replace('.', ',');
 
 // Same shape as ProtectedSavingsScreen's, so the two hero pills that quote a
 // Home stat read identically. null stays "—": unknown is not zero.
@@ -88,7 +102,7 @@ const ExplanationRow = ({
 }) => (
   <View style={styles.explanationRow}>
     <View style={styles.explanationIcon}>
-      <Icon name={icon} size={17} color={colors.primaryDark} />
+      <Icon name={icon} size={16} color={colors.primaryDark} />
     </View>
     <View style={styles.explanationCopy}>
       <Text style={styles.explanationTitle}>{title}</Text>
@@ -100,6 +114,7 @@ const ExplanationRow = ({
 export const OndoStocksInfoScreen = () => {
   const navigation = useNavigation<NavProp>();
   const {stocks} = useSavingsPortfolio();
+  const isAuthReady = useAuthReady();
 
   // Hooks must run before the eligibility return below, so both are wired
   // here and simply skip themselves when the product is off.
@@ -110,13 +125,19 @@ export const OndoStocksInfoScreen = () => {
     fetchPolicy: 'cache-and-network',
     pollInterval: 300_000,
   });
+  const {data: walletData} = useQuery(STOCK_WALLET_ADDRESS, {
+    skip: !stocks.enabled || !isAuthReady,
+    fetchPolicy: 'network-only',
+  });
   // useGmMarket returns an EMPTY list while loading and on upstream failure
   // (its documented honesty rule — never a fake price), so a bare
   // `marketAssets.length` would render "0 acciones" as if that were a fact.
   // Treat unknown as unknown and drop to the countless phrasing instead.
   const assetCount = marketAssets.length;
   const catalogLabel =
-    assetCount > 0 ? `${assetCount} acciones y ETFs` : 'Acciones y ETFs de EE.UU.';
+    assetCount > 0
+      ? `${assetCount} acciones y ETFs`
+      : 'Acciones y ETFs de EE.UU.';
 
   // gm_tvl refuses to publish a partial scan, so this field is legitimately
   // null whenever the aggregation or a held-asset price failed. Render the
@@ -124,9 +145,10 @@ export const OndoStocksInfoScreen = () => {
   // read as "nobody is invested" rather than "we don't know right now".
   const stocksTvl: number | null | undefined = feeData?.gmCommunity?.valueUsd;
   const stocksTvlLabel =
-    stocksTvl != null ? formatWhole(stocksTvl, currency.thousandsSeparator) : null;
-  const communityStocks: CommunityStock[] =
-    feeData?.gmCommunity?.assets ?? [];
+    stocksTvl != null
+      ? formatWhole(stocksTvl, currency.thousandsSeparator)
+      : null;
+  const communityStocks: CommunityStock[] = feeData?.gmCommunity?.assets ?? [];
   const communityHolderWallets: number | null | undefined =
     feeData?.gmCommunity?.holderWallets;
   const communityPositions: number | null | undefined =
@@ -144,7 +166,9 @@ export const OndoStocksInfoScreen = () => {
       minute: '2-digit',
     });
   })();
-  const marketByTicker = new Map(marketAssets.map(asset => [asset.ticker, asset]));
+  const marketByTicker = new Map(
+    marketAssets.map(asset => [asset.ticker, asset]),
+  );
   const formatUsd = (value: number) => {
     const rendered = new Intl.NumberFormat('en-US', {
       minimumFractionDigits: 2,
@@ -165,6 +189,39 @@ export const OndoStocksInfoScreen = () => {
       : feeBps === 0
         ? 'Por ahora Confío no cobra comisión por operar.'
         : `Confío cobra un ${formatFeePercent(feeBps)}% sobre cada compra y venta completada.`;
+
+  const userBscAddress: string | null = isAuthReady
+    ? (walletData?.stockWalletAddress ?? null)
+    : null;
+  const routerAddress: string | null =
+    feeData?.cusdPlusConvertParams?.stockRouterAddress ?? null;
+  const isBscAddress = (address: string | null): address is string =>
+    Boolean(address && /^0x[0-9a-fA-F]{40}$/.test(address));
+
+  const openMyStocks = () => {
+    if (!isBscAddress(userBscAddress)) return;
+    Linking.openURL(
+      `https://bscscan.com/tokenholdings?a=${userBscAddress}`,
+    ).catch(() => {});
+  };
+
+  const explainConfioSystem = () => {
+    if (!isBscAddress(routerAddress)) return;
+    Alert.alert(
+      'Cómo funciona Confío',
+      'Esta página pública muestra el sistema que Confío utiliza para procesar compras y ventas. Contiene información técnica y operaciones de todos los usuarios, pero no revela sus identidades.',
+      [
+        {text: 'Cancelar', style: 'cancel'},
+        {
+          text: 'Continuar',
+          onPress: () =>
+            Linking.openURL(
+              `https://bscscan.com/address/${routerAddress}#code`,
+            ).catch(() => {}),
+        },
+      ],
+    );
+  };
 
   // The navigation entry points are hidden for blocked jurisdictions, but
   // the screen also fails closed for stale navigation state and deep links.
@@ -226,19 +283,21 @@ export const OndoStocksInfoScreen = () => {
           </Text>
           <View style={styles.heroPills}>
             <View style={styles.heroPill}>
-              <Icon name="bar-chart-2" size={14} color={colors.primaryDark} />
+              <Icon name="bar-chart-2" size={14} color={colors.primary} />
               <Text style={styles.heroPillText}>{catalogLabel}</Text>
             </View>
             <View style={styles.heroPill}>
-              <Icon name="clock" size={14} color={colors.primaryDark} />
+              <Icon name="clock" size={14} color={colors.primary} />
               {/* Not "24/5": weekend trading is a PER-ASSET flag (GmAssetType
                   .offHours), so a blanket claim here contradicted both the
                   schema and this screen's own hours copy two sections down. */}
-              <Text style={styles.heroPillText}>24/5 y algunos fines de semana</Text>
+              <Text style={styles.heroPillText}>
+                24/5 y algunos fines de semana
+              </Text>
             </View>
             {stocksTvlLabel && (
               <View style={styles.heroPill}>
-                <Icon name="trending-up" size={14} color={colors.primaryDark} />
+                <Icon name="trending-up" size={14} color={colors.primary} />
                 <Text style={styles.heroPillText}>
                   US${stocksTvlLabel} en acciones
                 </Text>
@@ -250,7 +309,7 @@ export const OndoStocksInfoScreen = () => {
         {communityStocks.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeadingRow}>
-              <Icon name="pie-chart" size={20} color={colors.primaryDark} />
+              <Icon name="pie-chart" size={20} color={colors.primary} />
               <Text style={styles.sectionTitleInline}>
                 En qué invierte la comunidad
               </Text>
@@ -280,7 +339,10 @@ export const OndoStocksInfoScreen = () => {
                       US${formatUsd(asset.valueUsd)}
                     </Text>
                     <Text style={styles.communityShare}>
-                      {asset.sharePct.toFixed(1).replace('.', currency.decimalSeparator)}%
+                      {asset.sharePct
+                        .toFixed(1)
+                        .replace('.', currency.decimalSeparator)}
+                      %
                     </Text>
                   </View>
                 </View>
@@ -321,7 +383,7 @@ export const OndoStocksInfoScreen = () => {
 
         <View style={styles.section}>
           <View style={styles.sectionHeadingRow}>
-            <Icon name="shield" size={20} color={colors.primaryDark} />
+            <Icon name="shield" size={20} color={colors.primary} />
             <Text style={styles.sectionTitleInline}>
               Qué representa el token
             </Text>
@@ -348,7 +410,7 @@ export const OndoStocksInfoScreen = () => {
 
         <View style={styles.section}>
           <View style={styles.sectionHeadingRow}>
-            <Icon name="eye" size={20} color={colors.primaryDark} />
+            <Icon name="eye" size={20} color={colors.primary} />
             <Text style={styles.sectionTitleInline}>
               Costos y horarios claros
             </Text>
@@ -365,6 +427,57 @@ export const OndoStocksInfoScreen = () => {
             de riesgo.
           </Text>
         </View>
+
+        {(isBscAddress(userBscAddress) || isBscAddress(routerAddress)) && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeadingRow}>
+              <Icon name="check-circle" size={20} color={colors.primary} />
+              <Text style={styles.sectionTitleInline}>
+                Comprueba tus acciones
+              </Text>
+            </View>
+            <Text style={styles.sectionBody}>
+              Las acciones digitales que compras quedan guardadas directamente
+              en tu cuenta. Puedes comprobarlas públicamente cuando quieras.
+            </Text>
+            <Text style={styles.proofExplanation}>
+              Confío realiza tus compras y ventas mediante un sistema público y
+              verificable. Tus acciones permanecen en tu cuenta, no en Confío.
+            </Text>
+            {/* Same chip grammar as the cUSD+ reserve links: these are proof
+                links, not actions — the visual weight of a full-width button
+                made them compete with "Explorar acciones". */}
+            <View style={styles.linksRow}>
+              {isBscAddress(userBscAddress) && (
+                <TouchableOpacity
+                  style={styles.linkButton}
+                  onPress={openMyStocks}
+                  activeOpacity={0.8}
+                  accessibilityRole="link"
+                  accessibilityLabel="Ver mis acciones">
+                  <Icon name="external-link" size={13} color={colors.primary} />
+                  <Text style={styles.linkText}>Ver mis acciones</Text>
+                </TouchableOpacity>
+              )}
+              {isBscAddress(routerAddress) && (
+                <TouchableOpacity
+                  style={styles.linkButton}
+                  onPress={explainConfioSystem}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ver cómo funciona Confío">
+                  <Icon name="external-link" size={13} color={colors.primary} />
+                  <Text style={styles.linkText}>Ver cómo funciona Confío</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <Text style={styles.proofWarning}>
+              BscScan también puede mostrar tokens desconocidos enviados por
+              terceros. Confío solo reconoce las acciones que aparecen dentro de
+              la app.
+            </Text>
+          </View>
+        )}
 
         <View style={styles.riskSection}>
           <View style={styles.sectionHeadingRow}>
@@ -385,54 +498,63 @@ export const OndoStocksInfoScreen = () => {
           <Text style={styles.partnerBrand}>Ondo Finance</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.officialLink}
-          onPress={openOndo}
-          activeOpacity={0.8}
-          accessibilityRole="link"
-          accessibilityLabel="Más información oficial sobre Ondo Stocks">
-          <Text style={styles.officialLinkText}>
-            Información oficial de Ondo Stocks
-          </Text>
-          <Icon name="external-link" size={15} color={colors.primaryDark} />
-        </TouchableOpacity>
+        <View style={styles.officialLinkRow}>
+          <TouchableOpacity
+            style={styles.linkButton}
+            onPress={openOndo}
+            activeOpacity={0.8}
+            accessibilityRole="link"
+            accessibilityLabel="Más información oficial sobre Ondo Stocks">
+            <Icon name="external-link" size={13} color={colors.primary} />
+            <Text style={styles.linkText}>
+              Información oficial de Ondo Stocks
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity
-          style={styles.ctaButton}
-          onPress={() => navigation.navigate('StocksList')}
-          activeOpacity={0.9}
-          accessibilityRole="button"
-          accessibilityLabel="Explorar acciones">
-          <Icon name="trending-up" size={19} color={colors.white} />
-          <Text style={styles.ctaText}>Explorar acciones</Text>
-        </TouchableOpacity>
-        {!stocks.buyEnabled && (
-          <Text style={styles.ctaHint}>
-            Puedes conocer el catálogo ahora. Las compras se habilitarán cuando
-            el servicio esté listo para tu cuenta.
-          </Text>
-        )}
+        <View style={styles.ctaSection}>
+          <TouchableOpacity
+            style={styles.ctaButton}
+            onPress={() => navigation.navigate('StocksList')}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Explorar acciones">
+            <Icon name="trending-up" size={20} color={colors.white} />
+            <Text style={styles.ctaText}>Explorar acciones</Text>
+          </TouchableOpacity>
+          {!stocks.buyEnabled && (
+            <Text style={styles.ctaHint}>
+              Puedes conocer el catálogo ahora. Las compras se habilitarán
+              cuando el servicio esté listo para tu cuenta.
+            </Text>
+          )}
+        </View>
       </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {flex: 1, backgroundColor: colors.neutral},
+  // Layout grammar is shared with ProtectedSavingsScreen (the cUSD+
+  // explanation page): white page, neutral-filled borderless section cards
+  // laid out with a 16pt gutter, emerald-soft chips for external proof links
+  // and a single pill CTA. The two pages are siblings in the same product
+  // story, so they must not read as two different apps.
+  container: {flex: 1, backgroundColor: colors.white},
   scroll: {flex: 1},
-  scrollContent: {padding: 16, paddingBottom: 40},
+  scrollContent: {paddingBottom: 32},
   unavailableContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.neutral,
+    backgroundColor: colors.white,
     paddingHorizontal: 32,
   },
   unavailableTitle: {
     marginTop: 12,
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text.primary,
+    color: colors.dark,
   },
   unavailableBody: {
     marginTop: 6,
@@ -442,84 +564,86 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   backButton: {marginTop: 18, paddingHorizontal: 20, paddingVertical: 10},
-  backButtonText: {color: colors.primaryDark, fontWeight: '700'},
+  backButtonText: {color: colors.primary, fontWeight: '700'},
   hero: {
     alignItems: 'center',
-    backgroundColor: colors.white,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
     paddingHorizontal: 20,
-    paddingVertical: 24,
+    paddingTop: 24,
+    paddingBottom: 16,
   },
   heroLogos: {flexDirection: 'row', alignItems: 'center'},
-  heroLogo: {width: 52, height: 52, borderRadius: 14},
+  heroLogo: {width: 56, height: 56, borderRadius: 14},
   heroArrow: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 12,
-    backgroundColor: colors.primaryLight,
+    marginHorizontal: 10,
+    backgroundColor: colors.primarySoft,
   },
   heroTitle: {
-    marginTop: 16,
+    marginTop: 12,
     fontSize: 22,
-    lineHeight: 28,
-    fontWeight: '800',
+    fontWeight: '700',
     textAlign: 'center',
-    color: colors.text.primary,
+    color: colors.dark,
   },
   heroSubtitle: {
-    marginTop: 8,
+    marginTop: 6,
+    paddingHorizontal: 16,
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
     textAlign: 'center',
     color: colors.text.secondary,
   },
-  heroPills: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16},
+  heroPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+  },
   heroPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderRadius: 14,
-    paddingHorizontal: 10,
+    borderRadius: 999,
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: colors.primaryLight,
+    backgroundColor: colors.primarySoft,
   },
-  heroPillText: {fontSize: 12, fontWeight: '700', color: colors.primaryDark},
+  heroPillText: {fontSize: 12, fontWeight: '700', color: colors.primary},
   section: {
-    marginTop: 12,
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: colors.neutral,
+    borderRadius: 12,
     padding: 16,
   },
   sectionTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: colors.text.primary,
-    marginBottom: 14,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.dark,
+    marginBottom: 12,
   },
   sectionHeadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: 8,
     marginBottom: 10,
   },
   sectionTitleInline: {
     flex: 1,
-    fontSize: 17,
-    fontWeight: '800',
-    color: colors.text.primary,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.dark,
   },
   sectionBody: {
     fontSize: 14,
     lineHeight: 21,
-    color: colors.text.secondary,
-    marginBottom: 10,
+    color: colors.text.primary,
+    marginBottom: 8,
   },
   communityIntro: {
     marginBottom: 4,
@@ -535,7 +659,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   communityIdentity: {flex: 1, marginLeft: 11, marginRight: 8},
-  communityTicker: {fontSize: 14, fontWeight: '800', color: colors.text.primary},
+  communityTicker: {fontSize: 14, fontWeight: '700', color: colors.dark},
   communityName: {marginTop: 2, fontSize: 12, color: colors.text.secondary},
   communityValueColumn: {alignItems: 'flex-end'},
   communityValue: {fontSize: 13, fontWeight: '700', color: colors.text.primary},
@@ -552,9 +676,9 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   explanationIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primaryLight,
@@ -563,7 +687,7 @@ const styles = StyleSheet.create({
   explanationTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.text.primary,
+    color: colors.dark,
   },
   explanationBody: {
     marginTop: 3,
@@ -571,74 +695,109 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: colors.text.secondary,
   },
+  // White-on-neutral inset, same construction as the cUSD+ yield split and
+  // trust-chain cards; the violet icon keeps this the page's one "read this
+  // twice" note without inventing a second card style.
   clarityCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
     marginBottom: 12,
-    borderRadius: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: 12,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.white,
   },
   clarityText: {
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
+    color: colors.text.primary,
+  },
+  proofExplanation: {
+    marginBottom: 8,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.text.secondary,
+  },
+  linksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  linkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: colors.primarySoft,
+  },
+  linkText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  proofWarning: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 17,
+    fontStyle: 'italic',
     color: colors.text.secondary,
   },
   riskSection: {
-    marginTop: 12,
-    borderRadius: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#FDE68A',
+    borderColor: colors.warning.border,
     padding: 16,
     backgroundColor: '#FFFBEB',
   },
   riskTitle: {
     flex: 1,
-    fontSize: 17,
-    fontWeight: '800',
-    color: colors.text.primary,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.dark,
   },
-  riskBody: {fontSize: 13, lineHeight: 20, color: colors.text.secondary},
+  riskBody: {fontSize: 13, lineHeight: 20, color: colors.text.primary},
   partnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    marginTop: 18,
+    gap: 6,
+    marginTop: 2,
+    marginBottom: 10,
   },
   partnerText: {fontSize: 12, color: colors.text.light},
-  partnerLogo: {width: 18, height: 18, borderRadius: 4},
+  partnerLogo: {width: 15, height: 15, borderRadius: 4},
   partnerBrand: {fontSize: 12, fontWeight: '700', color: colors.text.secondary},
-  officialLink: {
-    flexDirection: 'row',
+  officialLinkRow: {alignItems: 'center', marginBottom: 20},
+  ctaSection: {
+    marginHorizontal: 16,
+    marginBottom: 24,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 13,
-  },
-  officialLinkText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primaryDark,
   },
   ctaButton: {
-    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 9,
-    borderRadius: 14,
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 999,
     backgroundColor: colors.primary,
   },
-  ctaText: {fontSize: 16, fontWeight: '800', color: colors.white},
+  ctaText: {fontSize: 15, fontWeight: '700', color: colors.white},
   ctaHint: {
-    marginTop: 8,
+    marginTop: 10,
     paddingHorizontal: 12,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
-    color: colors.text.light,
+    color: colors.text.secondary,
   },
 });

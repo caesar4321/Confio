@@ -1,13 +1,20 @@
 import React from 'react';
 import renderer, {ReactTestRenderer, act} from 'react-test-renderer';
+import {Alert, Linking} from 'react-native';
 
 const FEE = 'OndoStocksInfoFee';
+const ADDRESS = 'OndoStocksWalletAddress';
 
 let mockFeePayload: any;
+let mockWalletPayload: any;
 let mockMarketAssets: any[];
+let mockAuthReady: boolean;
 const mockUseQuery = jest.fn((query: any, _options: any) => {
   if (typeof query === 'string' && query.includes(FEE)) {
     return {data: mockFeePayload, loading: false};
+  }
+  if (typeof query === 'string' && query.includes(ADDRESS)) {
+    return {data: mockWalletPayload, loading: false};
   }
   return {data: undefined, loading: false};
 });
@@ -28,7 +35,12 @@ jest.mock('../../hooks/useGmMarket', () => ({
   useGmMarket: () => ({stocks: mockMarketAssets}),
 }));
 jest.mock('../../hooks/useCurrency', () => ({
-  useCurrency: () => ({currency: {thousandsSeparator: '.', decimalSeparator: ','}}),
+  useCurrency: () => ({
+    currency: {thousandsSeparator: '.', decimalSeparator: ','},
+  }),
+}));
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuthReady: () => mockAuthReady,
 }));
 jest.mock('../../components/TickerLogo', () => ({TickerLogo: 'TickerLogo'}));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
@@ -39,7 +51,8 @@ import {OndoStocksInfoScreen} from '../OndoStocksInfoScreen';
 // live instances instead pulls in React elements, which are circular.
 const collectText = (node: any): string[] => {
   if (node == null || node === false) return [];
-  if (typeof node === 'string' || typeof node === 'number') return [String(node)];
+  if (typeof node === 'string' || typeof node === 'number')
+    return [String(node)];
   if (Array.isArray(node)) return node.flatMap(collectText);
   return collectText(node.children);
 };
@@ -54,8 +67,12 @@ const render = (): string => {
 
 beforeEach(() => {
   mockUseQuery.mockClear();
+  mockAuthReady = true;
   mockFeePayload = {
-    cusdPlusConvertParams: {gmTradeFeeBps: 30},
+    cusdPlusConvertParams: {
+      gmTradeFeeBps: 30,
+      stockRouterAddress: '0x2222222222222222222222222222222222222222',
+    },
     gmCommunity: {
       valueUsd: 12345,
       holderWallets: 3,
@@ -71,6 +88,9 @@ beforeEach(() => {
         },
       ],
     },
+  };
+  mockWalletPayload = {
+    stockWalletAddress: '0x1111111111111111111111111111111111111111',
   };
   mockMarketAssets = new Array(438).fill({});
 });
@@ -135,5 +155,88 @@ describe('OndoStocksInfoScreen headline figures', () => {
   it('tracks a changed fee instead of the old hardcoded rate', () => {
     mockFeePayload.cusdPlusConvertParams.gmTradeFeeBps = 45;
     expect(render()).toContain('0,45%');
+  });
+
+  it('explains ownership without technical language', () => {
+    const text = render();
+    expect(text).toContain('Comprueba tus acciones');
+    expect(text).toContain('Ver mis acciones');
+    expect(text).toContain('Ver cómo funciona Confío');
+    expect(text).toContain('Las acciones digitales que compras');
+    expect(text).toContain(
+      'Tus acciones permanecen en tu cuenta, no en Confío',
+    );
+  });
+
+  it('does not build public links from missing or malformed addresses', () => {
+    mockWalletPayload.stockWalletAddress = 'not-an-address';
+    mockFeePayload.cusdPlusConvertParams.stockRouterAddress = null;
+    const text = render();
+
+    expect(text).not.toContain('Comprueba tus acciones');
+    expect(text).not.toContain('Ver mis acciones');
+    expect(text).not.toContain('Ver cómo funciona Confío');
+  });
+
+  it('hides the wallet link while the active account token is changing', () => {
+    mockAuthReady = false;
+    const text = render();
+
+    expect(text).not.toContain('Ver mis acciones');
+    expect(mockUseQuery).toHaveBeenCalledWith(
+      expect.stringContaining(ADDRESS),
+      expect.objectContaining({skip: true, fetchPolicy: 'network-only'}),
+    );
+  });
+
+  it('opens the signed-in wallet assets instead of a shared address', () => {
+    const openUrl = jest
+      .spyOn(Linking, 'openURL')
+      .mockReturnValue({catch: jest.fn()} as any);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<OndoStocksInfoScreen />);
+    });
+
+    act(() => {
+      tree.root
+        .findByProps({accessibilityLabel: 'Ver mis acciones'})
+        .props.onPress();
+    });
+
+    expect(openUrl).toHaveBeenCalledWith(
+      'https://bscscan.com/tokenholdings?a=0x1111111111111111111111111111111111111111',
+    );
+    openUrl.mockRestore();
+  });
+
+  it('explains the shared activity before opening the server-provided system address', () => {
+    const openUrl = jest
+      .spyOn(Linking, 'openURL')
+      .mockReturnValue({catch: jest.fn()} as any);
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<OndoStocksInfoScreen />);
+    });
+
+    act(() => {
+      tree.root
+        .findByProps({accessibilityLabel: 'Ver cómo funciona Confío'})
+        .props.onPress();
+    });
+    expect(alert).toHaveBeenCalledWith(
+      'Cómo funciona Confío',
+      expect.stringContaining('operaciones de todos los usuarios'),
+      expect.any(Array),
+    );
+
+    const buttons = alert.mock.calls[0][2] as any[];
+    act(() => buttons[1].onPress());
+    expect(openUrl).toHaveBeenCalledWith(
+      'https://bscscan.com/address/0x2222222222222222222222222222222222222222#code',
+    );
+    alert.mockRestore();
+    openUrl.mockRestore();
   });
 });

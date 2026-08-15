@@ -377,6 +377,9 @@ def _sparkline(history: list, points: int = 24) -> list:
 class Query(graphene.ObjectType):
     cusd_plus_summary = graphene.Field(CusdPlusSummaryType)
     cusd_plus_convert_params = graphene.Field(CusdPlusConvertParamsType)
+    stock_wallet_address = graphene.String(
+        description="Active JWT account's BSC address for an explicit self-verification link",
+    )
     cusd_plus_conversions_in_flight = graphene.List(
         graphene.NonNull(lambda: CusdPlusConversionType),
     )
@@ -407,6 +410,24 @@ class Query(graphene.ObjectType):
         params=graphene.String(required=True, description="JSON-encoded params array"),
         description="Read-only BSC RPC proxy (allowlisted methods) — keeps user IPs off public nodes",
     )
+
+    def resolve_stock_wallet_address(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        from users.jwt_context import get_jwt_business_context_with_validation
+        ctx = get_jwt_business_context_with_validation(
+            info, required_permission=None)
+        if not ctx:
+            return None
+        if ctx.get('account_type') == 'business':
+            # AccountDetailScreen enforces the same privacy boundary. Viewing
+            # a balance does not automatically grant permission to reveal the
+            # business's public address and its full on-chain history.
+            if not get_jwt_business_context_with_validation(
+                    info, required_permission='view_business_address'):
+                return None
+        return _active_bsc_address(info)
 
     def resolve_bsc_rpc(self, info, method, params):
         import json as _json

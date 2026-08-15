@@ -26,6 +26,96 @@ class GmApiTradingTests(SimpleTestCase):
         gm_holdings._fallback_registry.cache_clear()
         super().tearDown()
 
+    def test_stock_wallet_address_requires_authentication(self):
+        context = SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=False, id=None),
+        )
+        schema = graphene.Schema(query=Query)
+
+        with mock.patch(
+                'users.jwt_context.get_jwt_business_context_with_validation') as validate, \
+             mock.patch('cusd_plus.schema._active_bsc_address') as active:
+            result = schema.execute(
+                '{ stockWalletAddress }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertIsNone(result.data['stockWalletAddress'])
+        validate.assert_not_called()
+        active.assert_not_called()
+
+    def test_stock_wallet_address_exposes_the_active_jwt_account(self):
+        address = '0x' + 'ab' * 20
+        user = SimpleNamespace(is_authenticated=True, id=91)
+        context = SimpleNamespace(user=user)
+        schema = graphene.Schema(query=Query)
+
+        jwt_context = {
+            'account_type': 'personal', 'account_index': 0,
+            'business_id': None,
+        }
+        with mock.patch(
+                'users.jwt_context.get_jwt_business_context_with_validation',
+                return_value=jwt_context), \
+             mock.patch('cusd_plus.schema._active_bsc_address', return_value=address) as active:
+            result = schema.execute(
+                '{ stockWalletAddress }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data['stockWalletAddress'], address)
+        active.assert_called_once()
+
+    def test_stock_wallet_address_hides_business_without_permission(self):
+        user = SimpleNamespace(is_authenticated=True, id=92)
+        context = SimpleNamespace(user=user)
+        schema = graphene.Schema(query=Query)
+        business_context = {
+            'account_type': 'business', 'account_index': 0,
+            'business_id': 7,
+        }
+
+        with mock.patch(
+                'users.jwt_context.get_jwt_business_context_with_validation',
+                side_effect=[business_context, None]) as validate, \
+             mock.patch('cusd_plus.schema._active_bsc_address') as active:
+            result = schema.execute(
+                '{ stockWalletAddress }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertIsNone(result.data['stockWalletAddress'])
+        self.assertEqual(
+            validate.call_args_list[1].kwargs['required_permission'],
+            'view_business_address',
+        )
+        active.assert_not_called()
+
+    def test_stock_wallet_address_exposes_authorized_business(self):
+        address = '0x' + 'cd' * 20
+        user = SimpleNamespace(is_authenticated=True, id=93)
+        context = SimpleNamespace(user=user)
+        schema = graphene.Schema(query=Query)
+        business_context = {
+            'account_type': 'business', 'account_index': 2,
+            'business_id': 8,
+        }
+
+        with mock.patch(
+                'users.jwt_context.get_jwt_business_context_with_validation',
+                side_effect=[business_context, business_context]), \
+             mock.patch('cusd_plus.schema._active_bsc_address', return_value=address):
+            result = schema.execute(
+                '{ stockWalletAddress }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data['stockWalletAddress'], address)
+
     @override_settings(
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
