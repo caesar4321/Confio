@@ -70,7 +70,7 @@ class PrepareCallShapeTests(SimpleTestCase):
 
     def _prepare(self, amount='10', shares_value=100 * WAD, usdt=0,
                  recipient_user=None, recipient_business=None,
-                 recipient_addr=RECIPIENT, token=''):
+                 recipient_addr=RECIPIENT, token='', locked_recipient_addr=None):
         captured = {}
 
         def _create(**kwargs):
@@ -79,10 +79,19 @@ class PrepareCallShapeTests(SimpleTestCase):
 
         pps = 11 * WAD // 10  # pPlus = $1.10
         with _recipient_resolution(recipient_user, recipient_business, recipient_addr), \
+             mock.patch.object(
+                 bsc_flow,
+                 '_lock_internal_recipient_account',
+                 return_value=SimpleNamespace(
+                     bsc_address=locked_recipient_addr or recipient_addr,
+                 ),
+             ), \
              mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
              mock.patch('cusd_plus.vault.erc20_balance_raw',
                         return_value=(shares_value * WAD) // pps), \
              mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=usdt), \
+             mock.patch('send.bsc_flow.transaction.atomic'), \
              mock.patch('send.models.SendTransaction.objects') as objs:
             objs.filter.return_value.first.return_value = None
             objs.create.side_effect = _create
@@ -146,6 +155,14 @@ class PrepareCallShapeTests(SimpleTestCase):
         self.assertEqual(result['error'], 'recipient_no_bsc_address')
         nudge.assert_called_once()
 
+    def test_refuses_to_snapshot_an_address_changed_during_prepare(self):
+        result, row, _ = self._prepare(
+            recipient_user=_recipient_user('VE'),
+            locked_recipient_addr='0x' + ('9' * 40),
+        )
+        self.assertEqual(result['error'], 'recipient_address_changed')
+        self.assertEqual(row, {})
+
     @override_settings(BSC_SEND_ENABLED=False)
     def test_dark_flag_blocks(self):
         result, _, _ = self._prepare(recipient_user=_recipient_user('VE'))
@@ -197,6 +214,7 @@ class PrepareCallShapeTests(SimpleTestCase):
             shares_value=0, usdt=100 * WAD, token='CONFIO')
         self.assertEqual(result['error'], 'insufficient_balance')
 
+    @override_settings(BSC_CONFIO_TOKEN_ADDRESS=None)
     def test_case_e_unconfigured_token_blocks(self):
         result, _, _ = self._prepare(recipient_user=None, token='CONFIO')
         self.assertEqual(result['error'], 'confio_not_configured')
@@ -219,9 +237,16 @@ class PrepareCallShapeTests(SimpleTestCase):
             return SimpleNamespace(id=7, internal_id='sid123', **kwargs)
 
         with _recipient_resolution(recipient_user, None, RECIPIENT), \
+             mock.patch.object(
+                 bsc_flow,
+                 '_lock_internal_recipient_account',
+                 return_value=SimpleNamespace(bsc_address=RECIPIENT),
+             ), \
              mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
              mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=shares_raw), \
              mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=usdt), \
+             mock.patch('send.bsc_flow.transaction.atomic'), \
              mock.patch('send.models.SendTransaction.objects') as objs:
             objs.filter.return_value.first.return_value = None
             objs.create.side_effect = _create

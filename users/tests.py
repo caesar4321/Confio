@@ -1,16 +1,22 @@
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.contrib.auth import get_user_model
 from graphene_django.utils.testing import GraphQLTestCase
 from graphql_jwt.testcases import JSONWebTokenTestCase
 from graphql_jwt.exceptions import PermissionDenied
 from graphql_jwt.utils import jwt_encode
 import json
+import time
+from unittest import mock
+from unittest.mock import patch
 from users.jwt import jwt_payload_handler, verify_auth_token_version
 from users.phone_utils import find_user_by_phone, phone_lookup_key
 from users.migration_safety import (
+    LEGACY_CONFIO_ASSET_ID,
     MATERIAL_SPENDABLE_ALGO_MICROS,
+    classify_sponsored_empty_wallet,
     get_address_reassignment_blocker,
     inspect_address_migration_risk,
+    inspect_sponsored_empty_wallet_reenrollment,
 )
 
 User = get_user_model()
@@ -58,7 +64,7 @@ class AccountBalanceQueryTestCase(TestCase):
         )
 
     def test_account_balance_query(self):
-        """Test that account balance query returns correct values"""
+        """The resolver returns safely formatted values from BalanceService."""
         from .schema import Query
         
         # Mock the GraphQL context
@@ -77,21 +83,32 @@ class AccountBalanceQueryTestCase(TestCase):
         # Test the resolver directly
         query = Query()
         
-        # Test cUSD balance
-        result = query.resolve_account_balance(info, 'cUSD')
-        self.assertEqual(result, '2850.35')
-        
-        # Test CONFIO balance
-        result = query.resolve_account_balance(info, 'CONFIO')
-        self.assertEqual(result, '234.18')
-        
-        # Test USDC balance
-        result = query.resolve_account_balance(info, 'USDC')
-        self.assertEqual(result, '458.22')
-        
-        # Test unknown token type
-        result = query.resolve_account_balance(info, 'UNKNOWN')
-        self.assertEqual(result, '0')
+        balances = {
+            'CUSD': '2850.3599999',
+            'CONFIO': '234.18',
+            'USDC': '458.22',
+            'UNKNOWN': '0',
+        }
+        account = mock.Mock(algorand_address='A' * 58)
+
+        with patch(
+            'users.jwt_context.get_jwt_business_context_with_validation',
+            return_value={
+                'account_type': 'personal',
+                'account_index': 0,
+                'business_id': None,
+                'employee_record': None,
+            },
+        ), patch('users.models.Account.objects.get', return_value=account), patch(
+            'blockchain.balance_service.BalanceService.get_balance',
+            side_effect=lambda _account, token, force_refresh: {
+                'amount': balances[token],
+            },
+        ):
+            self.assertEqual(query.resolve_account_balance(info, 'cUSD'), '2850.359999')
+            self.assertEqual(query.resolve_account_balance(info, 'CONFIO'), '234.180000')
+            self.assertEqual(query.resolve_account_balance(info, 'USDC'), '458.220000')
+            self.assertEqual(query.resolve_account_balance(info, 'UNKNOWN'), '0.000000')
 
     def test_account_balance_requires_authentication(self):
         """Test that account balance query requires authentication"""
@@ -116,7 +133,7 @@ class AccountBalanceQueryTestCase(TestCase):
         self.assertEqual(result, '0')
 
 
-class MigrationSafetyTestCase(TestCase):
+class MigrationSafetyTestCase(SimpleTestCase):
     class FakeAlgodClient:
         def __init__(self, responses):
             self.responses = responses
@@ -130,14 +147,14 @@ class MigrationSafetyTestCase(TestCase):
                 'amount': 500000,
                 'min-balance': 400000,
                 'assets': [
-                    {'asset-id': 31566704, 'amount': 123456},
+                    {'asset-id': LEGACY_CONFIO_ASSET_ID, 'amount': 123456},
                 ],
             }
         })
 
         risk = inspect_address_migration_risk(algod, 'legacy')
         self.assertTrue(risk['has_material_risk'])
-        self.assertEqual(risk['relevant_assets'][31566704], 123456)
+        self.assertEqual(risk['relevant_assets'][LEGACY_CONFIO_ASSET_ID], 123456)
 
     def test_detects_spendable_algo_even_without_assets(self):
         algod = self.FakeAlgodClient({
@@ -177,6 +194,519 @@ class MigrationSafetyTestCase(TestCase):
 
         blocker = get_address_reassignment_blocker(algod, 'legacy', 'new')
         self.assertIsNone(blocker)
+
+    def test_allows_reenrollment_for_sponsor_funding_and_zero_value_opt_ins(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+        result = classify_sponsored_empty_wallet(
+            {
+                'amount': 500000,
+                'min-balance': 400000,
+                'assets': [
+                    {'asset-id': 1, 'amount': 0},
+                    {'asset-id': 2, 'amount': 0},
+                    {'asset-id': 3, 'amount': 0},
+                ],
+                'apps-local-state': [],
+                'created-apps': [],
+                'created-assets': [],
+            },
+            [
+                {
+                    'tx-type': 'pay',
+                    'sender': sponsor,
+                    'payment-transaction': {'receiver': address, 'amount': 500000},
+                },
+                {
+                    'tx-type': 'axfer',
+                    'sender': address,
+                    'asset-transfer-transaction': {
+                        'receiver': address,
+                        'asset-id': 1,
+                        'amount': 0,
+                    },
+                },
+            ],
+            address,
+            sponsor,
+        )
+
+        self.assertTrue(result['eligible'])
+        self.assertEqual(result['reason'], 'sponsor_only_empty_wallet')
+
+    def test_reenrollment_fails_closed_on_any_user_asset_or_payment_activity(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+        base_info = {
+            'amount': 500000,
+            'min-balance': 400000,
+            'assets': [{'asset-id': 1, 'amount': 0}],
+        }
+        sponsor_txn = {
+            'tx-type': 'pay',
+            'sender': sponsor,
+            'payment-transaction': {'receiver': address, 'amount': 500000},
+        }
+
+        with_asset = dict(base_info, assets=[{'asset-id': 1, 'amount': 1}])
+        self.assertFalse(classify_sponsored_empty_wallet(
+            with_asset, [sponsor_txn], address, sponsor
+        )['eligible'])
+
+        user_payment = {
+            'tx-type': 'pay',
+            'sender': address,
+            'payment-transaction': {'receiver': 'R' * 58, 'amount': 1},
+        }
+        self.assertFalse(classify_sponsored_empty_wallet(
+            base_info, [sponsor_txn, user_payment], address, sponsor
+        )['eligible'])
+
+    def test_reenrollment_reads_complete_paginated_history(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+
+        class FakeIndexer:
+            def search_transactions(self, address, limit, next_page, max_round):
+                if next_page is None:
+                    return {
+                        'current-round': max_round,
+                        'transactions': [{
+                            'tx-type': 'pay',
+                            'sender': sponsor,
+                            'payment-transaction': {
+                                'receiver': address,
+                                'amount': 500000,
+                            },
+                        }],
+                        'next-token': 'page-2',
+                    }
+                return {
+                    'current-round': max_round,
+                    'transactions': [{
+                        'tx-type': 'axfer',
+                        'sender': address,
+                        'asset-transfer-transaction': {
+                            'receiver': address,
+                            'asset-id': 1,
+                            'amount': 0,
+                        },
+                    }],
+                }
+
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12345,
+                'amount': 500000,
+                'min-balance': 200000,
+                'assets': [{'asset-id': 1, 'amount': 0}],
+            },
+        })
+        result = inspect_sponsored_empty_wallet_reenrollment(
+            algod, FakeIndexer(), address, sponsor
+        )
+        self.assertTrue(result['eligible'])
+
+    def test_reenrollment_fails_closed_when_indexer_lags_algod_snapshot(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+
+        class LaggingIndexer:
+            def search_transactions(self, **kwargs):
+                return {
+                    'current-round': kwargs['max_round'] - 1,
+                    # The omitted latest outbound transaction would otherwise
+                    # make this sponsor payment look like complete history.
+                    'transactions': [{
+                        'tx-type': 'pay',
+                        'sender': sponsor,
+                        'payment-transaction': {
+                            'receiver': address,
+                            'amount': 500000,
+                        },
+                    }],
+                }
+
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12345,
+                'amount': 400000,
+                'min-balance': 100000,
+                'assets': [],
+            },
+        })
+        result = inspect_sponsored_empty_wallet_reenrollment(
+            algod, LaggingIndexer(), address, sponsor
+        )
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'indexer_lagging')
+
+    def test_reenrollment_fails_closed_when_indexer_is_unavailable(self):
+        address = 'A' * 58
+
+        class FailingIndexer:
+            def search_transactions(self, **kwargs):
+                raise TimeoutError('indexer unavailable')
+
+        algod = self.FakeAlgodClient({
+            address: {'round': 12345, 'amount': 0, 'min-balance': 0, 'assets': []},
+        })
+        result = inspect_sponsored_empty_wallet_reenrollment(
+            algod, FailingIndexer(), address, 'S' * 58
+        )
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'inspection_failed')
+
+
+class WalletReenrollmentProofTestCase(SimpleTestCase):
+    def setUp(self):
+        from types import SimpleNamespace
+        from eth_account import Account as EvmAccount
+
+        self.private_key = '0x' + ('11' * 32)
+        self.address = EvmAccount.from_key(self.private_key).address
+        self.google_subject = 'google-subject-123'
+        self.google_auth_time = int(time.time())
+        self.user = SimpleNamespace(id=123, email='wallet-owner@example.com')
+        self.account = SimpleNamespace(
+            id=456,
+            algorand_address='A' * 58,
+            bsc_address=None,
+        )
+
+    def _proof(self, google_auth_time=None):
+        from eth_account import Account as EvmAccount
+        from eth_account.messages import encode_defunct
+        from users.web3auth_schema import _issue_wallet_reenrollment_grant
+
+        challenge, grant = _issue_wallet_reenrollment_grant(
+            self.user,
+            self.account,
+            self.google_subject,
+            google_auth_time or self.google_auth_time,
+        )
+        signature = EvmAccount.sign_message(
+            encode_defunct(text=challenge),
+            private_key=self.private_key,
+        ).signature.hex()
+        return grant, signature
+
+    def test_reenrollment_requires_recent_google_authentication(self):
+        from users.web3auth_schema import _is_recent_google_auth
+
+        now = 1_800_000_000
+        self.assertTrue(_is_recent_google_auth(now - 30, now=now))
+        self.assertFalse(_is_recent_google_auth(now - 601, now=now))
+        self.assertFalse(_is_recent_google_auth(None, now=now))
+        self.assertFalse(_is_recent_google_auth(now + 61, now=now))
+
+    def test_accepts_signature_from_submitted_bsc_address(self):
+        from users.web3auth_schema import _verify_wallet_reenrollment_grant
+
+        grant, signature = self._proof()
+        self.assertTrue(_verify_wallet_reenrollment_grant(
+            grant, self.user, self.account, self.address, signature
+        ))
+
+    def test_rejects_wrong_address_and_changed_legacy_anchor(self):
+        from users.web3auth_schema import _verify_wallet_reenrollment_grant
+
+        grant, signature = self._proof()
+        self.assertFalse(_verify_wallet_reenrollment_grant(
+            grant, self.user, self.account, '0x' + ('2' * 40), signature
+        ))
+        self.account.algorand_address = 'B' * 58
+        self.assertFalse(_verify_wallet_reenrollment_grant(
+            grant, self.user, self.account, self.address, signature
+        ))
+
+    def test_rejects_grant_when_bsc_anchor_changes(self):
+        from users.web3auth_schema import _verify_wallet_reenrollment_grant
+
+        self.account.bsc_address = '0x' + ('3' * 40)
+        grant, signature = self._proof()
+        self.account.bsc_address = '0x' + ('4' * 40)
+        self.assertFalse(_verify_wallet_reenrollment_grant(
+            grant, self.user, self.account, self.address, signature
+        ))
+
+    @patch('users.web3auth_schema.signing.loads')
+    def test_rejects_expired_grant(self, loads_mock):
+        from django.core.signing import SignatureExpired
+        from users.web3auth_schema import _verify_wallet_reenrollment_grant
+
+        loads_mock.side_effect = SignatureExpired('expired')
+        grant, signature = self._proof()
+        self.assertFalse(_verify_wallet_reenrollment_grant(
+            grant, self.user, self.account, self.address, signature
+        ))
+
+    def test_rejects_grant_when_google_auth_is_no_longer_recent(self):
+        from users.web3auth_schema import _verify_wallet_reenrollment_grant
+
+        grant, signature = self._proof(google_auth_time=int(time.time()) - 601)
+        self.assertFalse(_verify_wallet_reenrollment_grant(
+            grant, self.user, self.account, self.address, signature
+        ))
+
+
+class StaleBscReenrollmentSafetyTestCase(SimpleTestCase):
+    def _inspect(
+        self,
+        *,
+        native='0x0',
+        nonce='0x0',
+        rpc_error=None,
+        pending_send=False,
+        pending_payroll=False,
+    ):
+        from types import SimpleNamespace
+        from users.web3auth_schema import _inspect_stale_bsc_reenrollment
+
+        account = SimpleNamespace(
+            id=456,
+            user=SimpleNamespace(id=123),
+            bsc_address='0x' + ('3' * 40),
+        )
+        empty_query = mock.Mock()
+        empty_query.exists.return_value = False
+        empty_query.exclude.return_value = empty_query
+        send_query = mock.Mock()
+        send_query.exists.return_value = pending_send
+        send_query.exclude.return_value = send_query
+        payroll_query = mock.Mock()
+        payroll_query.exists.return_value = pending_payroll
+
+        def rpc(method, params):
+            if rpc_error:
+                raise rpc_error
+            return native if method == 'eth_getBalance' else nonce
+
+        with patch('blockchain.models.SponsoredBatch.objects.filter', return_value=empty_query), \
+             patch('conversion.models.Conversion.objects.filter', return_value=empty_query), \
+             patch('send.models.SendTransaction.objects.filter', return_value=send_query), \
+             patch('send.models.PhoneInvite.objects.filter', return_value=empty_query), \
+             patch('payroll.models.PayrollItem.objects.filter', return_value=payroll_query), \
+             patch('ramps.models.RampTransaction.objects.filter', return_value=empty_query), \
+             patch('presale.models.PresaleMigrationCredit.objects.filter', return_value=empty_query), \
+             patch('cusd_plus.vault._rpc', side_effect=rpc), \
+             patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
+             patch('cusd_plus.gm_holdings.registry', return_value={}):
+            return _inspect_stale_bsc_reenrollment(account)
+
+    def test_allows_only_zero_state_unused_bsc_anchor(self):
+        result = self._inspect()
+        self.assertTrue(result['eligible'])
+        self.assertEqual(result['reason'], 'unused_bsc_anchor')
+
+    def test_rejects_native_balance_or_transaction_history(self):
+        self.assertEqual(self._inspect(native='0x1')['reason'], 'native_balance')
+        self.assertEqual(self._inspect(nonce='0x1')['reason'], 'transaction_history')
+
+    def test_rejects_prepared_inbound_value(self):
+        self.assertEqual(
+            self._inspect(pending_send=True)['reason'],
+            'pending_inbound_send',
+        )
+        self.assertEqual(
+            self._inspect(pending_payroll=True)['reason'],
+            'pending_inbound_payroll',
+        )
+
+    def test_fails_closed_when_bsc_state_is_unavailable(self):
+        result = self._inspect(rpc_error=TimeoutError('rpc unavailable'))
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'inspection_failed')
+
+
+class WalletReenrollmentMutationTestCase(TestCase):
+    OLD_ADDRESS = 'A' * 58
+
+    class Info:
+        class Context:
+            def __init__(self, user):
+                self.user = user
+
+        def __init__(self, user):
+            self.context = self.Context(user)
+
+    def setUp(self):
+        from users.models import Account
+        from eth_account import Account as EvmAccount
+
+        self.bsc_private_key = '0x' + ('11' * 32)
+        self.NEW_BSC_ADDRESS = EvmAccount.from_key(self.bsc_private_key).address
+        self.google_subject = 'google-subject-123'
+        self.google_auth_time = int(time.time())
+        self.user = User.objects.create_user(
+            username='wallet-reenroll',
+            email='wallet-reenroll@example.com',
+            password='testpass123',
+            firebase_uid='wallet-reenroll-firebase',
+        )
+        self.account = Account.objects.create(
+            user=self.user,
+            account_type='personal',
+            account_index=0,
+            algorand_address=self.OLD_ADDRESS,
+            bsc_address=None,
+            is_keyless_migrated=False,
+        )
+
+    def _reenrollment_proof(self):
+        from eth_account import Account as EvmAccount
+        from eth_account.messages import encode_defunct
+        from users.web3auth_schema import _issue_wallet_reenrollment_grant
+
+        challenge, grant = _issue_wallet_reenrollment_grant(
+            self.user, self.account, self.google_subject, self.google_auth_time
+        )
+        signature = EvmAccount.sign_message(
+            encode_defunct(text=challenge),
+            private_key=self.bsc_private_key,
+        ).signature.hex()
+        return grant, signature
+
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_atomically_retires_old_address_and_registers_bsc(self, inspect_mock):
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        inspect_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
+        grant, signature = self._reenrollment_proof()
+        result = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address=self.NEW_BSC_ADDRESS,
+            reenrollment_grant=grant,
+            bsc_signature=signature,
+        )
+
+        self.assertTrue(result.success)
+        self.account.refresh_from_db()
+        self.assertIsNone(self.account.algorand_address)
+        self.assertEqual(self.account.bsc_address, self.NEW_BSC_ADDRESS)
+        self.assertTrue(self.account.is_keyless_migrated)
+
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_leaves_account_unchanged_when_chain_recheck_refuses(self, inspect_mock):
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        inspect_mock.return_value = {'eligible': False, 'reason': 'asset_balance'}
+        grant, signature = self._reenrollment_proof()
+        result = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address=self.NEW_BSC_ADDRESS,
+            reenrollment_grant=grant,
+            bsc_signature=signature,
+        )
+
+        self.assertFalse(result.success)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.algorand_address, self.OLD_ADDRESS)
+        self.assertIsNone(self.account.bsc_address)
+        self.assertFalse(self.account.is_keyless_migrated)
+
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_rejects_bsc_address_not_owned_by_challenge_signer(self, inspect_mock):
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        inspect_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
+        grant, signature = self._reenrollment_proof()
+        result = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address='0x' + ('2' * 40),
+            reenrollment_grant=grant,
+            bsc_signature=signature,
+        )
+
+        self.assertFalse(result.success)
+        self.assertIn('proof', result.error.lower())
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.algorand_address, self.OLD_ADDRESS)
+        self.assertIsNone(self.account.bsc_address)
+
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_successful_reenrollment_is_idempotent_after_lost_response(self, inspect_mock):
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        inspect_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
+        grant, signature = self._reenrollment_proof()
+        first = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address=self.NEW_BSC_ADDRESS,
+            reenrollment_grant=grant,
+            bsc_signature=signature,
+        )
+        second = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address=self.NEW_BSC_ADDRESS.lower(),
+            reenrollment_grant='already-consumed',
+            bsc_signature='already-consumed',
+        )
+
+        self.assertTrue(first.success)
+        self.assertTrue(second.success)
+
+    @patch('users.web3auth_schema._inspect_stale_bsc_reenrollment')
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_atomically_replaces_proven_unused_stale_bsc(
+        self,
+        inspect_algo_mock,
+        inspect_bsc_mock,
+    ):
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        self.account.bsc_address = '0x' + ('3' * 40)
+        self.account.save(update_fields=['bsc_address'])
+        inspect_algo_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
+        inspect_bsc_mock.return_value = {'eligible': True, 'reason': 'unused_bsc_anchor'}
+        grant, signature = self._reenrollment_proof()
+        result = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address=self.NEW_BSC_ADDRESS,
+            reenrollment_grant=grant,
+            bsc_signature=signature,
+        )
+
+        self.assertTrue(result.success)
+        self.account.refresh_from_db()
+        self.assertIsNone(self.account.algorand_address)
+        self.assertEqual(self.account.bsc_address, self.NEW_BSC_ADDRESS)
+        self.assertTrue(self.account.is_keyless_migrated)
+
+    @patch('users.web3auth_schema._inspect_stale_bsc_reenrollment')
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_keeps_stale_bsc_when_it_has_supported_value_or_history(
+        self,
+        inspect_algo_mock,
+        inspect_bsc_mock,
+    ):
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        old_bsc = '0x' + ('3' * 40)
+        self.account.bsc_address = old_bsc
+        self.account.save(update_fields=['bsc_address'])
+        inspect_algo_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
+        inspect_bsc_mock.return_value = {'eligible': False, 'reason': 'token_balance'}
+        grant, signature = self._reenrollment_proof()
+        result = CompleteWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            bsc_address=self.NEW_BSC_ADDRESS,
+            reenrollment_grant=grant,
+            bsc_signature=signature,
+        )
+
+        self.assertFalse(result.success)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.algorand_address, self.OLD_ADDRESS)
+        self.assertEqual(self.account.bsc_address, old_bsc)
+        self.assertFalse(self.account.is_keyless_migrated)
 
 
 class _FakeAlgodHTTPError(Exception):

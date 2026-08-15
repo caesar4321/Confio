@@ -26,6 +26,7 @@ import time
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from eth_abi import encode as abi_encode
 from eth_utils import keccak, to_checksum_address
@@ -478,8 +479,20 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     # Take the invite before broadcasting, same reasoning as create: 'claiming'
     # is what stops a reclaim from being prepared against a slot whose claim is
     # already on its way, and what stops a second auto-claim double-broadcast.
-    won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='pending').update(
-        status='claiming', claimed_by=recipient_user)
+    with transaction.atomic():
+        from users.models import Account
+
+        locked_recipient = Account.objects.select_for_update().filter(
+            pk=getattr(rec_acct, 'pk', None),
+            deleted_at__isnull=True,
+        ).first()
+        current_recipient = (
+            getattr(locked_recipient, 'bsc_address', None) or ''
+        ).lower()
+        if current_recipient != recipient_addr:
+            return {'success': False, 'error': 'recipient_address_changed'}
+        won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='pending').update(
+            status='claiming', claimed_by=recipient_user)
     if not won:
         return {'success': False, 'error': 'invite_not_pending'}
     phone_invite.status = 'claiming'

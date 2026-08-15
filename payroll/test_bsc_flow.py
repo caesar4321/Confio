@@ -369,7 +369,8 @@ def _item(net='100', fee='0.9', recipient_addr=RECIPIENT_ADDR,
         run=SimpleNamespace(business_id=77, token_type=run_token,
                             business=SimpleNamespace(id=77, name='Bodega')),
         recipient_user=recipient_user,
-        recipient_account=SimpleNamespace(bsc_address=recipient_addr),
+        recipient_account_id=99,
+        recipient_account=SimpleNamespace(id=99, pk=99, bsc_address=recipient_addr),
         net_amount=Decimal(net), fee_amount=Decimal(fee),
         blockchain_data=None, save=mock.Mock(),
     )
@@ -393,7 +394,7 @@ def _user():
 )
 class PreparePayoutTests(SimpleTestCase):
     def _prepare(self, item, eligible=True, escrow=10_000 * WAD,
-                 is_delegate=True):
+                 is_delegate=True, locked_recipient_addr=None):
         business_account = SimpleNamespace(
             bsc_address=BUSINESS_ADDR,
             business=SimpleNamespace(id=77, name='Bodega'))
@@ -407,9 +408,14 @@ class PreparePayoutTests(SimpleTestCase):
              mock.patch.object(bsc_flow, 'escrow_usdt_raw',
                                return_value=escrow), \
              mock.patch.object(bsc_flow, 'is_onchain_delegate',
-                               return_value=is_delegate):
+                               return_value=is_delegate), \
+             mock.patch('payroll.bsc_flow.transaction.atomic'):
             acct_objs.filter.return_value.select_related.return_value.first.return_value = \
                 business_account
+            acct_objs.select_for_update.return_value.filter.return_value.first.return_value = \
+                SimpleNamespace(
+                    bsc_address=locked_recipient_addr or item.recipient_account.bsc_address,
+                )
             result = bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
         return result, pps
 
@@ -518,9 +524,12 @@ class PreparePayoutTests(SimpleTestCase):
              mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=eligible), \
              mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=shares), \
              mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=usdt), \
-             mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+             mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True), \
+             mock.patch('payroll.bsc_flow.transaction.atomic'):
             acct_objs.filter.return_value.select_related.return_value.first.return_value = \
                 business_account
+            acct_objs.select_for_update.return_value.filter.return_value.first.return_value = \
+                item.recipient_account
             return bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
 
     def test_a_pinned_pool_that_cannot_pay_falls_back_to_the_one_that_can(self):
@@ -581,9 +590,12 @@ class PreparePayoutTests(SimpleTestCase):
              mock.patch('cusd_plus.eligibility.is_ondo_eligible', return_value=True), \
              mock.patch.object(bsc_flow, 'escrow_shares_raw', return_value=10_000 * WAD), \
              mock.patch.object(bsc_flow, 'escrow_usdt_raw', return_value=0), \
-             mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True):
+             mock.patch.object(bsc_flow, 'is_onchain_delegate', return_value=True), \
+             mock.patch('payroll.bsc_flow.transaction.atomic'):
             acct_objs.filter.return_value.select_related.return_value.first.return_value = \
                 business_account
+            acct_objs.select_for_update.return_value.filter.return_value.first.return_value = \
+                item.recipient_account
             result = bsc_flow.prepare_bsc_payroll_payout(_user(), _jwt_ctx(), item)
         self.assertTrue(result['success'], result.get('error'))
         payout = item.blockchain_data['bsc_payout']
@@ -597,6 +609,15 @@ class PreparePayoutTests(SimpleTestCase):
             result, _ = self._prepare(item)
         self.assertEqual(result['error'], 'recipient_no_bsc_address')
         nudge.assert_called_once()
+
+    def test_refuses_to_snapshot_an_address_changed_during_prepare(self):
+        item = _item()
+        result, _ = self._prepare(
+            item,
+            locked_recipient_addr='0x' + ('9' * 40),
+        )
+        self.assertEqual(result['error'], 'recipient_address_changed')
+        self.assertEqual(item.status, 'PENDING')
 
     def test_non_delegate_rejected(self):
         result, _ = self._prepare(_item(), is_delegate=False)

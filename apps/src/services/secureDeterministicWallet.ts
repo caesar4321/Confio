@@ -24,7 +24,7 @@ import { REPORT_BACKUP_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 import { secureRandomBytes } from '../setup/entropyGuard';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
-import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet } from './evmWallet';
+import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet, signEip191Message } from './evmWallet';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, strictBase64ToBytes, NonCanonicalBase64Error } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
@@ -473,6 +473,9 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
 // ============================================================================
 
 const MANIFEST_FILENAME = 'confio_wallet_manifest_v2.json';
+const REENROLLMENT_ATTESTATION_FILENAME = 'confio_wallet_reenrollment_attestation_v1.json';
+const APP_BACKUP_KEY = 'ConfioWallet_Backup_Key_v1_DoNotShare';
+const DRIVE_SECURITY_HEADER = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE.';
 const ADDRESS_BOUND_SECRET_PREFIX = 'confio_master_secret_v2_address_';
 
 interface WalletEntry {
@@ -918,7 +921,87 @@ async function saveManifest(googleDriveStorage: any, accessToken: string, manife
   }
 }
 
-function getBackupTime(candidate: DriveBackupCandidate): number {
+/**
+ * Re-download and fully validate the canonical backup, then persist a signed,
+ * hash-bound Drive checkpoint before the destructive reenrollment transition.
+ * The OAuth token and ciphertext stay client-side: reportBackupStatus remains
+ * telemetry, not a backend authorization factor.
+ */
+export async function createWalletReenrollmentDriveAttestation(
+  accessToken: string,
+  challenge: string,
+  bscAddress: string,
+  bscPrivateKeyHex: string,
+): Promise<{ ownershipSignature: string; backupSignature: string }> {
+  const { googleDriveStorage } = await import('./googleDriveStorage');
+  const manifestFiles = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME);
+  if (manifestFiles.length === 0) throw new Error('Google Drive wallet manifest is missing');
+  const newestManifest = [...manifestFiles].sort((a, b) => getBackupTime(b) - getBackupTime(a))[0];
+  const manifest = JSON.parse(await googleDriveStorage.downloadFile(accessToken, newestManifest.id));
+  if (!Array.isArray(manifest?.wallets) || manifest.wallets.length !== 1) {
+    throw new Error('Google Drive wallet manifest is not canonical');
+  }
+  const walletId = manifest.wallets[0]?.id;
+  if (typeof walletId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(walletId)) {
+    throw new Error('Google Drive wallet id is invalid');
+  }
+  const backupFiles = await googleDriveStorage.listFiles(
+    accessToken,
+    `confio_wallet_v2_${walletId}.enc`,
+  );
+  if (backupFiles.length === 0) throw new Error('Google Drive wallet backup is missing');
+  const newestBackup = [...backupFiles].sort((a, b) => getBackupTime(b) - getBackupTime(a))[0];
+  const backup = await googleDriveStorage.downloadFile(accessToken, newestBackup.id);
+  const prefix = `${DRIVE_SECURITY_HEADER}\n`;
+  if (!backup.startsWith(prefix)) throw new Error('Google Drive wallet backup is invalid');
+  const recovered = decryptBackupV2(backup.slice(prefix.length).trim(), APP_BACKUP_KEY);
+  if (!recovered || derivePersonalEvmAddress(recovered).toLowerCase() !== bscAddress.toLowerCase()) {
+    throw new Error('Google Drive wallet backup does not match the replacement wallet');
+  }
+  const backupSha256 = bytesToHex(sha256(utf8ToBytes(backup)));
+  const backupChallenge = walletReenrollmentBackupChallenge(
+    challenge,
+    bscAddress,
+    walletId,
+    backupSha256,
+  );
+  const ownershipSignature = signEip191Message(challenge, bscPrivateKeyHex);
+  const backupSignature = signEip191Message(backupChallenge, bscPrivateKeyHex);
+  const content = JSON.stringify({
+    version: 1,
+    challenge,
+    bscAddress: bscAddress.toLowerCase(),
+    ownershipSignature,
+    walletId,
+    backupSha256,
+    backupSignature,
+    createdAt: new Date().toISOString(),
+  });
+  const files = await googleDriveStorage.listFiles(accessToken, REENROLLMENT_ATTESTATION_FILENAME);
+  if (files.length > 0) {
+    await googleDriveStorage.updateFile(accessToken, files[0].id, content);
+  } else {
+    await googleDriveStorage.createFile(accessToken, REENROLLMENT_ATTESTATION_FILENAME, content);
+  }
+  return { ownershipSignature, backupSignature };
+}
+
+function walletReenrollmentBackupChallenge(
+  challenge: string,
+  bscAddress: string,
+  walletId: string,
+  backupSha256: string,
+): string {
+  return [
+    'Confio wallet Drive backup attestation v1',
+    `challenge_sha256:${bytesToHex(sha256(utf8ToBytes(challenge)))}`,
+    `bsc_address:${bscAddress.toLowerCase()}`,
+    `wallet_id:${walletId}`,
+    `backup_sha256:${backupSha256.toLowerCase()}`,
+  ].join('\n');
+}
+
+function getBackupTime(candidate: { modifiedTime?: string }): number {
   const time = candidate.modifiedTime ? new Date(candidate.modifiedTime).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
 }
@@ -1582,6 +1665,13 @@ export async function getOrCreateMasterSecret(
     expectedEvmAddress?: string | null;
     requireCloudSync?: boolean;
     /**
+     * Request-scoped backend JWT used by backup telemetry while a login has
+     * deliberately not persisted its session yet (wallet reenrollment).
+     * Keeping these fire-and-forget reports pinned prevents a late auth-link
+     * cleanup from deleting the valid JWT persisted after reenrollment.
+     */
+    backupReportAuthToken?: string;
+    /**
      * Reports whether the Drive backup upload in this call actually completed.
      * Never called when no accessToken is provided or when the fast path
      * returns without touching Drive — callers must default to "not synced".
@@ -1615,8 +1705,6 @@ export async function getOrCreateMasterSecret(
     const { googleDriveStorage } = await import('./googleDriveStorage');
     const AES = require('crypto-js/aes');
     const Utf8 = require('crypto-js/enc-utf8');
-    const APP_BACKUP_KEY = 'ConfioWallet_Backup_Key_v1_DoNotShare';
-    const DRIVE_SECURITY_HEADER = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE.';
 
     // =================================================================================
     // 1. LOCAL CHECK
@@ -1868,6 +1956,10 @@ export async function getOrCreateMasterSecret(
           );
         }
 
+        const keepUnanchoredLocal = !!localSecret &&
+          !secretsEqual(localSecret, restore.secret) &&
+          !options?.expectedAddress &&
+          !options?.expectedEvmAddress;
         if (localSecret && !secretsEqual(localSecret, restore.secret)) {
           // Replacing a DIFFERENT local secret needs positive evidence that the
           // Drive copy is the right one. With no anchors, candidateMatchesAnchor
@@ -1875,34 +1967,54 @@ export async function getOrCreateMasterSecret(
           // BSC-only account, whose bsc_address is not yet on AccountType, has
           // no anchor to pass) could overwrite a perfectly good local wallet
           // and then upload it as canonical. Keep what we have instead.
-          if (!options?.expectedAddress && !options?.expectedEvmAddress) {
+          if (keepUnanchoredLocal && !options?.requireCloudSync) {
             console.warn('[MasterSecret] Drive holds a different secret but no anchor was supplied; keeping the local secret rather than replacing it.');
             return localSecret;
           }
-          console.log('[MasterSecret] Replacing local V2 secret with canonical Drive backup.');
+          if (keepUnanchoredLocal) {
+            // Reenrollment requires a real cloud checkpoint. Preserve the
+            // local wallet, but continue to the upload section so its backup
+            // and manifest become canonical instead of failing every retry.
+            console.warn('[MasterSecret] Drive holds a different unanchored secret; required cloud sync will canonicalize the local wallet.');
+          } else {
+            console.log('[MasterSecret] Replacing local V2 secret with canonical Drive backup.');
+          }
         }
-        localSecret = restore.secret;
-        localWalletId = restore.walletId || generateUUID();
+        if (!keepUnanchoredLocal) {
+          localSecret = restore.secret;
+          localWalletId = restore.walletId || generateUUID();
 
-        await tryStoreRecoveredSecret(
-          credentialStorage,
-          secretAlias,
-          localSecret,
-          'subject-bound secret'
-        );
-        await tryStoreRecoveredSecret(
-          credentialStorage,
-          walletIdKey,
-          stringToUtf8Bytes(localWalletId),
-          'wallet id'
-        );
-        await tryStoreRecoveredAddressBoundSecret(
-          credentialStorage,
-          restoredAddress,
-          localSecret
-        );
+          await tryStoreRecoveredSecret(
+            credentialStorage,
+            secretAlias,
+            localSecret,
+            'subject-bound secret'
+          );
+          await tryStoreRecoveredSecret(
+            credentialStorage,
+            walletIdKey,
+            stringToUtf8Bytes(localWalletId),
+            'wallet id'
+          );
+          await tryStoreRecoveredAddressBoundSecret(
+            credentialStorage,
+            restoredAddress,
+            localSecret
+          );
 
-        reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
+          const restoreReport = reportBackupStatus(
+            'google_drive',
+            options?.backupReportAuthToken,
+          );
+          if (options?.backupReportAuthToken) {
+            // Reenrollment persists its JWT only after this function returns.
+            // Finish the pinned report first so no auth cleanup can race that
+            // later write even if the Apollo link behavior changes again.
+            await restoreReport;
+          } else {
+            restoreReport.catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
+          }
+        }
       } else if (restore.foundAny) {
         if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
           throw new Error('No encontramos en este Google Drive el respaldo de la billetera registrada para esta cuenta.');
@@ -2113,7 +2225,15 @@ export async function getOrCreateMasterSecret(
         options?.onCloudSyncResult?.(true);
 
         // Drive Backup Report
-        reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive backup report failed', e));
+        const backupReport = reportBackupStatus(
+          'google_drive',
+          options?.backupReportAuthToken,
+        );
+        if (options?.backupReportAuthToken) {
+          await backupReport;
+        } else {
+          backupReport.catch(e => console.warn('[BackupHealth] Drive backup report failed', e));
+        }
 
       } catch (syncErr: any) {
         AnalyticsService.logBackupFailed('google_drive', syncErr?.message || 'Unknown sync error');
@@ -3166,18 +3286,34 @@ export const secureDeterministicWallet = SecureDeterministicWalletService.getIns
 /**
  * Reports backup status to the server.
  */
-export const reportBackupStatus = async (provider: 'google_drive' | 'icloud'): Promise<boolean> => {
+export const reportBackupStatus = async (
+  provider: 'google_drive' | 'icloud',
+  pinnedAuthToken?: string,
+): Promise<boolean> => {
   try {
     const deviceName = await DeviceInfo.getDeviceName();
-    await apolloClient.mutate({
+    const { data } = await apolloClient.mutate({
       mutation: REPORT_BACKUP_STATUS,
       variables: {
         provider,
         device_name: deviceName,
         isVerified: true
       },
-      context: { skipAuth: false }
+      context: {
+        skipAuth: false,
+        ...(pinnedAuthToken ? {
+          pinnedAuthToken,
+          skipProactiveRefresh: true,
+        } : {}),
+      }
     });
+    if (!data?.reportBackupStatus?.success) {
+      console.warn(
+        '[BackupHealth] Server rejected backup status:',
+        data?.reportBackupStatus?.error || 'Unknown error'
+      );
+      return false;
+    }
     console.log(`[BackupHealth] Reported safe via ${provider}`);
     AnalyticsService.logBackupSuccess(provider, deviceName);
     return true;

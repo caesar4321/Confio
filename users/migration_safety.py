@@ -6,6 +6,12 @@ logger = logging.getLogger(__name__)
 
 LEGACY_CONFIO_ASSET_ID = 3198568509
 MATERIAL_SPENDABLE_ALGO_MICROS = 100_000
+MAX_SPONSORED_REENROLLMENT_MICROALGOS = 1_000_000
+# Public on-chain identities, not secrets. The KMS sponsor rotated in 2026;
+# historical onboarding payments remain valid provenance for older wallets.
+LEGACY_ALGORAND_SPONSOR_ADDRESSES = {
+    'ZS2HK5N7BZV46ZZGDOQBGFTN3JSXGAFVJFG33WAEP47JQMASSSJIQL7HI4',
+}
 
 
 def _relevant_asset_ids():
@@ -123,6 +129,124 @@ def inspect_address_migration_risk(algod_client, address):
         'spendable_algo': spendable_algo,
         'inspection_failed': False,
     }
+
+
+def classify_sponsored_empty_wallet(account_info, transactions, address, sponsor_address):
+    """Decide whether an inaccessible Algorand wallet can be retired safely.
+
+    This is intentionally narrower than "the balance is small". Every asset
+    must be empty and the complete transaction history must contain only
+    Confio sponsor funding plus zero-value self opt-ins. Anything unfamiliar
+    fails closed and keeps the existing recovery requirement.
+    """
+    sponsor_addresses = set(LEGACY_ALGORAND_SPONSOR_ADDRESSES)
+    if isinstance(sponsor_address, (list, tuple, set)):
+        sponsor_addresses.update(value for value in sponsor_address if value)
+    elif sponsor_address:
+        sponsor_addresses.add(sponsor_address)
+    if not address or not sponsor_addresses:
+        return {'eligible': False, 'reason': 'missing_address_or_sponsor'}
+
+    assets = account_info.get('assets') or []
+    if any(int(asset.get('amount') or 0) != 0 for asset in assets):
+        return {'eligible': False, 'reason': 'asset_balance'}
+    if account_info.get('apps-local-state') or account_info.get('created-apps') or account_info.get('created-assets'):
+        return {'eligible': False, 'reason': 'onchain_state'}
+
+    amount = int(account_info.get('amount') or 0)
+    if amount < 0 or amount > MAX_SPONSORED_REENROLLMENT_MICROALGOS:
+        return {'eligible': False, 'reason': 'algo_balance'}
+
+    sponsor_funding = 0
+    saw_sponsor_funding = False
+    for txn in transactions:
+        if txn.get('rekey-to'):
+            return {'eligible': False, 'reason': 'rekey'}
+        txn_type = txn.get('tx-type')
+        sender = txn.get('sender')
+
+        if txn_type == 'pay':
+            payment = txn.get('payment-transaction') or {}
+            if (
+                sender not in sponsor_addresses
+                or payment.get('receiver') != address
+                or payment.get('close-remainder-to')
+            ):
+                return {'eligible': False, 'reason': 'non_sponsor_payment'}
+            sponsor_funding += int(payment.get('amount') or 0)
+            saw_sponsor_funding = True
+            continue
+
+        if txn_type == 'axfer':
+            transfer = txn.get('asset-transfer-transaction') or {}
+            if (
+                sender != address
+                or transfer.get('receiver') != address
+                or int(transfer.get('amount') or 0) != 0
+                or transfer.get('close-to')
+                or transfer.get('sender')
+            ):
+                return {'eligible': False, 'reason': 'asset_activity'}
+            continue
+
+        return {'eligible': False, 'reason': 'unsupported_transaction'}
+
+    if not saw_sponsor_funding or sponsor_funding < amount:
+        return {'eligible': False, 'reason': 'unproven_funding'}
+
+    return {
+        'eligible': True,
+        'reason': 'sponsor_only_empty_wallet',
+        'sponsor_funding': sponsor_funding,
+        'current_amount': amount,
+    }
+
+
+def inspect_sponsored_empty_wallet_reenrollment(
+    algod_client,
+    indexer_client,
+    address,
+    sponsor_address,
+    max_pages=10,
+):
+    """Fetch fresh chain state and complete history, failing closed on errors."""
+    try:
+        account_info = algod_client.account_info(address)
+        snapshot_round = int(account_info.get('round') or 0)
+        if snapshot_round <= 0:
+            return {'eligible': False, 'reason': 'missing_algod_round'}
+
+        transactions = []
+        next_token = None
+        for _ in range(max_pages):
+            response = indexer_client.search_transactions(
+                address=address,
+                limit=1000,
+                next_page=next_token,
+                max_round=snapshot_round,
+            )
+            indexer_round = int(response.get('current-round') or 0)
+            if indexer_round < snapshot_round:
+                return {'eligible': False, 'reason': 'indexer_lagging'}
+            transactions.extend(response.get('transactions') or [])
+            next_token = response.get('next-token')
+            if not next_token:
+                break
+        if next_token:
+            return {'eligible': False, 'reason': 'history_too_large'}
+        return classify_sponsored_empty_wallet(
+            account_info,
+            transactions,
+            address,
+            sponsor_address,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not verify sponsored-empty reenrollment for %s: %s",
+            redact_address(address),
+            _describe_exception(exc),
+        )
+        return {'eligible': False, 'reason': 'inspection_failed'}
 
 
 def get_address_reassignment_blocker(algod_client, current_address, new_address, account=None):

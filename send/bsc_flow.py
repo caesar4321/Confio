@@ -52,6 +52,7 @@ import time
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,30 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
         return None, None, addr, None
 
     return None, None, None, 'recipient_required'
+
+
+def _lock_internal_recipient_account(recipient_user, recipient_business):
+    """Lock the account whose BSC address is about to be snapshotted.
+
+    Wallet reenrollment locks the same row, so an inbound send either commits
+    its old-address intent first (and blocks replacement) or observes the new
+    address and asks the caller to prepare again.
+    """
+    from users.models import Account
+
+    accounts = Account.objects.select_for_update().filter(deleted_at__isnull=True)
+    if recipient_business is not None:
+        return accounts.filter(
+            business=recipient_business,
+            account_type='business',
+        ).order_by('account_index').first()
+    if recipient_user is not None:
+        return accounts.filter(
+            user=recipient_user,
+            account_type='personal',
+            account_index=0,
+        ).first()
+    return None
 
 
 def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
@@ -437,36 +462,47 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         recipient_display = _display_name(recipient_user)
         recipient_phone_val = recipient_user.phone_number or ''
 
-    send_tx = SendTransaction.objects.create(
-        sender_user=user,
-        sender_business=sender_business,
-        sender_type='business' if sender_business else 'user',
-        sender_display_name=(
-            sender_business.name if sender_business else _display_name(user)),
-        sender_phone=user.phone_number or '',
-        recipient_user=recipient_user,
-        recipient_business=recipient_business,
-        recipient_type=(
-            'business' if recipient_business else
-            'user' if recipient_user else 'external'),
-        recipient_display_name=recipient_display,
-        recipient_phone=recipient_phone_val,
-        sender_address=sender_addr,
-        recipient_address=recipient_addr,
-        amount=amount_usd,
-        token_type=token_type,
-        memo=(memo or '')[:500],
-        status='PENDING',
-        idempotency_key=idempotency_key or None,
-        bsc_calls_json=json.dumps({
-            'calls': calls, 'kind': kind,
-            # Canonical intent for the submit-side byte-exact rebuild (audit
-            # 2026-07-31 P2): recipient + token + units (+ min_out) pin the
-            # AMOUNT, not just the recipient, so no stored-calls drift settles.
-            'token': token_addr, 'recipient': recipient_addr,
-            'units': str(units), 'min_out': (str(min_out) if min_out is not None else None),
-        }),
-    )
+    with transaction.atomic():
+        if recipient_user is not None or recipient_business is not None:
+            locked_recipient = _lock_internal_recipient_account(
+                recipient_user,
+                recipient_business,
+            )
+            current_recipient = (
+                getattr(locked_recipient, 'bsc_address', None) or ''
+            ).lower()
+            if current_recipient != recipient_addr:
+                return {'success': False, 'error': 'recipient_address_changed'}
+
+        send_tx = SendTransaction.objects.create(
+            sender_user=user,
+            sender_business=sender_business,
+            sender_type='business' if sender_business else 'user',
+            sender_display_name=(
+                sender_business.name if sender_business else _display_name(user)),
+            sender_phone=user.phone_number or '',
+            recipient_user=recipient_user,
+            recipient_business=recipient_business,
+            recipient_type=(
+                'business' if recipient_business else
+                'user' if recipient_user else 'external'),
+            recipient_display_name=recipient_display,
+            recipient_phone=recipient_phone_val,
+            sender_address=sender_addr,
+            recipient_address=recipient_addr,
+            amount=amount_usd,
+            token_type=token_type,
+            memo=(memo or '')[:500],
+            status='PENDING',
+            idempotency_key=idempotency_key or None,
+            bsc_calls_json=json.dumps({
+                'calls': calls, 'kind': kind,
+                # Canonical intent for the submit-side byte-exact rebuild.
+                'token': token_addr, 'recipient': recipient_addr,
+                'units': str(units),
+                'min_out': (str(min_out) if min_out is not None else None),
+            }),
+        )
     # Unified row arrives via the existing post_save signal
     # (users/signals.py create_unified_transaction_from_send).
 

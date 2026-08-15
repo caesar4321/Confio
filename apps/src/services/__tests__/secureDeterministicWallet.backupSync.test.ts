@@ -11,6 +11,7 @@
  */
 import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes, bytesToHex } from '@noble/hashes/utils';
+import { bytesToBase64 } from '../../utils/encoding';
 
 const mockMemoryStore = new Map<string, Uint8Array>();
 
@@ -44,6 +45,7 @@ jest.mock('../analyticsService', () => ({
   AnalyticsService: {
     logBackupAttempt: jest.fn(),
     logBackupFailed: jest.fn(),
+    logBackupSuccess: jest.fn(),
   },
 }));
 
@@ -77,9 +79,15 @@ jest.mock('../googleDriveStorage', () => ({
   },
 }));
 
-import { getOrCreateMasterSecret, deriveV2AddressPure } from '../secureDeterministicWallet';
+import {
+  createWalletReenrollmentDriveAttestation,
+  getOrCreateMasterSecret,
+  deriveV2AddressPure,
+  reportBackupStatus,
+} from '../secureDeterministicWallet';
 import { deriveEvmKeyFromMasterSecret } from '../evmWallet';
 import { googleDriveStorage } from '../googleDriveStorage';
+import { apolloClient } from '../../apollo/client';
 
 const USER_SUB = '111222333444555666777';
 const MASTER_SECRET = new Uint8Array(32).fill(7);
@@ -92,6 +100,101 @@ const walletIdAlias = () =>
 const expectedAddress = deriveV2AddressPure(MASTER_SECRET, {
   accountType: 'personal',
   accountIndex: 0,
+});
+
+describe('reportBackupStatus server acknowledgement', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('returns false when GraphQL completes but the server rejects the report', async () => {
+    (apolloClient.mutate as jest.Mock).mockResolvedValueOnce({
+      data: { reportBackupStatus: { success: false, error: 'rejected' } },
+    });
+
+    await expect(reportBackupStatus('google_drive')).resolves.toBe(false);
+  });
+
+  it('returns true only when the server acknowledges the report', async () => {
+    (apolloClient.mutate as jest.Mock).mockResolvedValueOnce({
+      data: { reportBackupStatus: { success: true, error: null } },
+    });
+
+    await expect(reportBackupStatus('google_drive', 'fresh-login-jwt')).resolves.toBe(true);
+    expect(apolloClient.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      context: expect.objectContaining({
+        pinnedAuthToken: 'fresh-login-jwt',
+        skipProactiveRefresh: true,
+      }),
+    }));
+  });
+});
+
+describe('wallet reenrollment Drive attestation', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('writes a purpose-specific checkpoint bound to the challenge and BSC proof', async () => {
+    const walletId = '11111111-2222-4333-8444-555555555555';
+    const evmWallet = deriveEvmKeyFromMasterSecret(MASTER_SECRET, {
+      accountType: 'personal',
+      accountIndex: 0,
+    });
+    const nonce = new Uint8Array(24).fill(9);
+    const inner = JSON.stringify({
+      v: 2,
+      secret: bytesToBase64(MASTER_SECRET),
+      algo: expectedAddress,
+      evm: evmWallet.address.toLowerCase(),
+    });
+    const nacl = require('tweetnacl');
+    const ct = nacl.secretbox(
+      utf8ToBytes(inner),
+      nonce,
+      sha256(utf8ToBytes('ConfioWallet_Backup_Key_v1_DoNotShare')),
+    );
+    const backup = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE.\n' +
+      JSON.stringify({
+        v: 2,
+        alg: 'xsalsa20poly1305',
+        nonce: bytesToHex(nonce),
+        ct: bytesToHex(ct),
+      });
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_token, name) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [{ id: 'manifest', name }];
+      if (name === `confio_wallet_v2_${walletId}.enc`) return [{ id: 'backup', name }];
+      return [];
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_token, id) => {
+      if (id === 'manifest') return JSON.stringify({ wallets: [{ id: walletId }] });
+      if (id === 'backup') return backup;
+      throw new Error('unexpected file');
+    });
+
+    const proof = await createWalletReenrollmentDriveAttestation(
+      'drive-token',
+      'reenrollment-challenge',
+      evmWallet.address,
+      evmWallet.privKeyHex,
+    );
+
+    expect(googleDriveStorage.createFile).toHaveBeenCalledWith(
+      'drive-token',
+      'confio_wallet_reenrollment_attestation_v1.json',
+      expect.any(String),
+    );
+    const content = JSON.parse((googleDriveStorage.createFile as jest.Mock).mock.calls[0][2]);
+    expect(content).toEqual(expect.objectContaining({
+      version: 1,
+      challenge: 'reenrollment-challenge',
+      bscAddress: evmWallet.address.toLowerCase(),
+      ownershipSignature: proof.ownershipSignature,
+      walletId,
+      backupSha256: bytesToHex(sha256(utf8ToBytes(backup))),
+      backupSignature: proof.backupSignature,
+    }));
+  });
 });
 
 const seedLocalVerifiedSecret = () => {
@@ -111,6 +214,12 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
   beforeEach(() => {
     mockMemoryStore.clear();
     jest.clearAllMocks();
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+    (googleDriveStorage.downloadFile as jest.Mock).mockRejectedValue(
+      new Error('no files in test Drive')
+    );
+    (googleDriveStorage.createFile as jest.Mock).mockResolvedValue({ id: 'new-file-id' });
+    (googleDriveStorage.updateFile as jest.Mock).mockResolvedValue({ id: 'updated-file-id' });
   });
 
   it('uploads the backup when requireCloudSync is set, even if the local secret already matches the server address', async () => {
@@ -131,6 +240,28 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
     expect(onCloudSyncResult).toHaveBeenCalledWith(true);
   });
 
+  it('pins reenrollment backup reports to the request-scoped login JWT', async () => {
+    seedLocalVerifiedSecret();
+    (apolloClient.mutate as jest.Mock).mockResolvedValue({
+      data: { reportBackupStatus: { success: true, error: null } },
+    });
+
+    await getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google',
+      requireCloudSync: true,
+      expectedAddress,
+      backupReportAuthToken: 'reenrollment-login-jwt',
+    });
+
+    await Promise.resolve();
+    expect(apolloClient.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      context: expect.objectContaining({
+        pinnedAuthToken: 'reenrollment-login-jwt',
+        skipProactiveRefresh: true,
+      }),
+    }));
+  });
+
   it('keeps the login fast path (no Drive calls) when cloud sync is not required', async () => {
     seedLocalVerifiedSecret();
     const onCloudSyncResult = jest.fn();
@@ -146,6 +277,63 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
     expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
     // No sync happened, so no sync result may be reported.
     expect(onCloudSyncResult).not.toHaveBeenCalled();
+  });
+
+  it('canonicalizes the local wallet when required sync finds a different unanchored Drive secret', async () => {
+    seedLocalVerifiedSecret();
+    const driveSecret = new Uint8Array(32).fill(9);
+    const driveWalletId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const nonce = new Uint8Array(24).fill(4);
+    const driveEvm = deriveEvmKeyFromMasterSecret(driveSecret, {
+      accountType: 'personal',
+      accountIndex: 0,
+    });
+    const inner = JSON.stringify({
+      v: 2,
+      secret: bytesToBase64(driveSecret),
+      algo: deriveV2AddressPure(driveSecret, { accountType: 'personal', accountIndex: 0 }),
+      evm: driveEvm.address.toLowerCase(),
+    });
+    const nacl = require('tweetnacl');
+    const ciphertext = nacl.secretbox(
+      utf8ToBytes(inner),
+      nonce,
+      sha256(utf8ToBytes('ConfioWallet_Backup_Key_v1_DoNotShare')),
+    );
+    const driveBackup = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE.\n' +
+      JSON.stringify({
+        v: 2,
+        alg: 'xsalsa20poly1305',
+        nonce: bytesToHex(nonce),
+        ct: bytesToHex(ciphertext),
+      });
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_token, name) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [{ id: 'manifest', name }];
+      if (name === `confio_wallet_v2_${driveWalletId}.enc`) return [{ id: 'drive-backup', name }];
+      return [];
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_token, id) => {
+      if (id === 'manifest') {
+        return JSON.stringify({ wallets: [{ id: driveWalletId, createdAt: '2026-01-01T00:00:00Z' }] });
+      }
+      if (id === 'drive-backup') return driveBackup;
+      throw new Error('unexpected Drive file');
+    });
+    const onCloudSyncResult = jest.fn();
+
+    const secret = await getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google',
+      allowGenerate: true,
+      requireCloudSync: true,
+      onCloudSyncResult,
+    });
+
+    expect(secret).toEqual(MASTER_SECRET);
+    expect(encBackupUploads()).toHaveLength(1);
+    expect(encBackupUploads()[0][1]).toBe(
+      'confio_wallet_v2_11111111-2222-4333-8444-555555555555.enc'
+    );
+    expect(onCloudSyncResult).toHaveBeenCalledWith(true);
   });
 
   it('reports onCloudSyncResult(false) when the sign-up backup upload fails silently', async () => {

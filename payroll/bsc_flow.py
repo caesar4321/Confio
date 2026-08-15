@@ -49,6 +49,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 from eth_abi import encode as abi_encode
 from eth_utils import keccak
 
@@ -982,14 +983,27 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
     }
     digest = payout_digest(payout, chain_id)
 
-    data = dict(item.blockchain_data or {})
-    data['bsc_payout'] = payout
-    item.blockchain_data = data
-    # What the EMPLOYEE ends up holding, which is not always what the run
-    # spent: a cUSD+ run redeeming for an ineligible recipient lands USDT.
-    item.token_type = 'USDT' if (asset == ASSET_USDT or redeem) else 'CUSD_PLUS'
-    item.status = 'PREPARED'
-    item.save(update_fields=['blockchain_data', 'token_type', 'status', 'updated_at'])
+    with transaction.atomic():
+        from users.models import Account
+
+        locked_recipient = Account.objects.select_for_update().filter(
+            pk=item.recipient_account_id,
+            deleted_at__isnull=True,
+        ).first()
+        current_recipient = (
+            getattr(locked_recipient, 'bsc_address', None) or ''
+        ).lower()
+        if current_recipient != recipient_addr:
+            return {'success': False, 'error': 'recipient_address_changed'}
+
+        data = dict(item.blockchain_data or {})
+        data['bsc_payout'] = payout
+        item.blockchain_data = data
+        # What the EMPLOYEE ends up holding, which is not always what the run
+        # spent: a cUSD+ run redeeming for an ineligible recipient lands USDT.
+        item.token_type = 'USDT' if (asset == ASSET_USDT or redeem) else 'CUSD_PLUS'
+        item.status = 'PREPARED'
+        item.save(update_fields=['blockchain_data', 'token_type', 'status', 'updated_at'])
 
     return {
         'success': True,

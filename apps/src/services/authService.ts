@@ -21,6 +21,23 @@ import { AccountManager, AccountContext } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
 
+const COMPLETE_WALLET_REENROLLMENT = gql`
+  mutation CompleteWalletReenrollment(
+    $bscAddress: String!
+    $reenrollmentGrant: String!
+    $bscSignature: String!
+  ) {
+    completeWalletReenrollment(
+      bscAddress: $bscAddress
+      reenrollmentGrant: $reenrollmentGrant
+      bscSignature: $bscSignature
+    ) {
+      success
+      error
+    }
+  }
+`;
+
 // Best-effort, SELF-HEALING registration of the BSC (savings chain)
 // address. Fires at sign-in, on every authenticated app open
 // (completeAuthenticatedEntry), after account switches, and from savings
@@ -1078,8 +1095,11 @@ export class AuthService {
         void emitNewUserSignupOnce(authData.user?.id, 'google');
       }
 
-      // Store Django JWT tokens for authenticated requests using Keychain (store BEFORE any further GraphQL)
-      if (authData.accessToken) {
+      const persistBackendTokens = async () => {
+        if (!authData.accessToken) {
+          console.error('No auth tokens received from Web3Auth login');
+          throw new Error('No auth tokens received from server');
+        }
         console.log('About to store tokens in Keychain:', {
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME,
@@ -1126,9 +1146,157 @@ export class AuthService {
           console.error('Error storing or verifying tokens:', error);
           throw error;
         }
+      };
+
+      // A reenrollment JWT is request-scoped until the destructive transition
+      // commits. Persisting it first lets a hard-killed app cold-start into
+      // Main and skip the login response that carries the reenrollment grant.
+      if (!authData.walletReenrollmentAllowed) {
+        await persistBackendTokens();
       } else {
-        console.error('No auth tokens received from Web3Auth login');
-        throw new Error('No auth tokens received from server');
+        let priorSessionCleared = false;
+        try {
+          priorSessionCleared = await Keychain.resetGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME,
+          });
+        } catch (clearError) {
+          console.error('[AuthService] Failed to clear session before reenrollment:', clearError);
+        }
+        if (!priorSessionCleared) {
+          await Keychain.setGenericPassword(
+            AUTH_KEYCHAIN_USERNAME,
+            JSON.stringify({ accessToken: '', refreshToken: '' }),
+            {
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME,
+              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
+            },
+          );
+        }
+      }
+
+      // Historical self-heal: a small set of Google accounts generated a V2
+      // wallet locally but were stored as V1 after Drive sync failed. The
+      // server only offers this path after proving that the old Algorand
+      // address contains sponsor funding + zero-value opt-ins and no user
+      // activity. Do not retire it until the replacement has a verified Drive
+      // backup and its BSC address is ready to bind atomically.
+      if (authData.walletReenrollmentAllowed) {
+        try {
+          if (!driveAccessToken) {
+            throw new Error(
+              'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
+            );
+          }
+          if (!authData.walletReenrollmentChallenge || !authData.walletReenrollmentGrant) {
+            throw new Error(
+              'No pudimos autorizar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
+            );
+          }
+
+          onProgress?.('Protegiendo tu nueva billetera en Google Drive...');
+          const {
+            createWalletReenrollmentDriveAttestation,
+            getOrCreateMasterSecret,
+            getActiveEvmWallet,
+          } = await import('./secureDeterministicWallet');
+          driveSyncSucceeded = false;
+          await getOrCreateMasterSecret(googleSubject, driveAccessToken, {
+            allowGenerate: true,
+            provider: 'google',
+            // Reenrollment is the one path where a local secret is not enough:
+            // the old server anchor is about to be retired, so force a real
+            // Drive upload even when the local-secret fast path could return.
+            requireCloudSync: true,
+            // This JWT stays request-scoped until reenrollment commits. The
+            // backup reporter is fire-and-forget, so it must not consult the
+            // intentionally invalidated Keychain session and later clear the
+            // fresh JWT persisted below.
+            backupReportAuthToken: authData.accessToken,
+            onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
+          });
+          if (!driveSyncSucceeded) {
+            throw new Error(
+              'No pudimos verificar el respaldo de tu nueva billetera en Google Drive. Inténtalo de nuevo antes de continuar.'
+            );
+          }
+
+          const replacementWallet = await getActiveEvmWallet({ type: 'personal', index: 0 });
+          const { ownershipSignature } =
+            await createWalletReenrollmentDriveAttestation(
+            driveAccessToken,
+            authData.walletReenrollmentChallenge,
+            replacementWallet.address,
+            replacementWallet.privKeyHex,
+          );
+
+          const { data: reenrollmentData } = await apolloClient.mutate({
+            mutation: COMPLETE_WALLET_REENROLLMENT,
+            variables: {
+              bscAddress: replacementWallet.address,
+              reenrollmentGrant: authData.walletReenrollmentGrant,
+              bscSignature: ownershipSignature,
+            },
+            context: {
+              pinnedAuthToken: authData.accessToken,
+              skipProactiveRefresh: true,
+            },
+          });
+          const reenrollment = reenrollmentData?.completeWalletReenrollment;
+          if (!reenrollment?.success) {
+            throw new Error(
+              reenrollment?.error ||
+              'No pudimos terminar la recuperación segura de tu billetera. Inténtalo de nuevo.'
+            );
+          }
+
+          // Keep the remainder of this sign-in on the state the server just
+          // committed. A lost response is safe: the mutation is idempotent and
+          // the same Drive-backed secret will be reused on retry.
+          authData.isKeylessMigrated = true;
+          if (authData.user) {
+            authData.user.algorandAddress = null;
+            authData.user.bscAddress = replacementWallet.address;
+          }
+          await persistBackendTokens();
+          console.log('[AuthService] Wallet reenrollment completed with verified Drive backup.');
+        } catch (reenrollmentError) {
+          // The JWT was stored above so the completion mutation could
+          // authenticate. Do not leave that partial session available to the
+          // cold-start path: it would enter Main and generic BSC registration
+          // could fill bsc_address while the legacy Algorand anchor remains,
+          // permanently suppressing reenrollment eligibility.
+          let partialSessionInvalidated = false;
+          try {
+            partialSessionInvalidated = await Keychain.resetGenericPassword({
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME,
+            });
+          } catch (clearError) {
+            console.error('[AuthService] Failed to clear partial reenrollment session:', clearError);
+          }
+          if (!partialSessionInvalidated) {
+            try {
+              // Some Keychain implementations transiently fail deletion. An
+              // invalid payload is still safer than retaining a valid JWT:
+              // cold start cannot authenticate it, and the backend also blocks
+              // generic BSC registration until reenrollment commits atomically.
+              await Keychain.setGenericPassword(
+                AUTH_KEYCHAIN_USERNAME,
+                JSON.stringify({ accessToken: '', refreshToken: '' }),
+                {
+                  service: AUTH_KEYCHAIN_SERVICE,
+                  username: AUTH_KEYCHAIN_USERNAME,
+                  accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
+                },
+              );
+            } catch (invalidateError) {
+              console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
+            }
+          }
+          throw reenrollmentError;
+        }
       }
 
       // ----------------------------------------------------------------------

@@ -3597,6 +3597,21 @@ class UpdateAccountBscAddress(graphene.Mutation):
             ).first()
         if not account:
             return UpdateAccountBscAddress(success=False, error="Cuenta no encontrada")
+        # A legacy personal account with an Algorand anchor must transition
+        # through CompleteWalletReenrollment, which proves the old wallet is
+        # sponsor-only/empty and atomically swaps anchors. Generic background
+        # BSC registration after a partial mobile login must never fill this
+        # field first: doing so suppresses reenrollment eligibility and leaves
+        # the account permanently split between V1 and V2 state.
+        if (
+            account.account_type == 'personal'
+            and account.algorand_address
+            and not account.is_keyless_migrated
+        ):
+            return UpdateAccountBscAddress(
+                success=False,
+                error="Esta cuenta debe completar la recuperación segura de su billetera.",
+            )
         # Same immutability posture as the Algorand address: once set, a
         # DIFFERENT address is refused (protects against wrong-seed clients).
         if account.bsc_address and account.bsc_address.lower() != addr.lower():

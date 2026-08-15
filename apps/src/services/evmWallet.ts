@@ -90,6 +90,26 @@ export const toChecksumAddress = (addrHexNoPrefix: string): string => {
   return out;
 };
 
+/** Sign an EIP-191 personal message for backend ownership challenges. */
+export function signEip191Message(message: string, privKeyHex: string): string {
+  const messageBytes = utf8ToBytes(message);
+  const prefix = utf8ToBytes(`\x19Ethereum Signed Message:\n${messageBytes.length}`);
+  const digest = keccak_256(concatBytes(prefix, messageBytes));
+  const recovered = secp256k1.sign(digest, hexToBytes0x(privKeyHex), {
+    prehash: false,
+    lowS: true,
+    format: 'recovered',
+  });
+  const recoveryId = recovered[0];
+  if (recoveryId !== 0 && recoveryId !== 1) {
+    throw new Error('Unexpected EVM recovery id');
+  }
+  return '0x' + bytesToHex(concatBytes(
+    recovered.slice(1),
+    Uint8Array.from([27 + recoveryId]),
+  ));
+}
+
 // ── Minimal RLP (all we need for legacy txs) ────────────────────────────
 
 type RlpInput = Uint8Array | RlpInput[];
