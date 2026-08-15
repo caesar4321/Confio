@@ -515,6 +515,14 @@ class Account(SoftDeleteModel):
         default=False,
         help_text="Whether this account has migrated to V2 keyless wallet (server-side tracking)"
     )
+    wallet_reenrollment_assessment = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Background chain-safety assessment for legacy wallet reenrollment",
+    )
+    wallet_reenrollment_assessed_at = models.DateTimeField(null=True, blank=True)
+    wallet_reenrollment_assessment_started_at = models.DateTimeField(null=True, blank=True)
+    wallet_reenrollment_assessment_lease = models.CharField(max_length=64, blank=True, default='')
 
     class Meta:
         unique_together = ['user', 'account_type', 'account_index']

@@ -8,6 +8,7 @@ from django.core.management import call_command
 import logging
 from functools import wraps
 from django.db import connection
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,126 @@ def ensure_db_connection_closed(func):
             result = func(*args, **kwargs)
             return result
         finally:
-            # Explicitly close database connections to prevent accumulation
             connection.close()
     return wrapper
+
+
+@shared_task(name='users.assess_wallet_reenrollment_account')
+@ensure_db_connection_closed
+def assess_wallet_reenrollment_account(account_id, lease=None):
+    """Compute the expensive complete-history proof away from authentication."""
+    from users.models import Account
+    from users.web3auth_schema import (
+        _inspect_wallet_reenrollment,
+        _acquire_wallet_reenrollment_assessment_lease,
+        _release_wallet_reenrollment_assessment_lease,
+        _store_wallet_reenrollment_assessment,
+        _wallet_reenrollment_assessment,
+    )
+
+    if lease:
+        owns_lease = Account.objects.filter(
+            pk=account_id,
+            wallet_reenrollment_assessment_lease=lease,
+        ).exists()
+        if not owns_lease:
+            return 'lease_lost'
+    else:
+        lease = _acquire_wallet_reenrollment_assessment_lease(account_id)
+    if not lease:
+        return 'already_running'
+    try:
+        account = Account.objects.filter(
+            id=account_id,
+            account_type='personal',
+            account_index=0,
+            algorand_address__isnull=False,
+            is_keyless_migrated=False,
+            deleted_at__isnull=True,
+        ).first()
+        if not account:
+            return 'not_candidate'
+        if _wallet_reenrollment_assessment(account):
+            return 'already_assessed'
+
+        old_algorand = account.algorand_address
+        old_bsc = account.bsc_address or ''
+        inspection = _inspect_wallet_reenrollment(account)
+
+        with transaction.atomic():
+            locked = Account.objects.select_for_update().filter(pk=account.pk).first()
+            if (
+                not locked
+                or locked.is_keyless_migrated
+                or locked.algorand_address != old_algorand
+                or (locked.bsc_address or '').lower() != old_bsc.lower()
+                or locked.wallet_reenrollment_assessment_lease != lease
+            ):
+                return 'lease_or_account_changed'
+            assessment = _store_wallet_reenrollment_assessment(locked, inspection)
+        return assessment.get('status')
+    finally:
+        _release_wallet_reenrollment_assessment_lease(account_id, lease)
+
+
+@shared_task(name='users.queue_wallet_reenrollment_assessments')
+@ensure_db_connection_closed
+def queue_wallet_reenrollment_assessments(batch_size=25):
+    """Continuously warm the finite legacy cohort before clients need it."""
+    from users.models import Account
+    from users.web3auth_schema import (
+        _acquire_wallet_reenrollment_assessment_lease,
+        _wallet_reenrollment_assessment,
+    )
+
+    batch_size = max(0, int(batch_size))
+    if batch_size == 0:
+        return 0
+    retry_before = timezone.now() - timedelta(minutes=5)
+    candidates = Account.objects.filter(
+        account_type='personal',
+        account_index=0,
+        algorand_address__isnull=False,
+        is_keyless_migrated=False,
+        deleted_at__isnull=True,
+    ).only(
+        'id',
+        'algorand_address',
+        'bsc_address',
+        'wallet_reenrollment_assessment',
+        'wallet_reenrollment_assessed_at',
+    ).order_by('id')
+
+    # Use the same version + anchor validation as login. A raw terminal JSON
+    # status is not enough: the Algorand/BSC anchor may have changed since the
+    # assessment was written, in which case login will (correctly) reject it.
+    account_ids = []
+    for account in candidates.iterator(chunk_size=200):
+        if _wallet_reenrollment_assessment(account):
+            continue
+        value = account.wallet_reenrollment_assessment or {}
+        if (
+            value.get('status') == 'retry'
+            and account.wallet_reenrollment_assessed_at
+            and account.wallet_reenrollment_assessed_at > retry_before
+        ):
+            continue
+        account_ids.append(account.id)
+        if len(account_ids) >= batch_size:
+            break
+    queued = 0
+    for account_id in account_ids:
+        lease = _acquire_wallet_reenrollment_assessment_lease(account_id)
+        if not lease:
+            continue
+        try:
+            assess_wallet_reenrollment_account.delay(account_id, lease)
+            queued += 1
+        except Exception:
+            from users.web3auth_schema import _release_wallet_reenrollment_assessment_lease
+            _release_wallet_reenrollment_assessment_lease(account_id, lease)
+            raise
+    return queued
 
 
 @shared_task(name='users.check_hodler_achievements')

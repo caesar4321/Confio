@@ -29,6 +29,17 @@ app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
     'schedule': crontab(hour=3, minute=30),
 })
 
+# Precompute the finite legacy-wallet safety cohort away from authentication.
+# Backend is deployed before mobile, so these rows are warm when capable
+# clients begin requesting self-heal grants.
+app.conf.beat_schedule.setdefault('users-wallet-reenrollment-assessments', {
+    'task': 'users.queue_wallet_reenrollment_assessments',
+    # The production rollout command warms the complete finite cohort. This
+    # daily pass only retries transient inspection failures; scanning every
+    # legacy row once a minute after prewarm created permanent O(N) DB load.
+    'schedule': crontab(hour=3, minute=45),
+})
+
 # Keep Koywe ramp limits warm so rampAvailability never computes them inline
 # (the off-ramp estimate needs several sequential preview quotes).
 app.conf.beat_schedule.setdefault('ramps-refresh-koywe-limits', {

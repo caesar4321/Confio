@@ -234,15 +234,107 @@ def inspect_sponsored_empty_wallet_reenrollment(
                 break
         if next_token:
             return {'eligible': False, 'reason': 'history_too_large'}
-        return classify_sponsored_empty_wallet(
+        result = classify_sponsored_empty_wallet(
             account_info,
             transactions,
             address,
             sponsor_address,
         )
+        if result.get('eligible'):
+            # Bind the destructive grant to the exact chain horizon that was
+            # fully inspected. Completion only needs to prove that no activity
+            # appeared after this round, instead of downloading the complete
+            # history a second time.
+            result['snapshot_round'] = snapshot_round
+        return result
     except Exception as exc:
         logger.warning(
             "Could not verify sponsored-empty reenrollment for %s: %s",
+            redact_address(address),
+            _describe_exception(exc),
+        )
+        return {'eligible': False, 'reason': 'inspection_failed'}
+
+
+def revalidate_sponsored_empty_wallet_reenrollment(
+    algod_client,
+    indexer_client,
+    address,
+    sponsor_address,
+    snapshot_round,
+    sponsor_funding,
+    max_pages=10,
+):
+    """Revalidate a recent complete inspection using only the round delta.
+
+    The original proof established complete sponsor-only history through
+    ``snapshot_round``. Any later transaction is a hard refusal. Current
+    account state is classified again using the already-proven sponsor funding
+    so balance/state changes cannot slip through even if an indexer response is
+    malformed or incomplete.
+    """
+    try:
+        snapshot_round = int(snapshot_round or 0)
+        sponsor_funding = int(sponsor_funding or 0)
+        if snapshot_round <= 0 or sponsor_funding <= 0:
+            return {'eligible': False, 'reason': 'missing_inspection_snapshot'}
+
+        account_info = algod_client.account_info(address)
+        current_round = int(account_info.get('round') or 0)
+        if current_round < snapshot_round:
+            return {'eligible': False, 'reason': 'algod_round_regressed'}
+
+        if current_round > snapshot_round:
+            next_token = None
+            for _ in range(max_pages):
+                response = indexer_client.search_transactions(
+                    address=address,
+                    limit=1000,
+                    next_page=next_token,
+                    min_round=snapshot_round + 1,
+                    max_round=current_round,
+                )
+                indexer_round = int(response.get('current-round') or 0)
+                if indexer_round < current_round:
+                    return {'eligible': False, 'reason': 'indexer_lagging'}
+                if response.get('transactions'):
+                    return {'eligible': False, 'reason': 'activity_after_snapshot'}
+                next_token = response.get('next-token')
+                if not next_token:
+                    break
+            if next_token:
+                return {'eligible': False, 'reason': 'history_too_large'}
+
+        # Reuse the normal account-state classifier with a synthetic copy of
+        # the funding already proven by the full snapshot. No synthetic value
+        # is trusted from the client; both values came from the signed grant.
+        sponsor_addresses = (
+            list(sponsor_address)
+            if isinstance(sponsor_address, (list, tuple, set))
+            else [sponsor_address]
+        )
+        sponsor = next((value for value in sponsor_addresses if value), None)
+        if not sponsor:
+            sponsor = next(iter(LEGACY_ALGORAND_SPONSOR_ADDRESSES), None)
+        result = classify_sponsored_empty_wallet(
+            account_info,
+            [{
+                'tx-type': 'pay',
+                'sender': sponsor,
+                'payment-transaction': {
+                    'receiver': address,
+                    'amount': sponsor_funding,
+                },
+            }],
+            address,
+            sponsor_addresses,
+        )
+        if result.get('eligible'):
+            result['snapshot_round'] = current_round
+        return result
+    except Exception as exc:
+        logger.warning(
+            "Could not revalidate sponsored-empty reenrollment for %s: %s",
             redact_address(address),
             _describe_exception(exc),
         )

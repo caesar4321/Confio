@@ -1,5 +1,6 @@
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from graphene_django.utils.testing import GraphQLTestCase
 from graphql_jwt.testcases import JSONWebTokenTestCase
 from graphql_jwt.exceptions import PermissionDenied
@@ -17,6 +18,7 @@ from users.migration_safety import (
     get_address_reassignment_blocker,
     inspect_address_migration_risk,
     inspect_sponsored_empty_wallet_reenrollment,
+    revalidate_sponsored_empty_wallet_reenrollment,
 )
 
 User = get_user_model()
@@ -306,6 +308,153 @@ class MigrationSafetyTestCase(SimpleTestCase):
             algod, FakeIndexer(), address, sponsor
         )
         self.assertTrue(result['eligible'])
+        self.assertEqual(result['snapshot_round'], 12345)
+        self.assertEqual(result['sponsor_funding'], 500000)
+
+    def test_reenrollment_completion_scans_only_rounds_after_preflight(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+        calls = []
+
+        class DeltaIndexer:
+            def search_transactions(self, **kwargs):
+                calls.append(kwargs)
+                return {
+                    'current-round': kwargs['max_round'],
+                    'transactions': [],
+                }
+
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12355,
+                'amount': 500000,
+                'min-balance': 200000,
+                'assets': [{'asset-id': 1, 'amount': 0}],
+            },
+        })
+        result = revalidate_sponsored_empty_wallet_reenrollment(
+            algod,
+            DeltaIndexer(),
+            address,
+            sponsor,
+            snapshot_round=12345,
+            sponsor_funding=500000,
+        )
+
+        self.assertTrue(result['eligible'])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]['min_round'], 12346)
+        self.assertEqual(calls[0]['max_round'], 12355)
+
+    def test_reenrollment_completion_refuses_any_post_preflight_activity(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+
+        class ActiveIndexer:
+            def search_transactions(self, **kwargs):
+                return {
+                    'current-round': kwargs['max_round'],
+                    'transactions': [{'tx-type': 'pay'}],
+                }
+
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12355,
+                'amount': 500000,
+                'min-balance': 200000,
+                'assets': [],
+            },
+        })
+        result = revalidate_sponsored_empty_wallet_reenrollment(
+            algod,
+            ActiveIndexer(),
+            address,
+            sponsor,
+            snapshot_round=12345,
+            sponsor_funding=500000,
+        )
+
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'activity_after_snapshot')
+
+    def test_reenrollment_completion_skips_indexer_when_snapshot_is_current(self):
+        address = 'A' * 58
+        sponsor = 'S' * 58
+        indexer = mock.Mock()
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12345,
+                'amount': 500000,
+                'min-balance': 200000,
+                'assets': [],
+            },
+        })
+
+        result = revalidate_sponsored_empty_wallet_reenrollment(
+            algod,
+            indexer,
+            address,
+            sponsor,
+            snapshot_round=12345,
+            sponsor_funding=500000,
+        )
+
+        self.assertTrue(result['eligible'])
+        self.assertEqual(result['snapshot_round'], 12345)
+        indexer.search_transactions.assert_not_called()
+
+    def test_reenrollment_completion_refuses_regressed_algod_round(self):
+        address = 'A' * 58
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12344,
+                'amount': 500000,
+                'min-balance': 200000,
+                'assets': [],
+            },
+        })
+
+        result = revalidate_sponsored_empty_wallet_reenrollment(
+            algod,
+            mock.Mock(),
+            address,
+            'S' * 58,
+            snapshot_round=12345,
+            sponsor_funding=500000,
+        )
+
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'algod_round_regressed')
+
+    def test_reenrollment_completion_refuses_lagging_indexer(self):
+        address = 'A' * 58
+
+        class LaggingDeltaIndexer:
+            def search_transactions(self, **kwargs):
+                return {
+                    'current-round': kwargs['max_round'] - 1,
+                    'transactions': [],
+                }
+
+        algod = self.FakeAlgodClient({
+            address: {
+                'round': 12355,
+                'amount': 500000,
+                'min-balance': 200000,
+                'assets': [],
+            },
+        })
+        result = revalidate_sponsored_empty_wallet_reenrollment(
+            algod,
+            LaggingDeltaIndexer(),
+            address,
+            'S' * 58,
+            snapshot_round=12345,
+            sponsor_funding=500000,
+        )
+
+        self.assertFalse(result['eligible'])
+        self.assertEqual(result['reason'], 'indexer_lagging')
 
     def test_reenrollment_fails_closed_when_indexer_lags_algod_snapshot(self):
         address = 'A' * 58
@@ -427,6 +576,11 @@ class WalletReenrollmentProofTestCase(SimpleTestCase):
             self.account,
             self.google_subject,
             google_auth_time or self.google_auth_time,
+            {
+                'eligible': True,
+                'snapshot_round': 12345,
+                'sponsor_funding': 500000,
+            },
         )
         signature = EvmAccount.sign_message(
             encode_defunct(text=challenge),
@@ -442,6 +596,280 @@ class WalletReenrollmentProofTestCase(SimpleTestCase):
         self.assertFalse(_is_recent_google_auth(now - 601, now=now))
         self.assertFalse(_is_recent_google_auth(None, now=now))
         self.assertFalse(_is_recent_google_auth(now + 61, now=now))
+
+    def test_login_hot_path_contains_no_wallet_chain_inspection(self):
+        import inspect
+        from users.web3auth_schema import Web3AuthLoginMutation
+
+        source = inspect.getsource(Web3AuthLoginMutation.mutate)
+        self.assertNotIn('_inspect_wallet_reenrollment(', source)
+        self.assertIn('_wallet_reenrollment_assessment(', source)
+        self.assertIn(
+            'requires_backup_completion=user.requires_backup_completion',
+            source,
+        )
+
+    def test_completion_does_not_hold_database_transaction_during_chain_io(self):
+        import inspect
+        from users.web3auth_schema import CompleteWalletReenrollmentMutation
+
+        source = inspect.getsource(CompleteWalletReenrollmentMutation.mutate)
+        chain_check = source.index('inspected_reenrollment = _revalidate_wallet_reenrollment')
+        transaction_start = source.index('with transaction.atomic():')
+        self.assertLess(chain_check, transaction_start)
+        self.assertNotIn('_revalidate_wallet_reenrollment(account,', source)
+        self.assertNotIn('_inspect_stale_bsc_reenrollment(account)', source)
+
+    def test_background_assessment_retry_is_not_scheduled_every_minute(self):
+        from config.celery import app
+
+        schedule = app.conf.beat_schedule['users-wallet-reenrollment-assessments']['schedule']
+        self.assertNotEqual(schedule, 60.0)
+
+    def test_algorand_onboarding_never_runs_for_ordinary_login(self):
+        from users.web3auth_schema import _should_run_algorand_onboarding
+
+        self.assertFalse(_should_run_algorand_onboarding(False, None, 'A' * 58))
+        self.assertFalse(_should_run_algorand_onboarding(False, 'A' * 58, 'A' * 58))
+        self.assertTrue(_should_run_algorand_onboarding(True, 'A' * 58, 'A' * 58))
+
+    def test_preparation_token_is_bound_to_account_and_recent_google_login(self):
+        from users.web3auth_schema import (
+            _issue_wallet_reenrollment_preparation,
+            _verify_wallet_reenrollment_preparation,
+        )
+
+        token = _issue_wallet_reenrollment_preparation(
+            self.user,
+            self.account,
+            self.google_subject,
+            self.google_auth_time,
+        )
+        self.assertIsNotNone(_verify_wallet_reenrollment_preparation(
+            token, self.user, self.account
+        ))
+        self.account.algorand_address = 'B' * 58
+        self.assertIsNone(_verify_wallet_reenrollment_preparation(
+            token, self.user, self.account
+        ))
+
+    def test_background_assessment_is_anchor_bound_and_login_read_is_db_only(self):
+        from users.web3auth_schema import (
+            _store_wallet_reenrollment_assessment,
+            _wallet_reenrollment_assessment,
+        )
+
+        self.account.wallet_reenrollment_assessment = {}
+        self.account.wallet_reenrollment_assessed_at = None
+        self.account.wallet_reenrollment_assessment_lease = 'older-worker'
+        self.account.wallet_reenrollment_assessment_started_at = timezone.now()
+        self.account.save = mock.Mock()
+        stored = _store_wallet_reenrollment_assessment(self.account, {
+            'eligible': True,
+            'reason': 'sponsor_only_empty_wallet',
+            'snapshot_round': 12345,
+            'sponsor_funding': 500000,
+        })
+
+        self.assertEqual(stored['status'], 'eligible')
+        self.assertEqual(self.account.wallet_reenrollment_assessment_lease, '')
+        self.assertIsNone(self.account.wallet_reenrollment_assessment_started_at)
+        self.assertIn(
+            'wallet_reenrollment_assessment_lease',
+            self.account.save.call_args.kwargs['update_fields'],
+        )
+        self.assertEqual(
+            _wallet_reenrollment_assessment(self.account)['snapshot_round'],
+            12345,
+        )
+        self.account.algorand_address = 'B' * 58
+        self.assertIsNone(_wallet_reenrollment_assessment(self.account))
+
+    def test_permanent_refusal_is_stored_while_transient_failure_retries(self):
+        from users.web3auth_schema import _store_wallet_reenrollment_assessment
+
+        self.account.save = mock.Mock()
+        permanent = _store_wallet_reenrollment_assessment(
+            self.account,
+            {'eligible': False, 'reason': 'non_sponsor_payment'},
+        )
+        transient = _store_wallet_reenrollment_assessment(
+            self.account,
+            {'eligible': False, 'reason': 'inspection_failed'},
+        )
+
+        self.assertEqual(permanent['status'], 'ineligible')
+        self.assertEqual(transient['status'], 'retry')
+
+    @patch('users.web3auth_schema.Account.objects.filter')
+    def test_assessment_lease_is_atomic_and_owner_checked(self, filter_mock):
+        from users.web3auth_schema import (
+            _acquire_wallet_reenrollment_assessment_lease,
+            _release_wallet_reenrollment_assessment_lease,
+        )
+
+        acquire_query = mock.Mock()
+        acquire_query.filter.return_value = acquire_query
+        acquire_query.update.return_value = 1
+        release_query = mock.Mock()
+        release_query.update.return_value = 1
+        filter_mock.side_effect = [acquire_query, release_query]
+
+        lease = _acquire_wallet_reenrollment_assessment_lease(456)
+        self.assertTrue(lease)
+        self.assertTrue(_release_wallet_reenrollment_assessment_lease(456, lease))
+        self.assertEqual(filter_mock.call_args_list[1].kwargs['wallet_reenrollment_assessment_lease'], lease)
+
+    @patch('users.tasks.assess_wallet_reenrollment_account.delay')
+    @patch('users.web3auth_schema._acquire_wallet_reenrollment_assessment_lease')
+    @patch('users.models.Account.objects.filter')
+    def test_background_queue_reassesses_terminal_status_bound_to_old_anchor(
+        self,
+        filter_mock,
+        acquire_mock,
+        delay_mock,
+    ):
+        from users.tasks import queue_wallet_reenrollment_assessments
+
+        self.account.algorand_address = 'B' * 58
+        self.account.wallet_reenrollment_assessment = {
+            'version': 1,
+            'status': 'eligible',
+            'eligible': True,
+            'reason': 'sponsor_only_empty_wallet',
+            'old_algorand_address': 'A' * 58,
+            'old_bsc_address': '',
+            'snapshot_round': 12345,
+            'sponsor_funding': 500000,
+        }
+        self.account.wallet_reenrollment_assessed_at = timezone.now()
+        queryset = mock.Mock()
+        queryset.only.return_value = queryset
+        queryset.order_by.return_value = queryset
+        queryset.iterator.return_value = iter([self.account])
+        filter_mock.return_value = queryset
+        acquire_mock.return_value = 'lease-token'
+
+        queued = queue_wallet_reenrollment_assessments.run(batch_size=25)
+
+        self.assertEqual(queued, 1)
+        acquire_mock.assert_called_once_with(self.account.id)
+        delay_mock.assert_called_once_with(self.account.id, 'lease-token')
+
+    @patch('users.tasks.assess_wallet_reenrollment_account.run')
+    @patch('users.models.Account.objects.filter')
+    def test_prewarm_gate_processes_terminal_status_bound_to_old_anchor(
+        self,
+        filter_mock,
+        run_mock,
+    ):
+        from users.management.commands.precompute_wallet_reenrollment import Command
+
+        self.account.algorand_address = 'B' * 58
+        self.account.wallet_reenrollment_assessment = {
+            'version': 1,
+            'status': 'eligible',
+            'eligible': True,
+            'reason': 'sponsor_only_empty_wallet',
+            'old_algorand_address': 'A' * 58,
+            'old_bsc_address': '',
+            'snapshot_round': 12345,
+            'sponsor_funding': 500000,
+        }
+        initial = mock.Mock()
+        initial.only.return_value = initial
+        initial.order_by.return_value = initial
+        initial.iterator.return_value = iter([self.account])
+        remaining = mock.Mock()
+        remaining.only.return_value = remaining
+        remaining.iterator.side_effect = lambda chunk_size: iter([self.account])
+        filter_mock.side_effect = [initial, remaining]
+
+        def mark_current(_account_id):
+            self.account.wallet_reenrollment_assessment['old_algorand_address'] = 'B' * 58
+            return 'eligible'
+
+        run_mock.side_effect = mark_current
+
+        Command().handle(limit=0)
+
+        run_mock.assert_called_once_with(self.account.id)
+
+    @patch('users.tasks.assess_wallet_reenrollment_account.run')
+    @patch('users.models.Account.objects.filter')
+    def test_prewarm_gate_fails_release_when_any_candidate_remains_unassessed(
+        self,
+        filter_mock,
+        run_mock,
+    ):
+        from django.core.management.base import CommandError
+        from users.management.commands.precompute_wallet_reenrollment import Command
+
+        initial = mock.Mock()
+        initial.only.return_value = initial
+        initial.order_by.return_value = initial
+        initial.iterator.return_value = iter([self.account])
+        remaining = mock.Mock()
+        remaining.only.return_value = remaining
+        remaining.iterator.side_effect = lambda chunk_size: iter([self.account])
+        filter_mock.side_effect = [initial, remaining]
+        run_mock.return_value = 'already_running'
+
+        with self.assertRaisesMessage(CommandError, 'prewarm is incomplete'):
+            Command().handle(limit=0)
+
+    @patch('users.tasks.transaction.atomic')
+    @patch('users.web3auth_schema._wallet_reenrollment_assessment')
+    @patch('users.web3auth_schema._store_wallet_reenrollment_assessment')
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    @patch('users.web3auth_schema._release_wallet_reenrollment_assessment_lease')
+    @patch('users.models.Account.objects.select_for_update')
+    @patch('users.models.Account.objects.filter')
+    def test_background_worker_cannot_publish_after_losing_its_lease(
+        self,
+        filter_mock,
+        select_for_update_mock,
+        release_mock,
+        inspect_mock,
+        store_mock,
+        assessment_mock,
+        atomic_mock,
+    ):
+        from contextlib import nullcontext
+        from users.tasks import assess_wallet_reenrollment_account
+
+        owned = mock.Mock()
+        owned.exists.return_value = True
+        candidate = mock.Mock()
+        candidate.first.return_value = self.account
+        self.account.pk = self.account.id
+        locked_account = mock.Mock(
+            is_keyless_migrated=False,
+            algorand_address=self.account.algorand_address,
+            bsc_address=self.account.bsc_address,
+            wallet_reenrollment_assessment_lease='newer-worker',
+        )
+        locked = mock.Mock()
+        locked.first.return_value = locked_account
+        filter_mock.side_effect = [owned, candidate]
+        select_for_update_mock.return_value.filter.return_value = locked
+        assessment_mock.return_value = None
+        inspect_mock.return_value = {
+            'eligible': True,
+            'reason': 'sponsor_only_empty_wallet',
+            'snapshot_round': 12345,
+            'sponsor_funding': 500000,
+        }
+        atomic_mock.return_value = nullcontext()
+
+        result = assess_wallet_reenrollment_account.run(
+            self.account.id,
+            lease='older-worker',
+        )
+
+        self.assertEqual(result, 'lease_or_account_changed')
+        store_mock.assert_not_called()
+        release_mock.assert_called_once_with(self.account.id, 'older-worker')
 
     def test_accepts_signature_from_submitted_bsc_address(self):
         from users.web3auth_schema import _verify_wallet_reenrollment_grant
@@ -650,7 +1078,15 @@ class WalletReenrollmentMutationTestCase(TestCase):
         from users.web3auth_schema import _issue_wallet_reenrollment_grant
 
         challenge, grant = _issue_wallet_reenrollment_grant(
-            self.user, self.account, self.google_subject, self.google_auth_time
+            self.user,
+            self.account,
+            self.google_subject,
+            self.google_auth_time,
+            {
+                'eligible': True,
+                'snapshot_round': 12345,
+                'sponsor_funding': 500000,
+            },
         )
         signature = EvmAccount.sign_message(
             encode_defunct(text=challenge),
@@ -659,6 +1095,67 @@ class WalletReenrollmentMutationTestCase(TestCase):
         return grant, signature
 
     @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_preflight_runs_full_inspection_once_and_returns_snapshot_grant(
+        self,
+        inspect_mock,
+    ):
+        from users.web3auth_schema import (
+            PrepareWalletReenrollmentMutation,
+            _issue_wallet_reenrollment_preparation,
+        )
+
+        inspect_mock.return_value = {
+            'eligible': True,
+            'reason': 'sponsor_only_empty_wallet',
+            'snapshot_round': 12345,
+            'sponsor_funding': 500000,
+        }
+        preparation_token = _issue_wallet_reenrollment_preparation(
+            self.user,
+            self.account,
+            self.google_subject,
+            self.google_auth_time,
+        )
+        result = PrepareWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            preparation_token=preparation_token,
+        )
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.wallet_reenrollment_allowed)
+        self.assertTrue(result.wallet_reenrollment_challenge)
+        self.assertTrue(result.wallet_reenrollment_grant)
+        inspect_mock.assert_called_once_with(self.account)
+
+    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    def test_preflight_ineligible_wallet_falls_back_without_blocking_login(
+        self,
+        inspect_mock,
+    ):
+        from users.web3auth_schema import (
+            PrepareWalletReenrollmentMutation,
+            _issue_wallet_reenrollment_preparation,
+        )
+
+        inspect_mock.return_value = {'eligible': False, 'reason': 'asset_balance'}
+        preparation_token = _issue_wallet_reenrollment_preparation(
+            self.user,
+            self.account,
+            self.google_subject,
+            self.google_auth_time,
+        )
+        result = PrepareWalletReenrollmentMutation.mutate(
+            None,
+            self.Info(self.user),
+            preparation_token=preparation_token,
+        )
+
+        self.assertTrue(result.success)
+        self.assertFalse(result.wallet_reenrollment_allowed)
+        self.assertIsNone(result.wallet_reenrollment_grant)
+
+    @patch('users.web3auth_schema._revalidate_wallet_reenrollment')
     def test_atomically_retires_old_address_and_registers_bsc(self, inspect_mock):
         from users.models import RetiredWalletAddress
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
@@ -685,7 +1182,7 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertEqual(retired.account, self.account)
         self.assertEqual(retired.user, self.user)
 
-    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    @patch('users.web3auth_schema._revalidate_wallet_reenrollment')
     def test_leaves_account_unchanged_when_chain_recheck_refuses(self, inspect_mock):
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
 
@@ -704,8 +1201,12 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertEqual(self.account.algorand_address, self.OLD_ADDRESS)
         self.assertIsNone(self.account.bsc_address)
         self.assertFalse(self.account.is_keyless_migrated)
+        self.assertEqual(
+            self.account.wallet_reenrollment_assessment.get('status'),
+            'ineligible',
+        )
 
-    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    @patch('users.web3auth_schema._revalidate_wallet_reenrollment')
     def test_rejects_bsc_address_not_owned_by_challenge_signer(self, inspect_mock):
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
 
@@ -725,7 +1226,7 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertEqual(self.account.algorand_address, self.OLD_ADDRESS)
         self.assertIsNone(self.account.bsc_address)
 
-    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    @patch('users.web3auth_schema._revalidate_wallet_reenrollment')
     def test_successful_reenrollment_is_idempotent_after_lost_response(self, inspect_mock):
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
 
@@ -750,7 +1251,7 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertTrue(second.success)
 
     @patch('users.web3auth_schema._inspect_stale_bsc_reenrollment')
-    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    @patch('users.web3auth_schema._revalidate_wallet_reenrollment')
     def test_atomically_replaces_proven_unused_stale_bsc(
         self,
         inspect_algo_mock,
@@ -788,7 +1289,7 @@ class WalletReenrollmentMutationTestCase(TestCase):
         )
 
     @patch('users.web3auth_schema._inspect_stale_bsc_reenrollment')
-    @patch('users.web3auth_schema._inspect_wallet_reenrollment')
+    @patch('users.web3auth_schema._revalidate_wallet_reenrollment')
     def test_keeps_stale_bsc_when_it_has_supported_value_or_history(
         self,
         inspect_algo_mock,
@@ -815,6 +1316,10 @@ class WalletReenrollmentMutationTestCase(TestCase):
         self.assertEqual(self.account.algorand_address, self.OLD_ADDRESS)
         self.assertEqual(self.account.bsc_address, old_bsc)
         self.assertFalse(self.account.is_keyless_migrated)
+        self.assertEqual(
+            self.account.wallet_reenrollment_assessment.get('status'),
+            'ineligible',
+        )
 
 
 class _FakeAlgodHTTPError(Exception):

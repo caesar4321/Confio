@@ -14,6 +14,7 @@ from .models import Account, RetiredWalletAddress, WalletPepper, WalletDerivatio
 from .migration_safety import (
     inspect_address_migration_risk,
     inspect_sponsored_empty_wallet_reenrollment,
+    revalidate_sponsored_empty_wallet_reenrollment,
     redact_address,
 )
 from .utils_username import generate_compliant_username
@@ -23,7 +24,19 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 WALLET_REENROLLMENT_GRANT_SALT = 'confio.wallet-reenrollment.v1'
+WALLET_REENROLLMENT_PREPARATION_SALT = 'confio.wallet-reenrollment-preparation.v1'
 WALLET_REENROLLMENT_GRANT_MAX_AGE_SECONDS = 10 * 60
+WALLET_REENROLLMENT_ASSESSMENT_VERSION = 1
+WALLET_REENROLLMENT_PERMANENT_REFUSALS = {
+    'asset_balance',
+    'onchain_state',
+    'algo_balance',
+    'rekey',
+    'non_sponsor_payment',
+    'asset_activity',
+    'unsupported_transaction',
+    'history_too_large',
+}
 
 
 def _is_recent_google_auth(auth_time, now=None):
@@ -35,6 +48,95 @@ def _is_recent_google_auth(auth_time, now=None):
     return -60 <= age_seconds <= WALLET_REENROLLMENT_GRANT_MAX_AGE_SECONDS
 
 
+def _should_run_algorand_onboarding(created, client_supplied_address, effective_address):
+    """Chain onboarding is signup-only, never an ordinary-login side effect."""
+    return bool(created and client_supplied_address and effective_address)
+
+
+def _wallet_reenrollment_assessment(account):
+    value = getattr(account, 'wallet_reenrollment_assessment', None) or {}
+    if (
+        value.get('version') != WALLET_REENROLLMENT_ASSESSMENT_VERSION
+        or value.get('old_algorand_address') != account.algorand_address
+        or (value.get('old_bsc_address') or '').lower()
+        != (getattr(account, 'bsc_address', None) or '').lower()
+        or value.get('status') not in ('eligible', 'ineligible')
+    ):
+        return None
+    if value.get('status') == 'eligible' and (
+        int(value.get('snapshot_round') or 0) <= 0
+        or int(value.get('sponsor_funding') or 0) <= 0
+    ):
+        return None
+    return value
+
+
+def _store_wallet_reenrollment_assessment(account, inspection):
+    eligible = bool(inspection.get('eligible'))
+    reason = str(inspection.get('reason') or 'inspection_failed')
+    permanent_refusal = not eligible and reason in WALLET_REENROLLMENT_PERMANENT_REFUSALS
+    value = {
+        'version': WALLET_REENROLLMENT_ASSESSMENT_VERSION,
+        'status': 'eligible' if eligible else ('ineligible' if permanent_refusal else 'retry'),
+        'eligible': eligible,
+        'reason': reason,
+        'old_algorand_address': account.algorand_address,
+        'old_bsc_address': getattr(account, 'bsc_address', None) or '',
+    }
+    if eligible:
+        value.update({
+            'snapshot_round': int(inspection.get('snapshot_round') or 0),
+            'sponsor_funding': int(inspection.get('sponsor_funding') or 0),
+        })
+    account.wallet_reenrollment_assessment = value
+    account.wallet_reenrollment_assessed_at = timezone.now()
+    # Publishing an assessment consumes any in-flight lease. This matters not
+    # only for the scan owner: completion can publish a newer refusal while an
+    # older background scan is still running. Clearing the lease under the
+    # Account row lock makes that older worker fail its ownership check instead
+    # of overwriting the newer result.
+    account.wallet_reenrollment_assessment_lease = ''
+    account.wallet_reenrollment_assessment_started_at = None
+    account.save(update_fields=[
+        'wallet_reenrollment_assessment',
+        'wallet_reenrollment_assessed_at',
+        'wallet_reenrollment_assessment_lease',
+        'wallet_reenrollment_assessment_started_at',
+    ])
+    return value
+
+
+def _acquire_wallet_reenrollment_assessment_lease(account_id):
+    """Acquire a database-backed, ownership-safe 15 minute scan lease."""
+    from django.db.models import Q
+
+    lease = secrets.token_urlsafe(24)
+    now = timezone.now()
+    expired_before = now - timedelta(minutes=15)
+    acquired = Account.objects.filter(pk=account_id).filter(
+        Q(wallet_reenrollment_assessment_lease='')
+        | Q(wallet_reenrollment_assessment_started_at__isnull=True)
+        | Q(wallet_reenrollment_assessment_started_at__lt=expired_before)
+    ).update(
+        wallet_reenrollment_assessment_lease=lease,
+        wallet_reenrollment_assessment_started_at=now,
+    )
+    return lease if acquired == 1 else None
+
+
+def _release_wallet_reenrollment_assessment_lease(account_id, lease):
+    if not lease:
+        return False
+    released = Account.objects.filter(
+        pk=account_id,
+        wallet_reenrollment_assessment_lease=lease,
+    ).update(
+        wallet_reenrollment_assessment_lease='',
+        wallet_reenrollment_assessment_started_at=None,
+    )
+    return released == 1
+
+
 def _wallet_reenrollment_challenge(payload):
     return (
         "Confio wallet reenrollment v1\n"
@@ -42,21 +144,75 @@ def _wallet_reenrollment_challenge(payload):
         f"account_id:{payload['account_id']}\n"
         f"old_algorand_address:{payload['old_algorand_address']}\n"
         f"old_bsc_address:{payload.get('old_bsc_address') or ''}\n"
+        f"inspection_round:{payload['inspection_round']}\n"
         f"nonce:{payload['nonce']}"
     )
 
 
-def _issue_wallet_reenrollment_grant(user, account, google_subject, google_auth_time):
-    payload = {
-        'version': 1,
+def _wallet_reenrollment_identity_payload(user, account, google_subject, google_auth_time):
+    return {
         'user_id': user.id,
         'account_id': account.id,
         'old_algorand_address': account.algorand_address,
         'old_bsc_address': getattr(account, 'bsc_address', None) or '',
         'google_subject': google_subject,
         'google_auth_time': google_auth_time,
+    }
+
+
+def _issue_wallet_reenrollment_preparation(user, account, google_subject, google_auth_time):
+    payload = {
+        'version': 1,
+        **_wallet_reenrollment_identity_payload(
+            user, account, google_subject, google_auth_time
+        ),
         'nonce': secrets.token_urlsafe(32),
     }
+    return signing.dumps(payload, salt=WALLET_REENROLLMENT_PREPARATION_SALT)
+
+
+def _verify_wallet_reenrollment_preparation(token, user, account):
+    try:
+        payload = signing.loads(
+            token,
+            salt=WALLET_REENROLLMENT_PREPARATION_SALT,
+            max_age=WALLET_REENROLLMENT_GRANT_MAX_AGE_SECONDS,
+        )
+        if (
+            payload.get('version') != 1
+            or payload.get('user_id') != user.id
+            or payload.get('account_id') != account.id
+            or payload.get('old_algorand_address') != account.algorand_address
+            or (payload.get('old_bsc_address') or '').lower()
+            != (getattr(account, 'bsc_address', None) or '').lower()
+            or not payload.get('google_subject')
+            or not _is_recent_google_auth(payload.get('google_auth_time'))
+            or not payload.get('nonce')
+        ):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _issue_wallet_reenrollment_grant(
+    user,
+    account,
+    google_subject,
+    google_auth_time,
+    inspection,
+):
+    payload = {
+        'version': 2,
+        **_wallet_reenrollment_identity_payload(
+            user, account, google_subject, google_auth_time
+        ),
+        'inspection_round': int(inspection.get('snapshot_round') or 0),
+        'sponsor_funding': int(inspection.get('sponsor_funding') or 0),
+        'nonce': secrets.token_urlsafe(32),
+    }
+    if payload['inspection_round'] <= 0 or payload['sponsor_funding'] <= 0:
+        raise ValueError('A complete wallet inspection is required')
     return (
         _wallet_reenrollment_challenge(payload),
         signing.dumps(payload, salt=WALLET_REENROLLMENT_GRANT_SALT),
@@ -74,7 +230,7 @@ def _verify_wallet_reenrollment_grant(grant, user, account, address, signature):
             max_age=WALLET_REENROLLMENT_GRANT_MAX_AGE_SECONDS,
         )
         if (
-            payload.get('version') != 1
+            payload.get('version') != 2
             or payload.get('user_id') != user.id
             or payload.get('account_id') != account.id
             or payload.get('old_algorand_address') != account.algorand_address
@@ -82,20 +238,21 @@ def _verify_wallet_reenrollment_grant(grant, user, account, address, signature):
             != (getattr(account, 'bsc_address', None) or '').lower()
             or not payload.get('google_subject')
             or not _is_recent_google_auth(payload.get('google_auth_time'))
+            or int(payload.get('inspection_round') or 0) <= 0
+            or int(payload.get('sponsor_funding') or 0) <= 0
             or not payload.get('nonce')
         ):
-            return False
+            return None
         recovered = EvmAccount.recover_message(
             encode_defunct(text=_wallet_reenrollment_challenge(payload)),
             signature=signature,
         )
-        return recovered.lower() == address.lower()
+        return payload if recovered.lower() == address.lower() else None
     except Exception:
-        return False
+        return None
 
 
-def _inspect_wallet_reenrollment(account):
-    from blockchain.algorand_client import get_algod_client, get_indexer_client
+def _wallet_reenrollment_server_blocker(account):
     from django.db.models import Q
     from humanitarian.models import HumanitarianRelease
     from send.models import SendTransaction
@@ -114,7 +271,7 @@ def _inspect_wallet_reenrollment(account):
         Q(status='PENDING', created_at__gte=reservation_cutoff)
         | Q(status__in=('SPONSORING', 'SIGNED', 'SUBMITTED', 'AML_REVIEW'))
     ).exists():
-        return {'eligible': False, 'reason': 'pending_inbound_algorand_send'}
+        return 'pending_inbound_algorand_send'
 
     # Draft and retryable humanitarian releases are contract-held cUSD
     # entitlements. They have not reached the chain yet, so Indexer history
@@ -123,7 +280,17 @@ def _inspect_wallet_reenrollment(account):
         recipient_address=account.algorand_address,
         status__in=('draft', 'failed', 'submitted'),
     ).exists():
-        return {'eligible': False, 'reason': 'pending_humanitarian_release'}
+        return 'pending_humanitarian_release'
+
+    return None
+
+
+def _inspect_wallet_reenrollment(account):
+    from blockchain.algorand_client import get_algod_client, get_indexer_client
+
+    blocker = _wallet_reenrollment_server_blocker(account)
+    if blocker:
+        return {'eligible': False, 'reason': blocker}
 
     return inspect_sponsored_empty_wallet_reenrollment(
         get_algod_client(),
@@ -133,6 +300,86 @@ def _inspect_wallet_reenrollment(account):
     )
 
 
+def _revalidate_wallet_reenrollment(account, grant_payload):
+    from blockchain.algorand_client import get_algod_client, get_indexer_client
+
+    blocker = _wallet_reenrollment_server_blocker(account)
+    if blocker:
+        return {'eligible': False, 'reason': blocker}
+    return revalidate_sponsored_empty_wallet_reenrollment(
+        get_algod_client(),
+        get_indexer_client(),
+        account.algorand_address,
+        getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None),
+        grant_payload.get('inspection_round'),
+        grant_payload.get('sponsor_funding'),
+    )
+
+
+def _stale_bsc_server_blocker(account):
+    """Return a DB-side blocker for replacing the current BSC anchor."""
+    address = (account.bsc_address or '').strip()
+    if not address:
+        return None
+
+    from blockchain.models import SponsoredBatch
+    from conversion.models import Conversion
+    from payroll.models import PayrollItem
+    from presale.models import PresaleMigrationCredit
+    from ramps.models import RampTransaction
+    from send.models import PhoneInvite, SendTransaction
+    from django.db.models import Q
+
+    if SendTransaction.objects.filter(
+        recipient_address__iexact=address,
+        status__in=(
+            'PENDING',
+            'SPONSORING',
+            'SIGNED',
+            'SUBMITTED',
+            'AML_REVIEW',
+        ),
+        deleted_at__isnull=True,
+    ).exclude(bsc_calls_json='').exists():
+        return 'pending_inbound_send'
+    if PayrollItem.objects.filter(
+        Q(blockchain_data__bsc_payout__recipient__iexact=address)
+        | Q(recipient_address__iexact=address),
+        status__in=('PREPARED', 'SUBMITTED'),
+        deleted_at__isnull=True,
+    ).exists():
+        return 'pending_inbound_payroll'
+    if PhoneInvite.objects.filter(
+        claimed_by=account.user,
+        rail='bsc',
+        status='claiming',
+        deleted_at__isnull=True,
+    ).exists():
+        return 'pending_inbound_invite_claim'
+
+    if SponsoredBatch.objects.filter(
+        user=account.user,
+        user_bsc_address__iexact=address,
+    ).exists():
+        return 'sponsored_batch_history'
+    if Conversion.objects.filter(
+        user_bsc_address__iexact=address,
+        is_deleted=False,
+    ).exists():
+        return 'conversion_history'
+    if RampTransaction.objects.filter(
+        actor_address__iexact=address,
+        destination='cusd_plus',
+    ).exists():
+        return 'ramp_history'
+    if PresaleMigrationCredit.objects.filter(
+        user=account.user,
+        bsc_address__iexact=address,
+    ).exists():
+        return 'presale_credit'
+    return None
+
+
 def _inspect_stale_bsc_reenrollment(account):
     """Fail closed unless replacing this BSC anchor cannot strand Confio value."""
     address = (account.bsc_address or '').strip()
@@ -140,62 +387,11 @@ def _inspect_stale_bsc_reenrollment(account):
         return {'eligible': True, 'reason': 'no_bsc_anchor'}
 
     try:
-        from blockchain.models import SponsoredBatch
-        from conversion.models import Conversion
-        from payroll.models import PayrollItem
-        from presale.models import PresaleMigrationCredit
-        from ramps.models import RampTransaction
-        from send.models import PhoneInvite, SendTransaction
         from cusd_plus import gm_holdings, vault
-        from django.db.models import Q
 
-        if SendTransaction.objects.filter(
-            recipient_address__iexact=address,
-            status__in=(
-                'PENDING',
-                'SPONSORING',
-                'SIGNED',
-                'SUBMITTED',
-                'AML_REVIEW',
-            ),
-            deleted_at__isnull=True,
-        ).exclude(bsc_calls_json='').exists():
-            return {'eligible': False, 'reason': 'pending_inbound_send'}
-        if PayrollItem.objects.filter(
-            Q(blockchain_data__bsc_payout__recipient__iexact=address)
-            | Q(recipient_address__iexact=address),
-            status__in=('PREPARED', 'SUBMITTED'),
-            deleted_at__isnull=True,
-        ).exists():
-            return {'eligible': False, 'reason': 'pending_inbound_payroll'}
-        if PhoneInvite.objects.filter(
-            claimed_by=account.user,
-            rail='bsc',
-            status='claiming',
-            deleted_at__isnull=True,
-        ).exists():
-            return {'eligible': False, 'reason': 'pending_inbound_invite_claim'}
-
-        if SponsoredBatch.objects.filter(
-            user=account.user,
-            user_bsc_address__iexact=address,
-        ).exists():
-            return {'eligible': False, 'reason': 'sponsored_batch_history'}
-        if Conversion.objects.filter(
-            user_bsc_address__iexact=address,
-            is_deleted=False,
-        ).exists():
-            return {'eligible': False, 'reason': 'conversion_history'}
-        if RampTransaction.objects.filter(
-            actor_address__iexact=address,
-            destination='cusd_plus',
-        ).exists():
-            return {'eligible': False, 'reason': 'ramp_history'}
-        if PresaleMigrationCredit.objects.filter(
-            user=account.user,
-            bsc_address__iexact=address,
-        ).exists():
-            return {'eligible': False, 'reason': 'presale_credit'}
+        blocker = _stale_bsc_server_blocker(account)
+        if blocker:
+            return {'eligible': False, 'reason': blocker}
 
         block_tag = vault._rpc('eth_blockNumber', [])
         native_balance = int(vault._rpc('eth_getBalance', [address, block_tag]), 16)
@@ -324,6 +520,12 @@ class Web3AuthLoginMutation(graphene.Mutation):
     opt_in_transactions = graphene.JSONString()  # Unsigned transactions for opt-in
     is_keyless_migrated = graphene.Boolean()  # True if user is V2 Native (Random Secret)
     is_new_user = graphene.Boolean()  # True only when this Web3Auth login created a new User row
+    requires_backup_completion = graphene.Boolean()
+    wallet_reenrollment_required = graphene.Boolean()
+    wallet_reenrollment_preparation_token = graphene.String()
+    # Login never performs chain I/O. The background assessment can authorize
+    # reenrollment directly; preparation fields remain additive compatibility
+    # for clients deployed during the transition.
     wallet_reenrollment_allowed = graphene.Boolean()
     wallet_reenrollment_challenge = graphene.String()
     wallet_reenrollment_grant = graphene.String()
@@ -331,6 +533,11 @@ class Web3AuthLoginMutation(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None, platform_os=None):
         try:
+
+            # Preserve request intent before an existing stored address is
+            # loaded below. Legacy accounts must never redo chain onboarding
+            # on ordinary login.
+            client_supplied_algorand_address = algorand_address
 
 
             from django.contrib.auth import get_user_model
@@ -371,6 +578,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
             wallet_reenrollment_allowed = False
             wallet_reenrollment_challenge = None
             wallet_reenrollment_grant = None
+            wallet_reenrollment_required = False
+            wallet_reenrollment_preparation_token = None
 
             # Check for soft-deleted accounts before attempting login or recreation
             existing_any_state = User.all_objects.filter(firebase_uid=firebase_uid).first()
@@ -605,18 +814,11 @@ class Web3AuthLoginMutation(graphene.Mutation):
                  # DO NOT auto-migrate here. They must complete the frontend migration flow first.
                  is_keyless_migrated_status = existing_account.is_keyless_migrated
 
-            # A narrow self-heal for historical Google accounts whose locally
-            # generated V2 wallet was stored as V1 without a verified backup.
-            # We only offer reenrollment when the old Algorand address's
-            # COMPLETE history is sponsor funding plus zero-value opt-ins. An
-            # existing BSC anchor is repairable only when its Confio-supported
-            # chain state and server history are empty. That conditional check
-            # happens at completion, once the submitted replacement tells us
-            # whether the BSC anchor is changing at all. A prior backup flag
-            # does not suppress this:
-            # it may be the fresh backup from an interrupted reenrollment, and
-            # the final mutation is deliberately retryable. It rechecks all
-            # chain state after Drive backup succeeds.
+            # Keep authentication DB-only. Celery precomputes the finite legacy
+            # cohort before the mobile release. Login only reads that durable
+            # assessment: eligible accounts get a fresh-auth-bound grant;
+            # permanent refusals continue normal V1 recovery; unassessed or
+            # transient failures also continue normally until a later scan.
             if (
                 provider == 'google'
                 and google_subject
@@ -625,9 +827,9 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 and existing_account.algorand_address
                 and not existing_account.is_keyless_migrated
             ):
-                reenrollment = _inspect_wallet_reenrollment(existing_account)
-                wallet_reenrollment_allowed = bool(reenrollment.get('eligible'))
-                if wallet_reenrollment_allowed:
+                assessment = _wallet_reenrollment_assessment(existing_account)
+                if assessment and assessment.get('status') == 'eligible':
+                    wallet_reenrollment_allowed = True
                     (
                         wallet_reenrollment_challenge,
                         wallet_reenrollment_grant,
@@ -636,15 +838,21 @@ class Web3AuthLoginMutation(graphene.Mutation):
                         existing_account,
                         google_subject,
                         google_auth_time,
+                        assessment,
                     )
                     logger.info(
-                        "Wallet reenrollment offered for account=%s user=%s old=%s",
+                        "Wallet reenrollment offered from background assessment "
+                        "for account=%s user=%s round=%s",
                         existing_account.id,
                         user.id,
-                        redact_address(existing_account.algorand_address),
+                        assessment.get('snapshot_round'),
                     )
             
-            if algorand_address:
+            if _should_run_algorand_onboarding(
+                created,
+                client_supplied_algorand_address,
+                algorand_address,
+            ):
                 # Use AlgorandAccountManager to ensure auto opt-ins happen
                 from blockchain.algorand_account_manager import AlgorandAccountManager
                 
@@ -843,6 +1051,9 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 opt_in_transactions=opt_in_transactions,
                 is_keyless_migrated=is_keyless_migrated_status,
                 is_new_user=created,
+                requires_backup_completion=user.requires_backup_completion,
+                wallet_reenrollment_required=wallet_reenrollment_required,
+                wallet_reenrollment_preparation_token=wallet_reenrollment_preparation_token,
                 wallet_reenrollment_allowed=wallet_reenrollment_allowed,
                 wallet_reenrollment_challenge=wallet_reenrollment_challenge,
                 wallet_reenrollment_grant=wallet_reenrollment_grant,
@@ -1419,6 +1630,113 @@ class OptInToUSDCMutation(graphene.Mutation):
 
 
 
+class PrepareWalletReenrollmentMutation(graphene.Mutation):
+    """Run the one-time chain proof outside the authentication hot path."""
+
+    class Arguments:
+        preparation_token = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    wallet_reenrollment_allowed = graphene.Boolean()
+    wallet_reenrollment_challenge = graphene.String()
+    wallet_reenrollment_grant = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, preparation_token):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return cls(success=False, error='Authentication required')
+
+        account = (
+            Account.objects.filter(
+                user=user,
+                account_type='personal',
+                account_index=0,
+                deleted_at__isnull=True,
+            )
+            .first()
+        )
+        if not account or account.is_keyless_migrated or not account.algorand_address:
+            return cls(success=False, error='Account is not eligible for wallet reenrollment')
+
+        preparation = _verify_wallet_reenrollment_preparation(
+            preparation_token,
+            user,
+            account,
+        )
+        if not preparation:
+            return cls(success=False, error='Invalid or expired wallet reenrollment preparation')
+
+        stored = _wallet_reenrollment_assessment(account)
+        if stored:
+            inspection = stored
+        else:
+            lease = _acquire_wallet_reenrollment_assessment_lease(account.id)
+            if not lease:
+                return cls(success=False, error='Wallet reenrollment preparation is already running')
+            try:
+                inspection = _inspect_wallet_reenrollment(account)
+                with transaction.atomic():
+                    locked = Account.objects.select_for_update().filter(pk=account.id).first()
+                    if (
+                        not locked
+                        or locked.wallet_reenrollment_assessment_lease != lease
+                        or locked.is_keyless_migrated
+                        or locked.algorand_address != account.algorand_address
+                        or (locked.bsc_address or '').lower()
+                        != (account.bsc_address or '').lower()
+                    ):
+                        return cls(
+                            success=False,
+                            error='Wallet reenrollment preparation changed; try again',
+                        )
+                    inspection = _store_wallet_reenrollment_assessment(locked, inspection)
+                    account = locked
+            finally:
+                _release_wallet_reenrollment_assessment_lease(account.id, lease)
+        if not (
+            inspection.get('eligible')
+            or inspection.get('status') == 'eligible'
+        ):
+            logger.info(
+                "Wallet reenrollment preflight refused for account=%s user=%s reason=%s",
+                account.id,
+                user.id,
+                inspection.get('reason'),
+            )
+            # This is not an authentication failure. The account may be a
+            # perfectly valid V1 wallet with real activity; the client must
+            # continue through its normal anchored recovery path.
+            return cls(
+                success=True,
+                error=None,
+                wallet_reenrollment_allowed=False,
+            )
+
+        challenge, grant = _issue_wallet_reenrollment_grant(
+            user,
+            account,
+            preparation.get('google_subject'),
+            preparation.get('google_auth_time'),
+            inspection,
+        )
+        logger.info(
+            "Wallet reenrollment prepared for account=%s user=%s old=%s round=%s",
+            account.id,
+            user.id,
+            redact_address(account.algorand_address),
+            inspection.get('snapshot_round'),
+        )
+        return cls(
+            success=True,
+            error=None,
+            wallet_reenrollment_allowed=True,
+            wallet_reenrollment_challenge=challenge,
+            wallet_reenrollment_grant=grant,
+        )
+
+
 class CompleteWalletReenrollmentMutation(graphene.Mutation):
     """Atomically retire a proven-empty legacy wallet and bind its V2 BSC replacement."""
 
@@ -1443,6 +1761,52 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
             return cls(success=False, error='Invalid BSC address')
 
         try:
+            # Chain/indexer verification can take seconds. Run it before the
+            # write transaction so an affected user's network latency does not
+            # hold an Account row lock or a database connection hostage. The
+            # short transaction below re-verifies the signed anchors and every
+            # DB-side reservation under the lock before committing.
+            inspected_account = (
+                Account.objects.filter(
+                    user=user,
+                    account_type='personal',
+                    account_index=0,
+                    deleted_at__isnull=True,
+                )
+                .first()
+            )
+            if not inspected_account:
+                return cls(success=False, error='Account not found')
+            if (
+                inspected_account.is_keyless_migrated
+                and not inspected_account.algorand_address
+                and inspected_account.bsc_address
+                and inspected_account.bsc_address.lower() == address.lower()
+            ):
+                return cls(success=True, error=None)
+            if inspected_account.is_keyless_migrated or not inspected_account.algorand_address:
+                return cls(success=False, error='Account is not eligible for wallet reenrollment')
+
+            inspected_grant = _verify_wallet_reenrollment_grant(
+                reenrollment_grant,
+                user,
+                inspected_account,
+                address,
+                bsc_signature,
+            )
+            if not inspected_grant:
+                return cls(success=False, error='Invalid or expired wallet reenrollment proof')
+            inspected_reenrollment = _revalidate_wallet_reenrollment(
+                inspected_account,
+                inspected_grant,
+            )
+            inspected_bsc = {'eligible': True, 'reason': 'same_bsc_anchor'}
+            if (
+                inspected_account.bsc_address
+                and inspected_account.bsc_address.lower() != address.lower()
+            ):
+                inspected_bsc = _inspect_stale_bsc_reenrollment(inspected_account)
+
             with transaction.atomic():
                 account = (
                     Account.objects.select_for_update()
@@ -1469,17 +1833,27 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                 if account.is_keyless_migrated or not account.algorand_address:
                     return cls(success=False, error='Account is not eligible for wallet reenrollment')
 
-                if not _verify_wallet_reenrollment_grant(
+                grant_payload = _verify_wallet_reenrollment_grant(
                     reenrollment_grant,
                     user,
                     account,
                     address,
                     bsc_signature,
-                ):
+                )
+                if not grant_payload:
                     return cls(success=False, error='Invalid or expired wallet reenrollment proof')
 
-                reenrollment = _inspect_wallet_reenrollment(account)
+                # Account preparation/claim paths serialize on this same row.
+                # Recheck their database reservations after acquiring the lock;
+                # only the slow chain evidence is reused from above.
+                server_blocker = _wallet_reenrollment_server_blocker(account)
+                reenrollment = (
+                    {'eligible': False, 'reason': server_blocker}
+                    if server_blocker
+                    else inspected_reenrollment
+                )
                 if not reenrollment.get('eligible'):
+                    _store_wallet_reenrollment_assessment(account, reenrollment)
                     logger.warning(
                         "Wallet reenrollment refused for account=%s user=%s reason=%s",
                         account.id,
@@ -1492,8 +1866,31 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                     account.bsc_address
                     and account.bsc_address.lower() != address.lower()
                 ):
-                    bsc_reenrollment = _inspect_stale_bsc_reenrollment(account)
+                    bsc_blocker = _stale_bsc_server_blocker(account)
+                    bsc_reenrollment = (
+                        {'eligible': False, 'reason': bsc_blocker}
+                        if bsc_blocker
+                        else inspected_bsc
+                    )
                     if not bsc_reenrollment.get('eligible'):
+                        bsc_reason = bsc_reenrollment.get('reason') or 'unsafe'
+                        account.wallet_reenrollment_assessment = {
+                            'version': WALLET_REENROLLMENT_ASSESSMENT_VERSION,
+                            'status': 'retry' if bsc_reason == 'inspection_failed' else 'ineligible',
+                            'eligible': False,
+                            'reason': f'bsc_{bsc_reason}',
+                            'old_algorand_address': account.algorand_address,
+                            'old_bsc_address': account.bsc_address or '',
+                        }
+                        account.wallet_reenrollment_assessed_at = timezone.now()
+                        account.wallet_reenrollment_assessment_lease = ''
+                        account.wallet_reenrollment_assessment_started_at = None
+                        account.save(update_fields=[
+                            'wallet_reenrollment_assessment',
+                            'wallet_reenrollment_assessed_at',
+                            'wallet_reenrollment_assessment_lease',
+                            'wallet_reenrollment_assessment_started_at',
+                        ])
                         logger.warning(
                             "Wallet reenrollment refused for account=%s user=%s old_bsc=%s reason=%s",
                             account.id,
@@ -1686,6 +2083,7 @@ class Web3AuthMutation(graphene.ObjectType):
     get_derivation_pepper = GetDerivationPepperMutation.Field()
     opt_in_to_usdc = OptInToUSDCMutation.Field()
     mark_wallet_migrated = MarkWalletMigratedMutation.Field()
+    prepare_wallet_reenrollment = PrepareWalletReenrollmentMutation.Field()
     complete_wallet_reenrollment = CompleteWalletReenrollmentMutation.Field()
 
 
@@ -1747,4 +2145,5 @@ class Mutation(graphene.ObjectType):
     rotate_kek_pepper = RotateKekPepperMutation.Field()
     get_derivation_pepper = GetDerivationPepperMutation.Field()
     mark_wallet_migrated = MarkWalletMigratedMutation.Field()
+    prepare_wallet_reenrollment = PrepareWalletReenrollmentMutation.Field()
     complete_wallet_reenrollment = CompleteWalletReenrollmentMutation.Field()
