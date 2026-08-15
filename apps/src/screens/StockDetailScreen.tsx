@@ -170,7 +170,7 @@ export const StockDetailScreen = () => {
         {/* Position (only when holding) */}
         {position && (
           <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Tu posición</Text>
+            <Text style={styles.sectionLabel}>Tu inversión</Text>
             <View style={styles.positionRow}>
               <Text style={styles.positionValue}>{fmtUsd(position.valueUsd)}</Text>
               <Text
@@ -237,11 +237,11 @@ export const StockDetailScreen = () => {
           {[
             {
               icon: 'repeat',
-              text: 'Dividendos reinvertidos automáticamente — el valor del token los incluye.',
+              text: 'Los dividendos se reinvierten automáticamente y se reflejan en el valor de tu acción digital.',
             },
             {
               icon: 'shield',
-              text: 'Respaldada 1:1 por acciones reales en custodios regulados de EE.UU. (Ondo Finance).',
+              text: 'Diseñada para estar totalmente respaldada por la acción o ETF correspondiente y efectivo (Ondo Finance).',
             },
             {
               icon: 'clock',

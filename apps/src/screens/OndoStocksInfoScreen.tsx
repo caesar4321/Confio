@@ -278,8 +278,8 @@ export const OndoStocksInfoScreen = () => {
           </View>
           <Text style={styles.heroTitle}>Tu ahorro, conectado al mercado</Text>
           <Text style={styles.heroSubtitle}>
-            Obtén exposición económica a acciones y ETFs de EE.UU. mediante
-            tokens de Ondo Stocks, directamente desde Confío.
+            Invierte en acciones y fondos cotizados (ETFs) de EE.UU. desde
+            Confío, a través de acciones digitales emitidas por Ondo Stocks.
           </Text>
           <View style={styles.heroPills}>
             <View style={styles.heroPill}>
@@ -315,8 +315,9 @@ export const OndoStocksInfoScreen = () => {
               </Text>
             </View>
             <Text style={styles.communityIntro}>
-              Posiciones actuales agregadas, valoradas con los precios de
-              mercado de Ondo. No mostramos identidades ni billeteras.
+              Inversiones actuales de la comunidad, reunidas y calculadas con
+              los precios de mercado de Ondo. No mostramos nombres ni datos
+              personales.
             </Text>
             {communityStocks.map(asset => {
               const marketAsset = marketByTicker.get(asset.ticker);
@@ -350,10 +351,10 @@ export const OndoStocksInfoScreen = () => {
             })}
             <Text style={styles.communityFootnote}>
               {communityHolderWallets != null
-                ? `${communityHolderWallets} ${communityHolderWallets === 1 ? 'cartera con posiciones' : 'carteras con posiciones'} · `
+                ? `${communityHolderWallets} ${communityHolderWallets === 1 ? 'cuenta con acciones' : 'cuentas con acciones'} · `
                 : ''}
               {communityPositions != null
-                ? `${communityPositions} ${communityPositions === 1 ? 'posición' : 'posiciones'} · `
+                ? `${communityPositions} ${communityPositions === 1 ? 'inversión' : 'inversiones'} · `
                 : ''}
               {communityUpdatedLabel
                 ? `Datos al ${communityUpdatedLabel}.`
@@ -372,7 +373,7 @@ export const OndoStocksInfoScreen = () => {
           <ExplanationRow
             icon="repeat"
             title="2. Invierte desde tu ahorro"
-            body="La compra usa cUSD+. Antes de confirmar ves la cotización y el costo de operación."
+            body="La compra usa cUSD+. Antes de confirmar ves el precio y la comisión."
           />
           <ExplanationRow
             icon="corner-down-left"
@@ -384,27 +385,25 @@ export const OndoStocksInfoScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeadingRow}>
             <Icon name="shield" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitleInline}>
-              Qué representa el token
-            </Text>
+            <Text style={styles.sectionTitleInline}>Qué estás comprando</Text>
           </View>
           <Text style={styles.sectionBody}>
-            Los tokens de Ondo Stocks están diseñados para estar totalmente
-            respaldados por las acciones, ETFs y efectivo correspondientes, y
-            brindar una exposición económica similar al activo subyacente.
+            Cada acción digital de Ondo Stocks busca reflejar el valor de una
+            acción o ETF y está diseñada para estar totalmente respaldada por
+            las acciones, ETFs y el efectivo correspondientes.
           </Text>
           <View style={styles.clarityCard}>
             <Icon name="info" size={18} color={colors.violet} />
             <Text style={styles.clarityText}>
-              No significa que la acción tradicional quede registrada
-              directamente a tu nombre. Mantienes un token emitido por la
-              plataforma Ondo Stocks que sigue el rendimiento del activo.
+              No compras la acción tradicional directamente a tu nombre. Recibes
+              una acción digital emitida por Ondo Stocks que sigue su
+              rendimiento.
             </Text>
           </View>
           <Text style={styles.sectionBody}>
-            Los dividendos se reflejan mediante reinversión automática, netos de
-            las retenciones aplicables, en vez de pagarse como efectivo por
-            separado.
+            Si la empresa paga dividendos, se reinvierten automáticamente
+            después de las retenciones aplicables. Por eso no los recibes como
+            un pago separado.
           </Text>
         </View>
 
@@ -423,8 +422,8 @@ export const OndoStocksInfoScreen = () => {
             La mayoría de los activos opera de forma continua durante la semana.
             Algunos también pueden estar disponibles en fines de semana, según
             el activo y las condiciones del servicio. Una operación puede
-            pausarse temporalmente por mercado, eventos corporativos o controles
-            de riesgo.
+            pausarse temporalmente por las condiciones del mercado, decisiones
+            de las empresas o medidas de seguridad.
           </Text>
         </View>
 
@@ -437,12 +436,13 @@ export const OndoStocksInfoScreen = () => {
               </Text>
             </View>
             <Text style={styles.sectionBody}>
-              Las acciones digitales que compras quedan guardadas directamente
-              en tu cuenta. Puedes comprobarlas públicamente cuando quieras.
+              Tus acciones digitales quedan guardadas directamente en tu cuenta.
+              Puedes comprobarlas públicamente cuando quieras.
             </Text>
             <Text style={styles.proofExplanation}>
               Confío realiza tus compras y ventas mediante un sistema público y
-              verificable. Tus acciones permanecen en tu cuenta, no en Confío.
+              verificable. Tus acciones digitales permanecen en tu cuenta, no en
+              Confío.
             </Text>
             {/* Same chip grammar as the cUSD+ reserve links: these are proof
                 links, not actions — the visual weight of a full-width button
@@ -455,7 +455,11 @@ export const OndoStocksInfoScreen = () => {
                   activeOpacity={0.8}
                   accessibilityRole="link"
                   accessibilityLabel="Ver mis acciones">
-                  <Icon name="external-link" size={13} color={colors.primary} />
+                  <Icon
+                    name="external-link"
+                    size={13}
+                    color={colors.successText}
+                  />
                   <Text style={styles.linkText}>Ver mis acciones</Text>
                 </TouchableOpacity>
               )}
@@ -466,13 +470,17 @@ export const OndoStocksInfoScreen = () => {
                   activeOpacity={0.8}
                   accessibilityRole="button"
                   accessibilityLabel="Ver cómo funciona Confío">
-                  <Icon name="external-link" size={13} color={colors.primary} />
+                  <Icon
+                    name="external-link"
+                    size={13}
+                    color={colors.successText}
+                  />
                   <Text style={styles.linkText}>Ver cómo funciona Confío</Text>
                 </TouchableOpacity>
               )}
             </View>
             <Text style={styles.proofWarning}>
-              BscScan también puede mostrar tokens desconocidos enviados por
+              BscScan también puede mostrar otros activos digitales enviados por
               terceros. Confío solo reconoce las acciones que aparecen dentro de
               la app.
             </Text>
@@ -486,9 +494,10 @@ export const OndoStocksInfoScreen = () => {
           </View>
           <Text style={styles.riskBody}>
             El valor puede subir o bajar y podrías perder dinero. También
-            existen riesgos del emisor, custodia, liquidez, tecnología y
-            regulación. La disponibilidad depende de tu jurisdicción y de los
-            proveedores del servicio. Esto no es asesoría financiera.
+            existen riesgos relacionados con quien las emite, dónde se guardan,
+            qué tan fácil es venderlas, la tecnología y las reglas de cada país.
+            La disponibilidad depende de tu país y de los servicios necesarios.
+            Esto no es asesoría financiera.
           </Text>
         </View>
 
@@ -505,7 +514,7 @@ export const OndoStocksInfoScreen = () => {
             activeOpacity={0.8}
             accessibilityRole="link"
             accessibilityLabel="Más información oficial sobre Ondo Stocks">
-            <Icon name="external-link" size={13} color={colors.primary} />
+            <Icon name="external-link" size={13} color={colors.successText} />
             <Text style={styles.linkText}>
               Información oficial de Ondo Stocks
             </Text>
@@ -727,6 +736,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
+  // Fill and label are one step darker than the cUSD+ page shipped with:
+  // primarySoft (#ECFDF5) on a neutral (#F9FAFB) card is a 1.01:1 edge — the
+  // chip was invisible — and mint-on-mint label text was 1.82:1. primaryLight
+  // + successText keeps the chip shape but clears 4.8:1. ProtectedSavingsScreen
+  // carries the identical pair so the two pages stay one design.
   linkButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -734,12 +748,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.primaryLight,
   },
   linkText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.successText,
   },
   proofWarning: {
     marginTop: 10,

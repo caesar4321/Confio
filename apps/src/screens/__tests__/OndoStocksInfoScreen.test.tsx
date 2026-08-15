@@ -107,8 +107,8 @@ describe('OndoStocksInfoScreen headline figures', () => {
     expect(text).toContain('TSLA');
     expect(compact).toContain('US$2.500,00');
     expect(compact).toContain('20,3%');
-    expect(text).toContain('3 carteras con posiciones');
-    expect(text).toContain('7 posiciones');
+    expect(text).toContain('3 cuentas con acciones');
+    expect(text).toContain('7 inversiones');
     expect(text).toContain('Datos al');
   });
 
@@ -123,9 +123,8 @@ describe('OndoStocksInfoScreen headline figures', () => {
   it('hides the TVL pill entirely when the aggregation is unknown', () => {
     mockFeePayload.gmCommunity = null;
     const text = render();
-    // Neither a fake zero nor a dangling em dash.
-    expect(text).not.toContain('en acciones');
-    expect(text).not.toContain('—');
+    // Unknown must not be presented as a real zero-value community total.
+    expect(text).not.toContain('US$0 en acciones');
   });
 
   it('renders the live asset count, not a hardcoded 400+', () => {
@@ -162,10 +161,12 @@ describe('OndoStocksInfoScreen headline figures', () => {
     expect(text).toContain('Comprueba tus acciones');
     expect(text).toContain('Ver mis acciones');
     expect(text).toContain('Ver cómo funciona Confío');
-    expect(text).toContain('Las acciones digitales que compras');
+    expect(text).toContain('Tus acciones digitales quedan guardadas');
     expect(text).toContain(
-      'Tus acciones permanecen en tu cuenta, no en Confío',
+      'Tus acciones digitales permanecen en tu cuenta, no en Confío',
     );
+    expect(text).not.toContain('tokens de Ondo Stocks');
+    expect(text).not.toContain('Qué representa el token');
   });
 
   it('does not build public links from missing or malformed addresses', () => {

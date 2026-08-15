@@ -8,18 +8,18 @@ import {
   Linking,
   Image,
 } from 'react-native';
-import { Header } from '../navigation/Header';
+import {Header} from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { gql, useQuery } from '@apollo/client';
-import { colors } from '../config/theme';
-import { useCurrency } from '../hooks/useCurrency';
-import { useRampCountry } from '../hooks/useRampCountry';
-import { useNumberFormat } from '../utils/numberFormatting';
-import { MainStackParamList } from '../types/navigation';
-import { GET_STATS_SUMMARY } from '../apollo/queries';
-import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
+import {useNavigation} from '@react-navigation/native';
+import {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {gql, useQuery} from '@apollo/client';
+import {colors} from '../config/theme';
+import {useCurrency} from '../hooks/useCurrency';
+import {useRampCountry} from '../hooks/useRampCountry';
+import {useNumberFormat} from '../utils/numberFormatting';
+import {MainStackParamList} from '../types/navigation';
+import {GET_STATS_SUMMARY} from '../apollo/queries';
+import {CUSD_RESERVE_PERA_URL} from '../config/algorand';
 
 // cUSD+ reserve verification chain (BSC vault deployed 2026-07-10):
 // vault token page → live USDY holdings → Ondo's issuer page → third-party
@@ -57,7 +57,7 @@ const formatWhole = (n: number | null | undefined, sep: string) => {
   if (n == null) return '—';
   const r = Math.round(n);
   try {
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+    return new Intl.NumberFormat('en-US', {maximumFractionDigits: 0})
       .format(r)
       .replace(/,/g, sep);
   } catch {
@@ -66,12 +66,13 @@ const formatWhole = (n: number | null | undefined, sep: string) => {
 };
 
 export const ProtectedSavingsScreen = () => {
-  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   // Same guard as Home: blocked countries go to Efectivo, not into a ramp
   // flow their country cannot complete.
-  const { navigateToRampOrEfectivo } = useRampCountry();
-  const { currency } = useCurrency();
-  const { data } = useQuery(GET_STATS_SUMMARY, {
+  const {navigateToRampOrEfectivo} = useRampCountry();
+  const {currency} = useCurrency();
+  const {data} = useQuery(GET_STATS_SUMMARY, {
     fetchPolicy: 'cache-and-network',
     nextFetchPolicy: 'cache-first',
   });
@@ -85,8 +86,8 @@ export const ProtectedSavingsScreen = () => {
   const usdyReserve = (s as any)?.usdyReserve ?? 0;
   const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);
 
-  const { formatNumber } = useNumberFormat();
-  const { data: apyData } = useQuery(GET_APY_SPLIT, {
+  const {formatNumber} = useNumberFormat();
+  const {data: apyData} = useQuery(GET_APY_SPLIT, {
     fetchPolicy: 'cache-and-network',
     nextFetchPolicy: 'cache-first',
   });
@@ -98,7 +99,7 @@ export const ProtectedSavingsScreen = () => {
     (apyData?.cusdPlusSummary?.cusdDepositsPaused ?? true) &&
     (apyData?.cusdPlusSummary?.savingsEnabled ?? true);
   const apyLive = grossApy > 0 && netApy > 0;
-  const pct = (v: number) => `~${formatNumber(v, { maximumFractionDigits: 1 })}%`;
+  const pct = (v: number) => `~${formatNumber(v, {maximumFractionDigits: 1})}%`;
 
   const openUrl = (url?: string | null) => {
     if (!url) return;
@@ -119,11 +120,16 @@ export const ProtectedSavingsScreen = () => {
         {/* Hero */}
         <View style={styles.hero}>
           <View style={styles.heroLogoRow}>
-            <Image source={cUSDPlusLogo} style={styles.heroLogo} resizeMode="contain" />
+            <Image
+              source={cUSDPlusLogo}
+              style={styles.heroLogo}
+              resizeMode="contain"
+            />
           </View>
           <Text style={styles.heroTitle}>Confío Dollar+</Text>
           <Text style={styles.heroSubtitle}>
-            Tus dólares digitales, 100% respaldados y verificables en blockchain.
+            Tus dólares digitales, totalmente respaldados y verificables
+            públicamente.
           </Text>
           <View style={styles.heroPillsRow}>
             <View style={styles.heroStatPill}>
@@ -140,7 +146,8 @@ export const ProtectedSavingsScreen = () => {
             </View>
           </View>
           <Text style={styles.heroFootnote}>
-            cUSD+: respaldado por USDY (Tesoro EE.UU.) · cUSD: respaldado por USDC
+            cUSD+: respaldado por USDY (Tesoro EE.UU.) · cUSD: respaldado por
+            USDC
           </Text>
         </View>
 
@@ -152,11 +159,11 @@ export const ProtectedSavingsScreen = () => {
             <Text style={styles.sectionTitle}>¿Qué es cUSD+?</Text>
           </View>
           <Text style={styles.sectionBody}>
-            <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>{' '}
-            es tu dólar para ahorrar: cada dólar está respaldado 100% por
-            USDY, un token de Ondo Finance respaldado por bonos del Tesoro de
-            EE.UU., y genera rendimiento todos los días. La blockchain permite
-            comprobar públicamente que el respaldo existe.
+            <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text> es
+            tu dólar para ahorrar: cada dólar está respaldado 100% por USDY, un
+            activo digital de Ondo Finance respaldado por bonos del Tesoro de
+            EE.UU., y genera rendimiento todos los días. Los registros públicos
+            permiten comprobar que el respaldo existe.
           </Text>
           <Text style={styles.sectionBody}>
             ¿Y <Text style={styles.inlineEmphasis}>cUSD</Text>? Sigue en
@@ -174,57 +181,58 @@ export const ProtectedSavingsScreen = () => {
           </View>
           <Text style={styles.sectionBody}>
             No tienes que confiar en nuestra palabra. El respaldo de cUSD se
-            verifica en <Text style={styles.inlineEmphasis}>Pera Explorer</Text>{' '}
-            (red Algorand) y el de cUSD+ en{' '}
+            puede comprobar en{' '}
+            <Text style={styles.inlineEmphasis}>Pera Explorer</Text> (red
+            Algorand) y el de cUSD+ en{' '}
             <Text style={styles.inlineEmphasis}>BscScan</Text> (red BNB Chain).
-            Cualquier persona en el mundo puede consultar los saldos en tiempo
+            Cualquier persona puede consultar los montos y movimientos en tiempo
             real.
           </Text>
           <View style={styles.linksRow}>
             <TouchableOpacity
-              style={[styles.linkButton, !s?.cusdAssetPeraUrl && styles.linkButtonDisabled]}
+              style={[
+                styles.linkButton,
+                !s?.cusdAssetPeraUrl && styles.linkButtonDisabled,
+              ]}
               onPress={() => openUrl(s?.cusdAssetPeraUrl)}
-              disabled={!s?.cusdAssetPeraUrl}
-            >
+              disabled={!s?.cusdAssetPeraUrl}>
               <Icon
                 name="external-link"
                 size={13}
-                color={s?.cusdAssetPeraUrl ? colors.primary : colors.text.light}
+                color={
+                  s?.cusdAssetPeraUrl ? colors.successText : colors.text.light
+                }
               />
               <Text
                 style={[
                   styles.linkText,
                   !s?.cusdAssetPeraUrl && styles.linkTextDisabled,
-                ]}
-              >
+                ]}>
                 Ver cUSD en circulación
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => openUrl(CUSD_RESERVE_PERA_URL)}
-            >
-              <Icon name="external-link" size={13} color={colors.primary} />
+              onPress={() => openUrl(CUSD_RESERVE_PERA_URL)}>
+              <Icon name="external-link" size={13} color={colors.successText} />
               <Text style={styles.linkText}>Ver respaldo USDC</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => openUrl(CUSD_PLUS_TOKEN_BSCSCAN_URL)}
-            >
-              <Icon name="external-link" size={13} color={colors.primary} />
+              onPress={() => openUrl(CUSD_PLUS_TOKEN_BSCSCAN_URL)}>
+              <Icon name="external-link" size={13} color={colors.successText} />
               <Text style={styles.linkText}>Ver cUSD+ en circulación</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => openUrl(CUSD_PLUS_VAULT_ASSETS_URL)}
-            >
-              <Icon name="external-link" size={13} color={colors.primary} />
+              onPress={() => openUrl(CUSD_PLUS_VAULT_ASSETS_URL)}>
+              <Icon name="external-link" size={13} color={colors.successText} />
               <Text style={styles.linkText}>Ver respaldo USDY</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.tipText}>
-            Tip: En cada explorador puedes ver la dirección de respaldo, su
-            balance y cada transacción que entra o sale.
+            En cada página puedes ver dónde se guarda la reserva, cuánto
+            contiene y cada movimiento que entra o sale.
           </Text>
         </View>
 
@@ -233,7 +241,9 @@ export const ProtectedSavingsScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="trending-up" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Tu rendimiento, todos los días</Text>
+            <Text style={styles.sectionTitle}>
+              Tu rendimiento, todos los días
+            </Text>
           </View>
 
           {/* Rates are LIVE from the server (Ondo's on-chain oracle) when
@@ -241,22 +251,36 @@ export const ProtectedSavingsScreen = () => {
               says so in the title. */}
           <View style={styles.splitCard}>
             <Text style={styles.splitTitle}>
-              {apyLive ? 'Cómo funciona cUSD+ (hoy)' : 'Cómo funciona cUSD+ (ejemplo)'}
+              {apyLive
+                ? 'Cómo funciona cUSD+ (hoy)'
+                : 'Cómo funciona cUSD+ (ejemplo)'}
             </Text>
             <View style={styles.splitRow}>
-              <View style={[styles.splitDot, { backgroundColor: colors.text.light }]} />
-              <Text style={styles.splitLabel}>Rendimiento de los bonos del Tesoro</Text>
-              <Text style={styles.splitValue}>{apyLive ? pct(grossApy) : '~3.5%'}</Text>
+              <View
+                style={[styles.splitDot, {backgroundColor: colors.text.light}]}
+              />
+              <Text style={styles.splitLabel}>
+                Rendimiento de los bonos del Tesoro
+              </Text>
+              <Text style={styles.splitValue}>
+                {apyLive ? pct(grossApy) : '~3.5%'}
+              </Text>
             </View>
             <View style={styles.splitRow}>
-              <View style={[styles.splitDot, { backgroundColor: colors.violet }]} />
-              <Text style={styles.splitLabel}>Comisión Confío (15% del rendimiento)</Text>
+              <View
+                style={[styles.splitDot, {backgroundColor: colors.violet}]}
+              />
+              <Text style={styles.splitLabel}>
+                Comisión Confío (15% del rendimiento)
+              </Text>
               <Text style={styles.splitValue}>
                 {apyLive ? pct(grossApy - netApy) : '~0.5%'}
               </Text>
             </View>
             <View style={styles.splitRow}>
-              <View style={[styles.splitDot, { backgroundColor: colors.primary }]} />
+              <View
+                style={[styles.splitDot, {backgroundColor: colors.primary}]}
+              />
               <Text style={[styles.splitLabel, styles.splitLabelStrong]}>
                 Para ti, todos los días
               </Text>
@@ -274,25 +298,26 @@ export const ProtectedSavingsScreen = () => {
 
           <TouchableOpacity
             style={styles.savingsLink}
-            onPress={() => navigation.navigate('AccountDetail', {
-                    accountType: 'cusd_plus',
-                    accountName: 'Confío Dollar+',
-                    accountSymbol: '$cUSD+',
-                    // Live figures come from the portfolio inside the screen;
-                    // this is only the first paint.
-                    accountBalance: '0.00',
-                  })}
-            activeOpacity={0.85}
-          >
+            onPress={() =>
+              navigation.navigate('AccountDetail', {
+                accountType: 'cusd_plus',
+                accountName: 'Confío Dollar+',
+                accountSymbol: '$cUSD+',
+                // Live figures come from the portfolio inside the screen;
+                // this is only the first paint.
+                accountBalance: '0.00',
+              })
+            }
+            activeOpacity={0.85}>
             <Text style={styles.savingsLinkText}>Conocer Confío Dollar+</Text>
             <Icon name="arrow-right" size={15} color={colors.primary} />
           </TouchableOpacity>
 
           <Text style={styles.disclaimer}>
             * Cifras ilustrativas: la tasa varía día a día con los bonos del
-            Tesoro y no es fija ni garantizada. El respaldo USDY es
-            verificable públicamente, igual que el de cUSD. Esto no constituye
-            asesoría de inversión.
+            Tesoro y no es fija ni garantizada. El respaldo USDY es verificable
+            públicamente, igual que el de cUSD. Esto no constituye asesoría de
+            inversión.
           </Text>
         </View>
 
@@ -314,45 +339,43 @@ export const ProtectedSavingsScreen = () => {
               The short one-liners elsewhere in the app are abbreviations of
               this sentence and must never contradict it. */}
           <Text style={styles.sectionBody}>
-            <Text style={styles.inlineEmphasis}>USDY</Text> es un token de{' '}
-            <Text style={styles.inlineEmphasis}>Ondo Finance</Text> respaldado
-            por bonos del Tesoro de EE.UU. de corto plazo, fondos de valores
-            gubernamentales e instrumentos de efectivo. Esos activos pagan
-            interés todos los días — ese interés es el rendimiento que recibe
-            tu cUSD+. (USDC, el respaldo de cUSD, es el dólar digital de
-            Circle, con auditorías públicas mensuales.)
+            <Text style={styles.inlineEmphasis}>USDY</Text> es un activo digital
+            de <Text style={styles.inlineEmphasis}>Ondo Finance</Text>{' '}
+            respaldado por bonos del Tesoro de EE.UU. de corto plazo, fondos que
+            invierten en deuda del gobierno e instrumentos similares al
+            efectivo. Esos activos pagan interés todos los días — ese interés es
+            el rendimiento que recibe tu cUSD+. (USDC, el respaldo de cUSD, es
+            el dólar digital de Circle, con auditorías públicas mensuales.)
           </Text>
           <Text style={styles.sectionBody}>
-            Las reservas de USDY se verifican por terceros independientes:
-            Ondo publica reportes de atestación diarios y mensuales en su
-            página oficial.
+            Empresas independientes revisan las reservas de USDY. Ondo publica
+            reportes diarios y mensuales en su página oficial.
           </Text>
           <View style={styles.linksRow}>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => openUrl(ONDO_USDY_URL)}
-            >
-              <Icon name="external-link" size={13} color={colors.primary} />
+              onPress={() => openUrl(ONDO_USDY_URL)}>
+              <Icon name="external-link" size={13} color={colors.successText} />
               <Text style={styles.linkText}>USDY en Ondo Finance</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => openUrl(USDY_ATTESTATION_DAILY_URL)}
-            >
-              <Icon name="external-link" size={13} color={colors.primary} />
-              <Text style={styles.linkText}>Atestación diaria</Text>
+              onPress={() => openUrl(USDY_ATTESTATION_DAILY_URL)}>
+              <Icon name="external-link" size={13} color={colors.successText} />
+              <Text style={styles.linkText}>Reporte diario de respaldo</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
-              onPress={() => openUrl(USDY_ATTESTATION_MONTHLY_URL)}
-            >
-              <Icon name="external-link" size={13} color={colors.primary} />
-              <Text style={styles.linkText}>Atestación mensual</Text>
+              onPress={() => openUrl(USDY_ATTESTATION_MONTHLY_URL)}>
+              <Icon name="external-link" size={13} color={colors.successText} />
+              <Text style={styles.linkText}>Reporte mensual de respaldo</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.chainCard}>
             <Text style={styles.chainLine}>cUSD → USDC → dólares reales</Text>
-            <Text style={styles.chainLine}>cUSD+ → USDY → bonos del Tesoro de EE.UU.</Text>
+            <Text style={styles.chainLine}>
+              cUSD+ → USDY → bonos del Tesoro de EE.UU.
+            </Text>
           </View>
         </View>
 
@@ -382,11 +405,10 @@ export const ProtectedSavingsScreen = () => {
             style={styles.ctaButton}
             onPress={() =>
               steerToSavings
-                ? navigateToRampOrEfectivo('TopUp', { destination: 'cusd_plus' })
+                ? navigateToRampOrEfectivo('TopUp', {destination: 'cusd_plus'})
                 : navigateToRampOrEfectivo('TopUp')
             }
-            activeOpacity={0.9}
-          >
+            activeOpacity={0.9}>
             <Icon name="dollar-sign" size={20} color={colors.white} />
             <Text style={styles.ctaText}>Recargar</Text>
           </TouchableOpacity>
@@ -406,16 +428,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.white,
   },
-  scroll: { flex: 1 },
+  scroll: {flex: 1},
   hero: {
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 24,
     paddingBottom: 16,
   },
-  heroLogoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  heroLogo: { width: 64, height: 64 },
-  heroLogoOverlap: { marginLeft: -14 },
+  heroLogoRow: {flexDirection: 'row', alignItems: 'center', marginBottom: 12},
+  heroLogo: {width: 64, height: 64},
+  heroLogoOverlap: {marginLeft: -14},
   heroTitle: {
     fontSize: 22,
     fontWeight: '700',
@@ -491,6 +513,8 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
+  // See OndoStocksInfoScreen: primarySoft on the neutral card is a 1.01:1
+  // edge and the mint label was 1.82:1, so the chips read as invisible text.
   linkButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -498,7 +522,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.primaryLight,
   },
   linkButtonDisabled: {
     backgroundColor: colors.neutralDark,
@@ -506,7 +530,7 @@ const styles = StyleSheet.create({
   linkText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.successText,
   },
   linkTextDisabled: {
     color: colors.text.light,
@@ -617,9 +641,13 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 10,
   },
-  partnerInlineText: { fontSize: 12, color: colors.text.light },
-  partnerInlineLogo: { width: 15, height: 15, borderRadius: 4 },
-  partnerInlineBrand: { fontSize: 12, fontWeight: '700', color: colors.text.secondary },
+  partnerInlineText: {fontSize: 12, color: colors.text.light},
+  partnerInlineLogo: {width: 15, height: 15, borderRadius: 4},
+  partnerInlineBrand: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text.secondary,
+  },
   savingsLink: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -630,7 +658,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     marginBottom: 10,
   },
-  savingsLinkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  savingsLinkText: {fontSize: 14, fontWeight: '700', color: colors.primary},
   chainCard: {
     backgroundColor: colors.white,
     borderRadius: 10,
@@ -671,5 +699,5 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
   },
-  bottomPadding: { height: 32 },
+  bottomPadding: {height: 32},
 });

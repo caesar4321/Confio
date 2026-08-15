@@ -269,10 +269,11 @@ export const StocksListScreen = () => {
             {/* Attribution lives in the list header (above the fold); the
                 footer keeps only the risk disclaimer + a closing mention. */}
             <Text style={styles.footerDisclaimer}>
-              Acciones tokenizadas respaldadas 1:1 por acciones reales en EE.UU. Los dividendos
-              se reinvierten automáticamente. Pueden subir o bajar de valor — invierte solo lo
-              que puedas mantener. Disponible en jurisdicciones habilitadas. En alianza con
-              Ondo Finance.
+              Acciones digitales de Ondo Stocks diseñadas para estar totalmente
+              respaldadas. Los dividendos se reinvierten automáticamente.
+              Pueden subir o bajar de valor — invierte solo lo que puedas
+              mantener. Disponible en jurisdicciones habilitadas. En alianza
+              con Ondo Finance.
             </Text>
           </View>
         }
