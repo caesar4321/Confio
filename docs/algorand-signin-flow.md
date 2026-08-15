@@ -110,10 +110,14 @@ The expensive safety work does not run during login:
 4. Ordinary `web3AuthLogin` reads this durable row only. Ineligible, retryable,
    and not-yet-assessed accounts continue through normal V1 recovery; an
    eligible account receives a short-lived, fresh-Google-auth-bound challenge
-   and grant.
-5. The client derives the replacement wallet, writes and verifies its Google
-   Drive backup, signs the challenge with the replacement BSC key, and calls
-   `completeWalletReenrollment`.
+   and grant. That grant is only permission to repair; it does not trigger a
+   replacement by itself.
+5. The client first probes the existing subject-bound V2 secret without cloud
+   I/O or generation, then reproduces V1 with the request-scoped backend token.
+   If either wallet matches the server anchor, normal login continues and no
+   wallet is created. Only a proven address collision may consume the grant,
+   generate or reuse the replacement V2 secret, verify its Google Drive backup,
+   sign with its BSC key, and call `completeWalletReenrollment`.
 6. Completion checks only Algorand activity after the saved snapshot, rechecks
    database reservations under the account row lock, and separately proves an
    old BSC anchor empty when it differs from the replacement. The address swap
@@ -123,6 +127,11 @@ The completion mutation is retry-safe. If a response is lost after commit, the
 same replacement BSC address returns success. If new Algorand activity, a
 pending inbound transfer, BSC balance/history, or a server-side reservation is
 found, the old address remains anchored and the repair is refused.
+
+This flow covers legacy accounts with a server Algorand anchor. A migrated
+BSC-only V2 account whose local and Drive secret cannot reproduce its server
+BSC address remains fail-closed; automatic BSC-only rotation is intentionally
+outside this repair path.
 
 `prepareWalletReenrollment` remains as a compatibility preflight for clients
 and servers deployed during the transition. Current login responses normally

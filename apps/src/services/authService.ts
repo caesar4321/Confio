@@ -20,6 +20,13 @@ import { ApolloClient } from '@apollo/client';
 import { AccountManager, AccountContext } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
+import {
+  decideWalletReenrollmentAfterRestore,
+  selectRestoredAddressForCollision,
+  selectLegacyAddressForServer,
+} from './walletReenrollmentDecision';
+
+const LEGACY_ALGOD_INSPECTION_TIMEOUT_MS = 8_000;
 
 const COMPLETE_WALLET_REENROLLMENT = gql`
   mutation CompleteWalletReenrollment(
@@ -409,6 +416,7 @@ type CustomJwtPayload = {
 
 type LegacyMigrationInspection = {
   legacyAddress: string | null;
+  derivedLegacyAddress: string | null;
   inspectionSucceeded: boolean;
 };
 
@@ -481,10 +489,12 @@ export class AuthService {
     oauthSubject: string,
     aud: string,
     provider: 'google' | 'apple',
-    accountContext: AccountContext
+    accountContext: AccountContext,
+    expectedServerAddress?: string | null,
+    pinnedAuthToken?: string,
   ): Promise<LegacyMigrationInspection> {
     if (accountContext.type !== 'personal') {
-      return { legacyAddress: null, inspectionSucceeded: true };
+      return { legacyAddress: null, derivedLegacyAddress: null, inspectionSucceeded: true };
     }
 
     try {
@@ -497,20 +507,47 @@ export class AuthService {
         provider,
         accountContext.type,
         accountContext.index,
-        accountContext.businessId
+        accountContext.businessId,
+        pinnedAuthToken,
       );
+
+      // A reproducible server anchor is already the answer: there is no
+      // collision and therefore no replacement to authorize. Avoid putting an
+      // Algod request back on the ordinary matching-wallet login path.
+      if (expectedServerAddress && legacyWallet.address === expectedServerAddress) {
+        return {
+          legacyAddress: legacyWallet.address,
+          derivedLegacyAddress: legacyWallet.address,
+          inspectionSucceeded: true,
+        };
+      }
 
       const algosdk = await import('algosdk');
       const algod = new algosdk.Algodv2('', this.getPublicAlgodServer(), '');
 
       let info: any;
+      let inspectionTimeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        info = await algod.accountInformation(legacyWallet.address).do();
+        info = await Promise.race([
+          algod.accountInformation(legacyWallet.address).do(),
+          new Promise<never>((_, reject) => {
+            inspectionTimeout = setTimeout(
+              () => reject(new Error('Legacy Algod inspection timed out')),
+              LEGACY_ALGOD_INSPECTION_TIMEOUT_MS,
+            );
+          }),
+        ]);
       } catch {
         // Algod unreachable: we could NOT verify whether the legacy wallet
         // still holds value, so this must count as a failed inspection —
         // callers guard V2 derivation on it for unmigrated accounts.
-        return { legacyAddress: null, inspectionSucceeded: false };
+        return {
+          legacyAddress: null,
+          derivedLegacyAddress: legacyWallet.address,
+          inspectionSucceeded: false,
+        };
+      } finally {
+        if (inspectionTimeout) clearTimeout(inspectionTimeout);
       }
 
       const relevantAssets = (info.assets || []).filter((asset: any) => {
@@ -531,13 +568,21 @@ export class AuthService {
           relevantAssetIds: relevantAssets.map((asset: any) => asset['asset-id']),
           spendableAlgo,
         });
-        return { legacyAddress: legacyWallet.address, inspectionSucceeded: true };
+        return {
+          legacyAddress: legacyWallet.address,
+          derivedLegacyAddress: legacyWallet.address,
+          inspectionSucceeded: true,
+        };
       }
 
-      return { legacyAddress: null, inspectionSucceeded: true };
+      return {
+        legacyAddress: null,
+        derivedLegacyAddress: legacyWallet.address,
+        inspectionSucceeded: true,
+      };
     } catch (error) {
       console.warn('[AuthService] Failed to inspect legacy migration state; blocking direct V2 derivation until migration state is verified:', error);
-      return { legacyAddress: null, inspectionSucceeded: false };
+      return { legacyAddress: null, derivedLegacyAddress: null, inspectionSucceeded: false };
     }
   }
 
@@ -1172,23 +1217,14 @@ export class AuthService {
         }
       }
 
-      if (authData.walletReenrollmentAllowed) {
-        // Do not discard a valid prior session for a local prerequisite error.
-        // These values are already known before any destructive work starts.
-        if (!driveAccessToken) {
-          throw new Error(
-            'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
-          );
-        }
-        if (!authData.walletReenrollmentChallenge || !authData.walletReenrollmentGrant) {
-          throw new Error(
-            'No pudimos autorizar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
-          );
-        }
-        await invalidateBackendSession('before wallet reenrollment');
-      }
+      // This is only a safety offer. It must never trigger wallet creation by
+      // itself. Normal restoration below first has to prove an actual address
+      // collision before the offer may be consumed.
+      const walletReenrollmentOfferAvailable = !!authData.walletReenrollmentAllowed;
 
+      let backendTokensPersisted = false;
       const persistBackendTokens = async () => {
+        if (backendTokensPersisted) return;
         if (!authData.accessToken) {
           console.error('No auth tokens received from Web3Auth login');
           throw new Error('No auth tokens received from server');
@@ -1235,6 +1271,7 @@ export class AuthService {
               throw new Error('Failed to verify token storage in Keychain');
             }
           }
+          backendTokensPersisted = true;
         } catch (error) {
           console.error('Error storing or verifying tokens:', error);
           throw error;
@@ -1244,7 +1281,7 @@ export class AuthService {
       // A reenrollment JWT is request-scoped until the destructive transition
       // commits. Persisting it first lets a hard-killed app cold-start into
       // Main and skip the login response that carries the reenrollment grant.
-      if (!authData.walletReenrollmentAllowed) {
+      if (!walletReenrollmentOfferAvailable) {
         await persistBackendTokens();
       }
 
@@ -1254,8 +1291,15 @@ export class AuthService {
       // address contains sponsor funding + zero-value opt-ins and no user
       // activity. Do not retire it until the replacement has a verified Drive
       // backup and its BSC address is ready to bind atomically.
-      if (authData.walletReenrollmentAllowed) {
+      const completeWalletReenrollmentAfterCollision = async (): Promise<string> => {
+        if (!walletReenrollmentOfferAvailable) {
+          throw new Error('Wallet reenrollment was not authorized for this account.');
+        }
+        let sessionInvalidated = false;
         try {
+          // Do not discard a valid prior session until normal wallet recovery
+          // has already demonstrated the collision and all local prerequisites
+          // for the repair are present.
           if (!driveAccessToken) {
             throw new Error(
               'Para recuperar esta cuenta de forma segura, vuelve a iniciar sesión y activa el respaldo en Google Drive.'
@@ -1266,6 +1310,8 @@ export class AuthService {
               'No pudimos autorizar la recuperación segura de tu billetera. Vuelve a iniciar sesión.'
             );
           }
+          await invalidateBackendSession('before wallet reenrollment');
+          sessionInvalidated = true;
 
           onProgress?.('Protegiendo tu nueva billetera en Google Drive...');
           const {
@@ -1333,20 +1379,21 @@ export class AuthService {
           }
           await persistBackendTokens();
           console.log('[AuthService] Wallet reenrollment completed with verified Drive backup.');
+          return replacementWallet.address;
         } catch (reenrollmentError) {
-          // The JWT was stored above so the completion mutation could
-          // authenticate. Do not leave that partial session available to the
-          // cold-start path: it would enter Main and generic BSC registration
-          // could fill bsc_address while the legacy Algorand anchor remains,
-          // permanently suppressing reenrollment eligibility.
-          try {
-            await invalidateBackendSession('after wallet reenrollment failure');
-          } catch (invalidateError) {
-            console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
+          // The fresh JWT remains request-scoped until completion. Do not leave
+          // any partial or older session available to the cold-start path: it
+          // could enter Main and skip collision handling on restart.
+          if (sessionInvalidated) {
+            try {
+              await invalidateBackendSession('after wallet reenrollment failure');
+            } catch (invalidateError) {
+              console.error('[AuthService] Failed to invalidate partial reenrollment session:', invalidateError);
+            }
           }
           throw reenrollmentError;
         }
-      }
+      };
 
       // ----------------------------------------------------------------------
       // NATIVE V2 CHECK:
@@ -1362,13 +1409,14 @@ export class AuthService {
       // would strand the funds on the original address.
       const serverBscAddress = authData.user?.bscAddress || null;
       const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddress);
+      let verifiedV2AlgorandAddress: string | null = null;
       if (authData.isKeylessMigrated) {
         console.log('[AuthService] ⚡️ User is V2 Native/Migrated. Verifying Master Secret...', {
           isNewUser: !!authData.isNewUser,
           hasServerAlgorandAddress: !!serverAlgorandAddress,
           allowV2SecretGeneration,
         });
-        const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+        const { deriveV2AddressPure, getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
         // A brand-new account has no Drive wallet to restore. Create its local
         // secret immediately and move the network upload to BackupCompletion;
         // making an empty Drive scan/upload part of authentication made first
@@ -1378,7 +1426,7 @@ export class AuthService {
           ? driveAccessToken
           : undefined;
         try {
-          await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
+          const verifiedSecret = await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
             allowGenerate: allowV2SecretGeneration,
             provider: 'google',
             expectedAddress: serverAlgorandAddress,
@@ -1387,6 +1435,10 @@ export class AuthService {
             // skipped by the verified-local fast path) and the server must not
             // be told the backup is verified in that case.
             onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
+          });
+          verifiedV2AlgorandAddress = deriveV2AddressPure(verifiedSecret, {
+            accountType: 'personal',
+            accountIndex: 0,
           });
           console.log('[AuthService] ✅ V2 Master Secret verified/restored.');
         } catch (v2Err) {
@@ -1399,12 +1451,16 @@ export class AuthService {
             }
 
             try {
-              await getOrCreateMasterSecret(googleSubject, recoveryDriveToken, {
+              const recoveredSecret = await getOrCreateMasterSecret(googleSubject, recoveryDriveToken, {
                 allowGenerate: false,
                 provider: 'google',
                 expectedAddress: serverAlgorandAddress,
                 expectedEvmAddress: serverBscAddress,
                 onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
+              });
+              verifiedV2AlgorandAddress = deriveV2AddressPure(recoveredSecret, {
+                accountType: 'personal',
+                accountIndex: 0,
               });
               console.log('[AuthService] ✅ Google V2 wallet recovered from Drive.');
             } catch (driveRecoveryErr: any) {
@@ -1438,91 +1494,160 @@ export class AuthService {
       // their funds to BSC. Algorand is deprecated — new users are BSC-only
       // and never generate an Algorand address.
       let algorandAddress: string | null = null;
+      let walletReenrollmentCompleted = false;
       if (serverAlgorandAddress) {
         const googleContext: AccountContext = { type: 'personal', index: 0 };
         const googleIss = 'https://accounts.google.com';
         const googleAud = GOOGLE_CLIENT_IDS.production.web;
-        const legacyInspection = await this.getLegacyAddressIfMigrationPending(
-          googleIss,
-          googleSubject,
-          googleAud,
-          'google',
-          googleContext
+        // An existing local V2 wallet is the normal client wallet even when a
+        // legacy server row was never marked migrated. Probe it without cloud
+        // I/O or generation so a real V2/server collision cannot be hidden by
+        // a reproducible V1 fallback.
+        if (!verifiedV2AlgorandAddress) {
+          const {
+            deriveV2AddressPure,
+            getExistingLocalV2MasterSecret,
+          } = await import('./secureDeterministicWallet');
+          const existingV2Secret = await getExistingLocalV2MasterSecret(googleSubject);
+          if (existingV2Secret) {
+            verifiedV2AlgorandAddress = deriveV2AddressPure(existingV2Secret, {
+              accountType: 'personal',
+              accountIndex: 0,
+            });
+          }
+        }
+
+        const v2AlreadyMatchesServer = verifiedV2AlgorandAddress === serverAlgorandAddress;
+        const legacyInspection = v2AlreadyMatchesServer
+          ? {
+              legacyAddress: null,
+              derivedLegacyAddress: null,
+              inspectionSucceeded: true,
+            }
+          : await this.getLegacyAddressIfMigrationPending(
+              googleIss,
+              googleSubject,
+              googleAud,
+              'google',
+              googleContext,
+              serverAlgorandAddress,
+              authData.accessToken,
+            );
+        const legacyAddressWithValue =
+          legacyInspection.derivedLegacyAddress === serverAlgorandAddress
+            ? null
+            : legacyInspection.legacyAddress;
+        const legacyAddress = selectLegacyAddressForServer(
+          serverAlgorandAddress,
+          legacyInspection.derivedLegacyAddress,
+          legacyAddressWithValue,
         );
-        const legacyAddress = legacyInspection.legacyAddress;
 
         if (!legacyInspection.inspectionSucceeded && !authData.isKeylessMigrated) {
           throw new Error('No pudimos verificar el estado de migración de tu billetera anterior. Vuelve a intentar para evitar usar una dirección nueva antes de completar la migración.');
         }
 
         const algorandService = (await import('./algorandService')).default;
-        algorandAddress = legacyAddress
-          ? legacyAddress
-          : await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
-        if (legacyAddress) {
-          await algorandService.setCurrentAddress(legacyAddress);
+        let restoredAlgorandAddress = selectRestoredAddressForCollision({
+          serverAlgorandAddress,
+          existingV2Address: verifiedV2AlgorandAddress,
+          selectedLegacyAddress: legacyAddress,
+          derivedLegacyAddress: legacyInspection.derivedLegacyAddress,
+          reenrollmentOffered: walletReenrollmentOfferAvailable,
+        });
+        if (!restoredAlgorandAddress) {
+          // Every safe path above is read-only and must yield either an
+          // existing V2 address or the explicit V1 derivation. Never fall back
+          // to a stateful cache-writing restore before the collision decision.
+          throw new Error(
+            'No pudimos reproducir la billetera registrada de esta cuenta. Vuelve a intentarlo.',
+          );
         }
-        console.log('Algorand wallet restored:', algorandAddress);
+        console.log('Algorand wallet restored:', restoredAlgorandAddress);
         perfLog('Algorand wallet restored');
 
-        if (!legacyAddress && algorandAddress !== serverAlgorandAddress) {
+        const reenrollmentDecision = decideWalletReenrollmentAfterRestore({
+          serverAlgorandAddress,
+          restoredAlgorandAddress,
+          legacyAddressWithValue,
+          reenrollmentOffered: walletReenrollmentOfferAvailable,
+        });
+        if (reenrollmentDecision === 'refuse_collision') {
           console.warn('[AuthService] Refusing mismatched V2 wallet for existing account', {
             serverAlgorandAddress,
-            localAlgorandAddress: algorandAddress,
+            localAlgorandAddress: restoredAlgorandAddress,
           });
           throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta desde Google Drive antes de continuar.');
         }
-
-        // Update server with derived address (pass isV2Wallet if V2 sync succeeded)
-        try {
-          const registration = await registerAlgorandAddressChecked(algorandAddress, {
-            isV2Wallet: driveSyncSucceeded,
-            context: 'google_sign_in',
-          });
-          if (registration.success) {
-            console.log('Updated server with Algorand address');
-          }
-          registerBscAddressBestEffort();
-          // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
-          try {
-            const payload = registration.payload;
-            const needsOptIn = payload?.needsOptIn as number[] | undefined;
-            const txns = payload?.optInTransactions as string | any[] | undefined;
-            if (needsOptIn && needsOptIn.length > 0 && txns) {
-              const groups = typeof txns === 'string' ? JSON.parse(txns) : txns;
-              console.log('Processing server-prepared opt-in transactions...', { assets: needsOptIn });
-              await algorandService.processSponsoredOptIn(groups);
-              console.log('Server-prepared asset opt-ins submitted');
-            }
-          } catch (e) {
-            console.error('Opt-in post-update handling failed (non-fatal):', e);
-          }
-        } catch (e) {
-          console.error('Failed updating server with Algorand address:', e);
+        if (reenrollmentDecision === 'repair_collision') {
+          console.log('[AuthService] Verified server/client wallet collision; consuming safe reenrollment offer.');
+          await completeWalletReenrollmentAfterCollision();
+          walletReenrollmentCompleted = true;
+          algorandAddress = null;
+        } else {
+          // Do not publish a candidate address before the collision decision.
+          // If repair prerequisites or completion fail, the prior valid session
+          // must remain paired with its previously accepted local wallet state.
+          algorandAddress = restoredAlgorandAddress;
+          await algorandService.setCurrentAddress(restoredAlgorandAddress);
         }
 
+        if (!walletReenrollmentCompleted) {
+          // Matching wallets take the ordinary path. Persist only after the
+          // address comparison so a server offer can never trigger repair by
+          // itself, while authenticated registration still has its JWT.
+          await persistBackendTokens();
 
-        // Now that tokens are stored, process any required opt-ins for PERSONAL accounts only
-        // Business accounts handle opt-ins separately during payment flow
-        const accountManager = AccountManager.getInstance();
-        const activeContext = await accountManager.getActiveAccountContext();
-        if (activeContext.type === 'personal' && authData.needsOptIn && authData.needsOptIn.length > 0) {
-          console.log('Personal account needs to opt-in to assets:', authData.needsOptIn);
-          if (authData.optInTransactions && authData.optInTransactions.length > 0) {
-            console.log('Processing opt-in transactions for personal account...');
+          // Update server with derived address (pass isV2Wallet if V2 sync succeeded)
+          try {
+            const registration = await registerAlgorandAddressChecked(restoredAlgorandAddress, {
+              isV2Wallet: driveSyncSucceeded,
+              context: 'google_sign_in',
+            });
+            if (registration.success) {
+              console.log('Updated server with Algorand address');
+            }
+            registerBscAddressBestEffort();
+            // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
             try {
-              const optInTxns = typeof authData.optInTransactions === 'string'
-                ? JSON.parse(authData.optInTransactions)
-                : authData.optInTransactions;
-              const ok = await algorandService.processSponsoredOptIn(optInTxns);
-              if (ok) {
-                console.log('Successfully processed opt-in transactions for personal account');
-              } else {
-                console.error('Opt-in transactions were not confirmed');
+              const payload = registration.payload;
+              const needsOptIn = payload?.needsOptIn as number[] | undefined;
+              const txns = payload?.optInTransactions as string | any[] | undefined;
+              if (needsOptIn && needsOptIn.length > 0 && txns) {
+                const groups = typeof txns === 'string' ? JSON.parse(txns) : txns;
+                console.log('Processing server-prepared opt-in transactions...', { assets: needsOptIn });
+                await algorandService.processSponsoredOptIn(groups);
+                console.log('Server-prepared asset opt-ins submitted');
               }
-            } catch (optInError) {
-              console.error('Failed to process opt-in transactions:', optInError);
-              // Don't fail login if opt-in fails - user can retry later
+            } catch (e) {
+              console.error('Opt-in post-update handling failed (non-fatal):', e);
+            }
+          } catch (e) {
+            console.error('Failed updating server with Algorand address:', e);
+          }
+
+          // Now that tokens are stored, process any required opt-ins for PERSONAL accounts only
+          // Business accounts handle opt-ins separately during payment flow
+          const accountManager = AccountManager.getInstance();
+          const activeContext = await accountManager.getActiveAccountContext();
+          if (activeContext.type === 'personal' && authData.needsOptIn && authData.needsOptIn.length > 0) {
+            console.log('Personal account needs to opt-in to assets:', authData.needsOptIn);
+            if (authData.optInTransactions && authData.optInTransactions.length > 0) {
+              console.log('Processing opt-in transactions for personal account...');
+              try {
+                const optInTxns = typeof authData.optInTransactions === 'string'
+                  ? JSON.parse(authData.optInTransactions)
+                  : authData.optInTransactions;
+                const ok = await algorandService.processSponsoredOptIn(optInTxns);
+                if (ok) {
+                  console.log('Successfully processed opt-in transactions for personal account');
+                } else {
+                  console.error('Opt-in transactions were not confirmed');
+                }
+              } catch (optInError) {
+                console.error('Failed to process opt-in transactions:', optInError);
+                // Don't fail login if opt-in fails - user can retry later
+              }
             }
           }
         }
@@ -1531,6 +1656,11 @@ export class AuthService {
         perfLog('Algorand wallet skipped');
         registerBscAddressBestEffort();
       }
+
+      // Defensive fallback for inconsistent/older server responses. Every
+      // successful sign-in must persist the fresh JWT, but never before an
+      // offered reenrollment has either observed no collision or completed.
+      await persistBackendTokens();
 
       // 8) Set default personal account context
       console.log('Setting default personal account context...');

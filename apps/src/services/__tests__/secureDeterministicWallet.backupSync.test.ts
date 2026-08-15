@@ -81,9 +81,11 @@ jest.mock('../googleDriveStorage', () => ({
 
 import {
   createWalletReenrollmentDriveAttestation,
+  getExistingLocalV2MasterSecret,
   getOrCreateMasterSecret,
   deriveV2AddressPure,
   reportBackupStatus,
+  SecureDeterministicWalletService,
 } from '../secureDeterministicWallet';
 import { deriveEvmKeyFromMasterSecret } from '../evmWallet';
 import { googleDriveStorage } from '../googleDriveStorage';
@@ -100,6 +102,27 @@ const walletIdAlias = () =>
 const expectedAddress = deriveV2AddressPure(MASTER_SECRET, {
   accountType: 'personal',
   accountIndex: 0,
+});
+
+describe('local V2 collision probe', () => {
+  beforeEach(() => {
+    mockMemoryStore.clear();
+  });
+
+  it('returns null on confirmed absence without generating or writing a secret', async () => {
+    await expect(getExistingLocalV2MasterSecret(USER_SUB)).resolves.toBeNull();
+    expect(mockMemoryStore.size).toBe(0);
+  });
+
+  it('returns the existing subject-bound secret without mutating storage', async () => {
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+
+    const restored = await getExistingLocalV2MasterSecret(USER_SUB);
+
+    expect(restored).toEqual(MASTER_SECRET);
+    expect(mockMemoryStore.size).toBe(1);
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(MASTER_SECRET);
+  });
 });
 
 describe('reportBackupStatus server acknowledgement', () => {
@@ -126,6 +149,84 @@ describe('reportBackupStatus server acknowledgement', () => {
         pinnedAuthToken: 'fresh-login-jwt',
         skipProactiveRefresh: true,
       }),
+    }));
+  });
+});
+
+describe('request-scoped pepper reads', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('reads the derivation pepper with the fresh login JWT before session persistence', async () => {
+    (apolloClient.mutate as jest.Mock)
+      .mockResolvedValueOnce({
+        data: { getDerivationPepper: { success: true, pepper: 'first-user-pepper' } },
+      })
+      .mockResolvedValueOnce({
+        data: { getDerivationPepper: { success: true, pepper: 'second-user-pepper' } },
+      });
+
+    const service = SecureDeterministicWalletService.getInstance();
+    await service.getDerivationPepper(
+      { accountType: 'personal', accountIndex: 0, businessId: 'pinned-derivation-test' },
+      'first-user-jwt',
+    );
+    const second = await service.getDerivationPepper(
+      { accountType: 'personal', accountIndex: 0, businessId: 'pinned-derivation-test' },
+      'second-user-jwt',
+    );
+
+    expect(second.pepper).toBe('second-user-pepper');
+    expect(apolloClient.mutate).toHaveBeenCalledTimes(2);
+    expect(apolloClient.mutate).toHaveBeenLastCalledWith(expect.objectContaining({
+      context: {
+        pinnedAuthToken: 'second-user-jwt',
+        skipProactiveRefresh: true,
+      },
+    }));
+  });
+
+  it('reads the KEK pepper with the fresh login JWT before session persistence', async () => {
+    (apolloClient.mutate as jest.Mock).mockResolvedValueOnce({
+      data: { getKekPepper: { success: true, pepper: 'kek-pepper', version: 1 } },
+    });
+
+    await SecureDeterministicWalletService.getInstance().getKekPepper(
+      1,
+      { accountType: 'personal', accountIndex: 0, businessId: 'pinned-kek-test' },
+      'fresh-login-jwt',
+    );
+
+    expect(apolloClient.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      context: {
+        pinnedAuthToken: 'fresh-login-jwt',
+        skipProactiveRefresh: true,
+      },
+    }));
+  });
+
+  it('restores the legacy V1 comparison wallet with the fresh login JWT', async () => {
+    (apolloClient.mutate as jest.Mock).mockResolvedValueOnce({
+      data: { getDerivationPepper: { success: true, pepper: 'legacy-derivation-pepper' } },
+    });
+
+    await SecureDeterministicWalletService.getInstance().restoreLegacyV1Wallet(
+      'https://accounts.google.com',
+      'legacy-subject',
+      'legacy-audience',
+      'google',
+      'personal',
+      0,
+      undefined,
+      'fresh-login-jwt',
+    );
+
+    expect(apolloClient.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      context: {
+        pinnedAuthToken: 'fresh-login-jwt',
+        skipProactiveRefresh: true,
+      },
     }));
   });
 });

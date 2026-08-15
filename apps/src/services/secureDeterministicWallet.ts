@@ -1635,6 +1635,28 @@ export async function restoreFromBackup(
 }
 
 /**
+ * Read only the subject-bound local V2 secret used by normal wallet startup.
+ * This probe never restores V1, scans cloud storage, persists state, or
+ * generates replacement key material. A confirmed absence returns null;
+ * storage failures and corruption remain fail-closed.
+ */
+export async function getExistingLocalV2MasterSecret(
+  userSub: string,
+): Promise<Uint8Array | null> {
+  if (!userSub) {
+    throw new Error('[MasterSecret] User Sub (OAuth ID) is required to inspect the local V2 wallet.');
+  }
+  const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
+  const secretAlias = `confio_master_secret_v2_${safeSub}`;
+  const { credentialStorage } = await import('./credentialStorage');
+  return readMasterSecret(
+    credentialStorage,
+    secretAlias,
+    'subject-bound keychain alias (collision probe)',
+  );
+}
+
+/**
  * Get-or-Create Master Secret.
  * 
  * STRATEGY: CANONICAL DRIVE BACKUP + UUID
@@ -2532,29 +2554,43 @@ export class SecureDeterministicWalletService {
     return businessId ? `${type}|${idx}|${businessId}` : `${type}|${idx}`;
   }
 
-  async getDerivationPepper(opts?: { accountType?: string; accountIndex?: number; businessId?: string }): Promise<{ pepper: string | undefined }> {
+  async getDerivationPepper(
+    opts?: { accountType?: string; accountIndex?: number; businessId?: string },
+    pinnedAuthToken?: string,
+  ): Promise<{ pepper: string | undefined }> {
     try {
       const ctxKey = this.makeAccountContextKey(opts?.accountType, opts?.accountIndex, opts?.businessId);
       // Fast path: return from session cache (per account context)
-      if (this.cachedDerivationPepperByContext.has(ctxKey)) {
+      if (!pinnedAuthToken && this.cachedDerivationPepperByContext.has(ctxKey)) {
         return { pepper: this.cachedDerivationPepperByContext.get(ctxKey) } as any;
       }
-      // Require JWT to be present; otherwise skip
-      try {
-        const creds = await Keychain.getGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME
-        });
-        if (!creds) {
+      // Normal callers use the persisted JWT. Collision detection deliberately
+      // keeps its fresh JWT request-scoped until the repair decision, so it may
+      // supply that token without opening a cold-start session.
+      if (!pinnedAuthToken) {
+        try {
+          const creds = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+          if (!creds) {
+            return { pepper: undefined };
+          }
+        } catch (_) {
           return { pepper: undefined };
         }
-      } catch (_) {
-        return { pepper: undefined };
       }
-      const { data } = await apolloClient.mutate({ mutation: GET_DERIVATION_PEPPER });
+      const { data } = await apolloClient.mutate({
+        mutation: GET_DERIVATION_PEPPER,
+        context: pinnedAuthToken
+          ? { pinnedAuthToken, skipProactiveRefresh: true }
+          : undefined,
+      });
       if (data?.getDerivationPepper?.success) {
         const pepper = data.getDerivationPepper.pepper as string;
-        this.cachedDerivationPepperByContext.set(ctxKey, pepper);
+        if (!pinnedAuthToken) {
+          this.cachedDerivationPepperByContext.set(ctxKey, pepper);
+        }
         return { pepper };
       }
       console.debug('Derivation pepper not provided');
@@ -2565,7 +2601,11 @@ export class SecureDeterministicWalletService {
     }
   }
 
-  async getKekPepper(requestVersion?: number, opts?: { accountType?: string; accountIndex?: number; businessId?: string }): Promise<{
+  async getKekPepper(
+    requestVersion?: number,
+    opts?: { accountType?: string; accountIndex?: number; businessId?: string },
+    pinnedAuthToken?: string,
+  ): Promise<{
     pepper: string | undefined;
     version: number;
     isRotated?: boolean;
@@ -2576,27 +2616,36 @@ export class SecureDeterministicWalletService {
       const ctxKey = this.makeAccountContextKey(opts?.accountType, opts?.accountIndex, opts?.businessId);
       const cacheKey = `${ctxKey}|v${versionToUse}`;
       // Fast path: return from session cache for requested version
-      if (this.cachedKekPepperByCtxAndVersion.has(cacheKey)) {
+      if (!pinnedAuthToken && this.cachedKekPepperByCtxAndVersion.has(cacheKey)) {
         return { pepper: this.cachedKekPepperByCtxAndVersion.get(cacheKey), version: versionToUse } as any;
       }
-      // Require JWT to be present; otherwise skip
-      try {
-        const creds = await Keychain.getGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME
-        });
-        if (!creds) {
+      // See getDerivationPepper: a request-scoped token keeps comparison
+      // authenticated without persisting a partially handled login.
+      if (!pinnedAuthToken) {
+        try {
+          const creds = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+          if (!creds) {
+            return { pepper: undefined, version: 1 };
+          }
+        } catch (_) {
           return { pepper: undefined, version: 1 };
         }
-      } catch (_) {
-        return { pepper: undefined, version: 1 };
       }
-      const { data } = await apolloClient.mutate({ mutation: GET_KEK_PEPPER, variables: { requestVersion: versionToUse } });
+      const { data } = await apolloClient.mutate({
+        mutation: GET_KEK_PEPPER,
+        variables: { requestVersion: versionToUse },
+        context: pinnedAuthToken
+          ? { pinnedAuthToken, skipProactiveRefresh: true }
+          : undefined,
+      });
 
       if (data?.getKekPepper?.success) {
         const pepper = data.getKekPepper.pepper;
         const version = data.getKekPepper.version || versionToUse || 1;
-        if (pepper && version) {
+        if (!pinnedAuthToken && pepper && version) {
           this.cachedKekPepperByCtxAndVersion.set(`${ctxKey}|v${version}`, pepper);
         }
         return {
@@ -2626,10 +2675,14 @@ export class SecureDeterministicWalletService {
     provider: 'google' | 'apple',
     accountType: 'personal' | 'business',
     accountIndex: number,
-    businessId?: string
+    businessId?: string,
+    pinnedAuthToken?: string,
   ): Promise<DerivedWallet> {
     console.log('[WalletService] Explicitly restoring Legacy V1 Wallet');
-    const { pepper: derivationPepper } = await this.getDerivationPepper({ accountType, accountIndex, businessId });
+    const { pepper: derivationPepper } = await this.getDerivationPepper(
+      { accountType, accountIndex, businessId },
+      pinnedAuthToken,
+    );
     // getDerivationPepper swallows every failure (no JWT, network down, server
     // error) and returns undefined. Falling back to '' here used to derive a
     // wallet from the OAuth claims and client salt ALONE — no server secret in
@@ -2690,7 +2743,8 @@ export class SecureDeterministicWalletService {
     accountType: 'personal' | 'business' = 'personal',
     accountIndex: number = 0,
     businessId?: string,
-    firebaseIdToken?: string
+    firebaseIdToken?: string,
+    pinnedAuthToken?: string,
   ): Promise<DerivedWallet> {
     const startTime = Date.now();
     const perfLog = (step: string) => {
@@ -2775,7 +2829,7 @@ export class SecureDeterministicWalletService {
         accountType,
         accountIndex,
         businessId
-      });
+      }, pinnedAuthToken);
       perfLog('Got derivation pepper');
       if (!derivPepper) {
         throw new Error('Missing derivation pepper: cannot derive wallet without pepper. Ensure authentication and network are available.');
@@ -2787,7 +2841,7 @@ export class SecureDeterministicWalletService {
         accountType,
         accountIndex,
         businessId
-      });
+      }, pinnedAuthToken);
       perfLog('Got KEK pepper');
 
       // Derive KEK for encryption
@@ -2829,7 +2883,7 @@ export class SecureDeterministicWalletService {
               accountType,
               accountIndex,
               businessId
-            });
+            }, pinnedAuthToken);
 
             if (oldPepper) {
               // Derive KEK with the old pepper version
