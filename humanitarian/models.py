@@ -205,6 +205,14 @@ class HumanitarianRelease(models.Model):
     purpose = models.CharField(max_length=240)
     recipient_address = models.CharField(max_length=66)
     transaction_hash = models.CharField(max_length=128, blank=True, default='', db_index=True)
+    signed_transaction_b64 = models.TextField(
+        blank=True,
+        default='',
+        editable=False,
+        help_text='Exact signed Algorand transaction claimed for crash-safe rebroadcast.',
+    )
+    submitted_first_valid_round = models.PositiveBigIntegerField(null=True, blank=True, editable=False)
+    submitted_last_valid_round = models.PositiveBigIntegerField(null=True, blank=True, editable=False)
     admin_note = models.TextField(blank=True)
     public_note = models.TextField(blank=True)
     released_by = models.ForeignKey(

@@ -1,6 +1,9 @@
 from django.contrib import admin, messages
+from django.db import transaction as db_transaction
 from django.db.models import Sum
 from django.utils import timezone
+
+from blockchain.algorand_client import get_algod_client
 
 from .models import (
     HumanitarianCampaign,
@@ -131,9 +134,73 @@ class HumanitarianReleaseAdmin(admin.ModelAdmin):
     list_display = ('campaign', 'kind', 'volunteer_application', 'amount', 'status', 'recipient_address', 'proof_status', 'transaction_hash', 'created_at')
     list_filter = ('status', 'kind', 'campaign')
     search_fields = ('public_id', 'recipient_address', 'transaction_hash', 'volunteer_application__user__username')
-    readonly_fields = ('public_id', 'transaction_hash', 'released_by', 'released_at', 'created_at', 'updated_at')
+    readonly_fields = (
+        'public_id',
+        'status',
+        'transaction_hash',
+        'released_by',
+        'released_at',
+        'created_at',
+        'updated_at',
+    )
     inlines = (HumanitarianProofLinkInline,)
     actions = ('submit_releases', 'mark_confirmed', 'mark_proof_pending', 'mark_proof_published')
+
+    PAYOUT_IDENTITY_FIELDS = (
+        'campaign',
+        'kind',
+        'volunteer_application',
+        'donation',
+        'amount',
+        'purpose',
+        'recipient_address',
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = tuple(super().get_readonly_fields(request, obj))
+        if obj is not None and obj.status not in ('draft', 'failed'):
+            fields += self.PAYOUT_IDENTITY_FIELDS
+        return fields
+
+    def has_delete_permission(self, request, obj=None):
+        # An in-flight or historical row is both the one-shot broadcast claim
+        # and a wallet-reenrollment blocker. Deleting it would forget an
+        # ambiguous payment and permit a second signature or address retirement.
+        if obj is not None and obj.status not in ('draft', 'failed', 'cancelled'):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        # Django's bulk delete does not provide per-object state enforcement.
+        actions.pop('delete_selected', None)
+        return actions
+
+    def save_model(self, request, obj, form, change):
+        if not change or not obj.pk:
+            return super().save_model(request, obj, form, change)
+
+        # Close the stale-form race: a POST may have loaded a draft just before
+        # the broadcaster claims it as submitted. ModelForm.save() writes every
+        # model column, including excluded/readonly fields, so without this lock
+        # that stale instance could erase the claim and signed recovery payload.
+        with db_transaction.atomic():
+            locked = HumanitarianRelease.objects.select_for_update().get(pk=obj.pk)
+            immutable_state = (
+                'status',
+                'transaction_hash',
+                'signed_transaction_b64',
+                'submitted_first_valid_round',
+                'submitted_last_valid_round',
+                'released_by',
+                'released_at',
+            )
+            for field in immutable_state:
+                setattr(obj, field, getattr(locked, field))
+            if locked.status not in ('draft', 'failed'):
+                for field in self.PAYOUT_IDENTITY_FIELDS:
+                    setattr(obj, field, getattr(locked, field))
+            return super().save_model(request, obj, form, change)
 
     def proof_status(self, obj):
         return obj.proof_url or 'pending'
@@ -155,19 +222,59 @@ class HumanitarianReleaseAdmin(admin.ModelAdmin):
 
     @admin.action(description='Mark selected releases confirmed')
     def mark_confirmed(self, request, queryset):
-        count = queryset.update(status='confirmed')
-        self._sync_campaign_totals(queryset)
-        self.message_user(request, f'Marked {count} release(s) confirmed.')
+        confirmed = 0
+        rejected = queryset.exclude(status='submitted').count()
+        submitted = list(queryset.filter(status='submitted'))
+        service = None
+        if submitted:
+            service = HumanitarianReleaseService.__new__(HumanitarianReleaseService)
+            service.algod = get_algod_client()
+        for release in submitted:
+            try:
+                outcome = service.reconcile_submission(release)
+            except Exception as exc:
+                rejected += 1
+                self.message_user(
+                    request,
+                    f'{release.public_id} could not be reconciled: {exc}',
+                    messages.ERROR,
+                )
+                continue
+            if outcome == 'confirmed':
+                confirmed += 1
+            else:
+                rejected += 1
+                self.message_user(
+                    request,
+                    f'{release.public_id} remains {outcome}; exact tx confirmation is required.',
+                    messages.WARNING,
+                )
+        if confirmed:
+            self.message_user(request, f'Confirmed {confirmed} release(s) on-chain.')
+        if rejected:
+            self.message_user(
+                request,
+                f'{rejected} release(s) were not confirmed.',
+                messages.WARNING,
+            )
 
     @admin.action(description='Mark selected releases proof pending')
     def mark_proof_pending(self, request, queryset):
-        count = queryset.update(status='proof_pending')
+        count = queryset.filter(status='confirmed').update(status='proof_pending')
+        rejected = queryset.exclude(status__in=('confirmed', 'proof_pending')).count()
         self._sync_campaign_totals(queryset)
         self.message_user(request, f'Marked {count} release(s) proof pending.')
+        if rejected:
+            self.message_user(
+                request,
+                f'{rejected} release(s) were not confirmed and were left unchanged.',
+                messages.WARNING,
+            )
 
     @admin.action(description='Mark selected releases proof published')
     def mark_proof_published(self, request, queryset):
-        count = queryset.update(status='proof_published')
+        count = queryset.filter(status='proof_pending').update(status='proof_published')
+        rejected = queryset.exclude(status__in=('proof_pending', 'proof_published')).count()
         self._sync_campaign_totals(queryset)
         self.message_user(request, f'Marked {count} release(s) proof published.')
 

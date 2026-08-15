@@ -121,7 +121,7 @@ def _inspect_wallet_reenrollment(account):
     # alone cannot prove this address safe to retire.
     if HumanitarianRelease.objects.filter(
         recipient_address=account.algorand_address,
-        status__in=('draft', 'failed'),
+        status__in=('draft', 'failed', 'submitted'),
     ).exists():
         return {'eligible': False, 'reason': 'pending_humanitarian_release'}
 
