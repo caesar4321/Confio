@@ -3,6 +3,11 @@
 ## Overview
 Sign-in process using Firebase Auth + Deterministic Algorand Wallet generation
 
+Ordinary sign-in is intentionally a database-only backend operation after the
+Firebase token is verified. Algod, Indexer, BSC RPC, and Google Drive recovery
+must not be added to the server login mutation. New-user wallet backup and the
+one-time repair of eligible legacy wallets use the separate flows below.
+
 ## Complete Sign-In Flow
 
 ```mermaid
@@ -85,6 +90,66 @@ audience = decoded_token.get('aud')
 ```
 
 Therefore, sending `web3AuthId`, `email`, `firstName`, `lastName` separately is redundant!
+
+## Fast login and legacy wallet self-heal
+
+Some historical Google accounts stored a client-generated V2 wallet as a V1
+wallet after backup did not finish. The repair path can replace both the old
+Algorand address and an opaque BSC address, but only when the server proves that
+retiring both anchors cannot lose user money or an in-flight transfer.
+
+The expensive safety work does not run during login:
+
+1. `users.queue_wallet_reenrollment_assessments` selects legacy personal
+   accounts that have no current terminal assessment.
+2. `users.assess_wallet_reenrollment_account` inspects complete Algorand history
+   and the relevant server-side reservations. A database-backed, owner-checked
+   lease prevents duplicate workers from publishing competing results.
+3. The assessment stores the old Algorand and BSC anchors, the inspected round,
+   and verified sponsor funding. Changing either anchor invalidates it.
+4. Ordinary `web3AuthLogin` reads this durable row only. Ineligible, retryable,
+   and not-yet-assessed accounts continue through normal V1 recovery; an
+   eligible account receives a short-lived, fresh-Google-auth-bound challenge
+   and grant.
+5. The client derives the replacement wallet, writes and verifies its Google
+   Drive backup, signs the challenge with the replacement BSC key, and calls
+   `completeWalletReenrollment`.
+6. Completion checks only Algorand activity after the saved snapshot, rechecks
+   database reservations under the account row lock, and separately proves an
+   old BSC anchor empty when it differs from the replacement. The address swap
+   and migration flag commit atomically.
+
+The completion mutation is retry-safe. If a response is lost after commit, the
+same replacement BSC address returns success. If new Algorand activity, a
+pending inbound transfer, BSC balance/history, or a server-side reservation is
+found, the old address remains anchored and the repair is refused.
+
+`prepareWalletReenrollment` remains as a compatibility preflight for clients
+and servers deployed during the transition. Current login responses normally
+return either a background-precomputed grant or no reenrollment request, so the
+preflight is not part of the normal hot path.
+
+### Release gate
+
+Deploy migration `0040`, restart the API, Celery worker, and Celery Beat, then
+precompute the complete legacy cohort before releasing the capable mobile
+client:
+
+```bash
+myvenv/bin/python manage.py migrate --noinput
+myvenv/bin/python manage.py precompute_wallet_reenrollment
+```
+
+The second command exits non-zero while any candidate remains unassessed or in
+a retryable state. Do not release the mobile build until its summary reports
+`remaining=0`. Celery Beat runs a daily retry pass at 03:45 for later transient
+inspection failures.
+
+Google Drive list, download, revision, upload, and update requests have a
+12-second per-request timeout so backup failure produces a recoverable error
+instead of an unbounded sign-in wait. New accounts create their local secret
+during sign-in and complete the first Drive upload in the backup-completion
+screen.
 
 ## Request Summary
 

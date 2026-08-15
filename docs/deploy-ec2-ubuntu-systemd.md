@@ -63,6 +63,26 @@ Management
 - Start/Restart: `sudo systemctl restart daphne celery celery-beat`
 - Logs: `sudo journalctl -u daphne -f`, `sudo journalctl -u celery -f`, `sudo journalctl -u celery-beat -f`
 
+Wallet Reenrollment Release Gate
+--------------------------------
+When a backend release includes the legacy wallet reenrollment assessment
+migration, deploy the backend before the mobile client. Apply migrations,
+restart every process that loads Django or the Celery schedule, and warm the
+finite legacy cohort:
+
+```bash
+cd /opt/confio
+sudo /opt/confio/venv/bin/python manage.py migrate --noinput
+sudo systemctl restart daphne celery celery-beat
+sudo /opt/confio/venv/bin/python manage.py precompute_wallet_reenrollment
+```
+
+The precompute command scans candidates synchronously and exits non-zero if any
+assessment remains incomplete. Repeat it after resolving transient Algod,
+Indexer, BSC RPC, or database failures. Release the new iOS/Android build only
+when the final line reports `remaining=0`. The daily Celery Beat task retries
+future transient failures; it is not a substitute for this release gate.
+
 Notes
 -----
 - If your project path or user differs, edit the unit files or adjust `scripts/install_systemd_ubuntu.sh` before installing.

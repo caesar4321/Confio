@@ -20,6 +20,7 @@ operational documentation for the Confío repository.
 ## Wallet and blockchain architecture
 
 - [Algorand integration guide](ALGORAND_INTEGRATION_GUIDE.md)
+- [Sign-in, fast-login, and legacy wallet self-heal flow](algorand-signin-flow.md)
 - [Sponsored transactions](ALGORAND_SPONSORED_TRANSACTIONS.md)
 - [cUSD contracts](../contracts/cusd/README.md)
 - [cUSD+ contracts](../contracts/cusd_plus/README.md)
