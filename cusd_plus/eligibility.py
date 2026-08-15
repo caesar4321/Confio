@@ -58,17 +58,17 @@ ONDO_POLICY = GeoPolicy(
 )
 
 
-# Confío product-policy defaults. Unlike the issuer lists above, this overlay
-# blocks only new stock purchases; it does not affect USDY or stock exits.
-CONFIO_STOCK_BUY_BLOCKED_DEFAULTS = frozenset({'CO'})
+# Confío's optional server-controlled overlay blocks only new stock purchases;
+# it does not affect USDY, Stocks discovery, holdings, stats, or stock exits.
+# No country is hard-coded here: operations can put an ISO-2 code in
+# CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES to make that country Sell-only.
+CONFIO_STOCK_BUY_BLOCKED_DEFAULTS = frozenset()
 
 
 def _confio_stock_buy_blocked_countries():
     """ISO-2 entry-only overlay controlled by Confío operations.
 
-    Colombia is a product-policy default: USDY remains available there, while
-    new stock purchases are disabled and existing positions remain sellable.
-    The environment setting can add more countries without removing Colombia.
+    The environment setting can add or remove countries without a deploy.
     """
     configured = getattr(settings, 'CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES', ())
     if isinstance(configured, str):

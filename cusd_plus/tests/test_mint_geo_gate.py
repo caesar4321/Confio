@@ -73,13 +73,13 @@ class EligibilityGateTests(SimpleTestCase):
             _user('VE'), {'HTTP_CF_IPCOUNTRY': 'CO'}))
 
     @override_settings(CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[])
-    def test_colombia_allows_usdy_but_blocks_new_stock_purchases(self):
+    def test_colombia_allows_usdy_and_stock_purchases_when_overlay_is_empty(self):
         colombia = {'HTTP_CF_IPCOUNTRY': 'CO'}
         peru = {'HTTP_CF_IPCOUNTRY': 'PE'}
 
         self.assertTrue(check_savings_mint_eligibility(_user('CO'), colombia))
-        self.assertFalse(check_stock_buy_eligibility(_user('CO'), peru))
-        self.assertFalse(check_stock_buy_eligibility(_user('PE'), colombia))
+        self.assertTrue(check_stock_buy_eligibility(_user('CO'), peru))
+        self.assertTrue(check_stock_buy_eligibility(_user('PE'), colombia))
 
     def test_unresolvable_ip_fails_open(self):
         # No header, no usable IP: get_country_for_ip returns None without
@@ -223,9 +223,9 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
         CUSD_PLUS_GM_TRADE_FEE_BPS=30,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
-    def test_colombia_stock_buy_batch_refused_by_confio_country_overlay(self):
+    def test_colombia_stock_buy_batch_refused_when_server_sets_sell_only(self):
         approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
         calls = [_call(VAULT, approve), _call(ROUTER, _stock_data(0))]
         res = self._mutate(calls, _user('CO', uid=25))
@@ -236,9 +236,9 @@ class SponsoredRailGateTests(SimpleTestCase):
         CUSD_PLUS_STOCK_TRADING_ENABLED=True,
         CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER,
         CUSD_PLUS_GM_TRADE_FEE_BPS=30,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
-    def test_colombia_stock_sell_batch_remains_an_exit(self):
+    def test_colombia_stock_sell_batch_remains_an_exit_in_sell_only_mode(self):
         approve = '0x' + sponsor_7702.SEL_APPROVE + _word(ROUTER) + _word(2**256 - 1)
         calls = [_call(STOCK, approve), _call(ROUTER, _stock_data(1))]
         with mock.patch('cusd_plus.eligibility.check_stock_buy_eligibility') as gate:

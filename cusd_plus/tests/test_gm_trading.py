@@ -295,9 +295,9 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
         CUSD_PLUS_GM_TRADE_FEE_BPS=30,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
-    def test_colombia_summary_allows_usdy_and_stock_exits_but_not_buys(self):
+    def test_colombia_summary_is_sell_only_when_server_overlay_is_configured(self):
         user = SimpleNamespace(is_authenticated=True, id=35, phone_country='CO')
         info = SimpleNamespace(context=SimpleNamespace(
             user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
@@ -310,6 +310,29 @@ class GmApiTradingTests(SimpleTestCase):
         self.assertTrue(result.stocks_enabled)
         self.assertTrue(result.stocks_trading_enabled)
         self.assertFalse(result.stocks_buy_enabled)
+
+    @override_settings(
+        CUSD_PLUS_STOCKS_ENABLED=True,
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
+        CUSD_PLUS_7702_ENABLED=True,
+        CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
+    )
+    def test_colombia_summary_is_fully_enabled_when_overlay_is_empty(self):
+        user = SimpleNamespace(is_authenticated=True, id=135, phone_country='CO')
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=user, META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=None), \
+             mock.patch('cusd_plus.vault.apy_split', return_value=(3.5, 3.0)):
+            result = Query().resolve_cusd_plus_summary(info)
+
+        self.assertTrue(result.savings_enabled)
+        self.assertTrue(result.stocks_enabled)
+        self.assertTrue(result.stocks_trading_enabled)
+        self.assertTrue(result.stocks_buy_enabled)
 
     @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
     def test_community_graphql_contract_uses_camel_case_client_fields(self):
@@ -380,7 +403,7 @@ class GmApiTradingTests(SimpleTestCase):
 
     @override_settings(
         CUSD_PLUS_STOCKS_ENABLED=True,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
     def test_colombia_soft_buy_is_blocked_but_sell_is_not(self):
         user = SimpleNamespace(is_authenticated=True, id=34, phone_country='CO')
@@ -411,7 +434,7 @@ class GmApiTradingTests(SimpleTestCase):
         CUSD_PLUS_7702_ENABLED=True,
         CUSD_PLUS_BATCH_DELEGATE_ADDRESS='0x' + '22' * 20,
         CUSD_PLUS_GM_TRADE_FEE_BPS=30,
-        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=[],
+        CUSD_PLUS_STOCK_BUY_BLOCKED_COUNTRIES=['CO'],
     )
     def test_colombia_binding_buy_quote_is_blocked(self):
         user = SimpleNamespace(is_authenticated=True, id=35, phone_country='CO')
