@@ -244,9 +244,7 @@ export const ProtectedSavingsScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="trending-up" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>
-              Rendimiento anual, acumulado cada día
-            </Text>
+            <Text style={styles.sectionTitle}>Rendimiento anual</Text>
           </View>
           <Text style={styles.sectionBody}>
             La tasa que ves es anual (APY). Tu ahorro acumula una pequeña parte
@@ -501,6 +499,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionTitle: {
+    flexShrink: 1,
     fontSize: 16,
     fontWeight: '700',
     color: colors.dark,
