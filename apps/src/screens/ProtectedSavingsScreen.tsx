@@ -20,6 +20,7 @@ import {useNumberFormat} from '../utils/numberFormatting';
 import {MainStackParamList} from '../types/navigation';
 import {GET_STATS_SUMMARY} from '../apollo/queries';
 import {CUSD_RESERVE_PERA_URL} from '../config/algorand';
+import {bscscanTokenHoldingsUrl} from '../utils/bscscan';
 
 // cUSD+ reserve verification chain (BSC vault deployed 2026-07-10):
 // vault token page → live USDY holdings → Ondo's issuer page → third-party
@@ -29,8 +30,9 @@ import {CUSD_RESERVE_PERA_URL} from '../config/algorand';
 // rot, the USDY page always carries the current ones.
 const CUSD_PLUS_TOKEN_BSCSCAN_URL =
   'https://bscscan.com/token/0x3C29417eb4314155e63d4C7D4507852b87763Ed1';
-const CUSD_PLUS_VAULT_ASSETS_URL =
-  'https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#asset-multichain';
+const CUSD_PLUS_VAULT_ASSETS_URL = bscscanTokenHoldingsUrl(
+  '0x3C29417eb4314155e63d4C7D4507852b87763Ed1',
+);
 const ONDO_USDY_URL = 'https://app.ondo.finance/assets/usdy';
 const USDY_ATTESTATION_DAILY_URL =
   'https://www.dropbox.com/scl/fo/375wdvar3rbc7o23nxsgp/AOFY8jhpENaNx9WAw-WPnbY?rlkey=4icqn1z9bez725wywr30fx52a&st=bsxeh8j5&dl=0';
@@ -162,8 +164,9 @@ export const ProtectedSavingsScreen = () => {
             <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text> es
             tu dólar para ahorrar: cada dólar está respaldado 100% por USDY, un
             activo digital de Ondo Finance respaldado por bonos del Tesoro de
-            EE.UU., y genera rendimiento todos los días. Los registros públicos
-            permiten comprobar que el respaldo existe.
+            EE.UU., y acumula rendimiento cada día según una tasa anual
+            variable. Los registros públicos permiten comprobar que el respaldo
+            existe.
           </Text>
           <Text style={styles.sectionBody}>
             ¿Y <Text style={styles.inlineEmphasis}>cUSD</Text>? Sigue en
@@ -242,9 +245,13 @@ export const ProtectedSavingsScreen = () => {
           <View style={styles.sectionHeader}>
             <Icon name="trending-up" size={20} color={colors.primary} />
             <Text style={styles.sectionTitle}>
-              Tu rendimiento, todos los días
+              Rendimiento anual, acumulado cada día
             </Text>
           </View>
+          <Text style={styles.sectionBody}>
+            La tasa que ves es anual (APY). Tu ahorro acumula una pequeña parte
+            del rendimiento cada día.
+          </Text>
 
           {/* Rates are LIVE from the server (Ondo's on-chain oracle) when
               available; the static example only stands in pre-launch, and
@@ -252,15 +259,15 @@ export const ProtectedSavingsScreen = () => {
           <View style={styles.splitCard}>
             <Text style={styles.splitTitle}>
               {apyLive
-                ? 'Cómo funciona cUSD+ (hoy)'
-                : 'Cómo funciona cUSD+ (ejemplo)'}
+                ? 'Desglose de la tasa anual (hoy)'
+                : 'Desglose de la tasa anual (ejemplo)'}
             </Text>
             <View style={styles.splitRow}>
               <View
                 style={[styles.splitDot, {backgroundColor: colors.text.light}]}
               />
               <Text style={styles.splitLabel}>
-                Rendimiento de los bonos del Tesoro
+                Tasa anual de los bonos del Tesoro
               </Text>
               <Text style={styles.splitValue}>
                 {apyLive ? pct(grossApy) : '~3.5%'}
@@ -271,7 +278,7 @@ export const ProtectedSavingsScreen = () => {
                 style={[styles.splitDot, {backgroundColor: colors.violet}]}
               />
               <Text style={styles.splitLabel}>
-                Comisión Confío (15% del rendimiento)
+                Comisión Confío (15% del rendimiento generado)
               </Text>
               <Text style={styles.splitValue}>
                 {apyLive ? pct(grossApy - netApy) : '~0.5%'}
@@ -282,7 +289,7 @@ export const ProtectedSavingsScreen = () => {
                 style={[styles.splitDot, {backgroundColor: colors.primary}]}
               />
               <Text style={[styles.splitLabel, styles.splitLabelStrong]}>
-                Para ti, todos los días
+                Tasa anual para ti
               </Text>
               <Text style={[styles.splitValue, styles.splitValueStrong]}>
                 {apyLive ? pct(netApy) : '~3%'}
@@ -314,10 +321,10 @@ export const ProtectedSavingsScreen = () => {
           </TouchableOpacity>
 
           <Text style={styles.disclaimer}>
-            * Cifras ilustrativas: la tasa varía día a día con los bonos del
-            Tesoro y no es fija ni garantizada. El respaldo USDY es verificable
-            públicamente, igual que el de cUSD. Esto no constituye asesoría de
-            inversión.
+            * Las tasas mostradas son anuales (APY). Varían día a día con los
+            bonos del Tesoro y no son fijas ni garantizadas. El respaldo USDY
+            es verificable públicamente, igual que el de cUSD. Esto no
+            constituye asesoría de inversión.
           </Text>
         </View>
 
@@ -343,9 +350,10 @@ export const ProtectedSavingsScreen = () => {
             de <Text style={styles.inlineEmphasis}>Ondo Finance</Text>{' '}
             respaldado por bonos del Tesoro de EE.UU. de corto plazo, fondos que
             invierten en deuda del gobierno e instrumentos similares al
-            efectivo. Esos activos pagan interés todos los días — ese interés es
-            el rendimiento que recibe tu cUSD+. (USDC, el respaldo de cUSD, es
-            el dólar digital de Circle, con auditorías públicas mensuales.)
+            efectivo. Su rendimiento se expresa como una tasa anual y se
+            acumula cada día — ese es el rendimiento que recibe tu cUSD+.
+            (USDC, el respaldo de cUSD, es el dólar digital de Circle, con
+            auditorías públicas mensuales.)
           </Text>
           <Text style={styles.sectionBody}>
             Empresas independientes revisan las reservas de USDY. Ondo publica

@@ -108,8 +108,8 @@ export const ConvertSavingsScreen = () => {
             title="Tu ahorro empezó a crecer"
             amount={fmtUsd(quote.receiveUsd)}
             hint={formatUsdDeltaAbs(dailyEstimate)
-              ? `Mañana habrás ganado ≈ ${formatUsdDeltaAbs(dailyEstimate)} — y así todos los días, sin hacer nada.`
-              : 'Tu dinero genera rendimiento todos los días, sin hacer nada.'}
+              ? `Mañana tu ahorro habrá acumulado ≈ ${formatUsdDeltaAbs(dailyEstimate)}, según la tasa anual actual.`
+              : 'Tu ahorro acumula rendimiento cada día según una tasa anual variable.'}
           />
           <ReceiptCard
             style={{ marginTop: 4 }}

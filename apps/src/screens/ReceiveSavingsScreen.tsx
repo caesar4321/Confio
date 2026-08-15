@@ -33,6 +33,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../config/theme';
 import { getEvmAddressForDisplay, evmAccountKey } from '../services/secureDeterministicWallet';
 import { useAccountManager } from '../hooks/useAccountManager';
+import { bscscanTokenHoldingsUrl } from '../utils/bscscan';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 
@@ -66,7 +67,7 @@ const stepsFor = (destination: Destination) => [
     : destination === 'cusd_plus'
     ? {
         title: 'Abre Confío y confirma',
-        body: 'Lo recibido se vuelve tu ahorro (cUSD+) y empieza a generar rendimiento.',
+        body: 'Lo recibido se vuelve tu ahorro (cUSD+) y acumula rendimiento cada día según una tasa anual variable.',
       }
     : {
         title: 'Abre Confío',
@@ -187,9 +188,12 @@ export const ReceiveSavingsScreen = () => {
               </View>
               <TouchableOpacity
                 style={styles.scanLink}
-                onPress={() => Linking.openURL(`https://bscscan.com/address/${address}`)}
+                onPress={() => {
+                  const url = bscscanTokenHoldingsUrl(address);
+                  if (url) Linking.openURL(url).catch(() => {});
+                }}
               >
-                <Text style={styles.scanLinkText}>Ver en BscScan</Text>
+                <Text style={styles.scanLinkText}>Ver mis activos en BscScan</Text>
                 <Icon name="external-link" size={12} color={colors.text.secondary} />
               </TouchableOpacity>
             </View>
@@ -219,8 +223,9 @@ export const ReceiveSavingsScreen = () => {
                 ) : isSavings ? (
                   <>
                     Lo que recibas aquí se convierte en tu ahorro{' '}
-                    <Text style={styles.warnStrong}>(Confío Dollar+)</Text> y genera rendimiento
-                    diario. Confirmas la conversión al abrir la app.
+                    <Text style={styles.warnStrong}>(Confío Dollar+)</Text> y acumula
+                    rendimiento cada día según una tasa anual variable. Confirmas la
+                    conversión al abrir la app.
                   </>
                 ) : (
                   <>

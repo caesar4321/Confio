@@ -21,6 +21,7 @@ import {useGmMarket} from '../hooks/useGmMarket';
 import {useCurrency} from '../hooks/useCurrency';
 import {useAuthReady} from '../contexts/AuthContext';
 import {TickerLogo} from '../components/TickerLogo';
+import {bscscanTokenHoldingsUrl} from '../utils/bscscan';
 import OndoLogo from '../assets/png/Ondo.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
@@ -200,9 +201,8 @@ export const OndoStocksInfoScreen = () => {
 
   const openMyStocks = () => {
     if (!isBscAddress(userBscAddress)) return;
-    Linking.openURL(
-      `https://bscscan.com/tokenholdings?a=${userBscAddress}`,
-    ).catch(() => {});
+    const url = bscscanTokenHoldingsUrl(userBscAddress);
+    if (url) Linking.openURL(url).catch(() => {});
   };
 
   const explainConfioSystem = () => {
