@@ -174,8 +174,9 @@ EXECUTE_TYPEHASH, three-way parity vector `0xf955b917…`). v2 at
 `0xC06BD197b34a587026615C6AEd21301F5E99bc00`, creation tx
 `0xc810100af1e6b2ef732a20748657018cbd1592a0b70d7a201accb39f773793c8`
 (nonce 36), BscScan verified. **v1 signs the old struct and is abandoned;
-already-shipped clients target v1, so `CUSD_PLUS_7702_ENABLED` is dark until
-the intent-binding client ships.**
+clients that shipped before the intent-binding update targeted v1, so the
+rollout stayed dark until the v2-capable client shipped.** The v2 delegate is
+now the active target and the sponsored-batch rail is enabled on mainnet.
 
 - Deployed via `manage.py deploy_batch_delegate --broadcast --yes-mainnet`
   (~719k gas ≈ 0.0007 BNB). Creation tx: (in deployer terminal output —
@@ -184,11 +185,27 @@ the intent-binding client ships.**
   (solc 0.8.26, optimizer 200, cancun) post-deploy, 2026-07-30.
 - BscScan source verified 2026-07-30 (`forge verify-contract`, "Pass -
   Verified"); Sourcify submitted same day.
-- Server config: `CUSD_PLUS_BATCH_DELEGATE_ADDRESS` (this address),
-  rollout gate `CUSD_PLUS_7702_ENABLED` (canary with
-  `CUSD_PLUS_7702_MAX_PER_DAY=3`; `CUSD_PLUS_GAS_DUST_ENABLED` stays
-  armed as the break-glass fallback). Policy/broadcast code:
+- Server config: `CUSD_PLUS_BATCH_DELEGATE_ADDRESS` (this address) and
+  rollout gate `CUSD_PLUS_7702_ENABLED`. Gas dusting has been removed; the
+  legacy fallback is self-funded rather than server-dusted. Policy/broadcast code:
   `cusd_plus/sponsor_7702.py`; audit ledger: SponsoredBatch (admin).
+
+### BNB auto-convert — enabled on mainnet 2026-08-18
+
+`CUSD_PLUS_BNB_AUTOCONVERT_ENABLED=True` activates the recovery path for
+native BNB accidentally sent to a user's Confío address. On authenticated app
+mount and foreground, the client swaps eligible BNB to USDT through the
+canonical PancakeSwap V2 router. The default minimum is 0.003 BNB after the
+transaction's gas budget, and the quote is protected by a 1% minimum-output
+guard.
+
+The user signs the swap, the server relay accepts only
+`swapExactETHForTokens` calldata to the configured router, and every outbound
+BNB transaction is recorded in the `BnbAutoConvert` ledger. A pending bridge
+arrival defers the sweep to avoid misattribution. Successful USDT output is
+registered immediately and handed to the normal cUSD+ savings-resume flow;
+failures remain silent and retry the next time the app enters the foreground.
+The same environment flag is the remote kill switch.
 
 ## ConfioPresaleVault — REDEPLOYED 2026-07-31 (audit)
 
