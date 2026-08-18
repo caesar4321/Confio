@@ -425,6 +425,8 @@ class KoyweClient:
             data = response.json()
         except ValueError:
             data = {'message': response.text}
+        if not isinstance(data, dict):
+            return False
         message = str(data.get('message') or data.get('error') or '').strip().lower()
         return message == 'check your credentials'
 

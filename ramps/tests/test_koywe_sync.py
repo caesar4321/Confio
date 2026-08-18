@@ -186,6 +186,24 @@ class KoyweOrderAmbiguityTests(SimpleTestCase):
         self.assertEqual(client.session.request.call_count, 2)
         cache_delete.assert_called_once()
 
+    @mock.patch('ramps.koywe_client.cache.delete')
+    def test_successful_list_response_is_not_treated_as_auth_rejection(self, cache_delete):
+        providers = [{'id': 'pix-br', 'code': 'PIX_QR'}]
+        response = mock.Mock(ok=True, status_code=200)
+        response.json.return_value = providers
+        client = self._client_with_response(response)
+
+        result = client._request(
+            'GET',
+            '/rest/payment-providers',
+            email='owner@example.com',
+        )
+
+        self.assertEqual(result, providers)
+        self.assertEqual(client.authenticate.call_count, 1)
+        self.assertEqual(client.session.request.call_count, 1)
+        cache_delete.assert_not_called()
+
 
 class KoyweAddressReservationTests(TestCase):
     def setUp(self):
