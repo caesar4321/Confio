@@ -201,7 +201,7 @@ guard.
 
 The user signs the swap, the server relay accepts only
 `swapExactETHForTokens` calldata to the configured router, and every outbound
-BNB transaction is recorded in the `BnbAutoConvert` ledger. A pending bridge
+BNB transaction is recorded as a BNB row in the `PendingAutoSwap` ledger. A pending bridge
 arrival defers the sweep to avoid misattribution. Successful USDT output is
 registered immediately and handed to the normal cUSD+ savings-resume flow;
 failures remain silent and retry the next time the app enters the foreground.
