@@ -478,7 +478,22 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
     title = None
     message = None
 
-    if created and ramp_tx.status in {'PENDING', 'PROCESSING'}:
+    reservation_state = str(
+        (ramp_tx.metadata or {}).get('wallet_address_reservation_state') or ''
+    )
+    provider_order_just_recorded = bool(
+        getattr(ramp_tx, '_provider_order_just_recorded', False)
+    )
+    if hasattr(ramp_tx, '_provider_order_just_recorded'):
+        # This is a one-save instruction. Reusing the same model instance for
+        # a later save must not emit a second pending notification.
+        delattr(ramp_tx, '_provider_order_just_recorded')
+
+    if (
+        (created or provider_order_just_recorded)
+        and ramp_tx.status in {'PENDING', 'PROCESSING'}
+        and reservation_state != 'creating_order'
+    ):
         notification_type = NotificationTypeChoices.RAMP_PENDING
         title = 'Operación en proceso'
         message = f'Tu {label} está en proceso.'
@@ -548,9 +563,21 @@ def handle_guardarian_transaction_save(sender, instance, **kwargs):
 
 @receiver(post_save, sender=RampTransaction)
 def handle_ramp_transaction_save(sender, instance, created, **kwargs):
-    sync_unified_transaction_from_ramp(instance)
+    try:
+        sync_unified_transaction_from_ramp(instance)
+    except Exception:  # noqa: BLE001 — derived-ledger failure cannot fail the provider order
+        logger.exception(
+            'ramp %s: failed to sync unified transaction',
+            getattr(instance, 'pk', '?'),
+        )
     previous_status = getattr(instance, '_previous_status', None)
-    _notify_ramp_status(instance, created=created, previous_status=previous_status)
+    try:
+        _notify_ramp_status(instance, created=created, previous_status=previous_status)
+    except Exception:  # noqa: BLE001 — notification failure cannot fail a money operation
+        logger.exception(
+            'ramp %s: failed to create status notification',
+            getattr(instance, 'pk', '?'),
+        )
 
     # Emit the first successful on-ramp completion for this user.
     # This captures the `claim -> first_deposit` funnel milestone without

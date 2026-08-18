@@ -556,8 +556,15 @@ def upsert_koywe_ramp_transaction(
         'completed_at': completed_at,
     }
     if existing is not None:
+        was_preorder_reservation = not bool(existing.provider_order_id)
         for field, value in defaults.items():
             setattr(existing, field, value)
+        # The pre-order wallet reservation is intentionally silent. Tell the
+        # post-save signal to emit the pending notification now that Koywe has
+        # returned a real provider order id.
+        existing._provider_order_just_recorded = bool(  # pylint: disable=protected-access
+            was_preorder_reservation and order_id
+        )
         existing.save(update_fields=[*defaults.keys(), 'updated_at'])
         ramp_tx = existing
     else:

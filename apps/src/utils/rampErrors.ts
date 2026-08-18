@@ -34,6 +34,10 @@ export const getFriendlyRampError = (rawError?: string | null): string => {
     return 'El servicio de compra y retiro no está disponible temporalmente. Inténtalo más tarde.';
   }
 
+  if (normalized.includes('check your credentials')) {
+    return 'El proveedor no pudo autorizar la operación en este momento. No se creó ninguna orden; inténtalo nuevamente en unos minutos.';
+  }
+
   if (
     normalized.includes('bankcode not valid nequi') ||
     (normalized.includes('nequi') && normalized.includes('bankcode not valid'))

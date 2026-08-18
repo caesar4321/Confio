@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -97,6 +97,7 @@ const TopUpScreen = () => {
   const [showAuthEmailModal, setShowAuthEmailModal] = useState(false);
   const [authEmailInput, setAuthEmailInput] = useState('');
   const [authEmailError, setAuthEmailError] = useState<string | null>(null);
+  const orderSubmissionInFlightRef = useRef(false);
 
   // The user's OWN country, or null. Never a picker, never Argentina by
   // default — see useRampCountry.
@@ -217,70 +218,70 @@ const TopUpScreen = () => {
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
   const submitRampOrder = async (authEmailOverride?: string | null) => {
-    if (!selectedMethod || !quote) {
+    if (!selectedMethod || !quote || orderSubmissionInFlightRef.current) {
       return;
     }
-    const walletSafe = await checkBackupEnforcement('deposit');
-    if (!walletSafe) {
-      return;
-    }
-    if (!hasCompleteRampAddress) {
-      Alert.alert(
-        'Completa tu dirección',
-        'Antes de confirmar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
-        [
-          { text: 'Ahora no', style: 'cancel' },
-          { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
-        ],
-      );
-      return;
-    }
-
+    orderSubmissionInFlightRef.current = true;
     setIsSubmittingOrder(true);
-    createRampOrder({
-      variables: {
-        direction: 'ON_RAMP',
-        amount: String(parsedAmount),
-        countryCode: availability?.countryCode,
-        fiatCurrency,
-        paymentMethodCode: selectedMethod.code,
-        authEmail: authEmailOverride || undefined,
-        ...(isSavingsRail ? { destination: 'cusd_plus' } : {}),
-      },
-    })
-      .then(({ data }) => {
-        const result = data?.createRampOrder;
-        if (!result?.success || !result?.orderId) {
-          Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
-          return;
-        }
-        void AnalyticsService.logEvent('add_payment_info', {
-          payment_type: selectedMethod.code,
-          provider: 'koywe',
+    try {
+      const walletSafe = await checkBackupEnforcement('deposit');
+      if (!walletSafe) {
+        return;
+      }
+      if (!hasCompleteRampAddress) {
+        Alert.alert(
+          'Completa tu dirección',
+          'Antes de confirmar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
+          [
+            { text: 'Ahora no', style: 'cancel' },
+            { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
+          ],
+        );
+        return;
+      }
+
+      const { data } = await createRampOrder({
+        variables: {
           direction: 'ON_RAMP',
-          value: Number(parsedAmount) || 0,
-          currency: fiatCurrency,
-          order_id: result.orderId,
-        });
-        navigation.replace('RampInstructions', {
-          direction: 'ON_RAMP',
-          orderId: result.orderId,
+          amount: String(parsedAmount),
           countryCode: availability?.countryCode,
-          paymentMethodCode: selectedMethod.code,
-          paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
-          amountOut: result.amountOut || undefined,
           fiatCurrency,
-          assetUnit,
-          nextActionUrl: result.nextActionUrl || undefined,
-          paymentDetails: result.paymentDetails,
-        });
-      })
-      .catch((error) => {
-        Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
-      })
-      .finally(() => {
-        setIsSubmittingOrder(false);
+          paymentMethodCode: selectedMethod.code,
+          authEmail: authEmailOverride || undefined,
+          ...(isSavingsRail ? { destination: 'cusd_plus' } : {}),
+        },
       });
+      const result = data?.createRampOrder;
+      if (!result?.success || !result?.orderId) {
+        Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
+        return;
+      }
+      void AnalyticsService.logEvent('add_payment_info', {
+        payment_type: selectedMethod.code,
+        provider: 'koywe',
+        direction: 'ON_RAMP',
+        value: Number(parsedAmount) || 0,
+        currency: fiatCurrency,
+        order_id: result.orderId,
+      });
+      navigation.replace('RampInstructions', {
+        direction: 'ON_RAMP',
+        orderId: result.orderId,
+        countryCode: availability?.countryCode,
+        paymentMethodCode: selectedMethod.code,
+        paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
+        amountOut: result.amountOut || undefined,
+        fiatCurrency,
+        assetUnit,
+        nextActionUrl: result.nextActionUrl || undefined,
+        paymentDetails: result.paymentDetails,
+      });
+    } catch (error: any) {
+      Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
+    } finally {
+      orderSubmissionInFlightRef.current = false;
+      setIsSubmittingOrder(false);
+    }
   };
 
   const openVerificationPrompt = () => {

@@ -1136,6 +1136,29 @@ class CreateRampOrder(graphene.Mutation):
                             success=False,
                             error='La dirección de ahorro cambió. Vuelve a intentar.',
                         )
+                    # Serialize the check and insert with the Account row lock.
+                    # Without this, two mutations a few milliseconds apart can
+                    # both create reservations and both reach Koywe with distinct
+                    # external ids. A blank provider id means the earlier create
+                    # is either still running or has an ambiguous outcome; both
+                    # cases must be reconciled before another order is attempted.
+                    unresolved_reservation = RampTransaction.objects.filter(
+                        provider='koywe',
+                        direction=normalized_direction.lower(),
+                        provider_order_id='',
+                        actor_user=user,
+                        actor_address__iexact=actor_address,
+                        destination='cusd_plus',
+                    ).exists()
+                    if unresolved_reservation:
+                        return RampOrderType(
+                            success=False,
+                            error=(
+                                'Ya hay una operación de ahorro en proceso. '
+                                'Espera su confirmación antes de volver a intentarlo; '
+                                'si el mensaje persiste, contacta a soporte.'
+                            ),
+                        )
                     address_reservation = RampTransaction.objects.create(
                         provider='koywe',
                         direction=normalized_direction.lower(),

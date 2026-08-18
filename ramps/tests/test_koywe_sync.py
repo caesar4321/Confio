@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
 from ramps import schema as ramps_schema
+from ramps import signals as ramps_signals
 from ramps.koywe_client import (
     KoyweClient,
     KoyweError,
@@ -24,6 +25,61 @@ from users.models import Account
 
 
 User = get_user_model()
+
+
+class KoyweNotificationTimingUnitTests(SimpleTestCase):
+    def _ramp(self, *, reservation_state, provider_recorded=False):
+        ramp = SimpleNamespace(
+            actor_user_id=1,
+            actor_user=SimpleNamespace(id=1),
+            actor_business=None,
+            direction='on_ramp',
+            fiat_amount=Decimal('500'),
+            fiat_currency='BRL',
+            final_amount=Decimal('94.90'),
+            crypto_amount_actual=None,
+            crypto_amount_estimated=None,
+            final_currency='CUSD+',
+            provider='koywe',
+            status='PENDING',
+            metadata={'wallet_address_reservation_state': reservation_state},
+            internal_id='reservation-id',
+        )
+        ramp._provider_order_just_recorded = provider_recorded
+        return ramp
+
+    @mock.patch('ramps.signals.create_notification')
+    def test_preorder_reservation_is_silent(self, notify_mock):
+        ramps_signals._notify_ramp_status(
+            self._ramp(reservation_state='creating_order'),
+            created=True,
+            previous_status=None,
+        )
+
+        notify_mock.assert_not_called()
+
+    @mock.patch('ramps.signals.create_notification')
+    def test_pending_notification_waits_for_provider_order(self, notify_mock):
+        ramp = self._ramp(
+            reservation_state='provider_order_recorded',
+            provider_recorded=True,
+        )
+        ramps_signals._notify_ramp_status(
+            ramp,
+            created=False,
+            previous_status='PENDING',
+        )
+        ramps_signals._notify_ramp_status(
+            ramp,
+            created=False,
+            previous_status='PENDING',
+        )
+
+        notify_mock.assert_called_once()
+        self.assertEqual(
+            notify_mock.call_args.kwargs['notification_type'],
+            'RAMP_PENDING',
+        )
 
 
 class KoyweOrderAmbiguityTests(SimpleTestCase):
@@ -93,6 +149,43 @@ class KoyweOrderAmbiguityTests(SimpleTestCase):
                 external_id='confio-ramp-on_ramp-test',
             )
 
+    @mock.patch('ramps.koywe_client.cache.delete')
+    def test_auth_rejection_refreshes_token_and_retries_once(self, cache_delete):
+        rejected = mock.Mock(ok=False, status_code=400)
+        rejected.json.return_value = {'message': 'Check your credentials'}
+        accepted = mock.Mock(ok=True, status_code=200)
+        accepted.json.return_value = {'items': [{'id': 'wire-br'}]}
+        client = KoyweClient()
+        client.authenticate = mock.Mock(side_effect=['stale-token', 'fresh-token'])
+        client.session = mock.Mock()
+        client.session.request.side_effect = [rejected, accepted]
+
+        result = client._request(
+            'GET',
+            '/rest/payment-providers',
+            email='owner@example.com',
+        )
+
+        self.assertEqual(result, {'items': [{'id': 'wire-br'}]})
+        self.assertEqual(client.authenticate.call_count, 2)
+        self.assertEqual(client.session.request.call_count, 2)
+        cache_delete.assert_called_once_with('koywe:token:owner@example.com')
+
+    @mock.patch('ramps.koywe_client.cache.delete')
+    def test_auth_rejection_is_returned_after_single_retry(self, cache_delete):
+        rejected = mock.Mock(ok=False, status_code=401)
+        rejected.json.return_value = {'message': 'Check your credentials'}
+        client = KoyweClient()
+        client.authenticate = mock.Mock(side_effect=['stale-token', 'fresh-token'])
+        client.session = mock.Mock()
+        client.session.request.side_effect = [rejected, rejected]
+
+        with self.assertRaisesRegex(KoyweError, 'Check your credentials'):
+            client._request('GET', '/rest/accounts/test', email='owner@example.com')
+
+        self.assertEqual(client.session.request.call_count, 2)
+        cache_delete.assert_called_once()
+
 
 class KoyweAddressReservationTests(TestCase):
     def setUp(self):
@@ -159,6 +252,87 @@ class KoyweAddressReservationTests(TestCase):
         )
         self.assertEqual(reservation.metadata['reconcile_key'], reservation.external_id)
 
+    def test_existing_unresolved_reservation_blocks_duplicate_provider_call(self):
+        RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            provider_order_id='',
+            external_id='confio-ramp-existing-inflight',
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.bsc_address,
+            destination='cusd_plus',
+            metadata={
+                'wallet_address_reserved': True,
+                'wallet_address_reservation_state': 'creating_order',
+            },
+        )
+        client = mock.Mock(is_configured=True)
+        with mock.patch('ramps.schema.KoyweClient', return_value=client), \
+             mock.patch('ramps.schema._employee_ramp_denial', return_value=None), \
+             mock.patch('ramps.schema._get_wallet_upgrade_blocker', return_value=None), \
+             mock.patch('ramps.schema._resolve_ramp_country_code', return_value='BR'), \
+             mock.patch('ramps.schema._get_ramp_account_for_user', return_value=self.account), \
+             mock.patch('ramps.schema._get_koywe_auth_email', return_value='owner@example.com'), \
+             mock.patch('ramps.schema._store_koywe_auth_email'), \
+             mock.patch(
+                 'ramps.schema._get_koywe_contact_profile',
+                 return_value={'activity': 'EMPLOYEE'},
+             ):
+            result = ramps_schema.CreateRampOrder().mutate(
+                self.info,
+                direction='ON_RAMP',
+                amount='500',
+                payment_method_code='PIX',
+                country_code='BR',
+                fiat_currency='BRL',
+                destination='cusd_plus',
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn('operación de ahorro en proceso', result.error)
+        client.create_ramp_order.assert_not_called()
+        self.assertEqual(RampTransaction.objects.count(), 1)
+
+    @mock.patch('ramps.signals._notify_ramp_status', side_effect=RuntimeError('push db down'))
+    @mock.patch('ramps.signals.sync_unified_transaction_from_ramp')
+    def test_notification_failure_does_not_fail_ramp_save(self, _sync_mock, _notify_mock):
+        ramp = RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            provider_order_id='koywe-order-notify-failure',
+            external_id='confio-ramp-notify-failure',
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.bsc_address,
+            destination='cusd_plus',
+        )
+
+        self.assertIsNotNone(ramp.pk)
+
+    @mock.patch('ramps.signals._notify_ramp_status')
+    @mock.patch(
+        'ramps.signals.sync_unified_transaction_from_ramp',
+        side_effect=RuntimeError('ledger sync down'),
+    )
+    def test_ledger_sync_failure_does_not_fail_ramp_save(self, _sync_mock, _notify_mock):
+        ramp = RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            provider_order_id='koywe-order-ledger-failure',
+            external_id='confio-ramp-ledger-failure',
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.bsc_address,
+            destination='cusd_plus',
+        )
+
+        self.assertIsNotNone(ramp.pk)
+        _notify_mock.assert_called_once()
+
     def test_provider_response_reuses_precreated_address_reservation(self):
         reservation = RampTransaction.objects.create(
             provider='koywe',
@@ -198,6 +372,53 @@ class KoyweAddressReservationTests(TestCase):
         self.assertEqual(
             ramp_tx.metadata['wallet_address_reservation_state'],
             'provider_order_recorded',
+        )
+
+    @mock.patch('ramps.signals.create_notification')
+    def test_reservation_notifies_only_after_provider_order_exists(self, notify_mock):
+        reservation = RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            provider_order_id='',
+            external_id='confio-ramp-notification-1',
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.bsc_address,
+            destination='cusd_plus',
+            metadata={
+                'wallet_address_reserved': True,
+                'wallet_address_reservation_state': 'creating_order',
+            },
+        )
+
+        notify_mock.assert_not_called()
+
+        upsert_koywe_ramp_transaction(
+            actor_user=self.user,
+            actor_business=None,
+            actor_type='user',
+            actor_display_name='Test User',
+            actor_address=self.account.bsc_address,
+            direction='ON_RAMP',
+            destination='cusd_plus',
+            country_code='BR',
+            fiat_currency='BRL',
+            payment_method_code='PIX',
+            payment_method_display='PIX',
+            order_id='koywe-order-notification-1',
+            external_id=reservation.external_id,
+            amount_in='500',
+            amount_out='94.90',
+            next_action_url=None,
+            auth_email='owner@example.com',
+            order_payload={'status': 'WAITING'},
+        )
+
+        notify_mock.assert_called_once()
+        self.assertEqual(
+            notify_mock.call_args.kwargs['notification_type'],
+            'RAMP_PENDING',
         )
 
 
@@ -384,6 +605,67 @@ class KoyweExistingAccountProfileTests(SimpleTestCase):
             ['old@example.com'],
         )
         self.assertIn('ya está registrado', str(ctx.exception))
+
+    @mock.patch('ramps.koywe_client.cache.set')
+    def test_existing_complete_profile_is_read_without_duplicate_post(self, cache_set):
+        client = KoyweClient()
+        existing = {
+            **self.PAYLOAD,
+            'address': {
+                'addressStreet': 'Rua Um 123',
+                'addressCountry': 'BRA',
+                'addressZipCode': '01001000',
+                'addressCity': 'Sao Paulo',
+                'addressState': 'SP',
+            },
+        }
+        payload = {
+            **self.PAYLOAD,
+            'address': dict(existing['address']),
+        }
+
+        with mock.patch.object(
+            client, '_build_account_profile_payload', return_value=payload,
+        ), mock.patch.object(
+            client, 'get_account', return_value=existing,
+        ) as get_account, mock.patch.object(
+            client, 'update_account',
+        ) as update_account, mock.patch.object(client, '_request') as request:
+            resolved = client.ensure_account_profile(
+                email='owner@example.com',
+                country_code='CO',
+                contact_profile={
+                    'email': 'owner@example.com',
+                    'documentNumber': '1234567890',
+                    'firstName': 'Test',
+                },
+            )
+
+        self.assertIsNone(resolved)
+        get_account.assert_called_once_with(email='owner@example.com')
+        update_account.assert_not_called()
+        request.assert_not_called()
+        cache_set.assert_called_once()
+
+    def test_profile_lookup_auth_error_does_not_fall_through_to_create(self):
+        client = KoyweClient()
+        with mock.patch.object(
+            client, '_build_account_profile_payload', return_value=self.PAYLOAD,
+        ), mock.patch.object(
+            client, 'get_account', side_effect=KoyweError('Check your credentials'),
+        ), mock.patch.object(client, '_request') as request:
+            with self.assertRaisesRegex(KoyweError, 'Check your credentials'):
+                client.ensure_account_profile(
+                    email='owner@example.com',
+                    country_code='CO',
+                    contact_profile={
+                        'email': 'owner@example.com',
+                        'documentNumber': '1234567890',
+                        'firstName': 'Test',
+                    },
+                )
+
+        request.assert_not_called()
 
 
 class KoyweEmailSelectionTests(SimpleTestCase):

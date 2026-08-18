@@ -368,23 +368,42 @@ class KoyweClient:
     def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True, ambiguous_on_transport: bool = False) -> dict[str, Any]:
         headers = {'Content-Type': 'application/json'}
         normalized_email = str(email or '').strip() or None
-        if auth:
-            headers['Authorization'] = f'Bearer {self.authenticate(email=normalized_email)}'
-        try:
-            response = self.session.request(
-                method,
-                f'{self.base_url}{path}',
-                params=params,
-                json=json_payload,
-                headers=headers,
-                timeout=self.timeout,
-            )
-        except requests.RequestException as exc:
-            if ambiguous_on_transport:
-                raise KoyweOrderCreationAmbiguousError(
-                    f'Koywe order creation outcome is unknown: {exc}'
-                ) from exc
-            raise KoyweError(f'Koywe request failed: {method} {path}: {exc}') from exc
+        response = None
+        for attempt in range(2):
+            if auth:
+                headers['Authorization'] = f'Bearer {self.authenticate(email=normalized_email)}'
+            try:
+                response = self.session.request(
+                    method,
+                    f'{self.base_url}{path}',
+                    params=params,
+                    json=json_payload,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as exc:
+                if ambiguous_on_transport:
+                    raise KoyweOrderCreationAmbiguousError(
+                        f'Koywe order creation outcome is unknown: {exc}'
+                    ) from exc
+                raise KoyweError(f'Koywe request failed: {method} {path}: {exc}') from exc
+
+            # Koywe sometimes invalidates a still-cached email-scoped token and
+            # responds with the generic "Check your credentials" message. A
+            # rejected authorization proves the request was not accepted, so
+            # it is safe to mint a fresh token and retry exactly once, including
+            # for order creation.
+            if auth and attempt == 0 and self._is_auth_rejection(response):
+                cache.delete(self._token_cache_key(normalized_email))
+                logger.warning(
+                    'Koywe rejected cached auth; refreshing token for %s %s',
+                    method,
+                    path,
+                )
+                continue
+            break
+
+        assert response is not None
         if ambiguous_on_transport:
             status_code = int(response.status_code)
             # Only responses that prove the provider rejected the request may
@@ -397,6 +416,17 @@ class KoyweClient:
                     f'the POST (HTTP {status_code})'
                 )
         return self._parse_response(response, f'Koywe request failed: {method} {path}')
+
+    @staticmethod
+    def _is_auth_rejection(response: requests.Response) -> bool:
+        if int(response.status_code) in {401, 403}:
+            return True
+        try:
+            data = response.json()
+        except ValueError:
+            data = {'message': response.text}
+        message = str(data.get('message') or data.get('error') or '').strip().lower()
+        return message == 'check your credentials'
 
     def _parse_response(self, response: requests.Response, default_message: str) -> dict[str, Any]:
         try:
@@ -845,6 +875,29 @@ class KoyweClient:
         if not payload:
             return None
 
+        # Most order attempts belong to an account Koywe already knows. Read it
+        # first instead of blindly POSTing /accounts again. Besides avoiding an
+        # unnecessary write, this bypasses Koywe's misleading credential error
+        # when the delegated profile already exists (observed for BRL orders).
+        try:
+            existing = self.get_account(email=normalized_email)
+        except KoyweError as exc:
+            if not self._is_account_not_found_error(str(exc)):
+                raise
+            existing = {}
+        if existing:
+            if not self._account_profile_satisfies_payload(existing, payload):
+                update_payload = self._build_migration_payload(
+                    existing=existing,
+                    target_payload=payload,
+                    country_code=country_code,
+                    current_email=normalized_email,
+                    new_email=None,
+                )
+                self.update_account(email=normalized_email, payload=update_payload)
+            cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
+            return None
+
         try:
             self._request('POST', '/rest/accounts', email=normalized_email, json_payload=payload)
         except KoyweError as exc:
@@ -1062,6 +1115,16 @@ class KoyweClient:
             'profile already',
             'document already exists',
             'duplicate',
+        ))
+
+    @staticmethod
+    def _is_account_not_found_error(message: str) -> bool:
+        normalized = str(message or '').strip().lower()
+        return any(fragment in normalized for fragment in (
+            'account not found',
+            'profile not found',
+            'user not found',
+            'does not exist',
         ))
 
     def _extract_action_url(self, payload: Any) -> str | None:
