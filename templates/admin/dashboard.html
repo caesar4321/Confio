@@ -843,8 +843,11 @@
             Rail Interest — demand probes (90d)
             <span style="font-weight: 400; color: #6b7280;">
                 · {{ rail_interest_totals.rails|default:"0" }} rails
-                · {{ rail_interest_totals.taps|default:"0"|intcomma }} taps
-                · {{ rail_interest_totals.confirmed|default:"0"|intcomma }} confirmed
+                · {{ rail_interest_totals.taps|default:"0"|intcomma }} users tapped
+                · {{ rail_interest_totals.confirmed|default:"0"|intcomma }} users confirmed
+                {% if rail_interest_totals.unidentified_events %}
+                    · {{ rail_interest_totals.unidentified_events|intcomma }} unidentified events ignored
+                {% endif %}
             </span>
         </div>
         <table>
@@ -852,9 +855,9 @@
                 <tr>
                     <th>Rail</th>
                     <th>Direction</th>
-                    <th style="text-align: right;">Taps</th>
-                    <th style="text-align: right;">Confirmed</th>
-                    <th style="text-align: right;">Tap → Confirm</th>
+                    <th style="text-align: right;">Users tapped</th>
+                    <th style="text-align: right;">Users confirmed</th>
+                    <th style="text-align: right;">User conversion</th>
                     <th>Countries</th>
                     <th>Last seen</th>
                 </tr>

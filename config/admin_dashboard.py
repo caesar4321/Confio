@@ -33,6 +33,7 @@ from send.models import SendTransaction
 from payments.models import PaymentTransaction
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 from inbox.models import ContentPlatformClick
+from users.rail_interest_metrics import build_rail_interest_metrics
 
 
 def get_fcm_reachability_metrics(now=None):
@@ -426,48 +427,18 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         rail_interest_rows = FunnelEvent.objects.filter(
             event_name__in=['receive_rail_interest', 'local_rail_interest'],
             created_at__gte=funnel_last_90_start,
-        ).values('event_name', 'properties', 'country', 'created_at')
+        ).values(
+            'event_name',
+            'properties',
+            'country',
+            'created_at',
+            'user_id',
+            'session_id',
+        )
 
-        rail_totals = {}
-        for row in rail_interest_rows:
-            props = row['properties'] or {}
-            rail = str(props.get('rail') or '—')
-            direction = str(props.get('direction') or ('receive' if row['event_name'] == 'receive_rail_interest' else '—'))
-            key = (rail, direction)
-            bucket = rail_totals.setdefault(key, {
-                'rail': rail,
-                'direction': direction,
-                'taps': 0,
-                'confirmed': 0,
-                'countries': set(),
-                'last_seen': None,
-            })
-            # Probes emitted before the two-stage split (2026-07-06) carry no
-            # `stage`. Counting them as taps keeps the historical total honest;
-            # they can never be confirmations.
-            if str(props.get('stage') or 'tap') == 'confirmed':
-                bucket['confirmed'] += 1
-            else:
-                bucket['taps'] += 1
-            if row['country']:
-                bucket['countries'].add(row['country'])
-            if bucket['last_seen'] is None or row['created_at'] > bucket['last_seen']:
-                bucket['last_seen'] = row['created_at']
-
-        rail_interest = []
-        for bucket in rail_totals.values():
-            rail_interest.append({
-                **bucket,
-                'countries': ', '.join(sorted(bucket['countries'])) or '—',
-                'conversion_pct': _pct(bucket['confirmed'], bucket['taps']),
-            })
-        rail_interest.sort(key=lambda item: (-item['confirmed'], -item['taps']))
+        rail_interest, rail_interest_totals = build_rail_interest_metrics(rail_interest_rows)
         context['rail_interest'] = rail_interest
-        context['rail_interest_totals'] = {
-            'taps': sum(item['taps'] for item in rail_interest),
-            'confirmed': sum(item['confirmed'] for item in rail_interest),
-            'rails': len(rail_interest),
-        }
+        context['rail_interest_totals'] = rail_interest_totals
 
         referral_event_names = [
             'referral_whatsapp_share_tapped',
