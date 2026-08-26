@@ -7,7 +7,7 @@
 // Preview uses Ondo's non-binding soft quote; confirmation requests a fresh
 // binding redemption attestation and atomically settles back into cUSD+.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -39,6 +39,8 @@ import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { STOCKS_TRADING_UI_ENABLED } from '../config/features';
 import { getSoftStockQuote, sellStockToSavings } from '../services/ondoStocks';
+import { createSponsoredRequestId } from '../services/sponsored7702';
+import { isOutcomeUnknown } from '../services/evmWallet';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type SellRoute = RouteProp<MainStackParamList, 'SellStock'>;
@@ -77,6 +79,14 @@ export const SellStockScreen = () => {
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [settledReceiveUsd, setSettledReceiveUsd] = useState(0);
   const [softNetWei, setSoftNetWei] = useState(0n);
+  const confirmInFlight = useRef(false);
+  const requestIdRef = useRef<string | null>(null);
+
+  const changeAmount = (value: string, isMax = false) => {
+    requestIdRef.current = null;
+    setSellAll(isMax && available > 0);
+    setRaw(value);
+  };
 
   const amount = useMemo(() => {
     const v = parseFloat(raw.replace(',', '.'));
@@ -138,21 +148,29 @@ export const SellStockScreen = () => {
     amount >= MIN_AMOUNT_USD && !overBalance && !quote.paused && tradability !== 'closed';
 
   const onConfirm = async () => {
+    if (!canConfirm || confirmInFlight.current) return;
+    confirmInFlight.current = true;
     setTradeError(null);
     setPhase('processing');
     try {
+      const requestId = requestIdRef.current || createSponsoredRequestId();
+      requestIdRef.current = requestId;
       const result = await sellStockToSavings({
         symbol: stock.symbol,
         grossAmountUsd: amount,
         sellAll,
         minExpectedNetWei: (softNetWei * 99n) / 100n,
+        requestId,
       });
       setSettledReceiveUsd(Number(result.expectedNetWei) / 1e18);
-      await refetch();
       setPhase('success');
+      void refetch().catch(() => undefined);
     } catch (e) {
+      if (!isOutcomeUnknown(e)) requestIdRef.current = null;
       setTradeError(e instanceof Error ? e.message : 'No pudimos completar la venta.');
       setPhase('input');
+    } finally {
+      confirmInFlight.current = false;
     }
   };
 
@@ -217,10 +235,7 @@ export const SellStockScreen = () => {
               <TextInput
                 style={styles.amountInput}
                 value={raw}
-                onChangeText={(value) => {
-                  setSellAll(false);
-                  setRaw(value);
-                }}
+                onChangeText={(value) => changeAmount(value)}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={colors.text.light}
@@ -234,8 +249,7 @@ export const SellStockScreen = () => {
               </Text>
               <TouchableOpacity
                 onPress={() => {
-                  setSellAll(available > 0);
-                  setRaw(available > 0 ? String(available) : '');
+                  changeAmount(available > 0 ? String(available) : '', true);
                 }}
                 disabled={phase !== 'input' || available <= 0}
               >

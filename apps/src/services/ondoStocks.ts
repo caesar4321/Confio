@@ -23,7 +23,11 @@ import {
   sharesForUsdtOut,
 } from './cusdPlusVault';
 import { getActiveEvmWallet } from './secureDeterministicWallet';
-import { executeSponsoredBatch, fetchSponsored7702Params } from './sponsored7702';
+import {
+  createSponsoredRequestId,
+  executeSponsoredBatch,
+  fetchSponsored7702Params,
+} from './sponsored7702';
 
 const WAD = 10n ** 18n;
 const BPS = 10_000n;
@@ -112,9 +116,6 @@ export const usdToWei = (value: number): bigint => {
   return BigInt(whole) * WAD + BigInt(frac.padEnd(18, '0').slice(0, 18));
 };
 
-const tradeRequestId = (): string =>
-  `gm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
-
 const stockError = (quote: Partial<GmTradeQuote>): Error => {
   const code = quote.errorCode || 'QUOTE_UNAVAILABLE';
   const messages: Record<string, string> = {
@@ -153,11 +154,15 @@ const requestQuote = async (
   side: 'buy' | 'sell',
   notionalWei: bigint,
   duration: 'short' | 'long' = 'short',
+  requestId?: string,
 ): Promise<GmTradeQuote> => {
   const { apolloClient } = await import('../apollo/client');
   const variables = { symbol, side, notionalValue: formatWei(notionalWei), duration };
   const response = binding
-    ? await apolloClient.mutate({ mutation: PREPARE_TRADE, variables: { ...variables, requestId: tradeRequestId() } })
+    ? await apolloClient.mutate({
+        mutation: PREPARE_TRADE,
+        variables: { ...variables, requestId: requestId || createSponsoredRequestId() },
+      })
     : await apolloClient.query({ query: SOFT_QUOTE, variables, fetchPolicy: 'no-cache' });
   const quote = (binding ? response.data?.prepareGmTrade?.quote : response.data?.gmSoftQuote) as GmTradeQuote;
   if (!quote?.success) throw stockError(quote || {});
@@ -196,14 +201,16 @@ export const buyStockWithSavings = async (params: {
   symbol: string;
   grossAmountUsd: number;
   minTokenAmountWei?: bigint;
+  requestId?: string;
 }): Promise<{ txHash: string; tokenAmountWei: bigint; feeWei: bigint }> => {
   installBscServerTransport();
   const [config, wallet, delegateAddress] = await Promise.all([
     fetchConfig(), getActiveEvmWallet(), requireSponsored(),
   ]);
   const grossTarget = usdToWei(params.grossAmountUsd);
+  const requestId = params.requestId || createSponsoredRequestId();
   const requestedSpend = grossTarget - (grossTarget * config.feeBps) / BPS;
-  const quote = await requestQuote(true, params.symbol, 'buy', requestedSpend);
+  const quote = await requestQuote(true, params.symbol, 'buy', requestedSpend, 'short', `${requestId}_q0`);
   if (params.minTokenAmountWei && BigInt(quote.tokenAmount) < params.minTokenAmountWei) {
     throw new Error('El precio cambió más de 1%. Revisa la nueva cotización antes de continuar.');
   }
@@ -235,7 +242,7 @@ export const buyStockWithSavings = async (params: {
       data: encodeBuyStockCall(quote, shares, spend, requiredGross, config.feeBps),
     },
   ];
-  const result = await executeSponsoredBatch({ wallet, calls, delegateAddress });
+  const result = await executeSponsoredBatch({ wallet, calls, delegateAddress, requestId });
   return { txHash: result.txHash, tokenAmountWei: BigInt(quote.tokenAmount), feeWei: fee };
 };
 
@@ -246,12 +253,15 @@ export const sellStockToSavings = async (params: {
    * the exact on-chain token balance when the first quote rounds above it. */
   sellAll?: boolean;
   minExpectedNetWei?: bigint;
+  requestId?: string;
 }): Promise<{ txHash: string; tokenAmountWei: bigint; expectedNetWei: bigint }> => {
   installBscServerTransport();
   const [config, wallet, delegateAddress] = await Promise.all([
     fetchConfig(), getActiveEvmWallet(), requireSponsored(),
   ]);
-  let quote = await requestQuote(true, params.symbol, 'sell', usdToWei(params.grossAmountUsd));
+  const requestId = params.requestId || createSponsoredRequestId();
+  let quote = await requestQuote(
+    true, params.symbol, 'sell', usdToWei(params.grossAmountUsd), 'short', `${requestId}_q0`);
   let quantity = BigInt(quote.tokenAmount);
   const held = await getErc20BalanceWei(quote.assetAddress, wallet.address);
   // The portfolio card is a floating USD display value, so MAX can initially
@@ -265,7 +275,8 @@ export const sellStockToSavings = async (params: {
     // operation. A floored notional can otherwise leave one token wei behind.
     const balanceNotional = (held * BigInt(quote.price) + WAD - 1n) / WAD;
     if (balanceNotional <= 0n) break;
-    quote = await requestQuote(true, params.symbol, 'sell', balanceNotional);
+    quote = await requestQuote(
+      true, params.symbol, 'sell', balanceNotional, 'short', `${requestId}_q${attempt + 1}`);
     quantity = BigInt(quote.tokenAmount);
   }
   if (params.sellAll && quantity !== held) {
@@ -294,6 +305,6 @@ export const sellStockToSavings = async (params: {
       data: encodeSellStockCall(quote, minUsdt, minShares, config.feeBps),
     },
   ];
-  const result = await executeSponsoredBatch({ wallet, calls, delegateAddress });
+  const result = await executeSponsoredBatch({ wallet, calls, delegateAddress, requestId });
   return { txHash: result.txHash, tokenAmountWei: quantity, expectedNetWei: expectedNet };
 };

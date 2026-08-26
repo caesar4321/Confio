@@ -1179,8 +1179,17 @@ def check_sponsored_batch_receipt(self, batch_id: int):
 
     if receipt.get('status') != '0x1':
         batch.status = 'reverted'
+        update_fields = ['status', 'updated_at']
+        try:
+            batch.block_number = int(receipt.get('blockNumber'), 16)
+            batch.block_hash = (receipt.get('blockHash') or '').lower()
+            update_fields.extend(['block_number', 'block_hash'])
+        except (TypeError, ValueError):
+            # A malformed provider response must not hide the known terminal
+            # outcome. Reconciliation can enrich the block metadata later.
+            logger.warning('7702 reverted receipt missing block metadata for %s', batch.tx_hash)
         settle_savings_mint(batch.tx_hash, 'reverted')
-        batch.save(update_fields=['status', 'updated_at'])
+        batch.save(update_fields=update_fields)
         logger.info('7702 batch %s reverted', batch.tx_hash)
         return
 

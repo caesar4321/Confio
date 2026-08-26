@@ -13,6 +13,7 @@ from unittest import mock
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError
 from django.test import SimpleTestCase, override_settings
 
 from eth_keys import keys
@@ -78,15 +79,20 @@ def _stock_data(side=0, *, max_fee=30, expiration=None, min_usdt=None):
     return '0x' + selector + abi_encode(types, values).hex()
 
 
-def _intent_id(calls):
+def _intent_id(calls, request_id=None):
     """The generic rail's intentId derivation — kind from the selectors
     (mirror of cusd_plus/schema.py), source_id omitted."""
-    return sponsor_7702.intent_id_for(sponsor_7702.classify_calls_kind(calls))
+    return sponsor_7702.intent_id_for(
+        sponsor_7702.classify_calls_kind(calls),
+        client_request_id=request_id,
+    )
 
 
-def _sign_intent(calls, nonce, deadline, key=USER_KEY, user_addr=USER):
+def _sign_intent(calls, nonce, deadline, key=USER_KEY, user_addr=USER,
+                 request_id=None):
     digest = sponsor_7702.intent_digest(
-        calls, nonce, deadline, user_addr, CHAIN_ID, _intent_id(calls))
+        calls, nonce, deadline, user_addr, CHAIN_ID,
+        _intent_id(calls, request_id))
     return '0x' + key.sign_msg_hash(digest).to_bytes().hex()  # r‖s‖v(0/1)
 
 
@@ -369,14 +375,16 @@ class SponsorBscBatchTests(SimpleTestCase):
 
     def _mutate(self, calls=None, nonce='0', deadline=None, intent_sig=None,
                 authorization=None, delegated=False, rpc_overrides=None,
-                sent_raws=None, user_addr=USER):
+                sent_raws=None, user_addr=USER, request_id=None,
+                existing_batch=None, create_side_effect=None):
         from cusd_plus.schema import SponsorBscBatch
 
         deadline = deadline if deadline is not None else self.deadline
         if calls is None:
             calls = [_call(USDT, _approve_data()), _call(VAULT, _mint_data())]
         if intent_sig is None:
-            intent_sig = _sign_intent(calls, int(nonce), deadline)
+            intent_sig = _sign_intent(
+                calls, int(nonce), deadline, request_id=request_id)
 
         gql_calls = [mock.Mock(to=c['to'], value_wei=c['value'], data=c['data']) for c in calls]
         gql_auth = None
@@ -391,11 +399,15 @@ class SponsorBscBatchTests(SimpleTestCase):
              mock.patch('cusd_plus.schema._active_bsc_address', return_value=user_addr), \
              mock.patch('blockchain.models.SponsoredBatch.objects') as ledger, \
              mock.patch('cusd_plus.tasks.check_sponsored_batch_receipt') as receipt_task, \
+             mock.patch('cusd_plus.sponsor_7702.transaction.atomic'), \
              mock.patch('blockchain.evm_kms_signer.get_bsc_sponsor_signer_from_settings',
                         return_value=self._StubSigner(SPONSOR_KEY)):
             ledger.create.return_value = mock.Mock(id=99)
+            ledger.create.side_effect = create_side_effect
+            ledger.filter.return_value.order_by.return_value.first.return_value = existing_batch
             res = SponsorBscBatch.mutate(
-                None, _Info(), gql_calls, str(nonce), str(deadline), intent_sig, gql_auth)
+                None, _Info(), gql_calls, str(nonce), str(deadline), intent_sig,
+                gql_auth, request_id)
         return res, ledger, receipt_task
 
     # ── gates ──
@@ -564,6 +576,93 @@ class SponsorBscBatchTests(SimpleTestCase):
         self.assertEqual(HexBytes(sent[0])[0], 2)  # type-2 envelope
         self.assertEqual(ledger.create.call_args.kwargs['kind'], 'redeem')
 
+    def test_new_request_id_is_signature_bound_and_persisted(self):
+        request_id = 'gm_0123456789abcdef0123456789abcdef'
+        calls = [_call(VAULT, _redeem_data(recipient=USER))]
+        res, ledger, _ = self._mutate(
+            calls=calls, delegated=True, request_id=request_id)
+
+        self.assertTrue(res.success, res.error)
+        self.assertEqual(
+            ledger.create.call_args.kwargs['client_request_id'], request_id)
+        self.assertTrue(ledger.create.call_args.kwargs['delegate_nonce_claimed'])
+
+        legacy_sig = _sign_intent(calls, 0, self.deadline)
+        rejected, *_ = self._mutate(
+            calls=calls, delegated=True, request_id=request_id,
+            intent_sig=legacy_sig)
+        self.assertEqual(rejected.error, 'bad_intent_signature')
+
+    def test_request_id_replay_returns_original_without_broadcast(self):
+        request_id = 'gm_0123456789abcdef0123456789abcdef'
+        calls = [_call(VAULT, _redeem_data(recipient=USER))]
+        existing = mock.Mock(
+            user_bsc_address=USER,
+            kind='redeem',
+            calls_json=json.dumps(calls),
+            tx_hash='0x' + '12' * 32,
+            status='sent',
+        )
+        sent = []
+        res, ledger, _ = self._mutate(
+            calls=calls, delegated=True, request_id=request_id,
+            existing_batch=existing, sent_raws=sent)
+
+        self.assertTrue(res.success, res.error)
+        self.assertEqual(res.tx_hash, existing.tx_hash)
+        self.assertEqual(sent, [])
+        ledger.create.assert_not_called()
+
+        existing.user_bsc_address = '0x' + 'ab' * 20
+        conflict, *_ = self._mutate(
+            calls=calls, delegated=True, request_id=request_id,
+            existing_batch=existing)
+        self.assertEqual(conflict.error, 'idempotency_conflict')
+
+    def test_nonce_collision_is_coalesced_only_for_same_calls(self):
+        calls = [_call(VAULT, _redeem_data(recipient=USER))]
+        existing = mock.Mock(
+            user_bsc_address=USER,
+            kind='redeem',
+            calls_json=json.dumps(calls),
+            tx_hash='0x' + '34' * 32,
+            status='sent',
+        )
+        sent = []
+        res, _, _ = self._mutate(
+            calls=calls, delegated=True, existing_batch=existing,
+            create_side_effect=IntegrityError('duplicate nonce'),
+            sent_raws=sent)
+        self.assertTrue(res.success, res.error)
+        self.assertEqual(res.tx_hash, existing.tx_hash)
+        self.assertEqual(sent, [])
+
+        different = mock.Mock(
+            user_bsc_address=USER,
+            kind='subscribe',
+            calls_json=json.dumps([_call(USDT, _approve_data())]),
+            tx_hash='0x' + '56' * 32,
+            status='sent',
+        )
+        rejected, _, _ = self._mutate(
+            calls=calls, delegated=True, existing_batch=different,
+            create_side_effect=IntegrityError('duplicate nonce'))
+        self.assertEqual(rejected.error, 'delegate_nonce_in_flight')
+
+    @override_settings(CUSD_PLUS_STOCK_ROUTER_ADDRESS=ROUTER)
+    def test_stock_replay_ignores_only_incidental_approval_call(self):
+        stock_call = _call(ROUTER, _stock_data(side=1))
+        existing = mock.Mock(
+            kind='stock_sell',
+            calls_json=json.dumps([_call(STOCK, _approve_data()), stock_call]),
+        )
+        self.assertTrue(sponsor_7702.batch_matches_stock_intent(
+            existing, [stock_call]))
+
+        different_trade = _call(ROUTER, _stock_data(side=0))
+        self.assertFalse(sponsor_7702.batch_matches_stock_intent(
+            existing, [different_trade]))
+
 
 class ReceiptCheckerTests(SimpleTestCase):
     """Finality-aware receipt resolution (audit 2026-07-31 P1-3): a 7702
@@ -675,6 +774,9 @@ class ReceiptCheckerTests(SimpleTestCase):
         batch = self._batch()
         self._run(batch, self._receipt(status='0x0'))
         self.assertEqual(batch.status, 'reverted')
+        self.assertEqual(batch.block_number, self.BLK)
+        self.assertEqual(batch.block_hash, self.BLKHASH)
+        self.assertIn('block_number', batch.save.call_args.kwargs['update_fields'])
 
     def test_silent_noop_flagged(self):
         # The delegation didn't apply, so the tx called a CODELESS EOA and

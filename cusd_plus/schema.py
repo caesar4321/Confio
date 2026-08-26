@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 _GM_SYMBOL_RE = re.compile(r'^[A-Za-z0-9]{1,24}$')
 _GM_ADDRESS_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 _GM_BYTES32_RE = re.compile(r'^0x[0-9a-fA-F]{64}$')
+_SPONSOR_REQUEST_ID_RE = re.compile(r'^[A-Za-z0-9_-]{16,80}$')
 
 
 def _stock_execution_ready():
@@ -1243,6 +1244,9 @@ class SponsorBscBatch(graphene.Mutation):
         deadline = graphene.String(required=True, description="Unix seconds")
         intent_signature = graphene.String(required=True, description="65-byte r‖s‖v hex")
         authorization = BscAuthorizationInput(required=False)
+        # Optional for wire compatibility with released clients. New clients
+        # bind it into intentId and reuse it across transport/quote retries.
+        request_id = graphene.String(required=False)
 
     success = graphene.Boolean()
     tx_hash = graphene.String()
@@ -1252,7 +1256,8 @@ class SponsorBscBatch(graphene.Mutation):
     execution = graphene.String(
         description="Sponsor-observed execution: executed | reverted | noop; null=unknown")
 
-    def mutate(self, info, calls, nonce, deadline, intent_signature, authorization=None):
+    def mutate(self, info, calls, nonce, deadline, intent_signature,
+               authorization=None, request_id=None):
         import time as _time
 
         from django.conf import settings
@@ -1305,6 +1310,9 @@ class SponsorBscBatch(graphene.Mutation):
             deadline_i = int(deadline)
         except (TypeError, ValueError):
             return SponsorBscBatch(success=False, error='bad_params')
+        request_id = (request_id or '').strip()
+        if request_id and not _SPONSOR_REQUEST_ID_RE.fullmatch(request_id):
+            return SponsorBscBatch(success=False, error='bad_request_id')
 
         now = int(_time.time())
         if not (now + 60 <= deadline_i <= now + 1800):
@@ -1345,12 +1353,40 @@ class SponsorBscBatch(graphene.Mutation):
                     return SponsorBscBatch(success=False, error='trade_not_available')
                 if kind == 'stock_buy' and not _stock_buy_enabled(user, meta):
                     return SponsorBscBatch(success=False, error='trade_not_available')
-            intent_id = sponsor_7702.intent_id_for(kind)
+            intent_id = sponsor_7702.intent_id_for(
+                kind, client_request_id=request_id or None)
             digest = sponsor_7702.intent_digest(
                 norm_calls, nonce_i, deadline_i, user_addr, chain_id, intent_id)
             signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
             if signer != user_addr:
                 return SponsorBscBatch(success=False, error='bad_intent_signature')
+
+            # Fast idempotent replay path for new clients. This runs only
+            # after the fresh payload's signature has been verified, so a
+            # guessed request id cannot reveal another signed transaction.
+            if request_id:
+                from blockchain.models import SponsoredBatch
+                existing = SponsoredBatch.objects.filter(
+                    user=user, client_request_id=request_id,
+                ).order_by('-id').first()
+                if existing is not None:
+                    exact_match = sponsor_7702.batch_matches_calls(
+                        existing, kind, norm_calls)
+                    stock_match = (
+                        kind in ('stock_buy', 'stock_sell')
+                        and existing.kind == kind
+                        and sponsor_7702.batch_matches_stock_intent(
+                            existing, norm_calls)
+                    )
+                    if (existing.user_bsc_address.lower() != user_addr
+                            or not (exact_match or stock_match)):
+                        return SponsorBscBatch(
+                            success=False, error='idempotency_conflict')
+                    return SponsorBscBatch(
+                        success=True,
+                        tx_hash=existing.tx_hash,
+                        execution=sponsor_7702.batch_execution_hint(existing),
+                    )
 
             # Delegation state decides whether an authorization must ride
             # along. The server's view is authoritative — the client's
@@ -1393,7 +1429,8 @@ class SponsorBscBatch(graphene.Mutation):
 
             tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
-                intent_signature, auth_dict, kind)
+                intent_signature, auth_dict, kind,
+                client_request_id=request_id, intent_id=intent_id)
             broadcast_tx_hash = tx_hash  # past the point of no return
             if kind in ('stock_buy', 'stock_sell'):
                 # Drop only fresh values. If the tx later reverts, the next
@@ -1418,6 +1455,29 @@ class SponsorBscBatch(graphene.Mutation):
                     amount_wei=int(mint_call['data'][10:74], 16),
                     tx_hash=tx_hash, bsc_address=user_addr,
                 )
+        except sponsor_7702.ExistingSponsoredBatch as exc:
+            existing = exc.batch
+            same_address = existing.user_bsc_address.lower() == user_addr
+            exact_match = (
+                same_address
+                and sponsor_7702.batch_matches_calls(existing, kind, norm_calls)
+            )
+            stock_match = (
+                same_address
+                and kind in ('stock_buy', 'stock_sell')
+                and existing.kind == kind
+                and sponsor_7702.batch_matches_stock_intent(existing, norm_calls)
+            )
+            if (exc.reason == 'client_request_id'
+                    and not (exact_match or stock_match)):
+                return SponsorBscBatch(success=False, error='idempotency_conflict')
+            if not exact_match and not stock_match:
+                return SponsorBscBatch(success=False, error='delegate_nonce_in_flight')
+            return SponsorBscBatch(
+                success=True,
+                tx_hash=existing.tx_hash,
+                execution=sponsor_7702.batch_execution_hint(existing),
+            )
         except sponsor_7702.PolicyError as exc:
             return SponsorBscBatch(success=False, error=exc.code)
         except Exception as exc:  # noqa: BLE001 — surface node rejections honestly

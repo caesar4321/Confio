@@ -40,6 +40,7 @@ const SPONSOR_BSC_BATCH = gql`
     $deadline: String!
     $intentSignature: String!
     $authorization: BscAuthorizationInput
+    $requestId: String
   ) {
     sponsorBscBatch(
       calls: $calls
@@ -47,6 +48,7 @@ const SPONSOR_BSC_BATCH = gql`
       deadline: $deadline
       intentSignature: $intentSignature
       authorization: $authorization
+      requestId: $requestId
     ) {
       success
       txHash
@@ -76,6 +78,7 @@ export const sponsorBscBatch = async (variables: {
   nonce: string;
   deadline: string;
   intentSignature: string;
+  requestId?: string;
   authorization?: {
     chainId: number;
     address: string;

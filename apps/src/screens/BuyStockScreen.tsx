@@ -11,7 +11,7 @@
 // straight into the savings funding flow — investing money always passes
 // through the sweep account, never around it.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,8 @@ import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { buyStockWithSavings, getSoftStockQuote } from '../services/ondoStocks';
+import { createSponsoredRequestId } from '../services/sponsored7702';
+import { isOutcomeUnknown } from '../services/evmWallet';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyStock'>;
@@ -68,6 +70,13 @@ export const BuyStockScreen = () => {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [settledTokens, setSettledTokens] = useState(0);
+  const confirmInFlight = useRef(false);
+  const requestIdRef = useRef<string | null>(null);
+
+  const changeAmount = (value: string) => {
+    requestIdRef.current = null;
+    setRaw(value);
+  };
 
   const amount = useMemo(() => {
     const v = parseFloat(raw.replace(',', '.'));
@@ -131,20 +140,32 @@ export const BuyStockScreen = () => {
     amount >= MIN_AMOUNT_USD && !overBalance && !quote.paused && tradability !== 'closed';
 
   const onConfirm = async () => {
+    // React state updates on the next render; the ref closes the same-frame
+    // double-tap window before either network request can start.
+    if (!canConfirm || confirmInFlight.current) return;
+    confirmInFlight.current = true;
     setTradeError(null);
     setPhase('processing');
     try {
+      const requestId = requestIdRef.current || createSponsoredRequestId();
+      requestIdRef.current = requestId;
       const result = await buyStockWithSavings({
         symbol: stock.symbol,
         grossAmountUsd: amount,
         minTokenAmountWei: (softTokenWei * 99n) / 100n,
+        requestId,
       });
       setSettledTokens(Number(result.tokenAmountWei) / 1e18);
-      await refetch();
       setPhase('success');
+      // Chain execution is the settlement boundary. A stale portfolio query
+      // must never turn a completed trade back into a retryable input form.
+      void refetch().catch(() => undefined);
     } catch (e) {
+      if (!isOutcomeUnknown(e)) requestIdRef.current = null;
       setTradeError(e instanceof Error ? e.message : 'No pudimos completar la compra.');
       setPhase('input');
+    } finally {
+      confirmInFlight.current = false;
     }
   };
 
@@ -210,7 +231,7 @@ export const BuyStockScreen = () => {
               <TextInput
                 style={styles.amountInput}
                 value={raw}
-                onChangeText={setRaw}
+                onChangeText={changeAmount}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={colors.text.light}
@@ -223,7 +244,7 @@ export const BuyStockScreen = () => {
                 Disponible en tu ahorro: {fmtUsd(available)}
               </Text>
               <TouchableOpacity
-                onPress={() => setRaw(available > 0 ? String(available) : '')}
+                onPress={() => changeAmount(available > 0 ? String(available) : '')}
                 disabled={phase !== 'input' || available <= 0}
               >
                 <Text style={styles.maxBtn}>MAX</Text>

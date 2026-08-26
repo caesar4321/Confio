@@ -40,5 +40,16 @@ describe('Ondo stock router ABI', () => {
     expect(deriveIntentId([{ to: '0x' + '11'.repeat(20), valueWei: 0n, data }])).toBe(
       '0x036789f1bf207cc331303995ee763597e87d887895b66f220a3f8cf0f0fe69de',
     );
+    const requestBound = deriveIntentId(
+      [{ to: '0x' + '11'.repeat(20), valueWei: 0n, data }],
+      'gm_0123456789abcdef0123456789abcdef_a0',
+    );
+    expect(requestBound).not.toBe(
+      deriveIntentId([{ to: '0x' + '11'.repeat(20), valueWei: 0n, data }]),
+    );
+    expect(requestBound).toBe(deriveIntentId(
+      [{ to: '0x' + '11'.repeat(20), valueWei: 0n, data }],
+      'gm_0123456789abcdef0123456789abcdef_a0',
+    ));
   });
 });

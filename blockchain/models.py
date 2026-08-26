@@ -332,6 +332,18 @@ class SponsoredBatch(models.Model):
     # Delegate nonce (7702) or 0 for plain KMS txs — matched against the
     # BatchExecuted(nonce,...) log to prove the batch actually executed.
     delegate_nonce = models.BigIntegerField(null=True, blank=True)
+    # Optional client-generated idempotency key. Legacy clients omit it and
+    # keep the original intentId derivation; newer clients bind it into the
+    # signed intent so an HTTP retry resolves to this exact batch.
+    # Nullable at the database boundary so a briefly overlapping old server
+    # process (which does not include this new column in INSERTs) remains
+    # deploy-safe. Upgraded code always writes a string.
+    client_request_id = models.CharField(
+        max_length=80, blank=True, null=True, default='')
+    # Introduced with the nonce uniqueness boundary. Historical rows default
+    # false so the migration never guesses which already-broadcast pending
+    # row owns a nonce; every batch created by the upgraded server claims it.
+    delegate_nonce_claimed = models.BooleanField(null=True, default=False)
     # Finality: the block the receipt landed in; re-checked canonical before
     # settling and after, so a reorg flips the row to 'reorged'.
     block_number = models.BigIntegerField(null=True, blank=True)
@@ -360,6 +372,29 @@ class SponsoredBatch(models.Model):
                 fields=['tx_hash'],
                 condition=models.Q(tx_hash__gt=''),
                 name='cpsb_unique_tx_hash',
+            ),
+            # The delegate nonce is single-use per EOA. This is the database
+            # correctness boundary for two workers that both simulated while
+            # the same nonce was current: only one may become broadcastable.
+            # Terminal failures release it because their execution rolled the
+            # nonce back (or never applied the delegation); confirmed batches
+            # retain it forever because that nonce can never be valid again.
+            models.UniqueConstraint(
+                fields=['user_bsc_address', 'delegate_nonce'],
+                condition=models.Q(
+                    delegate_nonce_claimed=True,
+                    delegate_nonce__isnull=False,
+                    status__in=('signed', 'sent', 'confirmed'),
+                ),
+                name='cpsb_unique_active_delegate_nonce',
+            ),
+            # New clients reuse this key across quote/submission retries. It
+            # remains unique after every terminal outcome: retrying a failed
+            # economic intent requires a fresh key and fresh user signature.
+            models.UniqueConstraint(
+                fields=['user', 'client_request_id'],
+                condition=models.Q(client_request_id__gt=''),
+                name='cpsb_unique_client_request',
             ),
             # ONE live batch per presale purchase. The application-level guard
             # in presale.bsc_flow.submit_purchase can be beaten: two requests

@@ -31,8 +31,14 @@ import {
   signSetCodeAuthorization,
   BscReceipt,
 } from './evmWallet';
+import { bytesToHex } from '@noble/hashes/utils';
+import { secureRandomBytes } from '../setup/entropyGuard';
 
 const DELEGATION_PREFIX = '0xef0100';
+
+/** Stable, unguessable id for one user-confirmed economic action. */
+export const createSponsoredRequestId = (): string =>
+  `gm_${bytesToHex(secureRandomBytes(16, 'a sponsored request id'))}`;
 
 /** Server-served 7702 config (cusdPlusConvertParams). */
 export interface Sponsored7702Params {
@@ -120,13 +126,18 @@ export const executeSponsoredBatch = async (params: {
   wallet: DerivedEvmWallet;
   calls: BatchCall[];
   delegateAddress: string;
+  requestId?: string;
 }): Promise<SponsoredBatchResultReceipt> => {
   const { sponsorBscBatch } = await import('./bscServerRpc');
-  const { wallet, calls, delegateAddress } = params;
+  const { wallet, calls, delegateAddress, requestId } = params;
   const from = wallet.address;
 
   let lastError = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
+    // A mined no-op legitimately needs a fresh delegate nonce and therefore
+    // a fresh idempotency slot. Transport retries of either attempt still
+    // reproduce the same suffix and resolve to its original transaction.
+    const attemptRequestId = requestId ? `${requestId}_a${attempt}` : undefined;
     // Independent reads, so pay for ONE round trip instead of two — each is
     // a phone→server→BSC hop and both are always needed. The account nonce
     // stays conditional: it's read only on a first-ever (undelegated) call.
@@ -138,7 +149,7 @@ export const executeSponsoredBatch = async (params: {
 
     // Savings rail: no prepare step, so derive intentId the way the server
     // does (from the selectors). Domain flows pass the server's intentId.
-    const intentId = deriveIntentId(calls);
+    const intentId = deriveIntentId(calls, attemptRequestId);
     const digest = hashBatchIntent(calls, execNonce, deadline, intentId, from);
     const intentSignature = signIntentDigest(digest, wallet.privKeyHex);
 
@@ -156,6 +167,7 @@ export const executeSponsoredBatch = async (params: {
       deadline: deadline.toString(),
       intentSignature,
       authorization,
+      requestId: attemptRequestId,
     });
 
     if (!res.success) {

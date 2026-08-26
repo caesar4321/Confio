@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.core.cache import cache
 
@@ -111,6 +112,20 @@ class PolicyError(Exception):
         super().__init__(code)
 
 
+class ExistingSponsoredBatch(PolicyError):
+    """A database uniqueness guard found an already-created batch.
+
+    The caller decides whether it is the same economic request and can be
+    returned idempotently. Raising instead of returning here guarantees the
+    losing worker never reaches eth_sendRawTransaction.
+    """
+
+    def __init__(self, batch, reason: str):
+        self.batch = batch
+        self.reason = reason
+        super().__init__('delegate_nonce_in_flight')
+
+
 # ── config / chain helpers ──────────────────────────────────────────────
 
 def delegate_address() -> str:
@@ -158,14 +173,18 @@ def _addr_bytes(addr: str) -> bytes:
     return bytes.fromhex(addr.lower().replace('0x', '').rjust(40, '0'))
 
 
-def intent_id_for(kind: str, source_id=None) -> bytes:
+def intent_id_for(kind: str, source_id=None, client_request_id=None) -> bytes:
     """The bytes32 intentId the user's signature binds to (2026-07-31
     migration audit): the flow PURPOSE and, for domain flows, the exact
-    domain row. keccak('<kind>:<source_id>'); the generic savings rail omits
-    the id (kind alone). Server-derived so an intent for one flow/row cannot
-    be presented as another. The client is handed the hex in prepare (domain
-    flows) or derives it identically (generic rail)."""
-    tag = f'{kind}:{source_id}' if source_id is not None else f'{kind}:'
+    domain row. New generic clients bind a client request id instead;
+    released clients still use keccak('<kind>:') byte-for-byte. Server-derived
+    so an intent for one flow/request cannot be presented as another. The
+    client is handed the hex in prepare (domain flows) or derives it
+    identically (generic rail)."""
+    if client_request_id is not None:
+        tag = f'{kind}:{client_request_id}'
+    else:
+        tag = f'{kind}:{source_id}' if source_id is not None else f'{kind}:'
     return keccak(text=tag)
 
 
@@ -433,6 +452,54 @@ def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
         # Receipt events replace this calldata estimate with exact values.
         'history_amount_wei': required_debit,
     }
+
+
+_LIVE_BATCH_STATUSES = ('signed', 'sent', 'confirmed')
+
+
+def batch_execution_hint(batch) -> Optional[str]:
+    """Map durable batch state to the GraphQL execution tri-state."""
+    return {
+        'confirmed': 'executed',
+        'reverted': 'reverted',
+        'noop_failed': 'noop',
+    }.get(batch.status)
+
+
+def batch_matches_calls(batch, kind: str, calls: list) -> bool:
+    """True only when a stored batch is byte-for-byte this request."""
+    try:
+        return batch.kind == kind and json.loads(batch.calls_json) == calls
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _stock_economic_fingerprint(calls: list):
+    """Quote-independent identity used only to coalesce legacy stock taps."""
+    decoded = []
+    for call in calls:
+        stock = _decode_stock_call(call, historical=True)
+        if stock is not None:
+            decoded.append(stock)
+    if len(decoded) != 1:
+        return None
+    stock = decoded[0]
+    return (
+        stock['kind'], stock['asset'], int(stock['quantity']),
+        int(stock['history_amount_wei']),
+    )
+
+
+def batch_matches_stock_intent(batch, calls: list) -> bool:
+    """Compare the economic trade while allowing a refreshed issuer quote."""
+    try:
+        stored_calls = json.loads(batch.calls_json)
+        stored = _stock_economic_fingerprint(stored_calls)
+        submitted = _stock_economic_fingerprint(calls)
+        return stored is not None and stored == submitted
+    except (AttributeError, KeyError, TypeError, ValueError,
+            json.JSONDecodeError, PolicyError):
+        return False
 
 
 def classify_calls_kind(calls: list) -> str:
@@ -761,7 +828,8 @@ def release_sponsor_nonce_lock(token=None) -> None:
 
 def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline: int,
                          intent_sig: str, authorization: Optional[dict], kind: str,
-                         source_id: Optional[int] = None):
+                         source_id: Optional[int] = None, *,
+                         client_request_id: str = '', intent_id: Optional[bytes] = None):
     """Build, sign (KMS) and broadcast the sponsored transaction: type-4
     when an authorization rides along (first use — EIP-7702 requires a
     NON-EMPTY authorization list in a type-4), plain type-2 to the already-
@@ -779,11 +847,13 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
     signer = get_bsc_sponsor_signer_from_settings()
     sponsor = signer.address
+    user_addr = user_addr.lower()
+    client_request_id = (client_request_id or '').strip()
 
-    # The intentId is derived from (kind, source_id) — the SAME derivation the
-    # submit used for its recover check, so the on-chain execute and the
-    # server-verified digest bind identical bytes.
-    intent_id = intent_id_for(kind, source_id)
+    # Use the exact intentId the submit path verified (or derive the legacy
+    # kind/source shape for unchanged domain call sites).
+    intent_id = intent_id or intent_id_for(
+        kind, source_id, client_request_id or None)
     calldata = execute_calldata(calls, nonce, deadline, intent_sig, intent_id)
     # Simulate UNDER THE REAL BUDGET. An eth_call with no gas field runs at
     # the node's (enormous) default, so an under-budgeted call sails through
@@ -847,19 +917,45 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
 
         # DURABLE record BEFORE broadcast. tx_hash is deterministic for the
         # signed bytes, so this is the exact hash that will (or won't) mine.
-        batch = SponsoredBatch.objects.create(
-            user=user,
-            user_bsc_address=user_addr,
-            kind=kind,
-            source_id=source_id,
-            num_calls=len(calls),
-            calls_json=json.dumps(calls),
-            tx_hash=tx_hash,
-            delegate_nonce=int(nonce),
-            gas_limit=gas,
-            max_fee_wei=str(fee_per_gas),
-            status='signed',
-        )
+        try:
+            # The savepoint is required: after an IntegrityError PostgreSQL
+            # rejects lookup queries until the failed transaction scope rolls
+            # back.
+            with transaction.atomic():
+                batch = SponsoredBatch.objects.create(
+                    user=user,
+                    user_bsc_address=user_addr,
+                    kind=kind,
+                    source_id=source_id,
+                    num_calls=len(calls),
+                    calls_json=json.dumps(calls),
+                    tx_hash=tx_hash,
+                    delegate_nonce=int(nonce),
+                    client_request_id=client_request_id,
+                    delegate_nonce_claimed=True,
+                    gas_limit=gas,
+                    max_fee_wei=str(fee_per_gas),
+                    status='signed',
+                )
+        except IntegrityError as exc:
+            existing = None
+            reason = 'delegate_nonce'
+            if client_request_id:
+                existing = SponsoredBatch.objects.filter(
+                    user=user, client_request_id=client_request_id,
+                ).order_by('-id').first()
+                if existing is not None:
+                    reason = 'client_request_id'
+            if existing is None:
+                existing = SponsoredBatch.objects.filter(
+                    user_bsc_address=user_addr,
+                    delegate_nonce=int(nonce),
+                    delegate_nonce_claimed=True,
+                    status__in=_LIVE_BATCH_STATUSES,
+                ).order_by('-id').first()
+            if existing is not None:
+                raise ExistingSponsoredBatch(existing, reason) from exc
+            raise
         try:
             _rpc('eth_sendRawTransaction', [raw])
         except Exception:  # noqa: BLE001

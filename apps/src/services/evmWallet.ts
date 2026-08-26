@@ -554,11 +554,11 @@ export function hashBatchIntent(
 
 /** The savings rail (generic sponsorBscBatch) has no prepare step, so the
  * client derives intentId the same way the server does: kind from the
- * selectors (redeem if any redeemToUsdt call, else subscribe), keccak(kind:).
- * Domain flows (send/pay/presale/invite/payroll) ignore this and pass the
- * intentId the server returned. */
+ * selectors plus an optional request id. Omitting requestId intentionally
+ * preserves released clients' keccak(kind:) digest. Domain flows
+ * (send/pay/presale/invite/payroll) pass the intentId the server returned. */
 const SEL_REDEEM_TO_USDT = 'f4794519'; // redeemToUsdt(uint256,uint256,address)
-export function deriveIntentId(calls: BatchCall[]): string {
+export function deriveIntentId(calls: BatchCall[], requestId?: string): string {
   const selectors = new Set(calls.map((c) => c.data.replace(/^0x/, '').slice(0, 8)));
   const stockBuy = selector(
     'buyWithSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256,uint256)',
@@ -573,7 +573,7 @@ export function deriveIntentId(calls: BatchCall[]): string {
       : selectors.has(SEL_REDEEM_TO_USDT)
         ? 'redeem'
         : 'subscribe';
-  return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${kind}:`)));
+  return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${kind}:${requestId || ''}`)));
 }
 
 /** 65-byte r‖s‖v signature (v = 27/28, what OZ ECDSA.recover expects). */

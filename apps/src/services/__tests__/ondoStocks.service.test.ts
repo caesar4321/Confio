@@ -21,6 +21,7 @@ jest.mock('../secureDeterministicWallet', () => ({
   getActiveEvmWallet: jest.fn(async () => ({ address: mockUserAddress })),
 }));
 jest.mock('../sponsored7702', () => ({
+  createSponsoredRequestId: jest.fn(() => 'gm_0123456789abcdef0123456789abcdef'),
   fetchSponsored7702Params: jest.fn(async () => ({ enabled: true, delegateAddress: mockDelegateAddress })),
   executeSponsoredBatch: (...args: unknown[]) => mockExecuteSponsoredBatch(...args),
 }));
@@ -82,9 +83,15 @@ describe('Ondo Stocks sell orchestration', () => {
     });
 
     expect(mockMutate).toHaveBeenCalledTimes(2);
+    expect(mockMutate.mock.calls[0][0].variables.requestId).toBe(
+      'gm_0123456789abcdef0123456789abcdef_q0');
+    expect(mockMutate.mock.calls[1][0].variables.requestId).toBe(
+      'gm_0123456789abcdef0123456789abcdef_q1');
     expect(mockMutate.mock.calls[1][0].variables.notionalValue).toBe('200');
     expect(result.tokenAmountWei).toBe(100n * WAD);
     expect(mockExecuteSponsoredBatch).toHaveBeenCalledTimes(1);
+    expect(mockExecuteSponsoredBatch.mock.calls[0][0].requestId).toBe(
+      'gm_0123456789abcdef0123456789abcdef');
   });
 
   it('does not silently clamp a user-entered partial sell', async () => {
