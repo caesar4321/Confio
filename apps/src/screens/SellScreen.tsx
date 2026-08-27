@@ -37,13 +37,13 @@ import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
-import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
+import { formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { formatMicros, microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
-import { CREATE_RAMP_ORDER } from '../apollo/mutations';
+import { selectCreateRampOrderMutation } from '../apollo/mutations';
 import {
   tryFundKoyweOffRampInBackground,
   tryFundKoyweSavingsOffRampInBackground,
@@ -52,6 +52,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
+import { getWithdrawalSourcePresentation } from '../utils/withdrawalRail';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -182,7 +183,7 @@ export const SellScreen = () => {
     () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
     [methods, selectedMethodCode],
   );
-  const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
+  const [createRampOrder] = useMutation(selectCreateRampOrderMutation(isSavingsSell));
   const isVerified = useMemo(() => {
     const candidates = [
       personalKycData?.myPersonalKycStatus?.status,
@@ -209,7 +210,11 @@ export const SellScreen = () => {
   const { savings: savingsPosition, usdtBalanceUsd } = useSavingsPortfolio();
   const { data: savingsSellParams } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavingsSell });
   const savingsVaultAddress: string = savingsSellParams?.cusdPlusConvertParams?.vaultAddress || '';
-  const sellUnitLabel = isSavingsSell ? USD_UNIT : 'cUSD';
+  const withdrawalPresentation = getWithdrawalSourcePresentation(
+    isSavingsSell,
+    Boolean(savingsPosition?.enabled),
+  );
+  const sellUnitLabel = withdrawalPresentation.unitLabel;
   const availableCusdBalance = useMemo(
     () => (isSavingsSell
       ? (savingsPosition?.balanceUsd ?? 0) + (usdtBalanceUsd ?? 0)
@@ -618,7 +623,7 @@ export const SellScreen = () => {
                 metaColor={colors.textSecondary}
               />
               <View style={styles.inputCard}>
-                <Text style={styles.inputLabel}>Monto a retirar en cUSD</Text>
+                <Text style={styles.inputLabel}>{withdrawalPresentation.inputLabel}</Text>
                 <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
                   <TextInput
                     style={styles.amountInput}
@@ -634,7 +639,7 @@ export const SellScreen = () => {
                     placeholderTextColor={colors.textSecondary}
                   />
                   <View style={styles.currencyBadge}>
-                    <Text style={styles.currencyBadgeText}>cUSD</Text>
+                    <Text style={styles.currencyBadgeText}>{sellUnitLabel}</Text>
                   </View>
                   <TouchableOpacity
                     style={[styles.maxPill, (!effectiveSellMax || balancesLoading) && styles.maxPillDisabled]}

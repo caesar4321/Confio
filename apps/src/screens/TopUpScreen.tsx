@@ -38,7 +38,7 @@ import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
-import { CREATE_RAMP_ORDER, CREATE_RAMP_ORDER_SAVINGS } from '../apollo/mutations';
+import { selectCreateRampOrderMutation } from '../apollo/mutations';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { AnalyticsService } from '../services/analyticsService';
@@ -145,7 +145,7 @@ const TopUpScreen = () => {
     ).catch(() => {});
   }, [isSavingsRail]);
   const [createRampOrder] = useMutation(
-    isSavingsRail ? CREATE_RAMP_ORDER_SAVINGS : CREATE_RAMP_ORDER,
+    selectCreateRampOrderMutation(isSavingsRail),
   );
   const isVerified = useMemo(() => {
     const candidates = [

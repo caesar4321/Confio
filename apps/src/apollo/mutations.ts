@@ -41,7 +41,7 @@ export const CREATE_RAMP_ORDER_SAVINGS = gql`
     $paymentMethodCode: String!
     $bankInfoId: ID
     $authEmail: String
-    $destination: String
+    $destination: String!
   ) {
     createRampOrder(
       direction: $direction
@@ -109,6 +109,16 @@ export const CREATE_RAMP_ORDER = gql`
     }
   }
 `;
+
+/**
+ * The savings rail adds `destination` to the GraphQL operation itself.
+ * Passing an extra value in Apollo's variables object is not enough when the
+ * selected document does not declare and forward that variable: the backend
+ * then takes its legacy `cusd` default. Keep the document choice centralized
+ * so Recargar and Retirar cannot drift onto different settlement rails.
+ */
+export const selectCreateRampOrderMutation = (isSavingsRail: boolean) =>
+  isSavingsRail ? CREATE_RAMP_ORDER_SAVINGS : CREATE_RAMP_ORDER;
 
 export const CREATE_MOCK_RAMP_ORDER = gql`
   mutation CreateMockRampOrder(
