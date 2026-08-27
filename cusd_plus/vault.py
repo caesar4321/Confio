@@ -35,6 +35,20 @@ SEL_YIELD_SHARE = _sel('CONFIO_YIELD_SHARE_BPS()')
 
 RAY = 10 ** 27  # oracle dailyInterestRate scale
 
+# Ondo's InstantManager rejects a redemption whose USDT output is below
+# exactly $1. A $1 subscribe can mint a position worth 1 wei less after the
+# USDT -> USDY -> cUSD+ floor operations, so converting it automatically can
+# create a balance that displays as $1.00 but cannot be redeemed. Confio's
+# public money precision is six decimals; one micro-dollar is therefore the
+# smallest honest buffer we can promise without exposing 18-decimal dust.
+ONDO_MIN_REDEEM_WEI = 10 ** 18
+MIN_SAFE_MINT_WEI = ONDO_MIN_REDEEM_WEI + 10 ** 12  # $1.000001
+
+
+def is_safe_mint_amount(usdt_wei: int) -> bool:
+    """Whether a standalone USDT mint clears Ondo's redeem floor safely."""
+    return int(usdt_wei) >= MIN_SAFE_MINT_WEI
+
 
 def vault_address() -> str | None:
     return getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', None)
@@ -275,7 +289,11 @@ def sweepable_usdt_wei(user, bsc_address: str) -> int:
     or reverts for insufficient funds.
     """
     balance = usdt_balance_raw(bsc_address, fresh=True)
-    return max(0, balance - reserved_usdt_wei(user, bsc_address))
+    available = max(0, balance - reserved_usdt_wei(user, bsc_address))
+    # Leave exact $1 (and smaller dust) as raw USDT. It remains fully
+    # spendable, whereas minting it can produce 0.999999999999999999 of
+    # redeemable value and strand the holder behind Ondo's $1 exit floor.
+    return available if is_safe_mint_amount(available) else 0
 
 
 def redeem_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:

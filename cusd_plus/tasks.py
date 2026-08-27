@@ -12,9 +12,10 @@ fake a STUCK state while the money already landed. It remains available
 as a support diagnostic for genuinely stuck rows only.
 """
 import logging
+import threading
+import time
 
 from django.db import models
-import threading
 from datetime import timedelta
 from decimal import ROUND_DOWN, Decimal
 
@@ -24,6 +25,58 @@ from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _usdt_amount_decimal(raw_units: int) -> Decimal:
+    """Public six-decimal USDT amount for an exact 18-decimal chain value."""
+    return (Decimal(int(raw_units)) / Decimal(10 ** 18)).quantize(
+        Decimal('0.000001'), rounding=ROUND_DOWN)
+
+
+def _mark_bridge_arrived(conv, log: dict, now) -> None:
+    """Persist the exact BSC arrival that leg C will reserve and mint."""
+    conv.to_amount = _usdt_amount_decimal(int(log['data'], 16))
+    conv.status = 'DEST_ARRIVED'
+    conv.dest_arrived_at = now
+    conv.bridge_arrival_tx = log['transactionHash']
+    conv.save(update_fields=[
+        'to_amount', 'status', 'dest_arrived_at',
+        'bridge_arrival_tx', 'updated_at',
+    ])
+    from .unified import sync_unified_from_cusd_plus_conversion
+    sync_unified_from_cusd_plus_conversion(conv)
+
+
+def _change_floor_refusal_marker(key: str, delta: int) -> bool:
+    """Atomically add or consume one old-client fallback allowance.
+
+    Django's cache API has atomic add but no portable compare-and-decrement,
+    so a short cache lock protects the small counted value across workers.
+    A consume that cannot acquire the lock fails closed (skip another saga).
+    """
+    from django.core.cache import cache
+
+    lock_key = f'{key}:lock'
+    token = f'{threading.get_ident()}:{time.time_ns()}'
+    for _ in range(50):
+        if cache.add(lock_key, token, 5):
+            try:
+                count = int(cache.get(key, 0) or 0)
+                if delta > 0:
+                    cache.set(key, count + 1, 300)
+                    return True
+                if count <= 0:
+                    return False
+                if count == 1:
+                    cache.delete(key)
+                else:
+                    cache.set(key, count - 1, 300)
+                return True
+            finally:
+                if cache.get(lock_key) == token:
+                    cache.delete(lock_key)
+        time.sleep(0.01)
+    return delta < 0
 
 
 @shared_task(name='cusd_plus.refresh_gm_tvl')
@@ -379,14 +432,11 @@ def monitor_bridge_arrivals():
     for addr, conv in conv_watch.items():
         log = arrived.get(addr)
         if log:
-            conv.status = 'DEST_ARRIVED'
-            conv.dest_arrived_at = now
-            conv.bridge_arrival_tx = log['transactionHash']
-            conv.save(update_fields=[
-                'status', 'dest_arrived_at', 'bridge_arrival_tx', 'updated_at',
-            ])
-            from .unified import sync_unified_from_cusd_plus_conversion
-            sync_unified_from_cusd_plus_conversion(conv)
+            # The quote was only a pre-bridge estimate. From this point on,
+            # to_amount is the exact six-decimal USDT amount observed on BSC;
+            # leg C and its reservation must never try to mint the larger
+            # source-side amount or a stale quote.
+            _mark_bridge_arrived(conv, log, now)
             logger.info(
                 'conversion %s: USDT arrived on BNB (%s)',
                 conv.internal_id, log['transactionHash'],
@@ -964,25 +1014,65 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         logger.exception('deposit notification failed for %s', tx_ref)
 
 
-def mark_saga_delivered_as_usdt(bsc_address: str) -> int:
+def mark_saga_delivered_as_usdt(
+        bsc_address: str, amount_wei: int | None = None,
+        refusal_source: str = 'legacy') -> int:
     """Close in-flight sagas for a holder the mint gate has refused.
 
-    Called by the relays when they answer mint_not_available: THEY have both
-    the row and the request's IP, which is the only place both are known. The
-    money did arrive — the holder simply keeps it as raw USDT — so this is a
-    terminal DELIVERED_USDT, not a failure, and not a pending row that retries
-    forever on every foreground.
+    A geo refusal closes every arrived saga because the holder cannot mint at
+    all. An amount-floor refusal closes only the oldest saga for that exact
+    six-decimal amount; closing every row would incorrectly consume unrelated
+    arrivals that the client's resume loop has not processed yet.
     """
     from conversion.models import Conversion
 
     if not bsc_address:
         return 0
     try:
-        rows = Conversion.objects.filter(
-            conversion_type='to_savings', user_bsc_address__iexact=bsc_address,
-            status='DEST_ARRIVED', is_deleted=False,
-        )
-        n = rows.update(status='DELIVERED_USDT', updated_at=timezone.now())
+        refusal_key = None
+        if amount_wei is not None:
+            refusal_key = (
+                f'cusd_plus:mint_floor_refusal:{bsc_address.lower()}:'
+                f'{int(amount_wei)}'
+            )
+            if refusal_source == 'legacy':
+                # Released clients fall back to legacy immediately after a
+                # structured sponsored rejection. Consume the sponsored
+                # marker so that one user attempt cannot close two identical
+                # pending sagas through the two relay endpoints.
+                if _change_floor_refusal_marker(refusal_key, -1):
+                    return 0
+            elif refusal_source == 'sponsored':
+                # Reserve the matching legacy fallback BEFORE touching the
+                # row. If cache coordination is unavailable, leave history
+                # in-flight; that is recoverable, unlike closing two rows.
+                if not _change_floor_refusal_marker(refusal_key, 1):
+                    return 0
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            rows = Conversion.objects.select_for_update().filter(
+                conversion_type='to_savings',
+                user_bsc_address__iexact=bsc_address,
+                status='DEST_ARRIVED', is_deleted=False,
+            ).order_by('created_at')
+            if amount_wei is not None:
+                amount_usd = (
+                    Decimal(int(amount_wei)) / Decimal(10 ** 18)
+                ).quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+                rows = rows.filter(to_amount=amount_usd)[:1]
+            locked = list(rows)
+            now = timezone.now()
+            for row in locked:
+                row.status = 'DELIVERED_USDT'
+                row.updated_at = now
+                row.save(update_fields=['status', 'updated_at'])
+
+        from .unified import sync_unified_from_cusd_plus_conversion
+        for row in locked:
+            sync_unified_from_cusd_plus_conversion(row)
+        n = len(locked)
         if n:
             logger.info('%d savings saga(s) for %s closed as DELIVERED_USDT '
                         '(holder refused by the mint gate)', n, bsc_address)

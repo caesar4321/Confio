@@ -47,7 +47,7 @@ def _approve_data(spender=VAULT, amount=2**256 - 1) -> str:
     return '0x' + sponsor_7702.SEL_APPROVE + _word(spender) + _word(amount)
 
 
-def _mint_data(recipient=USER, amount=10**18, min_out=0) -> str:
+def _mint_data(recipient=USER, amount=2 * 10**18, min_out=0) -> str:
     return '0x' + sponsor_7702.SEL_SUBSCRIBE_AND_MINT + _word(amount) + _word(min_out) + _word(recipient)
 
 

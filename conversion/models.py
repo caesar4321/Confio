@@ -75,11 +75,10 @@ class Conversion(models.Model):
         ('STUCK', 'Bridge exceeded timeout - ops attention'),
         ('DEST_ARRIVED', 'Funds at user destination address'),
         ('ABANDONED', 'Never signed - expired'),
-        # Terminal, and NOT a failure: the money arrived and the holder keeps
-        # it as raw USDT because the mint gate refuses them (a blocked IP
-        # after leg A/B committed). Without this a saga sat at DEST_ARRIVED
-        # forever — the exact stranding this rail keeps producing.
-        ('DELIVERED_USDT', 'Delivered as USDT - holder cannot mint'),
+        # Terminal, and NOT a failure: the money arrived and remains raw USDT
+        # because this mint attempt was refused (eligibility or safe-amount
+        # floor). It may be converted later with other funds as a new event.
+        ('DELIVERED_USDT', 'Delivered as raw USDT'),
     ]
 
     # Allowed saga transitions (enforced in the Advance mutation and tasks).

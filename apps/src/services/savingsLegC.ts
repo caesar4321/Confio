@@ -18,7 +18,7 @@ const IN_FLIGHT = gql`
     cusdPlusConversionsInFlight {
       conversionId
       status
-      amountUsd
+      quotedReceiveUsd
       userBscAddress
     }
   }
@@ -31,7 +31,7 @@ const ELIGIBILITY = gql`
   query SavingsMintEligibility {
     cusdPlusSummary {
       savingsEnabled
-      sweepableUsdtUsd
+      sweepableUsdtWei
     }
   }
 `;
@@ -48,13 +48,6 @@ const ADVANCE = gql`
 // BSC USDT is 18 decimals.
 const usdToWei = (usd: number): bigint =>
   BigInt(Math.round(usd * 1e6)) * 10n ** 12n;
-
-// Same conversion, but FLOORED. A sweep mints the balance the wallet actually
-// holds, and usdToWei rounds — 2.9999995 would become 3.000000 and revert for
-// insufficient USDT. Rounding up is only safe when the amount is a promise;
-// here it is a measurement.
-const usdToWeiFloor = (usd: number): bigint =>
-  BigInt(Math.floor(usd * 1e6)) * 10n ** 12n;
 
 let running = false;
 // Set when a caller arrives mid-run (a deposit landing during a pass). The
@@ -106,7 +99,7 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     // Geo-ineligible users keep their arrived USDT raw ("Confío Dollar") —
     // don't mint. Cache-first: the summary is polled by the portfolio hook;
     // an unknown answer falls through to attempting (server still gates).
-    let usdtOnHandUsd = 0;
+    let usdtOnHandWei = 0n;
     try {
       const { data: elig } = await apolloClient.query({
         query: ELIGIBILITY,
@@ -115,7 +108,7 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         fetchPolicy: 'network-only',
       });
       if (elig?.cusdPlusSummary?.savingsEnabled === false) return;
-      usdtOnHandUsd = Number(elig?.cusdPlusSummary?.sweepableUsdtUsd ?? 0);
+      usdtOnHandWei = BigInt(elig?.cusdPlusSummary?.sweepableUsdtWei ?? '0');
     } catch {}
     const { data } = await apolloClient.query({
       query: IN_FLIGHT,
@@ -134,7 +127,9 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
       try {
         const { mintTx } = await subscribeUsdtToSavings({
           vaultAddress,
-          usdtWei: usdToWei(row.amountUsd),
+          // Once DEST_ARRIVED, the server replaces this quoted value with
+          // the exact six-decimal amount observed in the USDT Transfer log.
+          usdtWei: usdToWei(row.quotedReceiveUsd),
           // Direct mint against Ondo's IM — no order book, so 0 floor is safe.
           minUsdyOut: 0n,
         });
@@ -161,10 +156,12 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         const { data: fresh } = await apolloClient.query({
           query: ELIGIBILITY, fetchPolicy: 'network-only',
         });
-        usdtOnHandUsd = Number(fresh?.cusdPlusSummary?.sweepableUsdtUsd ?? 0);
-      } catch { usdtOnHandUsd = 0; }
+        usdtOnHandWei = BigInt(fresh?.cusdPlusSummary?.sweepableUsdtWei ?? '0');
+      } catch { usdtOnHandWei = 0n; }
     }
-    // sweepableUsdtUsd, never the displayed balance. The server reads the
+    // sweepableUsdtWei, never a Float or the displayed balance. The exact
+    // string avoids rounding $1.000001 down to $1 at the JS boundary. The
+    // server reads the
     // chain fresh and subtracts what is already committed — prepared sends,
     // in-flight off-ramps, in-flight sagas — none of which escrow on chain,
     // so this subtraction is the only thing keeping an auto-mint from moving
@@ -172,12 +169,12 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     // nothing (audit 2026-08-01).
     // Ondo's InstantManager rejects sub-$1 amounts on this side too, so a
     // smaller balance is left alone rather than burned on a reverting mint.
-    if (usdtOnHandUsd >= 1) {
+    if (usdtOnHandWei > 0n) {
       if (!announced) { announced = true; setMinting(true); }
       try {
         await subscribeUsdtToSavings({
           vaultAddress,
-          usdtWei: usdToWeiFloor(usdtOnHandUsd),
+          usdtWei: usdtOnHandWei,
           minUsdyOut: 0n,
         });
         // No mutation: the RELAY writes the history row, after the gate it

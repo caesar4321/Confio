@@ -199,21 +199,26 @@ def _gm_quote_error(exc):
     return GmTradeQuoteType(success=False, error_code=code[:80], error_message='Quote unavailable')
 
 
-def _sweepable_usdt_usd(user, bsc_address) -> float:
-    """Sweepable amount for the summary, in USD.
+def _sweepable_usdt_wei(user, bsc_address) -> int:
+    """Exact sweepable amount for the summary, in BSC-USDT wei.
 
     Any failure degrades to 0 — mint NOTHING. The alternative is falling back
     to the displayed balance, which is exactly the stale/over-committed figure
     this field exists to replace.
     """
     if not bsc_address:
-        return 0.0
+        return 0
     try:
         from . import vault as _v
-        return _v.sweepable_usdt_wei(user, bsc_address) / (10 ** 18)
+        return _v.sweepable_usdt_wei(user, bsc_address)
     except Exception:  # noqa: BLE001
         logger.warning('sweepable usdt unavailable for %s — reporting 0', bsc_address)
-        return 0.0
+        return 0
+
+
+def _sweepable_usdt_usd(user, bsc_address) -> float:
+    """Display-only compatibility projection of the exact wei amount."""
+    return _sweepable_usdt_wei(user, bsc_address) / (10 ** 18)
 
 
 class CusdPlusSummaryType(graphene.ObjectType):
@@ -225,6 +230,8 @@ class CusdPlusSummaryType(graphene.ObjectType):
     earned_month_usd = graphene.Float()
     sweepable_usdt_usd = graphene.Float(
         description='Raw USDT that may be auto-minted: a FRESH balance minus everything already committed (prepared sends, in-flight off-ramps, in-flight sagas). The client mints this, never the displayed balance.')
+    sweepable_usdt_wei = graphene.String(
+        description='Exact auto-mintable raw USDT in 18-decimal base units. Money-moving clients must use this string, never the Float projection.')
     savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo): phone country AND request IP country, the same full set the mint gate enforces. Gates ENTRY only — exits are never gated")
     stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
     stocks_trading_enabled = graphene.Boolean(description="Binding GM attestations and router settlement are enabled")
@@ -668,6 +675,7 @@ class Query(graphene.ObjectType):
         # serves both fields; the client re-reads balanceOf live before any
         # exact-amount send, so 30s staleness here is display-only.
         usdt_wei_int = vault.usdt_balance_raw(bsc_address) if bsc_address else 0
+        sweepable_wei_int = _sweepable_usdt_wei(user, bsc_address)
         # BEP-20 CONFIO (token count) for the send screen. Never blocks the
         # summary: an RPC hiccup shows 0 here while the dollar fields keep
         # their own cache fallbacks.
@@ -702,7 +710,8 @@ class Query(graphene.ObjectType):
             # lands as a considered follow-up; the ticker renders Hoy alone.
             earned_month_usd=0.0,
             savings_enabled=eligible,
-            sweepable_usdt_usd=_sweepable_usdt_usd(user, bsc_address),
+            sweepable_usdt_usd=sweepable_wei_int / (10 ** 18),
+            sweepable_usdt_wei=str(sweepable_wei_int),
             # Discovery is visible only when the ops switch and issuer geo
             # policy both allow it.
             stocks_enabled=stocks_enabled,
@@ -1132,6 +1141,8 @@ class SubmitBscTransaction(graphene.Mutation):
             # country + Cloudflare IP country. Mint only; redeem above and
             # raw USDT transfers stay ungated (exits are never gated).
             if data_hex.startswith(_SEL_SUBSCRIBE_AND_MINT):
+                if len(data_hex) != 8 + 192:
+                    return SubmitBscTransaction(success=False, error='bad_calldata')
                 from .eligibility import check_savings_mint_eligibility
                 if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
                     # Close any saga waiting on this mint: it can never happen
@@ -1143,6 +1154,16 @@ class SubmitBscTransaction(graphene.Mutation):
                 # address recipient) — first word, from calldata we validated,
                 # never from the client. Recorded after broadcast.
                 mint_amount_wei = int(data_hex[8:72], 16)
+                from .vault import is_safe_mint_amount
+                if not is_safe_mint_amount(mint_amount_wei):
+                    # The money stays raw USDT and remains spendable. Close a
+                    # bridge saga if one owns this arrival so old clients do
+                    # not retry the same unsafe mint on every foreground.
+                    from .tasks import mark_saga_delivered_as_usdt
+                    mark_saga_delivered_as_usdt(
+                        _active_bsc_address(info) or '', mint_amount_wei)
+                    return SubmitBscTransaction(
+                        success=False, error='mint_below_redeemable_minimum')
 
         from .tasks import _rpc
         try:
@@ -1325,16 +1346,35 @@ class SponsorBscBatch(graphene.Mutation):
         # (tests call it directly) and has no request context. Redeems and
         # approvals pass untouched: exits are never gated.
         vault_l = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
-        mint_call = next((
+        mint_calls = [
             c for c in norm_calls
             if c['to'] == vault_l and c['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
-        ), None)
+        ]
+        # One sponsored request represents one savings operation and creates
+        # one history row. Allowing a second mint would both bypass an amount
+        # check that inspected only the first call and under-report movement.
+        if len(mint_calls) > 1:
+            return SponsorBscBatch(success=False, error='multiple_mints_not_allowed')
+        mint_call = mint_calls[0] if mint_calls else None
+        mint_refusal_error = None
+        mint_refusal_amount = None
         if mint_call is not None:
+            if len(mint_call['data']) != 2 + 8 + 192:
+                return SponsorBscBatch(success=False, error='bad_calldata')
+            try:
+                mint_amount_wei = int(mint_call['data'][10:74], 16)
+            except ValueError:
+                return SponsorBscBatch(success=False, error='bad_calldata')
             from .eligibility import check_savings_mint_eligibility
             if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
-                from .tasks import mark_saga_delivered_as_usdt
-                mark_saga_delivered_as_usdt(user_addr)
-                return SponsorBscBatch(success=False, error='mint_not_available')
+                mint_refusal_error = 'mint_not_available'
+            # subscribeAndMint(uint256,uint256,address) first argument.
+            # Enforce this server-side so an older or modified client cannot
+            # create a position that rounds below Ondo's exact $1 exit floor.
+            from .vault import is_safe_mint_amount
+            if mint_refusal_error is None and not is_safe_mint_amount(mint_amount_wei):
+                mint_refusal_error = 'mint_below_redeemable_minimum'
+                mint_refusal_amount = mint_amount_wei
 
         chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
         # Set the instant a broadcast is attempted; nothing after that point
@@ -1361,9 +1401,10 @@ class SponsorBscBatch(graphene.Mutation):
             if signer != user_addr:
                 return SponsorBscBatch(success=False, error='bad_intent_signature')
 
-            # Fast idempotent replay path for new clients. This runs only
-            # after the fresh payload's signature has been verified, so a
-            # guessed request id cannot reveal another signed transaction.
+            # A signed exact replay refers to a batch whose outcome is
+            # already on record. Return it before re-evaluating today's entry
+            # gate; otherwise a policy change could mutate a different live
+            # saga even though this request already broadcast earlier.
             if request_id:
                 from blockchain.models import SponsoredBatch
                 existing = SponsoredBatch.objects.filter(
@@ -1387,6 +1428,16 @@ class SponsorBscBatch(graphene.Mutation):
                         tx_hash=existing.tx_hash,
                         execution=sponsor_7702.batch_execution_hint(existing),
                     )
+
+            # Refusal changes saga history, so it must happen only after the
+            # calldata policy and the wallet's intent signature prove this is
+            # the holder's request. Nothing is broadcast on this path.
+            if mint_refusal_error is not None:
+                from .tasks import mark_saga_delivered_as_usdt
+                mark_saga_delivered_as_usdt(
+                    user_addr, mint_refusal_amount,
+                    refusal_source='sponsored')
+                return SponsorBscBatch(success=False, error=mint_refusal_error)
 
             # Delegation state decides whether an authorization must ride
             # along. The server's view is authoritative — the client's

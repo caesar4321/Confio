@@ -76,8 +76,8 @@ MAX_SEND_DUST_WEI = 10 ** 12
 # 10**18 - 1 reverts with custom error 0xd0022dba. Nothing in our own
 # contracts enforces this — the vault's minUsdtOut floor (REDEEM_MIN_OUT_BPS)
 # sits BELOW it and so cannot catch it — and the revert only surfaces in
-# simulation, after the SendTransaction row already exists.
-ONDO_MIN_REDEEM_WEI = 10 ** 18
+# simulation, after the SendTransaction row already exists. The canonical
+# value lives in cusd_plus.vault because mint and send must share it.
 EVM_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 
@@ -418,7 +418,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 # which is an OVER-estimate and would approve a redemption
                 # Ondo rejects (audit 2026-08-01).
                 redeem_out_wei = cp_vault.redeem_usdt_out(shares, pps_wad, oracle_p_wad)
-                if redeem_out_wei < ONDO_MIN_REDEEM_WEI and (
+                if redeem_out_wei < cp_vault.ONDO_MIN_REDEEM_WEI and (
                         usdt_raw + MAX_SEND_DUST_WEI >= amount_wei):
                     # Not a dead end: raw USDT covers this send. Refusing
                     # outright stranded a user holding $0.50 of savings and
@@ -433,7 +433,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                         'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr)
                                 + _uint_word(amount_wei),
                     }]
-                elif redeem_out_wei < ONDO_MIN_REDEEM_WEI:
+                elif redeem_out_wei < cp_vault.ONDO_MIN_REDEEM_WEI:
                     return {'success': False, 'error': 'redeem_below_minimum'}
                 else:
                     kind = 'send_redeem'

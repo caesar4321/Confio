@@ -8,11 +8,13 @@ last-known fallback), and minting a stale figure either misses a deposit or
 reverts for insufficient funds.
 """
 import json
+from contextlib import nullcontext
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
 from django.test import SimpleTestCase
+from django.core.cache import cache
 
 from cusd_plus import vault
 
@@ -128,6 +130,19 @@ class SweepableUsdtTests(SimpleTestCase):
         out, _ = self._sweepable(10 * WAD, 4 * WAD)
         self.assertEqual(out, 6 * WAD)
 
+    def test_exact_one_dollar_stays_raw_and_spendable(self):
+        out, _ = self._sweepable(WAD, 0)
+        self.assertEqual(out, 0)
+
+    def test_one_micro_dollar_buffer_is_safe_to_mint(self):
+        safe = WAD + 10 ** 12
+        out, _ = self._sweepable(safe, 0)
+        self.assertEqual(out, safe)
+
+    def test_reservation_that_leaves_one_dollar_prevents_mint(self):
+        out, _ = self._sweepable(2 * WAD, WAD)
+        self.assertEqual(out, 0)
+
     def test_never_negative(self):
         out, _ = self._sweepable(1 * WAD, 5 * WAD)
         self.assertEqual(out, 0)
@@ -149,18 +164,98 @@ class SweepableResolverTests(SimpleTestCase):
         from cusd_plus.schema import _sweepable_usdt_usd
         self.assertEqual(_sweepable_usdt_usd(SimpleNamespace(id=1), ''), 0.0)
 
+    def test_arrival_amount_uses_observed_value_and_floors_to_public_precision(self):
+        from cusd_plus.tasks import _usdt_amount_decimal
+        self.assertEqual(
+            _usdt_amount_decimal(1_999_999_999_999_999_999),
+            Decimal('1.999999'),
+        )
+
+    def test_arrival_persists_observed_amount_for_leg_c(self):
+        from cusd_plus.tasks import _mark_bridge_arrived
+        conv = mock.Mock(to_amount=Decimal('1.100000'))
+        now = object()
+        log = {
+            'data': hex(10**18 + 999_999_999_999),
+            'transactionHash': '0xabc',
+        }
+        with mock.patch(
+                'cusd_plus.unified.sync_unified_from_cusd_plus_conversion') as sync:
+            _mark_bridge_arrived(conv, log, now)
+        self.assertEqual(conv.to_amount, Decimal('1.000000'))
+        self.assertEqual(conv.status, 'DEST_ARRIVED')
+        conv.save.assert_called_once_with(update_fields=[
+            'to_amount', 'status', 'dest_arrived_at',
+            'bridge_arrival_tx', 'updated_at',
+        ])
+        sync.assert_called_once_with(conv)
+
 
 class DeliveredAsUsdtTests(SimpleTestCase):
     """A saga the mint gate will never allow must reach a TERMINAL state."""
 
+    @staticmethod
+    def _delivery_rows(*rows):
+        qs = mock.Mock()
+        qs.filter.return_value = qs
+        qs.order_by.return_value = qs
+        qs.__iter__ = mock.Mock(return_value=iter(rows))
+        return qs
+
     def test_refused_holder_closes_their_in_flight_sagas(self):
         from cusd_plus.tasks import mark_saga_delivered_as_usdt
-        with mock.patch('conversion.models.Conversion.objects') as convs:
-            convs.filter.return_value.update.return_value = 2
+        row_a, row_b = mock.Mock(), mock.Mock()
+        qs = self._delivery_rows(row_a, row_b)
+        with mock.patch('conversion.models.Conversion.objects') as convs, \
+             mock.patch('django.db.transaction.atomic', return_value=nullcontext()), \
+             mock.patch('cusd_plus.unified.sync_unified_from_cusd_plus_conversion') as sync:
+            convs.select_for_update.return_value = qs
             self.assertEqual(mark_saga_delivered_as_usdt(ADDR), 2)
-            self.assertEqual(
-                convs.filter.return_value.update.call_args.kwargs['status'],
-                'DELIVERED_USDT')
+        for row in (row_a, row_b):
+            self.assertEqual(row.status, 'DELIVERED_USDT')
+            row.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+            sync.assert_any_call(row)
+
+    def test_amount_refusal_closes_only_one_matching_saga(self):
+        from cusd_plus.tasks import mark_saga_delivered_as_usdt
+        row = mock.Mock()
+        qs = self._delivery_rows(row)
+        qs.__getitem__ = mock.Mock(return_value=qs)
+        with mock.patch('conversion.models.Conversion.objects') as convs, \
+             mock.patch('django.db.transaction.atomic', return_value=nullcontext()), \
+             mock.patch('cusd_plus.unified.sync_unified_from_cusd_plus_conversion'):
+            convs.select_for_update.return_value = qs
+            self.assertEqual(mark_saga_delivered_as_usdt(ADDR, WAD), 1)
+        qs.filter.assert_any_call(to_amount=Decimal('1.000000'))
+        qs.__getitem__.assert_called_once_with(slice(None, 1, None))
+
+    def test_legacy_fallback_does_not_close_a_second_matching_saga(self):
+        from cusd_plus.tasks import mark_saga_delivered_as_usdt
+        cache.clear()
+        first = mock.Mock()
+        qs = self._delivery_rows(first)
+        qs.__getitem__ = mock.Mock(return_value=qs)
+        with mock.patch('conversion.models.Conversion.objects') as convs, \
+             mock.patch('django.db.transaction.atomic', return_value=nullcontext()), \
+             mock.patch('cusd_plus.unified.sync_unified_from_cusd_plus_conversion'):
+            convs.select_for_update.return_value = qs
+            self.assertEqual(mark_saga_delivered_as_usdt(
+                ADDR, WAD, refusal_source='sponsored'), 1)
+            convs.reset_mock()
+            self.assertEqual(mark_saga_delivered_as_usdt(ADDR, WAD), 0)
+            convs.select_for_update.assert_not_called()
+        cache.clear()
+
+    def test_equal_concurrent_refusals_keep_one_marker_per_fallback(self):
+        from cusd_plus.tasks import _change_floor_refusal_marker
+        key = f'test:mint_floor:{ADDR}:{WAD}'
+        cache.clear()
+        self.assertTrue(_change_floor_refusal_marker(key, 1))
+        self.assertTrue(_change_floor_refusal_marker(key, 1))
+        self.assertTrue(_change_floor_refusal_marker(key, -1))
+        self.assertTrue(_change_floor_refusal_marker(key, -1))
+        self.assertFalse(_change_floor_refusal_marker(key, -1))
+        cache.clear()
 
     def test_delivered_usdt_is_terminal(self):
         from conversion.models import Conversion
@@ -173,6 +268,7 @@ class DeliveredAsUsdtTests(SimpleTestCase):
 
     def test_failure_never_breaks_the_refusal_path(self):
         from cusd_plus.tasks import mark_saga_delivered_as_usdt
-        with mock.patch('conversion.models.Conversion.objects') as convs:
-            convs.filter.side_effect = RuntimeError('db down')
+        with mock.patch('conversion.models.Conversion.objects') as convs, \
+             mock.patch('django.db.transaction.atomic', return_value=nullcontext()):
+            convs.select_for_update.side_effect = RuntimeError('db down')
             self.assertEqual(mark_saga_delivered_as_usdt(ADDR), 0)

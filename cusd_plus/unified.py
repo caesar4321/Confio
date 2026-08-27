@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # savings surfaces, not the main activity list.
 _STATUS_MAP = {
     'COMPLETED': 'CONFIRMED',
+    'DELIVERED_USDT': 'CONFIRMED',
     'FAILED': 'FAILED',
 }
 
@@ -30,14 +31,21 @@ def sync_unified_from_cusd_plus_conversion(conv) -> None:
         from users.models_unified import UnifiedTransactionTable
 
         to_savings = conv.conversion_type == 'to_savings'
-        if to_savings:
+        delivered_as_usdt = to_savings and conv.status == 'DELIVERED_USDT'
+        if delivered_as_usdt:
+            token_type = 'USDT'
+            amount = conv.to_amount
+            description = f"Entrega: {conv.to_amount} USDT"
+        elif to_savings:
             # USDT in -> cUSD+ out; the position the user ends up with.
             token_type = 'CUSD_PLUS'
+            amount = conv.to_amount
             description = (
                 f"Conversión: {conv.from_amount} USDT → {conv.to_amount} cUSD+"
             )
         else:
             token_type = 'USDT'
+            amount = conv.to_amount
             description = (
                 f"Conversión: {conv.from_amount} cUSD+ → {conv.to_amount} USDT"
             )
@@ -46,7 +54,7 @@ def sync_unified_from_cusd_plus_conversion(conv) -> None:
             conversion=conv,
             defaults={
                 'transaction_type': 'conversion',
-                'amount': str(conv.to_amount),
+                'amount': str(amount),
                 'token_type': token_type,
                 'status': _STATUS_MAP.get(conv.status, 'PENDING'),
                 'transaction_hash': conv.to_transaction_hash or conv.bridge_arrival_tx or '',

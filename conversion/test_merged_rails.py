@@ -63,6 +63,22 @@ class MirrorRoutingTests(SimpleTestCase):
         savings_called, _ = self._mirror('usdc_to_cusd')
         self.assertFalse(savings_called)
 
+    def test_delivered_usdt_mirror_records_the_asset_actually_held(self):
+        from cusd_plus.unified import sync_unified_from_cusd_plus_conversion
+        from users.models_unified import UnifiedTransactionTable
+
+        conv = Conversion(
+            conversion_type='to_savings', status='DELIVERED_USDT',
+            from_amount='1.000000', to_amount='0.999999',
+            actor_type='user', actor_display_name='X',
+        )
+        with mock.patch.object(UnifiedTransactionTable, 'objects') as objects:
+            sync_unified_from_cusd_plus_conversion(conv)
+        defaults = objects.update_or_create.call_args.kwargs['defaults']
+        self.assertEqual(defaults['status'], 'CONFIRMED')
+        self.assertEqual(defaults['token_type'], 'USDT')
+        self.assertEqual(defaults['amount'], '0.999999')
+
 
 class TokenPairTests(SimpleTestCase):
     """Codex audit 2026-08-01: every reader kept a private pair table that fell

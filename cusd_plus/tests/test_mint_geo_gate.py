@@ -16,6 +16,7 @@ Runs without a database:
     myvenv/bin/python manage.py test cusd_plus.tests.test_mint_geo_gate
 """
 import time
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest import mock
 
@@ -125,8 +126,8 @@ class LegacyRelayGateTests(SimpleTestCase):
         with mock.patch('cusd_plus.schema._active_bsc_address', return_value=SIGNER_ADDR):
             return SubmitBscTransaction.mutate(None, info or _info(user), raw)
 
-    def _mint_raw(self):
-        return _legacy_tx(VAULT, 0, bytes.fromhex(_mint_data()[2:]))
+    def _mint_raw(self, amount=2 * 10**18):
+        return _legacy_tx(VAULT, 0, bytes.fromhex(_mint_data(amount=amount)[2:]))
 
     def test_mint_refused_for_blocked_phone(self):
         with mock.patch('cusd_plus.tasks._rpc') as rpc:
@@ -147,6 +148,31 @@ class LegacyRelayGateTests(SimpleTestCase):
             res = self._submit(self._mint_raw(), _user('VE', uid=13))
         self.assertTrue(res.success, res.error)
         rpc.assert_called_once()
+
+    def test_exact_one_dollar_mint_stays_raw(self):
+        with mock.patch('cusd_plus.tasks._rpc') as rpc, \
+             mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close:
+            res = self._submit(self._mint_raw(amount=10**18), _user('VE', uid=16))
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'mint_below_redeemable_minimum')
+        rpc.assert_not_called()
+        close.assert_called_once_with(SIGNER_ADDR, 10**18)
+
+    def test_one_micro_dollar_buffer_relays(self):
+        amount = 10**18 + 10**12
+        with mock.patch('cusd_plus.tasks._rpc', return_value='0xabc') as rpc:
+            res = self._submit(self._mint_raw(amount=amount), _user('VE', uid=17))
+        self.assertTrue(res.success, res.error)
+        rpc.assert_called_once()
+
+    def test_truncated_mint_calldata_is_rejected_cleanly(self):
+        raw = _legacy_tx(
+            VAULT, 0, bytes.fromhex(sponsor_7702.SEL_SUBSCRIBE_AND_MINT))
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, _user('VE', uid=18))
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'bad_calldata')
+        rpc.assert_not_called()
 
     def test_raw_usdt_transfer_relays_for_ineligible_user(self):
         # THE exit: a geo-blocked user moving arrived USDT out. Never gated.
@@ -175,20 +201,27 @@ class LegacyRelayGateTests(SimpleTestCase):
 )
 class SponsoredRailGateTests(SimpleTestCase):
     """SponsorBscBatch: a batch carrying a mint consults the gate; a
-    redeem-only batch does not. (The gate runs before signature checks, so
-    dummy intent signatures suffice.)"""
+    redeem-only batch does not. Refusal-side state changes happen only after
+    the wallet intent signature has been verified."""
 
     def setUp(self):
         cache.clear()
         self.deadline = str(int(time.time()) + 600)
 
-    def _mutate(self, calls, user):
+    def _mutate(self, calls, user, valid_signature=True, request_id=None):
         from cusd_plus.schema import SponsorBscBatch
         gql_calls = [mock.Mock(to=c['to'], value_wei=c['value'], data=c['data'])
                      for c in calls]
-        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=USER):
+        signature = (
+            mock.patch('cusd_plus.sponsor_7702.recover_intent_signer', return_value=USER)
+            if valid_signature else nullcontext()
+        )
+        with mock.patch('cusd_plus.schema._active_bsc_address', return_value=USER), \
+             mock.patch('cusd_plus.sponsor_7702.is_delegated', return_value=False), \
+             signature:
             return SponsorBscBatch.mutate(
-                None, _info(user), gql_calls, '0', self.deadline, '0x' + '00' * 65, None)
+                None, _info(user), gql_calls, '0', self.deadline,
+                '0x' + '00' * 65, None, request_id)
 
     def test_mint_batch_refused_for_ineligible(self):
         calls = [_call(USDT, _approve_data()), _call(VAULT, _mint_data())]
@@ -200,6 +233,67 @@ class SponsoredRailGateTests(SimpleTestCase):
         res = self._mutate(calls, _user('VE', uid=22))
         # Proceeds past the gate and dies later on the dummy signature.
         self.assertNotEqual(res.error, 'mint_not_available')
+
+    def test_exact_one_dollar_batch_stays_raw(self):
+        calls = [
+            _call(USDT, _approve_data()),
+            _call(VAULT, _mint_data(amount=10**18)),
+        ]
+        with mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close:
+            res = self._mutate(calls, _user('VE', uid=27))
+        self.assertEqual(res.error, 'mint_below_redeemable_minimum')
+        close.assert_called_once_with(
+            USER, 10**18, refusal_source='sponsored')
+
+    def test_bad_signature_cannot_close_exact_one_dollar_saga(self):
+        calls = [_call(VAULT, _mint_data(amount=10**18))]
+        with mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close:
+            res = self._mutate(
+                calls, _user('VE', uid=271), valid_signature=False)
+        self.assertEqual(res.error, 'bad_intent_signature')
+        close.assert_not_called()
+
+    def test_exact_replay_wins_over_a_new_policy_refusal(self):
+        calls = [_call(VAULT, _mint_data(amount=2 * 10**18))]
+        existing = SimpleNamespace(
+            user_bsc_address=USER, kind='subscribe', tx_hash='0xabc')
+        with mock.patch('blockchain.models.SponsoredBatch.objects') as objects, \
+             mock.patch('cusd_plus.sponsor_7702.batch_matches_calls', return_value=True), \
+             mock.patch('cusd_plus.sponsor_7702.batch_execution_hint', return_value='executed'), \
+             mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close:
+            objects.filter.return_value.order_by.return_value.first.return_value = existing
+            res = self._mutate(
+                calls, _user('US', uid=272), request_id='replay_0123456789abcdef')
+        self.assertTrue(res.success)
+        self.assertEqual(res.tx_hash, '0xabc')
+        close.assert_not_called()
+
+    def test_one_micro_dollar_buffer_passes_batch_gate(self):
+        calls = [
+            _call(USDT, _approve_data()),
+            _call(VAULT, _mint_data(amount=10**18 + 10**12)),
+        ]
+        res = self._mutate(calls, _user('VE', uid=28))
+        self.assertNotEqual(res.error, 'mint_below_redeemable_minimum')
+
+    def test_truncated_mint_batch_is_rejected_cleanly(self):
+        calls = [_call(VAULT, '0x' + sponsor_7702.SEL_SUBSCRIBE_AND_MINT)]
+        res = self._mutate(calls, _user('VE', uid=29))
+        self.assertEqual(res.error, 'bad_calldata')
+
+    def test_non_hex_mint_amount_is_rejected_cleanly(self):
+        data = _mint_data(amount=10**18)
+        malformed = data[:10] + ('z' * 64) + data[74:]
+        res = self._mutate([_call(VAULT, malformed)], _user('VE', uid=291))
+        self.assertEqual(res.error, 'bad_calldata')
+
+    def test_second_mint_cannot_bypass_amount_floor(self):
+        calls = [
+            _call(VAULT, _mint_data(amount=2 * 10**18)),
+            _call(VAULT, _mint_data(amount=10**18)),
+        ]
+        res = self._mutate(calls, _user('VE', uid=30))
+        self.assertEqual(res.error, 'multiple_mints_not_allowed')
 
     def test_redeem_only_batch_never_consults_gate(self):
         calls = [_call(VAULT, _redeem_data(recipient=USER))]

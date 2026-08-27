@@ -141,6 +141,12 @@ export const subscribeUsdtToSavings = async (
       // on the network; running the legacy self-signed path here would
       // execute the same vault call twice (Codex re-audit 2026-08-02 [P1]).
       if (isOutcomeUnknown(e)) throw e;
+      // These are entry-policy verdicts, not sponsor outages. Retrying the
+      // self-funded rail cannot change the answer and may burn BNB on an
+      // approval before the legacy relay refuses the mint too.
+      if (/mint_(?:not_available|below_redeemable_minimum)/i.test(
+        String((e as any)?.message || e),
+      )) throw e;
       // Sponsored rail down ≠ savings down: fall back to the self-signed
       // legacy path (works only with user-funded BNB at the address).
       console.warn('[cusdPlusVault] sponsored subscribe failed, using legacy path', e);
