@@ -267,13 +267,18 @@ def _wallet_reenrollment_server_blocker(account):
     # unsubmitted reservations (longer than Algorand's maximum transaction
     # lifetime) and every submitted transfer as hard blockers.
     reservation_cutoff = timezone.now() - timedelta(hours=24)
-    if SendTransaction.objects.filter(
+    # Prepared Algorand sends are soft-hidden because they are safety
+    # reservations, not transaction history. They still block address
+    # retirement for the full validity window.
+    if SendTransaction.all_objects.filter(
         recipient_address=account.algorand_address,
         bsc_calls_json='',
-        deleted_at__isnull=True,
     ).filter(
         Q(status='PENDING', created_at__gte=reservation_cutoff)
-        | Q(status__in=('SPONSORING', 'SIGNED', 'SUBMITTED', 'AML_REVIEW'))
+        | Q(
+            status__in=('SPONSORING', 'SIGNED', 'SUBMITTED', 'AML_REVIEW'),
+            deleted_at__isnull=True,
+        )
     ).exists():
         return 'pending_inbound_algorand_send'
 
