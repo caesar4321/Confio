@@ -4,7 +4,7 @@ from unittest import mock
 
 import requests
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 
 from ramps import schema as ramps_schema
 from ramps import signals as ramps_signals
@@ -437,6 +437,229 @@ class KoyweAddressReservationTests(TestCase):
         self.assertEqual(
             notify_mock.call_args.kwargs['notification_type'],
             'RAMP_PENDING',
+        )
+
+
+class KoyweWebhookReservationRecoveryTests(SimpleTestCase):
+    @mock.patch('ramps.views.verify_koywe_webhook_signature', return_value=True)
+    @mock.patch('ramps.views.sync_koywe_ramp_transaction_from_order')
+    @mock.patch('ramps.views.KoyweClient')
+    @mock.patch('ramps.views.RampWebhookEvent.objects.get_or_create')
+    @mock.patch('ramps.views.RampTransaction.objects.filter')
+    def test_webhook_recovers_ambiguous_reservation_by_external_id(
+        self,
+        ramp_filter,
+        event_get_or_create,
+        client_class,
+        sync_order,
+        _verify_signature,
+    ):
+        reservation = SimpleNamespace(
+            pk=1267,
+            status='PENDING',
+            provider_order_id='',
+            external_id='confio-ramp-lost-create-response',
+            actor_user_id=42,
+            actor_user=SimpleNamespace(
+                ramp_user_address=SimpleNamespace(auth_email='owner@example.com'),
+            ),
+            metadata={
+                'wallet_address_reserved': True,
+                'wallet_address_reservation_state': 'ambiguous_order_creation',
+            },
+        )
+        provider_lookup = mock.Mock()
+        provider_lookup.first.return_value = None
+        external_lookup = mock.Mock()
+        external_lookup.order_by.return_value.first.return_value = reservation
+        reservation_update = mock.Mock()
+        reservation_update.update.return_value = 1
+        ramp_filter.side_effect = [
+            provider_lookup,
+            external_lookup,
+            reservation_update,
+        ]
+        event_get_or_create.return_value = (SimpleNamespace(), True)
+
+        client = client_class.return_value
+        client.is_configured = True
+        order_result = SimpleNamespace(
+            next_action_url=None,
+            raw_response={
+                'orderId': 'koywe-order-recovered',
+                'externalId': reservation.external_id,
+                'status': 'REJECTED',
+                'amountIn': '499',
+                'amountOut': '95.82326',
+                'symbolIn': 'BRL',
+                'symbolOut': 'USDT BSC',
+            },
+        )
+        client.get_ramp_order_status.return_value = order_result
+
+        request = RequestFactory().post(
+            '/api/koywe/webhook/',
+            data={
+                'eventName': 'payment_expired',
+                'orderId': 'koywe-order-recovered',
+                'externalId': reservation.external_id,
+                'timeStamp': '2026-08-28T06:32:47.936Z',
+            },
+            content_type='application/json',
+        )
+        from ramps.views import koywe_webhook
+
+        response = koywe_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        external_lookup.order_by.assert_called_once_with('created_at')
+        self.assertEqual(reservation.provider_order_id, 'koywe-order-recovered')
+        self.assertEqual(
+            reservation.metadata['wallet_address_reservation_state'],
+            'provider_order_recorded',
+        )
+        reservation_update.update.assert_called_once()
+        recovery_update_filter = ramp_filter.call_args_list[2].kwargs
+        self.assertEqual(recovery_update_filter['status'], 'PENDING')
+        self.assertEqual(
+            recovery_update_filter['metadata__wallet_address_reservation_state__in'],
+            ('creating_order', 'ambiguous_order_creation'),
+        )
+        client.get_ramp_order_status.assert_called_once_with(
+            order_id='koywe-order-recovered',
+            email='owner@example.com',
+        )
+        sync_order.assert_called_once_with(
+            ramp_tx=reservation,
+            order_payload=order_result.raw_response,
+            next_action_url=None,
+        )
+
+    @mock.patch('ramps.views.verify_koywe_webhook_signature', return_value=True)
+    @mock.patch('ramps.views.sync_koywe_ramp_transaction_from_order')
+    @mock.patch('ramps.views.KoyweClient')
+    @mock.patch('ramps.views.RampWebhookEvent.objects.get_or_create')
+    @mock.patch('ramps.views.RampTransaction.objects.filter')
+    def test_concurrent_recovery_reuses_the_provider_order_winner(
+        self,
+        ramp_filter,
+        event_get_or_create,
+        client_class,
+        sync_order,
+        _verify_signature,
+    ):
+        reservation = SimpleNamespace(
+            pk=1267,
+            metadata={'wallet_address_reservation_state': 'ambiguous_order_creation'},
+        )
+        recovered = SimpleNamespace(
+            pk=1267,
+            status='PROCESSING',
+            provider_order_id='koywe-order-recovered',
+            actor_user_id=None,
+            metadata={'auth_email': 'owner@example.com'},
+        )
+        provider_lookup = mock.Mock()
+        provider_lookup.first.return_value = None
+        external_lookup = mock.Mock()
+        external_lookup.order_by.return_value.first.return_value = reservation
+        lost_update_race = mock.Mock()
+        lost_update_race.update.return_value = 0
+        concurrent_winner_lookup = mock.Mock()
+        concurrent_winner_lookup.first.return_value = recovered
+        ramp_filter.side_effect = [
+            provider_lookup,
+            external_lookup,
+            lost_update_race,
+            concurrent_winner_lookup,
+        ]
+        event_get_or_create.return_value = (SimpleNamespace(), True)
+
+        client = client_class.return_value
+        client.is_configured = True
+        order_result = SimpleNamespace(
+            next_action_url=None,
+            raw_response={'status': 'PAYMENT_CREATED'},
+        )
+        client.get_ramp_order_status.return_value = order_result
+        request = RequestFactory().post(
+            '/api/koywe/webhook/',
+            data={
+                'eventName': 'payment_created',
+                'orderId': recovered.provider_order_id,
+                'externalId': 'confio-ramp-lost-create-response',
+            },
+            content_type='application/json',
+        )
+        from ramps.views import koywe_webhook
+
+        response = koywe_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            ramp_filter.call_args_list[3].kwargs,
+            {
+                'pk': reservation.pk,
+                'provider_order_id': recovered.provider_order_id,
+            },
+        )
+        client.get_ramp_order_status.assert_called_once_with(
+            order_id=recovered.provider_order_id,
+            email='owner@example.com',
+        )
+        sync_order.assert_called_once_with(
+            ramp_tx=recovered,
+            order_payload=order_result.raw_response,
+            next_action_url=None,
+        )
+
+    @mock.patch('ramps.views.verify_koywe_webhook_signature', return_value=True)
+    @mock.patch('ramps.views.KoyweClient')
+    @mock.patch('ramps.views.RampWebhookEvent.objects.get_or_create')
+    @mock.patch('ramps.views.RampTransaction.objects.filter')
+    def test_webhook_does_not_recover_without_an_active_matching_reservation(
+        self,
+        ramp_filter,
+        event_get_or_create,
+        client_class,
+        _verify_signature,
+    ):
+        provider_lookup = mock.Mock()
+        provider_lookup.first.return_value = None
+        external_lookup = mock.Mock()
+        external_lookup.order_by.return_value.first.return_value = None
+        ramp_filter.side_effect = [provider_lookup, external_lookup]
+        event_get_or_create.return_value = (SimpleNamespace(), True)
+
+        request = RequestFactory().post(
+            '/api/koywe/webhook/',
+            data={
+                'eventName': 'payment_created',
+                'orderId': 'koywe-order-unknown',
+                'externalId': 'confio-ramp-not-a-live-reservation',
+            },
+            content_type='application/json',
+        )
+        from ramps.views import koywe_webhook
+
+        response = koywe_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertJSONEqual(
+            response.content,
+            {
+                'ok': True,
+                'stored': True,
+                'order_id': 'koywe-order-unknown',
+            },
+        )
+        client_class.assert_not_called()
+        external_lookup.order_by.assert_called_once_with('created_at')
+        recovery_filter = ramp_filter.call_args_list[1].kwargs
+        self.assertEqual(recovery_filter['status'], 'PENDING')
+        self.assertEqual(
+            recovery_filter['metadata__wallet_address_reservation_state__in'],
+            ('creating_order', 'ambiguous_order_creation'),
         )
 
 
