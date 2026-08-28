@@ -516,7 +516,7 @@ class MigrationSafetyTestCase(SimpleTestCase):
         account = SimpleNamespace(algorand_address='A' * 58)
 
         with patch(
-            'send.models.SendTransaction.objects.filter',
+            'send.models.SendTransaction.all_objects.filter',
             return_value=reservation_query,
         ), patch('blockchain.algorand_client.get_algod_client') as algod_mock:
             result = _inspect_wallet_reenrollment(account)
@@ -537,7 +537,7 @@ class MigrationSafetyTestCase(SimpleTestCase):
         account = SimpleNamespace(algorand_address='A' * 58)
 
         with patch(
-            'send.models.SendTransaction.objects.filter',
+            'send.models.SendTransaction.all_objects.filter',
             return_value=empty_send_query,
         ), patch(
             'humanitarian.models.HumanitarianRelease.objects.filter',

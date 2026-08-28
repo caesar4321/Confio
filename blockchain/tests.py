@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from achievements.models import (
     AchievementType,
@@ -85,7 +86,9 @@ class PreparedRecipientReservationSubmitTest(TestCase):
             status='PENDING',
             idempotency_key=group.hex(),
             bsc_calls_json='',
+            deleted_at=timezone.now(),
         )
+        self.assertFalse(SendTransaction.objects.filter(pk=reservation.pk).exists())
         signed_user_txn = base64.b64encode(msgpack.packb({
             'txn': {
                 'grp': group,
@@ -118,6 +121,15 @@ class PreparedRecipientReservationSubmitTest(TestCase):
         self.assertTrue(result.success)
         reservation.refresh_from_db()
         self.assertEqual(reservation.status, 'SUBMITTED')
+        self.assertIsNone(reservation.deleted_at)
+        self.assertTrue(SendTransaction.objects.filter(pk=reservation.pk).exists())
+        self.assertTrue(
+            reservation.unified_transaction.deleted_at is None
+        )
+        sender.refresh_from_db(fields=['last_activity_at'])
+        recipient.refresh_from_db(fields=['last_activity_at'])
+        self.assertIsNotNone(sender.last_activity_at)
+        self.assertIsNotNone(recipient.last_activity_at)
 
 
 class ConsumedDepositRecoveryTest(TestCase):
@@ -509,6 +521,8 @@ class ReferralWithdrawalPolicyTest(TestCase):
             account_index=0,
             algorand_address='B' * 58,
         )
+        sender_activity_before = self.user.last_activity_at
+        recipient_activity_before = recipient.last_activity_at
 
         ctx_patch, algod_patch, sponsor_patch = self._patch_context()
         with ctx_patch, algod_patch, sponsor_patch:
@@ -521,14 +535,22 @@ class ReferralWithdrawalPolicyTest(TestCase):
             )
 
         self.assertTrue(result.success, result.error)
-        reservation = SendTransaction.objects.get(
+        reservation = SendTransaction.all_objects.get(
             sender_user=self.user,
             idempotency_key='fake-group',
+        )
+        self.assertIsNotNone(reservation.deleted_at)
+        self.assertFalse(
+            SendTransaction.objects.filter(pk=reservation.pk).exists()
         )
         self.assertEqual(reservation.status, 'PENDING')
         self.assertEqual(reservation.recipient_user, recipient)
         self.assertEqual(reservation.recipient_address, recipient_account.algorand_address)
         self.assertEqual(reservation.bsc_calls_json, '')
+        self.user.refresh_from_db(fields=['last_activity_at'])
+        recipient.refresh_from_db(fields=['last_activity_at'])
+        self.assertEqual(self.user.last_activity_at, sender_activity_before)
+        self.assertEqual(recipient.last_activity_at, recipient_activity_before)
 
     def test_raw_send_rejects_retired_algorand_destination(self):
         RetiredWalletAddress.objects.create(

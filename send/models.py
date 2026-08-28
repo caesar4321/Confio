@@ -218,8 +218,11 @@ from users.utils import touch_user_activity
 
 
 @receiver(post_save, sender=SendTransaction)
-def send_txn_activity(sender, instance: SendTransaction, created, **kwargs):
-    if created:
+def send_txn_activity(sender, instance: SendTransaction, created, update_fields=None, **kwargs):
+    # Hidden prepare reservations are not user activity; only a broadcast
+    # transaction should advance sender/recipient activity timestamps.
+    became_visible = bool(update_fields and 'deleted_at' in update_fields)
+    if not instance.is_deleted and (created or became_visible):
         try:
             if instance.sender_user_id:
                 touch_user_activity(instance.sender_user_id)

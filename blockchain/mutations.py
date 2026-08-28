@@ -1307,7 +1307,8 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     if current_recipient != resolved_recipient_address:
                         return cls(success=False, error='Recipient address changed; prepare the send again')
 
-                    SendTransaction.objects.update_or_create(
+                    # Retry-safe even though the reservation is soft-hidden.
+                    SendTransaction.all_objects.update_or_create(
                         sender_user=user,
                         idempotency_key=result['group_id'],
                         defaults={
@@ -1332,6 +1333,11 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                                 else 'user'
                             ),
                             'bsc_calls_json': '',
+                            # Prepare is an address-safety reservation, not a
+                            # transaction. Keep it durable for reenrollment
+                            # checks but hidden from admin and user history
+                            # until this exact group is actually submitted.
+                            'deleted_at': timezone.now(),
                         },
                     )
             
@@ -1413,12 +1419,13 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     group_bytes = txn_dict.get('grp')
                     group_id = group_bytes.hex() if isinstance(group_bytes, bytes) else ''
                     if group_id:
-                        prepared_reservation = SendTransaction.objects.filter(
+                        # Prepared reservations are intentionally soft-hidden
+                        # until broadcast, so submission must use all_objects.
+                        prepared_reservation = SendTransaction.all_objects.filter(
                             sender_user=user,
                             idempotency_key=group_id,
                             status='PENDING',
                             bsc_calls_json='',
-                            deleted_at__isnull=True,
                         ).select_related('recipient_user', 'recipient_business').first()
                     if prepared_reservation is not None:
                         if prepared_reservation.created_at < timezone.now() - timedelta(hours=24):
@@ -1648,9 +1655,11 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     for field, value in send_defaults.items():
                         setattr(prepared_reservation, field, value)
                     prepared_reservation.transaction_hash = axfer_txid or result['tx_id']
+                    prepared_reservation.deleted_at = None
                     prepared_reservation.save(update_fields=[
                         *send_defaults.keys(),
                         'transaction_hash',
+                        'deleted_at',
                         'updated_at',
                     ])
                     stx, created = prepared_reservation, False
