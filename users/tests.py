@@ -620,6 +620,16 @@ class WalletReenrollmentReservationTestCase(TestCase):
 
         self.assertIsNone(_wallet_reenrollment_server_blocker(self.account))
 
+    def test_visible_submitted_send_blocks_reenrollment(self):
+        from users.web3auth_schema import _wallet_reenrollment_server_blocker
+
+        self._send(status='SUBMITTED', deleted_at=None)
+
+        self.assertEqual(
+            _wallet_reenrollment_server_blocker(self.account),
+            'pending_inbound_algorand_send',
+        )
+
 
 class WalletReenrollmentProofTestCase(SimpleTestCase):
     def setUp(self):

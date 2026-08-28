@@ -1297,6 +1297,14 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 from send.models import SendTransaction
 
                 with db_transaction.atomic():
+                    # Serialize every prepare for this sender, even if legacy
+                    # data contains two Account rows with the same Algorand
+                    # address. The hidden reservation is outside the model's
+                    # active-row uniqueness constraint, so the sender row is
+                    # the database lock that prevents duplicate group IDs.
+                    get_user_model().objects.select_for_update().only('pk').get(
+                        pk=user.pk
+                    )
                     locked_recipient = Account.objects.select_for_update().filter(
                         pk=recipient_user_account.pk,
                         deleted_at__isnull=True,

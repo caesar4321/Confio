@@ -131,6 +131,75 @@ class PreparedRecipientReservationSubmitTest(TestCase):
         self.assertIsNotNone(sender.last_activity_at)
         self.assertIsNotNone(recipient.last_activity_at)
 
+    def test_expired_hidden_reservation_fails_without_broadcast(self):
+        import base64
+        import msgpack
+        from datetime import timedelta
+
+        sender = User.objects.create_user(
+            username='expired-reservation-sender',
+            email='expired-reservation-sender@example.com',
+            password='password123',
+            firebase_uid='uid-expired-reservation-sender',
+        )
+        recipient = User.objects.create_user(
+            username='expired-reservation-recipient',
+            email='expired-reservation-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-expired-reservation-recipient',
+        )
+        recipient_account = Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=0,
+            algorand_address='B' * 58,
+        )
+        group = b'e' * 32
+        reservation = SendTransaction.all_objects.create(
+            sender_user=sender,
+            recipient_user=recipient,
+            sender_address='A' * 58,
+            recipient_address=recipient_account.algorand_address,
+            amount=Decimal('5'),
+            token_type='CUSD',
+            status='PENDING',
+            idempotency_key=group.hex(),
+            bsc_calls_json='',
+            deleted_at=timezone.now(),
+        )
+        SendTransaction.all_objects.filter(pk=reservation.pk).update(
+            created_at=timezone.now() - timedelta(hours=25)
+        )
+        signed_user_txn = base64.b64encode(msgpack.packb({
+            'txn': {
+                'grp': group,
+                'type': 'axfer',
+                'snd': b'a' * 32,
+                'arcv': b'b' * 32,
+                'xaid': 1,
+                'aamt': 5_000_000,
+            },
+        }, use_bin_type=True)).decode()
+        info = SimpleNamespace(context=SimpleNamespace(user=sender))
+
+        with patch(
+            'blockchain.mutations.algorand_sponsor_service.submit_sponsored_group',
+            new_callable=AsyncMock,
+        ) as submit_mock:
+            result = SubmitSponsoredGroupMutation.mutate(
+                None,
+                info,
+                signed_user_txn=signed_user_txn,
+                signed_sponsor_txn='signed-sponsor',
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn('expired', result.error.lower())
+        submit_mock.assert_not_called()
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, 'FAILED')
+        self.assertIsNotNone(reservation.deleted_at)
+
 
 class ConsumedDepositRecoveryTest(TestCase):
     def setUp(self):
