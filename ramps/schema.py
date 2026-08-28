@@ -888,17 +888,34 @@ def _mark_ambiguous_koywe_reservation(reservation) -> None:
             'integration; verify this key with Koywe before release.'
         ),
     })
-    RampTransaction.objects.filter(pk=reservation.pk).update(
+    # A webhook can recover the provider order while the original create-order
+    # request is still waiting to time out. Only mark the stale reservation
+    # ambiguous if it is still the untouched pre-order placeholder.
+    updated = RampTransaction.objects.filter(
+        pk=reservation.pk,
+        provider='koywe',
+        provider_order_id='',
+        status='PENDING',
+        metadata__wallet_address_reservation_state='creating_order',
+    ).update(
         status_detail='Koywe order creation outcome unresolved',
         metadata=metadata,
         updated_at=timezone.now(),
     )
-    logger.error(
-        'Koywe create outcome ambiguous; retaining wallet reservation '
-        'pk=%s external_id=%s',
-        reservation.pk,
-        reservation.external_id,
-    )
+    if updated:
+        logger.error(
+            'Koywe create outcome ambiguous; retaining wallet reservation '
+            'pk=%s external_id=%s',
+            reservation.pk,
+            reservation.external_id,
+        )
+    else:
+        logger.info(
+            'Koywe ambiguity marker skipped because reservation already changed: '
+            'pk=%s external_id=%s',
+            reservation.pk,
+            reservation.external_id,
+        )
 
 
 class CreateRampOrder(graphene.Mutation):
