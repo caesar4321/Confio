@@ -149,6 +149,31 @@ class KoyweOrderAmbiguityTests(SimpleTestCase):
                 external_id='confio-ramp-on_ramp-test',
             )
 
+    @mock.patch('ramps.schema.RampTransaction.objects.filter')
+    def test_ambiguity_marker_only_updates_an_untouched_reservation(self, ramp_filter):
+        reservation = SimpleNamespace(
+            pk=1267,
+            external_id='confio-ramp-on_ramp-test',
+            metadata={
+                'wallet_address_reserved': True,
+                'wallet_address_reservation_state': 'creating_order',
+            },
+        )
+
+        ramps_schema._mark_ambiguous_koywe_reservation(reservation)
+
+        self.assertEqual(
+            ramp_filter.call_args.kwargs,
+            {
+                'pk': reservation.pk,
+                'provider': 'koywe',
+                'provider_order_id': '',
+                'status': 'PENDING',
+                'metadata__wallet_address_reservation_state': 'creating_order',
+            },
+        )
+        ramp_filter.return_value.update.assert_called_once()
+
     @mock.patch('ramps.koywe_client.cache.delete')
     def test_auth_rejection_refreshes_token_and_retries_once(self, cache_delete):
         rejected = mock.Mock(ok=False, status_code=400)
@@ -269,6 +294,43 @@ class KoyweAddressReservationTests(TestCase):
             'ambiguous_order_creation',
         )
         self.assertEqual(reservation.metadata['reconcile_key'], reservation.external_id)
+
+    def test_timeout_does_not_overwrite_a_webhook_recovered_reservation(self):
+        reservation = RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            provider_order_id='',
+            external_id='confio-ramp-webhook-won-race',
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.bsc_address,
+            destination='cusd_plus',
+            status_detail='Koywe order creation reserved',
+            metadata={
+                'wallet_address_reserved': True,
+                'wallet_address_reservation_state': 'creating_order',
+            },
+        )
+        recovered_metadata = {
+            **reservation.metadata,
+            'wallet_address_reservation_state': 'provider_order_recorded',
+        }
+        RampTransaction.objects.filter(pk=reservation.pk).update(
+            provider_order_id='koywe-order-recovered-first',
+            status_detail='payment_created',
+            metadata=recovered_metadata,
+        )
+
+        ramps_schema._mark_ambiguous_koywe_reservation(reservation)
+
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.provider_order_id, 'koywe-order-recovered-first')
+        self.assertEqual(reservation.status_detail, 'payment_created')
+        self.assertEqual(
+            reservation.metadata['wallet_address_reservation_state'],
+            'provider_order_recorded',
+        )
 
     def test_existing_unresolved_reservation_blocks_duplicate_provider_call(self):
         RampTransaction.objects.create(
