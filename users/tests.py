@@ -516,7 +516,7 @@ class MigrationSafetyTestCase(SimpleTestCase):
         account = SimpleNamespace(algorand_address='A' * 58)
 
         with patch(
-            'send.models.SendTransaction.objects.filter',
+            'send.models.SendTransaction.all_objects.filter',
             return_value=reservation_query,
         ), patch('blockchain.algorand_client.get_algod_client') as algod_mock:
             result = _inspect_wallet_reenrollment(account)
@@ -537,7 +537,7 @@ class MigrationSafetyTestCase(SimpleTestCase):
         account = SimpleNamespace(algorand_address='A' * 58)
 
         with patch(
-            'send.models.SendTransaction.objects.filter',
+            'send.models.SendTransaction.all_objects.filter',
             return_value=empty_send_query,
         ), patch(
             'humanitarian.models.HumanitarianRelease.objects.filter',
@@ -548,6 +548,87 @@ class MigrationSafetyTestCase(SimpleTestCase):
         self.assertFalse(result['eligible'])
         self.assertEqual(result['reason'], 'pending_humanitarian_release')
         algod_mock.assert_not_called()
+
+
+class WalletReenrollmentReservationTestCase(TestCase):
+    def setUp(self):
+        from users.models import Account
+
+        self.sender = User.objects.create_user(
+            username='reservation-sender',
+            email='reservation-sender@example.com',
+            password='password123',
+            firebase_uid='uid-reservation-sender',
+        )
+        recipient = User.objects.create_user(
+            username='reservation-recipient',
+            email='reservation-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-reservation-recipient',
+        )
+        self.account = Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=0,
+            algorand_address='R' * 58,
+        )
+
+    def _send(self, **overrides):
+        from send.models import SendTransaction
+
+        values = {
+            'sender_user': self.sender,
+            'recipient_user': self.account.user,
+            'sender_address': 'S' * 58,
+            'recipient_address': self.account.algorand_address,
+            'amount': '1',
+            'token_type': 'CUSD',
+            'status': 'PENDING',
+            'idempotency_key': f"group-{SendTransaction.all_objects.count()}",
+            'bsc_calls_json': '',
+            'deleted_at': timezone.now(),
+        }
+        values.update(overrides)
+        return SendTransaction.all_objects.create(**values)
+
+    def test_recent_hidden_prepare_blocks_reenrollment(self):
+        from users.web3auth_schema import _wallet_reenrollment_server_blocker
+
+        self._send()
+
+        self.assertEqual(
+            _wallet_reenrollment_server_blocker(self.account),
+            'pending_inbound_algorand_send',
+        )
+
+    def test_old_hidden_prepare_does_not_block_reenrollment(self):
+        from datetime import timedelta
+        from send.models import SendTransaction
+        from users.web3auth_schema import _wallet_reenrollment_server_blocker
+
+        reservation = self._send()
+        SendTransaction.all_objects.filter(pk=reservation.pk).update(
+            created_at=timezone.now() - timedelta(hours=25)
+        )
+
+        self.assertIsNone(_wallet_reenrollment_server_blocker(self.account))
+
+    def test_soft_deleted_submitted_send_does_not_block_reenrollment(self):
+        from users.web3auth_schema import _wallet_reenrollment_server_blocker
+
+        self._send(status='SUBMITTED')
+
+        self.assertIsNone(_wallet_reenrollment_server_blocker(self.account))
+
+    def test_visible_submitted_send_blocks_reenrollment(self):
+        from users.web3auth_schema import _wallet_reenrollment_server_blocker
+
+        self._send(status='SUBMITTED', deleted_at=None)
+
+        self.assertEqual(
+            _wallet_reenrollment_server_blocker(self.account),
+            'pending_inbound_algorand_send',
+        )
 
 
 class WalletReenrollmentProofTestCase(SimpleTestCase):

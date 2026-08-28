@@ -69,7 +69,6 @@ export const SendWithAddressScreen = () => {
   const [showScanner, setShowScanner] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const navLock = React.useRef(false);
-  const [prepared, setPrepared] = useState<any | null>(null);
 
   // Balance snapshot + background refresh
   const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
@@ -158,33 +157,6 @@ export const SendWithAddressScreen = () => {
   // mistake, which is worth saying plainly.
   const wrongChainMessage = wrongNetworkMessage(destination, 'algorand');
 
-  // Background preflight via WS when valid Algorand address and amount provided
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setPrepared(null);
-        const amt = parseFloat(String(amount || '0'));
-        const isAlgorandAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
-        if (!(isFinite(amt) && amt > 0 && isAlgorandAddress)) return;
-        const assetType = tokenType.toUpperCase();
-        const { prepareSendViaWs } = await import('../services/sendWs');
-        const pack = await prepareSendViaWs({
-          amount: amt,
-          assetType,
-          recipientAddress: destination,
-        });
-        if (!alive) return;
-        if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length >= 2) {
-          setPrepared({ transactions: (pack as any).transactions });
-        }
-      } catch (e) {
-        // ignore preflight errors; processing screen will fallback
-      }
-    })();
-    return () => { alive = false; };
-  }, [amount, destination, tokenType]);
-
   const handleSend = async () => {
 
     // Prevent double-clicks/rapid button presses
@@ -267,7 +239,6 @@ export const SendWithAddressScreen = () => {
           recipientAddress: destination,
           memo: '', // Empty memo - user can add notes in a future feature
           idempotencyKey: idempotencyKey,
-          prepared: prepared,
           tokenType: tokenType.toUpperCase(), // Add token type for blockchain transaction
           needsCusdSwap: needsCusdSwap, // Pass the swap flag to processing screen
         }

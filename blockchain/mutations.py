@@ -1297,6 +1297,14 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 from send.models import SendTransaction
 
                 with db_transaction.atomic():
+                    # Serialize every prepare for this sender, even if legacy
+                    # data contains two Account rows with the same Algorand
+                    # address. The hidden reservation is outside the model's
+                    # active-row uniqueness constraint, so the sender row is
+                    # the database lock that prevents duplicate group IDs.
+                    get_user_model().objects.select_for_update().only('pk').get(
+                        pk=user.pk
+                    )
                     locked_recipient = Account.objects.select_for_update().filter(
                         pk=recipient_user_account.pk,
                         deleted_at__isnull=True,
@@ -1307,33 +1315,58 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     if current_recipient != resolved_recipient_address:
                         return cls(success=False, error='Recipient address changed; prepare the send again')
 
-                    SendTransaction.objects.update_or_create(
-                        sender_user=user,
-                        idempotency_key=result['group_id'],
-                        defaults={
-                            'recipient_user': recipient_user,
-                            'recipient_business': (
-                                locked_recipient.business
-                                if locked_recipient.account_type == 'business'
-                                else None
-                            ),
-                            'sender_address': user_account.algorand_address,
-                            'recipient_address': resolved_recipient_address,
-                            'amount': amount_decimal,
-                            'token_type': asset_type_upper,
-                            'memo': (note or '')[:500],
-                            'status': 'PENDING',
-                            'sender_type': (
-                                'business' if user_account.account_type == 'business'
-                                else 'user'
-                            ),
-                            'recipient_type': (
-                                'business' if locked_recipient.account_type == 'business'
-                                else 'user'
-                            ),
-                            'bsc_calls_json': '',
-                        },
+                    reservation_defaults = {
+                        'recipient_user': recipient_user,
+                        'recipient_business': (
+                            locked_recipient.business
+                            if locked_recipient.account_type == 'business'
+                            else None
+                        ),
+                        'sender_address': user_account.algorand_address,
+                        'recipient_address': resolved_recipient_address,
+                        'amount': amount_decimal,
+                        'token_type': asset_type_upper,
+                        'memo': (note or '')[:500],
+                        'status': 'PENDING',
+                        'sender_type': (
+                            'business' if user_account.account_type == 'business'
+                            else 'user'
+                        ),
+                        'recipient_type': (
+                            'business' if locked_recipient.account_type == 'business'
+                            else 'user'
+                        ),
+                        'bsc_calls_json': '',
+                        # Prepare is an address-safety reservation, not a
+                        # transaction. Keep it durable for reenrollment
+                        # checks but hidden from admin and user history
+                        # until this exact group is actually submitted.
+                        'deleted_at': timezone.now(),
+                    }
+                    existing_reservation = (
+                        SendTransaction.all_objects.select_for_update().filter(
+                            sender_user=user,
+                            idempotency_key=result['group_id'],
+                        ).first()
                     )
+                    if existing_reservation is not None:
+                        if (
+                            existing_reservation.status != 'PENDING'
+                            or existing_reservation.deleted_at is None
+                        ):
+                            return cls(success=False, error='Prepared send was already submitted')
+                        for field, value in reservation_defaults.items():
+                            setattr(existing_reservation, field, value)
+                        existing_reservation.save(update_fields=[
+                            *reservation_defaults.keys(),
+                            'updated_at',
+                        ])
+                    else:
+                        SendTransaction.all_objects.create(
+                            sender_user=user,
+                            idempotency_key=result['group_id'],
+                            **reservation_defaults,
+                        )
             
             # Do not send push/in-app notifications here; use optimistic UI on client.
             # Push notifications will be sent after on-chain confirmation by the worker.
@@ -1413,12 +1446,13 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     group_bytes = txn_dict.get('grp')
                     group_id = group_bytes.hex() if isinstance(group_bytes, bytes) else ''
                     if group_id:
-                        prepared_reservation = SendTransaction.objects.filter(
+                        # Prepared reservations are intentionally soft-hidden
+                        # until broadcast, so submission must use all_objects.
+                        prepared_reservation = SendTransaction.all_objects.filter(
                             sender_user=user,
                             idempotency_key=group_id,
                             status='PENDING',
                             bsc_calls_json='',
-                            deleted_at__isnull=True,
                         ).select_related('recipient_user', 'recipient_business').first()
                     if prepared_reservation is not None:
                         if prepared_reservation.created_at < timezone.now() - timedelta(hours=24):
@@ -1648,9 +1682,11 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     for field, value in send_defaults.items():
                         setattr(prepared_reservation, field, value)
                     prepared_reservation.transaction_hash = axfer_txid or result['tx_id']
+                    prepared_reservation.deleted_at = None
                     prepared_reservation.save(update_fields=[
                         *send_defaults.keys(),
                         'transaction_hash',
+                        'deleted_at',
                         'updated_at',
                     ])
                     stx, created = prepared_reservation, False

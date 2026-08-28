@@ -198,7 +198,6 @@ export const SendToFriendScreen = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const navLock = React.useRef(false);
-  const [prepared, setPrepared] = useState<any | null>(null);
 
   // Balance snapshot + background refresh. The BSC dollar reads the savings
   // portfolio (vault position + raw wallet USDT — the server picks which
@@ -300,35 +299,6 @@ export const SendToFriendScreen = () => {
 
   const handleQuickAmount = (val: string) => setAmount(val);
 
-  // Background preflight via WebSocket when inputs look valid (Algorand
-  // rails only — the BSC flow prepares server-side at send time).
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setPrepared(null);
-        if (isBscToken) return;
-        const amt = parseFloat(String(amount || '0'));
-        if (!(isFinite(amt) && amt > 0 && friend && friend.isOnConfio !== false)) return;
-        const assetType = (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO');
-        const { prepareSendViaWs } = await import('../services/sendWs');
-        const pack = await prepareSendViaWs({
-          amount: amt,
-          assetType,
-          recipientUserId: friend.userId || friend.id,
-          recipientPhone: friendInternationalPhone,
-        });
-        if (!alive) return;
-        if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length >= 2) {
-          setPrepared({ transactions: (pack as any).transactions });
-        }
-      } catch (e) {
-        // ignore preflight errors; processing screen will fallback
-      }
-    })();
-    return () => { alive = false; };
-  }, [amount, tokenType, friend?.userId, friend?.id, friend?.phone, friend?.isOnConfio]);
-
   const handleSend = async () => {
 
     // Prevent double-clicks/rapid button presses
@@ -424,7 +394,6 @@ export const SendToFriendScreen = () => {
           memo: '', // Empty memo - user can add notes in a future feature
           idempotencyKey: idempotencyKey,
           preparedInvite: invitePrepared,
-          prepared: prepared,
           senderName: userProfile?.firstName ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim() : (userProfile?.username || 'Usuario'),
           sender: userProfile?.firstName || 'Usuario',
           recipientStatusTier: (friend as any).statusTier || null,

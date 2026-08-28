@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from achievements.models import (
     AchievementType,
@@ -85,7 +86,9 @@ class PreparedRecipientReservationSubmitTest(TestCase):
             status='PENDING',
             idempotency_key=group.hex(),
             bsc_calls_json='',
+            deleted_at=timezone.now(),
         )
+        self.assertFalse(SendTransaction.objects.filter(pk=reservation.pk).exists())
         signed_user_txn = base64.b64encode(msgpack.packb({
             'txn': {
                 'grp': group,
@@ -118,6 +121,84 @@ class PreparedRecipientReservationSubmitTest(TestCase):
         self.assertTrue(result.success)
         reservation.refresh_from_db()
         self.assertEqual(reservation.status, 'SUBMITTED')
+        self.assertIsNone(reservation.deleted_at)
+        self.assertTrue(SendTransaction.objects.filter(pk=reservation.pk).exists())
+        self.assertTrue(
+            reservation.unified_transaction.deleted_at is None
+        )
+        sender.refresh_from_db(fields=['last_activity_at'])
+        recipient.refresh_from_db(fields=['last_activity_at'])
+        self.assertIsNotNone(sender.last_activity_at)
+        self.assertIsNotNone(recipient.last_activity_at)
+
+    def test_expired_hidden_reservation_fails_without_broadcast(self):
+        import base64
+        import msgpack
+        from datetime import timedelta
+
+        sender = User.objects.create_user(
+            username='expired-reservation-sender',
+            email='expired-reservation-sender@example.com',
+            password='password123',
+            firebase_uid='uid-expired-reservation-sender',
+        )
+        recipient = User.objects.create_user(
+            username='expired-reservation-recipient',
+            email='expired-reservation-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-expired-reservation-recipient',
+        )
+        recipient_account = Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=0,
+            algorand_address='B' * 58,
+        )
+        group = b'e' * 32
+        reservation = SendTransaction.all_objects.create(
+            sender_user=sender,
+            recipient_user=recipient,
+            sender_address='A' * 58,
+            recipient_address=recipient_account.algorand_address,
+            amount=Decimal('5'),
+            token_type='CUSD',
+            status='PENDING',
+            idempotency_key=group.hex(),
+            bsc_calls_json='',
+            deleted_at=timezone.now(),
+        )
+        SendTransaction.all_objects.filter(pk=reservation.pk).update(
+            created_at=timezone.now() - timedelta(hours=25)
+        )
+        signed_user_txn = base64.b64encode(msgpack.packb({
+            'txn': {
+                'grp': group,
+                'type': 'axfer',
+                'snd': b'a' * 32,
+                'arcv': b'b' * 32,
+                'xaid': 1,
+                'aamt': 5_000_000,
+            },
+        }, use_bin_type=True)).decode()
+        info = SimpleNamespace(context=SimpleNamespace(user=sender))
+
+        with patch(
+            'blockchain.mutations.algorand_sponsor_service.submit_sponsored_group',
+            new_callable=AsyncMock,
+        ) as submit_mock:
+            result = SubmitSponsoredGroupMutation.mutate(
+                None,
+                info,
+                signed_user_txn=signed_user_txn,
+                signed_sponsor_txn='signed-sponsor',
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn('expired', result.error.lower())
+        submit_mock.assert_not_called()
+        reservation.refresh_from_db()
+        self.assertEqual(reservation.status, 'FAILED')
+        self.assertIsNotNone(reservation.deleted_at)
 
 
 class ConsumedDepositRecoveryTest(TestCase):
@@ -509,6 +590,8 @@ class ReferralWithdrawalPolicyTest(TestCase):
             account_index=0,
             algorand_address='B' * 58,
         )
+        sender_activity_before = self.user.last_activity_at
+        recipient_activity_before = recipient.last_activity_at
 
         ctx_patch, algod_patch, sponsor_patch = self._patch_context()
         with ctx_patch, algod_patch, sponsor_patch:
@@ -521,14 +604,109 @@ class ReferralWithdrawalPolicyTest(TestCase):
             )
 
         self.assertTrue(result.success, result.error)
-        reservation = SendTransaction.objects.get(
+        reservation = SendTransaction.all_objects.get(
             sender_user=self.user,
             idempotency_key='fake-group',
+        )
+        self.assertIsNotNone(reservation.deleted_at)
+        self.assertFalse(
+            SendTransaction.objects.filter(pk=reservation.pk).exists()
         )
         self.assertEqual(reservation.status, 'PENDING')
         self.assertEqual(reservation.recipient_user, recipient)
         self.assertEqual(reservation.recipient_address, recipient_account.algorand_address)
         self.assertEqual(reservation.bsc_calls_json, '')
+        self.assertFalse(hasattr(reservation, 'unified_transaction'))
+        self.user.refresh_from_db(fields=['last_activity_at'])
+        recipient.refresh_from_db(fields=['last_activity_at'])
+        self.assertEqual(self.user.last_activity_at, sender_activity_before)
+        self.assertEqual(recipient.last_activity_at, recipient_activity_before)
+
+    def test_retrying_same_prepared_group_reuses_hidden_reservation(self):
+        recipient = User.objects.create_user(
+            username='prepared-send-retry-recipient',
+            email='prepared-send-retry-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-prepared-send-retry-recipient',
+        )
+        Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=0,
+            algorand_address='B' * 58,
+        )
+
+        ctx_patch, algod_patch, sponsor_patch = self._patch_context()
+        with ctx_patch, algod_patch, sponsor_patch:
+            first = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_user_id=recipient.id,
+                amount=5,
+                asset_type='CUSD',
+            )
+        ctx_patch, algod_patch, sponsor_patch = self._patch_context()
+        with ctx_patch, algod_patch, sponsor_patch:
+            second = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_user_id=recipient.id,
+                amount=5,
+                asset_type='CUSD',
+            )
+
+        self.assertTrue(first.success, first.error)
+        self.assertTrue(second.success, second.error)
+        reservations = SendTransaction.all_objects.filter(
+            sender_user=self.user,
+            idempotency_key='fake-group',
+        )
+        self.assertEqual(reservations.count(), 1)
+        self.assertIsNotNone(reservations.get().deleted_at)
+
+    def test_prepare_cannot_rehide_already_submitted_group(self):
+        recipient = User.objects.create_user(
+            username='prepared-send-used-recipient',
+            email='prepared-send-used-recipient@example.com',
+            password='password123',
+            firebase_uid='uid-prepared-send-used-recipient',
+        )
+        Account.objects.create(
+            user=recipient,
+            account_type='personal',
+            account_index=0,
+            algorand_address='B' * 58,
+        )
+        SendTransaction.objects.create(
+            sender_user=self.user,
+            recipient_user=recipient,
+            sender_address=self.account.algorand_address,
+            recipient_address='B' * 58,
+            amount=Decimal('5'),
+            token_type='CUSD',
+            status='SUBMITTED',
+            idempotency_key='fake-group',
+            bsc_calls_json='',
+        )
+
+        ctx_patch, algod_patch, sponsor_patch = self._patch_context()
+        with ctx_patch, algod_patch, sponsor_patch:
+            result = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_user_id=recipient.id,
+                amount=5,
+                asset_type='CUSD',
+            )
+
+        self.assertFalse(result.success)
+        self.assertIn('already submitted', result.error)
+        existing = SendTransaction.objects.get(
+            sender_user=self.user,
+            idempotency_key='fake-group',
+        )
+        self.assertEqual(existing.status, 'SUBMITTED')
+        self.assertIsNone(existing.deleted_at)
 
     def test_raw_send_rejects_retired_algorand_destination(self):
         RetiredWalletAddress.objects.create(
