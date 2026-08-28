@@ -332,6 +332,63 @@ class KoyweAddressReservationTests(TestCase):
             'provider_order_recorded',
         )
 
+    @mock.patch('ramps.views.verify_koywe_webhook_signature', return_value=True)
+    @mock.patch('ramps.views.KoyweClient')
+    def test_webhook_persists_recovery_through_the_real_orm(
+        self,
+        client_class,
+        _verify_signature,
+    ):
+        reservation = RampTransaction.objects.create(
+            provider='koywe',
+            direction='on_ramp',
+            status='PENDING',
+            provider_order_id='',
+            external_id='confio-ramp-real-orm-recovery',
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.bsc_address,
+            destination='cusd_plus',
+            metadata={
+                'auth_email': 'owner@example.com',
+                'wallet_address_reserved': True,
+                'wallet_address_reservation_state': 'creating_order',
+            },
+        )
+        client_class.return_value.is_configured = False
+        request = RequestFactory().post(
+            '/api/koywe/webhook/',
+            data={
+                'id': 'koywe-event-real-orm-recovery',
+                'eventName': 'payment_created',
+                'orderId': 'koywe-order-real-orm-recovery',
+                'externalId': reservation.external_id,
+            },
+            content_type='application/json',
+        )
+        from ramps.views import koywe_webhook
+
+        response = koywe_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        reservation.refresh_from_db()
+        self.assertEqual(
+            reservation.provider_order_id,
+            'koywe-order-real-orm-recovery',
+        )
+        self.assertEqual(
+            reservation.metadata['wallet_address_reservation_state'],
+            'provider_order_recorded',
+        )
+        self.assertEqual(
+            reservation.metadata['provider_order_recovery']['source'],
+            'koywe_webhook',
+        )
+        self.assertEqual(
+            reservation.metadata['provider_order_recovery']['event_id'],
+            'koywe-event-real-orm-recovery',
+        )
+
     def test_existing_unresolved_reservation_blocks_duplicate_provider_call(self):
         RampTransaction.objects.create(
             provider='koywe',
