@@ -4,7 +4,47 @@ import { Platform } from 'react-native';
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_REQUEST_TIMEOUT_MS = 12_000;
-const DRIVE_AUTH_ERROR_MESSAGE = 'No pudimos acceder a Google Drive. Vuelve a tocar Reintentar respaldo y elige la cuenta de Google correcta.';
+
+const DRIVE_AUTH_ERROR_MESSAGE = 'Google Drive rechazó el permiso de Confío. Vuelve a intentarlo para renovar el acceso.';
+
+const normalizeDriveReason = (reason: unknown): string | null => {
+    if (typeof reason !== 'string') return null;
+    const normalized = reason.trim();
+    return /^[A-Za-z0-9_.-]{1,80}$/.test(normalized) ? normalized : null;
+};
+
+const parseDriveReason = (rawResponse?: string): string | null => {
+    if (!rawResponse) return null;
+    try {
+        const payload = JSON.parse(rawResponse);
+        return normalizeDriveReason(
+            payload?.error?.errors?.[0]?.reason
+            ?? payload?.error?.status
+            ?? payload?.error?.reason,
+        );
+    } catch (_error) {
+        return null;
+    }
+};
+
+const driveErrorMessage = (status: number, reason: string | null, operation: string): string => {
+    if (status === 401) {
+        return 'La autorización de Google Drive venció. Vuelve a intentarlo para iniciar sesión nuevamente.';
+    }
+    if (status === 403) {
+        if (reason === 'storageQuotaExceeded') {
+            return 'La cuenta de Google seleccionada no tiene espacio disponible en Drive.';
+        }
+        if (reason === 'domainPolicy') {
+            return 'La configuración de esta cuenta de Google no permite que Confío use Drive.';
+        }
+        if (reason === 'accessNotConfigured' || reason === 'dailyLimitExceeded' || reason === 'userRateLimitExceeded') {
+            return 'Google Drive no está disponible temporalmente para Confío. Intenta nuevamente más tarde.';
+        }
+        return DRIVE_AUTH_ERROR_MESSAGE;
+    }
+    return `No pudimos completar la operación de Google Drive (${operation}). Intenta nuevamente.`;
+};
 
 export interface DriveFile {
     id: string;
@@ -15,16 +55,17 @@ export interface DriveFile {
 export class GoogleDriveStorageError extends Error {
     status: number;
     operation: string;
-    rawResponse?: string;
+    reason: string | null;
+    supportCode: string;
 
-    constructor(operation: string, status: number, rawResponse?: string) {
-        super(status === 401 || status === 403
-            ? DRIVE_AUTH_ERROR_MESSAGE
-            : `No pudimos completar la operación de Google Drive (${operation}). Intenta nuevamente.`);
+    constructor(operation: string, status: number, reason?: string | null) {
+        const safeReason = normalizeDriveReason(reason) || null;
+        super(driveErrorMessage(status, safeReason, operation));
         this.name = 'GoogleDriveStorageError';
         this.status = status;
         this.operation = operation;
-        this.rawResponse = rawResponse;
+        this.reason = safeReason;
+        this.supportCode = `DRIVE-${status}-${(safeReason || operation).replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}`;
     }
 }
 
@@ -35,7 +76,7 @@ async function createDriveError(operation: string, response: Response): Promise<
     } catch (error) {
         rawResponse = undefined;
     }
-    return new GoogleDriveStorageError(operation, response.status, rawResponse);
+    return new GoogleDriveStorageError(operation, response.status, parseDriveReason(rawResponse));
 }
 
 async function driveFetch(

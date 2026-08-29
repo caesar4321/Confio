@@ -25,6 +25,14 @@ import {
   selectRestoredAddressForCollision,
   selectLegacyAddressForServer,
 } from './walletReenrollmentDecision';
+import {
+  assertMatchingGoogleAccount,
+  driveSupportCode,
+  GoogleDriveAccountMismatchError,
+  GoogleDriveScopeMissingError,
+  isDriveAuthorizationFailure,
+  runWithDriveAuthorizationRetry,
+} from './googleDriveAuthPolicy';
 
 const LEGACY_ALGOD_INSPECTION_TIMEOUT_MS = 8_000;
 
@@ -696,7 +704,10 @@ export class AuthService {
    * This is used when an Apple Sign-In user wants to backup to Google Drive.
    * It gets the Drive access token but preserves the existing user's JWT.
    */
-  async getDriveAccessTokenOnly(): Promise<string | null> {
+  async getDriveAccessTokenOnly(options?: {
+    forceFreshSignIn?: boolean;
+    expectedGoogleSubject?: string;
+  }): Promise<string | null> {
     try {
       console.log('[AuthService] Getting Drive access token only (preserving current user)...');
 
@@ -706,15 +717,23 @@ export class AuthService {
       // Check Play Services
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
-      const currentUser = await GoogleSignin.getCurrentUser();
+      if (options?.forceFreshSignIn) {
+        try {
+          await GoogleSignin.signOut();
+        } catch (signOutError) {
+          console.warn('[AuthService] Local Google sign-out before fresh Drive authorization failed:', signOutError);
+        }
+      }
+
+      const currentUser = GoogleSignin.getCurrentUser();
       const hasDriveScope = currentUser?.scopes?.includes(GOOGLE_DRIVE_APPDATA_SCOPE);
       if (!hasDriveScope) {
         const driveScopeResponse = currentUser
           ? await GoogleSignin.addScopes({ scopes: [GOOGLE_DRIVE_APPDATA_SCOPE] })
           : await GoogleSignin.signIn();
 
-        if (!isSuccessResponse(driveScopeResponse)) {
-          if (isCancelledResponse(driveScopeResponse)) {
+        if (!driveScopeResponse || !isSuccessResponse(driveScopeResponse)) {
+          if (driveScopeResponse && isCancelledResponse(driveScopeResponse)) {
             console.log('[AuthService] Drive access sign-in cancelled by user');
             return null;
           }
@@ -724,7 +743,7 @@ export class AuthService {
         }
       }
 
-      const driveScopedUser = await GoogleSignin.getCurrentUser();
+      let driveScopedUser = GoogleSignin.getCurrentUser();
       if (!driveScopedUser?.scopes?.includes(GOOGLE_DRIVE_APPDATA_SCOPE)) {
         console.warn('[AuthService] Drive scope missing after scope request; forcing fresh Google sign-in');
         try {
@@ -743,7 +762,18 @@ export class AuthService {
           console.warn('[AuthService] Fresh Drive access sign-in returned a non-success response');
           return null;
         }
+
+        driveScopedUser = GoogleSignin.getCurrentUser();
       }
+
+      if (!driveScopedUser?.scopes?.includes(GOOGLE_DRIVE_APPDATA_SCOPE)) {
+        throw new GoogleDriveScopeMissingError();
+      }
+
+      assertMatchingGoogleAccount(
+        options?.expectedGoogleSubject,
+        driveScopedUser.user?.id,
+      );
 
       // Get the access token for Drive
       const { accessToken } = await GoogleSignin.getTokens();
@@ -753,6 +783,21 @@ export class AuthService {
 
       return accessToken || null;
     } catch (error) {
+      if (
+        error instanceof GoogleDriveScopeMissingError
+        || error instanceof GoogleDriveAccountMismatchError
+      ) {
+        // Leave no mismatched/under-scoped Google session behind. The next
+        // tap must reopen account selection instead of deterministically
+        // failing against the same cached account again.
+        try {
+          await GoogleSignin.signOut();
+        } catch (signOutError) {
+          console.warn('[AuthService] Failed to clear unusable Google Drive session:', signOutError);
+        }
+        this.driveAccessToken = null;
+        throw error;
+      }
       if (isErrorWithCode(error)) {
         console.error('[AuthService] Failed to get Drive access token:', error.code, error.message);
       }
@@ -761,36 +806,10 @@ export class AuthService {
     }
   }
 
-  /**
-   * Enable Google Drive backup for the CURRENT user (works for Apple Sign-In users too).
-   * This gets a Drive access token, syncs the master secret to Drive, and reports the backup
-   * status to the CURRENT user (not a new Google user).
-   * 
-   * @returns Object with success flag or error
-   */
-  async enableDriveBackup(): Promise<{
-    success: boolean;
-    error?: string;
-  }> {
-    try {
-      console.log('[AuthService] Enabling Drive backup for current user...');
-
-      // Get Drive access token without changing current user
-      const accessToken = await this.getDriveAccessTokenOnly();
-
-      if (!accessToken) {
-        console.error('[AuthService] Failed to get Drive access token');
-        return { success: false, error: 'No se pudo obtener acceso a Google Drive' };
-      }
-
-      // Get the stored OAuth subject (from Apple or Google sign-in)
-      const { oauthStorage } = await import('./oauthStorageService');
-      const oauthData = await oauthStorage.getOAuthSubject();
-      if (!oauthData?.subject) {
-        console.error('[AuthService] No OAuth subject found for backup');
-        return { success: false, error: 'No se encontró información de la cuenta' };
-      }
-
+  private async syncCurrentWalletToDrive(
+    oauthData: { subject: string; provider: 'google' | 'apple' },
+    accessToken: string,
+  ): Promise<void> {
       // Fetch the server's authoritative Algorand address so the restore
       // path can filter Drive candidates by expectedAddress. Without this,
       // findOldestRestorableDriveBackup returns the OLDEST decryptable
@@ -871,19 +890,83 @@ export class AuthService {
       // Report backup status for the CURRENT user (uses existing JWT)
       await reportBackupStatus('google_drive');
       console.log('[AuthService] Backup status reported for current user');
+  }
+
+  private async clearRejectedDriveToken(): Promise<void> {
+    if (!this.driveAccessToken) return;
+    try {
+      await GoogleSignin.clearCachedAccessToken(this.driveAccessToken);
+    } catch (clearTokenError) {
+      console.warn('[AuthService] Failed to clear rejected Drive token:', clearTokenError);
+    } finally {
+      this.driveAccessToken = null;
+    }
+  }
+
+  /**
+   * Enable Google Drive backup for the CURRENT user (works for Apple Sign-In users too).
+   * This gets a Drive access token, syncs the master secret to Drive, and reports the backup
+   * status to the CURRENT user (not a new Google user).
+   *
+   * A Drive 401/403 gets one clean Google reauthorization and one retry. We
+   * never loop beyond that: repeated consent prompts are both confusing and
+   * incapable of fixing project policy/quota errors.
+   */
+  async enableDriveBackup(): Promise<{
+    success: boolean;
+    error?: string;
+    supportCode?: string;
+  }> {
+    console.log('[AuthService] Enabling Drive backup for current user...');
+
+    try {
+      // Read the Confío identity before opening Google's account chooser. A
+      // Google-backed Confío session must use that SAME Google subject for
+      // Drive; email text is mutable and is therefore not an identity anchor.
+      const { oauthStorage } = await import('./oauthStorageService');
+      const oauthData = await oauthStorage.getOAuthSubject();
+      if (!oauthData?.subject) {
+        console.error('[AuthService] No OAuth subject found for backup');
+        return { success: false, error: 'No se encontró información de la cuenta' };
+      }
+
+      const expectedGoogleSubject = oauthData.provider === 'google'
+        ? oauthData.subject
+        : undefined;
+
+      const accessToken = await this.getDriveAccessTokenOnly({ expectedGoogleSubject });
+      if (!accessToken) {
+        console.error('[AuthService] Failed to get Drive access token');
+        return { success: false, error: 'No se pudo obtener acceso a Google Drive' };
+      }
+
+      await runWithDriveAuthorizationRetry(
+        accessToken,
+        token => this.syncCurrentWalletToDrive(oauthData, token),
+        async firstError => {
+          console.warn('[AuthService] Drive rejected authorization; retrying once with a fresh Google session:', {
+            status: firstError.status,
+            supportCode: driveSupportCode(firstError),
+          });
+          await this.clearRejectedDriveToken();
+          return this.getDriveAccessTokenOnly({
+            forceFreshSignIn: true,
+            expectedGoogleSubject,
+          });
+        },
+      );
 
       return { success: true };
     } catch (error: any) {
       console.error('[AuthService] Failed to enable Drive backup:', error);
-      if ((error?.status === 401 || error?.status === 403) && this.driveAccessToken) {
-        try {
-          await GoogleSignin.clearCachedAccessToken(this.driveAccessToken);
-        } catch (clearTokenError) {
-          console.warn('[AuthService] Failed to clear rejected Drive token:', clearTokenError);
-        }
-        this.driveAccessToken = null;
+      if (isDriveAuthorizationFailure(error)) {
+        await this.clearRejectedDriveToken();
       }
-      return { success: false, error: error?.message || 'Error desconocido' };
+      return {
+        success: false,
+        error: error?.message || 'Error desconocido',
+        supportCode: driveSupportCode(error),
+      };
     }
   }
 

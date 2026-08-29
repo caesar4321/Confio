@@ -14,6 +14,7 @@ export const BackupCompletionScreen = () => {
   const { handleSuccessfulLogin, refreshProfile, signOut } = useAuth();
   const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [supportCode, setSupportCode] = useState<string | null>(null);
 
   useEffect(() => {
     refreshProfile('personal').catch(err => {    });
@@ -37,6 +38,7 @@ export const BackupCompletionScreen = () => {
   const handleRetryBackup = useCallback(async () => {
     setIsRetrying(true);
     setError(null);
+    setSupportCode(null);
 
     try {
       const result = await authService.enableDriveBackup();
@@ -47,6 +49,7 @@ export const BackupCompletionScreen = () => {
       }
 
       setError(result.error || 'No pudimos terminar el respaldo seguro.');
+      setSupportCode(result.supportCode || null);
     } catch (retryErr: any) {
       setError(retryErr?.message || 'No pudimos terminar el respaldo seguro.');
     } finally {
@@ -118,7 +121,10 @@ export const BackupCompletionScreen = () => {
         {error ? (
           <View style={styles.errorBox}>
             <Icon name="alert-circle" size={18} color={colors.error.icon} />
-            <Text style={styles.errorText}>{error}</Text>
+            <View style={styles.errorContent}>
+              <Text style={styles.errorText}>{error}</Text>
+              {supportCode ? <Text style={styles.supportCode}>Código de soporte: {supportCode}</Text> : null}
+            </View>
           </View>
         ) : null}
 
@@ -309,12 +315,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.error.border,
   },
-  errorText: {
+  errorContent: {
     flex: 1,
     marginLeft: 10,
+  },
+  errorText: {
     color: colors.error.icon,
     fontSize: 14,
     lineHeight: 20,
+  },
+  supportCode: {
+    color: colors.error.icon,
+    fontSize: 12,
+    marginTop: 6,
   },
   primaryButton: {
     height: 56,
