@@ -9,12 +9,13 @@ describe('googleDriveStorage', () => {
         jest.restoreAllMocks();
     });
 
-    it('does not expose raw Google auth errors to UI callers', async () => {
+    it('keeps only a safe reason and support code from Google auth errors', async () => {
         const rawResponse = JSON.stringify({
             error: {
                 code: 401,
                 message: 'Request had invalid authentication credentials.',
                 status: 'UNAUTHENTICATED',
+                errors: [{ reason: 'authError' }],
             },
         });
         global.fetch = jest.fn().mockResolvedValue({
@@ -27,9 +28,43 @@ describe('googleDriveStorage', () => {
             name: 'GoogleDriveStorageError',
             status: 401,
             operation: 'list',
-            message: 'No pudimos acceder a Google Drive. Vuelve a tocar Reintentar respaldo y elige la cuenta de Google correcta.',
-            rawResponse,
+            message: 'La autorización de Google Drive venció. Vuelve a intentarlo para iniciar sesión nuevamente.',
+            reason: 'authError',
+            supportCode: 'DRIVE-401-AUTHERROR',
         } satisfies Partial<GoogleDriveStorageError>);
+    });
+
+    it('shows an accurate message when Google reports exhausted storage', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 403,
+            text: jest.fn().mockResolvedValue(JSON.stringify({
+                error: { errors: [{ reason: 'storageQuotaExceeded' }] },
+            })),
+        } as any);
+
+        await expect(googleDriveStorage.createFile('token', 'wallet.enc', 'ciphertext'))
+            .rejects.toMatchObject({
+                status: 403,
+                reason: 'storageQuotaExceeded',
+                supportCode: 'DRIVE-403-STORAGEQUOTAEXCEEDED',
+                message: 'La cuenta de Google seleccionada no tiene espacio disponible en Drive.',
+            });
+    });
+
+    it('does not retain malformed or sensitive Google error bodies', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 403,
+            text: jest.fn().mockResolvedValue('{"error":{"reason":"user@example.com has no access"}}'),
+        } as any);
+
+        const error = await googleDriveStorage.listFiles('token').catch(value => value);
+        expect(error).toMatchObject({
+            reason: null,
+            supportCode: 'DRIVE-403-LIST',
+        });
+        expect(error).not.toHaveProperty('rawResponse');
     });
 
     it('attaches an abort signal so Drive cannot hang sign-in indefinitely', async () => {
@@ -59,7 +94,8 @@ describe('googleDriveStorage', () => {
             name: 'GoogleDriveStorageError',
             status: 0,
             operation: 'list',
-            rawResponse: 'request_timeout',
+            reason: 'request_timeout',
+            supportCode: 'DRIVE-0-REQUEST_TIMEOUT',
         } satisfies Partial<GoogleDriveStorageError>);
         await jest.advanceTimersByTimeAsync(12_000);
 
