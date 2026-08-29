@@ -8,6 +8,7 @@ import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
 import { AccountManager } from '../utils/accountManager';
 import appCheckService from '../services/appCheckService';
+import { shouldSkipStoredJwt } from './authPolicy';
 // RN-free module — safe to import statically (heavier emergencyExit modules
 // like the keychain store stay behind dynamic imports).
 import { successProvesUnbanned } from '../services/emergencyExit/banSignal';
@@ -299,13 +300,9 @@ const authLink = setContext(async (operation, previousContext) => {
     nextHeaders['X-AppCheck-Debug-Error'] = acError?.message || String(acError);
   }
 
-  // Check if we should skip authentication (for login mutations)
-  if (previousContext?.skipAuth) {
-    return { headers: nextHeaders };
-  }
-
-  // Skip token refresh/auth for the refresh token mutation itself
-  if (operation.operationName === 'RefreshToken') {
+  // Session-establishing operations must be independent of any stale JWT
+  // left in Keychain. App Check above still applies to these requests.
+  if (shouldSkipStoredJwt(operation.operationName, !!previousContext?.skipAuth)) {
     return { headers: nextHeaders };
   }
 

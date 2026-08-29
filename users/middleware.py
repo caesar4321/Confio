@@ -41,9 +41,22 @@ class AuthTokenVersionMiddleware:
                 body = request.body.decode('utf-8')
                 data = json.loads(body)
                 op_name = str(data.get('operationName') or '').strip()
-                if op_name in ('refreshToken', 'legalDocument'):
+                if op_name in (
+                    'RefreshToken',
+                    'LegalDocument',
+                    'Web3AuthLogin',
+                    # Retain the legacy lower-camel names for older clients.
+                    'refreshToken',
+                    'legalDocument',
+                    'web3AuthLogin',
+                ):
                     if settings.DEBUG:
                         logger.info("Skipping auth for whitelisted public operation: %s", op_name)
+                    # The GraphQL JWT middleware runs after this Django
+                    # middleware. Remove any stale device JWT so it cannot
+                    # reject a public login after the fresh Firebase identity
+                    # proof has already succeeded.
+                    request.META.pop('HTTP_AUTHORIZATION', None)
                     request.user = AnonymousUser()
                     return self.get_response(request)
             except Exception as e:
