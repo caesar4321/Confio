@@ -3520,7 +3520,7 @@ type Query {
   unifiedTransactions(accountType: String!, accountIndex: Int!, limit: Int = 50, offset: Int = 0, tokenTypes: [String]): [UnifiedTransactionType]
 
   """Get unified transactions for current JWT account context"""
-  currentAccountTransactions(limit: Int = 50, offset: Int = 0, tokenTypes: [String]): [UnifiedTransactionType]
+  currentAccountTransactions(limit: Int = 50, offset: Int = 0, tokenTypes: [String], transactionTypes: [String]): [UnifiedTransactionType]
 
   """Get unified transactions between current user and a specific friend"""
   unifiedTransactionsWithFriend(friendUserId: ID, friendPhone: String, limit: Int = 50, offset: Int = 0): [UnifiedTransactionType]
@@ -5701,6 +5701,8 @@ type StatsSummaryType {
   protectedSavings: Float
   totalValueLocked: Float
   usdyReserve: Float
+  cusdBscCirculating: Float
+  cusdBscReserve: Float
   ondoStocksTvl: Float
   circulatingCusd: Float
   presaleCusdRaised: Float

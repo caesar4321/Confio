@@ -22,6 +22,10 @@ SEL_FEE_FOR = _sel('feeFor(uint256)')
 SEL_PREVIEW_MINT = _sel('previewMint(uint256)')
 SEL_PREVIEW_REDEEM = _sel('previewRedeem(uint256)')
 SEL_PAUSED = _sel('paused()')
+SEL_TOTAL_SUPPLY = _sel('totalSupply()')
+SEL_BACKING_USDT = _sel('backingUsdt()')
+SEL_ACCRUED_ENTRY_FEES = _sel('accruedEntryFees()')
+SEL_ACCRUED_EXIT_FEES = _sel('accruedExitFees()')
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,23 @@ def _uint_call(selector: str, value: int | None = None, words: int = 1) -> tuple
 
 def current_fee_bps() -> int:
     return _uint_call(SEL_FEE_BPS)[0]
+
+
+def total_supply_wei() -> int:
+    return _uint_call(SEL_TOTAL_SUPPLY)[0]
+
+
+def backing_usdt_wei() -> int:
+    """USDT reserved for holders, excluding accrued Confío fees."""
+    return _uint_call(SEL_BACKING_USDT)[0]
+
+
+def accrued_entry_fees_wei() -> int:
+    return _uint_call(SEL_ACCRUED_ENTRY_FEES)[0]
+
+
+def accrued_exit_fees_wei() -> int:
+    return _uint_call(SEL_ACCRUED_EXIT_FEES)[0]
 
 
 def is_paused() -> bool:

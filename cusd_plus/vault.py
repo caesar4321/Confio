@@ -540,9 +540,9 @@ def usdy_address() -> str:
     )
 
 
-def usdy_reserve_usd() -> float:
+def usdy_reserve_usd() -> float | None:
     """USD value of the USDY the vault actually holds — the cUSD+ side of
-    the public reserve stat (the cUSD side is USDC, 1:1).
+    the public reserve stat (legacy a-cUSD uses USDC; cUSD uses USDT).
 
     USDY is ACCUMULATING: the token count stays put while its price rises,
     so a token count would understate the reserve and sit visually frozen.
@@ -557,7 +557,7 @@ def usdy_reserve_usd() -> float:
     vault = vault_address()
     oracle = oracle_address()
     if not vault or not oracle:
-        return 0.0
+        return None
     cached = cache.get('cusd_plus_reserve_usd')
     if cached is not None:
         return cached
@@ -567,7 +567,7 @@ def usdy_reserve_usd() -> float:
     except Exception:  # noqa: BLE001 — a flaky node must not zero the stat
         logger.warning('cUSD+ reserve read failed', exc_info=True)
         last = cache.get('cusd_plus_reserve_usd_last')
-        return last if last is not None else 0.0
+        return last if last is not None else None
     cache.set('cusd_plus_reserve_usd', value, RESERVE_TTL)
     cache.set('cusd_plus_reserve_usd_last', value, RESERVE_LAST_TTL)
     return value

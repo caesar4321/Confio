@@ -30,6 +30,125 @@ WAD = Decimal(10 ** 18)
 
 
 @dataclass(frozen=True)
+class CUSDBscPlatformMetrics:
+    """Live state of the universal USDT-backed cUSD perimeter."""
+
+    wired: bool
+    address: Optional[str]
+    circulating_cusd: Optional[Decimal]
+    usdt_reserve_usd: Optional[Decimal]
+    backing_ratio_bps: Optional[int]
+    fee_bps: Optional[int]
+    accrued_entry_fees_usd: Optional[Decimal]
+    accrued_exit_fees_usd: Optional[Decimal]
+    paused: Optional[bool]
+    source: str
+    as_of: object
+
+    @property
+    def is_undercollateralised(self) -> bool:
+        return (
+            self.backing_ratio_bps is not None
+            and self.backing_ratio_bps < 10_000
+        )
+
+    @property
+    def fee_pct(self) -> Optional[Decimal]:
+        return (
+            Decimal(self.fee_bps) / Decimal(100)
+            if self.fee_bps is not None
+            else None
+        )
+
+
+def _cusd_bsc_unavailable(
+        *, wired: bool, address: Optional[str], source: str,
+) -> CUSDBscPlatformMetrics:
+    return CUSDBscPlatformMetrics(
+        wired=wired,
+        address=address,
+        circulating_cusd=None,
+        usdt_reserve_usd=None,
+        backing_ratio_bps=None,
+        fee_bps=None,
+        accrued_entry_fees_usd=None,
+        accrued_exit_fees_usd=None,
+        paused=None,
+        source=source,
+        as_of=timezone.now(),
+    )
+
+
+def get_cusd_bsc_platform_metrics(
+        *, use_cache: bool = True,
+) -> CUSDBscPlatformMetrics:
+    """Read cUSD supply, holder reserve, and fee accounting from BSC.
+
+    `backingUsdt()` deliberately excludes accrued fees, so comparing it with
+    total supply cannot mistake Confío revenue for holder collateral.
+    """
+    cache_key = 'cusd_bsc_platform_metrics:v1'
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+    from . import cusd_vault
+
+    address = cusd_vault.vault_address()
+    if not address:
+        return _cusd_bsc_unavailable(
+            wired=False, address=None, source='unconfigured')
+
+    try:
+        circulating = Decimal(cusd_vault.total_supply_wei()) / WAD
+        reserve = Decimal(cusd_vault.backing_usdt_wei()) / WAD
+        backing_ratio_bps = (
+            int((reserve * Decimal(10_000)) / circulating)
+            if circulating > 0
+            else 10_000
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Unable to read cUSD vault state from BSC: %s', exc)
+        return _cusd_bsc_unavailable(
+            wired=True, address=address, source='unavailable')
+
+    try:
+        fee_bps = cusd_vault.current_fee_bps()
+    except Exception:  # noqa: BLE001
+        logger.warning('Unable to read cUSD conversion fee', exc_info=True)
+        fee_bps = None
+    try:
+        entry_fees = Decimal(cusd_vault.accrued_entry_fees_wei()) / WAD
+        exit_fees = Decimal(cusd_vault.accrued_exit_fees_wei()) / WAD
+    except Exception:  # noqa: BLE001
+        logger.warning('Unable to read cUSD accrued fees', exc_info=True)
+        entry_fees, exit_fees = None, None
+    try:
+        paused = cusd_vault.is_paused()
+    except Exception:  # noqa: BLE001
+        logger.warning('Unable to read cUSD pause state', exc_info=True)
+        paused = None
+
+    result = CUSDBscPlatformMetrics(
+        wired=True,
+        address=address,
+        circulating_cusd=circulating,
+        usdt_reserve_usd=reserve,
+        backing_ratio_bps=backing_ratio_bps,
+        fee_bps=fee_bps,
+        accrued_entry_fees_usd=entry_fees,
+        accrued_exit_fees_usd=exit_fees,
+        paused=paused,
+        source='bsc',
+        as_of=timezone.now(),
+    )
+    if use_cache:
+        cache.set(cache_key, result, 30)
+    return result
+
+
+@dataclass(frozen=True)
 class CUSDPlusPlatformMetrics:
     """Live vault state. Every on-chain field is Optional: None means "we
     could not read it", which is a different fact from 0."""
@@ -125,7 +244,12 @@ def get_cusd_plus_platform_metrics(*, use_cache: bool = True) -> CUSDPlusPlatfor
     # degrade to a stale-but-real value rather than raising, so a failure
     # here should not discard the supply figures we just read.
     try:
-        usdy_reserve_usd = Decimal(str(vault.usdy_reserve_usd()))
+        raw_reserve_usd = vault.usdy_reserve_usd()
+        usdy_reserve_usd = (
+            Decimal(str(raw_reserve_usd))
+            if raw_reserve_usd is not None
+            else None
+        )
     except Exception:  # noqa: BLE001
         logger.warning("cUSD+ reserve read failed", exc_info=True)
         usdy_reserve_usd = None

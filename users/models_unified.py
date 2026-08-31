@@ -8,14 +8,15 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-# The app's account screens query these EXACT strings — savings asks for
-# ['CUSD_PLUS','USDT'], cUSD for ['CUSD','USDC','ALGO'], CONFIO for
-# ['CONFIO'] (AccountDetailScreen accountTokenTypes). A row tagged with
-# anything else belongs to no screen: it is money the user can never see.
-# That has already happened twice in production — 67 conversion rows written
-# as lowercase 'cUSD', and the presale card the BSC rail filed under 'CUSD'.
+# Asset account screens query exact canonical strings, while operation screens
+# such as RampHistory intentionally filter by transaction type instead. A row
+# still needs one canonical token label so every shared resolver can format it
+# and choose the correct chain. That contract has already failed twice in
+# production — 67 conversion rows were written as lowercase 'cUSD', and the
+# presale card filed its BSC rail under Algorand 'CUSD'.
 CANONICAL_TOKEN_TYPES = frozenset({
     'CUSD', 'CUSD_BSC', 'CONFIO', 'USDC', 'ALGO', 'CUSD_PLUS', 'USDT',
+    'BNB',
 })
 
 # Every non-canonical spelling any writer in this repo can produce. The ramp
@@ -92,6 +93,7 @@ class UnifiedTransactionTable(models.Model):
         # token_type on filter, so these are safe additive choices.
         ('CUSD_PLUS', 'Confío Dollar Plus'),
         ('USDT', 'Tether USD'),
+        ('BNB', 'BNB'),
     ]
 
     ACCOUNT_TYPE_CHOICES = [

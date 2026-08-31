@@ -20,6 +20,7 @@ import {useNumberFormat} from '../utils/numberFormatting';
 import {MainStackParamList} from '../types/navigation';
 import {GET_STATS_SUMMARY} from '../apollo/queries';
 import {CUSD_RESERVE_PERA_URL} from '../config/algorand';
+import {CUSD_BSC_VAULT_ADDRESS} from '../config/env';
 import {bscscanTokenHoldingsUrl} from '../utils/bscscan';
 
 // cUSD+ reserve verification chain (BSC vault deployed 2026-07-10):
@@ -32,6 +33,12 @@ const CUSD_PLUS_TOKEN_BSCSCAN_URL =
   'https://bscscan.com/token/0x3C29417eb4314155e63d4C7D4507852b87763Ed1';
 const CUSD_PLUS_VAULT_ASSETS_URL = bscscanTokenHoldingsUrl(
   '0x3C29417eb4314155e63d4C7D4507852b87763Ed1',
+);
+const CUSD_TOKEN_BSCSCAN_URL = CUSD_BSC_VAULT_ADDRESS
+  ? `https://bscscan.com/token/${CUSD_BSC_VAULT_ADDRESS}`
+  : null;
+const CUSD_VAULT_ASSETS_URL = bscscanTokenHoldingsUrl(
+  CUSD_BSC_VAULT_ADDRESS,
 );
 const ONDO_USDY_URL = 'https://app.ondo.finance/assets/usdy';
 const USDY_ATTESTATION_DAILY_URL =
@@ -79,13 +86,20 @@ export const ProtectedSavingsScreen = () => {
     nextFetchPolicy: 'cache-first',
   });
   const s = data?.statsSummary;
-  const tvl = s?.totalValueLocked ?? s?.protectedSavings;
-  const tvlLabel = formatWhole(tvl, currency.thousandsSeparator);
+  const legacyCusdReserve = s?.totalValueLocked ?? s?.protectedSavings;
+  const legacyCusdReserveLabel = formatWhole(
+    legacyCusdReserve,
+    currency.thousandsSeparator,
+  );
+  const cusdReserveLabel = formatWhole(
+    s?.cusdBscReserve,
+    currency.thousandsSeparator,
+  );
   // statsSummary.usdyReserve is the USD VALUE of the USDY the vault holds
   // (server reads balance × oracle price, 2026-07-31), not a token count:
   // USDY accrues in price, so counting tokens would understate the reserve
   // and sit frozen while it actually grows. Same unit as the USDC pill.
-  const usdyReserve = (s as any)?.usdyReserve ?? 0;
+  const usdyReserve = s?.usdyReserve;
   const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);
 
   const {formatNumber} = useNumberFormat();
@@ -95,8 +109,8 @@ export const ProtectedSavingsScreen = () => {
   });
   const grossApy = apyData?.cusdPlusSummary?.grossApyPct ?? 0;
   const netApy = apyData?.cusdPlusSummary?.netApyPct ?? 0;
-  // cUSD phase-out: while deposits are paused, the generic Recargar CTA
-  // steers eligible users to the savings rail (same rule as the Home sheet).
+  // Legacy a-cUSD phase-out: while its deposits are paused, the generic
+  // Recargar CTA steers eligible users to the savings rail (same as Home).
   const steerToSavings =
     (apyData?.cusdPlusSummary?.cusdDepositsPaused ?? true) &&
     (apyData?.cusdPlusSummary?.savingsEnabled ?? true);
@@ -137,7 +151,13 @@ export const ProtectedSavingsScreen = () => {
             <View style={styles.heroStatPill}>
               <Icon name="shield" size={14} color={colors.primary} />
               <Text style={styles.heroStatText}>
-                {tvlLabel} USDC en reserva
+                US${legacyCusdReserveLabel} en USDC
+              </Text>
+            </View>
+            <View style={styles.heroStatPill}>
+              <Icon name="shield" size={14} color={colors.primary} />
+              <Text style={styles.heroStatText}>
+                US${cusdReserveLabel} en USDT
               </Text>
             </View>
             <View style={styles.heroStatPill}>
@@ -148,18 +168,31 @@ export const ProtectedSavingsScreen = () => {
             </View>
           </View>
           <Text style={styles.heroFootnote}>
-            cUSD+: respaldado por USDY (Tesoro EE.UU.) · cUSD: respaldado por
-            USDC
+            a-cUSD: USDC · cUSD: USDT · cUSD+: USDY
           </Text>
         </View>
 
-        {/* What is cUSD+ (the protagonist); cUSD gets one honest line —
-            still circulating, reserves intact — not a co-feature. */}
+        {/* Three distinct liabilities, each paired with its actual reserve. */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="help-circle" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>¿Qué es cUSD+?</Text>
+            <Text style={styles.sectionTitle}>Tres dólares, reservas separadas</Text>
           </View>
+          <Text style={styles.sectionBody}>
+            <Text style={styles.inlineEmphasis}>
+              Antiguo Confío Dollar (a-cUSD)
+            </Text>{' '}
+            es la versión anterior que todavía circula. Está respaldada 1:1
+            por USDC en una reserva verificable y sigue disponible para sus
+            titulares.
+          </Text>
+          <Text style={styles.sectionBody}>
+            <Text style={styles.inlineEmphasis}>
+              Confío Dollar (cUSD)
+            </Text>{' '}
+            es el dólar de uso diario. Está respaldado 1:1 por USDT en una
+            reserva pública y no genera rendimiento.
+          </Text>
           <Text style={styles.sectionBody}>
             <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text> es
             tu dólar para ahorrar: cada dólar está respaldado 100% por USDY, un
@@ -167,12 +200,6 @@ export const ProtectedSavingsScreen = () => {
             EE.UU., y acumula rendimiento cada día según una tasa anual
             variable. Los registros públicos permiten comprobar que el respaldo
             existe.
-          </Text>
-          <Text style={styles.sectionBody}>
-            ¿Y <Text style={styles.inlineEmphasis}>cUSD</Text>? Sigue en
-            circulación y 100% respaldado por USDC en una reserva verificable
-            que <Text style={styles.inlineEmphasis}>nunca se invierte</Text> —
-            puedes usarlo y retirarlo cuando quieras.
           </Text>
         </View>
 
@@ -183,13 +210,12 @@ export const ProtectedSavingsScreen = () => {
             <Text style={styles.sectionTitle}>Reserva 100% verificable</Text>
           </View>
           <Text style={styles.sectionBody}>
-            No tienes que confiar en nuestra palabra. El respaldo de cUSD se
-            puede comprobar en{' '}
-            <Text style={styles.inlineEmphasis}>Pera Explorer</Text> (red
-            Algorand) y el de cUSD+ en{' '}
-            <Text style={styles.inlineEmphasis}>BscScan</Text> (red BNB Chain).
-            Cualquier persona puede consultar los montos y movimientos en tiempo
-            real.
+            No tienes que confiar en nuestra palabra. La circulación y las
+            reservas del antiguo a-cUSD se pueden comprobar en{' '}
+            <Text style={styles.inlineEmphasis}>Pera Explorer</Text>. Las de
+            cUSD y cUSD+ se pueden comprobar en{' '}
+            <Text style={styles.inlineEmphasis}>BscScan</Text>. Cualquier
+            persona puede consultar los montos y movimientos en tiempo real.
           </Text>
           <View style={styles.linksRow}>
             <TouchableOpacity
@@ -211,14 +237,62 @@ export const ProtectedSavingsScreen = () => {
                   styles.linkText,
                   !s?.cusdAssetPeraUrl && styles.linkTextDisabled,
                 ]}>
-                Ver cUSD en circulación
+                Ver a-cUSD en circulación
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
               onPress={() => openUrl(CUSD_RESERVE_PERA_URL)}>
               <Icon name="external-link" size={13} color={colors.successText} />
-              <Text style={styles.linkText}>Ver respaldo USDC</Text>
+              <Text style={styles.linkText}>Ver reserva USDC de a-cUSD</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                !CUSD_TOKEN_BSCSCAN_URL && styles.linkButtonDisabled,
+              ]}
+              onPress={() => openUrl(CUSD_TOKEN_BSCSCAN_URL)}
+              disabled={!CUSD_TOKEN_BSCSCAN_URL}>
+              <Icon
+                name="external-link"
+                size={13}
+                color={
+                  CUSD_TOKEN_BSCSCAN_URL
+                    ? colors.successText
+                    : colors.text.light
+                }
+              />
+              <Text
+                style={[
+                  styles.linkText,
+                  !CUSD_TOKEN_BSCSCAN_URL && styles.linkTextDisabled,
+                ]}>
+                Ver cUSD en circulación
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.linkButton,
+                !CUSD_VAULT_ASSETS_URL && styles.linkButtonDisabled,
+              ]}
+              onPress={() => openUrl(CUSD_VAULT_ASSETS_URL)}
+              disabled={!CUSD_VAULT_ASSETS_URL}>
+              <Icon
+                name="external-link"
+                size={13}
+                color={
+                  CUSD_VAULT_ASSETS_URL
+                    ? colors.successText
+                    : colors.text.light
+                }
+              />
+              <Text
+                style={[
+                  styles.linkText,
+                  !CUSD_VAULT_ASSETS_URL && styles.linkTextDisabled,
+                ]}>
+                Ver reserva USDT de cUSD
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
@@ -230,7 +304,7 @@ export const ProtectedSavingsScreen = () => {
               style={styles.linkButton}
               onPress={() => openUrl(CUSD_PLUS_VAULT_ASSETS_URL)}>
               <Icon name="external-link" size={13} color={colors.successText} />
-              <Text style={styles.linkText}>Ver respaldo USDY</Text>
+              <Text style={styles.linkText}>Ver reserva USDY de cUSD+</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.tipText}>
@@ -322,13 +396,12 @@ export const ProtectedSavingsScreen = () => {
           <Text style={styles.disclaimer}>
             * Las tasas mostradas son anuales (APY). Varían día a día con los
             bonos del Tesoro y no son fijas ni garantizadas. El respaldo USDY
-            es verificable públicamente, igual que el de cUSD. Esto no
-            constituye asesoría de inversión.
+            es verificable públicamente, igual que los respaldos de cUSD y
+            a-cUSD. Esto no constituye asesoría de inversión.
           </Text>
         </View>
 
-        {/* The backing assets themselves — completes the trust chain:
-            cUSD → USDC → Circle/dollars · cUSD+ → USDY → Ondo/Treasuries */}
+        {/* The backing assets themselves complete the trust chain. */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="layers" size={20} color={colors.primary} />
@@ -351,8 +424,8 @@ export const ProtectedSavingsScreen = () => {
             invierten en deuda del gobierno e instrumentos similares al
             efectivo. Su rendimiento se expresa como una tasa anual y se
             acumula cada día — ese es el rendimiento que recibe tu cUSD+.
-            (USDC, el respaldo de cUSD, es el dólar digital de Circle, con
-            auditorías públicas mensuales.)
+            (USDT respalda cUSD; USDC, el dólar digital de Circle, respalda el
+            antiguo a-cUSD.)
           </Text>
           <Text style={styles.sectionBody}>
             Empresas independientes revisan las reservas de USDY. Ondo publica
@@ -379,7 +452,12 @@ export const ProtectedSavingsScreen = () => {
             </TouchableOpacity>
           </View>
           <View style={styles.chainCard}>
-            <Text style={styles.chainLine}>cUSD → USDC → dólares reales</Text>
+            <Text style={styles.chainLine}>
+              a-cUSD → USDC → dólares en reserva
+            </Text>
+            <Text style={styles.chainLine}>
+              cUSD → USDT → dólares en reserva
+            </Text>
             <Text style={styles.chainLine}>
               cUSD+ → USDY → bonos del Tesoro de EE.UU.
             </Text>
