@@ -1,4 +1,4 @@
-import { deriveIntentId } from '../evmWallet';
+import { deriveIntentId, selector } from '../evmWallet';
 import {
   encodeBuyStockCall,
   encodeSellStockCall,
@@ -55,5 +55,31 @@ describe('Ondo stock router ABI', () => {
       [{ to: '0x' + '11'.repeat(20), valueWei: 0n, data }],
       'gm_0123456789abcdef0123456789abcdef_a0',
     ));
+  });
+});
+
+describe('cUSD rail intent parity', () => {
+  const intentFor = (signature: string): string => deriveIntentId([{
+    to: '0x' + '11'.repeat(20),
+    valueWei: 0n,
+    data: selector(signature),
+  }]);
+
+  it('matches the server kinds for fee-free internal conversions', () => {
+    expect(intentFor('wrapCusd(uint256,uint256,address)')).toBe(
+      '0xe20ab42d131e776a4be1d3cf2b15431b4f9903bfa3742c9808d71b821b04f08f',
+    );
+    expect(intentFor('unwrapToCusd(uint256,uint256,address)')).toBe(
+      '0x0fd51316f246a59f873be2bdd5b5d7e625d5011b21e58b1e4acbba9f648894c8',
+    );
+  });
+
+  it('matches the server kinds for fee-bearing cUSD mint and redeem', () => {
+    expect(intentFor('mintWithFee(uint256,uint256,address)')).toBe(
+      '0x7c1868ae2dd041e6c12c7c97c5aed2860e230e29b354f49450c5d1a4a97103fb',
+    );
+    expect(intentFor('redeemWithFee(uint256,uint256,address)')).toBe(
+      '0x7b542b59c64007e300b1b692521eba93c6010468a5c3618075414a094322aea6',
+    );
   });
 });

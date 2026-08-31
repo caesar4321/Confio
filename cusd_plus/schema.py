@@ -1431,6 +1431,31 @@ class SponsorBscBatch(graphene.Mutation):
             digest = sponsor_7702.intent_digest(
                 norm_calls, nonce_i, deadline_i, user_addr, chain_id, intent_id)
             signer = sponsor_7702.recover_intent_signer(digest, intent_signature)
+            # Compatibility for the first cUSD rail client. Its generic
+            # intent classifier knew the older stock/redeem selectors only,
+            # so the newly added cUSD mint/redeem/wrap selectors were signed
+            # as `subscribe`. The exact calls, recipient, amount, nonce and
+            # deadline are still bound by EIP-712; accepting that legacy kind
+            # for ONLY these selectors restores installed builds without
+            # weakening the calldata policy. New builds sign the canonical
+            # server kind above.
+            selectors = {c['data'][2:10] for c in norm_calls}
+            legacy_subscribe_intent = (
+                kind in ('wrap_cusd', 'unwrap_to_cusd', 'mint_cusd')
+                or (kind == 'redeem'
+                    and sponsor_7702.SEL_CUSD_REDEEM in selectors)
+            )
+            if signer != user_addr and legacy_subscribe_intent:
+                legacy_intent_id = sponsor_7702.intent_id_for(
+                    'subscribe', client_request_id=request_id or None)
+                legacy_digest = sponsor_7702.intent_digest(
+                    norm_calls, nonce_i, deadline_i, user_addr,
+                    chain_id, legacy_intent_id)
+                legacy_signer = sponsor_7702.recover_intent_signer(
+                    legacy_digest, intent_signature)
+                if legacy_signer == user_addr:
+                    signer = legacy_signer
+                    intent_id = legacy_intent_id
             if signer != user_addr:
                 return SponsorBscBatch(success=False, error='bad_intent_signature')
 

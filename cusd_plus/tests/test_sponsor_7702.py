@@ -113,6 +113,15 @@ def _sign_intent(calls, nonce, deadline, key=USER_KEY, user_addr=USER,
     return '0x' + key.sign_msg_hash(digest).to_bytes().hex()  # r‖s‖v(0/1)
 
 
+def _sign_intent_as_kind(calls, nonce, deadline, kind, key=USER_KEY,
+                         user_addr=USER, request_id=None):
+    intent_id = sponsor_7702.intent_id_for(
+        kind, client_request_id=request_id)
+    digest = sponsor_7702.intent_digest(
+        calls, nonce, deadline, user_addr, CHAIN_ID, intent_id)
+    return '0x' + key.sign_msg_hash(digest).to_bytes().hex()
+
+
 def _sign_authorization(nonce=0, key=USER_KEY, chain_id=CHAIN_ID, delegate=DELEGATE):
     import rlp
     payload = rlp.encode([chain_id, bytes.fromhex(delegate[2:]), nonce])
@@ -544,6 +553,30 @@ class SponsorBscBatchTests(SimpleTestCase):
             calls=calls, intent_sig=_sign_intent(calls, 0, self.deadline, key=MALLORY_KEY),
             delegated=True)
         self.assertEqual(res.error, 'bad_intent_signature')
+
+    def test_legacy_client_subscribe_intent_unwraps_to_cusd(self):
+        calls = [_call(VAULT, _unwrap_data())]
+        legacy_sig = _sign_intent_as_kind(
+            calls, 0, self.deadline, 'subscribe')
+
+        res, ledger, _ = self._mutate(
+            calls=calls, intent_sig=legacy_sig, delegated=True)
+
+        self.assertTrue(res.success, res.error)
+        ledger.create.assert_called_once()
+        created = ledger.create.call_args.kwargs
+        self.assertEqual(created['kind'], 'unwrap_to_cusd')
+
+    def test_legacy_subscribe_fallback_is_not_general(self):
+        calls = [_call(VAULT, _redeem_data())]
+        legacy_sig = _sign_intent_as_kind(
+            calls, 0, self.deadline, 'subscribe')
+
+        res, ledger, _ = self._mutate(
+            calls=calls, intent_sig=legacy_sig, delegated=True)
+
+        self.assertEqual(res.error, 'bad_intent_signature')
+        ledger.create.assert_not_called()
 
     def test_undelegated_without_authorization_asks_for_one(self):
         res, *_ = self._mutate(delegated=False, authorization=None)
