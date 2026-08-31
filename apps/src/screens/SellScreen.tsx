@@ -588,7 +588,14 @@ export const SellScreen = () => {
     // so it sees this screen's route and honors `destination: 'cusd_plus'`
     // (the savings redeem rail). Converting this to its own navigation route
     // would silently break that param threading.
-    return <LegacyGuardarianSellScreen />;
+    return (
+      <LegacyGuardarianSellScreen
+        bscWithdrawalAvailability={bscWithdrawalAvailability}
+        onRetryNormalization={() => {
+          void resumeSavingsMints(savingsVaultAddress, savingsCusdAddress);
+        }}
+      />
+    );
   }
 
   if (isBoliviaOffRampUnavailable) {

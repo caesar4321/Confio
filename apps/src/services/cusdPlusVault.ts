@@ -411,9 +411,10 @@ export class InsufficientWithdrawableError extends Error {
 }
 
 /**
- * Pay `amountWei` of USDT to `to` (a ramp provider's deposit address),
- * redeeming cUSD+ shares first if raw USDT doesn't cover it — as ONE
- * sponsored batch.
+ * Pay `amountWei` of USDT to `to` (a ramp provider's deposit address) as ONE
+ * sponsored batch. Fee-capable orders redeem the server-vouched universal
+ * cUSD gross (unwrapping only the needed cUSD+ shortfall first); legacy
+ * orders retain their raw-USDT/cUSD+ compatibility path.
  *
  * Why one batch (audit 2026-08-03 [P1]): the redeem and transfer used to be
  * separate sponsored calls. A failure between them could leave the shares

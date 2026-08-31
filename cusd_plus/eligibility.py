@@ -42,6 +42,14 @@ INELIGIBLE_MESSAGE = (
     'país por requisitos del emisor (Ondo Finance).'
 )
 
+# Legacy builds cannot fund an off-ramp from universal cUSD-BSC. Keep the
+# compatibility response shared across Koywe (GraphQL) and Guardarian (REST)
+# so provider routing cannot change what an affected user is told to do.
+CUSD_BSC_LEGACY_UPDATE_MESSAGE = (
+    'Actualiza la app para preparar y retirar tu cUSD en BNB Smart Chain. '
+    'Esta versión ya no admite el flujo anterior de USDT.'
+)
+
 
 # The policy; the mechanism lives in security/geo.py, shared with presale.
 # Ondo's IP list is the same as its phone list, and a missing phone country

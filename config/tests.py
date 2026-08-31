@@ -157,6 +157,7 @@ class GuardarianTransactionProxyTests(SimpleTestCase):
     ):
         from cusd_plus.cusd_vault import ConversionPreview
 
+        self.user.phone_country = 'BR'
         mock_app_check.return_value = {'success': True}
         mock_jwt_decode.return_value = {
             'user_id': self.user.id,
@@ -188,6 +189,7 @@ class GuardarianTransactionProxyTests(SimpleTestCase):
             HTTP_AUTHORIZATION='JWT test-token',
             HTTP_X_FIREBASE_APPCHECK='test-app-check',
             HTTP_X_CONFIO_FEE_CAPABLE='1',
+            HTTP_CF_IPCOUNTRY='BR',
         )
         with patch('users.models.User.objects.get', return_value=self.user), \
                 patch('cusd_plus.cusd_vault.require_operational'), \
@@ -203,3 +205,102 @@ class GuardarianTransactionProxyTests(SimpleTestCase):
         self.assertEqual(body['confio_net_crypto_amount'], '99.1')
         provider_payload = json.loads(mock_post.call_args.kwargs['data'])
         self.assertEqual(provider_payload['from_amount'], 99.1)
+
+    @override_settings(
+        GUARDARIAN_API_KEY='test-api-key',
+        GUARDARIAN_API_URL='https://api-payments.guardarian.com/v1',
+        CUSD_CONVERSION_FEE_ENABLED=True,
+    )
+    @patch('security.integrity_service.app_check_service.verify_request_header')
+    @patch('config.views.jwt_decode')
+    @patch('cusd_plus.cusd_vault.current_fee_bps', side_effect=RuntimeError('RPC unavailable'))
+    @patch('config.views.requests.post')
+    def test_legacy_ineligible_bsc_sell_requires_update_before_fee_preflight(
+        self, mock_post, mock_fee_bps, mock_jwt_decode, mock_app_check,
+    ):
+        self.user.phone_country = 'BR'
+        mock_app_check.return_value = {'success': True}
+        mock_jwt_decode.return_value = {
+            'user_id': self.user.id,
+            'account_type': 'personal',
+            'account_index': 0,
+        }
+        request = self.factory.post(
+            '/api/guardarian/transaction/',
+            data=json.dumps({
+                'amount': 100,
+                'from_currency': 'USDT',
+                'from_network': 'BSC',
+                'to_currency': 'PEN',
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION='JWT test-token',
+            HTTP_X_FIREBASE_APPCHECK='test-app-check',
+            HTTP_CF_IPCOUNTRY='BR',
+        )
+
+        with patch('users.models.User.objects.get', return_value=self.user):
+            response = guardarian_transaction_proxy(request)
+
+        self.assertEqual(response.status_code, 426)
+        body = json.loads(response.content)
+        self.assertIn('Actualiza la app', body['error'])
+        self.assertIn('cUSD en BNB Smart Chain', body['error'])
+        mock_fee_bps.assert_not_called()
+        mock_post.assert_not_called()
+
+    @override_settings(
+        GUARDARIAN_API_KEY='test-api-key',
+        GUARDARIAN_API_URL='https://api-payments.guardarian.com/v1',
+        CUSD_CONVERSION_FEE_ENABLED=True,
+    )
+    @patch('security.integrity_service.app_check_service.verify_request_header')
+    @patch('config.views.jwt_decode')
+    @patch('cusd_plus.cusd_vault.current_fee_bps', return_value=90)
+    @patch('cusd_plus.cusd_vault.preview_redeem_wei')
+    @patch('config.views.requests.post')
+    def test_fee_capable_bsc_sell_cannot_be_funded_by_raw_usdt(
+        self, mock_post, mock_preview, _mock_fee_bps,
+        mock_jwt_decode, mock_app_check,
+    ):
+        from cusd_plus.cusd_vault import ConversionPreview
+
+        self.user.phone_country = 'BR'
+        mock_app_check.return_value = {'success': True}
+        mock_jwt_decode.return_value = {
+            'user_id': self.user.id,
+            'account_type': 'personal',
+            'account_index': 0,
+        }
+        mock_preview.return_value = ConversionPreview(
+            gross_wei=100 * 10 ** 18,
+            fee_wei=9 * 10 ** 17,
+            net_wei=991 * 10 ** 17,
+            fee_bps=90,
+        )
+        request = self.factory.post(
+            '/api/guardarian/transaction/',
+            data=json.dumps({
+                'amount': 100,
+                'from_currency': 'USDT',
+                'from_network': 'BSC',
+                'to_currency': 'PEN',
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION='JWT test-token',
+            HTTP_X_FIREBASE_APPCHECK='test-app-check',
+            HTTP_X_CONFIO_FEE_CAPABLE='1',
+            HTTP_CF_IPCOUNTRY='BR',
+        )
+
+        with patch('users.models.User.objects.get', return_value=self.user), \
+                patch('cusd_plus.vault.withdrawable_usdt_wei', return_value=100 * 10 ** 18), \
+                patch('cusd_plus.vault.usdt_balance_raw', return_value=100 * 10 ** 18), \
+                patch('cusd_plus.vault.cusd_withdrawable_usdt_wei', return_value=0), \
+                patch('cusd_plus.vault.redeem_blocked_reason') as redeem_blocked:
+            response = guardarian_transaction_proxy(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('saldo disponible', json.loads(response.content)['error'])
+        redeem_blocked.assert_not_called()
+        mock_post.assert_not_called()

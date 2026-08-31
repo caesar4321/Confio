@@ -35,6 +35,7 @@ import USDCLogo from '../assets/png/USDC.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
+import type { BscWithdrawalAvailability } from '../utils/withdrawalRail';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
@@ -94,7 +95,15 @@ const parseSwapPayload = (raw: any): any => {
   return raw;
 };
 
-export const SellScreen = () => {
+type LegacyGuardarianSellScreenProps = {
+    bscWithdrawalAvailability?: BscWithdrawalAvailability;
+    onRetryNormalization?: () => void;
+};
+
+export const SellScreen = ({
+    bscWithdrawalAvailability,
+    onRetryNormalization,
+}: LegacyGuardarianSellScreenProps = {}) => {
     const navigation = useNavigation<NavigationProp>();
     const route = useRoute<any>();
     const { userProfile } = useAuth() as any;
@@ -111,7 +120,7 @@ export const SellScreen = () => {
     // remainder. Transient raw USDT is excluded under the fee perimeter.
     const withdrawableUsd = savingsBalanceUsd + (cusdBalanceUsd ?? 0);
     // Copy has to match the product the money actually IS. An Ondo-ineligible
-    // user holds plain Confío Dollar (USDT) and has no vault at all, so
+    // user holds universal cUSD-BSC and has no yield vault at all, so
     // "ahorro"/"bóveda" would be a lie on every screen of this flow.
     const isYieldUser = Boolean(savings?.enabled);
     const balanceNoun = isYieldUser ? 'ahorro' : 'saldo';
@@ -268,6 +277,19 @@ export const SellScreen = () => {
     }, [derivedCurrencyCode]);
 
     const handleCreateOrder = async () => {
+        if (isSavings && bscWithdrawalAvailability?.normalizationPending) {
+            if (bscWithdrawalAvailability.normalizationRetryable) {
+                onRetryNormalization?.();
+            }
+            Alert.alert(
+                bscWithdrawalAvailability.normalizationRetryable
+                    ? 'Reintentando preparación'
+                    : 'Preparando tu Confío Dollar',
+                'Estamos convirtiendo el USDT pendiente a cUSD en BNB Smart Chain. '
+                    + 'El retiro se habilitará cuando termine.',
+            );
+            return;
+        }
         const amountMicros = parseUsdMicros(amount);
         if (!amountMicros) {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
@@ -287,6 +309,14 @@ export const SellScreen = () => {
 
     const handleProceedToGuardarian = async () => {
         setShowPreFlightModal(false);
+        if (isSavings && bscWithdrawalAvailability?.normalizationPending) {
+            Alert.alert(
+                'Preparando tu Confío Dollar',
+                'El retiro saldrá desde cUSD en BNB Smart Chain, no desde USDT directo. '
+                    + 'Espera a que termine la conversión automática.',
+            );
+            return;
+        }
         const amountMicros = parseUsdMicros(amount);
         if (!amountMicros) {
             Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
@@ -406,12 +436,12 @@ export const SellScreen = () => {
         if (!depositAddress || !amountMicros) {
             return;
         }
-        // NOTE: no vault-address precondition. A raw-USDT-only (Ondo-
-        // ineligible) user has no vault at all, and refusing them here on a
+        // NOTE: no vault-address precondition. A cUSD-only (Ondo-ineligible)
+        // user has no yield vault at all, and refusing them here on a
         // stale/absent vault query blocked an exit that never needed one
-        // (audit [P1] #8). Sufficiency is decided by the LIVE balance read
-        // inside fundUsdtDestination, which asks for a vault only if raw
-        // USDT doesn't cover the amount.
+        // (audit [P1] #8). Sufficiency is decided by the live cUSD/cUSD+
+        // reads inside fundUsdtDestination, which asks for the yield vault
+        // only when universal cUSD cannot cover the vouched gross debit.
         const authenticated = await requestRampCriticalAuth({
             amount: microsToNumber(amountMicros),
             assetUnit: USD_UNIT,
@@ -690,7 +720,11 @@ export const SellScreen = () => {
                     <View style={styles.conversionHint}>
                         <Icon name="arrow-down" size={14} color={colors.offRampIcon} />
                         <Text style={styles.conversionText}>
-                            {isSavings
+                            {isSavings && bscWithdrawalAvailability?.normalizationPending
+                                ? bscWithdrawalAvailability.normalizationRetryable
+                                    ? 'La preparación se detuvo. Reinténtala para continuar.'
+                                    : 'Preparando tu cUSD en BNB Smart Chain…'
+                                : isSavings
                                 ? `Disponible para retirar: $${withdrawableUsd.toFixed(2)}`
                                 : 'Recibirás moneda local en tu banco'}
                         </Text>
@@ -726,15 +760,28 @@ export const SellScreen = () => {
 
                 {/* CTA Button */}
                 <TouchableOpacity
-                    style={[styles.ctaButton, (!amount || loading) && styles.ctaButtonDisabled]}
+                    style={[
+                        styles.ctaButton,
+                        (loading || (bscWithdrawalAvailability?.normalizationPending
+                            ? !bscWithdrawalAvailability.normalizationRetryable
+                            : !amount)) && styles.ctaButtonDisabled,
+                    ]}
                     onPress={handleCreateOrder}
-                    disabled={!amount || loading}
+                    disabled={loading || (bscWithdrawalAvailability?.normalizationPending
+                        ? !bscWithdrawalAvailability.normalizationRetryable
+                        : !amount)}
                 >
-                    {loading ? (
+                    {loading || (isSavings
+                        && bscWithdrawalAvailability?.normalizationPending
+                        && !bscWithdrawalAvailability.normalizationRetryable) ? (
                         <ActivityIndicator color={colors.white} />
                     ) : (
                         <>
-                            <Text style={styles.ctaButtonText}>Continuar con Guardarian</Text>
+                            <Text style={styles.ctaButtonText}>
+                                {bscWithdrawalAvailability?.normalizationRetryable
+                                    ? 'Reintentar preparación'
+                                    : 'Continuar con Guardarian'}
+                            </Text>
                             <Icon name="arrow-right" size={20} color={colors.white} />
                         </>
                     )}
