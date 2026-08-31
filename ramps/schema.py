@@ -994,10 +994,7 @@ class CreateRampOrder(graphene.Mutation):
             return RampOrderType(success=False, error='destination must be cusd or cusd_plus')
         savings_rail = destination == 'cusd_plus'
         fee_rollout = savings_rail and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
-        legacy_cusd_bsc_update_error = (
-            'Actualiza la app para preparar y retirar tu cUSD en BNB Smart Chain. '
-            'Esta versión ya no admite el flujo anterior de USDT.'
-        )
+        from cusd_plus.eligibility import CUSD_BSC_LEGACY_UPDATE_MESSAGE
         # Everyone may receive USDT-BSC settlement. Foreground auto-conversion
         # routes eligible holders to cUSD+ and ineligible holders to cUSD;
         # raw USDT is never the user-facing balance.
@@ -1019,7 +1016,7 @@ class CreateRampOrder(graphene.Mutation):
                 # the actionable update message cannot be masked by an outage.
                 return RampOrderType(
                     success=False,
-                    error=legacy_cusd_bsc_update_error,
+                    error=CUSD_BSC_LEGACY_UPDATE_MESSAGE,
                 )
         if fee_rollout:
             try:
@@ -1125,7 +1122,7 @@ class CreateRampOrder(graphene.Mutation):
                         if not fee_capable_client and raw_usdt > 0:
                             return RampOrderType(
                                 success=False,
-                                error=legacy_cusd_bsc_update_error,
+                                error=CUSD_BSC_LEGACY_UPDATE_MESSAGE,
                             )
                         return RampOrderType(
                             success=False,

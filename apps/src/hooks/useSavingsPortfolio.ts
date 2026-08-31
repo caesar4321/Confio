@@ -84,10 +84,10 @@ export interface SavingsPortfolio {
     earnedTodayUsd: number;
     positions: StockPosition[];
   };
-  /** Raw wallet USDT-BSC: landed-but-not-minted money (eligible users,
-   *  transient) or the whole "Confío Dollar" balance (geo-ineligible users).
-   *  TOP-LEVEL on purpose — never part of savings.balanceUsd, which caps the
-   *  vault redeem rails. */
+  /** Raw wallet USDT-BSC: transient settlement money awaiting conversion to
+   *  cUSD+ (eligible users) or universal cUSD (geo-ineligible users).
+   *  TOP-LEVEL on purpose — never part of savings.balanceUsd or spendable
+   *  cUSD, and never a normal withdrawal source. */
   usdtBalanceUsd: number;
   /** Same balance in exact wei (server string; client re-reads live before
    *  exact-amount sends). */

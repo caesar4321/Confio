@@ -35,7 +35,7 @@ describe('withdrawal source presentation', () => {
     });
   });
 
-  it('names an ineligible raw-USDT balance as Confío Dollar', () => {
+  it('names an ineligible universal cUSD-BSC balance as Confío Dollar', () => {
     expect(getWithdrawalSourcePresentation(true, false)).toEqual({
       inputLabel: 'Monto a retirar desde Confío Dollar',
       unitLabel: 'US$',

@@ -53,11 +53,10 @@ def _sum(rows, field):
 
 
 class ReservedUsdtTests(SimpleTestCase):
-    def _reserved(self, sends=(), ramps=(), sagas=(), buys=()):
+    def _reserved(self, sends=(), ramps=(), sagas=()):
         with mock.patch('send.models.SendTransaction.objects') as s_objs, \
              mock.patch('ramps.models.RampTransaction.objects') as r_objs, \
-             mock.patch('conversion.models.Conversion.objects') as c_objs, \
-             mock.patch('presale.models.PresalePurchase.objects') as p_objs:
+             mock.patch('conversion.models.Conversion.objects') as c_objs:
             s_objs.filter.return_value.exclude.return_value.only.return_value = _Rows(sends)
             # Everything except the sends is summed in the database: a capped
             # scan stopped reserving past the cap, so those reads are
@@ -67,9 +66,6 @@ class ReservedUsdtTests(SimpleTestCase):
             }
             c_objs.filter.return_value.aggregate.return_value = {
                 's': _sum(sagas, 'to_amount'),
-            }
-            p_objs.filter.return_value.aggregate.return_value = {
-                's': _sum(buys, 'cusd_amount'),
             }
             return vault.reserved_usdt_wei(SimpleNamespace(id=1), ADDR)
 
@@ -94,19 +90,19 @@ class ReservedUsdtTests(SimpleTestCase):
         saga = SimpleNamespace(to_amount=Decimal('3'))
         self.assertEqual(self._reserved(sagas=[saga]), 3 * WAD)
 
-    def test_a_prepared_presale_buy_is_reserved(self):
-        # The batch spends wallet USDT, so an auto-mint must not get there
-        # first — even before the buy is signed.
-        buy = SimpleNamespace(cusd_amount=Decimal('4'))
-        self.assertEqual(self._reserved(buys=[buy]), 4 * WAD)
+    def test_presale_is_not_a_raw_usdt_reservation_source(self):
+        # Presale atomically spends cUSD/cUSD+, so a prepared purchase must
+        # not strand unrelated settlement USDT outside auto-conversion.
+        with mock.patch('presale.models.PresalePurchase.objects') as p_objs:
+            self.assertEqual(self._reserved(), 0)
+        p_objs.filter.assert_not_called()
 
     def test_reservations_accumulate(self):
         total = self._reserved(
             sends=[_send('1')],
             ramps=[SimpleNamespace(crypto_amount_estimated=Decimal('2'))],
-            sagas=[SimpleNamespace(to_amount=Decimal('3'))],
-            buys=[SimpleNamespace(cusd_amount=Decimal('4'))])
-        self.assertEqual(total, 10 * WAD)
+            sagas=[SimpleNamespace(to_amount=Decimal('3'))])
+        self.assertEqual(total, 6 * WAD)
 
     def test_an_unreadable_reservation_raises_rather_than_vanishing(self):
         # Swallowing this would silently make committed funds spendable.

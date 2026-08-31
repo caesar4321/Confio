@@ -674,6 +674,22 @@ def guardarian_transaction_proxy(request):
     fee_capable_client = str(
         request.META.get('HTTP_X_CONFIO_FEE_CAPABLE', '')
     ).strip() == '1'
+    if (is_bsc_dollar_sell
+            and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
+            and not fee_capable_client):
+        from cusd_plus.eligibility import (
+            CUSD_BSC_LEGACY_UPDATE_MESSAGE,
+            check_savings_mint_eligibility,
+        )
+        if not check_savings_mint_eligibility(user, request.META):
+            # Ineligible holders now own universal cUSD-BSC. Legacy builds
+            # only know how to fund this Guardarian order from raw USDT or
+            # cUSD+, so they cannot complete it after normalization. Refuse
+            # before fee/RPC preflights to keep the response actionable.
+            return JsonResponse(
+                {'error': CUSD_BSC_LEGACY_UPDATE_MESSAGE},
+                status=426,
+            )
     # A Guardarian checkout must disclose the fee that the deployed cUSD
     # perimeter will actually charge. The Safe may lower feeBps (bounded by
     # the immutable 90-bps ceiling), so a hardcoded 90 can drift from
