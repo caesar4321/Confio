@@ -472,9 +472,10 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                         usdt_raw + MAX_SEND_DUST_WEI >= amount_wei):
                     # Not a dead end: raw USDT covers this send. Refusing
                     # outright stranded a user holding $0.50 of savings and
-                    # plenty of USDT (audit 2026-08-01).
-                    if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
-                        return {'success': False, 'error': 'conversion_pending'}
+                    # plenty of USDT (audit 2026-08-01). This branch is
+                    # external-only: raw USDT already is the required output
+                    # asset, so converting it into cUSD merely to redeem it
+                    # again would be both unnecessary and fee-wasteful.
                     if amount_wei > usdt_raw:
                         amount_wei = usdt_raw
                     kind = 'send_usdt'
@@ -638,10 +639,16 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 }]
             mixed_meta = {'shares': str(shares), 'unwrap_min': str(shortfall)}
         elif usdt_raw + MAX_SEND_DUST_WEI >= amount_wei:
-            # Once the universal perimeter is active, transient raw USDT may
-            # not become a public fee bypass. Foreground auto-conversion will
-            # mint cUSD/cUSD+ and the user can retry against that balance.
-            if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+            # External destinations always receive USDT. If the holder
+            # already has raw USDT (notably a pre-cUSD legacy balance), send
+            # that output asset directly: there is no conversion to charge.
+            # Internal Confío recipients still wait for foreground
+            # conversion so friend sends use cUSD/cUSD+ and cannot bypass the
+            # entry perimeter.
+            if (getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
+                    and (requested == 'CUSD_PLUS'
+                         or recipient_user is not None
+                         or recipient_business is not None)):
                 return {'success': False, 'error': 'conversion_pending'}
             if amount_wei > usdt_raw:
                 amount_wei = usdt_raw  # dust-short MAX → the full wallet balance
