@@ -22,6 +22,8 @@ def _ramp_conversion_fee(ramp):
     the conversion's entire fee to every ramp.  Older one-ramp rows fall back
     to the linked conversion's exact fee.
     """
+    if getattr(ramp, 'status', None) != 'COMPLETED':
+        return ''
     metadata = getattr(ramp, 'metadata', None) or {}
     allocation = metadata.get('conversion_allocation') or {}
     allocated = _positive_difference(
@@ -44,6 +46,8 @@ def _ramp_conversion_fee(ramp):
 
     # Guardarian persisted this before conversions gained exact fee columns.
     legacy_fee = metadata.get('confio_fee')
+    if isinstance(legacy_fee, dict):
+        legacy_fee = legacy_fee.get('fee_amount')
     try:
         legacy_decimal = Decimal(str(legacy_fee))
     except (InvalidOperation, TypeError, ValueError):
@@ -104,6 +108,77 @@ def _external_deposit_conversion(row):
     return conversion
 
 
+def _preload_external_deposit_conversions(rows):
+    """Resolve list-page external deposits with one bounded conversion query."""
+    candidates_by_row = []
+    owner_filter = None
+    amounts = set()
+    earliest = None
+    latest = None
+
+    for row in rows:
+        if getattr(row, 'transaction_type', None) != 'send':
+            continue
+        receipt = getattr(row, 'send_transaction', None)
+        if (
+            receipt is None
+            or getattr(receipt, 'sender_type', None) != 'external'
+            or str(getattr(receipt, 'token_type', '')).upper() != 'USDT'
+        ):
+            continue
+        business_id = getattr(receipt, 'recipient_business_id', None)
+        user_id = getattr(receipt, 'recipient_user_id', None)
+        if business_id:
+            owner = ('business', business_id)
+            clause = Q(actor_business_id=business_id)
+        elif user_id:
+            owner = ('user', user_id)
+            clause = Q(actor_user_id=user_id)
+        else:
+            setattr(row, '_external_deposit_conversion_cache', None)
+            continue
+        owner_filter = clause if owner_filter is None else owner_filter | clause
+        created_at = receipt.created_at
+        candidates_by_row.append((row, receipt, owner))
+        amounts.add(receipt.amount)
+        earliest = created_at if earliest is None else min(earliest, created_at)
+        latest = created_at if latest is None else max(latest, created_at)
+
+    if not candidates_by_row or owner_filter is None:
+        return
+
+    from conversion.models import Conversion
+
+    conversions = list(Conversion.objects.filter(
+        source='external_deposit',
+        conversion_type__in=('to_savings', 'usdt_to_cusd'),
+        status='COMPLETED',
+        from_amount__in=amounts,
+        created_at__gte=earliest - timedelta(hours=6),
+        created_at__lte=latest + timedelta(days=14),
+        is_deleted=False,
+        ramp_transactions__isnull=True,
+    ).filter(owner_filter).order_by('created_at'))
+
+    for row, receipt, owner in candidates_by_row:
+        matches = [
+            conversion for conversion in conversions
+            if conversion.from_amount == receipt.amount
+            and receipt.created_at - timedelta(hours=6)
+                <= conversion.created_at
+                <= receipt.created_at + timedelta(days=14)
+            and (
+                ('business', conversion.actor_business_id) == owner
+                if owner[0] == 'business'
+                else ('user', conversion.actor_user_id) == owner
+            )
+        ]
+        setattr(
+            row, '_external_deposit_conversion_cache',
+            matches[0] if len(matches) == 1 else None,
+        )
+
+
 def _visible_unified():
     """Ledger rows the app may show.
 
@@ -118,6 +193,26 @@ def _visible_unified():
 from django.db.models import Q
 
 
+def _positive_fee_bps(value):
+    """Return a stored positive basis-point snapshot, never today's rate."""
+    try:
+        bps = int(value)
+    except (TypeError, ValueError):
+        return None
+    return bps if bps > 0 else None
+
+
+def _send_fee_bps(send):
+    try:
+        import json
+        metadata = json.loads(getattr(send, 'bsc_calls_json', '') or '{}')
+        receipt = metadata.get('receipt') if isinstance(metadata, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return _positive_fee_bps(
+        receipt.get('fee_bps') if isinstance(receipt, dict) else None)
+
+
 class UnifiedTransactionType(DjangoObjectType):
     """GraphQL type for unified transaction view"""
     
@@ -125,10 +220,11 @@ class UnifiedTransactionType(DjangoObjectType):
     direction = graphene.String(description="Transaction direction from current user perspective")
     display_amount = graphene.String(description="Formatted amount with +/- based on direction")
     # The fee the recipient did NOT receive. Blank when there is none. The
-    # client currently derives this from a hardcoded 0.9%, which is wrong the
-    # moment the rate changes or a flow prices differently — read this
-    # instead, and net_amount below with it.
+    # Released clients derived this from a hardcoded 0.9%, which becomes wrong
+    # when the rate changes or a flow prices differently. New clients read
+    # this snapshot and net_amount below instead.
     fee_amount = graphene.String(description="Fee deducted before the recipient was credited ('' if none)")
+    fee_bps = graphene.Int(description="Stored fee-rate snapshot in basis points (null if no fee or unavailable)")
     net_amount = graphene.String(description="What the recipient actually received (amount - fee)")
     display_counterparty = graphene.String(description="Name of the counterparty from user perspective")
     display_description = graphene.String(description="Transaction description")
@@ -316,6 +412,46 @@ class UnifiedTransactionType(DjangoObjectType):
             )
             return str(fee or '')
         return ''
+
+    def resolve_fee_bps(self, info):
+        # A rate without an actual deducted fee would create a misleading fee
+        # section on historical and explicitly fee-free transactions.
+        try:
+            fee = Decimal(str(UnifiedTransactionType.resolve_fee_amount(self, info) or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+        if fee <= 0:
+            return None
+
+        if self.transaction_type == 'ramp':
+            ramp = getattr(self, 'ramp_transaction', None)
+            conversion = getattr(ramp, 'conversion', None) if ramp is not None else None
+            bps = _positive_fee_bps(
+                getattr(conversion, 'conversion_fee_bps', None))
+            if bps is not None:
+                return bps
+            metadata = getattr(ramp, 'metadata', None) or {}
+            legacy_fee = metadata.get('confio_fee') or {}
+            if isinstance(legacy_fee, dict):
+                bps = _positive_fee_bps(legacy_fee.get('fee_bps'))
+                if bps is not None:
+                    return bps
+            return _positive_fee_bps(metadata.get('confio_fee_bps'))
+
+        conversion = getattr(self, 'conversion', None)
+        bps = _positive_fee_bps(
+            getattr(conversion, 'conversion_fee_bps', None))
+        if bps is not None:
+            return bps
+
+        send = getattr(self, 'send_transaction', None)
+        bps = _send_fee_bps(send) if send is not None else None
+        if bps is not None:
+            return bps
+
+        conversion = _external_deposit_conversion(self)
+        return _positive_fee_bps(
+            getattr(conversion, 'conversion_fee_bps', None))
 
     def resolve_net_amount(self, info):
         """What reached the recipient. Authoritative — not a client guess."""
@@ -631,6 +767,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
+        _preload_external_deposit_conversions(transactions)
         for transaction in transactions:
             # Hints used by resolvers to compute perspective/direction correctly
             transaction._user_address = _viewer_address_for(transaction, account)
@@ -747,6 +884,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
+        _preload_external_deposit_conversions(transactions)
         print(f"Found {len(transactions)} transactions for account {account.id}")
         for transaction in transactions:
             transaction._user_address = _viewer_address_for(transaction, account)
@@ -879,6 +1017,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Apply pagination and add user address to each transaction for direction calculation
         transactions = list(queryset[offset:offset + limit])
+        _preload_external_deposit_conversions(transactions)
         
         print(f"Friend transactions resolver - Found {len(transactions)} transactions for account {account.id} with friend criteria")
         

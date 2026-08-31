@@ -81,6 +81,22 @@ class KoyweNotificationTimingUnitTests(SimpleTestCase):
             'RAMP_PENDING',
         )
 
+    @mock.patch('ramps.signals.create_notification')
+    def test_completed_notification_carries_exact_fee_snapshot(self, notify_mock):
+        ramp = self._ramp(reservation_state='provider_order_recorded')
+        ramp.status = 'COMPLETED'
+        ramp.metadata['conversion_allocation'] = {
+            'gross_amount': '100', 'net_amount': '99.1',
+        }
+        ramp.conversion = SimpleNamespace(conversion_fee_bps=90)
+
+        ramps_signals._notify_ramp_status(
+            ramp, created=False, previous_status='PROCESSING')
+
+        data = notify_mock.call_args.kwargs['data']
+        self.assertEqual(data['fee_amount'], '0.9')
+        self.assertEqual(data['fee_bps'], '90')
+
 
 class KoyweOrderAmbiguityTests(SimpleTestCase):
     def _client_with_response(self, response):

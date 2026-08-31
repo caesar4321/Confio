@@ -180,6 +180,20 @@ const serverFee = (tx: any): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+const serverFeeBps = (tx: any): number | null => {
+  const raw = tx?.feeBps ?? tx?.fee_bps;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+const confioFeeLabel = (tx: any): string => {
+  const bps = serverFeeBps(tx);
+  return bps === null
+    ? 'Comisión de Confío'
+    : `Comisión de Confío (${(bps / 100).toLocaleString('es-PE')}%)`;
+};
+
 // Legacy fallback for rows written before feeAmount existed.
 const computeConfioFee = (amountLike: string | number | undefined): number => {
   try {
@@ -924,6 +938,7 @@ export const TransactionDetailScreen = () => {
       toAddress: tx.recipientAddress,
       amount: resolvedType === 'sent' ? `-${tx.amount}` : `+${tx.amount}`,
       feeAmount: tx.feeAmount ?? (transactionData as any)?.feeAmount ?? (transactionData as any)?.fee_amount,
+      feeBps: tx.feeBps ?? (transactionData as any)?.feeBps ?? (transactionData as any)?.fee_bps,
       netAmount: tx.netAmount ?? (transactionData as any)?.netAmount ?? (transactionData as any)?.net_amount,
       creditedCurrency: tx.toToken ?? (transactionData as any)?.creditedCurrency,
       currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
@@ -1031,6 +1046,7 @@ export const TransactionDetailScreen = () => {
       transactionId: transactionData.transaction_id || transactionData.transactionId || transactionData.id,
       internalId: transactionData.internal_id || transactionData.internalId,
       feeAmount: transactionData.fee_amount ?? transactionData.feeAmount,
+      feeBps: transactionData.fee_bps ?? transactionData.feeBps,
       netAmount: transactionData.net_amount ?? transactionData.netAmount,
       fromAmount: transactionData.from_amount ?? transactionData.fromAmount,
       toAmount: transactionData.to_amount ?? transactionData.toAmount,
@@ -1683,7 +1699,7 @@ export const TransactionDetailScreen = () => {
         items.push({ label: 'Monto pagado', value: `${formatAmount(currentTx.amount)} ${currency}` });
         if (fee !== null && fee > 0) {
           items.push({
-            label: 'Comisión de Confío',
+            label: confioFeeLabel(currentTx),
             value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} USD`,
           });
         }
@@ -1698,7 +1714,7 @@ export const TransactionDetailScreen = () => {
         items.push({ label: 'Monto enviado', value: `${formatAmount(currentTx.amount)} ${currency}` });
         if (fee !== null && fee > 0) {
           items.push({
-            label: 'Comisión de Confío',
+            label: confioFeeLabel(currentTx),
             value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
           });
         }
@@ -1722,7 +1738,7 @@ export const TransactionDetailScreen = () => {
       });
       if (fee !== null && fee > 0) {
         items.push({
-          label: 'Comisión de Confío',
+          label: confioFeeLabel(currentTx),
           value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${formatTokenLabel(conversionFromCurrencyLabel) || currency}`,
         });
       }
@@ -1749,7 +1765,7 @@ export const TransactionDetailScreen = () => {
         const fee = serverFee(currentTx);
         if (fee !== null && fee > 0) {
           items.push({
-            label: 'Comisión de Confío',
+            label: confioFeeLabel(currentTx),
             value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
           });
           const net = currentTx.netAmount ?? currentTx.net_amount;
@@ -1772,7 +1788,7 @@ export const TransactionDetailScreen = () => {
       const fee = serverFee(currentTx) ?? computeConfioFee(currentTx.amount);
       if (fee > 0) {
         items.push({
-          label: 'Comisión de Confío',
+          label: confioFeeLabel(currentTx),
           value: `- ${(fee < 0.01 && fee > 0) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
         });
       }

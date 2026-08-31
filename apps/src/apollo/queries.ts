@@ -2734,6 +2734,7 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       # they did. Read these instead of computing a rate client-side — see
       # docs/ledger-amounts.md.
       feeAmount
+      feeBps
       netAmount
       displayCounterparty
       displayDescription
@@ -3084,6 +3085,7 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
       recipientAddress
       amount
       feeAmount
+      feeBps
       netAmount
       toToken
       tokenType
@@ -3177,6 +3179,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       # they did. Read these instead of computing a rate client-side — see
       # docs/ledger-amounts.md.
       feeAmount
+      feeBps
       netAmount
       displayCounterparty
       displayDescription
@@ -3283,6 +3286,7 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
       # they did. Read these instead of computing a rate client-side — see
       # docs/ledger-amounts.md.
       feeAmount
+      feeBps
       netAmount
       displayCounterparty
       displayDescription

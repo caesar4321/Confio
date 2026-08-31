@@ -26,6 +26,38 @@ User = get_user_model()
 
 class UnifiedRampFeeResolverTestCase(SimpleTestCase):
     @patch('conversion.models.Conversion.objects')
+    def test_external_deposit_list_preloads_fee_conversions_once(
+            self, conversion_objects):
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from users.graphql_views import (
+            _external_deposit_conversion,
+            _preload_external_deposit_conversions,
+        )
+
+        created_at = timezone.now()
+        conversion = SimpleNamespace(
+            from_amount=Decimal('100'), created_at=created_at,
+            actor_user_id=7, actor_business_id=None,
+        )
+        query = conversion_objects.filter.return_value
+        query.filter.return_value = query
+        query.order_by.return_value = [conversion]
+        receipt = SimpleNamespace(
+            sender_type='external', token_type='USDT',
+            amount=Decimal('100'), created_at=created_at,
+            recipient_user_id=7, recipient_business_id=None,
+        )
+        row = SimpleNamespace(
+            transaction_type='send', send_transaction=receipt,
+        )
+
+        _preload_external_deposit_conversions([row])
+
+        self.assertIs(_external_deposit_conversion(row), conversion)
+        self.assertEqual(conversion_objects.filter.call_count, 1)
+
+    @patch('conversion.models.Conversion.objects')
     def test_external_deposit_does_not_guess_between_same_amount_conversions(
             self, conversion_objects):
         from types import SimpleNamespace
@@ -120,11 +152,13 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
         from users.graphql_views import UnifiedTransactionType
 
         ramp = SimpleNamespace(
+            status='COMPLETED',
             metadata={'conversion_allocation': {
                 'gross_amount': '100.000000',
                 'net_amount': '99.100000',
             }},
-            conversion=SimpleNamespace(fee_amount_exact='4.50'),
+            conversion=SimpleNamespace(
+                fee_amount_exact='4.50', conversion_fee_bps=90),
         )
         row = SimpleNamespace(
             fee_amount='', transaction_type='ramp',
@@ -135,15 +169,19 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             UnifiedTransactionType.resolve_fee_amount(row, None), '0.9')
         self.assertEqual(
             UnifiedTransactionType.resolve_net_amount(row, None), '99.100000')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_bps(row, None), 90)
 
     def test_legacy_single_ramp_uses_linked_conversion_exact_fee(self):
         from types import SimpleNamespace
         from users.graphql_views import UnifiedTransactionType
 
         ramp = SimpleNamespace(
+            status='COMPLETED',
             metadata={},
             conversion=SimpleNamespace(
-                fee_amount_exact='0.135000000000000001', fee_amount='0.135000'),
+                fee_amount_exact='0.135000000000000001', fee_amount='0.135000',
+                conversion_fee_bps=None),
         )
         row = SimpleNamespace(
             fee_amount='', transaction_type='ramp', ramp_transaction=ramp,
@@ -153,6 +191,52 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             UnifiedTransactionType.resolve_fee_amount(row, None),
             '0.135000000000000001',
         )
+        self.assertIsNone(
+            UnifiedTransactionType.resolve_fee_bps(row, None))
+
+    def test_guardarian_nested_metadata_exposes_stored_fee_snapshot(self):
+        from types import SimpleNamespace
+        from ramps.signals import _ramp_fee_snapshot
+        from users.graphql_views import UnifiedTransactionType
+
+        ramp = SimpleNamespace(
+            status='COMPLETED',
+            metadata={'confio_fee': {
+                'fee_amount': '0.135',
+                'fee_bps': 90,
+            }},
+            conversion=None,
+        )
+        row = SimpleNamespace(
+            fee_amount='', transaction_type='ramp', ramp_transaction=ramp,
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_amount(row, None), '0.135')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_bps(row, None), 90)
+        self.assertEqual(_ramp_fee_snapshot(ramp), ('0.135', 90))
+
+    def test_failed_ramp_does_not_present_quote_as_charged_fee(self):
+        from types import SimpleNamespace
+        from ramps.signals import _ramp_fee_snapshot
+        from users.graphql_views import UnifiedTransactionType
+
+        ramp = SimpleNamespace(
+            status='FAILED', conversion=None,
+            metadata={'confio_fee': {
+                'fee_amount': '0.135', 'fee_bps': 90,
+            }},
+        )
+        row = SimpleNamespace(
+            fee_amount='', transaction_type='ramp', ramp_transaction=ramp,
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_amount(row, None), '')
+        self.assertIsNone(
+            UnifiedTransactionType.resolve_fee_bps(row, None))
+        self.assertEqual(_ramp_fee_snapshot(ramp), ('', None))
 
     @patch('users.graphql_views._external_deposit_conversion')
     def test_external_deposit_receipt_exposes_completed_conversion(self, lookup):
@@ -165,6 +249,7 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             net_amount_exact='9.909999999999999999',
             to_amount='9.910000',
             to_token='CUSD_PLUS',
+            conversion_fee_bps=90,
         )
         row = SimpleNamespace(
             fee_amount='', transaction_type='send', amount='10.000000',
@@ -180,6 +265,8 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
         )
         self.assertEqual(
             UnifiedTransactionType.resolve_to_token(row, None), 'CUSD_PLUS')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_bps(row, None), 90)
 
     @patch('users.graphql_views._external_deposit_conversion')
     def test_zero_fee_external_conversion_still_exposes_net_and_destination(self, lookup):
@@ -213,7 +300,7 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
         conversion_lookup.return_value = SimpleNamespace(
             fee_amount_exact='0.09', fee_amount='0.090000',
             net_amount_exact='9.91', to_amount='9.910000',
-            to_token='CUSD_PLUS',
+            to_token='CUSD_PLUS', conversion_fee_bps=90,
         )
         unified_lookup.return_value = SimpleNamespace(
             fee_amount='', transaction_type='send', amount='10.000000',
@@ -228,6 +315,8 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             SendTransactionType.resolve_net_amount(send, None), '9.91')
         self.assertEqual(
             SendTransactionType.resolve_to_token(send, None), 'CUSD_PLUS')
+        self.assertEqual(
+            SendTransactionType.resolve_fee_bps(send, None), 90)
 
     @patch('send.schema._send_unified_receipt')
     def test_pending_send_detail_uses_prepared_fee_snapshot(self, unified_lookup):
@@ -248,6 +337,8 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             SendTransactionType.resolve_fee_amount(send, None), '0.9')
         self.assertEqual(
             SendTransactionType.resolve_net_amount(send, None), '99.1')
+        self.assertEqual(
+            SendTransactionType.resolve_fee_bps(send, None), 90)
         unified_lookup.assert_not_called()
 
     @patch('send.schema._send_unified_receipt')
@@ -269,6 +360,8 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             SendTransactionType.resolve_fee_amount(send, None), '0')
         self.assertEqual(
             SendTransactionType.resolve_net_amount(send, None), '100')
+        self.assertIsNone(
+            SendTransactionType.resolve_fee_bps(send, None))
         unified_lookup.assert_not_called()
 
     @patch('send.schema._send_unified_receipt')
@@ -287,6 +380,8 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             SendTransactionType.resolve_fee_amount(send, None), '')
         self.assertEqual(
             SendTransactionType.resolve_net_amount(send, None), '100')
+        self.assertIsNone(
+            SendTransactionType.resolve_fee_bps(send, None))
 
 
 class UserSoftDeleteAuthTestCase(TestCase):

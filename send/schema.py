@@ -48,6 +48,7 @@ def _send_prepared_receipt(send):
 class SendTransactionType(DjangoObjectType):
     """GraphQL type for SendTransaction model"""
     fee_amount = graphene.String()
+    fee_bps = graphene.Int()
     net_amount = graphene.String()
     to_token = graphene.String()
 
@@ -97,6 +98,25 @@ class SendTransactionType(DjangoObjectType):
             return ''
         from users.graphql_views import UnifiedTransactionType
         return UnifiedTransactionType.resolve_fee_amount(row, info)
+
+    def resolve_fee_bps(self, info):
+        from users.graphql_views import _positive_fee_bps
+
+        try:
+            fee = Decimal(str(SendTransactionType.resolve_fee_amount(self, info) or 0))
+        except Exception:  # malformed legacy rows must not invent a rate
+            return None
+        if fee <= 0:
+            return None
+        prepared = _positive_fee_bps(
+            _send_prepared_receipt(self).get('fee_bps'))
+        if prepared is not None:
+            return prepared
+        row = _send_unified_receipt(self)
+        if row is None:
+            return None
+        from users.graphql_views import UnifiedTransactionType
+        return UnifiedTransactionType.resolve_fee_bps(row, info)
 
     def resolve_net_amount(self, info):
         if self.net_amount is not None:

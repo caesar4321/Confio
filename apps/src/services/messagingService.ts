@@ -1081,7 +1081,11 @@ class MessagingService {
         let transactionType = transactionData?.transaction_type || 'send';
         const notifType = transactionData?.notification_type;
         // Force receiver perspective for invitation received
-        if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') {
+        // External BSC deposits are represented by a SendTransaction receipt.
+        // Treat them as received sends so TransactionDetail re-fetches the
+        // persisted conversion snapshot (including its historical fee), rather
+        // than trusting the pre-conversion push payload's `deposit` hint.
+        if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED' || notifType === 'SEND_FROM_EXTERNAL') {
           transactionType = 'received';
           navData.transaction_type = 'received';
           navData.type = 'received';
