@@ -146,3 +146,184 @@ export const explorerTxUrl = (
   if (!h) return null;
   return `${explorerFor(tokenLabel, h).base}/tx/${encodeURIComponent(h)}`;
 };
+
+type ReceiptUser = {
+  firstName?: string | null;
+  lastName?: string | null;
+  username?: string | null;
+  phone?: string | null;
+  phoneCountry?: string | null;
+  phoneNumber?: string | null;
+};
+
+const pickReceiptText = (...values: unknown[]): string => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+};
+
+const GENERIC_RECEIPT_IDENTITIES = new Set([
+  'billetera externa',
+  'external wallet',
+  'remitente',
+  'destinatario',
+  'usuario',
+  'desconocido',
+  'contacto',
+]);
+
+const isFullWalletAddress = (value: string): boolean =>
+  /^0x[0-9a-f]{40}$/i.test(value) ||
+  /^[A-Z2-7]{58}$/.test(value);
+
+const isLossyWalletIdentity = (value: string): boolean =>
+  /^[A-Za-z0-9]{4,}(?:\.\.\.|…)[A-Za-z0-9]*$/.test(value);
+
+const pickReceiptIdentity = (...values: unknown[]): string => {
+  let lossyWalletFallback = '';
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const clean = value.trim();
+    const normalized = clean.toLowerCase();
+    if (!clean || GENERIC_RECEIPT_IDENTITIES.has(normalized)) continue;
+    if (/^(?:billetera\s+)?extern[oa]\s*\(/i.test(clean)) continue;
+    if (isLossyWalletIdentity(clean)) {
+      lossyWalletFallback ||= clean;
+      continue;
+    }
+    return isFullWalletAddress(clean) ? receiptAddressName(clean) : clean;
+  }
+  return lossyWalletFallback;
+};
+
+const receiptUserName = (user?: ReceiptUser | null): string => {
+  if (!user) return '';
+  const fullName = [user.firstName, user.lastName]
+    .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+    .map(value => value.trim())
+    .join(' ');
+  return fullName || pickReceiptText(user.username);
+};
+
+const receiptAddressName = (address: unknown): string => {
+  if (typeof address !== 'string' || !address.trim()) return '';
+  const clean = address.trim();
+  if (clean.length <= 16) return clean;
+  return `${clean.slice(0, 8)}…${clean.slice(-8)}`;
+};
+
+export type TransferReceiptParticipants = {
+  senderName: string;
+  recipientName: string;
+  senderUsername?: string;
+  recipientUsername?: string;
+  senderPhone?: string;
+  recipientPhone?: string;
+  senderAddress?: string;
+  recipientAddress?: string;
+  isOutgoing: boolean;
+  isIncoming: boolean;
+};
+
+const receiptUserPhone = (user?: ReceiptUser | null): string => {
+  if (!user) return '';
+  if (typeof user.phone === 'string' && user.phone.trim()) return user.phone.trim();
+  const country = String(user.phoneCountry || '').trim().replace(/^\+/, '');
+  const number = String(user.phoneNumber || '').trim();
+  return country && number ? `${country}:${number}` : number;
+};
+
+/** Resolve the two real identities shown on an official transfer receipt. */
+export const resolveTransferReceiptParticipants = (
+  transaction: any,
+  authenticatedUser?: ReceiptUser | null,
+): TransferReceiptParticipants => {
+  const outgoingDirections = new Set(['sent', 'send', 'withdrawal']);
+  const incomingDirections = new Set(['received', 'receive', 'deposit']);
+  const directionCandidates = [
+    transaction?.type,
+    transaction?.transactionType,
+    transaction?.transaction_type,
+    transaction?.direction,
+  ].map(value => String(value || '').toLowerCase());
+  const direction = directionCandidates.find(
+    value => outgoingDirections.has(value) || incomingDirections.has(value),
+  ) || '';
+  const amount = String(transaction?.amount || '').trim();
+  const directionIsOutgoing = outgoingDirections.has(direction);
+  const directionIsIncoming = incomingDirections.has(direction);
+  const hasKnownDirection = directionIsOutgoing || directionIsIncoming;
+  const isOutgoing = directionIsOutgoing || (!hasKnownDirection && amount.startsWith('-'));
+  const isIncoming = directionIsIncoming || (!hasKnownDirection && amount.startsWith('+'));
+  const authenticatedName = receiptUserName(authenticatedUser);
+  const senderBusiness = transaction?.senderBusiness || transaction?.payerBusiness;
+  const recipientBusiness = transaction?.recipientBusiness || transaction?.merchantBusiness;
+  const senderUser = senderBusiness || (isOutgoing
+    ? authenticatedUser
+    : (transaction?.senderUser || transaction?.counterpartyUser));
+  const recipientUser = recipientBusiness || (isIncoming
+    ? authenticatedUser
+    : (transaction?.recipientUser || transaction?.counterpartyUser));
+  const senderAddress = pickReceiptText(
+    transaction?.senderAddress,
+    transaction?.sender_address,
+    transaction?.fromAddress,
+    transaction?.from_address,
+    transaction?.sourceAddress,
+  );
+  const recipientAddress = pickReceiptText(
+    transaction?.recipientAddress,
+    transaction?.recipient_address,
+    transaction?.toAddress,
+    transaction?.to_address,
+    transaction?.destinationAddress,
+  );
+
+  const senderName = pickReceiptIdentity(
+    senderBusiness?.name,
+    isOutgoing ? authenticatedName : '',
+    transaction?.senderDisplayName,
+    transaction?.sender_name,
+    transaction?.senderName,
+    transaction?.fromName,
+    transaction?.from,
+    receiptUserName(transaction?.senderUser),
+    isIncoming ? receiptUserName(transaction?.counterpartyUser) : '',
+    senderAddress,
+  ) || 'Usuario';
+
+  const recipientName = pickReceiptIdentity(
+    recipientBusiness?.name,
+    isIncoming ? authenticatedName : '',
+    transaction?.recipientDisplayName,
+    transaction?.recipient_name,
+    transaction?.recipientName,
+    transaction?.toName,
+    transaction?.to,
+    receiptUserName(transaction?.recipientUser),
+    isOutgoing ? receiptUserName(transaction?.counterpartyUser) : '',
+    recipientAddress,
+  ) || 'Usuario';
+
+  return {
+    senderName,
+    recipientName,
+    senderUsername: pickReceiptText(senderUser?.username),
+    recipientUsername: pickReceiptText(recipientUser?.username),
+    senderPhone: pickReceiptText(
+      receiptUserPhone(senderUser),
+      transaction?.senderPhone,
+      transaction?.sender_phone,
+    ),
+    recipientPhone: pickReceiptText(
+      receiptUserPhone(recipientUser),
+      transaction?.recipientPhone,
+      transaction?.recipient_phone,
+    ),
+    senderAddress,
+    recipientAddress,
+    isOutgoing,
+    isIncoming,
+  };
+};

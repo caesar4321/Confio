@@ -20,7 +20,7 @@ import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { APP_LAYOUT } from '../config/layout';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
-import { formatTokenLabel } from '../utils/tokenDisplay';
+import { formatTokenLabel, resolveTransferReceiptParticipants } from '../utils/tokenDisplay';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TransactionReceipt'>;
 type RouteProps = RouteProp<MainStackParamList, 'TransactionReceipt'>;
@@ -31,6 +31,22 @@ export const TransactionReceiptScreen = () => {
   const { userProfile } = useAuth();
   const transaction = route.params?.transaction as any;
   const viewShotRef = useRef<ViewShot>(null);
+
+  if (!transaction) {
+    return (
+      <View style={styles.container}>
+        <Header
+          navigation={navigation as any}
+          title="Comprobante de transacción"
+          backgroundColor={colors.white}
+          showBackButton
+        />
+        <View style={styles.missingReceipt}>
+          <Text style={styles.missingReceiptText}>No se encontró la transacción.</Text>
+        </View>
+      </View>
+    );
+  }
 
   // Infer transaction type if not provided explicitly
   // Note: Future callers should pass { type: 'payroll' | 'payment' | 'transfer' }
@@ -56,16 +72,6 @@ export const TransactionReceiptScreen = () => {
   };
 
   const counterpartyUser = transaction.counterpartyUser || transaction.recipientUser || transaction.senderUser;
-  const transferDirection = String(
-    transaction.type || transaction.transactionType || transaction.transaction_type || ''
-  ).toLowerCase();
-  const isOutgoingTransfer = ['sent', 'send', 'withdrawal'].includes(transferDirection)
-    || String(transaction.amount || '').trim().startsWith('-');
-  const isIncomingTransfer = ['received', 'receive', 'deposit'].includes(transferDirection)
-    || String(transaction.amount || '').trim().startsWith('+');
-  const authenticatedUserName = userProfile?.firstName
-    ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim()
-    : (userProfile?.username || '');
 
   // Formatters
   // Formatters
@@ -154,43 +160,22 @@ export const TransactionReceiptScreen = () => {
     referenceId = transaction.invoiceId || '';
   } else {
     // Transfer
+    const transferParticipants = resolveTransferReceiptParticipants(transaction, userProfile);
     senderLabel = 'Remitente';
-    senderName = pick(
-      transaction.senderDisplayName,
-      transaction.sender_name,
-      transaction.senderName,
-      transaction.fromName,
-      transaction.from,
-      transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName || ''}`.trim() : '',
-      isIncomingTransfer && counterpartyUser?.firstName
-        ? `${counterpartyUser.firstName} ${counterpartyUser.lastName || ''}`.trim()
-        : '',
-      isOutgoingTransfer ? authenticatedUserName : '',
-      transaction.senderAddress ? `Externo (${transaction.senderAddress.slice(0, 4)}...${transaction.senderAddress.slice(-4)})` : '',
-      'Billetera Externa'
-    );
-    const sUsername = transaction.senderUser?.username || (isOutgoingTransfer ? userProfile?.username : undefined);
-    const sAddr = transaction.senderAddress || transaction.fromAddress;
+    senderName = transferParticipants.senderName;
+    const sUsername = transferParticipants.senderUsername;
+    const sAddr = transferParticipants.senderAddress;
     senderDetail = sUsername
       ? `@${sUsername}`
-      : (formatPhoneNumber(transaction.senderPhone) || (sAddr ? `${sAddr.slice(0, 6)}...${sAddr.slice(-6)}` : ''));
+      : (formatPhoneNumber(transferParticipants.senderPhone) || (sAddr ? `${sAddr.slice(0, 6)}...${sAddr.slice(-6)}` : ''));
 
     recipientLabel = 'Destinatario';
-    recipientName = pick(
-      transaction.recipientDisplayName,
-      transaction.recipient_name,
-      transaction.recipientName,
-      transaction.toName,
-      transaction.to,
-      transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName || ''}`.trim() : '',
-      isOutgoingTransfer && counterpartyUser?.firstName
-        ? `${counterpartyUser.firstName} ${counterpartyUser.lastName || ''}`.trim()
-        : '',
-      isIncomingTransfer ? authenticatedUserName : '',
-      'Usuario'
-    );
-    const rUsername = transaction.recipientUser?.username;
-    recipientDetail = rUsername ? `@${rUsername}` : formatPhoneNumber(transaction.recipientPhone);
+    recipientName = transferParticipants.recipientName;
+    const rUsername = transferParticipants.recipientUsername;
+    const rAddr = transferParticipants.recipientAddress;
+    recipientDetail = rUsername
+      ? `@${rUsername}`
+      : (formatPhoneNumber(transferParticipants.recipientPhone) || (rAddr ? `${rAddr.slice(0, 6)}...${rAddr.slice(-6)}` : ''));
   }
 
   const amount = (transaction.amount || '0.00').replace(/^[+-]\s*/, '').replace('cUSD', '').trim();
@@ -315,6 +300,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.neutral,
+  },
+  missingReceipt: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  missingReceiptText: {
+    color: colors.textSecondary,
+    fontSize: 16,
+    textAlign: 'center',
   },
   downloadButton: {
     padding: 8,

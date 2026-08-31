@@ -7,7 +7,7 @@ import {
   clearPendingNotificationOpen,
   loadPendingNotificationOpen,
 } from './notificationOpenStore';
-import { extractFcmTransactionData } from '../utils/fcmData';
+import { confirmedReceiptContext, extractFcmTransactionData } from '../utils/fcmData';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -343,6 +343,11 @@ export class PushNotificationService {
 
             const isPayment = transactionType === 'payment';
             const receiptType = isPayment ? 'payment' : 'transfer';
+            const {
+              direction: receiptDirection,
+              senderAddress,
+              recipientAddress,
+            } = confirmedReceiptContext(transactionData, notification_type);
 
             const receiptTransaction = {
               id: transactionData.internal_id || transactionId,
@@ -352,6 +357,8 @@ export class PushNotificationService {
               amount: transactionData.amount || '0',
               currency,
               status: 'confirmed',
+              type: receiptDirection,
+              direction: receiptDirection,
               date: remoteMessage.data?.created_at || new Date().toISOString(),
               memo: transactionData.memo || '',
               // Sender/recipient names from notification payload
@@ -361,6 +368,10 @@ export class PushNotificationService {
               recipient_name: transactionData.recipient_name || '',
               senderPhone: transactionData.sender_phone || '',
               recipientPhone: transactionData.recipient_phone || '',
+              senderAddress,
+              sender_address: senderAddress,
+              recipientAddress,
+              recipient_address: recipientAddress,
               // Payment-specific fields
               ...(isPayment && {
                 merchantName: transactionData.recipient_name || '',
