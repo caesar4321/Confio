@@ -38,6 +38,7 @@ from cusd_plus.tests.test_sponsor_7702 import (
     _mint_data,
     _redeem_data,
     _stock_data,
+    _wrap_data,
     _word,
 )
 from cusd_plus.tests.test_bnb_autoconvert_relay import SIGNER_ADDR, _legacy_tx
@@ -227,6 +228,13 @@ class SponsoredRailGateTests(SimpleTestCase):
         res = self._mutate(calls, _user('US', uid=21))
         self.assertEqual(res.error, 'mint_not_available')
 
+    def test_ineligible_internal_wrap_does_not_close_usdt_sagas(self):
+        calls = [_call(VAULT, _wrap_data())]
+        with mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close:
+            res = self._mutate(calls, _user('US', uid=211))
+        self.assertEqual(res.error, 'mint_not_available')
+        close.assert_not_called()
+
     def test_mint_batch_passes_gate_for_eligible(self):
         calls = [_call(USDT, _approve_data()), _call(VAULT, _mint_data())]
         res = self._mutate(calls, _user('VE', uid=22))
@@ -273,6 +281,18 @@ class SponsoredRailGateTests(SimpleTestCase):
             _call(VAULT, _mint_data(amount=10**18 + 10**12)),
         ]
         res = self._mutate(calls, _user('VE', uid=28))
+        self.assertNotEqual(res.error, 'mint_below_redeemable_minimum')
+
+    def test_exact_one_dollar_internal_wrap_is_refused(self):
+        calls = [_call(VAULT, _wrap_data(amount=10**18))]
+        with mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close:
+            res = self._mutate(calls, _user('VE', uid=281))
+        self.assertEqual(res.error, 'mint_below_redeemable_minimum')
+        close.assert_not_called()
+
+    def test_buffered_internal_wrap_passes_amount_gate(self):
+        calls = [_call(VAULT, _wrap_data(amount=10**18 + 10**12))]
+        res = self._mutate(calls, _user('VE', uid=282))
         self.assertNotEqual(res.error, 'mint_below_redeemable_minimum')
 
     def test_truncated_mint_batch_is_rejected_cleanly(self):

@@ -52,6 +52,10 @@ def _mint_data(recipient=USER, amount=2 * 10**18, min_out=0) -> str:
     return '0x' + sponsor_7702.SEL_SUBSCRIBE_AND_MINT + _word(amount) + _word(min_out) + _word(recipient)
 
 
+def _wrap_data(recipient=USER, amount=2 * 10**18, min_out=0) -> str:
+    return '0x' + sponsor_7702.SEL_WRAP_CUSD + _word(amount) + _word(min_out) + _word(recipient)
+
+
 def _redeem_data(recipient=USER, shares=10**18, min_out=0) -> str:
     return '0x' + sponsor_7702.SEL_REDEEM_TO_USDT + _word(shares) + _word(min_out) + _word(recipient)
 
@@ -145,6 +149,20 @@ class PolicyTests(SimpleTestCase):
         ]
         self._validate(calls)
         self.assertEqual(sponsor_7702.classify_calls_kind(calls), 'mint_cusd')
+
+    def test_internal_cusd_wrap_batch_accepted_and_classified(self):
+        calls = [
+            _call(CUSD, _approve_data(spender=VAULT)),
+            _call(VAULT, _wrap_data()),
+        ]
+        self._validate(calls)
+        self.assertEqual(sponsor_7702.classify_calls_kind(calls), 'wrap_cusd')
+
+    def test_internal_cusd_unwrap_accepted_and_classified(self):
+        calls = [_call(VAULT, _unwrap_data())]
+        self._validate(calls)
+        self.assertEqual(
+            sponsor_7702.classify_calls_kind(calls), 'unwrap_to_cusd')
 
     def test_universal_cusd_mint_recipient_is_pinned_to_user(self):
         self._assert_rejected(
@@ -784,6 +802,15 @@ class ReceiptCheckerTests(SimpleTestCase):
         self._run(batch, self._receipt(logs=[self._exec_log()]))
         self.assertEqual(batch.status, 'confirmed')
         self.assertEqual(batch.block_number, self.BLK)
+
+    def test_internal_rail_conversion_invalidates_position_after_finality(self):
+        for kind in ('wrap_cusd', 'unwrap_to_cusd'):
+            with self.subTest(kind=kind), \
+                 mock.patch('cusd_plus.vault.invalidate_position') as invalidate:
+                batch = self._batch(kind=kind)
+                self._run(batch, self._receipt(logs=[self._exec_log()]))
+                self.assertEqual(batch.status, 'confirmed')
+                invalidate.assert_called_once_with(USER)
 
     def test_stock_history_failure_keeps_batch_retryable(self):
         batch = self._batch(kind='stock_buy')
