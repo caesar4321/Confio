@@ -994,6 +994,33 @@ class CreateRampOrder(graphene.Mutation):
             return RampOrderType(success=False, error='destination must be cusd or cusd_plus')
         savings_rail = destination == 'cusd_plus'
         fee_rollout = savings_rail and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
+        legacy_cusd_bsc_update_error = (
+            'Actualiza la app para preparar y retirar tu cUSD en BNB Smart Chain. '
+            'Esta versión ya no admite el flujo anterior de USDT.'
+        )
+        # Everyone may receive USDT-BSC settlement. Foreground auto-conversion
+        # routes eligible holders to cUSD+ and ineligible holders to cUSD;
+        # raw USDT is never the user-facing balance.
+        if savings_rail and not getattr(current_account, 'bsc_address', None):
+            return RampOrderType(
+                success=False,
+                error='Tu cuenta de ahorro aún no está activada en este dispositivo. Actualiza la app e inicia sesión de nuevo.',
+            )
+        if (fee_rollout and normalized_direction == 'OFF_RAMP'
+                and not fee_capable_client):
+            from cusd_plus.eligibility import check_savings_mint_eligibility
+            if not check_savings_mint_eligibility(
+                    user, getattr(info.context, 'META', {})):
+                # Ineligible holders now own universal cUSD-BSC. Legacy
+                # builds only know the pre-integration USDT/cUSD+ funding
+                # paths, so letting the order through guarantees a failure
+                # even after foreground normalization has completed. This
+                # compatibility gate precedes RPC-dependent fee preflights so
+                # the actionable update message cannot be masked by an outage.
+                return RampOrderType(
+                    success=False,
+                    error=legacy_cusd_bsc_update_error,
+                )
         if fee_rollout:
             try:
                 from cusd_plus.cusd_vault import require_operational
@@ -1024,15 +1051,6 @@ class CreateRampOrder(graphene.Mutation):
                     success=False,
                     error='No pudimos calcular la comisión de Confío.',
                 )
-        # Everyone may receive USDT-BSC settlement. Foreground auto-conversion
-        # routes eligible holders to cUSD+ and ineligible holders to cUSD;
-        # raw USDT is never the user-facing balance.
-        if savings_rail and not getattr(current_account, 'bsc_address', None):
-            return RampOrderType(
-                success=False,
-                error='Tu cuenta de ahorro aún no está activada en este dispositivo. Actualiza la app e inicia sesión de nuevo.',
-            )
-
         wallet_upgrade_blocker = _get_wallet_upgrade_blocker(user=user, account=current_account)
         if wallet_upgrade_blocker:
             return RampOrderType(success=False, error=wallet_upgrade_blocker)
@@ -1099,17 +1117,33 @@ class CreateRampOrder(graphene.Mutation):
                         # lets a just-arrived deposit fund Koywe without ever
                         # crossing the fee perimeter.
                         available_usdt -= raw_usdt
+                    # Actual provider funding, after every contract fee. This
+                    # is net for fee-capable builds and gross for legacy
+                    # fee-on-top compatibility.
+                    required_available_usdt = provider_order_amount
+                    if available_usdt < required_available_usdt:
+                        if not fee_capable_client and raw_usdt > 0:
+                            return RampOrderType(
+                                success=False,
+                                error=legacy_cusd_bsc_update_error,
+                            )
+                        return RampOrderType(
+                            success=False,
+                            error=(
+                                f'No tienes suficiente saldo disponible para este retiro. '
+                                f'Disponible: {available_usdt:.6f}. Requerido: {required_available_usdt:.6f}.'
+                            ),
+                        )
                     # Worth is not the same as withdrawable: redeemToUsdt is
                     # whenNotPaused and refuses while the oracle guard is
                     # tripped. Creating an order the client provably cannot
                     # fund just strands it (re-audit [P2] #9).
                     #
-                    # ONLY when a cUSD+ redeem is actually required. Checking
-                    # this unconditionally would turn a cUSD+ pause into an
-                    # exit gate for an ineligible holder funded entirely by
-                    # cUSD, whose exit never touches the savings vault.
-                    required_provider_usdt = provider_order_amount
-                    if cusd_only_usdt < required_provider_usdt:
+                    # Only check the vault after proving combined cUSD/cUSD+
+                    # funds are sufficient. A raw-USDT-only holder has no
+                    # redeem to attempt, so a vault RPC outage must not hide
+                    # the actionable update/normalization response above.
+                    if cusd_only_usdt < required_available_usdt:
                         blocked = cusd_plus_vault.redeem_blocked_reason()
                         if blocked:
                             logger.warning('savings off-ramp refused: %s', blocked)
@@ -1118,18 +1152,6 @@ class CreateRampOrder(graphene.Mutation):
                                 error=('Los retiros desde tu ahorro están pausados por un momento. '
                                        'Vuelve a intentar en unos minutos.'),
                             )
-                    # Actual provider funding, after every contract fee. This
-                    # is net for fee-capable builds and gross for legacy
-                    # fee-on-top compatibility.
-                    required_available_usdt = provider_order_amount
-                    if available_usdt < required_available_usdt:
-                        return RampOrderType(
-                            success=False,
-                            error=(
-                                f'No tienes suficiente saldo disponible para este retiro. '
-                                f'Disponible: {available_usdt:.6f}. Requerido: {required_available_usdt:.6f}.'
-                            ),
-                        )
                 else:
                     wallet_address = _get_koywe_destination_address(current_account=current_account)
                     available_cusd = _get_algorand_asset_balance(
