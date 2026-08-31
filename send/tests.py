@@ -183,6 +183,7 @@ class PrepareCallShapeTests(SimpleTestCase):
         )
         self.assertEqual(result['fee_bps'], 90)
 
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
     def test_case_c_usdt_fallback(self):
         result, row, _ = self._prepare(
             shares_value=0, usdt=100 * WAD, recipient_user=_recipient_user('VE'))
@@ -194,10 +195,24 @@ class PrepareCallShapeTests(SimpleTestCase):
         self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_usdt')
 
     @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
-    def test_transient_raw_usdt_cannot_bypass_live_perimeter(self):
+    def test_transient_raw_usdt_cannot_fund_internal_friend_send(self):
         result, _, _ = self._prepare(
             shares_value=0, usdt=100 * WAD, recipient_user=_recipient_user('VE'))
         self.assertEqual(result['error'], 'conversion_pending')
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_legacy_raw_usdt_can_send_directly_to_external_address(self):
+        result, row, _ = self._prepare(
+            shares_value=0, usdt=100 * WAD, recipient_user=None)
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        self.assertEqual(call['to'], USDT_BSC)
+        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
+        self.assertEqual(int(call['data'][74:138], 16), 10 * WAD)
+        meta = json.loads(row['bsc_calls_json'])
+        self.assertEqual(meta['kind'], 'send_usdt')
+        self.assertEqual(result['fee_amount'], '0')
+        self.assertEqual(result['net_amount'], '10')
 
     def test_cusd_to_ineligible_friend_is_fee_free_transfer(self):
         result, row, _ = self._prepare(
