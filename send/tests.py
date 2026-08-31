@@ -696,6 +696,39 @@ class IdempotencyTests(SimpleTestCase):
         self.assertEqual(result['error'], 'idempotency_key_conflict')
 
 
+class SendNotificationFeeSnapshotTests(SimpleTestCase):
+    @mock.patch('users.phone_utils.to_international', return_value='')
+    @mock.patch('notifications.utils.create_notification')
+    def test_external_send_notification_carries_finalized_fee_rate(
+            self, notify, _phone):
+        from send.tasks import _notify_send_parties
+
+        send = SimpleNamespace(
+            internal_id='send-id', transaction_hash='0xabc',
+            amount=Decimal('10'), fee_amount=Decimal('0.09'),
+            net_amount=Decimal('9.91'), token_type='USDT',
+            bsc_calls_json=json.dumps({'receipt': {
+                'fee_bps': 90, 'finalized': True,
+            }}),
+            sender_user_id=1, sender_user=SimpleNamespace(id=1),
+            sender_business=None, sender_type='user',
+            sender_display_name='Sender', sender_phone='',
+            sender_address=SENDER,
+            recipient_user_id=None, recipient_user=None,
+            recipient_business=None, recipient_type='external',
+            recipient_display_name='', recipient_phone='',
+            recipient_address=RECIPIENT,
+            memo='', is_invitation=False,
+        )
+
+        _notify_send_parties(send)
+
+        data = notify.call_args.kwargs['data']
+        self.assertEqual(data['fee_amount'], '0.09')
+        self.assertEqual(data['fee_bps'], '90')
+        self.assertEqual(data['net_amount'], '9.91')
+
+
 class ConfirmTaskTests(SimpleTestCase):
     """confirm_bsc_send settles the row, writes both ledger sides for
     internal sends, and notifies both parties."""

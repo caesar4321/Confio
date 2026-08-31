@@ -7,6 +7,7 @@ CONFIRMED → SEND_SENT/SEND_RECEIVED notifications
 pushes (payload parity with the Algorand sweeper in blockchain/tasks.py);
 reverted/noop_failed → FAILED (funds untouched; the client retries).
 """
+import json
 import logging
 
 from celery import shared_task
@@ -68,6 +69,14 @@ def _notify_send_parties(s) -> None:
     # calling an invite external would cost the inviter their money back.
     external_sender = (s.sender_type or '') == 'external'
     external_recipient = (s.recipient_type or '') == 'external' and not s.is_invitation
+    fee_bps = None
+    if s.fee_amount and s.fee_amount > 0:
+        try:
+            receipt = json.loads(s.bsc_calls_json or '{}').get('receipt') or {}
+            parsed_fee_bps = int(receipt.get('fee_bps') or 0)
+            fee_bps = parsed_fee_bps if parsed_fee_bps > 0 else None
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+            pass
     common = {
         'transaction_id': str(s.internal_id),
         'internal_id': str(s.internal_id),
@@ -78,6 +87,7 @@ def _notify_send_parties(s) -> None:
         # rediscover a rate (or call a stale notification "free") when the
         # finalized SendTransaction already knows gross/fee/net.
         'fee_amount': str(s.fee_amount or ''),
+        **({'fee_bps': str(fee_bps)} if fee_bps is not None else {}),
         'net_amount': str(s.net_amount if s.net_amount is not None else s.amount),
         'sender_name': sender_name,
         'recipient_name': recipient_name,

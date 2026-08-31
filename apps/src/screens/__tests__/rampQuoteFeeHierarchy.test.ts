@@ -31,16 +31,23 @@ describe('ramp quote fee hierarchy', () => {
 
   it('shows authoritative fees on ramp and external-wallet detail receipts', () => {
     const source = readScreen('TransactionDetailScreen.tsx');
+    const messagingSource = readFileSync(resolve(__dirname, '../../services/messagingService.ts'), 'utf8');
 
     expect(source).toContain('if (isRampReceipt)');
-    expect(source).toContain("label: 'Comisión de Confío'");
+    expect(source).toContain('label: confioFeeLabel(currentTx)');
+    expect(source).toContain('const serverFeeBps = (tx: any): number | null =>');
+    expect(source).toContain('`Comisión de Confío (${(bps / 100).toLocaleString(\'es-PE\')}%)`');
     expect(source).toContain("label: currentTx.type === 'received' ? 'Monto acreditado' : 'Recibe la billetera'");
     expect(source).toContain('const fee = serverFee(currentTx)');
     expect(source).not.toContain('computeConfioFee(currentTx.amount);\n          items.push({\n            label: currentTx.type');
+    expect(messagingSource).toMatch(
+      /notifType === 'INVITE_RECEIVED'[\s\S]*?notifType === 'SEND_RECEIVED'[\s\S]*?notifType === 'SEND_FROM_EXTERNAL'[\s\S]*?transactionType = 'received'/,
+    );
   });
 
   it('uses balance-impact amounts on account cards and preserves receipt data', () => {
     const source = readScreen('AccountDetailScreen.tsx');
+    const queries = readFileSync(resolve(__dirname, '../../apollo/queries.ts'), 'utf8');
     const amountMapping = source.slice(
       source.indexOf('amount: isConversion'),
       source.indexOf('// For conversions, show the currency'),
@@ -52,6 +59,8 @@ describe('ramp quote fee hierarchy', () => {
     expect(source).toContain("if (type === 'received' && tx.toToken)");
     expect(source).not.toContain("tx.feeAmount && tx.toToken");
     expect(source).toContain('feeAmount: transaction.feeAmount');
+    expect(source).toContain('feeBps: transaction.feeBps');
+    expect(queries).toMatch(/currentAccountTransactions[\s\S]*?feeAmount\s+feeBps\s+netAmount/);
     expect(source).toContain('rampFiatAmount: transaction.rampFiatAmount');
     expect(source).toContain('walletAmount: transaction.walletAmount');
     expect(source).toContain('grossAmount: tx.amount');

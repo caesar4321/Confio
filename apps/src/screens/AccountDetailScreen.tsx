@@ -125,6 +125,7 @@ interface Transaction {
   rampFiatAmount?: string;
   rampFiatCurrency?: string;
   feeAmount?: string;
+  feeBps?: number;
   netAmount?: string;
   fromAmount?: string;
   toAmount?: string;
@@ -929,6 +930,7 @@ export const AccountDetailScreen = () => {
           // Carry the server's fee through so the detail screen can render the
           // breakdown from the ledger instead of a hardcoded rate.
           feeAmount: tx.feeAmount || undefined,
+          feeBps: tx.feeBps ?? undefined,
           netAmount: tx.netAmount || undefined,
           fromAmount: tx.fromAmount || tx.from_amount || undefined,
           toAmount: tx.toAmount || tx.to_amount || undefined,
@@ -1475,6 +1477,7 @@ export const AccountDetailScreen = () => {
           currency: detailCurrency,
           secondaryCurrency: transaction.secondaryCurrency,
           feeAmount: transaction.feeAmount,
+          feeBps: transaction.feeBps,
           netAmount: transaction.netAmount,
           fromAmount: transaction.fromAmount,
           toAmount: transaction.toAmount,

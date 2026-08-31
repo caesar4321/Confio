@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import timedelta
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 from django.conf import settings
 from django.db import transaction
@@ -37,6 +37,53 @@ def _safe_related(instance, attr_name: str):
         return getattr(instance, attr_name)
     except Exception:
         return None
+
+
+def _ramp_fee_snapshot(ramp_tx: RampTransaction) -> tuple[str, int | None]:
+    """Return the immutable fee amount/rate recorded for this ramp.
+
+    Aggregated conversions allocate one conversion across several ramps, so
+    their per-ramp gross/net delta is authoritative. Guardarian rows created
+    before the conversion link keep the same snapshot in nested metadata.
+    """
+    if getattr(ramp_tx, 'status', None) != 'COMPLETED':
+        return '', None
+    metadata = ramp_tx.metadata or {}
+    allocation = metadata.get('conversion_allocation') or {}
+    fee_amount = None
+    try:
+        gross = Decimal(str(allocation.get('gross_amount')))
+        net = Decimal(str(allocation.get('net_amount')))
+        fee_amount = gross - net if gross > net else None
+    except (InvalidOperation, TypeError, ValueError):
+        pass
+
+    conversion = _safe_related(ramp_tx, 'conversion')
+    fee_bps = getattr(conversion, 'conversion_fee_bps', None) if conversion else None
+    if fee_amount is None and conversion is not None:
+        fee_amount = (
+            getattr(conversion, 'fee_amount_exact', None)
+            or getattr(conversion, 'fee_amount', None)
+        )
+
+    legacy = metadata.get('confio_fee') or {}
+    if isinstance(legacy, dict):
+        if fee_amount is None:
+            fee_amount = legacy.get('fee_amount')
+        if not fee_bps:
+            fee_bps = legacy.get('fee_bps')
+
+    try:
+        fee_decimal = Decimal(str(fee_amount))
+    except (InvalidOperation, TypeError, ValueError):
+        return '', None
+    try:
+        parsed_bps = int(fee_bps or 0)
+    except (TypeError, ValueError):
+        parsed_bps = 0
+    if fee_decimal <= 0:
+        return '', None
+    return format(fee_decimal.normalize(), 'f'), parsed_bps if parsed_bps > 0 else None
 
 
 def _map_guardarian_status(status: str | None) -> str:
@@ -695,6 +742,8 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
     if not notification_type:
         return
 
+    fee_amount, fee_bps = _ramp_fee_snapshot(ramp_tx)
+
     create_notification(
         user=ramp_tx.actor_user,
         business=ramp_tx.actor_business,
@@ -713,6 +762,8 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
             'wallet_amount': wallet_amount_display,
             'wallet_currency': wallet_currency_display,
             'internal_id': str(ramp_tx.internal_id),
+            **({'fee_amount': fee_amount} if fee_amount else {}),
+            **({'fee_bps': str(fee_bps)} if fee_bps is not None else {}),
         },
         related_object_type='RampTransaction',
         related_object_id=str(ramp_tx.internal_id),
