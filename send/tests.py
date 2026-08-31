@@ -4,9 +4,10 @@ dollar sends safe:
 
   1. call-shape selection follows the eligibility matrix (A: cUSD+ transfer
      to eligible internal recipients; B: atomic redeem-to-USDT for
-     ineligible/external; C: raw USDT transfer) — and the explicit token
-     shapes honor the request literally (D: cUSD+ itself to ANY address,
-     never a silent redeem; E: BEP-20 CONFIO, never dollar-funded);
+     ineligible/external; C: legacy raw USDT fallback) — and explicit cUSD+
+     still follows recipient eligibility (D: transfer to an eligible friend,
+     fee-free unwrap to cUSD for an ineligible friend, fee-bearing exit for
+     an external address; E: BEP-20 CONFIO, never dollar-funded);
   2. a recipient without a registered bsc_address BLOCKS the send and
      nudges the recipient (the coverage-cold-start adoption loop);
   3. the submit-side validator accepts only the stored single-call shapes
@@ -26,12 +27,16 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from cusd_plus.sponsor_7702 import (
     PolicyError,
     SEL_REDEEM_TO_USDT,
+    SEL_APPROVE,
     SEL_TRANSFER,
+    SEL_UNWRAP_TO_CUSD,
+    SEL_WRAP_CUSD,
     USDT_BSC,
 )
 from send import bsc_flow
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+CUSD = '0x' + '66' * 20
 CONFIO_TOKEN = '0x' + 'cc' * 20
 SENDER = '0x' + '11' * 20
 RECIPIENT = '0x' + '22' * 20
@@ -64,11 +69,15 @@ def _recipient_user(eligible_country='VE', uid=2):
     )
 
 
-@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_SEND_ENABLED=True)
+@override_settings(
+    CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    CUSD_VAULT_ADDRESS=CUSD,
+    BSC_SEND_ENABLED=True,
+)
 class PrepareCallShapeTests(SimpleTestCase):
     """The A/B/C matrix, exercised with mocked balances + ORM."""
 
-    def _prepare(self, amount='10', shares_value=100 * WAD, usdt=0,
+    def _prepare(self, amount='10', shares_value=100 * WAD, cusd=0, usdt=0,
                  recipient_user=None, recipient_business=None,
                  recipient_addr=RECIPIENT, token='', locked_recipient_addr=None):
         captured = {}
@@ -87,9 +96,13 @@ class PrepareCallShapeTests(SimpleTestCase):
                  ),
              ), \
              mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
-             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=105 * WAD // 100), \
+             mock.patch('cusd_plus.vault.current_oracle_price_wad', return_value=106 * WAD // 100), \
              mock.patch('cusd_plus.vault.erc20_balance_raw',
-                        return_value=(shares_value * WAD) // pps), \
+                        side_effect=lambda token, _holder: (
+                            cusd if token.lower() == CUSD.lower()
+                            else (shares_value * WAD) // pps
+                        )), \
              mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=usdt), \
              mock.patch('send.bsc_flow.transaction.atomic'), \
              mock.patch('send.models.SendTransaction.objects') as objs:
@@ -114,22 +127,61 @@ class PrepareCallShapeTests(SimpleTestCase):
         shares = int(call['data'][74:138], 16)
         self.assertEqual(shares, (10 * WAD * WAD) // pps)
 
-    def test_case_b_ineligible_recipient_gets_atomic_redeem(self):
+    def test_case_b_ineligible_recipient_gets_fee_free_cusd_unwrap(self):
         result, row, _ = self._prepare(recipient_user=_recipient_user('US'))
         self.assertTrue(result['success'], result)
         call = result['calls'][0]
         self.assertEqual(call['to'], VAULT.lower())
-        self.assertTrue(call['data'][2:].startswith(SEL_REDEEM_TO_USDT))
+        self.assertTrue(call['data'][2:].startswith(SEL_UNWRAP_TO_CUSD))
         # minOut = amount * 0.995
         min_out = int(call['data'][74:138], 16)
         self.assertEqual(min_out, (10 * WAD * 9950) // 10000)
         self.assertEqual(call['data'][138:202], RECIPIENT[2:].lower().rjust(64, '0'))
-        self.assertEqual(result['token_type'], 'USDT')
+        self.assertEqual(result['token_type'], 'CUSD')
+        self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_unwrap_cusd')
 
     def test_case_b_external_address_gets_atomic_redeem(self):
         result, _, _ = self._prepare(recipient_user=None)
         self.assertTrue(result['success'], result)
         self.assertTrue(result['calls'][0]['data'][2:].startswith(SEL_REDEEM_TO_USDT))
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_external_plus_send_treats_entered_amount_as_gross(self):
+        """A $10 entry burns a $10 gross position and delivers $9.91.
+
+        It must not silently debit ~$10.09 to make the recipient receive $10;
+        that was the legacy fee-on-top behavior.
+        """
+        net = 9_910_000_000_000_000_000
+        with mock.patch(
+            'cusd_plus.cusd_vault.preview_redeem_wei',
+            side_effect=lambda gross: SimpleNamespace(
+                gross_wei=gross,
+                fee_wei=gross - (gross * 9_910 // 10_000),
+                net_wei=gross * 9_910 // 10_000,
+                fee_bps=90,
+            ),
+        ):
+            result, _, pps = self._prepare('10', recipient_user=None)
+        self.assertTrue(result['success'], result)
+        call = result['calls'][0]
+        shares = int(call['data'][10:74], 16)
+        min_out = int(call['data'][74:138], 16)
+        # At the mocked $1 oracle, this share amount represents the requested
+        # $10 gross (allowing only the vault's integer-floor dust).
+        self.assertLessEqual(shares, -(-10 * WAD * WAD // pps) + 1)
+        self.assertLess(min_out, 10 * WAD)
+        self.assertEqual(min_out, net * bsc_flow.REDEEM_MIN_OUT_BPS // 10_000)
+        # The exact share preview may be one wei above the entered display
+        # amount because the redeem path floors twice. The receipt reports
+        # the chain-authoritative values, and they must reconcile exactly.
+        self.assertLessEqual(abs(Decimal(result['gross_amount']) - Decimal('10')), Decimal('0.000000000000000001'))
+        self.assertEqual(result['net_amount'], '9.91')
+        self.assertEqual(
+            Decimal(result['fee_amount']) + Decimal(result['net_amount']),
+            Decimal(result['gross_amount']),
+        )
+        self.assertEqual(result['fee_bps'], 90)
 
     def test_case_c_usdt_fallback(self):
         result, row, _ = self._prepare(
@@ -140,6 +192,47 @@ class PrepareCallShapeTests(SimpleTestCase):
         self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
         self.assertEqual(int(call['data'][74:138], 16), 10 * WAD)
         self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_usdt')
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_transient_raw_usdt_cannot_bypass_live_perimeter(self):
+        result, _, _ = self._prepare(
+            shares_value=0, usdt=100 * WAD, recipient_user=_recipient_user('VE'))
+        self.assertEqual(result['error'], 'conversion_pending')
+
+    def test_cusd_to_ineligible_friend_is_fee_free_transfer(self):
+        result, row, _ = self._prepare(
+            shares_value=0, cusd=100 * WAD,
+            recipient_user=_recipient_user('US'),
+        )
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(result['calls']), 1)
+        self.assertEqual(result['calls'][0]['to'], CUSD.lower())
+        self.assertTrue(result['calls'][0]['data'][2:].startswith(SEL_TRANSFER))
+        meta = json.loads(row['bsc_calls_json'])
+        self.assertEqual(meta['kind'], 'send_cusd')
+        bsc_flow._validate_send_batch(
+            result['calls'], SimpleNamespace(recipient_address=RECIPIENT), meta)
+
+    def test_cusd_to_eligible_friend_wraps_fee_free_atomically(self):
+        result, row, _ = self._prepare(
+            shares_value=0, cusd=100 * WAD,
+            recipient_user=_recipient_user('VE'),
+        )
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(result['calls']), 2)
+        self.assertEqual(result['calls'][0]['to'], CUSD.lower())
+        self.assertTrue(result['calls'][0]['data'][2:].startswith(SEL_APPROVE))
+        self.assertEqual(result['calls'][1]['to'], VAULT.lower())
+        self.assertTrue(result['calls'][1]['data'][2:].startswith(SEL_WRAP_CUSD))
+        min_out = int(result['calls'][1]['data'][74:138], 16)
+        self.assertEqual(
+            min_out,
+            bsc_flow._min_usdy_out(10 * WAD, 106 * WAD // 100),
+        )
+        meta = json.loads(row['bsc_calls_json'])
+        self.assertEqual(meta['kind'], 'send_wrap_cusd')
+        bsc_flow._validate_send_batch(
+            result['calls'], SimpleNamespace(recipient_address=RECIPIENT), meta)
 
     def test_insufficient_balance(self):
         result, _, _ = self._prepare(
@@ -170,29 +263,59 @@ class PrepareCallShapeTests(SimpleTestCase):
 
     # ── explicit token shapes (D/E) ─────────────────────────────────────
 
-    def test_case_d_explicit_cusd_plus_to_external_never_redeems(self):
+    def test_explicit_cusd_plus_to_external_still_pays_exit_fee(self):
         result, row, pps = self._prepare(recipient_user=None, token='CUSD_PLUS')
         self.assertTrue(result['success'], result)
         call = result['calls'][0]
         self.assertEqual(call['to'], VAULT.lower())
-        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
-        self.assertEqual(call['data'][10:74], RECIPIENT[2:].lower().rjust(64, '0'))
-        self.assertEqual(result['token_type'], 'CUSD_PLUS')
-        self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_cusd_plus')
-        self.assertEqual(int(call['data'][74:138], 16), (10 * WAD * WAD) // pps)
+        self.assertTrue(call['data'][2:].startswith(SEL_REDEEM_TO_USDT))
+        self.assertEqual(result['token_type'], 'USDT')
+        self.assertEqual(json.loads(row['bsc_calls_json'])['kind'], 'send_redeem')
 
-    def test_case_d_ineligible_recipient_still_gets_the_token(self):
+    def test_explicit_cusd_plus_cannot_bypass_ineligible_routing(self):
         result, _, _ = self._prepare(
             recipient_user=_recipient_user('US'), token='CUSD_PLUS')
         self.assertTrue(result['success'], result)
-        self.assertTrue(result['calls'][0]['data'][2:].startswith(SEL_TRANSFER))
-        self.assertEqual(result['token_type'], 'CUSD_PLUS')
+        self.assertTrue(result['calls'][0]['data'][2:].startswith(SEL_UNWRAP_TO_CUSD))
+        self.assertEqual(result['token_type'], 'CUSD')
 
-    def test_case_d_never_falls_back_to_usdt(self):
-        # Plenty of wallet USDT can NOT fund an explicit cUSD+ send.
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_explicit_cusd_plus_cannot_spend_transient_usdt(self):
         result, _, _ = self._prepare(
             shares_value=0, usdt=100 * WAD, token='CUSD_PLUS')
-        self.assertEqual(result['error'], 'insufficient_balance')
+        self.assertEqual(result['error'], 'conversion_pending')
+
+    def test_mixed_balance_can_send_to_ineligible_friend(self):
+        result, row, _ = self._prepare(
+            amount='10', shares_value=8 * WAD, cusd=4 * WAD,
+            recipient_user=_recipient_user('US'))
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(result['calls']), 2)
+        meta = json.loads(row['bsc_calls_json'])
+        self.assertEqual(meta['kind'], 'send_mixed_cusd')
+        bsc_flow._validate_send_batch(
+            result['calls'],
+            SimpleNamespace(recipient_address=RECIPIENT, sender_address=SENDER),
+            meta,
+        )
+
+    def test_mixed_external_exit_normalizes_then_charges_one_fee(self):
+        with mock.patch(
+            'cusd_plus.cusd_vault.preview_redeem_wei',
+            return_value=SimpleNamespace(
+                gross_wei=10 * WAD,
+                fee_wei=90_000_000_000_000_000,
+                net_wei=9_910_000_000_000_000_000,
+                fee_bps=90,
+            ),
+        ):
+            result, row, _ = self._prepare(
+                amount='10', shares_value=8 * WAD, cusd=4 * WAD,
+                recipient_user=None)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(result['calls']), 2)
+        meta = json.loads(row['bsc_calls_json'])
+        self.assertEqual(meta['kind'], 'send_mixed_cusd_redeem')
 
     @override_settings(BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN)
     def test_case_e_confio_transfer(self):
@@ -266,15 +389,15 @@ class PrepareCallShapeTests(SimpleTestCase):
         # clamped to the ENTIRE position, not the (unaffordable) ideal shares
         self.assertEqual(int(call['data'][10:74], 16), shares_raw)
 
-    def test_max_explicit_cusd_plus_dust_short_sends_full_position(self):
+    def test_max_explicit_cusd_plus_dust_short_redeems_full_position(self):
         pps = 11 * WAD // 10
         amount_wei = 299 * WAD // 100
         shares_raw = (amount_wei * WAD) // pps - 1
         result, _ = self._prepare_raw('2.99', shares_raw, pps=pps, token='CUSD_PLUS')
         self.assertTrue(result['success'], result)
         call = result['calls'][0]
-        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
-        self.assertEqual(int(call['data'][74:138], 16), shares_raw)
+        self.assertTrue(call['data'][2:].startswith(SEL_REDEEM_TO_USDT))
+        self.assertEqual(int(call['data'][10:74], 16), shares_raw)
 
     def test_max_usdt_dust_short_sends_full_wallet_balance(self):
         usdt_raw = 299 * WAD // 100 - 1
@@ -364,7 +487,7 @@ class PrepareCallShapeTests(SimpleTestCase):
         short = amount_wei - 2 * bsc_flow.MAX_SEND_DUST_WEI
         shares_raw = (short * WAD) // pps
         result, _ = self._prepare_raw('2.99', shares_raw, pps=pps)
-        self.assertEqual(result['error'], 'insufficient_balance')
+        self.assertEqual(result['error'], 'redeem_below_minimum')
 
 
 class SubmitValidatorTests(SimpleTestCase):
@@ -508,7 +631,11 @@ class RecipientResolutionTests(TestCase):
         )
 
 
-@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_SEND_ENABLED=True)
+@override_settings(
+    CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    CUSD_VAULT_ADDRESS=CUSD,
+    BSC_SEND_ENABLED=True,
+)
 class IdempotencyTests(SimpleTestCase):
     """A reused idempotency key REPLAYS only when the request matches the
     stored row; different params → conflict, never the stale calls (P3)."""
@@ -558,7 +685,7 @@ class ConfirmTaskTests(SimpleTestCase):
     """confirm_bsc_send settles the row, writes both ledger sides for
     internal sends, and notifies both parties."""
 
-    def _run(self, batch_status='confirmed'):
+    def _run(self, batch_status='confirmed', kind='send_cusd_plus'):
         from send import tasks as send_tasks
         s = SimpleNamespace(
             id=7, internal_id='sid', status='SUBMITTED',
@@ -574,7 +701,7 @@ class ConfirmTaskTests(SimpleTestCase):
             save=mock.Mock(),
         )
         batch = SimpleNamespace(id=9, status=batch_status, tx_hash=s.transaction_hash,
-                                kind='send_cusd_plus', source_id=s.id)
+                                kind=kind, source_id=s.id)
         with mock.patch('send.models.SendTransaction.objects') as sobjs, \
              mock.patch('blockchain.models.SponsoredBatch.objects') as bobjs, \
              mock.patch.object(send_tasks, '_account_for_bsc_address',
@@ -598,3 +725,29 @@ class ConfirmTaskTests(SimpleTestCase):
         s, notify = self._run('reverted')
         self.assertEqual(s.status, 'FAILED')
         notify.assert_not_called()
+
+    def test_every_preparable_kind_can_settle(self):
+        for kind in sorted(bsc_flow.BSC_SEND_KINDS):
+            with self.subTest(kind=kind):
+                s, _ = self._run('confirmed', kind=kind)
+                self.assertEqual(s.status, 'CONFIRMED')
+
+    def test_every_preparable_kind_is_crash_recoverable(self):
+        from cusd_plus.tasks import _DOMAIN_CONFIRM_TASKS
+        for kind in bsc_flow.BSC_SEND_KINDS:
+            self.assertEqual(
+                _DOMAIN_CONFIRM_TASKS.get(kind),
+                'send.confirm_bsc_send',
+                kind,
+            )
+
+    def test_one_live_batch_per_economic_send_is_a_db_constraint(self):
+        from blockchain.models import SponsoredBatch
+        constraint = next(
+            c for c in SponsoredBatch._meta.constraints
+            if c.name == 'cpsb_unique_active_send'
+        )
+        self.assertEqual(tuple(constraint.fields), ('source_id',))
+        condition = str(constraint.condition)
+        for kind in bsc_flow.BSC_SEND_KINDS:
+            self.assertIn(kind, condition)

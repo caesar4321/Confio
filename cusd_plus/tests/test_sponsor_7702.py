@@ -24,6 +24,7 @@ from cusd_plus import sponsor_7702
 from cusd_plus.sponsor_7702 import PolicyError
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+CUSD = '0x' + '66' * 20
 DELEGATE = '0x' + '77' * 20
 ROUTER = '0x' + '88' * 20
 STOCK = '0x' + '99' * 20
@@ -53,6 +54,18 @@ def _mint_data(recipient=USER, amount=2 * 10**18, min_out=0) -> str:
 
 def _redeem_data(recipient=USER, shares=10**18, min_out=0) -> str:
     return '0x' + sponsor_7702.SEL_REDEEM_TO_USDT + _word(shares) + _word(min_out) + _word(recipient)
+
+
+def _cusd_mint_data(recipient=USER, amount=2 * 10**18, min_out=0) -> str:
+    return '0x' + sponsor_7702.SEL_CUSD_MINT + _word(amount) + _word(min_out) + _word(recipient)
+
+
+def _unwrap_data(recipient=USER, shares=10**18, min_out=0) -> str:
+    return '0x' + sponsor_7702.SEL_UNWRAP_TO_CUSD + _word(shares) + _word(min_out) + _word(recipient)
+
+
+def _cusd_redeem_data(recipient=USER, amount=10**18, min_out=0) -> str:
+    return '0x' + sponsor_7702.SEL_CUSD_REDEEM + _word(amount) + _word(min_out) + _word(recipient)
 
 
 def _call(to, data, value='0'):
@@ -114,7 +127,7 @@ class PolicyTests(SimpleTestCase):
     """validate_policy: only exact vault-flow calls for THIS user pass."""
 
     def _validate(self, calls, user=None):
-        with override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT):
+        with override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, CUSD_VAULT_ADDRESS=CUSD):
             sponsor_7702.validate_policy(calls, user or mock.Mock(id=1), USER)
 
     def _assert_rejected(self, calls, code):
@@ -125,6 +138,37 @@ class PolicyTests(SimpleTestCase):
     def test_deposit_batch_accepted(self):
         self._validate([_call(USDT, _approve_data()), _call(VAULT, _mint_data())])
 
+    def test_universal_cusd_mint_batch_accepted_and_classified(self):
+        calls = [
+            _call(USDT, _approve_data(spender=CUSD)),
+            _call(CUSD, _cusd_mint_data()),
+        ]
+        self._validate(calls)
+        self.assertEqual(sponsor_7702.classify_calls_kind(calls), 'mint_cusd')
+
+    def test_universal_cusd_mint_recipient_is_pinned_to_user(self):
+        self._assert_rejected(
+            [_call(CUSD, _cusd_mint_data(recipient='0x' + 'cd' * 20))],
+            'mint_recipient_not_allowed',
+        )
+
+    def test_multiple_conversion_actions_rejected(self):
+        self._assert_rejected(
+            [_call(CUSD, _cusd_mint_data()), _call(CUSD, _cusd_mint_data())],
+            'multiple_conversion_actions',
+        )
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    @mock.patch('cusd_plus.cusd_vault.preview_redeem_wei')
+    def test_normalize_then_single_fee_exit_and_provider_transfer_allowed(self, preview):
+        preview.return_value = mock.Mock(net_wei=991)
+        transfer = '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + 'cd' * 20) + _word(991)
+        self._validate([
+            _call(VAULT, _unwrap_data(min_out=500)),
+            _call(CUSD, _cusd_redeem_data(amount=1000, min_out=991)),
+            _call(USDT, transfer),
+        ])
+
     def test_value_rejected(self):
         self._assert_rejected([_call(USDT, _approve_data(), value='1')], 'value_not_allowed')
 
@@ -132,12 +176,22 @@ class PolicyTests(SimpleTestCase):
         self._assert_rejected([_call('0x' + 'ab' * 20, _approve_data())], 'destination_not_allowed')
 
     def test_usdt_transfer_allowed_any_recipient(self):
-        # Policy change 2026-07-30: sponsored USDT transfer IS allowed — the
-        # raw-USDT exit. Recipient deliberately unrestricted (exits are never
-        # gated), so even a foreign recipient passes.
+        # Before the cUSD perimeter rollout, retain the legacy raw-USDT rail.
         transfer = '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + 'cd' * 20) + _word(1)
-        with override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT):
+        with override_settings(
+            CUSD_PLUS_VAULT_ADDRESS=VAULT,
+            CUSD_CONVERSION_FEE_ENABLED=False,
+        ):
             sponsor_7702.validate_policy([_call(USDT, transfer)], mock.Mock(), USER)
+
+    def test_usdt_transfer_rejected_when_fee_perimeter_is_live(self):
+        transfer = '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + 'cd' * 20) + _word(1)
+        with override_settings(
+            CUSD_PLUS_VAULT_ADDRESS=VAULT,
+            CUSD_CONVERSION_FEE_ENABLED=True,
+        ):
+            with self.assertRaisesRegex(PolicyError, 'raw_usdt_transfer_not_allowed'):
+                sponsor_7702.validate_policy([_call(USDT, transfer)], mock.Mock(), USER)
 
     def test_usdt_transfer_bad_length_rejected(self):
         short = '0x' + sponsor_7702.SEL_TRANSFER + _word(1)
@@ -1214,3 +1268,41 @@ class StockHistoryTests(SimpleTestCase):
             kwargs = batches.filter.call_args.kwargs
             self.assertEqual(kwargs['kind__in'], ('stock_buy', 'stock_sell'))
             self.assertEqual(kwargs['user_bsc_address__iexact'], USER)
+
+
+class CusdFeeEventTests(SimpleTestCase):
+    CUSD = '0x' + '42' * 20
+
+    def _receipt(self, signature, values, *, address=None, log_index='0x7'):
+        return {
+            'logs': [{
+                'address': address or self.CUSD,
+                'topics': ['0x' + keccak(text=signature).hex()],
+                'data': '0x' + ''.join(f'{value:064x}' for value in values),
+                'logIndex': log_index,
+            }],
+        }
+
+    @override_settings(CUSD_VAULT_ADDRESS=CUSD)
+    def test_parses_exact_mint_fee_triplet(self):
+        from cusd_plus.tasks import _cusd_fee_event
+
+        event = _cusd_fee_event(self._receipt(
+            'MintedWithFee(address,address,uint256,uint256,uint256,uint256)',
+            [100, 1, 99, 90],
+        ))
+        self.assertEqual(event, {
+            'direction': 'entry', 'conversion_type': 'usdt_to_cusd',
+            'gross_wei': 100, 'fee_wei': 1, 'net_wei': 99,
+            'fee_bps': 90,
+            'log_index': 7,
+        })
+
+    @override_settings(CUSD_VAULT_ADDRESS=CUSD)
+    def test_rejects_wrong_contract_and_inconsistent_triplet(self):
+        from cusd_plus.tasks import _cusd_fee_event
+
+        signature = 'RedeemedWithFee(address,address,uint256,uint256,uint256,uint256)'
+        self.assertIsNone(_cusd_fee_event(self._receipt(
+            signature, [100, 1, 99, 90], address='0x' + '43' * 20)))
+        self.assertIsNone(_cusd_fee_event(self._receipt(signature, [100, 2, 99, 90])))

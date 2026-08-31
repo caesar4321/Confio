@@ -175,7 +175,7 @@ const formatPhoneNumber = (phone: string | undefined): string => {
 // differently, and it is what made this screen subtract the fee twice when
 // the backend briefly sent a netted amount. See docs/ledger-amounts.md.
 const serverFee = (tx: any): number | null => {
-  const raw = tx?.feeAmount;
+  const raw = tx?.feeAmount ?? tx?.fee_amount;
   if (raw === undefined || raw === null || raw === '') return null;
   const n = parseFloat(String(raw));
   return Number.isFinite(n) ? n : null;
@@ -1028,6 +1028,10 @@ export const TransactionDetailScreen = () => {
       tokenType: transactionData.token_type || transactionData.tokenType || transactionData.currency,
       transactionId: transactionData.transaction_id || transactionData.transactionId || transactionData.id,
       internalId: transactionData.internal_id || transactionData.internalId,
+      feeAmount: transactionData.fee_amount ?? transactionData.feeAmount,
+      netAmount: transactionData.net_amount ?? transactionData.netAmount,
+      fromAmount: transactionData.from_amount ?? transactionData.fromAmount,
+      toAmount: transactionData.to_amount ?? transactionData.toAmount,
       recipientName: transactionData.recipient_name || transactionData.recipientName,
       recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
       recipientAddress: recipientAddressFromPayload,
@@ -1071,10 +1075,10 @@ export const TransactionDetailScreen = () => {
       merchantIsReferralVerified: transactionData.merchantIsReferralVerified ?? transactionData.recipientIsReferralVerified ?? transactionData.recipientUser?.isReferralVerified ?? false,
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
       // For withdrawals: always negative (money out)
-      amount: (conversionType === 'cusd_to_usdc' || conversionType === 'from_savings')
-        ? `-${stripSign(fromAmount || transactionData.amount) || '0'}`
-        : (conversionType === 'usdc_to_cusd' || conversionType === 'to_savings')
+      amount: conversionPair(conversionType)
+        ? (isConversionIncoming(conversionType)
           ? `+${stripSign(toAmount || transactionData.amount) || '0'}`
+          : `-${stripSign(fromAmount || transactionData.amount) || '0'}`)
           : type === 'withdrawal'
             ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
             : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
@@ -1481,18 +1485,9 @@ export const TransactionDetailScreen = () => {
       normalizedTransactionData?.conversionType ||
       transactionData?.conversion_type ||
       transactionData?.conversionType;
-    const fallbackFrom =
-      typeHint === 'usdc_to_cusd' ? 'USDC' :
-        typeHint === 'to_savings' ? 'USDT' :
-        typeHint === 'from_savings' ? 'cUSD+' :
-        typeHint === 'cusd_to_usdc' ? 'cUSD' :
-          undefined;
-    const fallbackTo =
-      typeHint === 'usdc_to_cusd' ? 'cUSD' :
-        typeHint === 'to_savings' ? 'cUSD+' :
-        typeHint === 'from_savings' ? 'USDT' :
-        typeHint === 'cusd_to_usdc' ? 'USDC' :
-          undefined;
+    const pair = conversionPair(typeHint);
+    const fallbackFrom = pair?.from;
+    const fallbackTo = pair?.to;
     const fromToken =
       tx?.conversionFromCurrency ||
       tx?.conversion_from_currency ||
@@ -1663,14 +1658,36 @@ export const TransactionDetailScreen = () => {
     const currency = formatTokenLabel(currentTx.currency) || 'cUSD';
     const isPaymentDebit = currentTx.type === 'payment' && !!currentTx.amount?.startsWith('-');
 
-    const amountLabel = currentTx.type === 'payment'
-      ? (isPaymentDebit ? 'Monto pagado' : 'Monto cobrado')
-      : (currentTx.type === 'exchange' || currentTx.type === 'conversion')
-        ? 'Monto intercambiado'
+    const isConversionReceipt = currentTx.type === 'exchange' || currentTx.type === 'conversion';
+    if (isConversionReceipt) {
+      const gross = currentTx.fromAmount ?? currentTx.from_amount ?? currentTx.amount;
+      const net = currentTx.toAmount ?? currentTx.to_amount ?? currentTx.netAmount ?? currentTx.net_amount;
+      const fee = serverFee(currentTx);
+      items.push({
+        label: 'Monto convertido',
+        value: `${formatAmount(gross)} ${formatTokenLabel(conversionFromCurrencyLabel) || currency}`,
+      });
+      if (fee !== null && fee > 0) {
+        items.push({
+          label: 'Comisión de Confío',
+          value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${formatTokenLabel(conversionFromCurrencyLabel) || currency}`,
+        });
+      }
+      if (net !== undefined && net !== null && net !== '') {
+        items.push({
+          label: 'Monto recibido',
+          value: `${formatAmount(net)} ${formatTokenLabel(conversionToCurrencyLabel) || formatTokenLabel(currentTx.secondaryCurrency) || currency}`,
+          color: colors.text.primary,
+        });
+      }
+    } else {
+      const amountLabel = currentTx.type === 'payment'
+        ? (isPaymentDebit ? 'Monto pagado' : 'Monto cobrado')
         : currentTx.type === 'received'
           ? 'Monto recibido'
           : 'Monto enviado';
-    items.push({ label: amountLabel, value: `${formatAmount(currentTx.amount)} ${currency}` });
+      items.push({ label: amountLabel, value: `${formatAmount(currentTx.amount)} ${currency}` });
+    }
     items.push({ label: 'Comisión de red', value: 'Gratis · cubre Confío', color: colors.primaryDark });
 
     if (currentTx.type === 'payment' && !isPaymentDebit) {

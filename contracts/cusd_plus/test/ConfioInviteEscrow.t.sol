@@ -3,15 +3,46 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ConfioInviteEscrow} from "../ConfioInviteEscrow.sol";
 
 contract MockToken is ERC20 {
     constructor(string memory n) ERC20(n, n) {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
+}
+
+contract MockInviteCusdPlus is ERC20 {
+    MockToken public immutable CUSD;
+
+    constructor(MockToken cusd) ERC20("cUSD+", "cUSD+") {
+        CUSD = cusd;
+    }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
+
+    function unwrapToCusd(uint256 shares, uint256 minOut, address to) external returns (uint256) {
+        _burn(msg.sender, shares);
+        require(shares >= minOut, "slippage");
+        CUSD.mint(to, shares);
+        return shares;
+    }
+
+    function wrapCusd(uint256 amount, uint256 minOut, address to) external returns (uint256) {
+        CUSD.transferFrom(msg.sender, address(this), amount);
+        require(amount >= minOut, "slippage");
+        _mint(to, amount);
+        return amount;
+    }
 }
 
 contract ConfioInviteEscrowTest is Test {
-    MockToken cusdPlus;
+    MockInviteCusdPlus cusdPlus;
+    MockToken cusd;
     MockToken confio;
     MockToken alien;
     ConfioInviteEscrow escrow;
@@ -25,19 +56,23 @@ contract ConfioInviteEscrowTest is Test {
     bytes32 constant ID = keccak256("invite-1");
 
     function setUp() public {
-        cusdPlus = new MockToken("cUSD+");
+        cusd = new MockToken("cUSD");
+        cusdPlus = new MockInviteCusdPlus(cusd);
         confio = new MockToken("CONFIO");
         alien = new MockToken("ALIEN");
-        escrow = new ConfioInviteEscrow(address(cusdPlus), address(confio), sponsor, safeOwner);
+        escrow = new ConfioInviteEscrow(address(cusdPlus), address(cusd), address(confio), sponsor, safeOwner);
         for (uint256 i = 0; i < 3; i++) {
-            MockToken t = [cusdPlus, confio, alien][i];
+            MockToken t = [cusd, confio, alien][i];
             t.mint(inviter, 1_000e18);
             vm.prank(inviter);
             t.approve(address(escrow), type(uint256).max);
         }
+        cusdPlus.mint(inviter, 1_000e18);
+        vm.prank(inviter);
+        cusdPlus.approve(address(escrow), type(uint256).max);
     }
 
-    function _create(bytes32 id, MockToken token, uint256 amt) internal {
+    function _create(bytes32 id, IERC20 token, uint256 amt) internal {
         vm.prank(inviter);
         escrow.createInvitation(id, address(token), amt);
     }
@@ -85,29 +120,54 @@ contract ConfioInviteEscrowTest is Test {
     function test_sponsor_claims_to_recipient() public {
         _create(ID, cusdPlus, 100e18);
         vm.prank(sponsor);
-        uint256 got = escrow.claimInvitation(ID, inviter, recipient);
+        uint256 got = escrow.claimInvitation(ID, inviter, recipient, true, 0);
         assertEq(got, 100e18);
         assertEq(cusdPlus.balanceOf(recipient), 100e18);
         (,,,, bool settled) = escrow.invitations(escrow.invitationKey(inviter, ID));
         assertTrue(settled);
     }
 
+    function test_plus_invite_unwraps_to_cusd_for_ineligible_recipient() public {
+        _create(ID, cusdPlus, 100e18);
+        vm.prank(sponsor);
+        uint256 got = escrow.claimInvitation(ID, inviter, recipient, false, 100e18);
+        assertEq(got, 100e18);
+        assertEq(cusd.balanceOf(recipient), 100e18);
+        assertEq(cusdPlus.balanceOf(recipient), 0);
+    }
+
+    function test_cusd_invite_wraps_for_eligible_recipient() public {
+        _create(ID, cusd, 100e18);
+        vm.prank(sponsor);
+        uint256 got = escrow.claimInvitation(ID, inviter, recipient, true, 100e18);
+        assertEq(got, 100e18);
+        assertEq(cusdPlus.balanceOf(recipient), 100e18);
+        assertEq(cusd.balanceOf(recipient), 0);
+    }
+
+    function test_cusd_invite_stays_cusd_for_ineligible_recipient() public {
+        _create(ID, cusd, 100e18);
+        vm.prank(sponsor);
+        escrow.claimInvitation(ID, inviter, recipient, false, 0);
+        assertEq(cusd.balanceOf(recipient), 100e18);
+    }
+
     function test_only_sponsor_can_claim() public {
         _create(ID, cusdPlus, 100e18);
         vm.prank(stranger);
         vm.expectRevert("not sponsor");
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
         // even the recipient cannot self-claim (backend-mediated flow)
         vm.prank(recipient);
         vm.expectRevert("not sponsor");
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
     }
 
     function test_claim_recipient_cannot_be_inviter() public {
         _create(ID, cusdPlus, 100e18);
         vm.prank(sponsor);
         vm.expectRevert("recipient is inviter");
-        escrow.claimInvitation(ID, inviter, inviter);
+        escrow.claimInvitation(ID, inviter, inviter, true, 0);
     }
 
     function test_claim_after_expiry_rejected() public {
@@ -115,15 +175,15 @@ contract ConfioInviteEscrowTest is Test {
         vm.warp(block.timestamp + 7 days + 1);
         vm.prank(sponsor);
         vm.expectRevert("expired");
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
     }
 
     function test_double_claim_rejected() public {
         _create(ID, cusdPlus, 100e18);
         vm.startPrank(sponsor);
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
         vm.expectRevert("settled");
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
         vm.stopPrank();
     }
 
@@ -171,7 +231,7 @@ contract ConfioInviteEscrowTest is Test {
         escrow.reclaimInvitation(ID);
         vm.prank(sponsor);
         vm.expectRevert("settled"); // settled is checked before expiry
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
     }
 
     // ── Admin ────────────────────────────────────────────────────────
@@ -186,9 +246,9 @@ contract ConfioInviteEscrowTest is Test {
         escrow.setSponsor(newSponsor);
         vm.prank(sponsor);
         vm.expectRevert("not sponsor");
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
         vm.prank(newSponsor);
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
         assertEq(cusdPlus.balanceOf(recipient), 100e18);
     }
 
@@ -218,10 +278,10 @@ contract ConfioInviteEscrowTest is Test {
         // And the sponsor claims the real one (bound to the real inviter),
         // never the squatter's.
         vm.prank(sponsor);
-        escrow.claimInvitation(ID, inviter, recipient);
+        escrow.claimInvitation(ID, inviter, recipient, true, 0);
         assertEq(cusdPlus.balanceOf(recipient), 100e18);
         // The squatter's 1-wei entry is independent and untouched.
-        (, , uint128 sqAmt,, bool sqSettled) = escrow.invitations(escrow.invitationKey(stranger, ID));
+        (,, uint128 sqAmt,, bool sqSettled) = escrow.invitations(escrow.invitationKey(stranger, ID));
         assertEq(sqAmt, 1);
         assertFalse(sqSettled);
     }

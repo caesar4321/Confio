@@ -20,6 +20,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
   // site must not advertise more than reality. Zero/NaN don't render.
   const deposited = toStatValue(live?.depositedVolumeUsd);
   const presale = toStatValue(live?.presaleRaisedUsd);
+  const registeredUsers = toStatValue(live?.registeredUsers);
 
   const defaultTitle = (
     <>
@@ -30,9 +31,9 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
   );
 
   const defaultSubtitle = t(
-    'Envía, paga, ahorra e invierte dólares digitales desde tu celular. Sin banco, sin comisiones de red, sin complicaciones.',
-    'Send, pay, save and invest digital dollars from your phone. No bank, no network fees, no complications.',
-    '휴대폰으로 디지털 달러를 보내고, 결제하고, 저축하고, 투자하세요. 은행 없이, 네트워크 수수료 없이, 복잡함 없이.'
+    'Envía, paga, ahorra e invierte dólares digitales desde tu celular. Sin banco, con tarifas claras y sin complicaciones.',
+    'Send, pay, save and invest digital dollars from your phone. No bank, clear fees, no complications.',
+    '휴대폰으로 디지털 달러를 보내고, 결제하고, 저축하고, 투자하세요. 은행 없이, 명확한 수수료로, 복잡함 없이.'
   );
 
   return (
@@ -94,7 +95,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
             )}
 
             {/* Live traction — real numbers styled like app balances */}
-            {!title && (
+            {!title && (deposited != null || presale != null || registeredUsers != null) && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -117,12 +118,14 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
                     </span>
                   </div>
                 )}
-                <div className={styles.statBlock}>
-                  <span className={styles.statValue}>US$0.00</span>
-                  <span className={styles.statLabel}>
-                    {t('comisión de red, siempre', 'network fees, always', '네트워크 수수료, 항상')}
-                  </span>
-                </div>
+                {registeredUsers != null && (
+                  <div className={styles.statBlock}>
+                    <TickerNumber value={registeredUsers} prefix="" className={styles.statValue} />
+                    <span className={styles.statLabel}>
+                      {t('usuarios registrados', 'registered users', '등록 사용자')}
+                    </span>
+                  </div>
+                )}
               </motion.div>
             )}
           </div>

@@ -9,12 +9,14 @@ pragma solidity ^0.8.24;
  *
  * One user signature per trade (plus one-time approvals):
  *
- *   buyWithSavings:  pull cUSD+ shares -> vault.redeemToUsdt -> fee slice
+ *   buyWithSavings:  pull cUSD+ shares -> vault.redeemForStock -> fee slice
  *                    retained in router -> GM mint -> stock tokens to user
  *   sellToSavings:   pull stock tokens -> GM redeem -> USDT -> fee slice
- *                    -> vault.subscribeAndMint(recipient = user)
+ *                    -> vault.subscribeForStock(recipient = user)
  *                    (proceeds keep earning — the SellStock success copy's
  *                    "sigue generando rendimiento" is literal)
+ *   sellToUsdt:      pull stock tokens -> GM redeem -> fee slice -> raw USDT
+ *                    to user (permissionless, user pays gas)
  *
  * Philosophy (same as CusdPlusVault):
  * - The router holds only the explicitly-accounted 0.30% USDT trade fees
@@ -73,8 +75,8 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 interface ICusdPlusVaultMinimal {
-    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to) external returns (uint256);
-    function subscribeAndMint(uint256 usdtIn, uint256 minUsdyOut, address recipient) external returns (uint256);
+    function redeemForStock(uint256 shares, uint256 minUsdtOut, address to) external returns (uint256);
+    function subscribeForStock(uint256 usdtIn, uint256 minUsdyOut, address recipient) external returns (uint256);
     function isSponsor(address account) external view returns (bool);
 }
 
@@ -159,6 +161,15 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         uint256 feeUsdt,
         uint256 sharesOut
     );
+    event StockSoldToUsdt(
+        address indexed user,
+        address indexed stockToken,
+        uint256 attestationId,
+        uint256 stockIn,
+        uint256 usdtProceeds,
+        uint256 feeUsdt,
+        uint256 usdtOut
+    );
     event UsdonRefundForwarded(address indexed user, uint256 amount);
     event UsdtRedemptionExcessReturned(address indexed user, uint256 amount);
 
@@ -189,22 +200,14 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
 
     function _authorizeUpgrade(address) internal view override onlyOwner {}
 
-    /// Confío's relay must ORIGINATE the trade (audit 2026-07-31 [P1]).
-    ///
-    /// `sellToSavings` reaches the vault's PRIMARY ISSUANCE, and the vault
-    /// must register this router as a sponsor for that call to work at all
-    /// (it mints to the user while the router is msg.sender). But being a
-    /// sponsor makes the router satisfy BOTH of the vault's checks by
-    /// itself — `isSponsor[msg.sender]` is true and `tx.origin` becomes
-    /// irrelevant — so without this modifier ANY caller could launder a
-    /// permissionless call into freshly minted cUSD+, bypassing the phone
-    /// + IP eligibility checks the whole v5 gate exists to enforce. A US
-    /// person holding a transferable GM stock is exactly that caller.
+    /// Confío's relay must ORIGINATE any trade that mints or spends cUSD+.
+    /// Raw-USDT redemption is deliberately excluded so sponsor availability
+    /// can never block a holder from selling stock and leaving the system.
     ///
     /// Deliberately `tx.origin`: checking `isSponsor(address(this))` would
-    /// always be true and is precisely the hole. This is NOT an exit gate
-    /// — a holder can always leave via the vault's own `redeemToUsdt`,
-    /// which no contract here can restrict.
+    /// always be true because the router needs that role for settlement.
+    /// This modifier belongs on cUSD+ buys and sells. `sellToUsdt` is the
+    /// separate permissionless exit.
     modifier onlySponsoredOrigin() {
         require(VAULT.isSponsor(tx.origin), "not sponsored");
         _;
@@ -304,7 +307,7 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         require(reinvest > 0, "nothing to reinvest");
 
         USDT.forceApprove(address(VAULT), reinvest);
-        VAULT.subscribeAndMint(reinvest, 0, msg.sender);
+        VAULT.subscribeForStock(reinvest, 0, msg.sender);
         require(USDT.allowance(address(this), address(VAULT)) == 0, "vault: partial fill");
 
         // Floor what the USER actually holds afterwards.
@@ -312,6 +315,37 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
         require(sharesOut >= minSharesOut, "insufficient shares out");
 
         emit StockSold(msg.sender, quote.asset, quote.attestationId, quote.quantity, usdt, fee, sharesOut);
+    }
+
+    /// Sell stock directly to raw USDT. This is the permissionless exit: it
+    /// never calls the cUSD+ vault, never needs a sponsor, and charges only
+    /// the fixed 30 bps stock fee. `minUsdtOut` protects the GM redemption;
+    /// `minNetUsdtOut` independently protects what reaches the user after fee.
+    function sellToUsdt(
+        GmQuote calldata quote,
+        bytes calldata signature,
+        uint256 minUsdtOut,
+        uint256 minNetUsdtOut,
+        uint256 maxFeeBps
+    ) external nonReentrant whenNotPaused returns (uint256 netUsdtOut) {
+        require(quote.quantity > 0, "zero in");
+        require(quote.price > 0, "zero price");
+        require(quote.side == SELL, "wrong quote side");
+        require(quote.chainId == block.chainid, "wrong chain");
+        require(stockFeeBps <= maxFeeBps, "fee above trade cap");
+
+        IERC20(quote.asset).safeTransferFrom(msg.sender, address(this), quote.quantity);
+        uint256 usdt = _gmRedeem(quote, signature, minUsdtOut);
+        require(usdt >= minUsdtOut, "gm: insufficient payment out");
+
+        uint256 fee = (usdt * stockFeeBps) / BPS;
+        accruedUsdtFees += fee;
+        netUsdtOut = usdt - fee;
+        require(netUsdtOut > 0, "nothing to redeem");
+        require(netUsdtOut >= minNetUsdtOut, "insufficient net usdt out");
+        USDT.safeTransfer(msg.sender, netUsdtOut);
+
+        emit StockSoldToUsdt(msg.sender, quote.asset, quote.attestationId, quote.quantity, usdt, fee, netUsdtOut);
     }
 
     // ═════════════════════════ Internals ════════════════════════════════
@@ -322,7 +356,7 @@ contract ConfioStockRouter is Ownable2StepUpgradeable, PausableUpgradeable, Reen
     /// the router from being swept into a user's trade.
     function _redeemSavings(uint256 sharesIn, uint256 minUsdtOut) private returns (uint256 usdt) {
         uint256 before = USDT.balanceOf(address(this));
-        VAULT.redeemToUsdt(sharesIn, minUsdtOut, address(this));
+        VAULT.redeemForStock(sharesIn, minUsdtOut, address(this));
         usdt = USDT.balanceOf(address(this)) - before;
         require(usdt >= minUsdtOut, "vault: insufficient usdt out");
     }

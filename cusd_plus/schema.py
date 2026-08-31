@@ -32,7 +32,7 @@ _SPONSOR_REQUEST_ID_RE = re.compile(r'^[A-Za-z0-9_-]{16,80}$')
 
 
 def _stock_execution_ready():
-    """Return True only when every server-controlled execution rail is wired."""
+    """Return True only when every Confío app execution rail is wired."""
     from django.conf import settings
 
     return bool(
@@ -233,12 +233,15 @@ class CusdPlusSummaryType(graphene.ObjectType):
     sweepable_usdt_wei = graphene.String(
         description='Exact auto-mintable raw USDT in 18-decimal base units. Money-moving clients must use this string, never the Float projection.')
     savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo): phone country AND request IP country, the same full set the mint gate enforces. Gates ENTRY only — exits are never gated")
+    conversion_fee_bps = graphene.Int(description="Live USDT perimeter fee for client disclosure; 0 while rollout is disabled")
     stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
     stocks_trading_enabled = graphene.Boolean(description="Binding GM attestations and router settlement are enabled")
     stocks_buy_enabled = graphene.Boolean(description="Trading is enabled and this request is Ondo-entry eligible")
     cusd_deposits_paused = graphene.Boolean(description="cUSD phase-out: when True the app stops promoting new cUSD ramp deposits (UX steering only; the ramp stays operational)")
-    usdt_balance_usd = graphene.Float(description="Raw wallet USDT-BSC (pre-mint, or held as 'Confío Dollar' by geo-ineligible users) — display-grade, cached")
+    usdt_balance_usd = graphene.Float(description="Transient raw wallet USDT-BSC awaiting foreground auto-conversion — display-grade, cached")
     usdt_balance_wei = graphene.String(description="Same balance in exact wei (string; 18dp) for MAX-send and mint math")
+    cusd_balance_usd = graphene.Float(description="Universal cUSD-BSC payment balance; 1 token = 1 USD")
+    cusd_balance_wei = graphene.String(description="Same cUSD balance in exact 18-decimal base units")
     confio_balance = graphene.Float(description="BEP-20 CONFIO held by the account (token count, not USD) — display-grade; 0 until the token address is configured")
 
 
@@ -260,6 +263,7 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     gm_trade_fee_bps = graphene.Int(description="Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative")
     stock_router_address = graphene.String(description="Standalone ConfioStockRouter on BSC; null until deployed")
     vault_address = graphene.String(description="cUSD+ vault (proxy) on BSC — client targets this for leg C (subscribeAndMint/redeem)")
+    cusd_address = graphene.String(description="cUSD vault (UUPS proxy) on BSC — universal non-yield dollar mint/redeem perimeter")
     # BNB auto-convert (mis-deposited BNB → USDT, the BSC mirror of the
     # ALGO→USDC auto-swap). Wei values travel as strings: they overflow
     # GraphQL Int and Float loses integer precision.
@@ -673,11 +677,18 @@ class Query(graphene.ObjectType):
         # first mint; the ledger for earned_today/month lands with leg C).
         bsc_address = _active_bsc_address(info)
         balance_usd = vault.position_usd(bsc_address) if bsc_address else 0.0
-        # Raw wallet USDT: money that landed but hasn't minted (or never will,
-        # for geo-ineligible users — their "Confío Dollar"). One cached read
-        # serves both fields; the client re-reads balanceOf live before any
-        # exact-amount send, so 30s staleness here is display-only.
+        # Raw wallet USDT: transient settlement money that landed but has not
+        # yet auto-converted. Eligible holders receive cUSD+; ineligible
+        # holders receive cUSD. One cached read serves both display fields;
+        # money-moving paths always re-read balanceOf live.
         usdt_wei_int = vault.usdt_balance_raw(bsc_address) if bsc_address else 0
+        cusd_wei_int = 0
+        cusd_token = getattr(settings, 'CUSD_VAULT_ADDRESS', None)
+        if bsc_address and cusd_token:
+            try:
+                cusd_wei_int = vault.erc20_balance_raw(cusd_token, bsc_address)
+            except Exception:  # noqa: BLE001
+                cusd_wei_int = 0
         sweepable_wei_int = _sweepable_usdt_wei(user, bsc_address)
         # BEP-20 CONFIO (token count) for the send screen. Never blocks the
         # summary: an RPC hiccup shows 0 here while the dollar fields keep
@@ -704,6 +715,18 @@ class Query(graphene.ObjectType):
         # balance -> 0.0 -> the ticker line hides.
         daily_net = (1.0 + net_apy / 100.0) ** (1.0 / 365.0) - 1.0
         earned_today = balance_usd * daily_net
+        conversion_fee_bps = 0
+        if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+            try:
+                from .cusd_vault import current_fee_bps
+                conversion_fee_bps = current_fee_bps()
+            except Exception:  # noqa: BLE001
+                # This field is disclosure-only and must never claim the
+                # conversion is free merely because an RPC read failed. The
+                # contract permanently caps the fee at 90 bps; binding flow
+                # quotes still fail closed and use previewMint/previewRedeem.
+                logger.warning('Live cUSD fee unavailable; disclosing 90-bps ceiling')
+                conversion_fee_bps = 90
         return CusdPlusSummaryType(
             balance_usd=balance_usd,
             net_apy_pct=net_apy,
@@ -713,6 +736,7 @@ class Query(graphene.ObjectType):
             # lands as a considered follow-up; the ticker renders Hoy alone.
             earned_month_usd=0.0,
             savings_enabled=eligible,
+            conversion_fee_bps=conversion_fee_bps,
             sweepable_usdt_usd=sweepable_wei_int / (10 ** 18),
             sweepable_usdt_wei=str(sweepable_wei_int),
             # Discovery is visible only when the ops switch and issuer geo
@@ -730,6 +754,8 @@ class Query(graphene.ObjectType):
             cusd_deposits_paused=getattr(settings, 'CUSD_DEPOSITS_PAUSED', True),
             usdt_balance_usd=usdt_wei_int / (10 ** 18),
             usdt_balance_wei=str(usdt_wei_int),
+            cusd_balance_usd=cusd_wei_int / (10 ** 18),
+            cusd_balance_wei=str(cusd_wei_int),
             confio_balance=confio_wei_int / (10 ** 18),
         )
 
@@ -773,6 +799,7 @@ class Query(graphene.ObjectType):
             gm_trade_fee_bps=getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 0),
             stock_router_address=getattr(settings, 'CUSD_PLUS_STOCK_ROUTER_ADDRESS', None) or None,
             vault_address=getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', None),
+            cusd_address=getattr(settings, 'CUSD_VAULT_ADDRESS', None) or None,
             bnb_auto_convert_enabled=getattr(settings, 'CUSD_PLUS_BNB_AUTOCONVERT_ENABLED', False),
             pancake_router=getattr(settings, 'CUSD_PLUS_PANCAKE_ROUTER', None),
             bnb_auto_convert_min_swap_wei=str(getattr(
@@ -1016,6 +1043,7 @@ class BscRpcResult(graphene.ObjectType):
 # not copied). Kept importable under the old name for existing tests.
 from .sponsor_7702 import (  # noqa: E402
     SEL_SUBSCRIBE_AND_MINT as _SEL_SUBSCRIBE_AND_MINT,
+    SEL_WRAP_CUSD as _SEL_WRAP_CUSD,
     _guardarian_savings_deposit_address,
     redeem_recipient_allowed as _redeem_recipient_allowed,
 )
@@ -1139,10 +1167,10 @@ class SubmitBscTransaction(graphene.Mutation):
                         recipient, user.id, tx_signer,
                     )
                     return SubmitBscTransaction(success=False, error='redeem_recipient_not_allowed')
-            # Mint geo-gate (2026-07-30): since ramps deliver raw USDT to
-            # everyone, THIS is where geo-eligibility is enforced — phone
-            # country + Cloudflare IP country. Mint only; redeem above and
-            # raw USDT transfers stay ungated (exits are never gated).
+            # Legacy cUSD+ mint geo-gate. Fee-capable clients choose cUSD for
+            # an ineligible holder before reaching this legacy relay; an old
+            # direct cUSD+ request is still refused without moving its USDT.
+            # Exits remain outside the Ondo acquisition gate.
             if data_hex.startswith(_SEL_SUBSCRIBE_AND_MINT):
                 if len(data_hex) != 8 + 192:
                     return SubmitBscTransaction(success=False, error='bad_calldata')
@@ -1159,9 +1187,10 @@ class SubmitBscTransaction(graphene.Mutation):
                 mint_amount_wei = int(data_hex[8:72], 16)
                 from .vault import is_safe_mint_amount
                 if not is_safe_mint_amount(mint_amount_wei):
-                    # The money stays raw USDT and remains spendable. Close a
-                    # bridge saga if one owns this arrival so old clients do
-                    # not retry the same unsafe mint on every foreground.
+                    # The money stays transient raw USDT and remains
+                    # recoverable. Close a bridge saga if one owns this
+                    # arrival so old clients do not retry the same unsafe
+                    # cUSD+ mint on every foreground.
                     from .tasks import mark_saga_delivered_as_usdt
                     mark_saga_delivered_as_usdt(
                         _active_bsc_address(info) or '', mint_amount_wei)
@@ -1342,16 +1371,16 @@ class SponsorBscBatch(graphene.Mutation):
         if not (now + 60 <= deadline_i <= now + 1800):
             return SponsorBscBatch(success=False, error='bad_deadline')
 
-        # Mint geo-gate (2026-07-30): ramps deliver raw USDT to everyone, so
-        # geo-eligibility (phone + Cloudflare IP country) is enforced HERE on
-        # any batch carrying a vault subscribeAndMint. Lives outside
-        # validate_policy on purpose — the policy is a pure calldata check
-        # (tests call it directly) and has no request context. Redeems and
-        # approvals pass untouched: exits are never gated.
+        # cUSD+ acquisition gate. Fee-capable clients route ineligible users
+        # to cUSD; this remains the server-side guard against a stale or
+        # modified client requesting cUSD+ directly. It lives outside
+        # validate_policy because the pure calldata policy has no request IP
+        # context. cUSD issuance and exits are deliberately unaffected.
         vault_l = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
         mint_calls = [
             c for c in norm_calls
-            if c['to'] == vault_l and c['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
+            if c['to'] == vault_l
+            and c['data'][2:10] in (_SEL_SUBSCRIBE_AND_MINT, _SEL_WRAP_CUSD)
         ]
         # One sponsored request represents one savings operation and creates
         # one history row. Allowing a second mint would both bypass an amount
@@ -1371,11 +1400,13 @@ class SponsorBscBatch(graphene.Mutation):
             from .eligibility import check_savings_mint_eligibility
             if not check_savings_mint_eligibility(user, getattr(info.context, 'META', {})):
                 mint_refusal_error = 'mint_not_available'
-            # subscribeAndMint(uint256,uint256,address) first argument.
+            # subscribeAndMint/wrapCusd(uint256,uint256,address), first arg.
             # Enforce this server-side so an older or modified client cannot
             # create a position that rounds below Ondo's exact $1 exit floor.
             from .vault import is_safe_mint_amount
-            if mint_refusal_error is None and not is_safe_mint_amount(mint_amount_wei):
+            if (mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
+                    and mint_refusal_error is None
+                    and not is_safe_mint_amount(mint_amount_wei)):
                 mint_refusal_error = 'mint_below_redeemable_minimum'
                 mint_refusal_amount = mint_amount_wei
 
@@ -1494,7 +1525,7 @@ class SponsorBscBatch(graphene.Mutation):
                 from . import vault as _vault
                 _vault.invalidate_position(user_addr)
                 _cache.delete(f'gm_hold:{user_addr.lower()}')
-            if mint_call is not None:
+            if mint_call is not None and mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
                 # Gate passed and the batch is on the wire: record the mint as
                 # history. subscribeAndMint(uint256 usdtAmount, ...) — first
                 # word of calldata we validated, never a client-supplied value.
@@ -1509,6 +1540,30 @@ class SponsorBscBatch(graphene.Mutation):
                     amount_wei=int(mint_call['data'][10:74], 16),
                     tx_hash=tx_hash, bsc_address=user_addr,
                 )
+            elif kind == 'mint_cusd':
+                # Universal cUSD issuance is not part of the Ondo mint gate,
+                # but remains sponsor-only on chain. Decode gross USDT from
+                # the already policy-validated mintWithFee calldata.
+                cusd_addr = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+                cusd_mint = next(
+                    (c for c in norm_calls
+                     if c['to'] == cusd_addr
+                     and c['data'][2:10] == sponsor_7702.SEL_CUSD_MINT),
+                    None,
+                )
+                if cusd_mint is not None:
+                    from .tasks import record_cusd_mint
+                    acct = _active_account(info)
+                    record_cusd_mint(
+                        user=user,
+                        business=getattr(acct, 'business', None) if acct else None,
+                        actor_type=('business' if acct is not None
+                                    and acct.account_type == 'business' else 'user'),
+                        display_name=getattr(acct, 'display_name', '') if acct else '',
+                        amount_wei=int(cusd_mint['data'][10:74], 16),
+                        tx_hash=tx_hash,
+                        bsc_address=user_addr,
+                    )
         except sponsor_7702.ExistingSponsoredBatch as exc:
             existing = exc.batch
             same_address = existing.user_bsc_address.lower() == user_addr

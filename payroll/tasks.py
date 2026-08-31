@@ -7,6 +7,7 @@ import logging
 from decimal import Decimal
 
 from celery import shared_task
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -133,16 +134,17 @@ def _decode_settled_amount(tx_hash: str, item):
             data = (log.get('data') or '0x')[2:]
             if len(data) < 6 * 64:
                 break
-            # signer · asset · netAmount · feeAmount · redeemedToUsdt · usdtOut
-            redeemed = int(data[4 * 64:5 * 64], 16) == 1
-            usdt_out = int(data[5 * 64:6 * 64], 16)
-            if not redeemed:
+            # Legacy ABI names: the last two words now mean routedToCusd and
+            # routedOut for the cUSD+ compatibility branch.
+            routed = int(data[4 * 64:5 * 64], 16) == 1
+            routed_out = int(data[5 * 64:6 * 64], 16)
+            if not routed:
                 return nominal  # paid in shares — nominal is what moved
-            settled = (Decimal(usdt_out) / Decimal(10) ** 18).quantize(Decimal('0.000001'))
+            settled = (Decimal(routed_out) / Decimal(10) ** 18).quantize(Decimal('0.000001'))
             if settled != nominal:
                 logger.info(
-                    '[PAYROLL][BSC] %s settled at %s USDT against a nominal %s '
-                    '(redemption slippage)', item.internal_id, settled, nominal)
+                    '[PAYROLL][BSC] %s settled at %s cUSD against a nominal %s '
+                    '(internal-route slippage)', item.internal_id, settled, nominal)
             return settled
         logger.warning('[PAYROLL][BSC] no PaidOut log for %s — recording the nominal amount',
                        item.internal_id)
@@ -164,14 +166,37 @@ def confirm_bsc_payroll_payout(self, item_id: int, batch_id: int):
         batch = SponsoredBatch.objects.get(id=batch_id)
     except (PayrollItem.DoesNotExist, SponsoredBatch.DoesNotExist):
         return
-    if item.status != 'SUBMITTED':
-        return  # already resolved
-
     # Isolation (audit 2026-07-31 P2): only THIS item's payout batch settles it.
     if (batch.kind != 'payroll_payout' or batch.source_id != item.id
-            or (item.transaction_hash and batch.tx_hash != item.transaction_hash)):
+            or (item.transaction_hash
+                and batch.tx_hash.lower() != item.transaction_hash.lower())):
         logger.error('[PAYROLL][BSC] batch %s does not match item %s — refusing to settle', batch.id, item.id)
         return
+
+    # Crash convergence: the KMS-signed batch is durable before the domain
+    # item is stamped. Adopt that isolated batch if the process died in the
+    # post-broadcast window, using recipient data stored at prepare time.
+    if item.status == 'PREPARED' and not item.transaction_hash:
+        payout = (item.blockchain_data or {}).get('bsc_payout') or {}
+        recipient = (payout.get('recipient') or '').lower()
+        adopted = PayrollItem.objects.filter(
+            pk=item.pk, status='PREPARED', transaction_hash='',
+        ).update(
+            transaction_hash=batch.tx_hash,
+            status='SUBMITTED',
+            executed_by_user_id=batch.user_id,
+            executed_at=batch.created_at,
+            recipient_address=recipient,
+            updated_at=timezone.now(),
+        )
+        if adopted:
+            item.transaction_hash = batch.tx_hash
+            item.status = 'SUBMITTED'
+            item.executed_by_user_id = batch.user_id
+            item.executed_at = batch.created_at
+            item.recipient_address = recipient
+    if item.status != 'SUBMITTED':
+        return  # already resolved or concurrently advanced
 
     if batch.status in ('signed', 'sent'):
         raise self.retry(countdown=15)
@@ -228,22 +253,42 @@ def reconcile_stranded_bsc_payroll():
     itself, so a duplicate delivery is a no-op.
     """
     from blockchain.models import SponsoredBatch
+    from django.db import models
     from .models import PayrollItem
 
+    batch_statuses = (
+        'signed', 'sent', 'confirmed', 'reverted', 'dropped', 'reorged',
+        'noop_failed',
+    )
+    has_batch = SponsoredBatch.objects.filter(
+        kind='payroll_payout',
+        source_id=models.OuterRef('pk'),
+        status__in=batch_statuses,
+    )
+    # PREPARED is normally a large queue of unpaid wages. Filter by durable
+    # batch existence BEFORE the limit so ordinary rows cannot starve a later
+    # crash-stranded broadcast forever.
     stranded = (PayrollItem.objects
-                .filter(status='SUBMITTED', deleted_at__isnull=True)
-                .exclude(transaction_hash='')
+                .filter(status__in=('PREPARED', 'SUBMITTED'), deleted_at__isnull=True)
+                .annotate(has_recovery_batch=models.Exists(has_batch))
+                .filter(has_recovery_batch=True)
                 .order_by('id')[:200])
     settled = 0
     for item in stranded:
         batch = SponsoredBatch.objects.filter(
             kind='payroll_payout', source_id=item.id,
-            status__in=('confirmed', 'reverted', 'dropped', 'reorged',
-                        'noop_failed'),
+            status__in=batch_statuses,
         ).order_by('-id').first()
         if batch is None:
             continue  # still in flight — the receipt worker owns it
-        confirm_bsc_payroll_payout.apply_async(args=[item.id, batch.id])
+        if batch.status in ('signed', 'sent'):
+            from cusd_plus.tasks import check_sponsored_batch_receipt
+            check_sponsored_batch_receipt.apply_async(
+                args=[batch.id], countdown=3,
+            )
+        confirm_bsc_payroll_payout.apply_async(
+            args=[item.id, batch.id], countdown=5,
+        )
         settled += 1
     if settled:
         logger.info('[PAYROLL][BSC] re-queued %s stranded payout(s)', settled)

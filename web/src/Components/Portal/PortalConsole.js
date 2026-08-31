@@ -669,10 +669,11 @@ export default function PortalConsole() {
 
   /* ─── Derived state ─── */
 
-  const conversations = supportQuery.data?.portalSupportConversations || [];
-  const filteredConversations = useMemo(() => {
-    return conversations;
-  }, [conversations]);
+  const conversations = useMemo(
+    () => supportQuery.data?.portalSupportConversations || [],
+    [supportQuery.data]
+  );
+  const filteredConversations = conversations;
 
   const totalUnread = useMemo(
     () => conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
@@ -686,7 +687,10 @@ export default function PortalConsole() {
   const activeConversation =
     supportConversationQuery.data?.portalSupportConversation || activeConversationSummary;
 
-  const contentItems = contentQuery.data?.portalContentItems || [];
+  const contentItems = useMemo(
+    () => contentQuery.data?.portalContentItems || [],
+    [contentQuery.data]
+  );
   const filteredContentItems = useMemo(() => {
     if (!contentSearch.trim()) return contentItems;
     const q = contentSearch.toLowerCase();
@@ -738,7 +742,7 @@ export default function PortalConsole() {
     requestAnimationFrame(() => {
       supportThreadRef.current.scrollTop = supportThreadRef.current.scrollHeight;
     });
-  }, [activeTab, activeConversation?.id, activeConversation?.messages?.length]);
+  }, [activeTab, activeConversation]);
 
   // Unsaved changes warning
   useEffect(() => {

@@ -9,14 +9,36 @@ from urllib.parse import quote
 import logging
 import os
 import json
+import re
 import uuid
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_CEILING, ROUND_DOWN, Decimal, InvalidOperation
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 import requests
 from graphql_jwt.utils import jwt_decode
 
 logger = logging.getLogger(__name__)
+
+
+def _provider_evm_tx_hash(payload):
+    """Return an EVM settlement hash from a nested provider response."""
+    if not isinstance(payload, dict):
+        return ''
+    for key in ('txHash', 'tx_hash', 'transactionHash', 'transaction_hash'):
+        value = payload.get(key)
+        if isinstance(value, str) and re.fullmatch(r'0x[0-9a-fA-F]{64}', value):
+            return value.lower()
+    for value in payload.values():
+        if isinstance(value, dict):
+            found = _provider_evm_tx_hash(value)
+            if found:
+                return found
+        if isinstance(value, list):
+            for item in value:
+                found = _provider_evm_tx_hash(item)
+                if found:
+                    return found
+    return ''
 
 CONFIO_ORGANIZATION = {
     'name': 'Confío',
@@ -638,16 +660,42 @@ def guardarian_transaction_proxy(request):
     # CreateRampOrder's savings_rail. Guardarian's BSC network codes vary
     # (BSC / BEP20 / BNB), so match loosely.
     _to_net_early = (body.get('to_network') or body.get('toNetwork') or '').strip().upper()
+    _from_net_early = (body.get('from_network') or body.get('fromNetwork') or '').strip().upper()
     is_savings_rail = (
         not is_sell_transaction
         and to_currency_clean == 'USDT'
         and _to_net_early in ('BSC', 'BEP20', 'BEP-20', 'BNB', 'BSC_BNB')
     )
-    # Geo-eligibility moved to the MINT (cusd_plus mint gate, 2026-07-30):
-    # everyone may receive USDT-BSC — ineligible users keep it raw ("Confío
-    # Dollar"); the vault mint is refused server-side. The missing-address
-    # refusal below stays: without a registered bsc_address there is nowhere
-    # to deliver.
+    is_bsc_dollar_sell = (
+        is_sell_transaction
+        and str(from_currency or '').strip().upper() == 'USDT'
+        and _from_net_early in ('BSC', 'BEP20', 'BEP-20', 'BNB', 'BSC_BNB')
+    )
+    fee_capable_client = str(
+        request.META.get('HTTP_X_CONFIO_FEE_CAPABLE', '')
+    ).strip() == '1'
+    # A Guardarian checkout must disclose the fee that the deployed cUSD
+    # perimeter will actually charge. The Safe may lower feeBps (bounded by
+    # the immutable 90-bps ceiling), so a hardcoded 90 can drift from
+    # execution. Read it before creating the provider order: if the chain is
+    # unavailable, failing here avoids an orphaned checkout whose economics
+    # we cannot quote honestly.
+    guardarian_fee_bps = 0
+    if ((is_savings_rail or is_bsc_dollar_sell)
+            and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)):
+        try:
+            from cusd_plus.cusd_vault import current_fee_bps
+            guardarian_fee_bps = current_fee_bps()
+        except Exception:  # noqa: BLE001
+            logger.exception('Could not read live cUSD fee before Guardarian checkout')
+            return JsonResponse(
+                {'error': 'No pudimos cotizar la comisión de conversión. Intenta de nuevo.'},
+                status=503,
+            )
+    # Everyone may receive USDT-BSC settlement. Foreground auto-conversion
+    # routes eligible holders to cUSD+ and ineligible holders to cUSD. The
+    # missing-address refusal below remains because there is nowhere to
+    # deliver the provider settlement without a registered BSC address.
     # Resolve the JWT's account FIRST, for buys AND sells. It used to be bound
     # only inside the buy branch below while GuardarianTransaction.create()
     # references it for every transaction — so every SELL raised
@@ -718,8 +766,68 @@ def guardarian_transaction_proxy(request):
     if canonical_amount <= 0:
         return JsonResponse({'error': 'amount debe ser mayor a 0'}, status=400)
 
+    guardarian_fee_preview = None
+    provider_crypto_amount = canonical_amount
+    if (is_bsc_dollar_sell
+            and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)):
+        try:
+            from cusd_plus.cusd_vault import WAD, preview_redeem_wei
+            gross_wei = int((canonical_amount * WAD).to_integral_value(rounding=ROUND_DOWN))
+            guardarian_fee_preview = preview_redeem_wei(gross_wei)
+            provider_crypto_amount = (
+                guardarian_fee_preview.net.quantize(
+                    Decimal('0.000001'), rounding=ROUND_DOWN)
+                if fee_capable_client else canonical_amount
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception('Could not preview Guardarian BSC sell fee')
+            return JsonResponse(
+                {'error': 'No pudimos cotizar la comisión de conversión. Intenta de nuevo.'},
+                status=503,
+            )
+        try:
+            from cusd_plus.vault import (
+                cusd_withdrawable_usdt_wei,
+                redeem_blocked_reason,
+                usdt_balance_raw,
+                withdrawable_usdt_wei,
+            )
+            available_net_wei = (
+                withdrawable_usdt_wei(account.bsc_address)
+                - usdt_balance_raw(account.bsc_address, fresh=True)
+            )
+            required_wei = int(
+                (provider_crypto_amount * Decimal(10) ** 18).to_integral_value(
+                    rounding=ROUND_DOWN))
+            if available_net_wei < required_wei:
+                return JsonResponse(
+                    {'error': 'No tienes suficiente saldo disponible para este retiro.'},
+                    status=400,
+                )
+            # cUSD can fund the order without touching Ondo. Only consult the
+            # cUSD+ exit guard when the requested provider amount needs the
+            # savings shortfall; otherwise a savings pause must not block a
+            # perfectly fundable cUSD withdrawal.
+            if cusd_withdrawable_usdt_wei(account.bsc_address) < required_wei:
+                blocked = redeem_blocked_reason()
+                if blocked:
+                    logger.warning(
+                        'Guardarian BSC sell refused: savings redeem blocked (%s)',
+                        blocked,
+                    )
+                    return JsonResponse(
+                        {'error': 'Los retiros desde tu ahorro están pausados por un momento.'},
+                        status=503,
+                    )
+        except Exception:
+            logger.exception('Could not verify Guardarian BSC withdrawable balance')
+            return JsonResponse(
+                {'error': 'No pudimos verificar tu saldo. Intenta de nuevo.'},
+                status=503,
+            )
+
     guardarian_payload = {
-        'from_amount': float(canonical_amount),
+        'from_amount': float(provider_crypto_amount),
         'from_currency': from_currency,
         'to_currency': to_currency_clean,
         'locale': body.get('locale') or 'es',
@@ -815,6 +923,17 @@ def guardarian_transaction_proxy(request):
     else:
         logger.warning('GUARDARIAN_SIGNING_KEY not configured - sending unsigned request')
 
+    if is_savings_rail or is_bsc_dollar_sell:
+        try:
+            from cusd_plus.cusd_vault import require_operational
+            require_operational()
+        except Exception:
+            logger.exception('cUSD perimeter preflight failed before Guardarian order creation')
+            return JsonResponse(
+                {'error': 'Las conversiones de dólares están pausadas temporalmente.'},
+                status=503,
+            )
+
     try:
         resp = requests.post(
             f'{base_url.rstrip("/")}/transaction',
@@ -854,11 +973,11 @@ def guardarian_transaction_proxy(request):
                     Decimal('0.000001'), rounding=ROUND_DOWN)
             except (InvalidOperation, TypeError, ValueError):
                 echoed_amount = None
-            if echoed_amount is None or echoed_amount != canonical_amount:
+            if echoed_amount is None or echoed_amount != provider_crypto_amount:
                 logger.error(
                     'Guardarian echoed from_amount %r != requested %s for user %s; '
                     'withholding the deposit address so nothing is auto-funded',
-                    echoed_raw, canonical_amount, user_id,
+                    echoed_raw, provider_crypto_amount, user_id,
                 )
                 for key in ('deposit_address', 'depositAddress',
                             'deposit_extra_id', 'depositExtraId'):
@@ -866,6 +985,46 @@ def guardarian_transaction_proxy(request):
                 data['confio_funding_blocked'] = 'amount_mismatch'
 
         if resp.ok:
+            # Guardarian creates an unpaid checkout session and returns its
+            # estimated crypto output. Enrich that response with the Confío
+            # perimeter preview so the app can disclose gross/fee/net BEFORE
+            # opening checkout. The actual fee is still computed from the
+            # USDT that eventually arrives on chain; these fields are clearly
+            # estimates and never authorize a mint.
+            if is_savings_rail:
+                fee_bps = guardarian_fee_bps
+                data['confio_fee_bps'] = fee_bps
+                estimated_raw = (
+                    data.get('estimated_exchange_amount')
+                    if data.get('estimated_exchange_amount') is not None
+                    else data.get('estimatedExchangeAmount')
+                )
+                try:
+                    estimated_gross = Decimal(str(estimated_raw))
+                    if estimated_gross > 0:
+                        quantum = Decimal('0.000000000000000001')
+                        estimated_fee = (
+                            estimated_gross * Decimal(fee_bps) / Decimal(10_000)
+                        ).quantize(quantum, rounding=ROUND_CEILING)
+                        estimated_net = estimated_gross - estimated_fee
+                        data['confio_gross_crypto_amount'] = format(estimated_gross, 'f')
+                        data['confio_fee_amount'] = format(estimated_fee, 'f')
+                        data['confio_net_crypto_amount'] = format(estimated_net, 'f')
+                except (InvalidOperation, TypeError, ValueError):
+                    logger.info(
+                        'Guardarian order %s returned no usable crypto estimate; '
+                        'the client will disclose 0.9%% without an amount',
+                        data.get('id'),
+                    )
+            elif is_bsc_dollar_sell and guardarian_fee_preview is not None:
+                data['confio_fee_bps'] = guardarian_fee_preview.fee_bps
+                data['confio_gross_crypto_amount'] = format(
+                    guardarian_fee_preview.gross, 'f')
+                data['confio_fee_amount'] = format(
+                    guardarian_fee_preview.fee, 'f')
+                data['confio_net_crypto_amount'] = format(
+                    guardarian_fee_preview.net, 'f')
+
             g_id = data.get('id')
             if g_id:
                 try:
@@ -890,6 +1049,15 @@ def guardarian_transaction_proxy(request):
                             if is_sell_transaction
                             else guardarian_payload.get('to_network')
                         ) or 'ALGO',
+                        confio_fee_metadata={
+                            'fee_bps': data.get('confio_fee_bps'),
+                            'gross_amount': data.get('confio_gross_crypto_amount'),
+                            'fee_amount': data.get('confio_fee_amount'),
+                            'net_amount': data.get('confio_net_crypto_amount'),
+                            'provider_transfer_tx_hash': _provider_evm_tx_hash(data),
+                        } if data.get('confio_fee_bps') is not None else {
+                            'provider_transfer_tx_hash': _provider_evm_tx_hash(data),
+                        },
                         status=data.get('status', 'waiting'),
                         to_amount_estimated=Decimal(str(data.get('estimated_exchange_amount'))) if data.get('estimated_exchange_amount') else None
                     )

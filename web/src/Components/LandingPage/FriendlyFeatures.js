@@ -19,8 +19,8 @@ const FriendlyFeatures = () => {
     },
     {
       icon: '💰',
-      title: t('Sin Comisiones', 'No Fees', '수수료 없음'),
-      description: t('Envía y recibe dólares digitales sin costos ocultos', 'Send and receive digital dollars with no hidden costs', '숨겨진 비용 없이 디지털 달러를 보내고 받으세요')
+      title: t('Tarifas Claras', 'Clear Fees', '명확한 수수료'),
+      description: t('0,9% al convertir al entrar o salir; enviar entre usuarios es gratis', '0.9% to convert in or out; sending between users is free', '들어오거나 나갈 때 전환 수수료 0.9%, 사용자 간 송금은 무료')
     },
     {
       icon: '⚡',

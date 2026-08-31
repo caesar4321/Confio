@@ -140,11 +140,17 @@ contract ConfioStockRouterTest is Test {
         // sell-into-savings reverts "recipient not caller".
         vm.prank(treasury);
         vault.setSponsor(address(router), true);
+        vm.prank(treasury);
+        vault.setStockRouter(address(router));
         // User saves $3,000 first (sweep model: cUSD+ is the buying power)
-        usdt.mint(user, 3000e18);
+        // Seed through the treasury USDY rail so this stock-router unit test
+        // is independent of the ordinary 90 bps USDT perimeter.
+        usdy.mint(treasury, 3000e18);
+        vm.startPrank(treasury);
+        usdy.approve(address(vault), 3000e18);
+        vault.depositAndMint(3000e18, user);
+        vm.stopPrank();
         vm.startPrank(user);
-        usdt.approve(address(vault), type(uint256).max);
-        vault.subscribeAndMint(3000e18, 0, user);
         vault.approve(address(router), type(uint256).max);
         tsla.approve(address(router), type(uint256).max);
         vm.stopPrank();
@@ -245,6 +251,19 @@ contract ConfioStockRouterTest is Test {
         assertEq(usdt.balanceOf(address(router)), expectedFee);
         assertEq(tsla.balanceOf(address(router)), 0);
         assertEq(vault.balanceOf(address(router)), 0);
+    }
+
+    function test_buy_doesNotChargeConversionFee() public {
+        uint256 sharesIn = 1_000e18;
+        GmQuote memory q = _buyQuote(address(tsla), sharesIn);
+
+        vm.prank(user);
+        _buy(q, sharesIn, 30);
+
+        uint256 expectedTradeFee = (sharesIn * 30) / 10_000;
+        assertEq(router.accruedUsdtFees(), expectedTradeFee, "only 30 bps stock fee");
+        assertEq(usdt.balanceOf(address(router)), expectedTradeFee, "no conversion fee retained");
+        assertEq(vault.balanceOf(user), 2_000e18, "only input shares consumed");
     }
 
     function test_buy_returnsAccrualAboveAttestedDebit() public {
@@ -608,25 +627,53 @@ contract ConfioStockRouterTest is Test {
         _buy(q, 300e18, 100);
     }
 
-    // ── AUDIT REGRESSION (2026-07-31 [P1]) ───────────────────────────
-    // Registering the router as a vault sponsor makes it satisfy BOTH of
-    // the vault's mint checks on its own, so without a gate of its own the
-    // router launders any permissionless call into fresh cUSD+ — exactly
-    // the eligibility bypass the v5 vault gate exists to prevent.
+    // ── Sponsor boundary: cUSD+ trades gated, raw exit permissionless ──
 
-    function test_sell_rejectsUnrelayedCaller() public {
-        // An ineligible holder with a real stock balance, acting alone.
-        address ineligible = makeAddr("ineligibleHolder");
-        tsla.mint(ineligible, 10e18);
-        vm.prank(ineligible, ineligible); // own tx: Confío not in it
+    function test_sellToUsdt_succeedsWithoutSponsoredOrigin_andChargesThirtyBps() public {
+        address holder = makeAddr("directHolder");
+        tsla.mint(holder, 10e18);
+        vm.prank(holder, holder);
         tsla.approve(address(router), type(uint256).max);
 
-        assertTrue(vault.isSponsor(address(router)), "router IS a vault sponsor");
         GmQuote memory sq = _sellQuote(address(tsla), 10e18);
-        vm.prank(ineligible, ineligible);
-        vm.expectRevert("not sponsored");
-        router.sellToSavings(sq, "", 0, 0, 100);
-        assertEq(vault.balanceOf(ineligible), 0, "no cUSD+ was issued");
+        vm.prank(holder, holder);
+        uint256 usdtOut = router.sellToUsdt(sq, "", 0, 0, 30);
+
+        assertEq(tsla.balanceOf(holder), 0, "stock redeemed");
+        uint256 gross = 3000e18;
+        uint256 fee = (gross * 30) / 10_000;
+        assertEq(usdtOut, gross - fee, "only the stock fee is deducted");
+        assertEq(usdt.balanceOf(holder), usdtOut, "holder receives raw USDT");
+        assertEq(vault.balanceOf(holder), 0, "raw exit cannot mint cUSD+");
+        assertEq(router.accruedUsdtFees(), fee, "30 bps accrued");
+    }
+
+    function test_sellToUsdt_enforcesNetFloor_andRollsBackStockTransfer() public {
+        address holder = makeAddr("floorHolder");
+        tsla.mint(holder, 1e18);
+        vm.prank(holder, holder);
+        tsla.approve(address(router), type(uint256).max);
+
+        GmQuote memory sq = _sellQuote(address(tsla), 1e18);
+        vm.prank(holder, holder);
+        vm.expectRevert("insufficient net usdt out");
+        router.sellToUsdt(sq, "", 0, 300e18, 30);
+
+        assertEq(tsla.balanceOf(holder), 1e18, "revert restores stock");
+        assertEq(usdt.balanceOf(holder), 0, "no partial payout");
+        assertEq(router.accruedUsdtFees(), 0, "no fee accrued on revert");
+    }
+
+    function test_sellToUsdt_rejectsFeeCapBelowThirtyBps() public {
+        address holder = makeAddr("feeCapHolder");
+        tsla.mint(holder, 1e18);
+        vm.prank(holder, holder);
+        tsla.approve(address(router), type(uint256).max);
+
+        GmQuote memory sq = _sellQuote(address(tsla), 1e18);
+        vm.prank(holder, holder);
+        vm.expectRevert("fee above trade cap");
+        router.sellToUsdt(sq, "", 0, 0, 29);
     }
 
     function test_buy_rejectsUnrelayedCaller() public {
@@ -636,9 +683,7 @@ contract ConfioStockRouterTest is Test {
         _buy(q, 1e18, 100);
     }
 
-    /// The gate must read the ORIGIN, not the router's own registration —
-    /// isSponsor(address(this)) is always true and is precisely the hole.
-    function test_gate_follows_origin_registration() public {
+    function test_sellToSavings_requiresSponsoredOrigin() public {
         address relay = makeAddr("otherRelay");
         tsla.mint(user, 10e18);
         vm.prank(user, relay);
@@ -650,10 +695,10 @@ contract ConfioStockRouterTest is Test {
         router.sellToSavings(sq1, "", 0, 0, 100);
 
         vm.prank(treasury);
-        vault.setSponsor(relay, true); // relay becomes Confío-operated
+        vault.setSponsor(relay, true);
         GmQuote memory sq2 = _sellQuote(address(tsla), 1e18);
         vm.prank(user, relay);
         uint256 sharesOut = router.sellToSavings(sq2, "", 0, 0, 100);
-        assertGt(sharesOut, 0, "same call succeeds once the origin is a relay");
+        assertGt(sharesOut, 0, "sponsored savings settlement succeeds");
     }
 }

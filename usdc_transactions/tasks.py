@@ -2,12 +2,51 @@ from celery import shared_task
 from django.utils import timezone
 from datetime import timedelta
 import logging
+import re
 import requests
 from django.conf import settings
 from decimal import Decimal
 from .models import GuardarianTransaction, USDCDeposit
 
 logger = logging.getLogger(__name__)
+
+
+def _provider_evm_tx_hash(payload):
+    if not isinstance(payload, dict):
+        return ''
+    for key in ('txHash', 'tx_hash', 'transactionHash', 'transaction_hash'):
+        value = payload.get(key)
+        if isinstance(value, str) and re.fullmatch(r'0x[0-9a-fA-F]{64}', value):
+            return value.lower()
+    for value in payload.values():
+        if isinstance(value, dict):
+            found = _provider_evm_tx_hash(value)
+            if found:
+                return found
+        if isinstance(value, list):
+            for item in value:
+                found = _provider_evm_tx_hash(item)
+                if found:
+                    return found
+    return ''
+
+
+def _apply_provider_details(tx, data):
+    """Persist attribution inputs even when the provider status is unchanged."""
+    update_fields = []
+    if data.get('to_amount'):
+        actual = Decimal(str(data['to_amount']))
+        if tx.to_amount_actual != actual:
+            tx.to_amount_actual = actual
+            update_fields.append('to_amount_actual')
+    provider_hash = _provider_evm_tx_hash(data)
+    if provider_hash:
+        metadata = dict(tx.confio_fee_metadata or {})
+        if metadata.get('provider_transfer_tx_hash') != provider_hash:
+            metadata['provider_transfer_tx_hash'] = provider_hash
+            tx.confio_fee_metadata = metadata
+            update_fields.append('confio_fee_metadata')
+    return update_fields
 
 @shared_task
 def poll_guardarian_transactions():
@@ -69,20 +108,19 @@ def poll_guardarian_transactions():
                 
             data = resp.json()
             new_status = data.get('status')
+            update_fields = _apply_provider_details(tx, data)
             
             if new_status and new_status != tx.status:
                 old_status = tx.status
                 tx.status = new_status
-                
-                # Update amounts if available
-                if data.get('to_amount'):
-                    tx.to_amount_actual = Decimal(str(data.get('to_amount')))
+                update_fields.append('status')
                 
                 # Capture any error info or details
                 if data.get('status_details'):
                     tx.status_details = data.get('status_details')
+                    update_fields.append('status_details')
                 
-                tx.save()
+                tx.save(update_fields=list(dict.fromkeys(update_fields)))
                 logger.info(f"Updated Guardarian Tx {tx.guardarian_id}: {old_status} -> {new_status}")
                 updated_count += 1
                 
@@ -92,6 +130,9 @@ def poll_guardarian_transactions():
                         tx.attempt_match_deposit()
                     elif tx.transaction_type == 'sell' and not tx.onchain_withdrawal:
                         tx.attempt_match_withdrawal()
+
+            elif update_fields:
+                tx.save(update_fields=list(dict.fromkeys(update_fields)))
 
             # Sleep to respect rate limits (basic throttle)
             time.sleep(1.0)
@@ -126,19 +167,22 @@ def check_single_guardarian_transaction(guardarian_id):
         if resp.ok:
             data = resp.json()
             new_status = data.get('status')
+            update_fields = _apply_provider_details(tx, data)
             if new_status and new_status != tx.status:
                 tx.status = new_status
-                if data.get('to_amount'):
-                    tx.to_amount_actual = Decimal(str(data.get('to_amount')))
+                update_fields.append('status')
                 if data.get('status_details'):
                     tx.status_details = data.get('status_details')
-                tx.save()
+                    update_fields.append('status_details')
+                tx.save(update_fields=list(dict.fromkeys(update_fields)))
                 if new_status == 'finished':
                     if tx.transaction_type == 'buy' and not tx.onchain_deposit:
                         tx.attempt_match_deposit()
                     elif tx.transaction_type == 'sell' and not tx.onchain_withdrawal:
                         tx.attempt_match_withdrawal()
                 return f"Updated to {new_status}"
+            if update_fields:
+                tx.save(update_fields=list(dict.fromkeys(update_fields)))
             if new_status == 'finished':
                 if tx.transaction_type == 'buy' and not tx.onchain_deposit:
                     tx.attempt_match_deposit()

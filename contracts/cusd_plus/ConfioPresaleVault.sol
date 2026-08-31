@@ -40,9 +40,16 @@ pragma solidity ^0.8.24;
  * sponsor set is owner-rotatable so a key incident cannot strand the sale.
  * Per-user purchase limits are deliberately an off-chain (backend) policy.
  *
- * ALGORAND MIGRATION: tokens already sold on the Algorand presale are
- * seeded at deploy time as `initialSold`, which (a) starts the curve at
- * the right price and (b) fills a `migratedPool` the owner assigns to
+ * MIGRATION: the constructor separates the historical curve position from
+ * the liabilities imported into this replacement vault. `initialSold`
+ * starts the curve at the exact old position; `initialClaimed` represents
+ * allocations already paid by the predecessor; `initialMigratedPool` is
+ * still-unassigned Algorand inventory; and `initialLegacyPool` is the fixed
+ * pool of outstanding predecessor allocations imported with `creditLegacy`.
+ * The four values must reconcile exactly, so a deployment cannot duplicate
+ * or erase claims while preserving the old price.
+ *
+ * Algorand purchases in `migratedPool` are assigned to
  * specific BSC addresses via `creditMigrated` as each user's Algorand→BSC
  * address link materializes (it is only created when the user opens the
  * app, which can be arbitrarily late — hence per-address admin credits
@@ -106,6 +113,10 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     uint256 public totalRaised;
     /// Algorand-sold CONFIO not yet assigned to a BSC address.
     uint256 public migratedPool;
+    /// Outstanding allocations copied from the predecessor PresaleVault but
+    /// not yet assigned to their BSC recipients here. Unlike migratedPool,
+    /// these credits are irrevocable: they represent already-paid purchases.
+    uint256 public legacyPool;
 
     mapping(address => uint256) public purchased;
     mapping(address => uint256) public claimed;
@@ -119,6 +130,7 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     event MigratedCredited(address indexed buyer, uint256 confioAmount);
     event MigratedUncredited(address indexed buyer, uint256 confioAmount);
     event MigratedPoolExpanded(uint256 confioAmount, uint256 newTotalSold);
+    event LegacyCredited(address indexed buyer, uint256 confioAmount);
     event Claimed(address indexed buyer, uint256 confioAmount);
     event ConfioTokenSet(address indexed token);
     event ClaimsUnlockedSet(bool unlocked);
@@ -143,6 +155,8 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     error UseSweepExcessConfio();
     error ClaimsAlreadyUnlocked();
     error InsufficientBacking(uint256 held, uint256 owed);
+    error BadMigrationSnapshot();
+    error ExceedsLegacyPool(uint256 requested, uint256 pool);
 
     constructor(
         address owner_,
@@ -150,9 +164,14 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         uint256[] memory soldBreakpoints_,
         uint256[] memory prices_,
         uint256 initialSold_,
+        uint256 initialClaimed_,
+        uint256 initialMigratedPool_,
+        uint256 initialLegacyPool_,
         address sponsor_
     ) Ownable(owner_) {
-        if (address(paymentToken_) == address(0) || sponsor_ == address(0)) revert ZeroAddress();
+        if (address(paymentToken_) == address(0) || sponsor_ == address(0)) {
+            revert ZeroAddress();
+        }
         uint256 n = soldBreakpoints_.length;
         if (n == 0 || n > MAX_SEGMENTS || prices_.length != n + 1) revert BadCurveParams();
         // Strictly increasing breakpoints AND prices (every quote solves a
@@ -166,13 +185,16 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         }
         if (soldBreakpoints_[n - 1] > type(uint128).max) revert BadCurveParams();
         if (initialSold_ > soldBreakpoints_[n - 1]) revert ExceedsTokensForSale();
+        if (initialClaimed_ + initialMigratedPool_ + initialLegacyPool_ != initialSold_) revert BadMigrationSnapshot();
 
         PAYMENT_TOKEN = paymentToken_;
         soldBreakpoints = soldBreakpoints_;
         prices = prices_;
         TOKENS_FOR_SALE = soldBreakpoints_[n - 1];
         totalSold = initialSold_;
-        migratedPool = initialSold_;
+        totalClaimed = initialClaimed_;
+        migratedPool = initialMigratedPool_;
+        legacyPool = initialLegacyPool_;
         isSponsor[sponsor_] = true;
         emit SponsorSet(sponsor_, true);
     }
@@ -262,11 +284,7 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
 
     /// Exact integral within one segment (prices pA→pB over length L),
     /// buying q starting at offset x: q·(2·L·pA + (pB−pA)·(2x+q)) / (2·L·1e18), ceil.
-    function _segCost(uint256 pA, uint256 pB, uint256 L, uint256 x, uint256 q)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _segCost(uint256 pA, uint256 pB, uint256 L, uint256 x, uint256 q) internal pure returns (uint256) {
         uint256 inner = 2 * L * pA + (pB - pA) * (2 * x + q);
         return Math.mulDiv(q, inner, 2 * L * ONE_CONFIO, Math.Rounding.Ceil);
     }
@@ -278,11 +296,7 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
      * like the floor on sqrt and the final mulDiv — can only shrink q,
      * the safe direction for a quote.
      */
-    function _segQuote(uint256 pA, uint256 pB, uint256 L, uint256 x, uint256 c)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _segQuote(uint256 pA, uint256 pB, uint256 L, uint256 x, uint256 c) internal pure returns (uint256) {
         uint256 k = pB - pA;
         uint256 p = pA + Math.mulDiv(k, x, L, Math.Rounding.Ceil);
         uint256 disc = p * p + Math.mulDiv(2 * k * ONE_CONFIO, c, L);
@@ -303,12 +317,7 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
      * signed slippage cap: concurrent buys move the curve, and the tx
      * reverts rather than charge more than the buyer agreed to.
      */
-    function buy(uint256 confioAmount, uint256 maxPayment)
-        external
-        whenNotPaused
-        nonReentrant
-        returns (uint256 cost)
-    {
+    function buy(uint256 confioAmount, uint256 maxPayment) external whenNotPaused nonReentrant returns (uint256 cost) {
         if (!isSponsor[msg.sender] && !isSponsor[tx.origin]) revert NotSponsoredTransaction();
         if (confioAmount == 0) revert ZeroAmount();
         uint256 sold = totalSold;
@@ -373,10 +382,7 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
      * the address links materialize. Draws down migratedPool, so total
      * credits can never exceed what the curve seed/expansions accounted for.
      */
-    function creditMigrated(address[] calldata buyers, uint256[] calldata amounts)
-        external
-        onlyOwner
-    {
+    function creditMigrated(address[] calldata buyers, uint256[] calldata amounts) external onlyOwner {
         if (buyers.length != amounts.length) revert LengthMismatch();
         uint256 pool = migratedPool;
         for (uint256 i; i < buyers.length; ++i) {
@@ -391,6 +397,29 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
             emit MigratedCredited(buyer, amount);
         }
         migratedPool = pool;
+    }
+
+    /**
+     * Import outstanding allocations from the predecessor BSC vault. The
+     * constructor fixes the aggregate pool from the audited snapshot; this
+     * function only assigns it. There is deliberately no reverse operation:
+     * these users already paid and their rights must not become revocable
+     * merely because the contract was replaced.
+     */
+    function creditLegacy(address[] calldata buyers, uint256[] calldata amounts) external onlyOwner {
+        if (buyers.length != amounts.length) revert LengthMismatch();
+        uint256 pool = legacyPool;
+        for (uint256 i; i < buyers.length; ++i) {
+            address buyer = buyers[i];
+            uint256 amount = amounts[i];
+            if (buyer == address(0)) revert ZeroAddress();
+            if (amount == 0) revert ZeroAmount();
+            if (amount > pool) revert ExceedsLegacyPool(amount, pool);
+            pool -= amount;
+            purchased[buyer] += amount;
+            emit LegacyCredited(buyer, amount);
+        }
+        legacyPool = pool;
     }
 
     /// Reverse a mis-assigned credit (manual mapping ⇒ mistakes happen).

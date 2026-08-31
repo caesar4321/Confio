@@ -1,17 +1,33 @@
-# cUSD+ Vault (BSC) — design draft
+# cUSD and cUSD+ contracts on BNB Smart Chain
 
-Solidity port of the trust architecture proven in [`contracts/cusd/cusd.py`](../cusd/cusd.py)
-(Algorand), for Confío Dollar+ (cUSD+): the USDY-backed savings token.
+This package contains Confío's deployed dollar system: universal cUSD, the
+USDY-backed cUSD+ savings wrapper, and the payment, payroll, invite, presale,
+vesting, reward, and sponsored-batch contracts around them.
 
-**Status: COMPILED + TESTED** (build ungated by founder decision,
-2026-07-04). Foundry scaffold in this directory: solc 0.8.26, OZ 5.6.1
-(via npm; `npm install && npm run setup:forge-std`), 43 tests green
-including a fuzz over random op sequences asserting
-`backingRatioBps() ≥ 10000`. Mocks stand in for USDY/USDT/IM/oracle until
-Ondo onboarding answers land — the Solidity surface those answers touch is
-isolated in `_imSubscribe`/`_imRedeem`. Note: OZ 5.6 dropped
-ReentrancyGuardUpgradeable; the vault uses ReentrancyGuardTransient
-(stateless, proxy-safe; needs Cancun opcodes — BSC has them).
+**Status: DEPLOYED, SOURCE-VERIFIED, AND TESTED (31 August 2026).** The cUSD
+UUPS proxy is `0x6101cC370635cF2c7f2725EaB010aC407A8d543F`. The existing
+cUSD+ proxy remains `0x3C29417eb4314155e63d4C7D4507852b87763Ed1` and was upgraded
+in place. The full deployment, upgrade, migration, Safe transactions, and
+superseded addresses are recorded in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+## Current dollar and fee topology
+
+- `CusdVault.sol` is the universal USDT-backed payment dollar and the sole
+  external fee perimeter. USDT→cUSD and cUSD→USDT charge 90 bps, with the
+  rate capped by `MAX_FEE_BPS = 90`.
+- `CusdPlusVault.sol` is the eligible USDY-backed savings wrapper. Direct
+  USDT→cUSD+ entry and cUSD+→USDT exit settle their same 90-bps perimeter
+  charge through cUSD. cUSD↔cUSD+ is an internal, fee-free conversion.
+- Minting requires a configured sponsor. Fee-free savings conversion also
+  requires the sponsor. Fee-bearing holder redemption to USDT is
+  permissionless for both cUSD and cUSD+, preserving sponsor-independent exit.
+- The Stock Router is the one narrow exception: its registered fee-free vault
+  settlement avoids a second 90-bps conversion charge and applies only the
+  router's fixed 30-bps trade fee. Permissionless stock→USDT redemption also
+  charges only 30 bps and is not used by Confío's normal app flow.
+- `ConfioPayContract`, `ConfioPayrollVault`, and `ConfioInviteEscrow` support
+  cUSD and cUSD+. The production backend does not authorize legacy raw-USDT
+  Pay. The replacement presale charges cUSD.
 
 ## Concept map: cusd.py → CusdPlusVault.sol
 
@@ -30,6 +46,13 @@ ReentrancyGuardUpgradeable; the vault uses ReentrancyGuardTransient
 
 ## Token & fee mechanics
 
+- **External conversion fee.** People and businesses pay the same 0.9% when
+  entering from USDT and the same 0.9% when leaving to USDT. The rule is based
+  on crossing the Confío-dollar boundary, not on whether USDT came from a ramp
+  or an on-chain transfer.
+- **Free internal movement.** Confío friend transfers and sponsor-authorized
+  cUSD↔cUSD+ conversion cost 0%. Cross-eligibility sends use this boundary so
+  an eligible holder receives cUSD+ and an ineligible holder receives cUSD.
 - **Accumulating share (decision A).** `pPlus` (USD per share, 1e18) starts at
   $1.00 and compounds at `1 − CONFIO_YIELD_SHARE_BPS` (85%) of USDY's oracle
   growth, lazily on every interaction (Compound-style `accrue()`). Share
@@ -44,10 +67,10 @@ ReentrancyGuardUpgradeable; the vault uses ReentrancyGuardTransient
   permissioned asset, and a sanctioned actor moving through the vault could
   get the vault address itself blacklisted by Ondo, stranding every honest
   holder. Surgical freeze protects the pool.
-- **Contract-automatic mint (decision D).** Two mint paths, both atomic with
+- **Sponsor-originated mint (decision D).** Mint paths are atomic with
   collateral custody: USDT → InstantManager `subscribe` → USDY → shares
-  (primary), or direct USDY deposit (treasury bridge leg / IM outage
-  fallback). Both honor a caller-supplied slippage floor.
+  (primary), cUSD → USDT → USDY for internal wrapping, or direct USDY
+  deposit for controlled operations. All honor caller-supplied slippage floors.
 
 ## Upgradeability posture (corrected after review)
 
@@ -215,10 +238,10 @@ migratedPool — is never sweepable. 26 tests (unit + fuzz) in
    REMAINING: complete PP onboarding and whitelist the vault PROXY
    address (read-only API key already issued — 1Password link expires
    7 days from 2026-07-07).
-6. ~~Relayer authz~~ — **RESOLVED: permissionless, like cusd.py.** The
-   conversion flow is user-driven end to end (see ORCHESTRATION.md): the
-   user's own BSC address is msg.sender for mint/redeem (Confío only
-   sponsors gas), so restricting callers would break the architecture.
+6. **Sponsor authorization — RESOLVED.** Minting and fee-free internal
+   conversion are sponsor-gated. Fee-bearing redemption is permissionless for
+   both cUSD and cUSD+, so sponsor rotation or outage cannot block a holder's
+   normal USDT exit.
 
 7. **GM settlement on BNB** — **MOSTLY RESOLVED.** Contract:
    `GMTokenManager 0x91f8Aff3738825e8eB16FC6f6b1A7A4647bDB299` (BNB).
@@ -243,7 +266,7 @@ migratedPool — is never sweepable. 26 tests (unit + fuzz) in
    US/Canada/Cuba + sanctions; Brazil restricted to Qualified Investors —
    matches our existing geofence (US/CA/BR + sanctions) exactly.
 
-## Deployment checklist (when ungated)
+## Deployment checklist
 
 - [x] Foundry scaffold + OZ pin; compile, fuzz the invariant
       (`backingRatioBps() ≥ 10000` under arbitrary op sequences) — done
@@ -272,14 +295,13 @@ migratedPool — is never sweepable. 26 tests (unit + fuzz) in
       mint/redeem paths need a whitelisted caller, so full E2E lands
       after PP approval, but wiring/oracle/view paths fork-test today)
 - [ ] External review of `accrue()` math (WAD/BPS rounding)
-- [ ] Deploy implementation + ERC1967 proxy; `initialize(treasury multisig)`;
+- [x] Deploy implementation + ERC1967 proxy; `initialize(treasury multisig)`;
       `CONFIO_YIELD_SHARE_BPS = 1500`; storage-layout checks in CI for every
-      subsequent upgrade
+      subsequent upgrade — deployed and upgraded 2026-08-31
 - [ ] Timelock on the owner before scale (covers upgrades AND the oracle
       verdict functions — rebaseline especially, per the incentive
       asymmetry). No upgrade lock exists by design; see UPGRADEABILITY.
 - [ ] Daily keeper cron calling `accrue()` (guard hygiene + fresh display
       data; not required for correctness)
-- [ ] Whitelist vault in OndoIDRegistry (Ondo onboarding)
-- [ ] Wire addresses into `cusd_plus/schema.py` resolvers + statsSummary
-      `usdy_reserve`; flip ProtectedSavings BscScan links live
+- [x] Whitelist vault in OndoIDRegistry (Ondo onboarding)
+- [x] Wire addresses into backend/client configuration, stats, and BscScan links

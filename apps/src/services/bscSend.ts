@@ -38,6 +38,10 @@ const PREPARE = gql`
       calls { to valueWei data }
       tokenType
       intentId
+      grossAmount
+      feeAmount
+      netAmount
+      feeBps
     }
   }
 `;
@@ -72,6 +76,10 @@ export interface BscSendResult {
   sendId: string;
   /** What actually moved on-chain: CUSD_PLUS (shares) or USDT. */
   tokenType: string;
+  grossAmount?: string;
+  feeAmount?: string;
+  netAmount?: string;
+  feeBps?: number;
   /** Broadcast, outcome not yet observed. NOT a failure and NOT retryable
    *  — the server's confirm task settles it from the chain. */
   pending?: boolean;
@@ -168,6 +176,10 @@ export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResul
       txHash: sub.transactionHash,
       sendId: prep.sendId,
       tokenType: prep.tokenType,
+      grossAmount: prep.grossAmount,
+      feeAmount: prep.feeAmount,
+      netAmount: prep.netAmount,
+      feeBps: prep.feeBps,
     };
 
     // The sponsor watched the chain before answering; null (it didn't see
@@ -201,6 +213,10 @@ export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResul
           txHash: sub.transactionHash,
           sendId: prep.sendId,
           tokenType: prep.tokenType,
+          grossAmount: prep.grossAmount,
+          feeAmount: prep.feeAmount,
+          netAmount: prep.netAmount,
+          feeBps: prep.feeBps,
           pending: true,
         };
       }

@@ -41,6 +41,10 @@ SEL_APPROVE = _sel('approve(address,uint256)')                       # 095ea7b3
 SEL_TRANSFER = _sel('transfer(address,uint256)')                     # a9059cbb
 SEL_SUBSCRIBE_AND_MINT = _sel('subscribeAndMint(uint256,uint256,address)')
 SEL_REDEEM_TO_USDT = _sel('redeemToUsdt(uint256,uint256,address)')   # f4794519
+SEL_CUSD_MINT = _sel('mintWithFee(uint256,uint256,address)')
+SEL_CUSD_REDEEM = _sel('redeemWithFee(uint256,uint256,address)')
+SEL_WRAP_CUSD = _sel('wrapCusd(uint256,uint256,address)')
+SEL_UNWRAP_TO_CUSD = _sel('unwrapToCusd(uint256,uint256,address)')
 GM_QUOTE_ABI = '(uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32)'
 SEL_STOCK_BUY = _sel(f'buyWithSavings({GM_QUOTE_ABI},bytes,uint256,uint256,uint256,uint256)')
 SEL_STOCK_SELL = _sel(f'sellToSavings({GM_QUOTE_ABI},bytes,uint256,uint256,uint256)')
@@ -90,6 +94,10 @@ GAS_PER_SELECTOR = {
     # path (pay from its USDT balance) or the expensive one (source it),
     # and its balance is routinely 0. Budget for the expensive path.
     SEL_REDEEM_TO_USDT: 750_000,
+    SEL_CUSD_MINT: 180_000,
+    SEL_CUSD_REDEEM: 150_000,
+    SEL_WRAP_CUSD: 750_000,
+    SEL_UNWRAP_TO_CUSD: 750_000,
     SEL_STOCK_BUY: 1_700_000,
     SEL_STOCK_SELL: 1_900_000,
     SEL_PRESALE_BUY: 200_000,  # curve integral + 2 ledger writes + transferFrom
@@ -134,6 +142,10 @@ def delegate_address() -> str:
 
 def _vault_address() -> str:
     return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+
+
+def _cusd_address() -> str:
+    return (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
 
 
 def _stock_router_address() -> str:
@@ -508,8 +520,14 @@ def classify_calls_kind(calls: list) -> str:
         return 'stock_buy'
     if SEL_STOCK_SELL in selectors:
         return 'stock_sell'
-    if SEL_REDEEM_TO_USDT in selectors:
+    if SEL_REDEEM_TO_USDT in selectors or SEL_CUSD_REDEEM in selectors:
         return 'redeem'
+    if SEL_WRAP_CUSD in selectors:
+        return 'wrap_cusd'
+    if SEL_UNWRAP_TO_CUSD in selectors:
+        return 'unwrap_to_cusd'
+    if SEL_CUSD_MINT in selectors:
+        return 'mint_cusd'
     return 'subscribe'
 
 
@@ -523,6 +541,7 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
     if not vault:
         raise PolicyError('vault_not_configured')
     user_word = user_addr.lower().replace('0x', '').rjust(64, '0')
+    cusd = _cusd_address()
 
     stock_actions = [a for c in calls if (a := _decode_stock_call(c)) is not None]
     if len(stock_actions) > 1:
@@ -531,6 +550,68 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
     if stock_action and len(calls) > 2:
         raise PolicyError('bad_stock_batch')
     router = _stock_router_address()
+
+    # One request represents one economic conversion. Approvals may precede
+    # it, but two mint/redeem/wrap calls in the same generic batch could debit
+    # more than the domain preview the user accepted.
+    conversion_selectors = {
+        SEL_SUBSCRIBE_AND_MINT, SEL_REDEEM_TO_USDT, SEL_WRAP_CUSD,
+        SEL_UNWRAP_TO_CUSD, SEL_CUSD_MINT, SEL_CUSD_REDEEM,
+    }
+    economic_calls = [
+        c for c in calls if c['data'][2:10].lower() in conversion_selectors
+    ]
+    economic_selectors = [c['data'][2:10].lower() for c in economic_calls]
+    exit_selectors = {SEL_REDEEM_TO_USDT, SEL_CUSD_REDEEM}
+    if len(economic_calls) > 1:
+        # A fee-aware off-ramp may atomically redeem one cUSD lot and one
+        # cUSD+ lot before paying the provider. No other multi-action batch is
+        # a single user intent, and duplicate exits are unnecessary.
+        normalized_cusd_exit = economic_selectors == [
+            SEL_UNWRAP_TO_CUSD, SEL_CUSD_REDEEM]
+        split_fee_exits = (
+            set(economic_selectors).issubset(exit_selectors)
+            and len(economic_selectors) == len(set(economic_selectors))
+        )
+        if not (normalized_cusd_exit or split_fee_exits):
+            raise PolicyError('multiple_conversion_actions')
+
+    usdt_transfers = [
+        c for c in calls
+        if c['to'] == USDT_BSC and c['data'][2:10].lower() == SEL_TRANSFER
+    ]
+    allowed_exit_transfer = False
+    if usdt_transfers and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+        normalized_cusd_exit = economic_selectors == [
+            SEL_UNWRAP_TO_CUSD, SEL_CUSD_REDEEM]
+        if len(usdt_transfers) != 1 or not economic_selectors or (
+                not set(economic_selectors).issubset(exit_selectors)
+                and not normalized_cusd_exit):
+            raise PolicyError('raw_usdt_transfer_not_allowed')
+        try:
+            from . import vault as vault_reader
+            from .cusd_vault import preview_redeem_wei
+
+            expected_net = 0
+            for call in economic_calls:
+                call_data = call['data'][2:].lower()
+                selector = call_data[:8]
+                if selector == SEL_CUSD_REDEEM:
+                    expected_net += preview_redeem_wei(int(_word(call_data, 0), 16)).net_wei
+                elif selector == SEL_REDEEM_TO_USDT:
+                    expected_net += vault_reader.redeem_usdt_out(
+                        int(_word(call_data, 0), 16),
+                        vault_reader.p_plus_wad(fresh=True),
+                        vault_reader.last_oracle_price_wad(fresh=True),
+                    )
+            transfer_data = usdt_transfers[0]['data'][2:].lower()
+            transfer_amount = int(_word(transfer_data, 1), 16)
+        except Exception as exc:  # noqa: BLE001 — money policy fails closed
+            logger.warning('could not validate fee-aware off-ramp transfer: %s', exc)
+            raise PolicyError('exit_quote_unavailable') from exc
+        if transfer_amount <= 0 or transfer_amount > expected_net:
+            raise PolicyError('raw_usdt_transfer_not_allowed')
+        allowed_exit_transfer = True
 
     for c in calls:
         if int(c['value']) != 0:
@@ -551,18 +632,24 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
                 raise PolicyError('approve_spender_not_allowed')
         elif c['to'] == USDT_BSC:
             if selector == SEL_APPROVE:
-                # approve: ONLY with the vault as spender.
+                # approve: only a configured Confio dollar vault may pull
+                # external USDT from this account.
                 if len(data_hex) != 8 + 128:
                     raise PolicyError('bad_calldata')
-                if _word(data_hex, 0)[-40:] != vault[2:]:
+                allowed_spenders = {vault[2:]}
+                if cusd:
+                    allowed_spenders.add(cusd[2:])
+                if _word(data_hex, 0)[-40:] not in allowed_spenders:
                     raise PolicyError('approve_spender_not_allowed')
             elif selector == SEL_TRANSFER:
-                # transfer: the sponsored USDT send (2026-07-30) — the EXIT
-                # for raw wallet USDT, so the recipient is deliberately
-                # unrestricted (exits are never gated) and no eligibility
-                # applies. Cost is bounded by the rail's own rate limits and
-                # daily cap; unlike gas dust, sponsored gas can't be
-                # extracted — it's consumed by the transfer itself.
+                # Once the universal cUSD perimeter is live, a normal
+                # sponsored raw-USDT transfer would be a deterministic way to
+                # skip the 0.9% redemption. Emergency Exit signs and submits
+                # directly through bundled public RPCs and never uses this
+                # normal sponsor endpoint.
+                if (getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
+                        and not allowed_exit_transfer):
+                    raise PolicyError('raw_usdt_transfer_not_allowed')
                 if len(data_hex) != 8 + 128:
                     raise PolicyError('bad_calldata')
             else:
@@ -582,6 +669,26 @@ def validate_policy(calls: list, user, user_addr: str) -> None:
                         '7702 redeem recipient %s rejected for user %s (signer %s)',
                         recipient, user.id, user_addr,
                     )
+                    raise PolicyError('redeem_recipient_not_allowed')
+            elif selector in (SEL_WRAP_CUSD, SEL_UNWRAP_TO_CUSD):
+                if len(data_hex) != 8 + 192:
+                    raise PolicyError('bad_calldata')
+                if _word(data_hex, 2) != user_word:
+                    raise PolicyError('conversion_recipient_not_allowed')
+            else:
+                raise PolicyError('selector_not_allowed')
+        elif cusd and c['to'] == cusd:
+            if selector == SEL_APPROVE:
+                if len(data_hex) != 8 + 128 or _word(data_hex, 0)[-40:] != vault[2:]:
+                    raise PolicyError('approve_spender_not_allowed')
+            elif selector == SEL_CUSD_MINT:
+                if len(data_hex) != 8 + 192 or _word(data_hex, 2) != user_word:
+                    raise PolicyError('mint_recipient_not_allowed')
+            elif selector == SEL_CUSD_REDEEM:
+                if len(data_hex) != 8 + 192:
+                    raise PolicyError('bad_calldata')
+                recipient = '0x' + _word(data_hex, 2)[-40:]
+                if not redeem_recipient_allowed(user, recipient, user_addr):
                     raise PolicyError('redeem_recipient_not_allowed')
             else:
                 raise PolicyError('selector_not_allowed')
@@ -946,6 +1053,19 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
                 ).order_by('-id').first()
                 if existing is not None:
                     reason = 'client_request_id'
+            # Economic-source uniqueness is more specific than a delegate
+            # nonce collision. Prefer it so a retry of the SAME send adopts
+            # its durable winner instead of surfacing a generic nonce race.
+            if existing is None and source_id is not None:
+                from send.kinds import BSC_SEND_KINDS
+                if kind in BSC_SEND_KINDS:
+                    existing = SponsoredBatch.objects.filter(
+                        source_id=source_id,
+                        kind__in=BSC_SEND_KINDS,
+                        status__in=_LIVE_BATCH_STATUSES,
+                    ).order_by('-id').first()
+                    if existing is not None:
+                        reason = 'source_id'
             if existing is None:
                 existing = SponsoredBatch.objects.filter(
                     user_bsc_address=user_addr,

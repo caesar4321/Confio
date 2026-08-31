@@ -10,13 +10,13 @@ Confío is a fully open-source, non-custodial financial application for Latin Am
 
 ## What Confío does
 
-- **Add and withdraw dollars:** connect local and international payment methods to BSC-USDT through integrated fiat providers.
-- **Save with cUSD+:** move USDT into an accumulating dollar balance backed by Ondo Finance's USDY and redeem it back to USDT. Yield is variable and not guaranteed.
+- **Add and withdraw dollars:** convert local currency or BSC-USDT into Confío dollars and back through one transparent 0.9% entry/exit fee perimeter.
+- **Hold cUSD or save with cUSD+:** users in Ondo-ineligible jurisdictions receive the universal, USDT-backed cUSD payment dollar; eligible users receive the USDY-backed, accumulating cUSD+ savings balance. Moving between cUSD and cUSD+ inside Confío is free. Yield is variable and not guaranteed.
 - **Send simply:** transfer to contacts without asking users to copy blockchain addresses or hold BNB for gas.
 - **Accept payments:** support merchant invoices and QR-centered payment flows with transparent on-chain settlement.
 - **Run payroll:** let businesses fund and authorize dollar payouts while recipients remain in control of their wallets.
 - **Access Ondo Stocks (staged):** once live trading is activated, eligible users can buy from cUSD+ and return sale proceeds to cUSD+ through a dedicated router with an explicit fixed 0.30% Confío fee on every completed purchase and sale.
-- **Participate in the ecosystem:** use the fixed-supply $CONFIO token for presale allocations, rewards, and disclosed ecosystem functions. $CONFIO does not back cUSD+ or user dollar balances.
+- **Participate in the ecosystem:** use the fixed-supply $CONFIO token for presale allocations, rewards, and disclosed ecosystem functions. $CONFIO does not back cUSD, cUSD+, or user dollar balances.
 
 ## Why Confío is different
 
@@ -44,28 +44,30 @@ The mobile application, backend, smart contracts, and core documentation are ope
 
 | Component | Role |
 | --- | --- |
-| **USDT on BNB Smart Chain** | Funding, liquidity, transfers, and exit rail |
-| **cUSD+** | Primary savings and transaction balance backed by USDY held by the vault |
-| **Payment and payroll contracts** | Merchant settlement, fees, business escrow, and authorized payouts |
+| **USDT on BNB Smart Chain** | External funding, liquidity, and exit asset; the app automatically converts incoming USDT into the appropriate Confío dollar |
+| **cUSD** | Universal payment dollar backed 1:1 by USDT, used when USDY exposure is unavailable or unsuitable |
+| **cUSD+** | USDY-backed savings wrapper for Ondo-eligible users |
+| **Payment, payroll, invite, and presale contracts** | cUSD/cUSD+ settlement, merchant and payroll fees, invitation escrow, and cUSD-funded presale purchases |
 | **Ondo Stocks router** | Staged user-authorized purchases from cUSD+ and sales back into cUSD+, with a fixed 0.30% explicit fee |
 | **$CONFIO** | Fixed-supply community and ecosystem token, separate from dollar backing |
 | **Sponsored transaction layer** | User-authorized EIP-7702 batches with network fees paid by Confío |
 
-The product followed Ondo's production infrastructure onto BNB Smart Chain: USDY, the InstantManager subscription and redemption path, its reference-price oracle, and BSC-USDT liquidity. Payments, payroll, transfers, and $CONFIO were consolidated onto the same network to avoid bridges and fragmented balances inside the consumer experience.
+The product followed Ondo's production infrastructure onto BNB Smart Chain: USDY, the InstantManager subscription and redemption path, its reference-price oracle, and BSC-USDT liquidity. cUSD is the universal payment layer and cUSD+ is its eligible savings wrapper. Every external USDT conversion into or out of this dollar system pays 0.9%; internal sends and cUSD/cUSD+ conversions cost 0%. Payments, payroll, transfers, and $CONFIO were consolidated onto the same network to avoid bridges and fragmented balances inside the consumer experience.
 
 ## Verified BNB Smart Chain contracts
 
 | Contract | Address |
 | --- | --- |
+| cUSD vault (UUPS proxy) | [`0x6101cC37…8d543F`](https://bscscan.com/address/0x6101cC370635cF2c7f2725EaB010aC407A8d543F#code) |
 | cUSD+ vault | [`0x3C29417e…63Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Ondo Stocks router (UUPS proxy) | [`0x40c8e134…29c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | $CONFIO token | [`0xCcEb3F61…B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| $CONFIO presale vault | [`0x1a2dD9b4…f095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
+| $CONFIO presale vault | [`0x8c3A1fff…aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
 | $CONFIO reward vault | [`0x812b8d86…De730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | $CONFIO vesting vault | [`0xb873e4db…0bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
-| Invitation escrow | [`0xeFF0Af29…4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| Merchant payments | [`0x039Ebe91…7736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
-| Payroll vault | [`0x851cA801…d7299`](https://bscscan.com/address/0x851cA801c3028D4C0e651d29803f8e35D86d7299#code) |
+| Invitation escrow | [`0xe6c49CcE…8AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
+| Merchant payments | [`0x942BF5F3…5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
+| Payroll vault | [`0x851e1a56•692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
 | Sponsored-batch delegate | [`0xC06BD197…bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 
 See the [deployment record](contracts/cusd_plus/DEPLOYMENT.md) for implementation addresses, migrations, superseded deployments, transaction references, and operational status.

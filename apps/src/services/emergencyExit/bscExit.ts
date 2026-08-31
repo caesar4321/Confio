@@ -7,11 +7,10 @@
 // its purpose.
 //
 // Redeem-first policy: "permissionless ≠ accessible" — external wallets
-// have no UI for redeemToUsdt, so the default exit converts cUSD+ into
-// plain USDT-BSC before it leaves. redeemToUsdt(shares, minOut, to) pays
-// USDT DIRECTLY to the destination (verified permissionless, only the
-// raw-USDY redeem is owner-gated). Fallback when the Ondo leg is dead:
-// raw cUSD+ transfer, flagged to the caller so the screen can warn.
+// have no UI for either vault redeem, so the default exit converts cUSD+
+// and cUSD into plain USDT-BSC before value leaves. Both fee-bearing exits
+// pay USDT DIRECTLY to the destination. Fallback when a vault leg is dead:
+// transfer the raw cUSD+/cUSD, flagged so the screen can warn.
 //
 // Resumable: every completed step records its tx hash in the injected KV
 // store; re-running skips completed steps and re-reads live balances so
@@ -33,6 +32,7 @@ import {
 import { CHAIN_ENDPOINTS } from './chainClock';
 import type { KVStore } from './reachability';
 import { BUNDLED_ONDO_STOCK_TOKENS } from '../../config/ondoStockTokens.generated';
+import { CUSD_BSC_VAULT_ADDRESS } from '../../config/env';
 
 // Bundled chain wiring (design doc: "token addresses/ABIs ship in the app
 // bundle") — in an outage the config query that normally serves the vault
@@ -42,6 +42,10 @@ import { BUNDLED_ONDO_STOCK_TOKENS } from '../../config/ondoStockTokens.generate
 // module stays free of react-native imports — the disaster drill drives
 // it from Node against mainnet (same value as cusdPlusVault.USDT_BSC).
 export const BUNDLED_VAULT_ADDRESS = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1';
+// Filled from the release environment after the UUPS proxy is deployed. It is
+// compiled into the app bundle; an empty value means cUSD is not deployed in
+// that environment yet.
+export const BUNDLED_CUSD_ADDRESS = CUSD_BSC_VAULT_ADDRESS;
 const USDT_BSC = '0x55d398326f99059fF775485246999027B3197955';
 export const BUNDLED_CONFIO_ADDRESS = '0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8';
 const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
@@ -195,16 +199,23 @@ export const readBundledOndoStockHoldings = async (owner: string): Promise<OndoS
 
 export interface BscExitPlan {
   cusdPlusShares: bigint;
+  cusdWei: bigint;
   usdtWei: bigint;
   confioWei: bigint;
   bnbWei: bigint;
   ondoStocks: OndoStockHolding[];
-  steps: Array<'redeemCusdPlus' | 'transferUsdt' | 'transferConfio' | 'transferOndoStocks'>;
+  steps: Array<'redeemCusdPlus' | 'redeemCusd' | 'transferUsdt' | 'transferConfio' | 'transferOndoStocks'>;
 }
 
-export const planBscExit = async (address: string, vaultAddress: string): Promise<BscExitPlan> => {
-  const [cusdPlusShares, usdtWei, confioWei, bnbWei, ondoStocks] = await Promise.all([
+export const planBscExit = async (
+  address: string,
+  vaultAddress: string,
+  cusdAddress: string = BUNDLED_CUSD_ADDRESS,
+): Promise<BscExitPlan> => {
+  const hasCusd = /^0x[0-9a-fA-F]{40}$/.test(cusdAddress);
+  const [cusdPlusShares, cusdWei, usdtWei, confioWei, bnbWei, ondoStocks] = await Promise.all([
     erc20Balance(vaultAddress, address),
+    hasCusd ? erc20Balance(cusdAddress, address) : Promise.resolve(0n),
     erc20Balance(USDT_BSC, address),
     erc20Balance(BUNDLED_CONFIO_ADDRESS, address),
     bscBnbBalance(address),
@@ -212,6 +223,7 @@ export const planBscExit = async (address: string, vaultAddress: string): Promis
   ]);
   const steps: BscExitPlan['steps'] = [];
   if (cusdPlusShares > 0n) steps.push('redeemCusdPlus');
+  if (cusdWei > 0n) steps.push('redeemCusd');
   // USDT step re-reads the live balance at execution time, so it also
   // carries whatever the redeem just delivered if redeem paid the user
   // (it pays the destination directly — this step covers pre-held USDT).
@@ -223,7 +235,7 @@ export const planBscExit = async (address: string, vaultAddress: string): Promis
   // Sweeping would leak sponsor dust through polished UI and strip the
   // account of gas it may need for stray future deposits to the old
   // address. Zero native outflow ⇒ zero farming-detector interaction.
-  return { cusdPlusShares, usdtWei, confioWei, bnbWei, ondoStocks, steps };
+  return { cusdPlusShares, cusdWei, usdtWei, confioWei, bnbWei, ondoStocks, steps };
 };
 
 /** BNB the user must hold for Direct-mode gas, for the top-up screen. */
@@ -235,6 +247,8 @@ export const estimateBscExitGasWei = async (plan: BscExitPlan): Promise<bigint> 
   // Reserve both the attempted redeem and the 120k raw-share fallback. A
   // reverted redeem still consumes gas before the fallback can run.
   if (plan.steps.includes('redeemCusdPlus')) units += 820_000n;
+  // cUSD has no Ondo call, but reserve both redeem and raw-token fallback.
+  if (plan.steps.includes('redeemCusd')) units += 260_000n;
   if (plan.steps.includes('transferUsdt')) units += 80_000n;
   if (plan.steps.includes('transferConfio')) units += 80_000n;
   // Ondo tokens can execute compliance hooks. Budget conservatively; the
@@ -265,10 +279,13 @@ export interface BscExitResult {
    * "amount unknown", never as "nothing moved".
    */
   usdtToDest: string;
+  /** Assets that remain in the Confío wallet after every safe fallback failed. */
+  unresolved: string[];
 }
 
 export type BscExitStep =
   | 'redeemCusdPlus'
+  | 'redeemCusd'
   | 'transferUsdt'
   | 'transferConfio'
   | `ondoStock:${string}:${string}`;
@@ -293,6 +310,7 @@ const ckKey = (accountKey: string, dest: string) =>
  */
 const CK_TTL_MS = 30 * 60 * 1000;
 const DEGRADED_REDEEM_CK = '__degraded:redeemCusdPlus';
+const DEGRADED_CUSD_REDEEM_CK = '__degraded:redeemCusd';
 const PENDING_CK_PREFIX = '__pending:';
 const PENDING_DEGRADED_CK_PREFIX = '__pendingDegraded:';
 
@@ -323,6 +341,8 @@ export const executeBscExit = async (params: {
   wallet: DerivedEvmWallet;
   dest: string;
   vaultAddress: string;
+  /** Bundled cUSD proxy. Empty only before cUSD exists in this environment. */
+  cusdAddress?: string;
   /** Slippage floor for the IM redeem; caller derives from displayed value. */
   minUsdtOutWei: bigint;
   accountKey: string;
@@ -334,7 +354,10 @@ export const executeBscExit = async (params: {
    */
   onStep?: (step: BscExitStep) => void;
 }): Promise<BscExitResult> => {
-  const { wallet, dest, vaultAddress, store, accountKey, onStep } = params;
+  const {
+    wallet, dest, vaultAddress, store, accountKey, onStep,
+    cusdAddress = BUNDLED_CUSD_ADDRESS,
+  } = params;
   if (!/^0x[0-9a-fA-F]{40}$/.test(dest)) throw new Error('bad destination address');
   if (dest.toLowerCase() === wallet.address.toLowerCase()) throw new Error('destination is own address');
 
@@ -344,6 +367,7 @@ export const executeBscExit = async (params: {
   const completed: string[] = [];
   const degraded: string[] = [];
   const sentNow: string[] = [];
+  const unresolved: string[] = [];
   let usdtToDest = 0n;
   let activeStep: string | null = null;
   let activeDegraded = false;
@@ -360,6 +384,7 @@ export const executeBscExit = async (params: {
     degraded: [...degraded],
     sentNow: [...sentNow],
     usdtToDest: usdtToDest.toString(),
+    unresolved: [...unresolved],
   });
   const persistCheckpoint = () =>
     store.set(key, JSON.stringify({ ts: Date.now(), steps: ck }));
@@ -381,8 +406,10 @@ export const executeBscExit = async (params: {
       if (receipt.status === '0x1') {
         ck[step] = txHash;
         completed.push(step);
-        if (wasDegraded) ck[DEGRADED_REDEEM_CK] = '1';
-        if (!wasDegraded && (step === 'redeemCusdPlus' || step === 'transferUsdt')) {
+        if (wasDegraded) {
+          ck[step === 'redeemCusd' ? DEGRADED_CUSD_REDEEM_CK : DEGRADED_REDEEM_CK] = '1';
+        }
+        if (!wasDegraded && (step === 'redeemCusdPlus' || step === 'redeemCusd' || step === 'transferUsdt')) {
           usdtToDest += usdtCreditedTo(receipt, dest);
         }
       } else if (receipt.status !== '0x0') {
@@ -402,6 +429,7 @@ export const executeBscExit = async (params: {
     Object.assign(ck, await loadCk(store, key));
     await reconcilePending();
     if (ck[DEGRADED_REDEEM_CK]) degraded.push('redeemCusdPlus');
+    if (ck[DEGRADED_CUSD_REDEEM_CK]) degraded.push('redeemCusd');
 
     // 1. cUSD+ → USDT paid straight to the destination.
     if (!ck.redeemCusdPlus) {
@@ -434,16 +462,21 @@ export const executeBscExit = async (params: {
           // back to a raw share transfer so value at least MOVES, and
           // surface the degradation for the screen's warning.
           activeDegraded = true;
-          const receipt = await sendCall({
-            from: wallet.address,
-            privKeyHex: wallet.privKeyHex,
-            to: vaultAddress,
-            data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(shares),
-            gasLimit: 120_000n,
-          });
-          ck[DEGRADED_REDEEM_CK] = '1';
-          if (!degraded.includes('redeemCusdPlus')) degraded.push('redeemCusdPlus');
-          await record('redeemCusdPlus', receipt.transactionHash);
+          try {
+            const receipt = await sendCall({
+              from: wallet.address,
+              privKeyHex: wallet.privKeyHex,
+              to: vaultAddress,
+              data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(shares),
+              gasLimit: 120_000n,
+            });
+            ck[DEGRADED_REDEEM_CK] = '1';
+            if (!degraded.includes('redeemCusdPlus')) degraded.push('redeemCusdPlus');
+            await record('redeemCusdPlus', receipt.transactionHash);
+          } catch (fallbackError) {
+            if (isOutcomeUnknown(fallbackError)) throw fallbackError;
+            unresolved.push('cUSD+');
+          }
           activeStep = null;
           activeDegraded = false;
         }
@@ -452,29 +485,84 @@ export const executeBscExit = async (params: {
       }
     }
 
-    // 2. Pre-held USDT (live re-read — never trust the plan snapshot).
+    // 2. cUSD → USDT paid straight to the destination. Fee-bearing
+    // redeemWithFee is intentionally permissionless; fee-free redemption is
+    // sponsor-only and is never part of Emergency Exit.
+    if (/^0x[0-9a-fA-F]{40}$/.test(cusdAddress) && !ck.redeemCusd) {
+      const cusd = await erc20Balance(cusdAddress, wallet.address);
+      if (cusd > 0n) {
+        onStep?.('redeemCusd');
+        activeStep = 'redeemCusd';
+        activeDegraded = false;
+        try {
+          const receipt = await sendCall({
+            from: wallet.address,
+            privKeyHex: wallet.privKeyHex,
+            to: cusdAddress,
+            data:
+              selector('redeemWithFee(uint256,uint256,address)') +
+              encodeUint(cusd) +
+              encodeUint(0n) +
+              encodeAddress(dest),
+            gasLimit: 140_000n,
+          });
+          usdtToDest += usdtCreditedTo(receipt, dest);
+          await record('redeemCusd', receipt.transactionHash);
+          activeStep = null;
+        } catch (e) {
+          if (isOutcomeUnknown(e)) throw e;
+          activeDegraded = true;
+          try {
+            const receipt = await sendCall({
+              from: wallet.address,
+              privKeyHex: wallet.privKeyHex,
+              to: cusdAddress,
+              data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(cusd),
+              gasLimit: 120_000n,
+            });
+            ck[DEGRADED_CUSD_REDEEM_CK] = '1';
+            if (!degraded.includes('redeemCusd')) degraded.push('redeemCusd');
+            await record('redeemCusd', receipt.transactionHash);
+          } catch (fallbackError) {
+            if (isOutcomeUnknown(fallbackError)) throw fallbackError;
+            unresolved.push('cUSD');
+          }
+          activeStep = null;
+          activeDegraded = false;
+        }
+      } else {
+        await record('redeemCusd', 'skipped_zero');
+      }
+    }
+
+    // 3. Pre-held USDT (live re-read — never trust the plan snapshot).
     if (!ck.transferUsdt) {
       const usdt = await erc20Balance(USDT_BSC, wallet.address);
       if (usdt > 0n) {
         onStep?.('transferUsdt');
         activeStep = 'transferUsdt';
         activeDegraded = false;
-        const receipt = await sendCall({
-          from: wallet.address,
-          privKeyHex: wallet.privKeyHex,
-          to: USDT_BSC,
-          data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(usdt),
-          gasLimit: 80_000n,
-        });
-        usdtToDest += usdtCreditedTo(receipt, dest);
-        await record('transferUsdt', receipt.transactionHash);
+        try {
+          const receipt = await sendCall({
+            from: wallet.address,
+            privKeyHex: wallet.privKeyHex,
+            to: USDT_BSC,
+            data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(usdt),
+            gasLimit: 80_000n,
+          });
+          usdtToDest += usdtCreditedTo(receipt, dest);
+          await record('transferUsdt', receipt.transactionHash);
+        } catch (e) {
+          if (isOutcomeUnknown(e)) throw e;
+          unresolved.push('USDT');
+        }
         activeStep = null;
       } else {
         await record('transferUsdt', 'skipped_zero');
       }
     }
 
-    // 3. Canonical CONFIO-BSC only. A token with the same symbol at any
+    // 4. Canonical CONFIO-BSC only. A token with the same symbol at any
     // other address is ignored.
     if (!ck.transferConfio) {
       const confio = await erc20Balance(BUNDLED_CONFIO_ADDRESS, wallet.address);
@@ -482,24 +570,28 @@ export const executeBscExit = async (params: {
         onStep?.('transferConfio');
         activeStep = 'transferConfio';
         activeDegraded = false;
-        const receipt = await sendCall({
-          from: wallet.address,
-          privKeyHex: wallet.privKeyHex,
-          to: BUNDLED_CONFIO_ADDRESS,
-          data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(confio),
-          gasLimit: 80_000n,
-        });
-        await record('transferConfio', receipt.transactionHash);
+        try {
+          const receipt = await sendCall({
+            from: wallet.address,
+            privKeyHex: wallet.privKeyHex,
+            to: BUNDLED_CONFIO_ADDRESS,
+            data: selector('transfer(address,uint256)') + encodeAddress(dest) + encodeUint(confio),
+            gasLimit: 80_000n,
+          });
+          await record('transferConfio', receipt.transactionHash);
+        } catch (e) {
+          if (isOutcomeUnknown(e)) throw e;
+          unresolved.push('CONFIO');
+        }
         activeStep = null;
       } else {
         await record('transferConfio', 'skipped_zero');
       }
     }
 
-    // 4. Every official Ondo Stock known to this app release. The registry
+    // 5. Every official Ondo Stock known to this app release. The registry
     // is compiled into the client; symbols are labels only and arbitrary
     // wallet tokens are never inspected or transferred.
-    const stockFailures: string[] = [];
     const stocks = await readBundledOndoStockHoldings(wallet.address);
     for (const stock of stocks) {
       const step = stockStep(stock);
@@ -521,7 +613,7 @@ export const executeBscExit = async (params: {
         if (isOutcomeUnknown(e)) throw e;
         // Continue with the other stocks. Completed sends are checkpointed;
         // a retry re-reads balances and attempts only what remains.
-        stockFailures.push(stock.symbol);
+        unresolved.push(stock.symbol);
         activeStep = null;
         continue;
       }
@@ -530,16 +622,16 @@ export const executeBscExit = async (params: {
       await record(step, receipt.transactionHash);
       activeStep = null;
     }
-    if (stockFailures.length) {
-      throw new Error(`No se pudieron enviar estas acciones: ${stockFailures.join(', ')}`);
-    }
-
     // Every step resolved, so this attempt is over: drop the checkpoint.
     // Leaving it is what made the SECOND exit to the same destination a
     // silent no-op that still reported success. Re-running with a stale
     // balance is not a double-spend risk — each step re-reads live
     // balances and the chain enforces the rest.
-    await store.del(key);
+    if (unresolved.length) {
+      await persistCheckpoint();
+    } else {
+      await store.del(key);
+    }
   } catch (e) {
     if (isOutcomeUnknown(e) && activeStep && typeof (e as any)?.txHash === 'string') {
       ck[PENDING_CK_PREFIX + activeStep] = (e as any).txHash;

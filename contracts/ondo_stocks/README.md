@@ -21,7 +21,16 @@ On buys, the client binds the exact attested USDT spend and sizes the cUSD+
 redemption to cover spend plus fee. If the vault accrues between quote and
 execution, every excess USDT wei is returned to the user. On sells, the router
 subtracts the fee from actual GM proceeds and calls the vault's
-`subscribeAndMint`, so the net amount returns directly to the user's savings.
+router-restricted `subscribeForStock`, so the net amount returns directly to
+the user's savings without the separate 0.9% conversion fee. Stock buys use
+the matching `redeemForStock` route. The router's fixed 0.30% is the only
+Confío fee on either trade direction.
+
+Every Confío app trade that spends or mints cUSD+ remains sponsor-originated.
+Advanced crypto-native holders have a separate contract-only escape hatch:
+`sellToUsdt` redeems stock directly to raw USDT, charges the same fixed 0.30%,
+and never calls the cUSD+ vault. Confío's client and server do not expose or
+invoke that permissionless function.
 
 ## End-to-end wiring
 
@@ -29,12 +38,18 @@ The production flow is deliberately split by custody boundary:
 
 1. Daphne requests a soft quote for preview, then a binding BSC attestation
    from Ondo after confirmation. The write key never leaves the server.
-2. The app reads the user's live cUSD+/stock balances, builds an optional
-   approval plus the exact router calldata, and signs one EIP-712 intent.
-3. Daphne validates the canonical ABI, quote side/chain/expiry/arithmetic,
-   token approval, fixed 30 bps cap, JWT account, and buy eligibility.
-4. The KMS relay broadcasts the sponsored EIP-7702 batch. The router settles
-   atomically and Daphne invalidates the vault and GM holdings caches.
+2. The app reads the user's live cUSD+/stock balances and builds an optional
+   approval plus the exact router calldata.
+3. Daphne validates the quote request, sponsored-rail configuration, issuer
+   eligibility, canonical calldata, and fixed 30 bps cap.
+4. The app signs an EIP-712 intent and the KMS relay broadcasts the sponsored
+   EIP-7702 batch.
+5. The router settles atomically and Daphne invalidates the vault and GM
+   holdings caches.
+
+`sellToUsdt` is deliberately outside this application flow. An advanced user
+must obtain a valid Ondo sell attestation, approve the router, and submit the
+contract call with their own BNB and tooling.
 
 USDY settlement is separate from GM stock settlement. The cUSD+ vault calls
 `USDY_InstantManager.subscribe`/`redeem`; it never calls a USDY
@@ -90,8 +105,9 @@ Trading remains disabled. Pending activation gates:
 - [ ] Whitelist the router address with Ondo GM. Ondo owns the internal
       purchaser `userId` mapping and returns it in signed attestations; there
       is no separate purchaser-ID value for Confío to configure.
-- [ ] Safe call on the cUSD+ vault:
-      `setSponsor(0x40c8e134BCAf44EEf9e7D184846F36c9862329c3, true)`.
+- [ ] Safe calls on the cUSD+ vault:
+      `setSponsor(0x40c8e134BCAf44EEf9e7D184846F36c9862329c3, true)` and
+      `setStockRouter(0x40c8e134BCAf44EEf9e7D184846F36c9862329c3)`.
 - [ ] Production-fork rehearsal against the deployed address.
 - [ ] Real minimum-size buy/sell canary.
 - [ ] Enable `CUSD_PLUS_STOCK_TRADING_ENABLED` only after every item above.
@@ -114,7 +130,8 @@ Deployment alone does not activate trades. Before enabling the app:
 2. Have Ondo whitelist the router address for GM settlement. The attestation
    API supplies the corresponding purchaser `userId`; it is not a separate
    dashboard input.
-3. From the Confío Safe, call `CusdPlusVault.setSponsor(router, true)`.
+3. From the Confío Safe, call `CusdPlusVault.setSponsor(router, true)` and
+   `CusdPlusVault.setStockRouter(router)`.
 4. Confirm the relay origin remains registered as a cUSD+ sponsor.
 5. Confirm the production KMS origin is a cUSD+ sponsor and the deployed
    ConfioBatchDelegate is the configured EIP-7702 delegate.

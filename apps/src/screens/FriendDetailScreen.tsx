@@ -171,10 +171,12 @@ export function FriendDetailScreen() {
   const [showTokenSelection, setShowTokenSelection] = useState(false);
   // Gating for the send sheet, identical to TransferScreen: the cUSD+ option
   // is an EXIT and stays visible whenever the user holds anything.
-  const { savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd } = useSavingsPortfolio();
+  const {
+    savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd, cusdBalanceUsd,
+  } = useSavingsPortfolio();
   const cusdDepositsPaused = savingsInfo.cusdDepositsPaused;
   const savingsExitVisible =
-    savingsInfo.enabled || savingsInfo.balanceUsd > 0 || walletUsdtUsd > 0;
+    savingsInfo.enabled || savingsInfo.balanceUsd > 0 || cusdBalanceUsd > 0 || walletUsdtUsd > 0;
   const [refreshing, setRefreshing] = useState(false);
   const [transactionLimit, setTransactionLimit] = useState(20);
   const [loadingMore, setLoadingMore] = useState(false);

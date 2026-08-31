@@ -22,7 +22,10 @@ class _FakeAccountQuerySet:
 class GuardarianTransactionProxyTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
-        self.account = SimpleNamespace(algorand_address='A' * 58)
+        self.account = SimpleNamespace(
+            algorand_address='A' * 58,
+            bsc_address='0x' + '12' * 20,
+        )
         self.user = SimpleNamespace(
             id=123,
             email='user@example.com',
@@ -67,7 +70,8 @@ class GuardarianTransactionProxyTests(SimpleTestCase):
             HTTP_AUTHORIZATION='JWT test-token',
             HTTP_X_FIREBASE_APPCHECK='test-app-check',
         )
-        with patch('users.models.User.objects.get', return_value=self.user):
+        with patch('users.models.User.objects.get', return_value=self.user), \
+                patch('cusd_plus.cusd_vault.require_operational'):
             response = guardarian_transaction_proxy(request)
 
         self.assertEqual(response.status_code, 200)
@@ -81,7 +85,121 @@ class GuardarianTransactionProxyTests(SimpleTestCase):
         self.assertNotIn('default_payout_address', query)
         self.assertNotIn('skip_choose_payout_address', query)
 
-        provider_payload = mock_post.call_args.kwargs['json']
+        provider_payload = json.loads(mock_post.call_args.kwargs['data'])
         self.assertEqual(provider_payload['customer']['contact_info']['email'], self.user.email)
         self.assertEqual(provider_payload['payout_info']['payout_address'], self.account.algorand_address)
         self.assertTrue(provider_payload['payout_info']['skip_choose_payout_address'])
+
+    @override_settings(
+        GUARDARIAN_API_KEY='test-api-key',
+        GUARDARIAN_API_URL='https://api-payments.guardarian.com/v1',
+        CUSD_CONVERSION_FEE_ENABLED=True,
+    )
+    @patch('security.integrity_service.app_check_service.verify_request_header')
+    @patch('config.views.jwt_decode')
+    @patch('cusd_plus.cusd_vault.current_fee_bps', return_value=50)
+    @patch('config.views.requests.post')
+    def test_bsc_buy_returns_confio_fee_preview(
+        self, mock_post, _mock_fee_bps, mock_jwt_decode, mock_app_check,
+    ):
+        mock_app_check.return_value = {'success': True}
+        mock_jwt_decode.return_value = {
+            'user_id': self.user.id,
+            'account_type': 'personal',
+            'account_index': 0,
+        }
+        provider_response = Mock(ok=True, status_code=200)
+        provider_response.json.return_value = {
+            'redirect_url': 'https://guardarian.example/checkout?session=bsc',
+            'status': 'waiting',
+            'estimated_exchange_amount': '123.456',
+        }
+        mock_post.return_value = provider_response
+        request = self.factory.post(
+            '/api/guardarian/transaction/',
+            data=json.dumps({
+                'amount': 500,
+                'from_currency': 'PEN',
+                'to_currency': 'USDT',
+                'to_network': 'BSC',
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION='JWT test-token',
+            HTTP_X_FIREBASE_APPCHECK='test-app-check',
+        )
+        with patch('users.models.User.objects.get', return_value=self.user), \
+                patch('cusd_plus.cusd_vault.require_operational'):
+            response = guardarian_transaction_proxy(request)
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['confio_fee_bps'], 50)
+        self.assertEqual(body['confio_gross_crypto_amount'], '123.456')
+        self.assertEqual(body['confio_fee_amount'], '0.617280000000000000')
+        self.assertEqual(body['confio_net_crypto_amount'], '122.838720000000000000')
+        provider_payload = json.loads(mock_post.call_args.kwargs['data'])
+        self.assertEqual(provider_payload['payout_info']['payout_address'], self.account.bsc_address)
+        self.assertEqual(provider_payload['to_network'], 'BSC')
+
+    @override_settings(
+        GUARDARIAN_API_KEY='test-api-key',
+        GUARDARIAN_API_URL='https://api-payments.guardarian.com/v1',
+        CUSD_CONVERSION_FEE_ENABLED=True,
+    )
+    @patch('security.integrity_service.app_check_service.verify_request_header')
+    @patch('config.views.jwt_decode')
+    @patch('cusd_plus.cusd_vault.current_fee_bps', return_value=90)
+    @patch('cusd_plus.cusd_vault.preview_redeem_wei')
+    @patch('config.views.requests.post')
+    def test_bsc_sell_orders_provider_net_and_returns_exact_fee(
+        self, mock_post, mock_preview, _mock_fee_bps,
+        mock_jwt_decode, mock_app_check,
+    ):
+        from cusd_plus.cusd_vault import ConversionPreview
+
+        mock_app_check.return_value = {'success': True}
+        mock_jwt_decode.return_value = {
+            'user_id': self.user.id,
+            'account_type': 'personal',
+            'account_index': 0,
+        }
+        mock_preview.return_value = ConversionPreview(
+            gross_wei=100 * 10 ** 18,
+            fee_wei=9 * 10 ** 17,
+            net_wei=991 * 10 ** 17,
+            fee_bps=90,
+        )
+        provider_response = Mock(ok=True, status_code=200)
+        provider_response.json.return_value = {
+            'redirect_url': 'https://guardarian.example/sell',
+            'from_amount': '99.100000',
+            'deposit_address': '0x' + '34' * 20,
+        }
+        mock_post.return_value = provider_response
+        request = self.factory.post(
+            '/api/guardarian/transaction/',
+            data=json.dumps({
+                'amount': 100,
+                'from_currency': 'USDT',
+                'from_network': 'BSC',
+                'to_currency': 'PEN',
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION='JWT test-token',
+            HTTP_X_FIREBASE_APPCHECK='test-app-check',
+            HTTP_X_CONFIO_FEE_CAPABLE='1',
+        )
+        with patch('users.models.User.objects.get', return_value=self.user), \
+                patch('cusd_plus.cusd_vault.require_operational'), \
+                patch('cusd_plus.vault.withdrawable_usdt_wei', return_value=100 * 10 ** 18), \
+                patch('cusd_plus.vault.cusd_withdrawable_usdt_wei', return_value=100 * 10 ** 18), \
+                patch('cusd_plus.vault.usdt_balance_raw', return_value=0):
+            response = guardarian_transaction_proxy(request)
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['confio_gross_crypto_amount'], '100')
+        self.assertEqual(body['confio_fee_amount'], '0.9')
+        self.assertEqual(body['confio_net_crypto_amount'], '99.1')
+        provider_payload = json.loads(mock_post.call_args.kwargs['data'])
+        self.assertEqual(provider_payload['from_amount'], 99.1)

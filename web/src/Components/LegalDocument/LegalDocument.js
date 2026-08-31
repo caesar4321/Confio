@@ -53,7 +53,7 @@ const LegalDocument = ({ type }) => {
     return <div className="legal-document error">No se encontró el documento</div>;
   }
 
-  const { title, content, version, lastUpdated, language } = data.legalDocument;
+  const { title, content, version, lastUpdated } = data.legalDocument;
 
   const renderContent = (content) => {
     if (typeof content === 'string') {
@@ -109,4 +109,4 @@ const LegalDocument = ({ type }) => {
   );
 };
 
-export default LegalDocument; 
+export default LegalDocument;

@@ -69,7 +69,12 @@ class ConversionAdmin(admin.ModelAdmin):
             'fields': ('actor_type', 'actor_user', 'actor_business', 'actor_display_name', 'actor_address')
         }),
         ('Conversion Details', {
-            'fields': ('from_amount', 'to_amount', 'exchange_rate', 'fee_amount')
+            'fields': (
+                'from_amount', 'to_amount', 'exchange_rate', 'fee_amount',
+                'gross_amount_exact', 'fee_amount_exact', 'net_amount_exact',
+                'conversion_fee_bps', 'from_asset_id', 'to_asset_id',
+                'perimeter_direction', 'prepared_intent_id', 'contract_event_index',
+            )
         }),
         ('Transaction Hashes', {
             'fields': ('from_transaction_hash', 'to_transaction_hash')

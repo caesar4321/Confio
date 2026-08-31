@@ -32,7 +32,7 @@ import { countries, getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
-import { useMutation, gql } from '@apollo/client';
+import { useMutation, useQuery, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import { oauthStorage } from '../services/oauthStorageService';
@@ -40,6 +40,7 @@ import { apolloClient } from '../apollo/client';
 import PreFlightModal from '../components/PreFlightModal';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { Button } from '../components/common/Button';
+import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 
 
 // GraphQL mutation for USDC opt-in
@@ -58,6 +59,23 @@ const OPT_IN_TO_USDC = gql`
     }
   }
 `;
+
+const GUARDARIAN_DOLLAR_DESTINATION = gql`
+  query GuardarianDollarDestination {
+    cusdPlusSummary {
+      savingsEnabled
+      conversionFeeBps
+    }
+  }
+`;
+
+type PendingGuardarianCheckout = {
+  url: string;
+  feeBps: number;
+  gross?: string;
+  fee?: string;
+  net?: string;
+};
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -96,6 +114,7 @@ const TopUpScreen = () => {
   const [showCurrencyNotAvailableHint, setShowCurrencyNotAvailableHint] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [showPreFlightModal, setShowPreFlightModal] = useState(false);
+  const [pendingCheckout, setPendingCheckout] = useState<PendingGuardarianCheckout | null>(null);
 
   // USDC opt-in mutation
   const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
@@ -106,6 +125,15 @@ const TopUpScreen = () => {
   // contract as the Koywe savings rail.
   const route = useRoute();
   const isSavingsRail = (route.params as any)?.destination === 'cusd_plus';
+  const { data: dollarDestinationData } = useQuery(GUARDARIAN_DOLLAR_DESTINATION, {
+    skip: !isSavingsRail,
+    fetchPolicy: 'cache-and-network',
+  });
+  const savingsEnabled = dollarDestinationData?.cusdPlusSummary?.savingsEnabled;
+  const conversionFeeBps = Number(dollarDestinationData?.cusdPlusSummary?.conversionFeeBps ?? 0);
+  const destinationAsset = savingsEnabled === true
+    ? 'Confío Dollar+'
+    : savingsEnabled === false ? 'cUSD' : 'dólares de Confío';
 
   // Animation for loading spinner
   const spinValue = useRef(new Animated.Value(0)).current;
@@ -349,8 +377,21 @@ const TopUpScreen = () => {
 
       // DEBUG: Log the redirect URL to understand its structure
 
-      // Open directly in external browser
-      await Linking.openURL(checkoutUrl);
+      if (isSavingsRail) {
+        // Creating the Guardarian session moves no money. Pause here so the
+        // user sees Confío's separate conversion fee before entering the
+        // provider checkout. Amounts are estimates; the contract charges the
+        // USDT that actually arrives.
+        setPendingCheckout({
+          url: checkoutUrl,
+          feeBps: Number(tx.confio_fee_bps ?? conversionFeeBps),
+          gross: tx.confio_gross_crypto_amount,
+          fee: tx.confio_fee_amount,
+          net: tx.confio_net_crypto_amount,
+        });
+      } else {
+        await Linking.openURL(checkoutUrl);
+      }
 
     } catch (err: any) {
       const errorMessage = translateGuardarianError(err?.message || 'Error desconocido');
@@ -400,7 +441,7 @@ const TopUpScreen = () => {
             <Text style={styles.fieldTitle}>{isSavingsRail ? 'Recarga tu ahorro' : 'Recarga tu cuenta'}</Text>
             <Text style={styles.fieldSubtitle}>
               {isSavingsRail
-                ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+), sin pasos extra.'
+                ? `Dinero nuevo se convierte automáticamente a ${destinationAsset}, sin pasos extra.`
                 : 'Pagas con tarjeta o transferencia y recibes cUSD directo en tu cuenta.'}
             </Text>
           </View>
@@ -461,8 +502,17 @@ const TopUpScreen = () => {
 
           <View style={styles.conversionHint}>
             <Icon name="arrow-down" size={14} color={colors.primary} />
-            <Text style={styles.conversionText}>{isSavingsRail ? 'Llega directo a tu ahorro (Confío Dollar+)' : 'Recibes cUSD en tu cuenta'}</Text>
+            <Text style={styles.conversionText}>{isSavingsRail ? `Se convierte automáticamente a ${destinationAsset}` : 'Recibes cUSD en tu cuenta'}</Text>
           </View>
+          {isSavingsRail && conversionFeeBps > 0 ? (
+            <View style={styles.confioFeeNotice}>
+              <View>
+                <Text style={styles.confioFeeLabel}>Comisión de Confío</Text>
+                <Text style={styles.confioFeeHint}>Se descuenta del USDT que entrega Guardarian.</Text>
+              </View>
+              <Text style={styles.confioFeeValue}>{(conversionFeeBps / 100).toLocaleString('es-PE')}%</Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Features */}
@@ -567,6 +617,71 @@ const TopUpScreen = () => {
         onContinue={handleProceedToGuardarian}
         onCancel={() => setShowPreFlightModal(false)}
       />
+      <Modal
+        visible={!!pendingCheckout}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setPendingCheckout(null)}
+      >
+        <View style={styles.checkoutReviewOverlay}>
+          <View style={styles.checkoutReviewCard}>
+            <View style={styles.checkoutReviewIcon}>
+              <Icon name="check-circle" size={24} color={colors.primary} />
+            </View>
+            <Text style={styles.checkoutReviewTitle}>Revisa antes de pagar</Text>
+            <Text style={styles.checkoutReviewSubtitle}>
+              Guardarian confirmará su cotización final dentro del checkout.
+            </Text>
+            {pendingCheckout?.gross ? (
+              <View style={styles.checkoutReviewRow}>
+                <Text style={styles.checkoutReviewLabel}>USDT estimado de Guardarian</Text>
+                <Text style={styles.checkoutReviewValue}>{formatRampMoney(pendingCheckout.gross, USD_UNIT)}</Text>
+              </View>
+            ) : null}
+            <View style={styles.checkoutReviewRow}>
+              <Text style={styles.checkoutReviewLabel}>Comisión de Confío</Text>
+              <Text style={styles.checkoutReviewValue}>
+                {Number(pendingCheckout?.feeBps ?? 0) === 0
+                  ? 'Gratis'
+                  : pendingCheckout?.fee
+                  ? `${formatRampMoney(pendingCheckout.fee, USD_UNIT)} (${(pendingCheckout.feeBps / 100).toLocaleString('es-PE')}%)`
+                  : `${(Number(pendingCheckout?.feeBps ?? 0) / 100).toLocaleString('es-PE')}%`}
+              </Text>
+            </View>
+            {pendingCheckout?.net ? (
+              <View style={[styles.checkoutReviewRow, styles.checkoutReviewNetRow]}>
+                <Text style={styles.checkoutReviewNetLabel}>Recibirías aprox. en {destinationAsset}</Text>
+                <Text style={styles.checkoutReviewNetValue}>{formatRampMoney(pendingCheckout.net, USD_UNIT)}</Text>
+              </View>
+            ) : (
+              <Text style={styles.checkoutReviewFootnote}>
+                {Number(pendingCheckout?.feeBps ?? 0) > 0
+                  ? `Recibirás el ${(100 - Number(pendingCheckout?.feeBps ?? 0) / 100).toLocaleString('es-PE')}% del USDT que Guardarian entregue finalmente.`
+                  : 'Recibirás el USDT que Guardarian entregue finalmente.'}
+              </Text>
+            )}
+            <Button
+              title="Continuar a Guardarian"
+              onPress={async () => {
+                const checkout = pendingCheckout;
+                if (!checkout) return;
+                try {
+                  await Linking.openURL(checkout.url);
+                  setPendingCheckout(null);
+                } catch {
+                  Alert.alert('No pudimos abrir Guardarian', 'Inténtalo nuevamente.');
+                }
+              }}
+              icon={<Icon name="external-link" size={18} color={colors.white} />}
+              style={styles.checkoutReviewPrimary}
+            />
+            <TouchableOpacity style={styles.checkoutReviewCancel} onPress={() => setPendingCheckout(null)}>
+              <Text style={styles.checkoutReviewCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <BackupEnforcementModal />
     </View>
   );
@@ -893,6 +1008,128 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text.secondary,
     fontWeight: '600',
+  },
+  confioFeeNotice: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  confioFeeLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  confioFeeHint: {
+    marginTop: 3,
+    fontSize: 11,
+    color: colors.text.secondary,
+  },
+  confioFeeValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primary,
+  },
+  checkoutReviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  checkoutReviewCard: {
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    padding: 24,
+  },
+  checkoutReviewIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  checkoutReviewTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  checkoutReviewSubtitle: {
+    marginTop: 7,
+    marginBottom: 20,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.text.secondary,
+    textAlign: 'center',
+  },
+  checkoutReviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  checkoutReviewLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  checkoutReviewValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text.primary,
+    textAlign: 'right',
+  },
+  checkoutReviewNetRow: {
+    marginTop: 4,
+    paddingHorizontal: 14,
+    borderTopWidth: 0,
+    borderRadius: 14,
+    backgroundColor: colors.primaryLight,
+  },
+  checkoutReviewNetLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  checkoutReviewNetValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: colors.primaryDark,
+  },
+  checkoutReviewFootnote: {
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: colors.primaryLight,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.primaryDark,
+    textAlign: 'center',
+  },
+  checkoutReviewPrimary: {
+    marginTop: 20,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+  },
+  checkoutReviewCancel: {
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  checkoutReviewCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text.secondary,
   },
 });
 

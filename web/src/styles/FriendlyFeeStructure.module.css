@@ -45,10 +45,33 @@
   margin: 0 auto;
 }
 
+.journeyIntro {
+  max-width: 760px;
+  margin: -1.5rem auto 2.5rem;
+  text-align: center;
+  color: #4b5563;
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.journeyIntro p {
+  margin: 1rem 0 0;
+}
+
+.journeyPill {
+  display: inline-flex;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #d1fae5;
+  color: #047857;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-  gap: 30px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
   margin-bottom: 3rem;
 }
 
@@ -62,12 +85,12 @@
 }
 
 .card:hover {
-  transform: translateY(-8px);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
 }
 
-.businessCard {
-  border-color: #8b5cf6;
+.insideCard {
+  border-color: #10b981;
+  box-shadow: 0 16px 48px rgba(5, 150, 105, 0.16);
 }
 
 .cardHeader {
@@ -76,21 +99,19 @@
   border-bottom: 1px solid #e5e7eb;
 }
 
-.businessCard .cardHeader {
-  background: #ede9fe;
-}
-
-.userType {
+.stepLabel {
   display: inline-block;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #6b7280;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #047857;
+  letter-spacing: 0.12em;
   margin-bottom: 1rem;
 }
 
 .price {
   display: flex;
-  align-items: baseline;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
@@ -114,6 +135,30 @@
   font-weight: 600;
   color: #1f2937;
   margin-bottom: 1.5rem;
+}
+
+.cardText {
+  min-height: 96px;
+  margin: 0 0 1.5rem;
+  color: #6b7280;
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.example {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f0fdf4;
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.example strong {
+  color: #047857;
+  font-size: 1rem;
 }
 
 .features {
@@ -147,38 +192,6 @@
   font-size: 1.25rem;
 }
 
-.comparison {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: #f9fafb;
-  border-radius: 12px;
-  margin-top: 1rem;
-}
-
-.comparisonItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.comparisonLabel {
-  font-size: 0.9rem;
-  color: #6b7280;
-}
-
-.comparisonValue {
-  font-weight: 600;
-  color: #ef4444;
-  text-decoration: line-through;
-}
-
-.comparisonValueGreen {
-  font-weight: 600;
-  color: #10b981;
-}
-
 .footer {
   max-width: 800px;
   margin: 0 auto;
@@ -210,7 +223,14 @@
   line-height: 1.6;
 }
 
-@media (max-width: 768px) {
+.providerNote {
+  margin: 12px 0 0;
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.55;
+}
+
+@media (max-width: 960px) {
   .cards {
     grid-template-columns: 1fr;
     gap: 20px;
@@ -227,5 +247,24 @@
   .features li {
     font-size: 0.9rem;
     padding: 6px 0;
+  }
+
+  .cardText {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .feeStructure {
+    padding: 72px 0;
+  }
+
+  .container {
+    padding: 0 1.25rem;
+  }
+
+  .footerCard {
+    gap: 14px;
+    padding: 20px;
   }
 }

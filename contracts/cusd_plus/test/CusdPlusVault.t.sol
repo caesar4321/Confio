@@ -6,18 +6,28 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {CusdPlusVault, IRWADynamicOracle, IOndoInstantManager} from "../CusdPlusVault.sol";
+import {MockCusdFeePerimeter} from "./MockCusdFeePerimeter.sol";
 
 // ── Mocks ────────────────────────────────────────────────────────────────
 
 contract MockToken is ERC20 {
     constructor(string memory n) ERC20(n, n) {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
 }
 
 contract MockOracle is IRWADynamicOracle {
     uint256 public price = 1e18;
-    function setPrice(uint256 p) external { price = p; }
-    function getPrice() external view returns (uint256) { return price; }
+
+    function setPrice(uint256 p) external {
+        price = p;
+    }
+
+    function getPrice() external view returns (uint256) {
+        return price;
+    }
 }
 
 /// Swaps USDT <-> USDY at the oracle price, no spread (Instant Manager
@@ -66,7 +76,9 @@ contract TwoFacedOracle is IRWADynamicOracle {
     uint256 public evil;
 
     function arm(CusdPlusVault v, uint256 h, uint256 e) external {
-        vault = v; honest = h; evil = e;
+        vault = v;
+        honest = h;
+        evil = e;
     }
 
     function getPrice() external view returns (uint256) {
@@ -94,9 +106,11 @@ contract MintForwarder {
 }
 
 contract BrickedVault is CusdPlusVault {
-    constructor(address a, address b, address c, address d, uint256 e)
-        CusdPlusVault(a, b, c, d, e) {}
-    function marker() external pure returns (uint256) { return 42; }
+    constructor(address a, address b, address c, address d, uint256 e) CusdPlusVault(a, b, c, d, e) {}
+
+    function marker() external pure returns (uint256) {
+        return 42;
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -107,6 +121,7 @@ contract CusdPlusVaultTest is Test {
     MockOracle oracle;
     MockInstantManager im;
     CusdPlusVault vault; // via proxy
+    MockCusdFeePerimeter cusd;
 
     address treasury = makeAddr("treasury");
     address user = makeAddr("user");
@@ -122,20 +137,17 @@ contract CusdPlusVaultTest is Test {
         usdt.mint(address(im), 100_000_000e18);
         usdy.mint(address(im), 100_000_000e18);
 
-        CusdPlusVault impl = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
-        );
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        );
+        CusdPlusVault impl = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury)));
         vault = CusdPlusVault(address(proxy));
+        cusd = new MockCusdFeePerimeter(IERC20(address(usdt)), 0);
+        vm.prank(treasury);
+        vault.initializeCusd(address(cusd));
         // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
         // the default sender under vm.prank, which mirrors production:
         // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
         vm.prank(treasury);
         vault.setSponsor(tx.origin, true);
-
 
         usdt.mint(user, 1_000_000e18);
         vm.prank(user);
@@ -653,7 +665,7 @@ contract CusdPlusVaultTest is Test {
 
     // ── Pause ────────────────────────────────────────────────────────
 
-    function test_pause_blocks_mint_redeem_not_transfers() public {
+    function test_pause_is_global() public {
         vm.prank(user);
         vault.subscribeAndMint(1000e18, 990e18, user);
         // treasury holds shares from before the pause (emergency scenario:
@@ -672,19 +684,17 @@ contract CusdPlusVaultTest is Test {
         vm.expectRevert();
         vault.redeemToUsdt(1e18, 0, user);
 
-        // Owner EXITS are not pause-gated (like collectFees/sweep): pause
-        // protects holders, and the emergency playbook is exactly
-        // pause-the-users-then-treasury-liquidates. Owner MINTING during
-        // pause has no such need — depositAndMint stays gated.
+        // The approved cUSD/cUSD+ pause is global: mint, holder exit,
+        // treasury raw exit, and ordinary transfers all stop.
         vm.startPrank(treasury);
         vm.expectRevert();
         vault.depositAndMint(1e18, treasury);
-        uint256 usdyOut = vault.redeem(shares);
+        vm.expectRevert();
+        vault.redeem(shares);
         vm.stopPrank();
-        assertApproxEqAbs(usdyOut, 10e18, 2, "treasury raw exit during pause");
 
-        // soft transfer policy: plain transfers unaffected by pause
         vm.prank(user);
+        vm.expectRevert();
         vault.transfer(user2, 1e18);
     }
 
@@ -692,13 +702,9 @@ contract CusdPlusVaultTest is Test {
 
     function test_initialize_rejects_zeroOraclePrice() public {
         oracle.setPrice(0);
-        CusdPlusVault impl2 = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
-        );
+        CusdPlusVault impl2 = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
         vm.expectRevert(bytes("invalid oracle price"));
-        new ERC1967Proxy(
-            address(impl2), abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        );
+        new ERC1967Proxy(address(impl2), abi.encodeCall(CusdPlusVault.initialize, (treasury)));
     }
 
     function test_zeroOracleRead_trips_notPanics() public {
@@ -757,12 +763,10 @@ contract CusdPlusVaultTest is Test {
     /// _assertFullyBacked (same lying p on both sides).
     function test_valuePaths_price_at_validated_snapshot() public {
         TwoFacedOracle liar = new TwoFacedOracle();
-        CusdPlusVault impl2 = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(liar), 1500
-        );
-        CusdPlusVault v = CusdPlusVault(address(new ERC1967Proxy(
-            address(impl2), abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        ))); // genesis baseline: 1e18
+        CusdPlusVault impl2 = new CusdPlusVault(address(usdy), address(usdt), address(im), address(liar), 1500);
+        CusdPlusVault v = CusdPlusVault(
+            address(new ERC1967Proxy(address(impl2), abi.encodeCall(CusdPlusVault.initialize, (treasury))))
+        ); // genesis baseline: 1e18
         liar.arm(v, 1.01e18, 100e18);
 
         usdy.mint(treasury, 100e18);
@@ -794,40 +798,81 @@ contract CusdPlusVaultTest is Test {
     function test_storageLayout_pinnedToLiveProxy() public {
         vm.prank(user);
         vault.subscribeAndMint(1000e18, 990e18, user);
-        assertEq(uint256(vm.load(address(vault), bytes32(uint256(0)))),
-            vault.pPlus(), "slot0: pPlus");
-        assertEq(uint256(vm.load(address(vault), bytes32(uint256(1)))),
-            vault.lastOraclePrice(), "slot1: lastOraclePrice");
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(0)))), vault.pPlus(), "slot0: pPlus");
+        assertEq(
+            uint256(vm.load(address(vault), bytes32(uint256(1)))), vault.lastOraclePrice(), "slot1: lastOraclePrice"
+        );
 
         oracle.setPrice(1.03e18);
         vault.accrue(); // trips the guard, records the price
-        assertEq(uint256(vm.load(address(vault), bytes32(uint256(2)))) & 0xff,
-            1, "slot2 offset0: oracleGuardTripped");
-        assertEq(uint256(vm.load(address(vault), bytes32(uint256(4)))),
-            1.03e18, "slot4: guardedOraclePrice");
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(2)))) & 0xff, 1, "slot2 offset0: oracleGuardTripped");
+        assertEq(uint256(vm.load(address(vault), bytes32(uint256(4)))), 1.03e18, "slot4: guardedOraclePrice");
 
         vm.prank(treasury);
         vault.freezeAddress(user);
-        assertEq(uint256(vm.load(address(vault), keccak256(abi.encode(user, uint256(3))))),
-            1, "slot3: frozen mapping base");
+        assertEq(
+            uint256(vm.load(address(vault), keccak256(abi.encode(user, uint256(3))))), 1, "slot3: frozen mapping base"
+        );
 
         // isSponsor APPENDED at slot 5 (2026-07-31). Everything above must
         // stay byte-identical to the live proxy — this pins that it did.
         address kms = makeAddr("kmsSlot");
         vm.prank(treasury);
         vault.setSponsor(kms, true);
-        assertEq(uint256(vm.load(address(vault), keccak256(abi.encode(kms, uint256(5))))),
-            1, "slot5: isSponsor mapping base");
+        assertEq(
+            uint256(vm.load(address(vault), keccak256(abi.encode(kms, uint256(5))))), 1, "slot5: isSponsor mapping base"
+        );
+        assertEq(
+            address(uint160(uint256(vm.load(address(vault), bytes32(uint256(6)))))),
+            address(cusd),
+            "slot6: CUSD appended after live layout"
+        );
+        vm.prank(treasury);
+        vault.setStockRouter(address(cusd));
+        assertEq(
+            address(uint160(uint256(vm.load(address(vault), bytes32(uint256(7)))))),
+            address(cusd),
+            "slot7: stockRouter appended after CUSD"
+        );
     }
 
+    function test_stockSettlement_requiresConfiguredSponsoredRouter() public {
+        vm.prank(treasury);
+        vault.setStockRouter(address(cusd));
+
+        vm.prank(address(cusd), address(cusd));
+        vm.expectRevert("not stock router");
+        vault.subscribeForStock(1e18, 0, user);
+
+        vm.prank(treasury);
+        vault.setSponsor(address(cusd), true);
+        vm.prank(address(cusd), address(cusd));
+        vm.expectRevert(); // access passes; mock router owns no approved USDT
+        vault.subscribeForStock(1e18, 0, user);
+    }
+
+    function test_setStockRouter_isOwnerOnly_andRequiresContract() public {
+        vm.prank(user);
+        vm.expectRevert();
+        vault.setStockRouter(address(cusd));
+
+        vm.prank(treasury);
+        vm.expectRevert("stock router not contract");
+        vault.setStockRouter(user);
+    }
+
+    function test_renounceOwnership_isDisabled() public {
+        vm.prank(treasury);
+        vm.expectRevert("renounce disabled");
+        vault.renounceOwnership();
+        assertEq(vault.owner(), treasury);
+    }
 
     /// No lockUpgrades exists BY DESIGN: the vault depends for life on
     /// Ondo-controlled oracle/IM contracts that may migrate — permanent
     /// immutability would be a self-destruct timer (see contract header).
     function test_upgrade_ownerGated_noLockExists() public {
-        BrickedVault impl2 = new BrickedVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
-        );
+        BrickedVault impl2 = new BrickedVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
 
         // non-owner cannot upgrade
         vm.prank(user);

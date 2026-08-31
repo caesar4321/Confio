@@ -1,5 +1,9 @@
 import { deriveIntentId } from '../evmWallet';
-import { encodeBuyStockCall, encodeSellStockCall, GmRouterQuote } from '../ondoStocksAbi';
+import {
+  encodeBuyStockCall,
+  encodeSellStockCall,
+  GmRouterQuote,
+} from '../ondoStocksAbi';
 
 const quote: GmRouterQuote = {
   attestationId: '123',

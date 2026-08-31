@@ -34,6 +34,7 @@ const PREPARE = gql`
       confioAmount
       cost
       maxPayment
+      confioFee
       avgPrice
       fundingSource
       intentId
@@ -65,8 +66,7 @@ export interface BscPresaleQuote {
   confioAmount: string;
   cost: string;
   avgPrice: string;
-  /** 'direct_cusd' = wallet Confío Dollar; 'cusd_plus_redeem' = savings
-   * redeemed to USDT inside the same atomic batch. */
+  /** 'cusd_direct' or 'cusd_plus_via_cusd'; neither exits to raw USDT. */
   fundingSource?: string;
 }
 

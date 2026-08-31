@@ -7,24 +7,35 @@ import {ConfioPayContract} from "../ConfioPayContract.sol";
 
 contract MockToken is ERC20 {
     constructor(string memory n) ERC20(n, n) {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
 }
 
 /// cUSD+ mock with the one extra behaviour the pay contract now relies on:
-/// burn the shares it is given and pay USDT to `to`, like CusdPlusVault.
+/// burn the shares it is given and pay cUSD to `to`, like CusdPlusVault.
 contract MockCusdPlus is ERC20 {
-    MockToken public immutable USDT_;
-    uint256 public rateBps = 10_000;  // 1 share -> 1 USDT by default
-    constructor(address usdt_) ERC20("cUSD+", "cUSD+") { USDT_ = MockToken(usdt_); }
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
-    function setRateBps(uint256 b) external { rateBps = b; }
-    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to)
-        external returns (uint256 usdtOut)
-    {
+    MockToken public immutable CUSD_;
+    uint256 public rateBps = 10_000; // 1 share -> 1 cUSD by default
+
+    constructor(address cusd_) ERC20("cUSD+", "cUSD+") {
+        CUSD_ = MockToken(cusd_);
+    }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
+
+    function setRateBps(uint256 b) external {
+        rateBps = b;
+    }
+
+    function unwrapToCusd(uint256 shares, uint256 minCusdOut, address to) external returns (uint256 cusdOut) {
         _burn(msg.sender, shares);
-        usdtOut = (shares * rateBps) / 10_000;
-        require(usdtOut >= minUsdtOut, "slippage");
-        USDT_.mint(to, usdtOut);
+        cusdOut = (shares * rateBps) / 10_000;
+        require(cusdOut >= minCusdOut, "slippage");
+        CUSD_.mint(to, cusdOut);
     }
 }
 
@@ -32,13 +43,19 @@ contract MockCusdPlus is ERC20 {
 /// hostile or broken UUPS upgrade of CusdPlusVault looks like from here.
 contract LyingCusdPlus is ERC20 {
     constructor() ERC20("cUSD+", "cUSD+") {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
-    function redeemToUsdt(uint256 shares, uint256, address)
-        external pure returns (uint256) { return shares; }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
+
+    function unwrapToCusd(uint256 shares, uint256, address) external pure returns (uint256) {
+        return shares;
+    }
 }
 
 contract ConfioPayContractTest is Test {
     MockCusdPlus cusdPlus;
+    MockToken cusd;
     MockToken usdt;
     MockToken confio;
     MockToken alien;
@@ -53,28 +70,29 @@ contract ConfioPayContractTest is Test {
     uint256 signerKey = 0xA11CE;
     address paymentSigner = vm.addr(0xA11CE);
 
-    bytes32 constant PAY_TYPEHASH = keccak256(
-        "Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,uint256 deadline)"
-    );
+    bytes32 constant PAY_TYPEHASH =
+        keccak256("Pay(bytes32 invoiceId,address payer,address token,uint256 gross,address merchant,uint256 deadline)");
 
     uint256 constant WAD = 1e18;
     uint256 deadline;
 
     function setUp() public {
         usdt = new MockToken("USDT");
-        cusdPlus = new MockCusdPlus(address(usdt));
+        cusd = new MockToken("cUSD");
+        cusdPlus = new MockCusdPlus(address(cusd));
         confio = new MockToken("CONFIO");
         alien = new MockToken("ALIEN");
         pay = new ConfioPayContract(
-            address(cusdPlus), address(usdt), address(confio), paymentSigner, safeOwner);
+            address(cusdPlus), address(cusd), address(usdt), address(confio), paymentSigner, safeOwner
+        );
         deadline = block.timestamp + 3600;
 
         // cusdPlus is its own mock type now, so fund it separately.
         cusdPlus.mint(payer, 1_000e18);
         vm.prank(payer);
         cusdPlus.approve(address(pay), type(uint256).max);
-        for (uint256 i = 0; i < 3; i++) {
-            MockToken t = [usdt, confio, alien][i];
+        for (uint256 i = 0; i < 4; i++) {
+            MockToken t = [cusd, usdt, confio, alien][i];
             t.mint(payer, 1_000e18);
             vm.prank(payer);
             t.approve(address(pay), type(uint256).max);
@@ -83,15 +101,11 @@ contract ConfioPayContractTest is Test {
 
     // ── EIP-712 authorization helper ─────────────────────────────────────
 
-    function _auth(
-        uint256 key,
-        bytes32 invoiceId,
-        address who,
-        address token,
-        uint256 gross,
-        address to,
-        uint256 dl
-    ) internal view returns (bytes memory) {
+    function _auth(uint256 key, bytes32 invoiceId, address who, address token, uint256 gross, address to, uint256 dl)
+        internal
+        view
+        returns (bytes memory)
+    {
         bytes32 digest = pay.payDigest(invoiceId, who, token, gross, to, false, 0, dl);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         return abi.encodePacked(r, s, v);
@@ -115,19 +129,17 @@ contract ConfioPayContractTest is Test {
     }
 
     // A correctly-signed authorization for `payer` from the real signer.
-    function _sig(bytes32 invoiceId, address token, uint256 gross, address to)
-        internal view returns (bytes memory)
-    {
+    function _sig(bytes32 invoiceId, address token, uint256 gross, address to) internal view returns (bytes memory) {
         return _auth(signerKey, invoiceId, payer, token, gross, to, deadline);
     }
 
     // ── Fee math (parity with the Algorand builder + bsc_flow.py) ────
 
     function test_fee_ceiling_vectors() public view {
-        assertEq(pay.feeFor(10_000), 90);      // exact multiple: flat 0.9%
-        assertEq(pay.feeFor(10_001), 91);      // one unit over rounds UP
-        assertEq(pay.feeFor(1), 1);            // dust pays a full unit
-        assertEq(pay.feeFor(1_111), 10);       // ceil(9.999)
+        assertEq(pay.feeFor(10_000), 90); // exact multiple: flat 0.9%
+        assertEq(pay.feeFor(10_001), 91); // one unit over rounds UP
+        assertEq(pay.feeFor(1), 1); // dust pays a full unit
+        assertEq(pay.feeFor(1_111), 10); // ceil(9.999)
         assertEq(pay.feeFor(10 * WAD), (10 * WAD * 90 + 9_999) / 10_000);
     }
 
@@ -143,7 +155,7 @@ contract ConfioPayContractTest is Test {
 
     // ── merchant routing, mirroring ConfioPayrollVault.payout() ──────────
 
-    function test_pay_redeems_to_usdt_for_an_ineligible_merchant() public {
+    function test_pay_unwraps_to_cusd_for_an_ineligible_merchant() public {
         uint256 gross = 100 * WAD;
         cusdPlus.mint(payer, gross);
         vm.prank(payer);
@@ -151,14 +163,15 @@ contract ConfioPayContractTest is Test {
 
         uint256 fee = pay.feeFor(gross);
         uint256 net = gross - fee;
-        bytes memory sig = _signAs(
-            signerKey, "inv-redeem", payer, address(cusdPlus), gross, merchant, true, net, deadline);
+        bytes memory sig =
+            _signAs(signerKey, "inv-redeem", payer, address(cusdPlus), gross, merchant, true, net, deadline);
 
         vm.prank(payer);
         pay.pay("inv-redeem", address(cusdPlus), gross, merchant, true, net, deadline, sig);
 
-        // The merchant holds USDT and NO shares — the whole point.
-        assertEq(usdt.balanceOf(merchant), net, "merchant not paid in USDT");
+        // The merchant holds cUSD and NO shares — internal jurisdiction
+        // conversion is free and never crosses the USDT fee perimeter.
+        assertEq(cusd.balanceOf(merchant), net, "merchant not paid in cUSD");
         assertEq(cusdPlus.balanceOf(merchant), 0, "merchant received shares");
         assertEq(cusdPlus.balanceOf(address(pay)), fee, "fee not accrued in cUSD+");
         assertEq(pay.accruedFees(address(cusdPlus)), fee);
@@ -172,8 +185,7 @@ contract ConfioPayContractTest is Test {
         uint256 net = gross - pay.feeFor(gross);
 
         // Authorization says "transfer shares"; the caller asks for a redeem.
-        bytes memory sig = _signAs(
-            signerKey, "inv-flip", payer, address(cusdPlus), gross, merchant, false, 0, deadline);
+        bytes memory sig = _signAs(signerKey, "inv-flip", payer, address(cusdPlus), gross, merchant, false, 0, deadline);
         vm.prank(payer);
         vm.expectRevert("bad authorization");
         pay.pay("inv-flip", address(cusdPlus), gross, merchant, true, net, deadline, sig);
@@ -185,10 +197,10 @@ contract ConfioPayContractTest is Test {
         vm.prank(payer);
         cusdPlus.approve(address(pay), type(uint256).max);
         uint256 net = gross - pay.feeFor(gross);
-        cusdPlus.setRateBps(9_000);  // vault returns 10% less than asked
+        cusdPlus.setRateBps(9_000); // vault returns 10% less than asked
 
-        bytes memory sig = _signAs(
-            signerKey, "inv-slip", payer, address(cusdPlus), gross, merchant, true, net, deadline);
+        bytes memory sig =
+            _signAs(signerKey, "inv-slip", payer, address(cusdPlus), gross, merchant, true, net, deadline);
         vm.prank(payer);
         vm.expectRevert("slippage");
         pay.pay("inv-slip", address(cusdPlus), gross, merchant, true, net, deadline, sig);
@@ -199,8 +211,7 @@ contract ConfioPayContractTest is Test {
         usdt.mint(payer, gross);
         vm.prank(payer);
         usdt.approve(address(pay), type(uint256).max);
-        bytes memory sig = _signAs(
-            signerKey, "inv-wrong", payer, address(usdt), gross, merchant, true, 1, deadline);
+        bytes memory sig = _signAs(signerKey, "inv-wrong", payer, address(usdt), gross, merchant, true, 1, deadline);
         vm.prank(payer);
         vm.expectRevert("redeem needs cUSD+");
         pay.pay("inv-wrong", address(usdt), gross, merchant, true, 1, deadline, sig);
@@ -209,15 +220,15 @@ contract ConfioPayContractTest is Test {
     function test_a_lying_vault_cannot_consume_the_invoice() public {
         LyingCusdPlus liar = new LyingCusdPlus();
         ConfioPayContract p2 = new ConfioPayContract(
-            address(liar), address(usdt), address(confio), paymentSigner, safeOwner);
+            address(liar), address(usdt), address(usdt), address(confio), paymentSigner, safeOwner
+        );
         uint256 gross = 100 * WAD;
         liar.mint(payer, gross);
         vm.prank(payer);
         liar.approve(address(p2), type(uint256).max);
         uint256 net = gross - p2.feeFor(gross);
 
-        bytes32 digest = p2.payDigest(
-            "inv-liar", payer, address(liar), gross, merchant, true, net, deadline);
+        bytes32 digest = p2.payDigest("inv-liar", payer, address(liar), gross, merchant, true, net, deadline);
         (uint8 v, bytes32 r, bytes32 sg) = vm.sign(signerKey, digest);
         bytes memory sig = abi.encodePacked(r, sg, v);
 
@@ -232,8 +243,7 @@ contract ConfioPayContractTest is Test {
 
     function test_redeem_requires_a_minimum_out() public {
         uint256 gross = 100 * WAD;
-        bytes memory sig = _signAs(
-            signerKey, "inv-nomin", payer, address(cusdPlus), gross, merchant, true, 0, deadline);
+        bytes memory sig = _signAs(signerKey, "inv-nomin", payer, address(cusdPlus), gross, merchant, true, 0, deadline);
         vm.prank(payer);
         vm.expectRevert("minOut required");
         pay.pay("inv-nomin", address(cusdPlus), gross, merchant, true, 0, deadline, sig);

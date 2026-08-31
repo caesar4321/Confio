@@ -15,6 +15,7 @@ const VAULT_ADDRESS = gql`
   query CusdPlusVaultAddress {
     cusdPlusConvertParams {
       vaultAddress
+      cusdAddress
     }
   }
 `;
@@ -39,6 +40,7 @@ export const useSavingsResume = (
 ): { mintingSavings: boolean } => {
   const { data } = useQuery(VAULT_ADDRESS, { fetchPolicy: 'cache-first' });
   const vaultAddress: string | undefined = data?.cusdPlusConvertParams?.vaultAddress;
+  const cusdAddress: string | undefined = data?.cusdPlusConvertParams?.cusdAddress;
   const appState = useRef(AppState.currentState);
   const [mintingSavings, setMintingSavings] = useState(false);
 
@@ -48,18 +50,18 @@ export const useSavingsResume = (
   useEffect(() => subscribeSavingsMinting(setMintingSavings), []);
 
   useEffect(() => {
-    if (!vaultAddress || !enabled) return;
+    if ((!vaultAddress && !cusdAddress) || !enabled) return;
     // Run once on mount (covers the case where the app was already active).
-    resumeSavingsMints(vaultAddress);
+    resumeSavingsMints(vaultAddress, cusdAddress);
 
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && next === 'active') {
-        resumeSavingsMints(vaultAddress);
+        resumeSavingsMints(vaultAddress, cusdAddress);
       }
       appState.current = next;
     });
     return () => sub.remove();
-  }, [vaultAddress, enabled]);
+  }, [vaultAddress, cusdAddress, enabled]);
 
   // Arrival trigger: run when raw USDT first appears (or grows). Ondo's
   // InstantManager rejects sub-$1 mints, so anything smaller is not worth a
@@ -70,14 +72,14 @@ export const useSavingsResume = (
   // forever; resumeSavingsMints is idempotent and self-guards regardless.
   const lastMintable = useRef(0);
   useEffect(() => {
-    if (!vaultAddress || !enabled) return;
+    if ((!vaultAddress && !cusdAddress) || !enabled) return;
     const onHand = usdtOnHandUsd ?? 0;
     const mintable = onHand >= 1;
     if (mintable && onHand > lastMintable.current) {
-      resumeSavingsMints(vaultAddress);
+      resumeSavingsMints(vaultAddress, cusdAddress);
     }
     lastMintable.current = mintable ? onHand : 0;
-  }, [vaultAddress, enabled, usdtOnHandUsd]);
+  }, [vaultAddress, cusdAddress, enabled, usdtOnHandUsd]);
 
   return { mintingSavings };
 };

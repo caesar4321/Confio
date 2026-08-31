@@ -8,6 +8,7 @@
 
 const TOKEN_LABELS: Record<string, string> = {
   CUSD: 'cUSD',
+  CUSD_BSC: 'cUSD',
   CUSD_PLUS: 'cUSD+',
   CONFIO: 'CONFIO',
   USDC: 'USDC',
@@ -58,6 +59,8 @@ const CONVERSION_PAIRS: Record<string, { from: string; to: string }> = {
   cusd_to_usdc: { from: 'cUSD', to: 'USDC' },
   to_savings: { from: 'USDT', to: 'cUSD+' },
   from_savings: { from: 'cUSD+', to: 'USDT' },
+  usdt_to_cusd: { from: 'USDT', to: 'cUSD' },
+  cusd_to_usdt: { from: 'cUSD', to: 'USDT' },
 };
 
 export const conversionPair = (
@@ -75,7 +78,7 @@ export const conversionPair = (
  */
 export const isConversionIncoming = (conversionType?: string | null): boolean => {
   const key = String(conversionType ?? '').trim().toLowerCase();
-  return key === 'usdc_to_cusd' || key === 'to_savings';
+  return key === 'usdc_to_cusd' || key === 'to_savings' || key === 'usdt_to_cusd';
 };
 
 /**
@@ -110,7 +113,7 @@ export const sendTokenParamFor = (currency?: string | null): SendTokenParam => {
 };
 
 /** Tokens that settle on BNB Smart Chain rather than Algorand. */
-const BSC_TOKENS = new Set(['CUSD_PLUS', 'CUSD+', 'USDT']);
+const BSC_TOKENS = new Set(['CUSD_BSC', 'CUSD_PLUS', 'CUSD+', 'USDT']);
 
 /**
  * Which block explorer can actually show this transaction.

@@ -29,6 +29,7 @@ from cusd_plus.sponsor_7702 import PolicyError, SEL_APPROVE, SEL_PAY, USDT_BSC
 from payments import bsc_flow
 
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+CUSD = '0x' + '66' * 20
 CONFIO_TOKEN = '0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8'
 PAY_CONTRACT = '0x' + 'ca' * 20
 PAYER = '0x' + '11' * 20
@@ -69,6 +70,7 @@ class FeeMathTests(SimpleTestCase):
 
 @override_settings(
     CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    CUSD_VAULT_ADDRESS=CUSD,
     BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN,
     BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT,
     BSC_PAY_ENABLED=True,
@@ -94,9 +96,12 @@ class PrepareBatchTests(SimpleTestCase):
             id=uid, accounts=accounts, phone_number='58412',
             get_full_name=lambda: 'Payer', username='payer')
 
-    def _prepare(self, invoice, shares_value=100 * WAD, usdt=0,
-                 merchant_addr=MERCHANT):
-        merchant_account = SimpleNamespace(bsc_address=merchant_addr)
+    def _prepare(self, invoice, shares_value=100 * WAD, cusd=0, usdt=0,
+                 merchant_addr=MERCHANT, merchant_country='PE'):
+        merchant_account = SimpleNamespace(
+            bsc_address=merchant_addr,
+            user=SimpleNamespace(phone_country=merchant_country),
+        )
         captured = {}
 
         def _goc(**kw):
@@ -110,8 +115,12 @@ class PrepareBatchTests(SimpleTestCase):
 
         pps = 11 * WAD // 10
         with mock.patch('cusd_plus.vault.p_plus_wad', return_value=pps), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
              mock.patch('cusd_plus.vault.erc20_balance_raw',
-                        return_value=(shares_value * WAD) // pps), \
+                        side_effect=lambda token, _holder: (
+                            cusd if token.lower() == CUSD.lower()
+                            else (shares_value * WAD) // pps
+                        )), \
              mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=usdt), \
              mock.patch.object(bsc_flow, '_sign_pay_authorization', side_effect=_sign_auth), \
              mock.patch('users.models.Account.objects') as acct_objs, \
@@ -169,6 +178,42 @@ class PrepareBatchTests(SimpleTestCase):
         self.assertTrue(result['success'], result)
         self._assert_batch_shape(result['calls'], USDT_BSC, 10 * WAD)
         self.assertEqual(result['token_type'], 'USDT')
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_transient_usdt_cannot_bypass_live_entry_fee(self):
+        result, _, _ = self._prepare(
+            self._invoice('10'), shares_value=0, usdt=100 * WAD)
+        self.assertEqual(result['error'], 'conversion_pending')
+
+    def test_cusd_pays_directly_with_only_the_pay_fee(self):
+        result, row, _ = self._prepare(
+            self._invoice('10'), shares_value=0, cusd=100 * WAD,
+        )
+        self.assertTrue(result['success'], result)
+        self._assert_batch_shape(result['calls'], CUSD.lower(), 10 * WAD)
+        self.assertEqual(result['token_type'], 'CUSD')
+        self.assertEqual(row.blockchain_data['kind'], 'pay_cusd')
+
+    def test_mixed_dollar_balance_normalizes_then_pays_cusd(self):
+        result, row, _ = self._prepare(
+            self._invoice('10'), shares_value=8 * WAD, cusd=4 * WAD,
+        )
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(result['calls']), 3)
+        self.assertEqual(row.blockchain_data['kind'], 'pay_cusd')
+        self.assertEqual(result['calls'][1]['to'], CUSD.lower())
+
+    @override_settings(BSC_PAY_CONTRACT_V4=True)
+    def test_plus_to_ineligible_merchant_routes_fee_free_to_cusd(self):
+        result, row, _ = self._prepare(
+            self._invoice('10'), merchant_country='US')
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(result['calls']), 2)
+        self.assertEqual(row.blockchain_data['kind'], 'pay_cusd_plus')
+        self.assertTrue(row.blockchain_data['v4_redeem'])
+        # The signed compatibility flag now invokes cUSD+ -> cUSD unwrap;
+        # there is no sibling USDT redemption and no perimeter fee.
+        self.assertGreater(row.blockchain_data['v4_min_out'], 0)
 
     def test_merchant_without_address_blocks_and_nudges(self):
         with mock.patch.object(bsc_flow, '_notify_merchant_needs_app') as nudge:

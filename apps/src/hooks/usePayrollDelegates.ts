@@ -26,8 +26,10 @@ const GET_PAYROLL_RAIL_STATUS = gql`
       vaultBalanceUsd
       fundableBalanceUsd
       escrowCusdPlusUsd
+      escrowCusdUsd
       escrowUsdtUsd
       fundableCusdPlusUsd
+      fundableCusdUsd
       fundableUsdtUsd
       activated
       delegateEmployeeIds
@@ -50,10 +52,10 @@ export interface PayrollRailStatus {
    * showing one and acting on the other moves funds the user never saw. */
   executionRail: PayrollRail;
   tokenType: string;
-  /** Which escrow pool a top-up parks into — 'CUSD_PLUS' or 'USDT' — and so
-   * the asset `fundableBalanceUsd` is measured in. 'USDT' means this
-   * employer is Ondo-blocked: its dollars can only ever be raw, and its
-   * payroll float earns nothing. Null on the legacy rail (and from a
+  /** Which escrow pool a top-up parks into — 'CUSD_PLUS' or 'CUSD_BSC' — and
+   * so the asset `fundableBalanceUsd` is measured in. CUSD_BSC means this
+   * employer is Ondo-blocked and its payroll float earns no yield. USDT can
+   * appear only for a legacy escrow being drained. Null on the legacy rail (and from a
    * server that predates the field). */
   fundingToken: string | null;
   /** null = the chain did not answer and nothing was cached. NOT zero —
@@ -66,8 +68,10 @@ export interface PayrollRailStatus {
    * the SELECTED pool, never against a sum. null per pool = unknown, same
    * rule as the aggregates. */
   escrowCusdPlusUsd: number | null;
+  escrowCusdUsd: number | null;
   escrowUsdtUsd: number | null;
   fundableCusdPlusUsd: number | null;
+  fundableCusdUsd: number | null;
   fundableUsdtUsd: number | null;
   /** null = indeterminate (partial delegate read); don't offer activation. */
   activated: boolean | null;
@@ -75,7 +79,7 @@ export interface PayrollRailStatus {
 }
 
 /** Payroll is denominated in cUSD+ — unless the employer cannot legally hold
- * it, in which case its float is raw USDT and calling that "Confío Dollar+"
+ * it, in which case its float is universal cUSD and calling that "Confío Dollar+"
  * would be a lie about what they own.
  *
  * This started out rail-conditional, labelling a business on the legacy
@@ -85,7 +89,7 @@ export interface PayrollRailStatus {
  *
  * The argument here is NOT plumbing. It is the same distinction the wallet
  * row on Home draws: an Ondo-blocked account holds "Confío Dollar / Dólar
- * digital", and it stays ticker-less because that money is USDT, not cUSD+,
+ * digital", and it stays ticker-less because that money is cUSD, not cUSD+,
  * and a cUSD+ badge on it would be dishonest.
  *
  * cUSD+ is an instrument, not a currency unit — an accumulating share that
@@ -93,9 +97,9 @@ export interface PayrollRailStatus {
  * beside them, payment-method style. The NUMBER still comes from whichever
  * escrow actually holds the money, and still shows "—" when unknown. */
 export const payrollInstrument = (fundingToken?: string | null) =>
-  String(fundingToken || '').toUpperCase() === 'USDT'
-    ? { name: 'Confío Dollar', short: 'Dólar digital', isPlus: false, known: true }
-    : { name: 'Confío Dollar+', short: 'cUSD+', isPlus: true, known: true };
+  String(fundingToken || '').toUpperCase() === 'CUSD_PLUS'
+    ? { name: 'Confío Dollar+', short: 'cUSD+', isPlus: true, known: true }
+    : { name: 'Confío Dollar', short: 'Dólar digital', isPlus: false, known: true };
 
 const SET_BUSINESS_DELEGATES = gql`
   mutation SetBusinessDelegates($businessAccount: String!, $add: [String!]!, $remove: [String!]!, $signedTransaction: String) {
@@ -145,8 +149,10 @@ export const usePayrollDelegates = () => {
       vaultBalanceUsd: num(s.vaultBalanceUsd),
       fundableBalanceUsd: num(s.fundableBalanceUsd),
       escrowCusdPlusUsd: num(s.escrowCusdPlusUsd),
+      escrowCusdUsd: num(s.escrowCusdUsd),
       escrowUsdtUsd: num(s.escrowUsdtUsd),
       fundableCusdPlusUsd: num(s.fundableCusdPlusUsd),
+      fundableCusdUsd: num(s.fundableCusdUsd),
       fundableUsdtUsd: num(s.fundableUsdtUsd),
       activated: s.activated === null || s.activated === undefined ? null : !!s.activated,
       delegateEmployeeIds: (s.delegateEmployeeIds || []).map(String),
@@ -212,7 +218,7 @@ export const usePayrollDelegates = () => {
       const bsc = await activateOnBsc(delegateUserIds || []);
       if (bsc) return bsc;
       const businessAddr = activeAccount.algorandAddress || (activeAccount as any).address;
-      const delegateAddr = activeAccount?.ownerAddress || activeAccount?.algorandAddress || businessAddr;
+      const delegateAddr = (activeAccount as any)?.ownerAddress || activeAccount?.algorandAddress || businessAddr;
       if (!businessAddr) {
         Alert.alert('Dirección faltante', 'No se encontró la dirección de la cuenta de negocio.', [{ text: 'OK' }]);
         return { success: false, error: 'Dirección faltante' };

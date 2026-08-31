@@ -11,14 +11,15 @@ pragma solidity ^0.8.24;
  * Full sale = $61M. Floored at 0.20 because Phase 1-1 buyers on Algorand
  * already paid 0.20 — nobody after them ever pays less.
  *
- * INITIAL_SOLD seeds the curve with what the Algorand presale already sold
- * (query the Algorand vault right before broadcast) and fills the
- * migratedPool the Safe later assigns to users' BSC addresses via
- * creditMigrated() as their Algorand→BSC links materialize.
+ * The four snapshot values preserve the predecessor's complete curve and
+ * liability state: already-claimed allocations, unassigned Algorand credits,
+ * and outstanding BSC allocations. The latter are imported with
+ * creditLegacy(); the former Algorand pool continues through
+ * creditMigrated() as address links materialize.
  *
- * PAYMENT_TOKEN is a deploy-time decision (cUSD once it exists on BSC, or
- * USDT 18dp). Prices are payment base units per WHOLE CONFIO, so 18dp
- * tokens use 0.2e18 … 1.3e18 as below.
+ * PAYMENT_TOKEN is the universal cUSD proxy. Eligible users unwrap cUSD+
+ * into cUSD through the fee-free internal boundary in the same sponsored
+ * batch; no Presale purchase exits to raw USDT.
  *
  * Owner = the 3-of-5 Safe; sponsor = the KMS hot wallet that broadcasts
  * 7702 batches. The CONFIO BEP-20 is wired later via setConfioToken().
@@ -37,14 +38,15 @@ contract DeployPresaleVault is Script {
     address constant SAFE = 0xF29A418744E793973BF4eEc676F8a30B2793b623;
     // KMS sponsor hot wallet (BSC_SPONSOR_ADDRESS in settings)
     address constant SPONSOR = 0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D;
-    // Payment token: set at deploy time (USDT shown; swap for cUSD on BSC)
-    address constant PAYMENT = 0x55d398326f99059fF775485246999027B3197955;
-
-    // CONFIO already sold on Algorand at broadcast time (1e18 units).
-    // MUST be refreshed from the Algorand vault right before deploy.
-    uint256 constant INITIAL_SOLD = 0;
 
     function run() external {
+        address payment = vm.envAddress("CUSD_VAULT_ADDRESS");
+        // Snapshot the predecessor immediately after pausing new buys.
+        // These four values MUST reconcile exactly in the constructor.
+        uint256 initialSold = vm.envUint("PRESALE_INITIAL_SOLD_WEI");
+        uint256 initialClaimed = vm.envUint("PRESALE_INITIAL_CLAIMED_WEI");
+        uint256 initialMigratedPool = vm.envUint("PRESALE_INITIAL_MIGRATED_POOL_WEI");
+        uint256 initialLegacyPool = vm.envUint("PRESALE_INITIAL_LEGACY_POOL_WEI");
         uint256[] memory soldBreakpoints = new uint256[](3);
         soldBreakpoints[0] = 4_000_000e18;
         soldBreakpoints[1] = 24_000_000e18;
@@ -60,7 +62,15 @@ contract DeployPresaleVault is Script {
         vm.startBroadcast(pk);
 
         ConfioPresaleVault vault = new ConfioPresaleVault(
-            SAFE, IERC20(PAYMENT), soldBreakpoints, prices, INITIAL_SOLD, SPONSOR
+            SAFE,
+            IERC20(payment),
+            soldBreakpoints,
+            prices,
+            initialSold,
+            initialClaimed,
+            initialMigratedPool,
+            initialLegacyPool,
+            SPONSOR
         );
 
         vm.stopBroadcast();
@@ -68,9 +78,13 @@ contract DeployPresaleVault is Script {
         console2.log("PRESALE VAULT :", address(vault));
         console2.log("OWNER (SAFE)  :", SAFE);
         console2.log("SPONSOR       :", SPONSOR);
-        console2.log("INITIAL SOLD  :", INITIAL_SOLD);
-        // Post-deploy: BscScan verify; creditMigrated() as Algorand->BSC
-        // links appear; wire CONFIO via setConfioToken() after the token
-        // migration, then setClaimsUnlocked(true) when claims open.
+        console2.log("PAYMENT (cUSD):", payment);
+        console2.log("INITIAL SOLD  :", initialSold);
+        console2.log("INITIAL CLAIMED:", initialClaimed);
+        console2.log("MIGRATED POOL :", initialMigratedPool);
+        console2.log("LEGACY POOL   :", initialLegacyPool);
+        // Post-deploy: BscScan verify; creditLegacy() for every outstanding
+        // predecessor BSC allocation; creditMigrated() as Algorand->BSC links
+        // appear; wire CONFIO via setConfioToken(), then unlock claims.
     }
 }

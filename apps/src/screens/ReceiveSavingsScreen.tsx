@@ -89,12 +89,12 @@ export const ReceiveSavingsScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<MainStackParamList, 'ReceiveSavings'>>();
   // Variant: 'cusd_plus' (default — silent mint into savings) vs 'usdt'
-  // (geo-ineligible: the money stays raw, branded "Confío Dollar").
+  // (geo-ineligible: the transient arrival auto-mints universal cUSD).
   const destination: Destination = route.params?.destination ?? 'cusd_plus';
   const isSavings = destination === 'cusd_plus';
   const isConfio = destination === 'confio';
   const token = isConfio ? TOKEN.confio : TOKEN.dollar;
-  const STEPS = stepsFor(destination);
+const STEPS = stepsFor(destination);
   const [copied, setCopied] = useState(false);
 
   // Derived at sign-in alongside the Algorand key (registered server-side);
@@ -141,7 +141,8 @@ export const ReceiveSavingsScreen = () => {
         title: isSavings ? 'Dirección de ahorro Confío' : 'Dirección Confío',
         message:
           `Esta es mi dirección para recibir ${token.symbol} en Confío:\n${address}\n\n` +
-          `Importante: solo ${token.symbol} por la red BNB Smart Chain (BEP-20).`,
+          `Importante: solo ${token.symbol} por la red BNB Smart Chain (BEP-20).` +
+          (!isConfio ? '\nConfío descuenta hasta 0,9% al convertir el USDT recibido.' : ''),
       });
     } catch {}
   };
@@ -236,6 +237,17 @@ export const ReceiveSavingsScreen = () => {
                 )}
               </Text>
             </View>
+
+            {!isConfio && (
+              <View style={styles.warnCard}>
+                <Icon name="info" size={18} color="#B45309" />
+                <Text style={styles.warnText}>
+                  Al convertir el USDT recibido, Confío descuenta una comisión de hasta{' '}
+                  <Text style={styles.warnStrong}>0,9%</Text>. Por cada 100 USDT recibes
+                  al menos 99,10 dólares de Confío con la tarifa máxima actual.
+                </Text>
+              </View>
+            )}
 
             <Text style={styles.sectionTitle}>Cómo enviar</Text>
             {STEPS.map((s, i) => (

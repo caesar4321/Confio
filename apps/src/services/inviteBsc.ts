@@ -1,7 +1,7 @@
 // BSC invite escrow — the client half of send/invite_bsc_flow.py and the
 // ConfioInviteEscrow contract. The Algorand equivalent is inviteSendService.ts.
 //
-// Sending to someone who isn't on Confío yet locks cUSD+ or CONFIO in the
+// Sending to someone who isn't on Confío yet locks cUSD+, cUSD or CONFIO in the
 // escrow under (inviter, inviteId). Three legs, two of which live here:
 //
 //   create   this file. A sponsored 7702 batch [approve, createInvitation],
@@ -11,7 +11,7 @@
 //            knows which phone belongs to whom.
 //   reclaim  this file, after the 7-day window.
 //
-// The escrow only accepts cUSD+ and CONFIO; USDT is not escrowable.
+// The escrow accepts cUSD+, cUSD and CONFIO; USDT is not escrowable.
 
 import { gql } from '@apollo/client';
 import {
@@ -76,7 +76,7 @@ const SUBMIT_RECLAIM = gql`
   }
 `;
 
-export type BscInviteToken = 'CUSD_PLUS' | 'CONFIO';
+export type BscInviteToken = 'CUSD_PLUS' | 'CUSD' | 'CONFIO';
 
 export interface BscInviteParams {
   /** International form. The server keys invites by the FULL number. */

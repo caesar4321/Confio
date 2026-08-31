@@ -335,10 +335,11 @@ class PrepareBscPresalePurchase(graphene.Mutation):
     confio_amount = graphene.String()
     cost = graphene.String()
     max_payment = graphene.String()
+    confio_fee = graphene.String()
     avg_price = graphene.String()
     funding_source = graphene.String(
-        description="'direct_cusd' (wallet Confío Dollar) or 'cusd_plus_redeem' "
-                    "(savings redeemed inside the same batch)")
+        description="'cusd_direct' or 'cusd_plus_via_cusd' (fee-free internal "
+                    "savings unwrap inside the atomic buy batch when needed)")
     intent_id = graphene.String()  # bytes32 the client binds into its signature
     # Signing params the SERVER read, so the device makes zero chain calls on
     # the happy path (see bsc_flow.execution_params for why that's safe).
@@ -387,6 +388,7 @@ class PrepareBscPresalePurchase(graphene.Mutation):
             confio_amount=res['confio_amount'],
             cost=res['cost'],
             max_payment=res['max_payment'],
+            confio_fee=res.get('confio_fee'),
             avg_price=res['avg_price'],
             funding_source=res.get('funding_source'),
             intent_id=res['intent_id'],

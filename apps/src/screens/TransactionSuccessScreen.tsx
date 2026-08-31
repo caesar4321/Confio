@@ -41,6 +41,10 @@ interface TransactionData {
   transactionId?: string;
   transactionHash?: string;
   status?: 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+  grossAmount?: string;
+  feeAmount?: string;
+  netAmount?: string;
+  feeBps?: number;
   // Status tier & verified badge for the counterparty
   recipientStatusTier?: string;
   recipientIsReferralVerified?: boolean;
@@ -100,10 +104,23 @@ export const TransactionSuccessScreen = () => {
     if (transactionData.type === 'sent') {
       // Check if it's an external wallet send (has address but no phone)
       if (transactionData.recipientAddress && !transactionData.recipientPhone) {
-        (navigation as any).navigate('SendWithAddress', {
-          tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio',
-          prefilledAddress: transactionData.recipientAddress
-        });
+        if (transactionData.recipientAddress.toLowerCase().startsWith('0x')) {
+          const currency = transactionData.currency.toUpperCase();
+          const token = currency === 'CONFIO'
+            ? 'confio'
+            : currency === 'CUSD+'
+              ? 'cusd_plus'
+              : 'usdt';
+          (navigation as any).navigate('SendUsdt', {
+            token,
+            prefilledAddress: transactionData.recipientAddress,
+          });
+        } else {
+          (navigation as any).navigate('SendWithAddress', {
+            tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio',
+            prefilledAddress: transactionData.recipientAddress,
+          });
+        }
       } else if (transactionData.recipient) {
         // Friend or invitation send
         const friendData = {
@@ -324,6 +341,11 @@ export const TransactionSuccessScreen = () => {
   const needsInvitation = transactionData.type === 'sent'
     && !Boolean(transactionData.isOnConfio)
     && Boolean(transactionData.recipientPhone);
+  const conversionFee = Number(transactionData.feeAmount || 0);
+  const hasConversionFee = Number.isFinite(conversionFee) && conversionFee > 0;
+  const displayedAmount = hasConversionFee && transactionData.netAmount
+    ? transactionData.netAmount
+    : transactionData.amount;
 
   const counterpartName = transactionData.type === 'sent'
     ? transactionData.recipient
@@ -340,7 +362,7 @@ export const TransactionSuccessScreen = () => {
             <SuccessHero
               title={transactionData.type === 'sent' ? '¡Enviado con éxito!' :
                 transactionData.type === 'payment' ? '¡Pago realizado!' : '¡Recibido con éxito!'}
-              amount={formatAmount(String(transactionData.amount), transactionData.currency)}
+              amount={formatAmount(String(displayedAmount), transactionData.currency)}
               hint={transactionData.type === 'sent'
                 ? `Enviado a ${transactionData.recipient}`
                 : transactionData.type === 'payment'
@@ -406,8 +428,30 @@ export const TransactionSuccessScreen = () => {
                   </View>
                 </View>
               )}
+              {hasConversionFee ? (
+                <>
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Monto convertido</Text>
+                    <Text style={styles.rowValue}>
+                      {formatAmount(String(transactionData.grossAmount || transactionData.amount), 'cUSD')}
+                    </Text>
+                  </View>
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Comisión de Confío</Text>
+                    <Text style={styles.rowValue}>
+                      - {formatAmount(String(transactionData.feeAmount), 'cUSD')}
+                    </Text>
+                  </View>
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Recibe</Text>
+                    <Text style={styles.rowValue}>
+                      {formatAmount(String(transactionData.netAmount), transactionData.currency)}
+                    </Text>
+                  </View>
+                </>
+              ) : null}
               <View style={styles.row}>
-                <Text style={styles.rowLabel}>Comisión</Text>
+                <Text style={styles.rowLabel}>Comisión de red</Text>
                 <Text style={[styles.rowValue, { color: colors.primaryDark, fontWeight: '600' }]}>
                   Gratis · cubierta por Confío
                 </Text>

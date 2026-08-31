@@ -256,4 +256,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Proxy tx:       {proxy_tx}")
         self.stdout.write("Post-deploy UUPS proxy ownership, immutable wiring, and 30 bps fee verified on-chain.")
         self.stdout.write("Trading is still inactive pending source verification, Ondo registration,")
-        self.stdout.write("Safe setSponsor(router, true), fork rehearsal, and a minimum-size canary.")
+        self.stdout.write(
+            "Safe setSponsor(router, true) + setStockRouter(router), fork rehearsal, "
+            "and a minimum-size canary."
+        )

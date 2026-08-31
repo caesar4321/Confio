@@ -264,6 +264,7 @@ describe('bsc exit checkpoint', () => {
   const WALLET = { address: '0x' + '11'.repeat(20), privKeyHex: '00' } as any;
   const DEST = '0x' + '22'.repeat(20);
   const VAULT = '0x' + '33'.repeat(20);
+  const CUSD = '0x' + '44'.repeat(20);
   const CONFIO = '0xcceb3f6127fa9160a26a1b85857ca4c9d56b3fa8';
   const ACCOUNT_KEY = 'personal_0';
   const ONE_TOKEN = '0x' + (10n ** 18n).toString(16).padStart(64, '0');
@@ -316,6 +317,27 @@ describe('bsc exit checkpoint', () => {
     const res = await run(mod, store);
     expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
     expect(store.map.size).toBe(0); // nothing left to poison the next exit
+  });
+
+  it('redeems bundled cUSD permissionlessly before transferring raw USDT', async () => {
+    const send = okSend();
+    const mod = loadExit(send);
+    const res = await mod.executeBscExit({
+      wallet: WALLET,
+      dest: DEST,
+      vaultAddress: VAULT,
+      cusdAddress: CUSD,
+      minUsdtOutWei: 0n,
+      accountKey: ACCOUNT_KEY,
+      store: memStore(),
+    });
+
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
+    expect(send.mock.calls.map(([call]) => call.to.toLowerCase())).toEqual([
+      VAULT.toLowerCase(),
+      CUSD.toLowerCase(),
+      '0x55d398326f99059ff775485246999027b3197955',
+    ]);
   });
 
   it('a second exit to the same destination sends again', async () => {
@@ -465,16 +487,33 @@ describe('bsc exit checkpoint', () => {
     const mod = require('../emergencyExit/bscExit');
     const store = memStore();
 
-    await expect(run(mod, store)).rejects.toMatchObject({
-      partialResult: {
-        degraded: ['redeemCusdPlus'],
-        sentNow: ['redeemCusdPlus'],
-      },
+    const partial = await run(mod, store);
+    expect(partial).toMatchObject({
+      degraded: ['redeemCusdPlus'],
+      sentNow: ['redeemCusdPlus'],
+      unresolved: ['USDT'],
     });
     const retry = await run(mod, store);
     expect(retry.degraded).toEqual(['redeemCusdPlus']);
     expect(retry.sentNow).toEqual(['transferUsdt']);
+    expect(retry.unresolved).toEqual([]);
     expect(retry.txids).not.toHaveProperty('__degraded:redeemCusdPlus');
+  });
+
+  it('continues after both cUSD+ exit paths fail definitively', async () => {
+    const definitive = new Error('rpc rejected before broadcast');
+    const okReceipt = {
+      status: '0x1', transactionHash: '0x' + 'ab'.repeat(32), blockNumber: '0x1', logs: [],
+    };
+    const send = jest.fn()
+      .mockRejectedValueOnce(definitive) // redeem
+      .mockRejectedValueOnce(definitive) // raw cUSD+ fallback
+      .mockResolvedValueOnce(okReceipt); // later raw USDT still exits
+    const mod = loadExit(send);
+    const result = await run(mod, memStore());
+    expect(result.unresolved).toEqual(['cUSD+']);
+    expect(result.sentNow).toEqual(['transferUsdt']);
+    expect(send).toHaveBeenCalledTimes(3);
   });
 
   it('records skipped legs without counting them as sent', async () => {

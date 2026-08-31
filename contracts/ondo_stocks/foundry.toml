@@ -5,6 +5,7 @@ script = "script"
 out = "out"
 cache_path = "cache"
 libs = ["node_modules", "lib"]
+allow_paths = ["../cusd_plus"]
 optimizer = true
 optimizer_runs = 200
 solc = "0.8.26"

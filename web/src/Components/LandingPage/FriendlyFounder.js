@@ -4,14 +4,15 @@ import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyFounder.module.css';
 import julianImage from '../../images/JulianMoon_Founder.jpeg';
 import tiktokIcon from '../../images/TikTok.png';
+import whatsappIcon from '../../images/WhatsApp.svg';
+import { useLanguage } from '../../contexts/LanguageContext';
+
 const instagramIcon = process.env.PUBLIC_URL + '/images/Instagram.png';
 const xIcon = process.env.PUBLIC_URL + '/images/X.png';
 const facebookIcon = process.env.PUBLIC_URL + '/images/Facebook.png';
 const telegramIcon = process.env.PUBLIC_URL + '/images/Telegram.png';
 const linkedInIcon = process.env.PUBLIC_URL + '/images/LinkedIn.png';
 const youtubeIcon = process.env.PUBLIC_URL + '/images/YouTube.png';
-import whatsappIcon from '../../images/WhatsApp.svg';
-import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyFounder = () => {
   const [ref, inView] = useInView({

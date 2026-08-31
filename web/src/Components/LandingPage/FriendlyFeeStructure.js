@@ -29,32 +29,65 @@ const FriendlyFeeStructure = () => {
           </p>
         </motion.div>
 
-        <div className={styles.cards}>
+        <div className={styles.journeyIntro}>
+          <span className={styles.journeyPill}>
+            {t('La misma comisión de conversión para personas y negocios', 'The same conversion fee for people and businesses', '개인과 비즈니스 모두 동일한 전환 수수료')}
+          </span>
+          <p>
+            {t('La comisión de conversión solo aplica al entrar o salir. Dentro de Confío, enviar y cambiar entre cUSD y cUSD+ es gratis; Confío Pay se cobra por separado.', 'The conversion fee only applies when entering or leaving. Inside Confío, sending and moving between cUSD and cUSD+ is free; Confío Pay is priced separately.', '전환 수수료는 들어오거나 나갈 때만 적용됩니다. Confío 안에서 송금하거나 cUSD와 cUSD+를 전환하는 것은 무료이며, Confío Pay는 별도로 부과됩니다.')}
+          </p>
+        </div>
+
+        <div className={styles.cards} aria-label={t('Cómo funcionan las comisiones', 'How fees work', '수수료 적용 방식')}>
           <motion.div
             initial={{ opacity: 0, x: -30 }}
             animate={inView ? { opacity: 1, x: 0 } : {}}
             transition={{ duration: 0.6, delay: 0.2 }}
+            whileHover={{ y: -8 }}
             className={styles.card}
           >
             <div className={styles.cardHeader}>
-              <span className={styles.userType}>{t('Usuario Personal', 'Personal User', '개인 사용자')}</span>
+              <span className={styles.stepLabel}>{t('ENTRAR', 'ENTER', '들어오기')}</span>
               <div className={styles.price}>
-                <span className={styles.priceAmount}>{t('GRATIS', 'FREE', '무료')}</span>
-                <span className={styles.pricePeriod}>{t('Para siempre', 'Forever', '영원히')}</span>
+                <span className={styles.priceAmount}>{t('0,9%', '0.9%', '0.9%')}</span>
+                <span className={styles.pricePeriod}>{t('una sola vez al convertir', 'once when converting', '전환할 때 한 번')}</span>
               </div>
             </div>
             <div className={styles.cardBody}>
-              <h3 className={styles.cardTitle}>{t('Perfecto para ti y tu familia', 'Perfect for you and your family', '당신과 가족에게 완벽함')}</h3>
+              <h3 className={styles.cardTitle}>{t('Convierte a dólares de Confío', 'Convert into Confío dollars', 'Confío 달러로 전환')}</h3>
+              <p className={styles.cardText}>{t('Aplica al entrar desde moneda local o desde USDT, tanto para personas como para negocios.', 'Applies when entering from local currency or USDT, for both people and businesses.', '현지 통화 또는 USDT로 들어올 때 개인과 비즈니스 모두에게 적용됩니다.')}</p>
+              <div className={styles.example}>
+                <span>{t('Conviertes', 'You convert', '전환 금액')} US$100</span>
+                <span>{t('Comisión de Confío US$0,90', 'Confío fee US$0.90', 'Confío 수수료 US$0.90')}</span>
+                <strong>{t('Recibes US$99,10', 'You receive US$99.10', 'US$99.10 수령')}</strong>
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={inView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.6, delay: 0.3 }}
+            whileHover={{ y: -8 }}
+            className={`${styles.card} ${styles.insideCard}`}
+          >
+            <div className={styles.cardHeader}>
+              <span className={styles.stepLabel}>{t('DENTRO', 'INSIDE', '내부')}</span>
+              <div className={styles.price}>
+                <span className={styles.priceAmount}>0%</span>
+                <span className={styles.pricePeriod}>{t('entre usuarios', 'between users', '사용자 간')}</span>
+              </div>
+            </div>
+            <div className={styles.cardBody}>
+              <h3 className={styles.cardTitle}>{t('Tus dólares, en movimiento', 'Your dollars, in motion', '자유롭게 움직이는 달러')}</h3>
               <ul className={styles.features}>
-                <li>✅ {t('Envía y recibe dólares digitales al instante', 'Send and receive digital dollars instantly', '디지털 달러를 즉시 보내고 받기')}</li>
-                <li>✅ {t('Paga en comercios con QR', 'Pay at businesses with QR', 'QR로 상점에서 결제')}</li>
-                <li>✅ {t('Ahorra con rendimiento diario (cUSD+)', 'Save with daily yield (cUSD+)', '매일 수익이 쌓이는 저축 (cUSD+)')}</li>
-                <li>✅ {t('Invierte en acciones de EE.UU.', 'Invest in U.S. stocks', '미국 주식에 투자')}</li>
-                <li>✅ {t('Sin comisiones ocultas', 'No hidden fees', '숨겨진 수수료 없음')}</li>
+                <li>✓ {t('Enviar y recibir entre usuarios', 'Send and receive between users', '사용자 간 송금과 수취')}</li>
+                <li>✓ {t('Cambiar entre cUSD y cUSD+', 'Move between cUSD and cUSD+', 'cUSD와 cUSD+ 간 전환')}</li>
+                <li>✓ {t('Sin membresías ni planes', 'No memberships or plans', '멤버십이나 요금제 없음')}</li>
               </ul>
               <div className={styles.freeHighlight}>
-                <span className={styles.highlightIcon}>🎉</span>
-                <span>{t('100% gratis, sin trucos', '100% free, no tricks', '100% 무료, 속임수 없음')}</span>
+                <span className={styles.highlightIcon} aria-hidden="true">✓</span>
+                <span>{t('Lo cotidiano sigue siendo gratis', 'Everyday movement stays free', '일상적인 자금 이동은 계속 무료')}</span>
               </div>
             </div>
           </motion.div>
@@ -62,34 +95,24 @@ const FriendlyFeeStructure = () => {
           <motion.div
             initial={{ opacity: 0, x: 30 }}
             animate={inView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className={`${styles.card} ${styles.businessCard}`}
+            transition={{ duration: 0.6, delay: 0.4 }}
+            whileHover={{ y: -8 }}
+            className={styles.card}
           >
             <div className={styles.cardHeader}>
-              <span className={styles.userType}>{t('Usuario Business', 'Business User', '비즈니스 사용자')}</span>
+              <span className={styles.stepLabel}>{t('SALIR', 'EXIT', '나가기')}</span>
               <div className={styles.price}>
-                <span className={styles.priceAmount}>0.9%</span>
-                <span className={styles.pricePeriod}>{t('Por transacción', 'Per transaction', '거래당')}</span>
+                <span className={styles.priceAmount}>{t('0,9%', '0.9%', '0.9%')}</span>
+                <span className={styles.pricePeriod}>{t('una sola vez al convertir', 'once when converting', '전환할 때 한 번')}</span>
               </div>
             </div>
             <div className={styles.cardBody}>
-              <h3 className={styles.cardTitle}>{t('Ideal para tu negocio', 'Ideal for your business', '당신의 비즈니스에 이상적')}</h3>
-              <ul className={styles.features}>
-                <li>✅ {t('Todo lo del plan personal', 'Everything in personal plan', '개인 플랜의 모든 것')}</li>
-                <li>✅ {t('Recibe pagos de clientes con QR', 'Receive customer payments with QR', 'QR로 고객 결제 수령')}</li>
-                <li>✅ {t('Nómina para tus empleados', 'Payroll for your employees', '직원 급여(페이롤) 지급')}</li>
-                <li>✅ {t('Empleados con roles (cajero, gerente)', 'Employees with roles (cashier, manager)', '역할별 직원 관리 (캐셔, 매니저)')}</li>
-                <li>✅ {t('Soporte prioritario', 'Priority support', '우선 지원')}</li>
-              </ul>
-              <div className={styles.comparison}>
-                <div className={styles.comparisonItem}>
-                  <span className={styles.comparisonLabel}>{t('Tarjetas de crédito', 'Credit cards', '신용카드')}</span>
-                  <span className={styles.comparisonValue}>3-5%</span>
-                </div>
-                <div className={styles.comparisonItem}>
-                  <span className={styles.comparisonLabel}>{t('Tu ahorro con Confío', 'Your savings with Confío', 'Confío로 절약')}</span>
-                  <span className={styles.comparisonValueGreen}>{t('Hasta 80% menos', 'Up to 80% less', '최대 80% 절감')}</span>
-                </div>
+              <h3 className={styles.cardTitle}>{t('Convierte de vuelta a USDT', 'Convert back to USDT', 'USDT로 다시 전환')}</h3>
+              <p className={styles.cardText}>{t('Aplica al retirar a moneda local o enviar USDT a una billetera externa. Siempre ves el monto final antes de confirmar.', 'Applies when withdrawing to local currency or sending USDT to an external wallet. You always see the final amount before confirming.', '현지 통화로 출금하거나 외부 지갑으로 USDT를 보낼 때 적용됩니다. 확인 전에 항상 최종 금액을 볼 수 있습니다.')}</p>
+              <div className={styles.example}>
+                <span>{t('Conviertes', 'You convert', '전환 금액')} US$100</span>
+                <span>{t('Comisión de Confío US$0,90', 'Confío fee US$0.90', 'Confío 수수료 US$0.90')}</span>
+                <strong>{t('Recibes US$99,10', 'You receive US$99.10', 'US$99.10 수령')}</strong>
               </div>
             </div>
           </motion.div>
@@ -102,11 +125,14 @@ const FriendlyFeeStructure = () => {
           className={styles.footer}
         >
           <div className={styles.footerCard}>
-            <span className={styles.footerIcon}>💡</span>
+            <span className={styles.footerIcon} aria-hidden="true">💡</span>
             <div>
-              <h4 className={styles.footerTitle}>{t('¿Por qué es gratis para usuarios normales?', 'Why is it free for regular users?', '일반 사용자에게는 왜 무료인가요?')}</h4>
+              <h4 className={styles.footerTitle}>{t('Una regla simple, sin planes ni membresías', 'One simple rule—no plans or memberships', '요금제나 멤버십 없는 하나의 간단한 규칙')}</h4>
               <p className={styles.footerText}>
-                {t('Creemos que todos merecen acceso a servicios financieros justos. Los negocios que procesan grandes volúmenes nos ayudan a mantener el servicio gratuito para todos los demás.', 'We believe everyone deserves access to fair financial services. Businesses that process large volumes help us keep the service free for everyone else.', '모든 사람이 공정한 금융 서비스에 접근할 자격이 있다고 믿습니다. 대량 처리하는 비즈니스가 다른 모든 사람에게 무료 서비스를 유지하는 데 도움이 됩니다.')}
+                {t('Personas y negocios pagan lo mismo: 0,9% al entrar y 0,9% al salir del sistema de dólares de Confío. Enviar entre usuarios y convertir entre cUSD y cUSD+ cuesta 0%. Los pagos con Confío Pay tienen una comisión de 0,9%, mostrada antes de confirmar.', 'People and businesses pay the same: 0.9% when entering and 0.9% when leaving the Confío dollar system. Sending between users and moving between cUSD and cUSD+ costs 0%. Confío Pay payments carry a 0.9% fee, shown before confirmation.', '개인과 비즈니스 모두 동일하게 Confío 달러 시스템에 들어올 때 0.9%, 나갈 때 0.9%를 지불합니다. 사용자 간 송금과 cUSD·cUSD+ 전환은 0%입니다. Confío Pay 결제에는 확인 전에 표시되는 0.9% 수수료가 적용됩니다.')}
+              </p>
+              <p className={styles.providerNote}>
+                {t('El 0,9% es la comisión de Confío. El tipo de cambio y cualquier cargo de un proveedor externo, si aplica, se muestran por separado antes de confirmar.', 'The 0.9% is Confío’s fee. The exchange rate and any third-party provider charge, if applicable, are shown separately before confirmation.', '0.9%는 Confío의 수수료입니다. 환율과 제3자 제공업체의 수수료가 있는 경우 확인 전에 별도로 표시됩니다.')}
               </p>
             </div>
           </div>

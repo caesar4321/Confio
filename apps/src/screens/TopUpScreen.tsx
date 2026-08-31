@@ -16,7 +16,7 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation, useQuery } from '@apollo/client';
+import { gql, useMutation, useQuery } from '@apollo/client';
 
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
@@ -83,6 +83,14 @@ const currencyNames: Record<string, string> = {
 };
 
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
+const TOP_UP_DOLLAR_DESTINATION = gql`
+  query TopUpDollarDestination {
+    cusdPlusSummary {
+      savingsEnabled
+    }
+  }
+`;
+
 const TopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { width } = useWindowDimensions();
@@ -137,6 +145,12 @@ const TopUpScreen = () => {
   // flow stays compatible with pre-cUSD+ servers.
   const route = useRoute<any>();
   const isSavingsRail = route.params?.destination === 'cusd_plus';
+  const { data: dollarDestinationData } = useQuery(TOP_UP_DOLLAR_DESTINATION, {
+    fetchPolicy: 'cache-and-network',
+    skip: !isSavingsRail,
+  });
+  const isYieldDestination = isSavingsRail
+    && dollarDestinationData?.cusdPlusSummary?.savingsEnabled !== false;
   useEffect(() => {
     if (!isSavingsRail) return;
     // Self-heal the bsc_address registration before the order can need it.
@@ -181,10 +195,11 @@ const TopUpScreen = () => {
     enabled: isKoyweMapped,
     minAmount: selectedMethodMin,
     maxAmount: selectedMethodMax,
+    destination: isSavingsRail ? 'cusd_plus' : 'cusd',
   });
   // What the user ends up holding. The savings rail buys dollars, not cUSD.
   const assetUnit = isSavingsRail ? USD_UNIT : 'cUSD';
-  const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, assetUnit)}${isSavingsRail ? ' en tu ahorro' : ''}` : '';
+  const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, assetUnit)}${isYieldDestination ? ' en tu ahorro' : ''}` : '';
   const quoteRateLine = quote ? `1 ${rampUnitCode(assetUnit)} = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
   const isCompact = width < 380;
   const accountEmail = String(meData?.me?.email || userProfile?.email || '').trim();
@@ -368,7 +383,7 @@ const TopUpScreen = () => {
       const authenticated = await requestRampCriticalAuth({
         amount: parsedAmount,
         assetUnit,
-        assetNote: isSavingsRail ? 'ahorro' : undefined,
+        assetNote: isYieldDestination ? 'ahorro' : undefined,
         actionLabel: 'compra',
       });
       if (!authenticated) {
@@ -386,7 +401,7 @@ const TopUpScreen = () => {
     const authenticated = await requestRampCriticalAuth({
       amount: parsedAmount,
       assetUnit,
-      assetNote: isSavingsRail ? 'ahorro' : undefined,
+      assetNote: isYieldDestination ? 'ahorro' : undefined,
       actionLabel: 'compra',
     });
     if (!authenticated) {
@@ -405,8 +420,8 @@ const TopUpScreen = () => {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <RampReveal delay={0}>
             <RampHero
-              eyebrow={isSavingsRail ? 'Ahorrar' : 'Ingresar saldo'}
-              title={isSavingsRail ? 'Recarga tu ahorro' : 'Compra Confío Dollar'}
+              eyebrow={isYieldDestination ? 'Ahorrar' : 'Ingresar saldo'}
+              title={isYieldDestination ? 'Recarga tu ahorro' : 'Compra Confío Dollar'}
               subtitle="Los medios de pago dependen de tu país."
               onBack={() => navigation.goBack()}
               compact={isCompact}
@@ -472,9 +487,9 @@ const TopUpScreen = () => {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero
-          eyebrow={isSavingsRail ? 'Ahorrar' : 'Ingresar saldo'}
-          title={isSavingsRail ? 'Recarga tu ahorro' : 'Compra Confío Dollar'}
-          subtitle={isSavingsRail
+          eyebrow={isYieldDestination ? 'Ahorrar' : 'Ingresar saldo'}
+          title={isYieldDestination ? 'Recarga tu ahorro' : 'Compra Confío Dollar'}
+          subtitle={isYieldDestination
             ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+). Elige tu medio de pago y confirma.'
             : 'Elige tu medio de pago, revisa la cotización y confirma cuando estés listo.'}
           onBack={() => navigation.goBack()}
@@ -612,9 +627,9 @@ const TopUpScreen = () => {
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
-                      <View style={styles.gratisBadge}>
-                        <Text style={styles.gratisBadgeText}>Gratis</Text>
-                      </View>
+                      <Text style={styles.quoteValue}>
+                        {`${formatRampMoney(quote.confioFeeAmount || 0, USD_UNIT)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
+                      </Text>
                     </View>
                   </>
                 ) : (
@@ -739,7 +754,7 @@ const TopUpScreen = () => {
                   const authenticated = await requestRampCriticalAuth({
                     amount: parsedAmount,
                     assetUnit,
-                    assetNote: isSavingsRail ? 'ahorro' : undefined,
+                    assetNote: isYieldDestination ? 'ahorro' : undefined,
                     actionLabel: 'compra',
                   });
                   if (!authenticated) {

@@ -15,6 +15,7 @@ type UseRampQuoteFlowParams = {
   maxAmount?: number;
   // The unit the user spends on an off-ramp — `US$` on the savings rail.
   assetUnit?: string;
+  destination?: 'cusd' | 'cusd_plus';
 };
 
 export const useRampQuoteFlow = ({
@@ -27,6 +28,7 @@ export const useRampQuoteFlow = ({
   minAmount = 0,
   maxAmount = 0,
   assetUnit = 'cUSD',
+  destination = 'cusd',
 }: UseRampQuoteFlowParams) => {
   const parsedAmount = useMemo(() => Number((amount || '').replace(',', '.')), [amount]);
   const amountReady = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!countryCode;
@@ -39,6 +41,7 @@ export const useRampQuoteFlow = ({
       countryCode,
       fiatCurrency,
       paymentMethodCode,
+      destination,
     },
     skip: !quoteReady,
     fetchPolicy: 'cache-and-network',

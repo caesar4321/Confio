@@ -123,6 +123,14 @@ class SendTransaction(SoftDeleteModel):
 
     # Transaction details
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
+    fee_amount = models.DecimalField(
+        max_digits=38, decimal_places=18, default=0,
+        help_text='Exact finalized Confío conversion fee; zero for internal sends.',
+    )
+    net_amount = models.DecimalField(
+        max_digits=38, decimal_places=18, null=True, blank=True,
+        help_text='Exact finalized recipient amount; defaults to amount for legacy/internal sends.',
+    )
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
     memo = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')

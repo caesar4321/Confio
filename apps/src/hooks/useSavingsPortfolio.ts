@@ -39,6 +39,9 @@ const GET_AHORRO_PORTFOLIO = gql`
       earnedMonthUsd
       usdtBalanceUsd
       usdtBalanceWei
+      cusdBalanceUsd
+      cusdBalanceWei
+      conversionFeeBps
     }
     gmHoldings {
       symbol
@@ -89,6 +92,11 @@ export interface SavingsPortfolio {
   /** Same balance in exact wei (server string; client re-reads live before
    *  exact-amount sends). */
   usdtBalanceWei: string;
+  /** Universal non-yield cUSD payment balance. */
+  cusdBalanceUsd: number;
+  cusdBalanceWei: string;
+  /** Live, bounded USDT perimeter fee used for non-binding disclosure. */
+  conversionFeeBps: number;
   totalUsd: number;
   earnedTodayUsd: number;
   earnedMonthUsd: number;
@@ -118,8 +126,8 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
   const summary = data?.cusdPlusSummary;
   // Fail-open before the server answers (most users are eligible LATAM —
   // avoids flash-hiding the hub); authoritative once it does. The server
-  // gates the MINT (phone + IP country): ineligible deposits simply land as
-  // raw USDT ("Confío Dollar"), never as cUSD+.
+  // gates the yield wrapper (phone + IP country): ineligible deposits become
+  // universal cUSD ("Confío Dollar"), never cUSD+.
   const savingsEnabled: boolean = summary?.savingsEnabled ?? true;
   // Stocks (Ondo GM): server flag = geo-eligible AND CUSD_PLUS_STOCKS_ENABLED.
   // Fail-closed before the answer — an investment surface appearing beats
@@ -174,7 +182,10 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
       stocks,
       usdtBalanceUsd: summary?.usdtBalanceUsd ?? 0,
       usdtBalanceWei: summary?.usdtBalanceWei ?? '0',
-      totalUsd: savings.balanceUsd + stocks.totalUsd,
+      cusdBalanceUsd: summary?.cusdBalanceUsd ?? 0,
+      cusdBalanceWei: summary?.cusdBalanceWei ?? '0',
+      conversionFeeBps: summary?.conversionFeeBps ?? 90,
+      totalUsd: savings.balanceUsd + (summary?.cusdBalanceUsd ?? 0) + stocks.totalUsd,
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
       refetch,

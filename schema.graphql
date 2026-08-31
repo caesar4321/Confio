@@ -5112,6 +5112,7 @@ figures (Koywe grey-box "On-chain Deposited Volume"; presale raised).
 type LandingStatsType {
   depositedVolumeUsd: Float
   presaleRaisedUsd: Float
+  registeredUsers: Int
 }
 
 type KoyweBankInfoType {

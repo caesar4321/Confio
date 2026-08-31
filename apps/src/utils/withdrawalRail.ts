@@ -20,8 +20,8 @@ export const getWithdrawalSourcePresentation = (
   return {
     inputLabel: `Monto a retirar desde ${savingsEnabled ? 'Confío Dollar+' : 'Confío Dollar'}`,
     // The balance is a dollar value, not a cUSD+ share count. Eligible users
-    // see the + product name above; geo-ineligible users hold raw USDT under
-    // the plain Confío Dollar name, while both enter amounts as dollars.
+    // see the + product name above; geo-ineligible users hold cUSD under the
+    // plain Confío Dollar name, while both enter amounts as dollars.
     unitLabel: USD_UNIT,
   };
 };

@@ -687,16 +687,18 @@ export const TransferScreen = () => {
 
   const [showReceiveSelection, setShowReceiveSelection] = useState(false);
   // Geo-eligibility (Ondo) + phase-out (2026-07-30): since the deposit
-  // pause, EVERYONE can receive USDT-BSC — the server geo-gates only the
-  // MINT (ineligible users keep it raw as "Confío Dollar"), so the receive
+  // pause, EVERYONE can receive USDT-BSC — the server routes eligible users
+  // into cUSD+ and ineligible users into cUSD, so the receive
   // option shows for all; copy varies by what the money becomes. The USDT
   // send option is an EXIT and stays visible whenever the user holds
   // anything (exits are never gated).
-  const { savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd } = useSavingsPortfolio();
+  const {
+    savings: savingsInfo, usdtBalanceUsd: walletUsdtUsd, cusdBalanceUsd,
+  } = useSavingsPortfolio();
   const cusdDepositsPaused = savingsInfo.cusdDepositsPaused;
   const savingsEntryAllowed = savingsInfo.enabled || cusdDepositsPaused;
   const savingsExitVisible =
-    savingsInfo.enabled || savingsInfo.balanceUsd > 0 || walletUsdtUsd > 0;
+    savingsInfo.enabled || savingsInfo.balanceUsd > 0 || cusdBalanceUsd > 0 || walletUsdtUsd > 0;
 
   const handleReceiveWithAddress = () => {
     setShowReceiveSelection(true);

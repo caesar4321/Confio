@@ -373,8 +373,10 @@ export const PaymentConfirmationScreen = () => {
   // never alternatives for one invoice — that was the double-settlement
   // path — so an insufficient BSC balance is "insufficient funds", not a
   // reason to reach for the other chain.
-  const bscDollarAvailable =
-    savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd;
+  const bscDollarAvailable = (
+    savingsPortfolio.savings.balanceUsd
+    + savingsPortfolio.cusdBalanceUsd
+  );
   const requestedAmount = parseFloat(currentPayment.amount || '0');
   const canPayBsc =
     isBscInvoice

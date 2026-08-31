@@ -26,7 +26,7 @@ const FriendlyHowItWorks = () => {
     {
       number: '3',
       title: t('¡Usa tus dólares!', 'Use your dollars!', '달러 사용하기!'),
-      description: t('Envía a familia y amigos solo con números de teléfono, paga en tiendas locales, todo gratis.', 'Send to family and friends with just phone numbers, pay at local stores, all for free.', '전화번호만으로 가족과 친구에게 보내고, 현지 상점에서 결제, 모두 무료.'),
+      description: t('Envía gratis a familia y amigos con su número de teléfono. Antes de convertir o pagar, siempre ves la comisión exacta.', 'Send free to family and friends with their phone number. Before converting or paying, you always see the exact fee.', '전화번호만으로 가족과 친구에게 무료로 보내세요. 전환하거나 결제하기 전에 정확한 수수료를 항상 확인할 수 있습니다.'),
     }
   ];
 

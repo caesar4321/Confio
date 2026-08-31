@@ -108,6 +108,19 @@ interface IOndoInstantManager {
         returns (uint256 receiveTokenAmount);
 }
 
+/// cUSD is the universal USDT reserve and the sole 0.9% conversion-fee
+/// perimeter. cUSD+ may call its savings surfaces; no call flows the other
+/// direction, keeping the dependency acyclic.
+interface ICusdVault {
+    function backingToken() external view returns (address);
+    function settleSavingsEntry(uint256 grossUsdt, uint256 minUsdtOut) external returns (uint256 netUsdt);
+    function settleSavingsExit(uint256 grossUsdt, uint256 minUsdtOut, address recipient)
+        external
+        returns (uint256 netUsdt);
+    function redeemForSavings(uint256 cusdAmount, address recipient) external returns (uint256 usdtOut);
+    function mintForSavings(uint256 usdtAmount, address recipient) external returns (uint256 cusdOut);
+}
+
 contract CusdPlusVault is
     ERC20Upgradeable,
     Ownable2StepUpgradeable,
@@ -212,28 +225,41 @@ contract CusdPlusVault is
     /// byte-identical to the live proxy's.
     mapping(address => bool) public isSponsor;
 
+    /// Universal payment-dollar vault. APPENDED after all live v5 storage.
+    /// It is initialized atomically with the proxy upgrade through
+    /// initializeCusd(), preserving slots 0-5 byte-for-byte.
+    ICusdVault public CUSD;
+
+    /// The Ondo stock router is an internal settlement adapter, not an
+    /// external USDT entry/exit. It therefore receives dedicated fee-free
+    /// cUSD+ <-> USDT surfaces while charging its own fixed 30 bps trade
+    /// fee. APPENDED after CUSD to preserve the live proxy layout.
+    address public stockRouter;
+
     // ── Events ──────────────────────────────────────────────────────────
     event Accrued(uint256 oraclePrice, uint256 newPPlus);
     event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
-    event OracleGrowthAccepted(uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash);
-    event OracleFaultRebaselined(uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash);
+    event OracleGrowthAccepted(
+        uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash
+    );
+    event OracleFaultRebaselined(
+        uint256 oldPrice, uint256 guardedPrice, uint256 resolvedPrice, bytes32 indexed evidenceHash
+    );
     event Minted(address indexed recipient, uint256 shares, uint256 usdyIn, uint256 pPlusAt);
     event Redeemed(address indexed holder, address indexed to, uint256 shares, uint256 usdyOut, uint256 pPlusAt);
     event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
     event AddressFrozen(address indexed target);
     event AddressUnfrozen(address indexed target);
     event SponsorSet(address indexed sponsor, bool allowed);
+    event CusdVaultSet(address indexed previousVault, address indexed newVault);
+    event StockRouterSet(address indexed previousRouter, address indexed newRouter);
+    event WrappedCusd(address indexed holder, address indexed recipient, uint256 cusdIn, uint256 sharesOut);
+    event UnwrappedToCusd(address indexed holder, address indexed recipient, uint256 sharesIn, uint256 cusdOut);
 
     /// Implementation constructor: wiring lives in implementation-level
     /// immutables (cheap reads; an upgrade = new implementation with new
     /// wiring). The proxy's state is set in initialize().
-    constructor(
-        address usdy,
-        address usdt,
-        address instantManager,
-        address oracle,
-        uint256 confioYieldShareBps
-    ) {
+    constructor(address usdy, address usdt, address instantManager, address oracle, uint256 confioYieldShareBps) {
         require(confioYieldShareBps <= 3_000, "share too high"); // hard ceiling 30%
         USDY = IERC20(usdy);
         USDT = IERC20(usdt);
@@ -257,12 +283,29 @@ contract CusdPlusVault is
         lastOraclePrice = p;
     }
 
+    /// Must be included in the Safe's upgradeToAndCall transaction. A zero
+    /// address would leave legacy mint/redeem unable to apply the perimeter
+    /// fee, so initialization fails closed.
+    function initializeCusd(address cusdVault) external reinitializer(2) onlyOwner {
+        require(cusdVault != address(0), "zero cusd");
+        require(cusdVault.code.length > 0, "cusd not contract");
+        require(ICusdVault(cusdVault).backingToken() == address(USDT), "cusd backing mismatch");
+        CUSD = ICusdVault(cusdVault);
+        emit CusdVaultSet(address(0), cusdVault);
+    }
+
     /// cusd.py's update(): Assert(sender == admin) — here onlyOwner.
     /// Upgrade authority must remain available for the vault's lifetime:
     /// the Ondo oracle/IM dependency can migrate out from under us, and an
     /// unupgradeable vault would strand holder funds (see header). Guard the
     /// OWNER (timelocked multisig before scale), not the upgrade path.
     function _authorizeUpgrade(address) internal view override onlyOwner {}
+
+    /// The proxy must always retain a reviewed governance recovery path.
+    /// Ownership can move through Ownable2Step but cannot be burned.
+    function renounceOwnership() public pure override {
+        revert("renounce disabled");
+    }
 
     // ═════════════════════════ Accrual ══════════════════════════════════
     /// Lazy compounding on every interaction (Compound-style): pPlus grows by
@@ -353,11 +396,10 @@ contract CusdPlusVault is
     /// split, exactly as if accrue() had kept up. Upward moves only — a
     /// price DROP is never "growth"; equality is no growth either (a glitch
     /// that returned exactly to baseline resolves via rebaseline).
-    function acceptVerifiedOracleGrowth(
-        uint256 minVerifiedPrice,
-        uint256 maxVerifiedPrice,
-        bytes32 evidenceHash
-    ) external onlyOwner {
+    function acceptVerifiedOracleGrowth(uint256 minVerifiedPrice, uint256 maxVerifiedPrice, bytes32 evidenceHash)
+        external
+        onlyOwner
+    {
         require(oracleGuardTripped, "guard not tripped");
         require(evidenceHash != bytes32(0), "missing evidence");
         require(minVerifiedPrice <= maxVerifiedPrice, "invalid range");
@@ -426,7 +468,7 @@ contract CusdPlusVault is
         returns (uint256 sharesOut)
     {
         // Primary issuance is gated; exits never are (see isSponsor).
-        require(isSponsor[msg.sender] || isSponsor[tx.origin], "not sponsored");
+        _requireSponsor();
         // AND the mint must land on the caller. `tx.origin` alone proves
         // only that a sponsor appeared somewhere above this call — not that
         // it approved THIS recipient (audit 2026-07-31 [P2]). Without this,
@@ -446,9 +488,57 @@ contract CusdPlusVault is
         // it: re-reading the oracle after the external IM calls would price
         // the mint at an UNVALIDATED value — the exact gap the guard closes.
         uint256 p = lastOraclePrice;
+        require(address(CUSD) != address(0), "cusd not configured");
+        USDT.safeTransferFrom(msg.sender, address(this), usdtIn);
+        USDT.forceApprove(address(CUSD), usdtIn);
+        uint256 netUsdt = CUSD.settleSavingsEntry(usdtIn, 0);
+        uint256 usdyOut = _imSubscribe(netUsdt, minUsdyOut);
+        sharesOut = _mintAgainstUsdy(usdyOut, recipient, p);
+    }
+
+    /// Stock-sale settlement is internal to Confio. The stock router already
+    /// charges the complete user-facing 30 bps trade fee, so applying the
+    /// external 90 bps conversion perimeter here would double-charge users.
+    function subscribeForStock(uint256 usdtIn, uint256 minUsdyOut, address recipient)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 sharesOut)
+    {
+        _requireStockRouter();
+        require(usdtIn > 0, "zero in");
+        require(recipient != address(0), "zero recipient");
+        accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
+        uint256 p = lastOraclePrice;
+
         USDT.safeTransferFrom(msg.sender, address(this), usdtIn);
         uint256 usdyOut = _imSubscribe(usdtIn, minUsdyOut);
         sharesOut = _mintAgainstUsdy(usdyOut, recipient, p);
+    }
+
+    /// cUSD -> cUSD+ is an internal, fee-free savings conversion. The cUSD
+    /// vault burns the cUSD received here and returns the same USDT amount;
+    /// this vault subscribes it into USDY and mints yield-bearing shares.
+    function wrapCusd(uint256 cusdIn, uint256 minUsdyOut, address recipient)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 sharesOut)
+    {
+        _requireSponsor();
+        require(address(CUSD) != address(0), "cusd not configured");
+        require(cusdIn > 0, "zero in");
+        require(recipient == msg.sender || isSponsor[msg.sender] || isSponsor[tx.origin], "recipient not caller");
+        accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
+        uint256 p = lastOraclePrice;
+
+        IERC20(address(CUSD)).safeTransferFrom(msg.sender, address(this), cusdIn);
+        uint256 usdtOut = CUSD.redeemForSavings(cusdIn, address(this));
+        uint256 usdyOut = _imSubscribe(usdtOut, minUsdyOut);
+        sharesOut = _mintAgainstUsdy(usdyOut, recipient, p);
+        emit WrappedCusd(msg.sender, recipient, cusdIn, sharesOut);
     }
 
     /// Secondary rail: owner (treasury Safe) already holds USDY (bridge
@@ -501,12 +591,7 @@ contract CusdPlusVault is
     /// Duende-controlled addresses" is a code invariant, not policy. Not
     /// pause-gated (like collectFees/sweep): pause protects holders, and
     /// the emergency playbook is exactly pause-then-treasury-operates.
-    function redeem(uint256 shares)
-        external
-        onlyOwner
-        nonReentrant
-        returns (uint256 usdyOut)
-    {
+    function redeem(uint256 shares) external onlyOwner nonReentrant returns (uint256 usdyOut) {
         accrue();
         require(!oracleGuardTripped, "oracle guard tripped");
         uint256 p = lastOraclePrice; // guard-validated snapshot
@@ -533,10 +618,62 @@ contract CusdPlusVault is
         uint256 usdyOut = Math.mulDiv(shares, pPlus, p);
         require(usdyOut > 0, "dust");
         _burn(msg.sender, shares);
-        usdtOut = _imRedeem(usdyOut, minUsdtOut);
-        USDT.safeTransfer(to, usdtOut);
+        require(address(CUSD) != address(0), "cusd not configured");
+        uint256 grossUsdt = _imRedeem(usdyOut, 0);
+        USDT.forceApprove(address(CUSD), grossUsdt);
+        usdtOut = CUSD.settleSavingsExit(grossUsdt, minUsdtOut, to);
         _assertFullyBacked(p);
         emit Redeemed(msg.sender, to, shares, usdyOut, pPlus);
+    }
+
+    /// Stock-buy settlement is likewise internal and fee-free. Shares must
+    /// already have been pulled into the configured router, and USDT can
+    /// only return to that same router for immediate GM settlement.
+    function redeemForStock(uint256 shares, uint256 minUsdtOut, address to)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 usdtOut)
+    {
+        _requireStockRouter();
+        require(to == msg.sender, "stock recipient must be router");
+        accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
+        uint256 p = lastOraclePrice;
+        uint256 usdyOut = Math.mulDiv(shares, pPlus, p);
+        require(usdyOut > 0, "dust");
+        _burn(msg.sender, shares);
+        usdtOut = _imRedeem(usdyOut, minUsdtOut);
+        USDT.safeTransfer(msg.sender, usdtOut);
+        _assertFullyBacked(p);
+        emit Redeemed(msg.sender, msg.sender, shares, usdyOut, pPlus);
+    }
+
+    /// cUSD+ -> cUSD is an internal, fee-free savings conversion. Unlike a
+    /// USDT exit it is sponsor-gated, so the permissionless surface remains
+    /// fee-bearing only.
+    function unwrapToCusd(uint256 shares, uint256 minCusdOut, address recipient)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 cusdOut)
+    {
+        _requireSponsor();
+        require(address(CUSD) != address(0), "cusd not configured");
+        require(recipient != address(0), "zero recipient");
+        require(recipient == msg.sender || isSponsor[msg.sender] || isSponsor[tx.origin], "recipient not caller");
+        accrue();
+        require(!oracleGuardTripped, "oracle guard tripped");
+        uint256 p = lastOraclePrice;
+        uint256 usdyOut = Math.mulDiv(shares, pPlus, p);
+        require(usdyOut > 0, "dust");
+        _burn(msg.sender, shares);
+        uint256 usdtOut = _imRedeem(usdyOut, minCusdOut);
+        USDT.forceApprove(address(CUSD), usdtOut);
+        cusdOut = CUSD.mintForSavings(usdtOut, recipient);
+        require(cusdOut >= minCusdOut, "insufficient out");
+        _assertFullyBacked(p);
+        emit UnwrappedToCusd(msg.sender, recipient, shares, cusdOut);
     }
 
     // ═════════════════════════ Fees ═════════════════════════════════════
@@ -578,8 +715,33 @@ contract CusdPlusVault is
         emit SponsorSet(sponsor, allowed);
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function setCusdVault(address newCusdVault) external onlyOwner {
+        require(newCusdVault != address(0), "zero cusd");
+        require(newCusdVault.code.length > 0, "cusd not contract");
+        require(ICusdVault(newCusdVault).backingToken() == address(USDT), "cusd backing mismatch");
+        address previous = address(CUSD);
+        CUSD = ICusdVault(newCusdVault);
+        emit CusdVaultSet(previous, newCusdVault);
+    }
+
+    /// Register the single stock-settlement proxy. It must separately hold
+    /// the sponsor role, so neither configuration mistake alone opens a
+    /// fee-free conversion path.
+    function setStockRouter(address newStockRouter) external onlyOwner {
+        require(newStockRouter != address(0), "zero stock router");
+        require(newStockRouter.code.length > 0, "stock router not contract");
+        address previous = stockRouter;
+        stockRouter = newStockRouter;
+        emit StockRouterSet(previous, newStockRouter);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 
     // ═════════════════════════ Freeze (cusd.py parity) ══════════════════
 
@@ -600,6 +762,7 @@ contract CusdPlusVault is
     /// OZ v5 single choke point for mint/burn/transfer — the same property
     /// cusd.py gets from the ASA freeze bit: one flag stops every movement.
     function _update(address from, address to, uint256 value) internal override {
+        require(!paused(), "Pausable: paused");
         require(!frozen[from] && !frozen[to], "address frozen");
         super._update(from, to, value);
     }
@@ -639,6 +802,14 @@ contract CusdPlusVault is
     /// everything; so do we): vault USDY ≥ USDY owed to holders.
     function _assertFullyBacked(uint256 p) internal view {
         require(USDY.balanceOf(address(this)) >= usdyOwed(p), "backing violated");
+    }
+
+    function _requireSponsor() internal view {
+        require(isSponsor[msg.sender] || isSponsor[tx.origin], "not sponsored");
+    }
+
+    function _requireStockRouter() internal view {
+        require(msg.sender == stockRouter && isSponsor[msg.sender], "not stock router");
     }
 
     /// IM plumbing against the official ABI. We measure the balance DELTA

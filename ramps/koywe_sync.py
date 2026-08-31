@@ -538,7 +538,10 @@ def upsert_koywe_ramp_transaction(
         'actor_address': actor_address or '',
         'fiat_currency': fiat_currency or '',
         'fiat_amount': fiat_amount,
-        'crypto_currency': getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'),
+        'crypto_currency': (
+            'USDT BSC' if destination == 'cusd_plus'
+            else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon')
+        ),
         'crypto_amount_estimated': crypto_estimated,
         'crypto_amount_actual': None,
         # Final product depends on the rail: the savings rail ends in cUSD+
@@ -591,26 +594,30 @@ def sync_koywe_ramp_transaction_from_order(
     )
 
     is_savings_rail = getattr(ramp_tx, 'destination', 'cusd') == 'cusd_plus'
-    # A savings-rail order delivers USDT to the user's address and only becomes
-    # cUSD+ if the mint is allowed. A geo-ineligible holder keeps raw USDT (the
-    # deposit watcher no longer even opens a conversion for them), so promising
-    # CUSD+ here would misstate what they hold (audit 2026-08-01).
-    keeps_raw_usdt = False
-    if is_savings_rail:
-        try:
-            from cusd_plus.eligibility import is_ondo_eligible
-            actor = getattr(ramp_tx, 'actor_user', None)
-            keeps_raw_usdt = actor is not None and not is_ondo_eligible(actor)
-        except Exception:  # noqa: BLE001 — labelling must not break the sync
-            logger.exception('ramp eligibility label check failed for %s', ramp_tx.pk)
+    # Never guess the product asset from phone-country eligibility. Mint
+    # routing also considers request IP and the finalized contract event is
+    # the source of truth. Until that Conversion is linked, USDT is merely a
+    # transient arrival and must not be presented as cUSD+.
+    destination_asset = 'USDT BSC'
+    conversion = getattr(ramp_tx, 'conversion', None)
+    if conversion is not None and conversion.status == 'COMPLETED':
+        destination_asset = (
+            'CUSD+' if conversion.conversion_type == 'to_savings'
+            else 'CUSD' if conversion.conversion_type == 'usdt_to_cusd'
+            else destination_asset
+        )
     if direction == 'on_ramp':
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
-        # An ineligible holder keeps what actually landed — USDT — not CUSD+
-        # (the mint is refused) and not legacy CUSD (wrong chain entirely).
-        ramp_tx.final_currency = (
-            'USDT BSC' if keeps_raw_usdt else ('CUSD+' if is_savings_rail else 'CUSD'))
-        ramp_tx.final_amount = amount_out or ramp_tx.final_amount
+        if ramp_status == 'COMPLETED' and amount_out is not None:
+            ramp_tx.crypto_amount_actual = amount_out
+        ramp_tx.final_currency = destination_asset if is_savings_rail else 'CUSD'
+        created = ((ramp_tx.metadata or {}).get('provider_payload_created') or {})
+        fee_net = _to_decimal(created.get('confioNetAmount'))
+        # Provider status payloads report gross USDT delivery. Once the
+        # contract fee preview was persisted, never overwrite the user's
+        # post-fee product amount with that gross value.
+        ramp_tx.final_amount = fee_net or amount_out or ramp_tx.final_amount
     else:
         ramp_tx.fiat_amount = amount_out or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_in or ramp_tx.crypto_amount_estimated

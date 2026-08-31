@@ -1,13 +1,12 @@
 """
-The mint-side geo stack (2026-07-30 phase-out): ramps deliver raw USDT-BSC
-to everyone, so geo-eligibility is enforced on the vault subscribeAndMint at
-BOTH relay rails — and nowhere else. These tests pin the three properties
-that make that safe:
+The cUSD+ mint-side geo stack. External USDT reaches the same user address for
+everyone; fee-capable clients route ineligible holders to cUSD, while both
+legacy cUSD+ relay rails still enforce eligibility. These tests pin the
+properties that keep the compatibility path safe:
 
   1. the gate itself (phone fails CLOSED, IP fails OPEN when unresolvable);
-  2. mints are refused for ineligible users on both rails, while EXITS —
-     redeems and raw USDT transfers — relay untouched (deposit-without-exit
-     is the scam signal this design exists to avoid);
+  2. cUSD+ mints are refused for ineligible users on both rails, while cUSD
+     issuance and exits are not subject to the Ondo acquisition gate;
   3. the supporting flows agree: ramp orders no longer geo-refuse savings
      top-ups, sponsored batches carry the raw USDT transfer (the exit), and
      the arrival notification never promises a mint that won't happen.
@@ -422,7 +421,7 @@ class DepositNotificationCopyTests(SimpleTestCase):
         captured = self._record('US')
         self.assertIn('Confío Dollar', captured['message'])
         self.assertNotIn('ahorro', captured['message'])
-        self.assertFalse(captured['data']['pending_auto_mint'])
+        self.assertTrue(captured['data']['pending_auto_mint'])
 
 
 class UsdtBalanceCacheTests(SimpleTestCase):

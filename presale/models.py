@@ -209,6 +209,13 @@ class PresalePurchase(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.01'))]
     )
+    cusd_amount_exact = models.DecimalField(
+        max_digits=78,
+        decimal_places=18,
+        null=True,
+        blank=True,
+        help_text='Exact BSC gross Confío-dollar debit; legacy rows use cusd_amount.',
+    )
     confio_amount = models.DecimalField(
         max_digits=15, 
         decimal_places=6,
@@ -270,8 +277,9 @@ class PresalePurchase(models.Model):
     )
     FUNDING_SOURCE_CHOICES = [
         ('algorand_cusd', 'Legacy cUSD (Algorand)'),
-        ('direct_cusd', 'Confío Dollar (USDT-BSC)'),
-        ('cusd_plus_redeem', 'Redeemed from cUSD+'),
+        ('cusd_redeem', 'Legacy cUSD redeemed with the universal fee'),
+        ('cusd_direct', 'cUSD paid directly'),
+        ('cusd_plus_via_cusd', 'cUSD+ normalized to cUSD internally'),
     ]
     funding_source = models.CharField(
         max_length=20,
@@ -360,8 +368,8 @@ class UserPresaleLimit(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     phase = models.ForeignKey(PresalePhase, on_delete=models.CASCADE)
     total_purchased = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+        max_digits=78,
+        decimal_places=18,
         default=Decimal('0')
     )
     last_purchase_at = models.DateTimeField(null=True, blank=True)

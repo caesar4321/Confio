@@ -47,7 +47,7 @@ contract ConfioPresaleVaultTest is Test {
 
     function _newVault(uint256 initialSold) internal returns (ConfioPresaleVault) {
         return new ConfioPresaleVault(
-            owner, IERC20(address(payment)), _breaks(), _prices(), initialSold, sponsor
+            owner, IERC20(address(payment)), _breaks(), _prices(), initialSold, 0, initialSold, 0, sponsor
         );
     }
 
@@ -89,34 +89,37 @@ contract ConfioPresaleVaultTest is Test {
         uint256[] memory pBad = _prices();
         pBad[0] = 0;
         vm.expectRevert(ConfioPresaleVault.BadCurveParams.selector);
-        new ConfioPresaleVault(owner, pt, b, pBad, 0, sponsor);
+        new ConfioPresaleVault(owner, pt, b, pBad, 0, 0, 0, 0, sponsor);
 
         // non-increasing prices (flat segment) rejected
         pBad = _prices();
         pBad[1] = pBad[0];
         vm.expectRevert(ConfioPresaleVault.BadCurveParams.selector);
-        new ConfioPresaleVault(owner, pt, b, pBad, 0, sponsor);
+        new ConfioPresaleVault(owner, pt, b, pBad, 0, 0, 0, 0, sponsor);
 
         // non-increasing breakpoints rejected
         uint256[] memory bBad = _breaks();
         bBad[1] = bBad[0];
         vm.expectRevert(ConfioPresaleVault.BadCurveParams.selector);
-        new ConfioPresaleVault(owner, pt, bBad, p, 0, sponsor);
+        new ConfioPresaleVault(owner, pt, bBad, p, 0, 0, 0, 0, sponsor);
 
         // length mismatch
         uint256[] memory pShort = new uint256[](3);
         (pShort[0], pShort[1], pShort[2]) = (p[0], p[1], p[2]);
         vm.expectRevert(ConfioPresaleVault.BadCurveParams.selector);
-        new ConfioPresaleVault(owner, pt, b, pShort, 0, sponsor);
+        new ConfioPresaleVault(owner, pt, b, pShort, 0, 0, 0, 0, sponsor);
 
         // initialSold beyond supply
         vm.expectRevert(ConfioPresaleVault.ExceedsTokensForSale.selector);
-        new ConfioPresaleVault(owner, pt, b, p, S + 1, sponsor);
+        new ConfioPresaleVault(owner, pt, b, p, S + 1, 0, S + 1, 0, sponsor);
 
         vm.expectRevert(ConfioPresaleVault.ZeroAddress.selector);
-        new ConfioPresaleVault(owner, pt, b, p, 0, address(0));
+        new ConfioPresaleVault(owner, pt, b, p, 0, 0, 0, 0, address(0));
         vm.expectRevert(ConfioPresaleVault.ZeroAddress.selector);
-        new ConfioPresaleVault(owner, IERC20(address(0)), b, p, 0, sponsor);
+        new ConfioPresaleVault(owner, IERC20(address(0)), b, p, 0, 0, 0, 0, sponsor);
+
+        vm.expectRevert(ConfioPresaleVault.BadMigrationSnapshot.selector);
+        new ConfioPresaleVault(owner, pt, b, p, 100e18, 0, 50e18, 40e18, sponsor);
     }
 
     // ------------------------------------------------------------------
@@ -232,9 +235,7 @@ contract ConfioPresaleVaultTest is Test {
         vm.prank(user, sponsor);
         payment.approve(address(vault), type(uint256).max);
         vm.prank(user, sponsor);
-        vm.expectRevert(
-            abi.encodeWithSelector(ConfioPresaleVault.CostExceedsMaxPayment.selector, cost, cost - 1)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.CostExceedsMaxPayment.selector, cost, cost - 1));
         vault.buy(1000e18, cost - 1);
     }
 
@@ -309,11 +310,7 @@ contract ConfioPresaleVaultTest is Test {
         buyers[0] = algoBuyer;
         amounts[0] = 100_001e18;
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ConfioPresaleVault.ExceedsMigratedPool.selector, 100_001e18, 100_000e18
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.ExceedsMigratedPool.selector, 100_001e18, 100_000e18));
         v.creditMigrated(buyers, amounts);
 
         // only owner
@@ -333,6 +330,48 @@ contract ConfioPresaleVaultTest is Test {
         assertEq(confio.balanceOf(algoBuyer), 300_000e18);
     }
 
+    function test_legacy_snapshot_preserves_curve_and_irrevocable_claims() public {
+        // Old vault snapshot: 500K sold, 100K already claimed, 150K still
+        // unassigned Algorand purchases and 250K outstanding BSC purchases.
+        ConfioPresaleVault v = new ConfioPresaleVault(
+            owner,
+            IERC20(address(payment)),
+            _breaks(),
+            _prices(),
+            500_000e18,
+            100_000e18,
+            150_000e18,
+            250_000e18,
+            sponsor
+        );
+        assertEq(v.totalSold(), 500_000e18);
+        assertEq(v.totalClaimed(), 100_000e18);
+        assertEq(v.migratedPool(), 150_000e18);
+        assertEq(v.legacyPool(), 250_000e18);
+
+        address[] memory buyers = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        buyers[0] = user;
+        amounts[0] = 250_000e18;
+        vm.prank(owner);
+        v.creditLegacy(buyers, amounts);
+        assertEq(v.legacyPool(), 0);
+        assertEq(v.purchased(user), 250_000e18);
+        assertEq(v.migratedCredited(user), 0, "paid legacy right is irrevocable");
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 1, 0));
+        v.uncreditMigrated(user, 1);
+
+        confio.mint(address(v), 400_000e18);
+        vm.startPrank(owner);
+        v.setConfioToken(IERC20(address(confio)));
+        v.unlockClaims();
+        vm.stopPrank();
+        vm.prank(user);
+        assertEq(v.claim(), 250_000e18);
+    }
+
     function test_uncreditMigrated_only_reverses_credits_not_purchases() public {
         ConfioPresaleVault v = _newVault(500_000e18);
 
@@ -350,9 +389,7 @@ contract ConfioPresaleVaultTest is Test {
         // cannot claw back more than the migrated portion
         vm.prank(owner);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 200_001e18, 200_000e18
-            )
+            abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 200_001e18, 200_000e18)
         );
         v.uncreditMigrated(algoBuyer, 200_001e18);
 
@@ -375,9 +412,7 @@ contract ConfioPresaleVaultTest is Test {
         vm.prank(algoBuyer);
         v.claim();
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 1, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 1, 0));
         v.uncreditMigrated(algoBuyer, 1);
     }
 
@@ -402,9 +437,7 @@ contract ConfioPresaleVaultTest is Test {
         // fund exactly the outstanding (pool, nothing credited/claimed yet)
         confio.mint(address(v), 500_000e18);
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(ConfioPresaleVault.ExceedsExcessConfio.selector, 1, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.ExceedsExcessConfio.selector, 1, 0));
         v.sweepExcessConfio(owner, 1); // unassigned pool is NOT sweepable
     }
 
@@ -460,9 +493,7 @@ contract ConfioPresaleVaultTest is Test {
         vault.setConfioToken(IERC20(address(confio)));
         confio.mint(address(vault), 1000e18);
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(ConfioPresaleVault.ExceedsExcessConfio.selector, 1, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.ExceedsExcessConfio.selector, 1, 0));
         vault.sweepExcessConfio(owner, 1);
 
         // Overfund → only the excess is sweepable
@@ -507,8 +538,7 @@ contract ConfioPresaleVaultTest is Test {
     // ------------------------------------------------------------------
 
     function testFuzz_payment_balance_covers_curve_integral(uint128 a, uint128 b, uint128 c) public {
-        uint256[3] memory qs =
-            [bound(uint256(a), 1, S / 4), bound(uint256(b), 1, S / 4), bound(uint256(c), 1, S / 4)];
+        uint256[3] memory qs = [bound(uint256(a), 1, S / 4), bound(uint256(b), 1, S / 4), bound(uint256(c), 1, S / 4)];
         address[3] memory buyers = [user, user2, user];
         uint256 total;
         uint256 preSold = vault.totalSold();
@@ -572,9 +602,7 @@ contract ConfioPresaleVaultTest is Test {
 
         // The owner cannot touch it — there is no credit left to reverse.
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 50_000e18, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.ExceedsUnclaimedCredit.selector, 50_000e18, 0));
         v.uncreditMigrated(algoBuyer, 50_000e18);
         assertEq(v.claimableOf(algoBuyer), 50_000e18, "paid purchase intact");
     }
@@ -592,11 +620,7 @@ contract ConfioPresaleVaultTest is Test {
         // Under-funded unlock is refused outright.
         confio.mint(address(v), 19_999e18);
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ConfioPresaleVault.InsufficientBacking.selector, 19_999e18, 20_000e18
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(ConfioPresaleVault.InsufficientBacking.selector, 19_999e18, 20_000e18));
         v.unlockClaims();
 
         confio.mint(address(v), 1e18); // exactly funded

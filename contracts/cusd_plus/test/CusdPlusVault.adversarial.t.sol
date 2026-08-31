@@ -14,6 +14,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {CusdPlusVault} from "../CusdPlusVault.sol";
 import {MockToken, MockOracle, MockInstantManager} from "./CusdPlusVault.t.sol";
+import {MockCusdFeePerimeter} from "./MockCusdFeePerimeter.sol";
 
 contract CusdPlusVaultAdversarialTest is Test {
     MockToken usdt;
@@ -36,19 +37,17 @@ contract CusdPlusVaultAdversarialTest is Test {
         usdt.mint(address(im), 100_000_000e18);
         usdy.mint(address(im), 100_000_000e18);
 
-        CusdPlusVault impl = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
-        );
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        );
+        CusdPlusVault impl = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury)));
         vault = CusdPlusVault(address(proxy));
+        MockCusdFeePerimeter cusd = new MockCusdFeePerimeter(usdt, 0);
+        vm.prank(treasury);
+        vault.initializeCusd(address(cusd));
         // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
         // the default sender under vm.prank, which mirrors production:
         // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
         vm.prank(treasury);
         vault.setSponsor(tx.origin, true);
-
 
         for (uint256 i = 0; i < 2; i++) {
             address a = i == 0 ? attacker : victim;
@@ -107,11 +106,7 @@ contract CusdPlusVaultAdversarialTest is Test {
 
         uint256 before = vault.surplusUsdy(oracle.price());
         usdy.mint(address(vault), 777e18);
-        assertEq(
-            vault.surplusUsdy(oracle.price()) - before,
-            777e18,
-            "surplus grows by exactly the donation"
-        );
+        assertEq(vault.surplusUsdy(oracle.price()) - before, 777e18, "surplus grows by exactly the donation");
         assertEq(vault.pPlus(), WAD, "pPlus untouched");
     }
 
@@ -198,10 +193,6 @@ contract CusdPlusVaultAdversarialTest is Test {
             vault.redeemToUsdt(bal, 0, users[i]);
         }
         assertGe(vault.backingRatioBps(), 10_000, "solvent after full exit");
-        assertLe(
-            (vault.totalSupply() * vault.pPlus()) / p,
-            5,
-            "only sub-wei dust may remain"
-        );
+        assertLe((vault.totalSupply() * vault.pPlus()) / p, 5, "only sub-wei dust may remain");
     }
 }

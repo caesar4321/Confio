@@ -17,28 +17,13 @@ Two-step, server-authoritative:
                      CONFIRMED/FAILED, writes ledger movements and fires
                      SEND_SENT / SEND_RECEIVED.
 
-Call shapes (server decides at prepare; A–C are the dollar-value send where
-the CLIENT names no token, D–E honor an explicit token request from the
-"Enviar con dirección" sheet):
-  A  sender holds cUSD+, recipient ELIGIBLE Confío user
-        [vault.transfer(recipient, shares)]                 kind=send_cusd_plus
-  B  sender holds cUSD+, recipient ineligible OR external
-        [vault.redeemToUsdt(shares, minOut, recipient)]     kind=send_redeem
-  C  sender holds raw USDT
-        [USDT.transfer(recipient, wei)]                     kind=send_usdt
-  D  token='CUSD_PLUS': the sender chose the TOKEN, not just the value —
-     the recipient gets cUSD+ itself at any address, no eligibility fork
-     (a transfer of the sender's position is an exit; the geo gate covers
-     only the MINT). Shares-funded only.
-        [vault.transfer(recipient, shares)]                 kind=send_cusd_plus
-  E  token='CONFIO': plain BEP-20 transfer. `amount` is a CONFIO count,
-     not USD.
-        [CONFIO.transfer(recipient, wei)]                   kind=send_confio
-
-No geo gate anywhere in this module: sends are EXITS from the sender's
-position and never gated (house rule). An eligible recipient receiving
-USDT auto-mints via the existing savings resume; an ineligible recipient
-simply keeps what arrives.
+Routing follows one product rule regardless of whether funds start in cUSD+,
+cUSD, or both: eligible Confío recipients receive cUSD+; ineligible Confío
+recipients receive cUSD through a fee-free internal wrap/unwrap; external
+addresses receive USDT through the fee-bearing perimeter exit. CONFIO is a
+plain BEP-20 transfer. Raw USDT is only a pre-rollout compatibility fallback
+and cannot bypass the live perimeter. Mixed balances normalize atomically and
+charge one exit fee, not one per funding leg.
 
 Recipient coverage: bsc_address is client-registered (the server cannot
 derive it), so a recipient who hasn't opened a post-EVM app version has no
@@ -55,6 +40,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from .kinds import BSC_SEND_KINDS
+
 logger = logging.getLogger(__name__)
 
 WAD = 10 ** 18
@@ -62,6 +49,10 @@ WAD = 10 ** 18
 # share count meets a slightly newer price at execution — 0.5% absorbs any
 # realistic drift while still bounding what the recipient could lose.
 REDEEM_MIN_OUT_BPS = 9_950
+# The same 0.5% execution tolerance protects fee-free cUSD -> cUSD+
+# conversions.  The argument to wrapCusd is Ondo's minimum USDY received,
+# not a share-count floor.
+INTERNAL_CONVERSION_MIN_OUT_BPS = 9_950
 # MAX-send dust tolerance: the mint path floors twice on-chain (USDY units
 # at the oracle price, then shares at pPlus), leaving a position a few wei
 # short of the deposited cents — while every float layer above (position_usd,
@@ -81,6 +72,18 @@ MAX_SEND_DUST_WEI = 10 ** 12
 EVM_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 
+def _min_usdy_out(dollar_wei: int, oracle_price_wad: int) -> int:
+    """USDY-token floor for a dollar-denominated internal wrap.
+
+    InstantManager's argument is RWA token units, not USD value.  USDY is an
+    accumulating token, so one USDY is worth `oracle_price_wad / WAD` dollars.
+    """
+    if dollar_wei <= 0 or oracle_price_wad <= 0:
+        return 0
+    expected_usdy = dollar_wei * WAD // oracle_price_wad
+    return expected_usdy * INTERNAL_CONVERSION_MIN_OUT_BPS // 10_000
+
+
 def _uint_word(v: int) -> str:
     return format(int(v), 'x').rjust(64, '0')
 
@@ -93,8 +96,25 @@ def _vault_address() -> str:
     return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
 
 
+def _cusd_address() -> str:
+    return (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+
+
 def _confio_token_address() -> str:
     return (getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', '') or '').lower()
+
+
+def _exit_quote(gross_wei: int) -> tuple[int, int, int, int]:
+    """Authoritative perimeter quote for an external dollar delivery."""
+    if not getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+        return gross_wei, 0, gross_wei, 0
+    from cusd_plus.cusd_vault import preview_redeem_wei
+    quote = preview_redeem_wei(gross_wei)
+    return quote.gross_wei, quote.fee_wei, quote.net_wei, quote.fee_bps
+
+
+def _decimal_wei(value: int) -> str:
+    return format(Decimal(value) / Decimal(WAD), 'f')
 
 
 def _display_name(user) -> str:
@@ -216,15 +236,20 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     from cusd_plus import vault as cp_vault
     from cusd_plus.eligibility import is_ondo_eligible
     from cusd_plus.sponsor_7702 import (
+        SEL_APPROVE,
+        SEL_CUSD_REDEEM,
         SEL_REDEEM_TO_USDT,
         SEL_TRANSFER,
+        SEL_UNWRAP_TO_CUSD,
+        SEL_WRAP_CUSD,
         USDT_BSC,
     )
     from users.models import Account
     from .models import SendTransaction
 
     vault_addr = _vault_address()
-    if not vault_addr:
+    cusd_addr = _cusd_address()
+    if not vault_addr or not cusd_addr:
         return {'success': False, 'error': 'vault_not_configured'}
     if not getattr(settings, 'BSC_SEND_ENABLED', False):
         return {'success': False, 'error': 'bsc_send_disabled'}
@@ -288,7 +313,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         if requested in ('CONFIO', 'CUSD_PLUS'):
             token_ok = existing.token_type == requested
         else:
-            token_ok = existing.token_type in ('CUSD_PLUS', 'USDT')
+            token_ok = existing.token_type in ('CUSD_PLUS', 'CUSD', 'USDT')
         same = (
             token_ok
             and existing.amount == amount_usd
@@ -306,9 +331,18 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             'calls': (json.loads(existing.bsc_calls_json) or {}).get('calls', []),
             'token_type': existing.token_type,
             'intent_id': intent_id_hex(existing_kind, existing.id),
+            'gross_amount': (json.loads(existing.bsc_calls_json) or {}).get('receipt', {}).get('gross'),
+            'fee_amount': (json.loads(existing.bsc_calls_json) or {}).get('receipt', {}).get('fee'),
+            'net_amount': (json.loads(existing.bsc_calls_json) or {}).get('receipt', {}).get('net'),
+            'fee_bps': (json.loads(existing.bsc_calls_json) or {}).get('receipt', {}).get('fee_bps', 0),
         }
 
     amount_wei = int(amount_usd * WAD)
+    receipt_gross_wei = amount_wei
+    receipt_fee_wei = 0
+    receipt_net_wei = amount_wei
+    receipt_fee_bps = 0
+    mixed_meta = None
     if requested and requested not in ('CUSD_PLUS', 'CONFIO'):
         return {'success': False, 'error': 'unsupported_token'}
 
@@ -336,37 +370,23 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
         }]
     else:
-        # Funding source: prefer the yield position; raw USDT is the fallback.
+        # Funding source: prefer the yield position, then universal cUSD.
+        # Raw USDT is only a transient-arrival compatibility fallback.
         try:
             pps_wad = cp_vault.p_plus_wad()
             # Needed to predict a redeem exactly (the chain floors twice).
             oracle_p_wad = cp_vault.last_oracle_price_wad()
+            if pps_wad <= 0 or oracle_p_wad <= 0:
+                raise ValueError('invalid vault price')
             shares_raw = cp_vault.erc20_balance_raw(vault_addr, sender_addr)
             shares_value_wei = (shares_raw * pps_wad) // WAD
+            cusd_raw = cp_vault.erc20_balance_raw(cusd_addr, sender_addr)
             usdt_raw = cp_vault.usdt_balance_raw(sender_addr, fresh=True)
         except Exception as exc:  # noqa: BLE001
             logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
             return {'success': False, 'error': 'balance_unavailable'}
 
-        if requested == 'CUSD_PLUS':
-            # D: explicit cUSD+ token send — shares-funded only, delivered
-            # as-is to ANY recipient (no eligibility fork; exits and
-            # transfers of an existing position are never gated).
-            if shares_value_wei + MAX_SEND_DUST_WEI < amount_wei:
-                return {'success': False, 'error': 'insufficient_balance'}
-            shares = (amount_wei * WAD) // pps_wad
-            if shares > shares_raw:
-                shares = shares_raw  # dust-short MAX → the whole position
-            if shares <= 0:
-                return {'success': False, 'error': 'invalid_amount'}
-            kind = 'send_cusd_plus'
-            token_type = 'CUSD_PLUS'
-            token_addr, units, min_out = vault_addr, shares, None
-            calls = [{
-                'to': vault_addr, 'value': '0',
-                'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
-            }]
-        elif shares_value_wei + MAX_SEND_DUST_WEI >= amount_wei:
+        if shares_value_wei + MAX_SEND_DUST_WEI >= amount_wei:
             # Value → shares at the live price; floor favors the sender's
             # remaining balance (never over-burn).
             shares = (amount_wei * WAD) // pps_wad
@@ -387,16 +407,41 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                     'to': vault_addr, 'value': '0',
                     'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(shares),
                 }]
+            elif recipient_user is not None or recipient_business is not None:
+                # Cross-jurisdiction Confío friend send: cUSD+ -> cUSD is
+                # perimeter-internal and therefore fee-free. The sponsor is
+                # allowed to bind the recipient in this exact stored intent.
+                shares = -(-amount_wei * WAD // pps_wad)
+                for _ in range(8):
+                    if shares >= shares_raw:
+                        break
+                    if cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) >= amount_wei:
+                        break
+                    shares += 1
+                if shares > shares_raw:
+                    shares = shares_raw
+                cusd_out = cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad)
+                if cusd_out < cp_vault.ONDO_MIN_REDEEM_WEI:
+                    return {'success': False, 'error': 'redeem_below_minimum'}
+                kind = 'send_unwrap_cusd'
+                token_type = 'CUSD'
+                token_addr, units = vault_addr, shares
+                min_out = (min(amount_wei, cusd_out) * REDEEM_MIN_OUT_BPS) // 10_000
+                calls = [{
+                    'to': vault_addr, 'value': '0',
+                    'data': '0x' + SEL_UNWRAP_TO_CUSD + _uint_word(shares)
+                            + _uint_word(min_out) + _addr_word(recipient_addr),
+                }]
             else:
-                # Ineligible or external: deliver USDT atomically (burn + IM
-                # redeem + transfer in one vault call). An exit — never gated.
+                # External address: leave the Confío dollar perimeter and
+                # pay the universal 0.9% via redeemToUsdt.
                 #
-                # Shares are re-derived by CEILING here. The floor above makes
-                # a redeem land up to a wei SHORT of the requested value, and
-                # Ondo rejects anything under 1.00 USDT — so sending exactly
-                # $1.00 produced 999999999999999999 and reverted. Rounding up
-                # burns at most one extra wei of the sender's position and
-                # makes "send $1.00" deliver $1.00.
+                # The entered amount is the GROSS Confío-dollar debit. The
+                # recipient receives that amount minus the universal 0.9%
+                # exit fee; new clients disclose the exact net, while legacy
+                # clients remain executable and briefly show stale fee copy.
+                # Round shares up until the pre-fee redeem covers the gross
+                # debit so flooring cannot silently reduce the quoted base.
                 shares = -(-amount_wei * WAD // pps_wad)
                 # The chain floors TWICE (shares→USDY at the oracle price, then
                 # USDY→USDT), so ceiling on shares alone can still land short.
@@ -406,7 +451,8 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 for _ in range(8):
                     if shares >= shares_raw:
                         break
-                    if cp_vault.redeem_usdt_out(shares, pps_wad, oracle_p_wad) >= amount_wei:
+                    if cp_vault.redeem_gross_usdt_out(
+                            shares, pps_wad, oracle_p_wad) >= amount_wei:
                         break
                     shares += 1
                 if shares > shares_raw:
@@ -417,12 +463,18 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 # against the exact two-floor preview, not shares * pPlus,
                 # which is an OVER-estimate and would approve a redemption
                 # Ondo rejects (audit 2026-08-01).
-                redeem_out_wei = cp_vault.redeem_usdt_out(shares, pps_wad, oracle_p_wad)
-                if redeem_out_wei < cp_vault.ONDO_MIN_REDEEM_WEI and (
+                gross_redeem_wei = cp_vault.redeem_gross_usdt_out(
+                    shares, pps_wad, oracle_p_wad)
+                (receipt_gross_wei, receipt_fee_wei, redeem_out_wei,
+                 receipt_fee_bps) = _exit_quote(gross_redeem_wei)
+                receipt_net_wei = redeem_out_wei
+                if gross_redeem_wei < cp_vault.ONDO_MIN_REDEEM_WEI and (
                         usdt_raw + MAX_SEND_DUST_WEI >= amount_wei):
                     # Not a dead end: raw USDT covers this send. Refusing
                     # outright stranded a user holding $0.50 of savings and
                     # plenty of USDT (audit 2026-08-01).
+                    if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+                        return {'success': False, 'error': 'conversion_pending'}
                     if amount_wei > usdt_raw:
                         amount_wei = usdt_raw
                     kind = 'send_usdt'
@@ -433,7 +485,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                         'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr)
                                 + _uint_word(amount_wei),
                     }]
-                elif redeem_out_wei < cp_vault.ONDO_MIN_REDEEM_WEI:
+                elif gross_redeem_wei < cp_vault.ONDO_MIN_REDEEM_WEI:
                     return {'success': False, 'error': 'redeem_below_minimum'}
                 else:
                     kind = 'send_redeem'
@@ -441,15 +493,156 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                     # minOut floors what the RECIPIENT accepts; derived from the
                     # exact preview, not the request, now that shares may be a
                     # hair above it.
-                    min_out = (min(amount_wei, redeem_out_wei)
-                               * REDEEM_MIN_OUT_BPS) // 10_000
+                    min_out = (redeem_out_wei * REDEEM_MIN_OUT_BPS) // 10_000
                     token_addr, units = vault_addr, shares
                     calls = [{
                         'to': vault_addr, 'value': '0',
                         'data': '0x' + SEL_REDEEM_TO_USDT + _uint_word(shares)
                                 + _uint_word(min_out) + _addr_word(recipient_addr),
                     }]
+        elif cusd_raw + MAX_SEND_DUST_WEI >= amount_wei:
+            if amount_wei > cusd_raw:
+                amount_wei = cusd_raw
+            if amount_wei <= 0:
+                return {'success': False, 'error': 'invalid_amount'}
+            recipient_eligible = (
+                recipient_user is not None
+                and recipient_business is None
+                and is_ondo_eligible(recipient_user)
+            )
+            if recipient_eligible:
+                # cUSD -> cUSD+ for an eligible friend, fee-free. Approval and
+                # wrap execute atomically in the same sponsored batch.
+                kind = 'send_wrap_cusd'
+                token_type = 'CUSD_PLUS'
+                try:
+                    mint_oracle_p_wad = cp_vault.current_oracle_price_wad()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning('[SEND][BSC] live mint oracle read failed: %s', exc)
+                    return {'success': False, 'error': 'quote_unavailable'}
+                wrap_min_out = _min_usdy_out(amount_wei, mint_oracle_p_wad)
+                token_addr, units, min_out = vault_addr, amount_wei, wrap_min_out
+                calls = [
+                    {
+                        'to': cusd_addr, 'value': '0',
+                        'data': '0x' + SEL_APPROVE + _addr_word(vault_addr)
+                                + _uint_word(amount_wei),
+                    },
+                    {
+                        'to': vault_addr, 'value': '0',
+                        'data': '0x' + SEL_WRAP_CUSD + _uint_word(amount_wei)
+                                + _uint_word(wrap_min_out)
+                                + _addr_word(recipient_addr),
+                    },
+                ]
+            elif recipient_user is not None or recipient_business is not None:
+                kind = 'send_cusd'
+                token_type = 'CUSD'
+                token_addr, units, min_out = cusd_addr, amount_wei, None
+                calls = [{
+                    'to': cusd_addr, 'value': '0',
+                    'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr)
+                            + _uint_word(amount_wei),
+                }]
+            else:
+                # External wallet receives USDT net of the universal fee.
+                from cusd_plus.cusd_vault import preview_redeem_wei
+                preview = preview_redeem_wei(amount_wei)
+                receipt_gross_wei = preview.gross_wei
+                receipt_fee_wei = preview.fee_wei
+                receipt_net_wei = preview.net_wei
+                receipt_fee_bps = preview.fee_bps
+                kind = 'send_cusd_redeem'
+                token_type = 'USDT'
+                token_addr, units, min_out = cusd_addr, amount_wei, preview.net_wei
+                calls = [{
+                    'to': cusd_addr, 'value': '0',
+                    'data': '0x' + SEL_CUSD_REDEEM + _uint_word(amount_wei)
+                            + _uint_word(preview.net_wei) + _addr_word(recipient_addr),
+                }]
+        elif shares_value_wei + cusd_raw + MAX_SEND_DUST_WEI >= amount_wei:
+            # A displayed dollar balance is spendable as one balance. Convert
+            # only the cUSD+ shortfall to cUSD, then finish atomically. For an
+            # external recipient this also guarantees ONE ceiling-rounded
+            # perimeter fee rather than one fee per source leg.
+            shortfall = max(0, amount_wei - cusd_raw)
+            shares = -(-shortfall * WAD // pps_wad)
+            for _ in range(8):
+                if shares >= shares_raw:
+                    break
+                if cp_vault.redeem_gross_usdt_out(
+                        shares, pps_wad, oracle_p_wad) >= shortfall:
+                    break
+                shares += 1
+            shares = min(shares, shares_raw)
+            predicted = cp_vault.redeem_gross_usdt_out(
+                shares, pps_wad, oracle_p_wad)
+            if predicted < shortfall:
+                return {'success': False, 'error': 'insufficient_balance'}
+            if predicted < cp_vault.ONDO_MIN_REDEEM_WEI:
+                return {'success': False, 'error': 'redeem_below_minimum'}
+            recipient_eligible = (
+                recipient_user is not None
+                and recipient_business is None
+                and is_ondo_eligible(recipient_user)
+            )
+            internal = recipient_user is not None or recipient_business is not None
+            unwrap_call = {
+                'to': vault_addr, 'value': '0',
+                'data': '0x' + SEL_UNWRAP_TO_CUSD + _uint_word(shares)
+                        + _uint_word(shortfall) + _addr_word(sender_addr),
+            }
+            if recipient_eligible:
+                kind = 'send_mixed_wrap_cusd'
+                token_type = 'CUSD_PLUS'
+                try:
+                    mint_oracle_p_wad = cp_vault.current_oracle_price_wad()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning('[SEND][BSC] live mint oracle read failed: %s', exc)
+                    return {'success': False, 'error': 'quote_unavailable'}
+                wrap_min_out = _min_usdy_out(amount_wei, mint_oracle_p_wad)
+                token_addr, units, min_out = vault_addr, amount_wei, wrap_min_out
+                calls = [unwrap_call, {
+                    'to': cusd_addr, 'value': '0',
+                    'data': '0x' + SEL_APPROVE + _addr_word(vault_addr)
+                            + _uint_word(amount_wei),
+                }, {
+                    'to': vault_addr, 'value': '0',
+                    'data': '0x' + SEL_WRAP_CUSD + _uint_word(amount_wei)
+                            + _uint_word(wrap_min_out)
+                            + _addr_word(recipient_addr),
+                }]
+            elif internal:
+                kind = 'send_mixed_cusd'
+                token_type = 'CUSD'
+                token_addr, units, min_out = cusd_addr, amount_wei, None
+                calls = [unwrap_call, {
+                    'to': cusd_addr, 'value': '0',
+                    'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr)
+                            + _uint_word(amount_wei),
+                }]
+            else:
+                from cusd_plus.cusd_vault import preview_redeem_wei
+                preview = preview_redeem_wei(amount_wei)
+                receipt_gross_wei = preview.gross_wei
+                receipt_fee_wei = preview.fee_wei
+                receipt_net_wei = preview.net_wei
+                receipt_fee_bps = preview.fee_bps
+                kind = 'send_mixed_cusd_redeem'
+                token_type = 'USDT'
+                token_addr, units, min_out = cusd_addr, amount_wei, preview.net_wei
+                calls = [unwrap_call, {
+                    'to': cusd_addr, 'value': '0',
+                    'data': '0x' + SEL_CUSD_REDEEM + _uint_word(amount_wei)
+                            + _uint_word(preview.net_wei) + _addr_word(recipient_addr),
+                }]
+            mixed_meta = {'shares': str(shares), 'unwrap_min': str(shortfall)}
         elif usdt_raw + MAX_SEND_DUST_WEI >= amount_wei:
+            # Once the universal perimeter is active, transient raw USDT may
+            # not become a public fee bypass. Foreground auto-conversion will
+            # mint cUSD/cUSD+ and the user can retry against that balance.
+            if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+                return {'success': False, 'error': 'conversion_pending'}
             if amount_wei > usdt_raw:
                 amount_wei = usdt_raw  # dust-short MAX → the full wallet balance
             if amount_wei <= 0:
@@ -511,6 +704,14 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 'token': token_addr, 'recipient': recipient_addr,
                 'units': str(units),
                 'min_out': (str(min_out) if min_out is not None else None),
+                'mixed': mixed_meta,
+                'receipt': {
+                    'gross': _decimal_wei(receipt_gross_wei),
+                    'fee': _decimal_wei(receipt_fee_wei),
+                    'net': _decimal_wei(receipt_net_wei),
+                    'fee_bps': receipt_fee_bps,
+                    'finalized': False,
+                },
             }),
         )
     # Unified row arrives via the existing post_save signal
@@ -522,6 +723,10 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         'send_id': send_tx.internal_id,
         'calls': calls,
         'token_type': token_type,
+        'gross_amount': _decimal_wei(receipt_gross_wei),
+        'fee_amount': _decimal_wei(receipt_fee_wei),
+        'net_amount': _decimal_wei(receipt_net_wei),
+        'fee_bps': receipt_fee_bps,
         # The client signs the Execute struct binding THIS intentId (audit
         # 2026-07-31): keccak(kind:send_id), re-derived + verified at submit.
         'intent_id': intent_id_hex(kind, send_tx.id),
@@ -538,20 +743,32 @@ def _validate_send_batch(calls: list, send_tx, meta: dict) -> None:
     and the allowlist before the rebuild is trusted."""
     from cusd_plus.sponsor_7702 import (
         PolicyError,
+        SEL_APPROVE,
+        SEL_CUSD_REDEEM,
         SEL_REDEEM_TO_USDT,
         SEL_TRANSFER,
+        SEL_UNWRAP_TO_CUSD,
+        SEL_WRAP_CUSD,
         USDT_BSC,
     )
 
     vault = _vault_address()
+    cusd = _cusd_address()
     confio = _confio_token_address()
-    if len(calls) != 1:
+    kind = meta.get('kind')
+    expected_counts = {
+        'send_wrap_cusd': 2,
+        'send_mixed_wrap_cusd': 3,
+        'send_mixed_cusd': 2,
+        'send_mixed_cusd_redeem': 2,
+    }
+    expected_count = expected_counts.get(kind, 1)
+    if len(calls) != expected_count:
         raise PolicyError('bad_batch_size')
-    call = calls[0]
-    if int(call.get('value') or 0) != 0:
+    if any(int(call.get('value') or 0) != 0 for call in calls):
         raise PolicyError('value_not_allowed')
 
-    kind = meta.get('kind')
+    call = calls[-1]
     token = (meta.get('token') or '').lower()
     recipient = (meta.get('recipient') or '').lower()
     try:
@@ -570,14 +787,67 @@ def _validate_send_batch(calls: list, send_tx, meta: dict) -> None:
         'send_usdt': USDT_BSC,
         'send_cusd_plus': vault,
         'send_redeem': vault,
+        'send_unwrap_cusd': vault,
+        'send_wrap_cusd': vault,
+        'send_cusd': cusd,
+        'send_cusd_redeem': cusd,
+        'send_mixed_wrap_cusd': vault,
+        'send_mixed_cusd': cusd,
+        'send_mixed_cusd_redeem': cusd,
     }.get(kind)
     if not allowed or token != allowed:
         raise PolicyError('destination_not_allowed')
 
     # Rebuild the exact call prepare must have stored.
-    if kind == 'send_redeem':
+    if kind.startswith('send_mixed_'):
+        mixed = meta.get('mixed') or {}
+        try:
+            shares = int(mixed['shares'])
+            unwrap_min = int(mixed['unwrap_min'])
+        except (KeyError, TypeError, ValueError):
+            raise PolicyError('bad_calldata')
+        expected_unwrap = (
+            '0x' + SEL_UNWRAP_TO_CUSD + _uint_word(shares)
+            + _uint_word(unwrap_min) + _addr_word(send_tx.sender_address)
+        )
+        if ((calls[0].get('to') or '').lower() != vault
+                or (calls[0].get('data') or '').lower() != expected_unwrap.lower()):
+            raise PolicyError('bad_calldata')
+        if kind == 'send_mixed_wrap_cusd':
+            min_out = int(meta.get('min_out') or 0)
+            expected_approve = (
+                '0x' + SEL_APPROVE + _addr_word(vault) + _uint_word(units))
+            if ((calls[1].get('to') or '').lower() != cusd
+                    or (calls[1].get('data') or '').lower() != expected_approve.lower()):
+                raise PolicyError('bad_calldata')
+            expected_data = ('0x' + SEL_WRAP_CUSD + _uint_word(units)
+                             + _uint_word(min_out) + _addr_word(recipient))
+        elif kind == 'send_mixed_cusd':
+            expected_data = '0x' + SEL_TRANSFER + _addr_word(recipient) + _uint_word(units)
+        else:
+            min_out = int(meta.get('min_out'))
+            expected_data = ('0x' + SEL_CUSD_REDEEM + _uint_word(units)
+                             + _uint_word(min_out) + _addr_word(recipient))
+    elif kind == 'send_redeem':
         min_out = int(meta.get('min_out'))
         expected_data = ('0x' + SEL_REDEEM_TO_USDT + _uint_word(units)
+                         + _uint_word(min_out) + _addr_word(recipient))
+    elif kind == 'send_unwrap_cusd':
+        min_out = int(meta.get('min_out'))
+        expected_data = ('0x' + SEL_UNWRAP_TO_CUSD + _uint_word(units)
+                         + _uint_word(min_out) + _addr_word(recipient))
+    elif kind == 'send_wrap_cusd':
+        min_out = int(meta.get('min_out') or 0)
+        expected_data = ('0x' + SEL_WRAP_CUSD + _uint_word(units)
+                         + _uint_word(min_out) + _addr_word(recipient))
+        expected_approve = ('0x' + SEL_APPROVE + _addr_word(vault)
+                            + _uint_word(units))
+        if ((calls[0].get('to') or '').lower() != cusd
+                or (calls[0].get('data') or '').lower() != expected_approve):
+            raise PolicyError('bad_calldata')
+    elif kind == 'send_cusd_redeem':
+        min_out = int(meta.get('min_out'))
+        expected_data = ('0x' + SEL_CUSD_REDEEM + _uint_word(units)
                          + _uint_word(min_out) + _addr_word(recipient))
     else:
         expected_data = '0x' + SEL_TRANSFER + _addr_word(recipient) + _uint_word(units)
@@ -629,6 +899,17 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, sender_addr, calls, int(nonce), int(deadline),
             intent_signature, auth_dict, kind, source_id=send_tx.id)
+    except sponsor_7702.ExistingSponsoredBatch as exc:
+        existing = exc.batch
+        if (exc.reason != 'source_id'
+                or existing.source_id != send_tx.id
+                or existing.user_bsc_address.lower() != sender_addr
+                or not sponsor_7702.batch_matches_calls(existing, kind, calls)):
+            return {'success': False, 'error': 'send_already_in_flight'}
+        # The losing retry adopts the durable winner instead of broadcasting
+        # a fresh-nonce duplicate. Common code below stamps the domain row and
+        # re-enqueues its idempotent confirmer.
+        tx_hash, batch = existing.tx_hash, existing
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}

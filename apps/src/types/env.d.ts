@@ -10,6 +10,8 @@ declare module '@env' {
   export const ALGORAND_CONFIO_ASSET_ID: string;
   export const ALGORAND_CUSD_ASSET_ID: string;
   export const ALGORAND_USDC_ASSET_ID: string;
+  /** Compiled into the app so Emergency Exit remains server-independent. */
+  export const BSC_CUSD_VAULT_ADDRESS: string;
   export const FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID: string;
   export const FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS: string;
 } 

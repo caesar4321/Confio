@@ -52,7 +52,7 @@ import {
 } from '../services/emergencyExit/reachability';
 import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
-  installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BscExitResult, BscExitStep,
+  installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS, BscExitResult, BscExitStep,
 } from '../services/emergencyExit/bscExit';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -77,6 +77,7 @@ const CHECKLIST = [
 // Human names for engine step ids — raw ids are for support, not users.
 const STEP_NAMES: Record<string, string> = {
   redeemCusdPlus: 'Canjear tu ahorro por USDT',
+  redeemCusd: 'Canjear tus dólares por USDT',
   transferUsdt: 'Enviar USDT',
   transferConfio: 'Enviar CONFIO',
 };
@@ -92,6 +93,7 @@ const stepName = (id: string): string => {
 // drill feel broken.
 const STEP_WAIT: Record<string, string> = {
   redeemCusdPlus: 'Canjeando tu ahorro por USDT…',
+  redeemCusd: 'Canjeando tus dólares por USDT…',
   transferUsdt: 'Enviando tu USDT…',
   transferConfio: 'Enviando tu CONFIO…',
 };
@@ -216,7 +218,7 @@ export const EmergencyExitScreen: React.FC = () => {
     setGasChecking(true);
     const restore = installEmergencyBscTransport();
     try {
-      const plan = await planBscExit(addr, BUNDLED_VAULT_ADDRESS);
+      const plan = await planBscExit(addr, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS);
       // A late reply for a since-abandoned account must not overwrite the
       // current one's status.
       if (gasAddrRef.current !== addr) return;
@@ -305,6 +307,7 @@ export const EmergencyExitScreen: React.FC = () => {
         wallet,
         dest,
         vaultAddress: BUNDLED_VAULT_ADDRESS,
+        cusdAddress: BUNDLED_CUSD_ADDRESS,
         minUsdtOutWei: 0n, // oracle guard + fully-backed assert protect pricing; IM has no book
         accountKey,
         store: emergencyStore,
@@ -314,7 +317,7 @@ export const EmergencyExitScreen: React.FC = () => {
       // An exit that actually broadcast SPENDS the 24h unlock: the wait is
       // per-episode anti-coercion, not a one-time toll. Never on failure —
       // a half-moved exit must stay retryable now, not in a day.
-      if (result.sentNow.length) {
+      if (result.sentNow.length && !result.unresolved.length) {
         try {
           await consumeExitCooloff(emergencyStore, accountKey);
         } catch (e) {
@@ -505,6 +508,11 @@ export const EmergencyExitScreen: React.FC = () => {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Comisión de red</Text>
         <Text style={styles.bodyText}>
+          Si conviertes cUSD o cUSD+ a USDT, el contrato descuenta además la
+          comisión de conversión de Confío, actualmente de hasta 0,9%. Esta
+          comisión es distinta del gas de la red.
+        </Text>
+        <Text style={styles.bodyText}>
           La red de blockchain cobra una pequeña comisión por enviar — como
           una estampilla postal — y la cobra en su propia moneda: BNB, la
           moneda de BNB Smart Chain.
@@ -544,10 +552,11 @@ export const EmergencyExitScreen: React.FC = () => {
   // Read sentNow, NEVER txids: txids can replay hashes from an interrupted
   // earlier attempt, and a headline built on those claimed "tu dinero
   // salió" for a run that broadcast nothing at all.
-  const outcome: 'none' | 'error' | 'pending' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
+  const outcome: 'none' | 'error' | 'pending' | 'partial' | 'empty' | 'already' | 'degraded' | 'ok' = (() => {
     if (bscPending) return 'pending';
     if (bscError) return 'error';
     if (!bscResult) return 'none';
+    if (bscResult.unresolved.length) return 'partial';
     if (!bscResult.sentNow.length) {
       // Nothing broadcast now. Either the account was empty, or this is a
       // re-tap on an attempt whose sends already went through — those are
@@ -566,6 +575,10 @@ export const EmergencyExitScreen: React.FC = () => {
     degraded: {
       icon: 'alert-circle', tone: colors.warning.text,
       title: 'Tu dinero salió, pero sin canjear',
+    },
+    partial: {
+      icon: 'alert-triangle', tone: colors.warning.text,
+      title: 'Parte del saldo sigue en esta cuenta',
     },
     empty: {
       icon: 'info', tone: colors.text.secondary,
@@ -600,11 +613,17 @@ export const EmergencyExitScreen: React.FC = () => {
       }
       case 'degraded': {
         const stocksSent = bscResult?.sentNow.some((step) => step.startsWith('ondoStock:'));
-        return `Tu ahorro no pudo canjearse por USDT (el servicio de Ondo no respondió), así que enviamos cUSD+ sin canjear${stocksSent ? ' junto con tus acciones Ondo' : ''} a ${to}. Son tuyos: para canjear cUSD+ necesitarás una herramienta externa.`;
+        const plus = bscResult?.degraded.includes('redeemCusdPlus');
+        const cusd = bscResult?.degraded.includes('redeemCusd');
+        const raw = plus && cusd ? 'cUSD+ y cUSD' : plus ? 'cUSD+' : 'cUSD';
+        const reason = plus ? 'el canje no respondió' : 'el contrato no permitió el canje';
+        return `Tus dólares no pudieron canjearse por USDT (${reason}), así que enviamos ${raw} sin canjear${stocksSent ? ' junto con tus acciones Ondo' : ''} a ${to}. Son tuyos: para canjearlos necesitarás una herramienta externa.`;
       }
+      case 'partial':
+        return `Enviamos todo lo que la red permitió, pero ${bscResult?.unresolved.join(', ')} sigue en esta cuenta. Reintenta: los envíos ya confirmados no se repetirán.`;
       case 'already':
-        return bscResult?.degraded.includes('redeemCusdPlus')
-          ? 'El intento anterior envió tu cUSD+ sin canjear porque Ondo no respondió. No se repitió el envío; puedes comprobarlo abajo.'
+        return bscResult?.degraded.includes('redeemCusdPlus') || bscResult?.degraded.includes('redeemCusd')
+          ? 'El intento anterior envió parte de tus dólares sin canjear. No se repitió el envío; puedes comprobarlo abajo.'
           : 'Los envíos de este intento ya se habían hecho, así que no se repitieron. Puedes comprobarlos abajo.';
       case 'empty':
         return 'Esta cuenta no tenía saldo en BNB Smart Chain. No se envió ninguna transacción y no se cobró ninguna comisión.';

@@ -243,6 +243,10 @@ class PrepareBscSend(graphene.Mutation):
     calls = graphene.List(BscSendCallType)
     token_type = graphene.String()
     intent_id = graphene.String()  # bytes32 the client binds into its signature
+    gross_amount = graphene.Decimal()
+    fee_amount = graphene.Decimal()
+    net_amount = graphene.Decimal()
+    fee_bps = graphene.Int()
 
     @login_required
     def mutate(self, info, amount, recipient_user_id=None, recipient_phone=None,
@@ -286,6 +290,10 @@ class PrepareBscSend(graphene.Mutation):
             ],
             token_type=result['token_type'],
             intent_id=result['intent_id'],
+            gross_amount=result.get('gross_amount'),
+            fee_amount=result.get('fee_amount'),
+            net_amount=result.get('net_amount'),
+            fee_bps=result.get('fee_bps', 0),
         )
 
 
@@ -348,10 +356,10 @@ class SubmitBscSend(graphene.Mutation):
 
 
 # ═══════════════════ BSC invite escrow (send to non-user) ═══════════════
-# Inviter locks cUSD+/CONFIO for a phone that isn't a Confío user; the KMS
-# sponsor releases it when they join (auto-claim in the verification flow),
-# or the inviter reclaims after 7 days. send/invite_bsc_flow.py + the
-# ConfioInviteEscrow contract.
+# Inviter locks cUSD+, cUSD or CONFIO for a phone that isn't a Confío user;
+# the server chooses the sender's jurisdiction-appropriate dollar token. The
+# KMS sponsor releases (and, if needed, converts) it when they join, or the
+# inviter reclaims after 7 days.
 
 
 class PrepareBscInvite(graphene.Mutation):
@@ -359,7 +367,10 @@ class PrepareBscInvite(graphene.Mutation):
         phone = graphene.String(required=True)
         phone_country = graphene.String(required=False)
         amount = graphene.Decimal(required=True)
-        token_type = graphene.String(required=True, description="CUSD_PLUS or CONFIO")
+        token_type = graphene.String(
+            required=True,
+            description="CUSD_PLUS, CUSD or CONFIO. Dollar representation is normalized server-side.",
+        )
 
     success = graphene.Boolean()
     error = graphene.String()

@@ -23,7 +23,9 @@ pragma solidity ^0.8.24;
  */
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {CusdPlusVault} from "../CusdPlusVault.sol";
+import {CusdVault} from "../CusdVault.sol";
 import {ConfioBatchDelegate} from "../ConfioBatchDelegate.sol";
 
 contract UpgradeRehearsalV5ForkTest is Test {
@@ -42,14 +44,19 @@ contract UpgradeRehearsalV5ForkTest is Test {
         return PROXY.code.length > 0;
     }
 
-    /// Deploy v5 and run the Safe's atomic upgrade+seed.
+    /// Deploy the cUSD perimeter and run the Safe's atomic cUSD+ upgrade+wiring.
     function _upgrade(CusdPlusVault v) internal {
+        CusdVault cusdImpl = new CusdVault(USDT);
+        CusdVault cusd =
+            CusdVault(address(new ERC1967Proxy(address(cusdImpl), abi.encodeCall(CusdVault.initialize, (SAFE, 90)))));
+        vm.startPrank(SAFE);
+        cusd.setSponsor(KMS, true);
+        cusd.setSavingsVault(PROXY);
+        vm.stopPrank();
+
         CusdPlusVault impl5 = new CusdPlusVault(USDY, USDT, IM, ORACLE, 1500);
         vm.prank(SAFE);
-        v.upgradeToAndCall(
-            address(impl5),
-            abi.encodeCall(CusdPlusVault.setSponsor, (KMS, true))
-        );
+        v.upgradeToAndCall(address(impl5), abi.encodeCall(CusdPlusVault.initializeCusd, (address(cusd))));
     }
 
     function test_fork_upgradePreservesStateAndSeedsSponsorAtomically() public {
@@ -148,11 +155,11 @@ contract UpgradeRehearsalV5ForkTest is Test {
         // Honest batch: mint to SELF.
         ConfioBatchDelegate.Call[] memory calls = new ConfioBatchDelegate.Call[](2);
         calls[0] = ConfioBatchDelegate.Call({
-            to: USDT, value: 0,
-            data: abi.encodeWithSignature("approve(address,uint256)", PROXY, type(uint256).max)});
+            to: USDT, value: 0, data: abi.encodeWithSignature("approve(address,uint256)", PROXY, type(uint256).max)
+        });
         calls[1] = ConfioBatchDelegate.Call({
-            to: PROXY, value: 0,
-            data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, u))});
+            to: PROXY, value: 0, data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, u))
+        });
         uint256 deadline = block.timestamp + 1 hours;
         (uint8 sv, bytes32 sr, bytes32 ss) =
             vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(calls, 0, deadline, bytes32(0)));
@@ -164,8 +171,8 @@ contract UpgradeRehearsalV5ForkTest is Test {
         address thirdParty = makeAddr("v5-ineligible");
         ConfioBatchDelegate.Call[] memory bad = new ConfioBatchDelegate.Call[](1);
         bad[0] = ConfioBatchDelegate.Call({
-            to: PROXY, value: 0,
-            data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, thirdParty))});
+            to: PROXY, value: 0, data: abi.encodeCall(CusdPlusVault.subscribeAndMint, (100e18, 0, thirdParty))
+        });
         (sv, sr, ss) = vm.sign(pk, ConfioBatchDelegate(payable(u)).hashExecute(bad, 1, deadline, bytes32(0)));
         vm.prank(SAFE, KMS);
         vm.expectRevert(); // delegate bubbles "recipient not caller"

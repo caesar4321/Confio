@@ -311,6 +311,11 @@ class GuardarianTransaction(models.Model):
     to_amount_actual = models.DecimalField(max_digits=19, decimal_places=6, null=True, blank=True, help_text='Actual crypto amount received')
     
     network = models.CharField(max_length=20, default='ALGO', help_text='Network (ALGO)')
+    confio_fee_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Immutable Confío gross/fee/net preview attached to the provider order',
+    )
     
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting')
