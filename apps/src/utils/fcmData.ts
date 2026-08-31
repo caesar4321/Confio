@@ -42,3 +42,19 @@ export function extractFcmTransactionData(data: Record<string, any>): Record<str
   });
   return out;
 }
+
+/** Preserve the viewer's side and external wallet identities when opening a confirmed receipt. */
+export function confirmedReceiptContext(
+  data: Record<string, any>,
+  notificationType: string,
+): {
+  direction: 'sent' | 'received';
+  senderAddress: string;
+  recipientAddress: string;
+} {
+  return {
+    direction: notificationType.endsWith('_SENT') ? 'sent' : 'received',
+    senderAddress: data.sender_address || data.from_address || data.fromAddress || '',
+    recipientAddress: data.recipient_address || data.to_address || data.toAddress || '',
+  };
+}
