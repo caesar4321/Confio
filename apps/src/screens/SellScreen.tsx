@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -52,7 +52,12 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
-import { getWithdrawalSourcePresentation } from '../utils/withdrawalRail';
+import {
+  getBscWithdrawalAvailability,
+  getWithdrawalSourcePresentation,
+} from '../utils/withdrawalRail';
+import { useSavingsResume } from '../hooks/useSavingsResume';
+import { resumeSavingsMints } from '../services/savingsLegC';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -207,9 +212,19 @@ export const SellScreen = () => {
   // The sellable balance depends on the RAIL, not the screen: the savings
   // sell spends the BSC Confío-dollar position. Raw USDT awaiting foreground
   // conversion is intentionally excluded so it cannot bypass the perimeter,
-  // the
-  // default sell spends Algorand cUSD.
-  const { savings: savingsPosition, cusdBalanceUsd } = useSavingsPortfolio();
+  // while the default sell spends Algorand cUSD.
+  const {
+    savings: savingsPosition,
+    cusdBalanceUsd,
+    usdtBalanceUsd,
+    refetch: refetchSavingsPortfolio,
+  } = useSavingsPortfolio();
+  // A direct/deep-linked Retiro can mount before Home gets a chance to turn
+  // raw settlement USDT into the user's actual product. Mount the same
+  // foreground normalizer here so an Ondo-ineligible holder reaches
+  // universal cUSD-BSC, never the old direct-USDT funding path.
+  const { mintingSavings } = useSavingsResume(isSavingsSell, usdtBalanceUsd);
+  const wasMintingSavings = useRef(false);
   const { data: savingsSellParams } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavingsSell });
   const savingsVaultAddress: string = savingsSellParams?.cusdPlusConvertParams?.vaultAddress || '';
   const savingsCusdAddress: string = savingsSellParams?.cusdPlusConvertParams?.cusdAddress || '';
@@ -218,12 +233,31 @@ export const SellScreen = () => {
     Boolean(savingsPosition?.enabled),
   );
   const sellUnitLabel = withdrawalPresentation.unitLabel;
+  const bscWithdrawalAvailability = useMemo(
+    () => getBscWithdrawalAvailability({
+      enabled: isSavingsSell,
+      cusdPlusUsd: savingsPosition?.balanceUsd ?? 0,
+      cusdUsd: cusdBalanceUsd ?? 0,
+      rawUsdtUsd: usdtBalanceUsd ?? 0,
+      normalizationRunning: mintingSavings,
+    }),
+    [isSavingsSell, savingsPosition?.balanceUsd, cusdBalanceUsd, usdtBalanceUsd, mintingSavings],
+  );
   const availableCusdBalance = useMemo(
     () => (isSavingsSell
-      ? (savingsPosition?.balanceUsd ?? 0) + (cusdBalanceUsd ?? 0)
+      ? bscWithdrawalAvailability.spendableUsd
       : Number(balancesData?.myBalances?.cusd || 0)),
-    [isSavingsSell, savingsPosition?.balanceUsd, cusdBalanceUsd, balancesData?.myBalances?.cusd],
+    [isSavingsSell, bscWithdrawalAvailability.spendableUsd, balancesData?.myBalances?.cusd],
   );
+
+  // The relay settles asynchronously. Refresh immediately when the spinner
+  // closes instead of leaving Sell on its cached zero until the 60s poll.
+  useEffect(() => {
+    if (wasMintingSavings.current && !mintingSavings && isSavingsSell) {
+      void refetchSavingsPortfolio();
+    }
+    wasMintingSavings.current = mintingSavings;
+  }, [isSavingsSell, mintingSavings, refetchSavingsPortfolio]);
   const selectedMethodMin = Number(selectedMethod?.offRampMinAmount || 0);
   const selectedMethodMax = Number(selectedMethod?.offRampMaxAmount || 0);
   const effectiveSellMax = useMemo(() => {
@@ -313,6 +347,19 @@ export const SellScreen = () => {
   };
 
   const handleContinue = () => {
+    if (isSavingsSell && bscWithdrawalAvailability.normalizationPending) {
+      if (bscWithdrawalAvailability.normalizationRetryable) {
+        void resumeSavingsMints(savingsVaultAddress, savingsCusdAddress);
+      }
+      Alert.alert(
+        bscWithdrawalAvailability.normalizationRetryable
+          ? 'Reintentando preparación'
+          : 'Preparando tu Confío Dollar',
+        'Estamos convirtiendo el USDT pendiente a cUSD en BNB Smart Chain. '
+          + 'El retiro se habilitará cuando termine.',
+      );
+      return;
+    }
     const continueError = validateRampContinue({
       hasSelectedMethod: !!selectedMethod,
       amountReady,
@@ -360,6 +407,14 @@ export const SellScreen = () => {
 
   const handleConfirm = async () => {
     if (!selectedMethod || !selectedSavedMethod || !quote) {
+      return;
+    }
+    if (isSavingsSell && bscWithdrawalAvailability.normalizationPending) {
+      Alert.alert(
+        'Preparando tu Confío Dollar',
+        'El retiro saldrá desde cUSD en BNB Smart Chain, no desde USDT directo. '
+          + 'Espera a que termine la conversión automática.',
+      );
       return;
     }
     // Canonicalize BEFORE the biometric prompt: the user must approve the
@@ -864,9 +919,16 @@ export const SellScreen = () => {
             ) : (
               <RampReveal delay={270}>
               <RampActionBar
-                primaryLabel={isVerified ? 'Continuar' : 'Continuar y verificar'}
+                primaryLabel={bscWithdrawalAvailability.normalizationPending
+                  ? bscWithdrawalAvailability.normalizationRetryable
+                    ? 'Reintentar preparación'
+                    : 'Preparando Confío Dollar…'
+                  : isVerified ? 'Continuar' : 'Continuar y verificar'}
                 onPrimaryPress={handleContinue}
-                primaryDisabled={Boolean(sellAmountError) || balancesLoading || quoteLoading}
+                primaryDisabled={bscWithdrawalAvailability.normalizationPending
+                  ? !bscWithdrawalAvailability.normalizationRetryable
+                  : Boolean(sellAmountError) || balancesLoading || quoteLoading}
+                primaryLoading={isSavingsSell && mintingSavings}
                 primaryIconName={isVerified ? 'chevron-right' : 'shield'}
               />
               </RampReveal>
