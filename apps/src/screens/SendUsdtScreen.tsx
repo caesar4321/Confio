@@ -462,12 +462,13 @@ export const SendUsdtScreen = () => {
             <View style={styles.feeAmountContainer}>
               <Text style={styles.feeAmount}>
                 {token === 'usdt'
-                  ? `Hasta $${conversionFeeUsd.toFixed(2)} si es billetera externa (${(conversionFeeBps / 100).toLocaleString('es-PE')}%)`
+                  ? `Billetera externa: hasta $${conversionFeeUsd.toFixed(2)} (${(conversionFeeBps / 100).toLocaleString('es-PE')}%)`
                   : 'Gratis'}
               </Text>
               {token === 'usdt' && amountNum > 0 ? (
                 <Text style={styles.netAmount}>
-                  Un usuario Confío recibe ${amountNum.toFixed(2)} gratis; una billetera externa recibe al menos ${recipientNetUsd.toFixed(2)}
+                  Usuario Confío: recibe ${amountNum.toFixed(2)} gratis{`\n`}
+                  Billetera externa: recibe al menos ${recipientNetUsd.toFixed(2)}
                 </Text>
               ) : null}
               <Text style={styles.sponsoredBadge}>Red cubierta por Confío</Text>
@@ -614,16 +615,39 @@ const styles = StyleSheet.create({
   feeInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 12,
     borderTopWidth: 1,
     borderTopColor: colors.neutral,
     paddingTop: 12,
   },
-  feeLabel: { fontSize: 13, color: colors.text.secondary },
-  feeAmountContainer: { alignItems: 'flex-end' },
-  feeAmount: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  netAmount: { fontSize: 12, fontWeight: '600', color: colors.text.secondary, marginTop: 1 },
-  sponsoredBadge: { fontSize: 11, color: colors.text.light, marginTop: 1 },
+  feeLabel: { fontSize: 13, color: colors.text.secondary, flexShrink: 0, paddingTop: 1 },
+  feeAmountContainer: { flex: 1, minWidth: 0, alignItems: 'flex-end' },
+  feeAmount: {
+    flexShrink: 1,
+    textAlign: 'right',
+    maxWidth: '100%',
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  netAmount: {
+    flexShrink: 1,
+    textAlign: 'right',
+    maxWidth: '100%',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginTop: 3,
+  },
+  sponsoredBadge: {
+    maxWidth: '100%',
+    textAlign: 'right',
+    fontSize: 11,
+    color: colors.text.light,
+    marginTop: 3,
+  },
 
   footer: { paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.neutral },
 });

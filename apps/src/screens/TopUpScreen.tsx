@@ -603,17 +603,13 @@ const TopUpScreen = () => {
                   </View>
                 ) : quote ? (
                   <>
-                    <Text style={styles.quoteEyebrow}>Estimado de ingreso</Text>
+                    <Text style={styles.quoteEyebrow}>Estimado final de ingreso</Text>
                     <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
                     <Text style={styles.quoteRate}>{quoteRateLine}</Text>
                     <View style={styles.quoteDivider} />
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Pagas</Text>
                       <Text style={styles.quoteValue}>{formatRampMoney(quote.amountIn, fiatCurrency)}</Text>
-                    </View>
-                    <View style={styles.quoteRow}>
-                      <Text style={styles.quoteLabel}>Recibes aprox.</Text>
-                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, assetUnit)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Tipo de cambio</Text>
@@ -626,10 +622,19 @@ const TopUpScreen = () => {
                       </Text>
                     </View>
                     <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>Monto antes de comisión Confío</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.grossCryptoAmount || quote.amountOut, assetUnit)}</Text>
+                    </View>
+                    <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
                       <Text style={styles.quoteValue}>
-                        {`${formatRampMoney(quote.confioFeeAmount || 0, USD_UNIT)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
+                        {`− ${formatRampMoney(quote.confioFeeAmount || 0, USD_UNIT)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
                       </Text>
+                    </View>
+                    <View style={styles.quoteFinalDivider} />
+                    <View style={styles.quoteFinalRow}>
+                      <Text style={styles.quoteFinalLabel}>Recibes aprox.</Text>
+                      <Text style={styles.quoteFinalValue}>{formatRampMoney(quote.amountOut, assetUnit)}</Text>
                     </View>
                   </>
                 ) : (
@@ -1070,6 +1075,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: colors.textFlat,
+    textAlign: 'right',
+  },
+  quoteFinalDivider: {
+    height: 1,
+    backgroundColor: colors.primary,
+    opacity: 0.35,
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  quoteFinalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 16,
+  },
+  quoteFinalLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.primaryDark,
+  },
+  quoteFinalValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primaryDark,
     textAlign: 'right',
   },
   gratisBadge: {

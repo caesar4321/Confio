@@ -780,17 +780,13 @@ export const SellScreen = () => {
                   </View>
                 ) : quote ? (
                   <>
-                    <Text style={styles.quoteEyebrow}>Estimado de retiro</Text>
+                    <Text style={styles.quoteEyebrow}>Estimado final de retiro</Text>
                     <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
                     <Text style={styles.quoteRate}>{quoteRateLine}</Text>
                     <View style={styles.quoteDivider} />
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Envías</Text>
                       <Text style={styles.quoteValue}>{formatRampMoney(quote.amountIn, sellUnitLabel)}</Text>
-                    </View>
-                    <View style={styles.quoteRow}>
-                      <Text style={styles.quoteLabel}>Recibes aprox.</Text>
-                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, fiatCurrency)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Tipo de cambio</Text>
@@ -804,13 +800,18 @@ export const SellScreen = () => {
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
                       {isSavingsSell ? (
                         <Text style={styles.quoteValue}>
-                          {`${formatRampMoney(quote.confioFeeAmount || 0, sellUnitLabel)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
+                          {`− ${formatRampMoney(quote.confioFeeAmount || 0, sellUnitLabel)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
                         </Text>
                       ) : (
                         <View style={styles.gratisBadge}>
                           <Text style={styles.gratisBadgeText}>Gratis</Text>
                         </View>
                       )}
+                    </View>
+                    <View style={styles.quoteFinalDivider} />
+                    <View style={styles.quoteFinalRow}>
+                      <Text style={styles.quoteFinalLabel}>Recibes aprox.</Text>
+                      <Text style={styles.quoteFinalValue}>{formatRampMoney(quote.amountOut, fiatCurrency)}</Text>
                     </View>
                     <View style={styles.disclaimerPill}>
                       <Icon name="info" size={12} color={colors.primaryDark} />
@@ -1416,6 +1417,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     flex: 1,
+    textAlign: 'right',
+  },
+  quoteFinalDivider: {
+    height: 1,
+    backgroundColor: colors.primary,
+    opacity: 0.35,
+    marginTop: 2,
+  },
+  quoteFinalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 18,
+    paddingVertical: 4,
+  },
+  quoteFinalLabel: {
+    flex: 1,
+    color: colors.primaryDark,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  quoteFinalValue: {
+    flex: 1,
+    color: colors.primaryDark,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '800',
     textAlign: 'right',
   },
   disclaimerPill: {

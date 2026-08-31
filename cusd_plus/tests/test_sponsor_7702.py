@@ -193,7 +193,10 @@ class PolicyTests(SimpleTestCase):
             with self.assertRaisesRegex(PolicyError, 'raw_usdt_transfer_not_allowed'):
                 sponsor_7702.validate_policy([_call(USDT, transfer)], mock.Mock(), USER)
 
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
     def test_usdt_transfer_bad_length_rejected(self):
+        # Isolate calldata validation from the live perimeter policy, which
+        # deliberately rejects every ordinary raw-USDT transfer first.
         short = '0x' + sponsor_7702.SEL_TRANSFER + _word(1)
         self._assert_rejected([_call(USDT, short)], 'bad_calldata')
 

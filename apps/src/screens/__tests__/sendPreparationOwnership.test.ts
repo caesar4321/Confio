@@ -39,3 +39,25 @@ describe('BSC external-send receipt accounting', () => {
     expect(success).toContain('prefilledAddress: transactionData.recipientAddress');
   });
 });
+
+describe('BSC external-send fee layout', () => {
+  it('constrains and wraps the fee copy inside the Send card', () => {
+    const source = readScreen('SendUsdtScreen.tsx');
+
+    expect(source).toMatch(/feeAmountContainer:\s*\{[^}]*flex:\s*1[^}]*minWidth:\s*0[^}]*\}/s);
+    expect(source).toMatch(/feeAmount:\s*\{[^}]*flexShrink:\s*1[^}]*textAlign:\s*'right'[^}]*\}/s);
+    expect(source).toMatch(/netAmount:\s*\{[^}]*flexShrink:\s*1[^}]*textAlign:\s*'right'[^}]*\}/s);
+  });
+});
+
+describe('Official transfer receipt identities', () => {
+  it('resolves the actual sender and receiver before generic fallbacks', () => {
+    const source = readScreen('TransactionReceiptScreen.tsx');
+
+    expect(source).toContain("['sent', 'send', 'withdrawal'].includes(transferDirection)");
+    expect(source).toContain("['received', 'receive', 'deposit'].includes(transferDirection)");
+    expect(source).toMatch(/senderName = pick\([\s\S]*?transaction\.from,[\s\S]*?isOutgoingTransfer \? authenticatedUserName : ''/);
+    expect(source).toMatch(/recipientName = pick\([\s\S]*?transaction\.to,[\s\S]*?isIncomingTransfer \? authenticatedUserName : ''/);
+    expect(source).toContain("isOutgoingTransfer ? authenticatedUserName : ''");
+  });
+});

@@ -1,6 +1,107 @@
 import graphene
 from graphene_django import DjangoObjectType
 from .models_unified import UnifiedTransactionTable
+from decimal import Decimal, InvalidOperation
+from datetime import timedelta
+
+
+def _positive_difference(gross, net):
+    """Return an exact positive gross-net delta, or an empty string."""
+    try:
+        value = Decimal(str(gross)) - Decimal(str(net))
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+    return format(value.normalize(), 'f') if value > 0 else ''
+
+
+def _ramp_conversion_fee(ramp):
+    """The Confío perimeter fee represented by a ramp ledger row.
+
+    One conversion can settle several ramp deposits.  Attribution writes each
+    ramp's gross/net allocation into metadata, so prefer that over assigning
+    the conversion's entire fee to every ramp.  Older one-ramp rows fall back
+    to the linked conversion's exact fee.
+    """
+    metadata = getattr(ramp, 'metadata', None) or {}
+    allocation = metadata.get('conversion_allocation') or {}
+    allocated = _positive_difference(
+        allocation.get('gross_amount'), allocation.get('net_amount'))
+    if allocated:
+        return allocated
+
+    conversion = getattr(ramp, 'conversion', None)
+    if conversion is not None:
+        fee = (
+            getattr(conversion, 'fee_amount_exact', None)
+            or getattr(conversion, 'fee_amount', None)
+        )
+        try:
+            fee_decimal = Decimal(str(fee))
+        except (InvalidOperation, TypeError, ValueError):
+            fee_decimal = Decimal(0)
+        if fee_decimal > 0:
+            return format(fee_decimal.normalize(), 'f')
+
+    # Guardarian persisted this before conversions gained exact fee columns.
+    legacy_fee = metadata.get('confio_fee')
+    try:
+        legacy_decimal = Decimal(str(legacy_fee))
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+    return format(legacy_decimal.normalize(), 'f') if legacy_decimal > 0 else ''
+
+
+def _external_deposit_conversion(row):
+    """Find the completed auto-conversion behind a raw external-USDT receipt.
+
+    The chain scanner records the incoming transfer before the foreground app
+    can mint cUSD/cUSD+.  Those hashes cannot be the same, so historical rows
+    have no FK between the receipt and conversion.  Match only the narrow,
+    unambiguous economic identity: same owner, exact gross, external-deposit
+    source, completed entry conversion, near the observed receipt, and not a
+    ramp conversion.  Never guess when more than one conversion matches. The
+    contract rate can change, so two identical deposits need not have the same
+    fee snapshot.
+    """
+    cached_marker = '_external_deposit_conversion_cache'
+    if hasattr(row, cached_marker):
+        return getattr(row, cached_marker)
+    if getattr(row, 'transaction_type', None) != 'send':
+        return None
+    receipt = getattr(row, 'send_transaction', None)
+    if (
+        receipt is None
+        or getattr(receipt, 'sender_type', None) != 'external'
+        or str(getattr(receipt, 'token_type', '')).upper() != 'USDT'
+    ):
+        return None
+
+    from conversion.models import Conversion
+
+    query = Conversion.objects.filter(
+        source='external_deposit',
+        conversion_type__in=('to_savings', 'usdt_to_cusd'),
+        status='COMPLETED',
+        from_amount=receipt.amount,
+        # The app can mint before the asynchronous chain scanner persists the
+        # receipt, so DB creation order is not guaranteed even though chain
+        # order is. Keep the lag window bounded to avoid matching an unrelated
+        # historical conversion with the same round amount.
+        created_at__gte=receipt.created_at - timedelta(hours=6),
+        created_at__lte=receipt.created_at + timedelta(days=14),
+        is_deleted=False,
+        ramp_transactions__isnull=True,
+    )
+    if receipt.recipient_business_id:
+        query = query.filter(actor_business_id=receipt.recipient_business_id)
+    elif receipt.recipient_user_id:
+        query = query.filter(actor_user_id=receipt.recipient_user_id)
+    else:
+        return None
+    candidates = list(query.order_by('created_at')[:2])
+    conversion = candidates[0] if len(candidates) == 1 else None
+    setattr(row, cached_marker, conversion)
+    return conversion
 
 
 def _visible_unified():
@@ -172,7 +273,12 @@ class UnifiedTransactionType(DjangoObjectType):
         return 'unknown'
     
     def resolve_display_amount(self, info):
-        """Resolve formatted amount based on direction"""
+        """Legacy signed gross amount.
+
+        Released clients reuse this field as the receipt's gross. Changing it
+        to net would make their payment detail subtract the fee twice. New
+        cards receive net_amount separately and choose it for credits.
+        """
         try:
             # Handle conversions
             if self.transaction_type == 'conversion':
@@ -187,32 +293,44 @@ class UnifiedTransactionType(DjangoObjectType):
                     return f'+{self.amount}'
                 return str(self.amount)
                 
-            # Get direction directly
-            user_address = getattr(self, '_user_address', None)
-            if user_address and hasattr(self, 'get_direction_for_address'):
-                direction = self.get_direction_for_address(user_address)
-                if direction == 'sent':
-                    return f'-{self.amount}'
-                elif direction == 'received':
-                    # GROSS on purpose. Netting here looked like it fixed the
-                    # history card, but TransactionDetailScreen already
-                    # computes the 0.9% itself (computeConfioFee) and treats
-                    # this value as gross — so every shipped build subtracted
-                    # the fee a SECOND time and showed a merchant 98.21 on a
-                    # 100.00 payment. The truth now lives on the row as
-                    # fee_amount and is exposed as feeAmount; the client
-                    # should render from that instead of a hardcoded rate,
-                    # and only then can this become net.
-                    return f'+{self.amount}'
+            direction = UnifiedTransactionType.resolve_direction(self, info)
+            if direction == 'sent':
+                return f'-{self.amount}'
+            if direction == 'received':
+                return f'+{self.amount}'
         except Exception as e:
             print(f"Error in resolve_display_amount: {e}")
         return str(self.amount)
     
     def resolve_fee_amount(self, info):
-        return self.fee_amount or ''
+        if self.fee_amount:
+            return self.fee_amount
+        if self.transaction_type == 'ramp':
+            ramp = getattr(self, 'ramp_transaction', None)
+            return _ramp_conversion_fee(ramp) if ramp is not None else ''
+        conversion = _external_deposit_conversion(self)
+        if conversion is not None:
+            fee = (
+                getattr(conversion, 'fee_amount_exact', None)
+                or getattr(conversion, 'fee_amount', None)
+            )
+            return str(fee or '')
+        return ''
 
     def resolve_net_amount(self, info):
         """What reached the recipient. Authoritative — not a client guess."""
+        # A ramp row already stores the post-conversion crypto amount.  Its
+        # linked conversion fee is exposed above for the receipt, but must not
+        # be subtracted from this already-net value a second time.
+        if self.transaction_type == 'ramp':
+            return str(self.amount)
+        conversion = _external_deposit_conversion(self)
+        if conversion is not None:
+            net = (
+                getattr(conversion, 'net_amount_exact', None)
+                or getattr(conversion, 'to_amount', None)
+            )
+            return str(net or self.amount)
         return self.amount_for_direction('received')
 
     def resolve_display_counterparty(self, info):
@@ -317,6 +435,9 @@ class UnifiedTransactionType(DjangoObjectType):
     
     def resolve_to_token(self, info):
         """For conversions, determine to token"""
+        conversion = _external_deposit_conversion(self)
+        if conversion is not None:
+            return conversion.to_token
         return self.get_to_token()
     
     def resolve_p2p_trade_id(self, info):
@@ -386,14 +507,16 @@ def _viewer_address_for(transaction, account):
     rendered with no direction and an "Unknown" counterparty.
     """
     token = (getattr(transaction, 'token_type', '') or '').upper()
-    if token in ('CUSD_PLUS', 'USDT'):
+    if token in ('CUSD_BSC', 'CUSD_PLUS', 'USDT'):
         return getattr(account, 'bsc_address', None) or ''
-    if token == 'CONFIO':
-        for field in ('from_address', 'to_address', 'sender_address',
-                      'counterparty_address'):
-            value = (getattr(transaction, field, '') or '').strip().lower()
-            if value.startswith('0x'):
-                return getattr(account, 'bsc_address', None) or ''
+    # Token labels are not the ultimate chain authority: CONFIO exists on
+    # both chains, and future dual-chain assets can too. A 0x endpoint makes
+    # this an EVM row regardless of symbol.
+    for field in ('from_address', 'to_address', 'sender_address',
+                  'counterparty_address'):
+        value = (getattr(transaction, field, '') or '').strip().lower()
+        if value.startswith('0x'):
+            return getattr(account, 'bsc_address', None) or ''
     return account.algorand_address
 
 
@@ -457,6 +580,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 'referral_reward_event', 
                 'presale_purchase',
                 'ramp_transaction',
+                'ramp_transaction__conversion',
                 'humanitarian_donation',
                 'humanitarian_release',
             ).filter(
@@ -477,6 +601,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 'referral_reward_event', 
                 'presale_purchase',
                 'ramp_transaction',
+                'ramp_transaction__conversion',
                 'humanitarian_donation',
                 'humanitarian_release',
             ).filter(
@@ -608,6 +733,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             'referral_reward_event',
             'presale_purchase',
             'ramp_transaction',
+            'ramp_transaction__conversion',
             'humanitarian_donation',
             'humanitarian_release',
         )
@@ -739,6 +865,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             'referral_reward_event',
             'presale_purchase',
             'ramp_transaction',
+            'ramp_transaction__conversion',
             'humanitarian_donation',
             'humanitarian_release',
         )

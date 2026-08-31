@@ -3083,6 +3083,9 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
       senderAddress
       recipientAddress
       amount
+      feeAmount
+      netAmount
+      toToken
       tokenType
       memo
       status

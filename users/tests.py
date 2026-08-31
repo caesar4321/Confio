@@ -24,6 +24,271 @@ from users.migration_safety import (
 User = get_user_model()
 
 
+class UnifiedRampFeeResolverTestCase(SimpleTestCase):
+    @patch('conversion.models.Conversion.objects')
+    def test_external_deposit_does_not_guess_between_same_amount_conversions(
+            self, conversion_objects):
+        from types import SimpleNamespace
+        from users.graphql_views import _external_deposit_conversion
+
+        first = SimpleNamespace(conversion_fee_bps=90)
+        second = SimpleNamespace(conversion_fee_bps=50)
+        query = conversion_objects.filter.return_value
+        query.filter.return_value = query
+        ordered = query.order_by.return_value
+        ordered.__getitem__.return_value = [first, second]
+        receipt = SimpleNamespace(
+            sender_type='external', token_type='USDT', amount='100.000000',
+            created_at=timezone.now(), recipient_business_id=None,
+            recipient_user_id=1,
+        )
+        row = SimpleNamespace(
+            transaction_type='send', send_transaction=receipt,
+        )
+
+        self.assertIsNone(_external_deposit_conversion(row))
+
+    @patch('users.graphql_views._external_deposit_conversion')
+    def test_external_deposit_net_is_authoritative_but_display_stays_legacy_gross(self, lookup):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionType
+
+        lookup.return_value = SimpleNamespace(
+            net_amount_exact='9.91', to_amount='9.910000')
+        received = SimpleNamespace(
+            transaction_type='send', amount='10.000000',
+            _user_address='0xviewer',
+            get_direction_for_address=lambda _address: 'received',
+        )
+        sent = SimpleNamespace(
+            transaction_type='send', amount='10.000000',
+            _user_address='0xviewer',
+            get_direction_for_address=lambda _address: 'sent',
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_net_amount(received, None), '9.91')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_display_amount(received, None),
+            '+10.000000',
+        )
+        self.assertEqual(
+            UnifiedTransactionType.resolve_display_amount(sent, None),
+            '-10.000000',
+        )
+
+    def test_payment_and_ramp_expose_authoritative_net_amounts(self):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionType
+
+        payment = SimpleNamespace(
+            transaction_type='payment', amount='100.000000',
+            _user_address='0xmerchant',
+            get_direction_for_address=lambda _address: 'received',
+            amount_for_direction=lambda direction: (
+                '99.100000' if direction == 'received' else '100.000000'),
+        )
+        ramp = SimpleNamespace(
+            transaction_type='ramp', amount='99.100000',
+            ramp_transaction=SimpleNamespace(direction='on_ramp'),
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_net_amount(payment, None),
+            '99.100000',
+        )
+        self.assertEqual(
+            UnifiedTransactionType.resolve_net_amount(ramp, None),
+            '99.100000',
+        )
+
+    def test_cusd_bsc_uses_the_bsc_viewer_address(self):
+        from types import SimpleNamespace
+        from users.graphql_views import _viewer_address_for
+
+        account = SimpleNamespace(
+            bsc_address='0xBSC', algorand_address='ALGORAND')
+        row = SimpleNamespace(
+            token_type='CUSD_BSC', from_address='', to_address='',
+            sender_address='', counterparty_address='',
+        )
+
+        self.assertEqual(_viewer_address_for(row, account), '0xBSC')
+
+    def test_aggregate_ramp_uses_its_own_allocated_fee(self):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionType
+
+        ramp = SimpleNamespace(
+            metadata={'conversion_allocation': {
+                'gross_amount': '100.000000',
+                'net_amount': '99.100000',
+            }},
+            conversion=SimpleNamespace(fee_amount_exact='4.50'),
+        )
+        row = SimpleNamespace(
+            fee_amount='', transaction_type='ramp',
+            ramp_transaction=ramp, amount='99.100000',
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_amount(row, None), '0.9')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_net_amount(row, None), '99.100000')
+
+    def test_legacy_single_ramp_uses_linked_conversion_exact_fee(self):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionType
+
+        ramp = SimpleNamespace(
+            metadata={},
+            conversion=SimpleNamespace(
+                fee_amount_exact='0.135000000000000001', fee_amount='0.135000'),
+        )
+        row = SimpleNamespace(
+            fee_amount='', transaction_type='ramp', ramp_transaction=ramp,
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_amount(row, None),
+            '0.135000000000000001',
+        )
+
+    @patch('users.graphql_views._external_deposit_conversion')
+    def test_external_deposit_receipt_exposes_completed_conversion(self, lookup):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionType
+
+        lookup.return_value = SimpleNamespace(
+            fee_amount_exact='0.090000000000000001',
+            fee_amount='0.090000',
+            net_amount_exact='9.909999999999999999',
+            to_amount='9.910000',
+            to_token='CUSD_PLUS',
+        )
+        row = SimpleNamespace(
+            fee_amount='', transaction_type='send', amount='10.000000',
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_amount(row, None),
+            '0.090000000000000001',
+        )
+        self.assertEqual(
+            UnifiedTransactionType.resolve_net_amount(row, None),
+            '9.909999999999999999',
+        )
+        self.assertEqual(
+            UnifiedTransactionType.resolve_to_token(row, None), 'CUSD_PLUS')
+
+    @patch('users.graphql_views._external_deposit_conversion')
+    def test_zero_fee_external_conversion_still_exposes_net_and_destination(self, lookup):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionType
+
+        lookup.return_value = SimpleNamespace(
+            fee_amount_exact=0, fee_amount=0,
+            net_amount_exact='10', to_amount='10.000000',
+            to_token='CUSD_BSC',
+        )
+        row = SimpleNamespace(
+            fee_amount='', transaction_type='send', amount='10.000000',
+        )
+
+        self.assertEqual(
+            UnifiedTransactionType.resolve_fee_amount(row, None), '')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_net_amount(row, None), '10')
+        self.assertEqual(
+            UnifiedTransactionType.resolve_to_token(row, None), 'CUSD_BSC')
+
+    @patch('users.graphql_views._external_deposit_conversion')
+    @patch('send.schema._send_unified_receipt')
+    def test_send_detail_query_reuses_unified_external_receipt(
+            self, unified_lookup, conversion_lookup):
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from send.schema import SendTransactionType
+
+        conversion_lookup.return_value = SimpleNamespace(
+            fee_amount_exact='0.09', fee_amount='0.090000',
+            net_amount_exact='9.91', to_amount='9.910000',
+            to_token='CUSD_PLUS',
+        )
+        unified_lookup.return_value = SimpleNamespace(
+            fee_amount='', transaction_type='send', amount='10.000000',
+        )
+        send = SimpleNamespace(
+            fee_amount=Decimal(0), net_amount=None, amount=Decimal('10'),
+        )
+
+        self.assertEqual(
+            SendTransactionType.resolve_fee_amount(send, None), '0.09')
+        self.assertEqual(
+            SendTransactionType.resolve_net_amount(send, None), '9.91')
+        self.assertEqual(
+            SendTransactionType.resolve_to_token(send, None), 'CUSD_PLUS')
+
+    @patch('send.schema._send_unified_receipt')
+    def test_pending_send_detail_uses_prepared_fee_snapshot(self, unified_lookup):
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from send.schema import SendTransactionType
+
+        unified_lookup.return_value = None
+        send = SimpleNamespace(
+            fee_amount=Decimal(0), net_amount=None, amount=Decimal('100'),
+            bsc_calls_json=json.dumps({'receipt': {
+                'gross': '100', 'fee': '0.9', 'net': '99.1',
+                'fee_bps': 90, 'finalized': False,
+            }}),
+        )
+
+        self.assertEqual(
+            SendTransactionType.resolve_fee_amount(send, None), '0.9')
+        self.assertEqual(
+            SendTransactionType.resolve_net_amount(send, None), '99.1')
+        unified_lookup.assert_not_called()
+
+    @patch('send.schema._send_unified_receipt')
+    def test_finalized_zero_fee_beats_older_prepared_snapshot(self, unified_lookup):
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from send.schema import SendTransactionType
+
+        send = SimpleNamespace(
+            fee_amount=Decimal(0), net_amount=Decimal('100'),
+            amount=Decimal('100'),
+            bsc_calls_json=json.dumps({'receipt': {
+                'gross': '100', 'fee': '0.9', 'net': '99.1',
+                'fee_bps': 90, 'finalized': False,
+            }}),
+        )
+
+        self.assertEqual(
+            SendTransactionType.resolve_fee_amount(send, None), '0')
+        self.assertEqual(
+            SendTransactionType.resolve_net_amount(send, None), '100')
+        unified_lookup.assert_not_called()
+
+    @patch('send.schema._send_unified_receipt')
+    def test_prepared_receipt_ignores_non_object_json(self, unified_lookup):
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from send.schema import SendTransactionType
+
+        unified_lookup.return_value = None
+        send = SimpleNamespace(
+            fee_amount=Decimal(0), net_amount=None, amount=Decimal('100'),
+            bsc_calls_json='[]',
+        )
+
+        self.assertEqual(
+            SendTransactionType.resolve_fee_amount(send, None), '')
+        self.assertEqual(
+            SendTransactionType.resolve_net_amount(send, None), '100')
+
+
 class UserSoftDeleteAuthTestCase(TestCase):
     def test_soft_deleted_users_are_hidden_from_default_manager(self):
         user = User.objects.create_user(
