@@ -130,6 +130,28 @@ class GmApiTradingTests(SimpleTestCase):
         with override_settings(CUSD_PLUS_GM_TRADE_FEE_BPS=31):
             self.assertFalse(_stock_execution_ready())
 
+    @override_settings(
+        CUSD_PLUS_STOCK_TRADING_ENABLED=True,
+        CUSD_PLUS_STOCK_ROUTER_ADDRESS='0x' + '11' * 20,
+        CUSD_PLUS_7702_ENABLED=False,
+        CUSD_PLUS_BATCH_DELEGATE_ADDRESS='',
+        CUSD_PLUS_GM_TRADE_FEE_BPS=30,
+    )
+    def test_confio_binding_sell_quote_requires_sponsored_app_rail(self):
+        user = SimpleNamespace(is_authenticated=True, id=38, phone_country='CO')
+        info = SimpleNamespace(context=SimpleNamespace(user=user, META={}))
+        with mock.patch('cusd_plus.gm_api.binding_attestation') as binding:
+            result = PrepareGmTrade().mutate(
+                info,
+                request_id='sponsored_sell_123456',
+                symbol='TSLAon',
+                side='sell',
+                notional_value='1',
+                duration='short',
+            )
+        self.assertEqual(result.quote.error_code, 'SPONSOR_NOT_CONFIGURED')
+        binding.assert_not_called()
+
     @override_settings(ONDO_API_KEY='read-key', ONDO_GM_WRITE_KEY='write-key')
     def test_soft_and_binding_use_split_keys_and_bsc_chain(self):
         response = mock.Mock(ok=True)
@@ -340,6 +362,29 @@ class GmApiTradingTests(SimpleTestCase):
         ohlc.assert_not_called()
         community.assert_not_called()
         account.assert_not_called()
+
+    @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
+    def test_gm_ohlc_upstream_failure_is_null_not_empty_history(self):
+        context = SimpleNamespace(
+            user=SimpleNamespace(
+                is_authenticated=True,
+                id=34,
+                phone_country='CO',
+            ),
+            META={'HTTP_CF_IPCOUNTRY': 'CO'},
+        )
+        schema = graphene.Schema(query=Query)
+
+        with mock.patch(
+                'cusd_plus.gm_api.ohlc',
+                side_effect=RuntimeError('upstream unavailable')):
+            result = schema.execute(
+                '{ gmOhlc(symbol: "TSLAon", range: "1D") { close } }',
+                context_value=context,
+            )
+
+        self.assertIsNone(result.errors)
+        self.assertIsNone(result.data['gmOhlc'])
 
     @override_settings(CUSD_PLUS_STOCKS_ENABLED=True)
     def test_eligible_user_gets_privacy_safe_marked_to_market_community_stats(self):

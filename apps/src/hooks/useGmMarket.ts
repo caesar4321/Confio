@@ -62,10 +62,91 @@ const GM_MARKET = gql`
 `;
 
 // Per-symbol candles for the range-selector chart (server proxy of Ondo's
-// OHLC endpoint, 300s cache). Only the close series is consumed — the
-// detail chart is a line, not a candlestick.
-export type GmRange = '1D' | '1M' | '3M' | '6M' | '1Y' | 'MAX';
-export const GM_RANGES: GmRange[] = ['1D', '1M', '3M', '6M', '1Y', 'MAX'];
+// OHLC endpoint, 300s cache). Ondo's smallest supported request is 1D with
+// 15-minute candles, so 1H/6H/12H reuse that real series and slice it on the
+// client. Only the close series is consumed — the detail chart is a line,
+// not a candlestick.
+export type GmRange =
+  | '1H'
+  | '6H'
+  | '12H'
+  | '1D'
+  | '1M'
+  | '3M'
+  | '6M'
+  | '1Y'
+  | 'MAX';
+type GmApiRange = Exclude<GmRange, '1H' | '6H' | '12H'>;
+export const GM_RANGES: GmRange[] = [
+  '1H',
+  '6H',
+  '12H',
+  '1D',
+  '1M',
+  '3M',
+  '6M',
+  '1Y',
+  'MAX',
+];
+export const GM_RANGE_ACCESSIBILITY_LABELS: Record<GmRange, string> = {
+  '1H': '1 hora',
+  '6H': '6 horas',
+  '12H': '12 horas',
+  '1D': '1 día',
+  '1M': '1 mes',
+  '3M': '3 meses',
+  '6M': '6 meses',
+  '1Y': '1 año',
+  MAX: 'Máximo',
+};
+
+interface GmCandle {
+  timestamp: number;
+  close: number;
+}
+
+const INTRADAY_LOOKBACK_MS: Partial<Record<GmRange, number>> = {
+  '1H': 60 * 60 * 1000,
+  '6H': 6 * 60 * 60 * 1000,
+  '12H': 12 * 60 * 60 * 1000,
+};
+
+export const gmApiRangeFor = (range: GmRange): GmApiRange =>
+  range in INTRADAY_LOOKBACK_MS ? '1D' : (range as GmApiRange);
+
+/** Select closes inside the requested window, anchored to the newest candle.
+ * Anchoring to market data rather than Date.now keeps the last trading window
+ * visible while a market is paused or closed. */
+export const gmClosesForRange = (
+  candles: GmCandle[],
+  range: GmRange,
+): number[] => {
+  const lookbackMs = INTRADAY_LOOKBACK_MS[range];
+  if (!lookbackMs || candles.length === 0)
+    return candles.map(candle => candle.close);
+
+  const newestTimestamp = Math.max(...candles.map(candle => candle.timestamp));
+  const cutoff = newestTimestamp - lookbackMs;
+  return candles
+    .filter(candle => candle.timestamp >= cutoff)
+    .map(candle => candle.close);
+};
+
+export const gmOhlcState = (
+  candles: GmCandle[],
+  range: GmRange,
+  enabled: boolean,
+  loading: boolean,
+  hasError: boolean,
+) => {
+  const closes = enabled ? gmClosesForRange(candles, range) : [];
+  const empty = closes.length === 0;
+  return {
+    closes,
+    loading: enabled && loading && empty,
+    failed: enabled && hasError && empty,
+  };
+};
 
 const GM_OHLC = gql`
   query GmOhlc($symbol: String!, $range: String) {
@@ -81,17 +162,24 @@ export const useGmOhlc = (
   range: GmRange,
   enabled = true,
 ) => {
-  const { data, loading } = useQuery(GM_OHLC, {
-    variables: { symbol, range },
+  const apiRange = gmApiRangeFor(range);
+  const { data, loading, error } = useQuery(GM_OHLC, {
+    variables: { symbol, range: apiRange },
     skip: !enabled || !symbol,
     fetchPolicy: 'cache-and-network',
+    pollInterval: 300_000,
   });
-  return useMemo(() => {
-    const closes: number[] = enabled
-      ? (data?.gmOhlc ?? []).map((c: any) => c.close)
-      : [];
-    return { closes, loading: enabled && loading && closes.length === 0 };
-  }, [data, loading, enabled]);
+  return useMemo(
+    () =>
+      gmOhlcState(
+        data?.gmOhlc ?? [],
+        range,
+        enabled,
+        loading,
+        !!error || data?.gmOhlc === null,
+      ),
+    [data, loading, error, enabled, range],
+  );
 };
 
 // Deterministic fallback sparkline so charts render when the 24h series is

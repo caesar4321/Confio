@@ -1,8 +1,9 @@
 // Stock detail — price, range-selector chart, and the buy/sell entry.
 //
 // The chart uses react-native-svg (house rule: no linear-gradient lib) and
-// renders REAL series only: gmOhlc closes for the selected range (1D–MAX),
-// with gmMarket.sparkline24h standing in on 1D until candles arrive. Buying
+// renders REAL series only: gmOhlc closes for the selected range (1H–MAX),
+// with 1H/6H/12H sliced from 1D's 15-minute candles and
+// gmMarket.sparkline24h standing in on 1D until candles arrive. Buying
 // draws from cUSD+ (sweep model) — the funding line under the CTAs says so
 // explicitly, and the total-return note explains why there is no dividends tab.
 
@@ -29,6 +30,7 @@ import {
   useGmOhlc,
   sparklineFor,
   GM_RANGES,
+  GM_RANGE_ACCESSIBILITY_LABELS,
   GmRange,
 } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
@@ -53,7 +55,11 @@ export const StockDetailScreen = () => {
   const position = stockHoldings.positions.find((p) => p.ticker === route.params.ticker);
 
   const [range, setRange] = useState<GmRange>('1D');
-  const { closes } = useGmOhlc(stock?.symbol, range, stockHoldings.enabled);
+  const { closes, loading: chartLoading, failed: chartFailed } = useGmOhlc(
+    stock?.symbol,
+    range,
+    stockHoldings.enabled,
+  );
 
   // Range chart from gmOhlc closes. On 1D the market sparkline stands in
   // until candles arrive (same real data source, coarser); deterministic
@@ -62,11 +68,11 @@ export const StockDetailScreen = () => {
   const series = useMemo(() => {
     if (!stock) return [];
     if (closes.length >= 2) return closes;
-    if (range !== '1D') return [];
+    if (range !== '1D' || chartFailed) return [];
     return stock.sparkline24h && stock.sparkline24h.length >= 2
       ? stock.sparkline24h
       : sparklineFor(stock.ticker);
-  }, [stock, closes, range]);
+  }, [stock, closes, range, chartFailed]);
 
   const points = useMemo(() => {
     if (series.length < 2) return '';
@@ -125,31 +131,53 @@ export const StockDetailScreen = () => {
             {up ? '▲' : '▼'} {formatNumber(Math.abs(stock.dayChangePct), { maximumFractionDigits: 2 })}% hoy
           </Text>
           <View style={styles.chartWrap}>
-            <Svg width="100%" height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`}>
-              <Polyline
-                points={points}
-                fill="none"
-                stroke={chartUp ? '#059669' : '#DC2626'}
-                strokeWidth="2.5"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-            </Svg>
+            {points ? (
+              <Svg width="100%" height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`}>
+                <Polyline
+                  points={points}
+                  fill="none"
+                  stroke={chartUp ? '#059669' : '#DC2626'}
+                  strokeWidth="2.5"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </Svg>
+            ) : (
+              <View
+                style={styles.chartEmpty}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Text style={styles.chartEmptyText}>
+                  {chartLoading
+                    ? 'Cargando gráfico…'
+                    : chartFailed
+                      ? 'No se pudo cargar el gráfico'
+                      : 'Aún no hay suficientes datos'}
+                </Text>
+              </View>
+            )}
           </View>
-          <View style={styles.rangeRow}>
+          <ScrollView
+            horizontal
+            contentContainerStyle={styles.rangeRow}
+          >
             {GM_RANGES.map((r) => (
               <TouchableOpacity
                 key={r}
                 style={[styles.rangePill, range === r && styles.rangePillActive]}
                 onPress={() => setRange(r)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={GM_RANGE_ACCESSIBILITY_LABELS[r]}
+                accessibilityState={{ selected: range === r }}
               >
                 <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>
                   {r === 'MAX' ? 'Máx' : r}
                 </Text>
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
           <View style={styles.marketRow}>
             <View
               style={[
@@ -280,10 +308,14 @@ const styles = StyleSheet.create({
   change: { fontSize: 14, fontWeight: '700', color: colors.primaryDark, marginTop: 3 },
   changeDown: { color: '#DC2626' },
   chartWrap: { marginTop: 14 },
-  rangeRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  chartEmpty: { height: CHART_H, alignItems: 'center', justifyContent: 'center' },
+  chartEmptyText: { fontSize: 12, color: colors.text.secondary },
+  rangeRow: { flexDirection: 'row', gap: 6, marginTop: 10, paddingRight: 4 },
   rangePill: {
-    flex: 1,
+    width: 44,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 6,
     borderRadius: 8,
   },
