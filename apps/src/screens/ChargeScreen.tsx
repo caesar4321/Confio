@@ -41,8 +41,9 @@ const CONFIOIcon = require('../assets/png/CONFIO.png');
 
 // The charge menu, in WIRE values — what createInvoice stores as token_type
 // and what the payer's rail keys on. Both settle on BNB Smart Chain
-// (2026-08-01 migration): cUSD+ is the dollar (the payer may fund it from
-// raw USDT, which the pay contract allows), CONFIO is a token COUNT.
+// (2026-08-01 migration): CUSD_PLUS is the generic dollar invoice wire value;
+// settlement uses the payer's cUSD+ or cUSD representation according to the
+// signed route. CONFIO is a token COUNT. Raw USDT is legacy migration only.
 const CUSD_PLUS = 'CUSD_PLUS';
 const CONFIO = 'CONFIO';
 

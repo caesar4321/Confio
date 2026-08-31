@@ -10,8 +10,10 @@ pragma solidity ^0.8.24;
  *
  * What only the fork proves beyond the mock suite:
  *  - shares minted by the REAL vault flow through deposit/escrow/payout
- *  - the redeem branch drives the real vault → real Ondo IM → real BSC
- *    USDT landing at the recipient (registry gate included, no mocks)
+ *  - legacy cUSD+ transfer and raw-USDT drain pools still work against live
+ *    tokens. The new cUSD compatibility route is exercised by the system and
+ *    upgrade-rehearsal suites because the historical live proxy is not yet
+ *    wired to a cUSD perimeter.
  */
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -39,7 +41,10 @@ contract ConfioPayrollVaultForkTest is Test {
         business = vm.addr(businessKey);
         delegate = vm.addr(delegateKey);
         vault = CusdPlusVault(VAULT);
-        payroll = new ConfioPayrollVault(VAULT, safeOwner);
+        // cUSD is not deployed on the historical fork block used by this
+        // rehearsal; the test exercises only the cUSD+ pool, so a non-zero
+        // IERC20-compatible address is sufficient for the unused new pool.
+        payroll = new ConfioPayrollVault(VAULT, USDT, safeOwner);
 
         // Fund the business with real USDT, mint real cUSD+, park it.
         // minUsdyOut is in USDY terms: at the live USDY price (~$1.14)
@@ -62,11 +67,7 @@ contract ConfioPayrollVaultForkTest is Test {
         return VAULT.code.length > 0 && address(payroll) != address(0);
     }
 
-    function _signedPayout(bool redeem)
-        internal
-        view
-        returns (ConfioPayrollVault.Payout memory p, bytes memory sig)
-    {
+    function _signedPayout(bool redeem) internal view returns (ConfioPayrollVault.Payout memory p, bytes memory sig) {
         p = ConfioPayrollVault.Payout({
             business: business,
             recipient: employee,
@@ -115,13 +116,12 @@ contract ConfioPayrollVaultForkTest is Test {
         assertEq(payroll.escrowUsdt(business), 200e18 - 101e18);
     }
 
-    function test_fork_payout_redeem_realOndoRail() public {
+    function test_fork_internal_route_requires_upgraded_plus() public {
         if (!_forked()) return;
         (ConfioPayrollVault.Payout memory p, bytes memory sig) = _signedPayout(true);
         vm.prank(sponsor);
-        uint256 usdtOut = payroll.payout(p, sig);
-        assertGe(usdtOut, 98e18, "live IM honored minOut");
-        assertEq(IERC20(USDT).balanceOf(employee), usdtOut, "USDT landed at employee");
-        assertEq(vault.balanceOf(employee), 0, "no shares on redeem branch");
+        vm.expectRevert();
+        payroll.payout(p, sig);
+        assertEq(IERC20(USDT).balanceOf(employee), 0, "no external exit fallback");
     }
 }

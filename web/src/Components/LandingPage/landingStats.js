@@ -9,6 +9,7 @@ export const LANDING_STATS = gql`
     landingStats {
       depositedVolumeUsd
       presaleRaisedUsd
+      registeredUsers
     }
   }
 `;

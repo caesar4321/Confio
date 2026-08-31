@@ -54,6 +54,8 @@ const IM_MIN_TARGET_WEI = (105n * 10n ** 18n) / 100n;
 export interface SubscribeParams {
   /** cUSD+ vault proxy address (from server config). */
   vaultAddress: string;
+  /** Universal cUSD vault used to quote the entry fee before Ondo subscribe. */
+  cusdAddress?: string;
   /** USDT amount in 18-dp base units (BSC USDT is 18 decimals). */
   usdtWei: bigint;
   /** IM slippage floor in USDY 18-dp units; 0 is safe (direct mint, no book). */
@@ -67,6 +69,18 @@ export interface SubscribeResult {
   mintTx: string;
   recipient: string;
 }
+
+export interface MintCusdParams {
+  /** Universal cUSD UUPS proxy address (from server config). */
+  cusdAddress: string;
+  /** Gross USDT entering the Confío dollar perimeter. */
+  usdtWei: bigint;
+  /** Minimum net cUSD after the contract-authoritative 0.9% fee. */
+  minCusdOut?: bigint;
+  wallet?: DerivedEvmWallet;
+}
+
+const INTERNAL_CONVERSION_MIN_OUT_BPS = 9_950n;
 
 // Reads ride the same server relay as everything else (transport installed
 // below); never a direct fetch to a public node from the app.
@@ -102,7 +116,17 @@ export const subscribeUsdtToSavings = async (
   const wallet = params.wallet ?? (await getActiveEvmWallet());
   const from = wallet.address;
   const { vaultAddress, usdtWei } = params;
-  const minUsdyOut = params.minUsdyOut ?? 0n;
+  let minUsdyOut = params.minUsdyOut;
+  if (minUsdyOut == null) {
+    if (!params.cusdAddress) {
+      throw new Error('cUSD vault required for fee-aware mint preview');
+    }
+    const preview = await previewCusdMint(params.cusdAddress, usdtWei);
+    const oraclePriceWad = await getCurrentOraclePrice(vaultAddress);
+    if (oraclePriceWad <= 0n) throw new Error('invalid USDY oracle price');
+    const expectedUsdy = preview.netWei * 10n ** 18n / oraclePriceWad;
+    minUsdyOut = expectedUsdy * INTERNAL_CONVERSION_MIN_OUT_BPS / 10_000n;
+  }
 
   const approveData = encodeCall('approve(address,uint256)', [
     { type: 'address', value: vaultAddress },
@@ -115,64 +139,70 @@ export const subscribeUsdtToSavings = async (
   ]);
   const needsApprove = (await getErc20Allowance(from, vaultAddress, USDT_BSC)) < usdtWei;
 
-  // ── 7702 sponsored path ──
   const sponsored = await fetchSponsored7702Params();
-  if (sponsored.enabled && sponsored.delegateAddress) {
-    try {
-      const calls: BatchCall[] = [
-        // Approve max once — avoids a re-approve on every future deposit.
-        ...(needsApprove ? [{ to: USDT_BSC, valueWei: 0n, data: approveData }] : []),
-        { to: vaultAddress, valueWei: 0n, data: mintData },
-      ];
-      const rec = await executeSponsoredBatch({
-        wallet,
-        calls,
-        delegateAddress: sponsored.delegateAddress,
-      });
-      // One atomic tx: the approve (if any) shares the mint's hash.
-      return {
-        approveTx: needsApprove ? rec.txHash : undefined,
-        mintTx: rec.txHash,
-        recipient: from,
-      };
-    } catch (e) {
-      // Fall back ONLY when nothing can still land — same rule as the
-      // transfer path below. An outcome-unknown sponsored batch is ALREADY
-      // on the network; running the legacy self-signed path here would
-      // execute the same vault call twice (Codex re-audit 2026-08-02 [P1]).
-      if (isOutcomeUnknown(e)) throw e;
-      // These are entry-policy verdicts, not sponsor outages. Retrying the
-      // self-funded rail cannot change the answer and may burn BNB on an
-      // approval before the legacy relay refuses the mint too.
-      if (/mint_(?:not_available|below_redeemable_minimum)/i.test(
-        String((e as any)?.message || e),
-      )) throw e;
-      // Sponsored rail down ≠ savings down: fall back to the self-signed
-      // legacy path (works only with user-funded BNB at the address).
-      console.warn('[cusdPlusVault] sponsored subscribe failed, using legacy path', e);
-    }
+  if (!sponsored.enabled || !sponsored.delegateAddress) {
+    throw new Error('cUSD+ mint requires sponsor');
   }
-
-  // ── legacy self-signed path ──
-  let approveTx: string | undefined;
-  if (needsApprove) {
-    const rec = await sendCall({
-      from,
-      privKeyHex: wallet.privKeyHex,
-      to: USDT_BSC,
-      data: approveData,
-    });
-    approveTx = rec.transactionHash;
-  }
-
-  const mintRec: BscReceipt = await sendCall({
-    from,
-    privKeyHex: wallet.privKeyHex,
-    to: vaultAddress,
-    data: mintData,
+  const calls: BatchCall[] = [
+    ...(needsApprove ? [{ to: USDT_BSC, valueWei: 0n, data: approveData }] : []),
+    { to: vaultAddress, valueWei: 0n, data: mintData },
+  ];
+  const rec = await executeSponsoredBatch({
+    wallet,
+    calls,
+    delegateAddress: sponsored.delegateAddress,
   });
+  return {
+    approveTx: needsApprove ? rec.txHash : undefined,
+    mintTx: rec.txHash,
+    recipient: from,
+  };
+};
 
-  return { approveTx, mintTx: mintRec.transactionHash, recipient: from };
+/**
+ * Convert raw USDT into universal cUSD. Minting is sponsor-required by the
+ * contract, so unlike legacy cUSD+ code this function never attempts a
+ * self-funded fallback. The holder signs the exact 7702 intent; Confío's
+ * sponsor pays gas and is the only party allowed to originate the mint.
+ */
+export const mintUsdtToCusd = async (params: MintCusdParams): Promise<SubscribeResult> => {
+  installBscServerTransport();
+  const wallet = params.wallet ?? (await getActiveEvmWallet());
+  const from = wallet.address;
+  const { cusdAddress, usdtWei } = params;
+
+  const approveData = encodeCall('approve(address,uint256)', [
+    { type: 'address', value: cusdAddress },
+    { type: 'uint', value: MAX_UINT256 },
+  ]);
+  const preview = params.minCusdOut == null
+    ? await previewCusdMint(cusdAddress, usdtWei)
+    : null;
+  const mintData = encodeCall('mintWithFee(uint256,uint256,address)', [
+    { type: 'uint', value: usdtWei },
+    { type: 'uint', value: params.minCusdOut ?? preview!.netWei },
+    { type: 'address', value: from },
+  ]);
+  const needsApprove = (await getErc20Allowance(from, cusdAddress, USDT_BSC)) < usdtWei;
+  const sponsored = await fetchSponsored7702Params();
+  if (!sponsored.enabled || !sponsored.delegateAddress) {
+    throw new Error('cUSD mint requires sponsor');
+  }
+
+  const calls: BatchCall[] = [
+    ...(needsApprove ? [{ to: USDT_BSC, valueWei: 0n, data: approveData }] : []),
+    { to: cusdAddress, valueWei: 0n, data: mintData },
+  ];
+  const rec = await executeSponsoredBatch({
+    wallet,
+    calls,
+    delegateAddress: sponsored.delegateAddress,
+  });
+  return {
+    approveTx: needsApprove ? rec.txHash : undefined,
+    mintTx: rec.txHash,
+    recipient: from,
+  };
 };
 
 /**
@@ -252,6 +282,34 @@ export const getErc20BalanceWei = async (token: string, owner: string): Promise<
   return hex && hex !== '0x' ? BigInt(hex) : 0n;
 };
 
+const previewCusdRedeem = async (
+  cusdAddress: string,
+  grossCusdWei: bigint,
+): Promise<{ feeWei: bigint; netWei: bigint }> => {
+  const hex = (await ethCall(cusdAddress, encodeCall('previewRedeem(uint256)', [
+    { type: 'uint', value: grossCusdWei },
+  ]))).replace(/^0x/, '');
+  if (hex.length < 128) throw new Error('invalid cUSD fee preview');
+  return {
+    feeWei: BigInt('0x' + hex.slice(0, 64)),
+    netWei: BigInt('0x' + hex.slice(64, 128)),
+  };
+};
+
+const previewCusdMint = async (
+  cusdAddress: string,
+  grossUsdtWei: bigint,
+): Promise<{ feeWei: bigint; netWei: bigint }> => {
+  const hex = (await ethCall(cusdAddress, encodeCall('previewMint(uint256)', [
+    { type: 'uint', value: grossUsdtWei },
+  ]))).replace(/^0x/, '');
+  if (hex.length < 128) throw new Error('invalid cUSD fee preview');
+  return {
+    feeWei: BigInt('0x' + hex.slice(0, 64)),
+    netWei: BigInt('0x' + hex.slice(64, 128)),
+  };
+};
+
 /** The vault's share price and guard-validated USDY price, both 1e18. */
 export const getVaultPrices = async (
   vaultAddress: string,
@@ -265,6 +323,16 @@ export const getVaultPrices = async (
     pPlusWad: pp && pp !== '0x' ? BigInt(pp) : 0n,
     oraclePriceWad: op && op !== '0x' ? BigInt(op) : 0n,
   };
+};
+
+/** Live oracle value the vault's next accrue()/mint will consume. */
+const getCurrentOraclePrice = async (vaultAddress: string): Promise<bigint> => {
+  const { selector } = await import('./evmWallet');
+  const oracleWord = (await ethCall(vaultAddress, selector('ORACLE()'))).replace(/^0x/, '');
+  if (oracleWord.length < 64) throw new Error('invalid USDY oracle address');
+  const oracleAddress = '0x' + oracleWord.slice(-40);
+  const price = await ethCall(oracleAddress, selector('getPrice()'));
+  return price && price !== '0x' ? BigInt(price) : 0n;
 };
 
 /**
@@ -302,22 +370,35 @@ export const predictSubscribeSharesOut = (
 };
 
 /**
- * Everything this wallet can actually move out in one withdrawal: raw USDT
- * plus what the WHOLE position would really redeem to. Both legs, because
- * the funding batch below spends both — and the predicted (not nominal)
- * redeem value, so the figure can be withdrawn rather than merely displayed.
+ * Everything this wallet can actually move out in one withdrawal: transient
+ * USDT plus the fee-net outputs of cUSD and the WHOLE cUSD+ position. Uses
+ * predicted/contract-previewed values rather than nominal balances, so the
+ * figure can be withdrawn rather than merely displayed.
  */
 export const maxWithdrawableUsdtWei = async (params: {
   owner: string;
   vaultAddress?: string | null;
+  cusdAddress?: string | null;
 }): Promise<bigint> => {
   installBscServerTransport();
   const raw = await getUsdtBalanceWei(params.owner);
-  if (!params.vaultAddress) return raw;
+  let total = raw;
+  if (params.cusdAddress) {
+    const cusd = await getErc20BalanceWei(params.cusdAddress, params.owner);
+    if (cusd > 0n) total += (await previewCusdRedeem(params.cusdAddress, cusd)).netWei;
+  }
+  if (!params.vaultAddress) return total;
   const shares = await getVaultShares(params.vaultAddress, params.owner);
-  if (shares <= 0n) return raw;
+  if (shares <= 0n) return total;
   const { pPlusWad, oraclePriceWad } = await getVaultPrices(params.vaultAddress);
-  return raw + predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+  const grossPlus = predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+  // cUSD+ permissionless exits cross the same cUSD fee perimeter. The live
+  // cUSD preview is authoritative; using it also remains correct if the Safe
+  // lowers the bounded fee after this app ships.
+  const plusNet = params.cusdAddress && grossPlus > 0n
+    ? (await previewCusdRedeem(params.cusdAddress, grossPlus)).netWei
+    : grossPlus;
+  return total + plusNet;
 };
 
 export class InsufficientWithdrawableError extends Error {
@@ -350,8 +431,13 @@ export const fundUsdtDestination = async (params: {
   to: string;
   /** Exact order amount in 18-dp base units. */
   amountWei: bigint;
-  /** cUSD+ vault proxy; omit for a wallet that holds only raw USDT. */
+  /** Server-vouched gross Confío-dollar debit. Present on fee-capable
+   *  off-ramp orders; the provider receives amountWei after the fee. */
+  grossDebitWei?: bigint | null;
+  /** cUSD+ vault proxy; omit when that position is absent. */
   vaultAddress?: string | null;
+  /** Universal cUSD proxy; redeemed first when present. */
+  cusdAddress?: string | null;
   wallet?: DerivedEvmWallet;
 }): Promise<{ txHash: string; redeemedShares: bigint }> => {
   installBscServerTransport();
@@ -366,16 +452,105 @@ export const fundUsdtDestination = async (params: {
   const rawUsdt = await getUsdtBalanceWei(wallet.address);
   let calls: BatchCall[] = [{ to: USDT_BSC, valueWei: 0n, data: transferData }];
   let shares = 0n;
+  let redeemedCusd = 0n;
+  const feeAware = !!params.grossDebitWei && params.grossDebitWei > 0n;
+  // Under the live perimeter, transient raw USDT is never a normal funding
+  // source. A fee-aware withdrawal must actually redeem the vouched gross
+  // cUSD/cUSD+ amount; otherwise a just-arrived raw balance could pay the
+  // provider directly and skip the conversion fee.
+  let fundingUsdt = feeAware ? 0n : rawUsdt;
 
-  if (rawUsdt < amountWei) {
+  if (feeAware) {
+    // New fee-capable off-ramps normalize mixed cUSD+ into cUSD first and
+    // perform ONE fee-bearing cUSD redemption. Two independent exits each
+    // ceil their fee and can underfund an exact provider order by one wei.
+    if (!params.cusdAddress) throw new InsufficientWithdrawableError(0n);
+    const gross = params.grossDebitWei!;
+    const cusdOwned = await getErc20BalanceWei(params.cusdAddress, wallet.address);
+    const normalizedCalls: BatchCall[] = [];
+    if (cusdOwned < gross) {
+      const shortfall = gross - cusdOwned;
+      if (!vaultAddress) throw new InsufficientWithdrawableError(cusdOwned);
+      const owned = await getVaultShares(vaultAddress, wallet.address);
+      const { pPlusWad, oraclePriceWad } = await getVaultPrices(vaultAddress);
+      if (owned <= 0n || pPlusWad <= 0n || oraclePriceWad <= 0n) {
+        throw new InsufficientWithdrawableError(cusdOwned);
+      }
+      let unwrapShares = sharesForUsdtOut(shortfall, pPlusWad);
+      if (unwrapShares > owned) unwrapShares = owned;
+      const predictedGross = predictRedeemUsdtOut(
+        unwrapShares, pPlusWad, oraclePriceWad);
+      if (predictedGross < shortfall || predictedGross < IM_MIN_REDEEM_WEI) {
+        throw new InsufficientWithdrawableError(cusdOwned + predictedGross);
+      }
+      shares = unwrapShares;
+      normalizedCalls.push({
+        to: vaultAddress,
+        valueWei: 0n,
+        data: encodeCall('unwrapToCusd(uint256,uint256,address)', [
+          { type: 'uint', value: unwrapShares },
+          { type: 'uint', value: shortfall },
+          { type: 'address', value: wallet.address },
+        ]),
+      });
+    }
+    const preview = await previewCusdRedeem(params.cusdAddress, gross);
+    if (preview.netWei < amountWei) {
+      throw new InsufficientWithdrawableError(preview.netWei);
+    }
+    normalizedCalls.push({
+      to: params.cusdAddress,
+      valueWei: 0n,
+      data: encodeCall('redeemWithFee(uint256,uint256,address)', [
+        { type: 'uint', value: gross },
+        { type: 'uint', value: preview.netWei },
+        { type: 'address', value: wallet.address },
+      ]),
+    });
+    calls = [...normalizedCalls, ...calls];
+    fundingUsdt = preview.netWei;
+    redeemedCusd = gross;
+  }
+
+  if (!feeAware && fundingUsdt < amountWei && params.cusdAddress) {
+    const cusdOwned = await getErc20BalanceWei(params.cusdAddress, wallet.address);
+    if (cusdOwned > 0n) {
+      const shortfall = amountWei - fundingUsdt;
+      // 90 bps is the immutable ceiling. Start with its ceil inverse, then
+      // use the contract's live preview as authority (the configured fee may
+      // be lower) and fall back to the whole balance for a mixed cUSD/cUSD+
+      // withdrawal.
+      let gross = (shortfall * 10_000n + 9_910n - 1n) / 9_910n;
+      if (params.grossDebitWei && fundingUsdt === 0n) gross = params.grossDebitWei;
+      if (gross > cusdOwned) gross = cusdOwned;
+      let preview = await previewCusdRedeem(params.cusdAddress, gross);
+      if (preview.netWei < shortfall && gross < cusdOwned) {
+        gross = cusdOwned;
+        preview = await previewCusdRedeem(params.cusdAddress, gross);
+      }
+      redeemedCusd = gross;
+      fundingUsdt += preview.netWei;
+      calls = [{
+        to: params.cusdAddress,
+        valueWei: 0n,
+        data: encodeCall('redeemWithFee(uint256,uint256,address)', [
+          { type: 'uint', value: gross },
+          { type: 'uint', value: preview.netWei },
+          { type: 'address', value: wallet.address },
+        ]),
+      }, ...calls];
+    }
+  }
+
+  if (!feeAware && fundingUsdt < amountWei) {
     // Short on raw USDT — the shortfall comes out of the vault, in the same
     // batch. An ineligible user (no shares, no vault) never reaches here
     // unless they genuinely cannot cover the amount.
-    const shortfall = amountWei - rawUsdt;
-    if (!vaultAddress) throw new InsufficientWithdrawableError(rawUsdt);
+    const shortfall = amountWei - fundingUsdt;
+    if (!vaultAddress) throw new InsufficientWithdrawableError(fundingUsdt);
 
     const owned = await getVaultShares(vaultAddress, wallet.address);
-    if (owned <= 0n) throw new InsufficientWithdrawableError(rawUsdt);
+    if (owned <= 0n) throw new InsufficientWithdrawableError(fundingUsdt);
 
     const { pPlusWad, oraclePriceWad } = await getVaultPrices(vaultAddress);
     if (pPlusWad <= 0n || oraclePriceWad <= 0n) {
@@ -398,22 +573,29 @@ export const fundUsdtDestination = async (params: {
     // redeem under-delivers, the transfer cannot cover `amountWei` and the
     // whole atomic batch reverts. That frees minUsdtOut to do its real job —
     // protecting the VALUE of the shares being burned.
-    const grossedUp = (shortfall * 100n) / 99n + 1n;
-    const target = grossedUp > IM_MIN_TARGET_WEI ? grossedUp : IM_MIN_TARGET_WEI;
+    const feeAdjustedGross = (shortfall * 10_000n + 9_910n - 1n) / 9_910n;
+    const legacyHeadroomGross = (shortfall * 100n) / 99n + 1n;
+    const requestedGross = fundingUsdt === 0n && feeAware
+      ? params.grossDebitWei!
+      : (feeAware ? feeAdjustedGross : legacyHeadroomGross);
+    const target = requestedGross > IM_MIN_TARGET_WEI ? requestedGross : IM_MIN_TARGET_WEI;
     const needed = sharesForUsdtOut(target, pPlusWad);
     shares = needed < owned ? needed : owned;
-    const expectedOut = predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+    const expectedGrossOut = predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+    const expectedOut = feeAware && params.cusdAddress
+      ? (await previewCusdRedeem(params.cusdAddress, expectedGrossOut)).netWei
+      : expectedGrossOut;
 
     if (expectedOut < IM_MIN_REDEEM_WEI) {
       // The entire position redeems to less than Ondo will process. Nothing
       // we can do on-chain — say so instead of broadcasting a certain revert.
-      throw new InsufficientWithdrawableError(rawUsdt);
+      throw new InsufficientWithdrawableError(fundingUsdt);
     }
-    if (rawUsdt + expectedOut < amountWei) {
+    if (fundingUsdt + expectedOut < amountWei) {
       // The whole position still doesn't cover it — the server authorized
       // against shares × pPlus, which over-states what a double-floored
       // redeem delivers. Report the honest figure.
-      throw new InsufficientWithdrawableError(rawUsdt + expectedOut);
+      throw new InsufficientWithdrawableError(fundingUsdt + expectedOut);
     }
 
     // Pure value protection now, with genuine room: 1% off what these exact
@@ -471,7 +653,7 @@ export const fundUsdtDestination = async (params: {
   // unfunded order, which is the exact failure the batch exists to prevent
   // (re-audit [P2] #8). Raw-USDT-only funding is a single transfer and is
   // still safe, so it continues.
-  if (shares > 0n) {
+  if (shares > 0n || redeemedCusd > 0n) {
     throw new Error(
       'Los retiros desde tu ahorro no están disponibles en este momento. '
       + 'Intenta de nuevo en unos minutos.',

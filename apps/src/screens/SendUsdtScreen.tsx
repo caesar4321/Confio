@@ -19,7 +19,8 @@
 //                   USD. Rail-gated.
 //
 // Server-authoritative on the rail: the client only signs the batch the
-// server stored. Confío fee: NONE (Julian, 2026-07-05).
+// server stored. Friend/token transfers are free; leaving the Confío-dollar
+// perimeter as USDT charges the contract-authoritative 0.9% conversion fee.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -97,7 +98,10 @@ export const SendUsdtScreen = () => {
   const route = useRoute();
   const token: BscToken = (route.params as any)?.token || 'usdt';
   const config = TOKEN_CONFIG[token];
-  const { usdtBalanceUsd, savings, loading: portfolioLoading } = useSavingsPortfolio();
+  const {
+    cusdBalanceUsd, savings, conversionFeeBps,
+    loading: portfolioLoading,
+  } = useSavingsPortfolio();
 
   // CONFIO-BSC balance via its OWN query (cusdPlusSummary.confioBalance is
   // newer than the portfolio query — bundling it there would invalidate
@@ -133,7 +137,9 @@ export const SendUsdtScreen = () => {
   }, [token]);
 
   const [amount, setAmount] = useState('');
-  const [destination, setDestination] = useState('');
+  const [destination, setDestination] = useState(
+    String((route.params as any)?.prefilledAddress || '').trim(),
+  );
   const [showScanner, setShowScanner] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -143,9 +149,12 @@ export const SendUsdtScreen = () => {
     const v = parseFloat((amount || '0').replace(',', '.'));
     return Number.isFinite(v) ? v : 0;
   }, [amount]);
+  const conversionFeeUsd = token === 'usdt'
+    ? amountNum * conversionFeeBps / 10_000
+    : 0;
+  const recipientNetUsd = Math.max(0, amountNum - conversionFeeUsd);
 
-  // Full-dollar rail flag (send/bsc_flow.py, server-gated). Defaults to the
-  // raw-USDT behavior until the server confirms. Sends ride 7702, so the
+  // Full-dollar rail flag (send/bsc_flow.py, server-gated). Sends ride 7702, so the
   // rail counts as ON only when the sponsored params are also live.
   const [dollarRail, setDollarRail] = useState(false);
   useEffect(() => {
@@ -160,7 +169,7 @@ export const SendUsdtScreen = () => {
         ]);
         if (alive) setDollarRail(Boolean(sendOn && params.enabled));
       } catch {
-        // Any failure keeps the safe raw-USDT behavior.
+        // Any failure leaves only the legacy emergency-compatible behavior.
       }
     })();
     return () => { alive = false; };
@@ -168,16 +177,13 @@ export const SendUsdtScreen = () => {
 
   // Per-token balance. USDT mirrors the Algorand USDC-send pattern (a USDC
   // send shows and spends the cUSD balance, converting at send time): the
-  // cUSD+ position ALWAYS counts toward what's sendable — the server
-  // redeems shares to USDT inside the same sponsored tx. max(), not sum:
-  // the server funds a send from a single leg, so the honest one-tx
-  // capacity is the larger of the two (same as maxSendable in
-  // SendWithAddressScreen's usdc mode).
+  // cUSD+/cUSD positions form one spendable balance. The server atomically
+  // normalizes mixed funding and charges one external conversion fee.
   const available = token === 'confio'
     ? confioBalance
     : token === 'cusd_plus'
       ? savings.balanceUsd
-      : Math.max(savings.balanceUsd, usdtBalanceUsd);
+      : savings.balanceUsd + cusdBalanceUsd;
   // Every balance here starts at 0 while its query is in flight, so "0" is
   // ambiguous. Without this the button asserts "Saldo insuficiente" against a
   // balance it hasn't read yet, and MAX silently does nothing.
@@ -236,8 +242,10 @@ export const SendUsdtScreen = () => {
     setSending(true);
     setShowError(false);
     try {
-      if (config.railOnly && !dollarRail) {
-        // cUSD+/CONFIO ride the server rail only — no legacy fallback.
+      if (!dollarRail) {
+        // Normal dollar/CONFIO sends never expose raw-token self-signing.
+        // Raw USDT is transient settlement money; only Emergency Exit may
+        // move it without the domain-specific server rail.
         setErrorMessage('Los envíos están en preparación. Inténtalo más tarde.');
         setShowError(true);
         return;
@@ -276,41 +284,7 @@ export const SendUsdtScreen = () => {
         return;
       }
 
-      // Legacy path (rail dark) moves RAW WALLET USDT only: a savings-
-      // funded amount would be silently clamped down by the live-balance
-      // re-read below — honest refusal instead.
-      if (amountNum > usdtBalanceUsd) {
-        setErrorMessage('Los envíos están en preparación. Inténtalo más tarde.');
-        setShowError(true);
-        return;
-      }
-
-      // Sponsored-first (EIP-7702, user needs zero BNB) with self-signed
-      // legacy fallback — all inside transferUsdt. Live balance re-read
-      // first so MAX sends the exact on-chain amount without reverting.
-      const { installBscServerTransport } = await import('../services/bscServerRpc');
-      installBscServerTransport();
-      const { getActiveEvmWallet } = await import('../services/secureDeterministicWallet');
-      const { selector, encodeAddress, bscEthCall } = await import('../services/evmWallet');
-      const { transferUsdt, USDT_BSC } = await import('../services/cusdPlusVault');
-      const wallet = await getActiveEvmWallet();
-      const balHex = await bscEthCall(
-        USDT_BSC,
-        selector('balanceOf(address)') + encodeAddress(wallet.address),
-      );
-      const balWei = BigInt(balHex === '0x' ? '0x0' : balHex);
-      // Cent precision from the text input, clamped to the live balance.
-      let amountWei = BigInt(Math.round(amountNum * 100)) * 10n ** 16n;
-      if (amountWei > balWei) amountWei = balWei;
-      if (amountWei <= 0n) {
-        throw new Error('Saldo insuficiente.');
-      }
-      await transferUsdt({ to: destination.trim(), amountWei, wallet });
-      Alert.alert(
-        'Enviado',
-        `Enviaste $${formatFixedFloor(Number(amountWei / 10n ** 16n) / 100, 2)} USDT por la red BNB Smart Chain.`,
-        [{ text: 'Listo', onPress: () => navigation.goBack() }],
-      );
+      throw new Error('send_rail_unavailable');
     } catch (e: any) {
       // Honest, retryable: nothing left the wallet if the relay refused it.
       // Server-rail errors arrive as stable codes; map them to Spanish.
@@ -486,7 +460,16 @@ export const SendUsdtScreen = () => {
           <View style={styles.feeInfo}>
             <Text style={styles.feeLabel}>Comisión de Confío</Text>
             <View style={styles.feeAmountContainer}>
-              <Text style={styles.feeAmount}>Gratis</Text>
+              <Text style={styles.feeAmount}>
+                {token === 'usdt'
+                  ? `Hasta $${conversionFeeUsd.toFixed(2)} si es billetera externa (${(conversionFeeBps / 100).toLocaleString('es-PE')}%)`
+                  : 'Gratis'}
+              </Text>
+              {token === 'usdt' && amountNum > 0 ? (
+                <Text style={styles.netAmount}>
+                  Un usuario Confío recibe ${amountNum.toFixed(2)} gratis; una billetera externa recibe al menos ${recipientNetUsd.toFixed(2)}
+                </Text>
+              ) : null}
               <Text style={styles.sponsoredBadge}>Red cubierta por Confío</Text>
             </View>
           </View>
@@ -638,7 +621,8 @@ const styles = StyleSheet.create({
   },
   feeLabel: { fontSize: 13, color: colors.text.secondary },
   feeAmountContainer: { alignItems: 'flex-end' },
-  feeAmount: { fontSize: 14, fontWeight: '700', color: colors.success },
+  feeAmount: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  netAmount: { fontSize: 12, fontWeight: '600', color: colors.text.secondary, marginTop: 1 },
   sponsoredBadge: { fontSize: 11, color: colors.text.light, marginTop: 1 },
 
   footer: { paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.neutral },

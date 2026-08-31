@@ -272,16 +272,15 @@ export const SendToFriendScreen = () => {
     : balanceSnapshot != null;
   const availableBalance = React.useMemo(() => {
     if (tokenType === 'cusd_plus') {
-      // max(), not sum: the server funds a send from ONE leg (vault shares
-      // or wallet USDT), so the honest one-tx capacity is the larger — the
-      // Algorand USDC/cUSD maxSendable pattern.
-      return Math.max(
-        savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd);
+      return (
+        savingsPortfolio.savings.balanceUsd
+        + savingsPortfolio.cusdBalanceUsd
+      );
     }
     if (tokenType === 'confio') return confioBalance;
     return parseFloat(balanceSnapshot || '0');
   }, [tokenType, balanceSnapshot, confioBalance,
-      savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd]);
+      savingsPortfolio.savings.balanceUsd, savingsPortfolio.cusdBalanceUsd]);
 
   // Prevent overstatement: floor display to 2 decimals
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {

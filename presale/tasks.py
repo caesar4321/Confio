@@ -269,7 +269,9 @@ def confirm_bsc_presale_purchase(self, purchase_id: int, batch_id: int):
                 user=purchase.user, phase=purchase.phase)
             upl = UserPresaleLimit.objects.select_for_update().get(pk=upl.pk)
             purchase.complete_purchase(batch.tx_hash)
-            upl.total_purchased += purchase.cusd_amount
+            upl.total_purchased += (
+                purchase.cusd_amount_exact or purchase.cusd_amount
+            )
             upl.last_purchase_at = timezone.now()
             upl.save(update_fields=['total_purchased', 'last_purchase_at'])
             UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(

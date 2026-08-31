@@ -5,8 +5,9 @@ Same KMS-creation-tx flow as deploy_presale_vault (the sponsor key is
 non-extractable, so forge --broadcast is not an option). Single contract,
 non-upgradeable, no proxy.
 
-Constructor: (cusdPlus, confio, sponsor, owner=Safe)
+Constructor: (cusdPlus, cusd, confio, sponsor, owner=Safe)
   - cusdPlus  = CUSD_PLUS_VAULT_ADDRESS
+  - cusd      = CUSD_VAULT_ADDRESS
   - confio    = BSC_CONFIO_TOKEN_ADDRESS
   - sponsor   = backend hot key that authorizes claims (default KMS sponsor)
   - owner     = the 3-of-5 Safe (rotate sponsor, pause new invites/claims)
@@ -19,6 +20,7 @@ Usage:
   myvenv/bin/python manage.py deploy_invite_escrow --broadcast --yes-mainnet
 """
 import json
+import re
 import time
 import urllib.request
 from pathlib import Path
@@ -62,10 +64,31 @@ class Command(BaseCommand):
         deployer = signer.address
 
         cusd_plus = getattr(settings, "CUSD_PLUS_VAULT_ADDRESS", "") or ""
+        cusd = getattr(settings, "CUSD_VAULT_ADDRESS", "") or ""
         confio = getattr(settings, "BSC_CONFIO_TOKEN_ADDRESS", "") or ""
         sponsor = options.get("attestor") or getattr(settings, "BSC_SPONSOR_ADDRESS", "") or ""
-        if not (cusd_plus and confio and sponsor):
-            raise CommandError("need CUSD_PLUS_VAULT_ADDRESS, BSC_CONFIO_TOKEN_ADDRESS, BSC_SPONSOR_ADDRESS")
+        if not (cusd_plus and cusd and confio and sponsor):
+            raise CommandError(
+                "need CUSD_PLUS_VAULT_ADDRESS, CUSD_VAULT_ADDRESS, "
+                "BSC_CONFIO_TOKEN_ADDRESS, BSC_SPONSOR_ADDRESS"
+            )
+        addresses = {
+            "cusdPlus": cusd_plus, "cusd": cusd, "confio": confio,
+            "sponsor": sponsor, "owner": SAFE,
+        }
+        for name, addr in addresses.items():
+            if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr or ""):
+                raise CommandError(f"{name} is not a valid address: {addr!r}")
+        token_addrs = [cusd_plus.lower(), cusd.lower(), confio.lower()]
+        if len(set(token_addrs)) != 3:
+            raise CommandError("cUSD+, cUSD and CONFIO addresses must be distinct")
+        on_chain_id = int(_rpc(rpc_url, "eth_chainId", []), 16)
+        if on_chain_id != int(chain_id):
+            raise CommandError(
+                f"RPC reports chain {on_chain_id}, settings say {chain_id} — refusing to deploy")
+        for name, addr in (("cUSD+", cusd_plus), ("cUSD", cusd), ("CONFIO", confio)):
+            if _rpc(rpc_url, "eth_getCode", [addr, "latest"]) in (None, "0x", "0x0"):
+                raise CommandError(f"{name} {addr} has no contract code")
 
         balance = int(_rpc(rpc_url, "eth_getBalance", [deployer, "latest"]), 16)
         nonce = int(_rpc(rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
@@ -80,15 +103,25 @@ class Command(BaseCommand):
         self.stdout.write(f"Deployer (KMS sponsor): {deployer}")
         self.stdout.write(f"Chain {chain_id} · balance {balance/1e18:.6f} BNB · nonce {nonce} · gasPrice {gas_price/1e9:.3f} gwei")
         self.stdout.write(f"cusdPlus     = {cusd_plus}")
+        self.stdout.write(f"cusd         = {cusd}")
         self.stdout.write(f"confio       = {confio}")
         self.stdout.write(f"sponsor      = {sponsor}")
         self.stdout.write(f"owner (Safe) = {SAFE}")
 
         art = json.loads((ARTIFACTS / "ConfioInviteEscrow.sol" / "ConfioInviteEscrow.json").read_text())
+        abi = art.get("abi", [])
+        ctor = next((x for x in abi if x.get("type") == "constructor"), None)
+        ctor_arity = len(ctor.get("inputs", [])) if ctor else 0
+        if ctor_arity != 5:
+            raise CommandError(
+                f"artifact constructor takes {ctor_arity} args, expected 5 — rebuild with `forge build`")
+        for getter in ("CUSD_PLUS", "CUSD", "CONFIO", "sponsor", "owner"):
+            if not any(x.get("type") == "function" and x.get("name") == getter for x in abi):
+                raise CommandError(f"artifact has no {getter}() — stale build")
         bytecode = bytes.fromhex(art["bytecode"]["object"].removeprefix("0x"))
         ctor_args = abi_encode(
-            ["address", "address", "address", "address"],
-            [cusd_plus, confio, sponsor, SAFE],
+            ["address", "address", "address", "address", "address"],
+            [cusd_plus, cusd, confio, sponsor, SAFE],
         )
         data = bytecode + ctor_args
 
@@ -133,8 +166,19 @@ class Command(BaseCommand):
             out = _rpc(rpc_url, "eth_call", [{"to": got, "data": "0x" + selector.hex()}, "latest"])
             return to_checksum_address("0x" + out[-40:])
 
+        actual = {
+            "CUSD+": call_addr("CUSD_PLUS()"), "CUSD": call_addr("CUSD()"),
+            "CONFIO": call_addr("CONFIO()"), "sponsor": call_addr("sponsor()"),
+            "owner": call_addr("owner()"),
+        }
+        expected = {
+            "CUSD+": to_checksum_address(cusd_plus), "CUSD": to_checksum_address(cusd),
+            "CONFIO": to_checksum_address(confio), "sponsor": to_checksum_address(sponsor),
+            "owner": to_checksum_address(SAFE),
+        }
+        if actual != expected:
+            raise CommandError(f"deployed wiring mismatch: actual={actual}, expected={expected}")
         self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioInviteEscrow: {got}"))
-        self.stdout.write(f"  CONFIO  = {call_addr('CONFIO()')}")
-        self.stdout.write(f"  sponsor = {call_addr('sponsor()')}")
-        self.stdout.write(f"  owner   = {call_addr('owner()')}")
+        for name, addr in actual.items():
+            self.stdout.write(f"  {name:<8} = {addr}")
         self.stdout.write("Next: add BSC_INVITE_ESCROW_ADDRESS to .env.mainnet, BscScan verify, record in DEPLOYMENT.md.")

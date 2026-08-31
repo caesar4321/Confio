@@ -24,6 +24,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {CusdPlusVault} from "../CusdPlusVault.sol";
 import {MockToken, MockOracle, MockInstantManager} from "./CusdPlusVault.t.sol";
+import {MockCusdFeePerimeter} from "./MockCusdFeePerimeter.sol";
 
 address constant SPONSOR = address(uint160(uint256(keccak256("confio.kms.sponsor"))));
 
@@ -38,13 +39,7 @@ contract VaultHandler is Test {
     uint256 public lastSeenPPlus; // I2 ghost
     uint256 public collectedFees; // ghost: everything treasury withdrew
 
-    constructor(
-        CusdPlusVault _vault,
-        MockToken _usdt,
-        MockToken _usdy,
-        MockOracle _oracle,
-        address _treasury
-    ) {
+    constructor(CusdPlusVault _vault, MockToken _usdt, MockToken _usdy, MockOracle _oracle, address _treasury) {
         vault = _vault;
         usdt = _usdt;
         usdy = _usdy;
@@ -215,19 +210,17 @@ contract CusdPlusVaultInvariantTest is Test {
         usdt.mint(address(im), 1_000_000_000e18);
         usdy.mint(address(im), 1_000_000_000e18);
 
-        CusdPlusVault impl = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
-        );
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        );
+        CusdPlusVault impl = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury)));
         vault = CusdPlusVault(address(proxy));
+        MockCusdFeePerimeter cusd = new MockCusdFeePerimeter(usdt, 0);
+        vm.prank(treasury);
+        vault.initializeCusd(address(cusd));
         // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
         // the default sender under vm.prank, which mirrors production:
         // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
         vm.prank(treasury);
         vault.setSponsor(SPONSOR, true);
-
 
         handler = new VaultHandler(vault, usdt, usdy, oracle, treasury);
         targetContract(address(handler));
@@ -241,11 +234,7 @@ contract CusdPlusVaultInvariantTest is Test {
     /// I1 restated at the raw-balance level (avoids the view's own division).
     function invariant_vaultHoldsWhatItOwes() public view {
         uint256 p = oracle.price();
-        assertGe(
-            usdy.balanceOf(address(vault)),
-            vault.usdyOwed(p),
-            "I1: owed exceeds balance"
-        );
+        assertGe(usdy.balanceOf(address(vault)), vault.usdyOwed(p), "I1: owed exceeds balance");
     }
 
     /// I3: after any op sequence, EVERY holder can exit fully (via the
@@ -263,10 +252,6 @@ contract CusdPlusVaultInvariantTest is Test {
         }
         assertGe(vault.backingRatioBps(), 10_000, "I3: insolvent at exit");
         // Whatever supply remains is dust worth < 1 USDY-wei per holder.
-        assertLe(
-            (vault.totalSupply() * vault.pPlus()) / p,
-            handler.actorCount(),
-            "I3: more than dust stranded"
-        );
+        assertLe((vault.totalSupply() * vault.pPlus()) / p, handler.actorCount(), "I3: more than dust stranded");
     }
 }

@@ -135,9 +135,9 @@ class DepositReceiptTests(SimpleTestCase):
         self.assertEqual(len(made), 1)
         self.assertEqual(made[0]['token_type'], 'USDT')
         self.assertEqual(len(notified), 1)
-        # ineligible copy: no promise that it joins savings
+        # Ineligible deposits auto-convert to non-yield cUSD.
         self.assertIn('Confío Dollar', notified[0]['message'])
-        self.assertFalse(notified[0]['data']['pending_auto_mint'])
+        self.assertTrue(notified[0]['data']['pending_auto_mint'])
 
 
 class SavingsMintSettlementTests(SimpleTestCase):

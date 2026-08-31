@@ -4,8 +4,11 @@ RPC/KMS mocked, house style.
 
     myvenv/bin/python manage.py test send.test_invite_bsc_flow
 """
+import json
 import time
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest import mock
 
 from django.test import SimpleTestCase, override_settings
 
@@ -15,6 +18,7 @@ from send import invite_bsc_flow as f
 ESCROW = '0x' + 'ee' * 20
 VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
 CONFIO = '0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8'
+CUSD = '0x' + 'dd' * 20
 INVITER = '0x' + '11' * 20
 INVITER2 = '0x' + '22' * 20
 WAD = 10 ** 18
@@ -23,6 +27,7 @@ WAD = 10 ** 18
 @override_settings(
     BSC_INVITE_ESCROW_ADDRESS=ESCROW,
     CUSD_PLUS_VAULT_ADDRESS=VAULT,
+    CUSD_VAULT_ADDRESS=CUSD,
     BSC_CONFIO_TOKEN_ADDRESS=CONFIO,
     BSC_INVITE_ENABLED=True,
 )
@@ -67,6 +72,12 @@ class InviteBatchTests(SimpleTestCase):
         self.assertEqual(calls[0]['to'], CONFIO.lower())
         self.assertEqual(calls[1]['data'][74:138], CONFIO[2:].lower().rjust(64, '0'))
 
+    def test_create_batch_cusd(self):
+        inv = f.invite_id_bytes32('55:119999', INVITER)
+        calls = f.build_create_calls('CUSD', 7 * WAD, inv)
+        self.assertEqual(calls[0]['to'], CUSD.lower())
+        self.assertEqual(calls[1]['data'][74:138], CUSD[2:].lower().rjust(64, '0'))
+
     def test_validator_accepts_matching_batch(self):
         inv = f.invite_id_bytes32('58:412555', INVITER)
         calls = f.build_create_calls('CUSD_PLUS', 5 * WAD, inv)
@@ -110,14 +121,49 @@ class InviteBatchTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             f.build_create_calls('USDT', 5 * WAD, f.invite_id_bytes32('58:1', INVITER))
 
+    @mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10)
+    def test_cusd_plus_display_dollars_are_converted_to_exact_shares(self, _pps):
+        units = f._token_units_for_dollars('CUSD_PLUS', 10 * WAD)
+        self.assertEqual(units, -(-10 * WAD * WAD // (11 * WAD // 10)))
+
+    def test_locked_units_come_from_persisted_create_batch(self):
+        inv = f.invite_id_bytes32('58:412555', INVITER)
+        calls = f.build_create_calls('CUSD_PLUS', 7 * WAD, inv)
+        invite = SimpleNamespace(
+            amount=Decimal('999'),
+            send_transaction=SimpleNamespace(
+                bsc_calls_json=json.dumps({'calls': calls}),
+            ),
+        )
+        self.assertEqual(f._locked_units(invite), 7 * WAD)
+
+    @mock.patch('cusd_plus.vault.current_oracle_price_wad', return_value=105 * WAD // 100)
+    def test_cusd_to_plus_claim_has_ondo_output_floor(self, _oracle):
+        invite = SimpleNamespace(
+            token_type='CUSD', amount=Decimal('10'), send_transaction=None,
+        )
+        expected_usdy = 10 * WAD * WAD // (105 * WAD // 100)
+        self.assertEqual(
+            f._claim_min_amount_out(invite, True),
+            expected_usdy * f.INTERNAL_CONVERSION_MIN_OUT_BPS // 10_000,
+        )
+
+    @mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD)
+    @mock.patch('cusd_plus.vault.p_plus_wad', return_value=11 * WAD // 10)
+    def test_plus_to_cusd_claim_has_redeem_output_floor(self, _pps, _oracle):
+        invite = SimpleNamespace(
+            token_type='CUSD_PLUS', amount=Decimal('10'), send_transaction=None,
+        )
+        predicted = 11 * WAD
+        self.assertEqual(
+            f._claim_min_amount_out(invite, False),
+            predicted * f.INTERNAL_CONVERSION_MIN_OUT_BPS // 10_000,
+        )
+
     @override_settings(BSC_INVITE_ENABLED=False)
     def test_disabled_flag(self):
         self.assertFalse(f._enabled())
 
-
-
-from types import SimpleNamespace
-from unittest import mock
 
 
 class _CasObjects:

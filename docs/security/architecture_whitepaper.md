@@ -97,13 +97,14 @@ When a V1 user logs in to the V2 app:
 
 ## 6. Smart Contract Security
 
-*   **Platform**: Algorand Virtual Machine (AVM / TEAL).
-*   **Admin Control**: Critical contracts (USDC, Rewards) are managed by a **Multi-Signature Account (3-of-5)**.
+*   **Current platform**: BNB Smart Chain with EVM contracts. The repository retains legacy Algorand contracts for historical verification and migration support.
+*   **Admin control**: Upgrade and operational authority for critical product contracts is held by a **3-of-5 Safe**, while the user wallet key remains client-side.
 *   **Assets**:
-    *   **USDC**: Standard Circle USDC (ASA).
-    *   **cUSD**: Confío Dollar (ASA). 1:1 backed by USDC.
-    *   **CONFIO**: Utility/Reward Token (ASA).
-*   **Permissions**: Contracts utilize `LogicSig` (Stateless Smart Contracts) for delegated signing and `Application` (Stateful) for logic.
+    *   **USDT**: External BSC funding and exit asset.
+    *   **cUSD**: Upgradeable Confío Dollar, backed 1:1 by USDT and enforcing the bounded 0.9% external conversion perimeter.
+    *   **cUSD+**: Upgradeable USDY-backed savings wrapper for Ondo-eligible users. Sponsor-gated cUSD↔cUSD+ conversion is fee-free.
+    *   **CONFIO**: Fixed-supply ecosystem token, separate from dollar backing.
+*   **Permissions and exits**: Normal minting and fee-free internal conversion require the Confío sponsor. Fee-bearing cUSD and cUSD+ redemption to USDT is permissionless. Users can also use the installed app's Emergency Exit through multiple public BSC RPC endpoints, with cUSD/cUSD+ token transfer as a fallback when conversion is unavailable.
 
 ## 7. Operational Security
 

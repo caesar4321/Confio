@@ -141,7 +141,7 @@ interface TransactionData {
   // flag — and here the token IS explicit, because the escrow must be told
   // what it is holding.
   bscInvite?: boolean;
-  bscInviteToken?: 'CUSD_PLUS' | 'CONFIO';
+  bscInviteToken?: 'CUSD_PLUS' | 'CUSD' | 'CONFIO';
   senderName?: string;
   sender?: string;
   recipientName?: string;
@@ -796,7 +796,7 @@ export const TransactionProcessingScreen = () => {
         // Name the delivered token so the success screen can't claim the
         // wrong one.
         const delivered: Record<string, string> = {
-          CUSD_PLUS: 'cUSD+', USDT: 'USDT', CONFIO: 'CONFIO',
+          CUSD_PLUS: 'cUSD+', CUSD: 'cUSD', USDT: 'USDT', CONFIO: 'CONFIO',
         };
         if (res?.tokenType && delivered[res.tokenType]) {
           transactionData.currency = delivered[res.tokenType];
@@ -811,6 +811,10 @@ export const TransactionProcessingScreen = () => {
         // screen polls settlement with. Without it that screen has nothing to
         // ask about and would sit on 'Confirmando…' forever.
         if (res?.sendId) (transactionData as any).internalId = res.sendId;
+        (transactionData as any).grossAmount = res?.grossAmount;
+        (transactionData as any).feeAmount = res?.feeAmount;
+        (transactionData as any).netAmount = res?.netAmount;
+        (transactionData as any).feeBps = res?.feeBps;
         // ALWAYS 'SUBMITTED', never CONFIRMED from here. Holding a receipt is
         // not the same as the transaction being final: on BSC a block is only
         // committed once the validator set has voted on it, and until then a
@@ -832,9 +836,10 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
-    // BSC invite (cUSD+/CONFIO locked in ConfioInviteEscrow for a phone that
-    // isn't a Confío user yet). The sponsor releases it when they join; the
-    // inviter can reclaim after 7 days from the transaction detail screen.
+    // BSC invite (cUSD+/cUSD/CONFIO locked in ConfioInviteEscrow for a phone
+    // that isn't a Confío user yet). The server chooses cUSD+ or cUSD from
+    // the inviter's eligibility; the sponsor converts fee-free on claim if
+    // the recipient belongs on the other representation.
     const processBscInvite = async () => {
       const { createBscInvite, BSC_INVITE_ERRORS } = await import('../services/inviteBsc');
       // Every BSC RPC (nonce reads, receipt polling) goes through our server,

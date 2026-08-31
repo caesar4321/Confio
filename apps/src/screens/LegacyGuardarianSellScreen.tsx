@@ -38,7 +38,7 @@ import GuardarianReturnModal from '../components/GuardarianReturnModal';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
-import { USD_UNIT } from '../utils/rampFormat';
+import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 import { microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import algorandService from '../services/algorandService';
 
@@ -49,6 +49,7 @@ const SAVINGS_SELL_PARAMS = gql`
   query GuardarianSavingsSellParams {
     cusdPlusConvertParams {
       vaultAddress
+      cusdAddress
     }
   }
 `;
@@ -104,16 +105,11 @@ export const SellScreen = () => {
     // (redeemToUsdt pays Guardarian's deposit address — no intermediate hop).
     // Default mode sells USDC-Algorand from the day-to-day balance.
     const isSavings = route.params?.destination === 'cusd_plus';
-    const { savings, usdtBalanceUsd } = useSavingsPortfolio();
+    const { savings, cusdBalanceUsd, conversionFeeBps } = useSavingsPortfolio();
     const savingsBalanceUsd = savings?.balanceUsd ?? 0;
-    // Ondo-ineligible users hold the plain dollar as RAW USDT and never mint
-    // vault shares — their money must still reach a bank. SUM, not max: the
-    // withdrawal now redeems the position to the user and pays from the
-    // combined raw balance, so both legs fund one payment. (It was max() when
-    // a single leg had to cover the whole amount on its own.) This matches
-    // the server's own sufficiency check for the Koywe rail.
-    const rawUsdtUsd = usdtBalanceUsd ?? 0;
-    const withdrawableUsd = savingsBalanceUsd + rawUsdtUsd;
+    // One atomic funding batch can redeem cUSD first and cUSD+ for the
+    // remainder. Transient raw USDT is excluded under the fee perimeter.
+    const withdrawableUsd = savingsBalanceUsd + (cusdBalanceUsd ?? 0);
     // Copy has to match the product the money actually IS. An Ondo-ineligible
     // user holds plain Confío Dollar (USDT) and has no vault at all, so
     // "ahorro"/"bóveda" would be a lie on every screen of this flow.
@@ -121,6 +117,7 @@ export const SellScreen = () => {
     const balanceNoun = isYieldUser ? 'ahorro' : 'saldo';
     const { data: savingsParamsData } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavings });
     const vaultAddress: string = savingsParamsData?.cusdPlusConvertParams?.vaultAddress || '';
+    const cusdAddress: string = savingsParamsData?.cusdPlusConvertParams?.cusdAddress || '';
     const [sendingFromSavings, setSendingFromSavings] = useState(false);
     // Latched when a funding attempt's outcome could not be determined: the
     // money may already have moved, so this session must not offer a retry.
@@ -230,6 +227,8 @@ export const SellScreen = () => {
     const [depositAddress, setDepositAddress] = useState('');
     const [depositMemo, setDepositMemo] = useState('');
     const [orderId, setOrderId] = useState<number | undefined>(undefined);
+    const [confioGrossAmount, setConfioGrossAmount] = useState('');
+    const [confioNetAmount, setConfioNetAmount] = useState('');
 
     // Whitelist of currencies that Guardarian supports for sells.
     // Based on testing and Guardarian's API limitations.
@@ -314,6 +313,8 @@ export const SellScreen = () => {
                 setDepositAddress(tx.deposit_address);
                 setDepositMemo(tx.deposit_extra_id || '');
                 setOrderId(tx.id);
+                setConfioGrossAmount(String(tx.confio_gross_crypto_amount || amount));
+                setConfioNetAmount(String(tx.confio_net_crypto_amount || amount));
                 setOrderCreated(true);
 
                 if (tx.redirect_url) {
@@ -428,10 +429,17 @@ export const SellScreen = () => {
             // payment to Guardarian ride the same transaction. Atomicity
             // prevents a failure between calls from leaving the shares burned
             // while the provider order remains unfunded (audit [P1] #1).
+            const providerMicros = parseUsdMicros(confioNetAmount || amount);
+            const grossMicros = parseUsdMicros(confioGrossAmount || amount);
+            if (!providerMicros || !grossMicros) {
+                throw new Error('No pudimos verificar los montos de la orden.');
+            }
             await fundUsdtDestination({
                 to: depositAddress,
-                amountWei: microsToWei(amountMicros),
+                amountWei: microsToWei(providerMicros),
+                grossDebitWei: microsToWei(grossMicros),
                 vaultAddress: vaultAddress || null,
+                cusdAddress: cusdAddress || null,
             });
             Alert.alert(
                 `Enviado desde tu ${balanceNoun}`,
@@ -510,7 +518,7 @@ export const SellScreen = () => {
                     </Text>
                     <Text style={styles.successSubtitle}>
                         {isSavings
-                            ? `Enviaremos ${amount} US$ directo desde tu ${balanceNoun} a la orden de Guardarian:`
+                            ? `Debitarás ${formatRampMoney(confioGrossAmount || amount)} US$. La comisión de Confío se descuenta y enviaremos ${formatRampMoney(confioNetAmount || amount)} USDT a Guardarian:`
                             : `Enviaremos ${amount} USDC por ti a la orden de Guardarian:`}
                     </Text>
 
@@ -687,6 +695,11 @@ export const SellScreen = () => {
                                 : 'Recibirás moneda local en tu banco'}
                         </Text>
                     </View>
+                    {isSavings && Number(amount) > 0 ? (
+                        <Text style={styles.infoCardTextSecondary}>
+                            Comisión de Confío: hasta ${(Number(amount) * conversionFeeBps / 10_000).toFixed(2)} ({(conversionFeeBps / 100).toLocaleString('es-PE')}%). Guardarian recibirá aproximadamente ${(Number(amount) * (1 - conversionFeeBps / 10_000)).toFixed(2)} USDT.
+                        </Text>
+                    ) : null}
                 </View>
 
                 {/* Features */}

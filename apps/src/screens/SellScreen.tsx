@@ -62,6 +62,7 @@ const SAVINGS_SELL_PARAMS = gql`
   query KoyweSavingsSellParams {
     cusdPlusConvertParams {
       vaultAddress
+      cusdAddress
     }
   }
 `;
@@ -204,12 +205,14 @@ export const SellScreen = () => {
   }, [bankAccountsData?.userBankAccounts, methods]);
 
   // The sellable balance depends on the RAIL, not the screen: the savings
-  // sell spends the BSC position (minted cUSD+ plus raw USDT that hasn't
-  // minted yet — the funding leg redeems whichever part it needs), the
+  // sell spends the BSC Confío-dollar position. Raw USDT awaiting foreground
+  // conversion is intentionally excluded so it cannot bypass the perimeter,
+  // the
   // default sell spends Algorand cUSD.
-  const { savings: savingsPosition, usdtBalanceUsd } = useSavingsPortfolio();
+  const { savings: savingsPosition, cusdBalanceUsd } = useSavingsPortfolio();
   const { data: savingsSellParams } = useQuery(SAVINGS_SELL_PARAMS, { skip: !isSavingsSell });
   const savingsVaultAddress: string = savingsSellParams?.cusdPlusConvertParams?.vaultAddress || '';
+  const savingsCusdAddress: string = savingsSellParams?.cusdPlusConvertParams?.cusdAddress || '';
   const withdrawalPresentation = getWithdrawalSourcePresentation(
     isSavingsSell,
     Boolean(savingsPosition?.enabled),
@@ -217,9 +220,9 @@ export const SellScreen = () => {
   const sellUnitLabel = withdrawalPresentation.unitLabel;
   const availableCusdBalance = useMemo(
     () => (isSavingsSell
-      ? (savingsPosition?.balanceUsd ?? 0) + (usdtBalanceUsd ?? 0)
+      ? (savingsPosition?.balanceUsd ?? 0) + (cusdBalanceUsd ?? 0)
       : Number(balancesData?.myBalances?.cusd || 0)),
-    [isSavingsSell, savingsPosition?.balanceUsd, usdtBalanceUsd, balancesData?.myBalances?.cusd],
+    [isSavingsSell, savingsPosition?.balanceUsd, cusdBalanceUsd, balancesData?.myBalances?.cusd],
   );
   const selectedMethodMin = Number(selectedMethod?.offRampMinAmount || 0);
   const selectedMethodMax = Number(selectedMethod?.offRampMaxAmount || 0);
@@ -243,6 +246,7 @@ export const SellScreen = () => {
     fiatCurrency,
     paymentMethodCode: selectedMethod?.code,
     enabled: isKoyweMapped,
+    destination: isSavingsSell ? 'cusd_plus' : 'cusd',
   });
   const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, fiatCurrency)}` : '';
   const quoteRateLine = quote ? `1 ${rampUnitCode(sellUnitLabel)} = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
@@ -428,6 +432,7 @@ export const SellScreen = () => {
             amountMicros: exactMicros,
             paymentDetails: result.paymentDetails,
             vaultAddress: savingsVaultAddress,
+            cusdAddress: savingsCusdAddress,
           })
           : await tryFundKoyweOffRampInBackground({
             amount: formatMicros(exactMicros),
@@ -797,9 +802,15 @@ export const SellScreen = () => {
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
-                      <View style={styles.gratisBadge}>
-                        <Text style={styles.gratisBadgeText}>Gratis</Text>
-                      </View>
+                      {isSavingsSell ? (
+                        <Text style={styles.quoteValue}>
+                          {`${formatRampMoney(quote.confioFeeAmount || 0, sellUnitLabel)} (${Number(quote.confioFeeBps ?? 0) / 100}%)`}
+                        </Text>
+                      ) : (
+                        <View style={styles.gratisBadge}>
+                          <Text style={styles.gratisBadgeText}>Gratis</Text>
+                        </View>
+                      )}
                     </View>
                     <View style={styles.disclaimerPill}>
                       <Icon name="info" size={12} color={colors.primaryDark} />

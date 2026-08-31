@@ -19,6 +19,7 @@ Usage:
   myvenv/bin/python manage.py deploy_payroll_vault --broadcast --yes-mainnet
 """
 import json
+import re
 import time
 import urllib.request
 from pathlib import Path
@@ -63,6 +64,23 @@ class Command(BaseCommand):
         cusd_plus = getattr(settings, "CUSD_PLUS_VAULT_ADDRESS", "") or ""
         if not cusd_plus:
             raise CommandError("CUSD_PLUS_VAULT_ADDRESS not configured")
+        cusd = getattr(settings, "CUSD_VAULT_ADDRESS", "") or ""
+        if not cusd:
+            raise CommandError("CUSD_VAULT_ADDRESS not configured")
+
+        tokens = {"cusdPlus": cusd_plus, "cusd": cusd}
+        for name, addr in tokens.items():
+            if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr or ""):
+                raise CommandError(f"{name} is not a valid address: {addr!r}")
+        if cusd_plus.lower() == cusd.lower():
+            raise CommandError("cUSD+ and cUSD addresses must be distinct")
+        on_chain_id = int(_rpc(rpc_url, "eth_chainId", []), 16)
+        if on_chain_id != int(chain_id):
+            raise CommandError(
+                f"RPC reports chain {on_chain_id}, settings say {chain_id} — refusing to deploy")
+        for name, addr in tokens.items():
+            if _rpc(rpc_url, "eth_getCode", [addr, "latest"]) in (None, "0x", "0x0"):
+                raise CommandError(f"{name} {addr} has NO CONTRACT CODE on chain {chain_id}")
 
         balance = int(_rpc(rpc_url, "eth_getBalance", [deployer, "latest"]), 16)
         nonce = int(_rpc(rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
@@ -77,13 +95,24 @@ class Command(BaseCommand):
         self.stdout.write(f"Deployer (KMS sponsor): {deployer}")
         self.stdout.write(f"Chain {chain_id} · balance {balance/1e18:.6f} BNB · nonce {nonce} · gasPrice {gas_price/1e9:.3f} gwei")
         self.stdout.write(f"cusdPlusVault = {cusd_plus}")
+        self.stdout.write(f"cusdVault     = {cusd}")
         self.stdout.write(f"owner (Safe)  = {SAFE}")
 
         art = json.loads((ARTIFACTS / "ConfioPayrollVault.sol" / "ConfioPayrollVault.json").read_text())
+        abi = art.get("abi", [])
+        ctor = next((x for x in abi if x.get("type") == "constructor"), None)
+        ctor_arity = len(ctor.get("inputs", [])) if ctor else 0
+        if ctor_arity != 3:
+            raise CommandError(
+                f"artifact constructor takes {ctor_arity} args, expected 3 "
+                "(cusdPlus, cusd, owner) — rebuild with `forge build`")
+        for getter in ("CUSD_PLUS", "CUSD", "owner"):
+            if not any(x.get("type") == "function" and x.get("name") == getter for x in abi):
+                raise CommandError(f"artifact has no {getter}() — stale build")
         bytecode = bytes.fromhex(art["bytecode"]["object"].removeprefix("0x"))
         ctor_args = abi_encode(
-            ["address", "address"],
-            [cusd_plus, SAFE],
+            ["address", "address", "address"],
+            [cusd_plus, cusd, SAFE],
         )
         data = bytecode + ctor_args
 
@@ -128,7 +157,19 @@ class Command(BaseCommand):
             out = _rpc(rpc_url, "eth_call", [{"to": got, "data": "0x" + selector.hex()}, "latest"])
             return to_checksum_address("0x" + out[-40:])
 
+        actual = {
+            'CUSD_PLUS': call_addr('CUSD_PLUS()'),
+            'CUSD': call_addr('CUSD()'),
+            'owner': call_addr('owner()'),
+        }
+        expected = {
+            'CUSD_PLUS': to_checksum_address(cusd_plus),
+            'CUSD': to_checksum_address(cusd),
+            'owner': to_checksum_address(SAFE),
+        }
+        if actual != expected:
+            raise CommandError(f"deployed wiring mismatch: actual={actual}, expected={expected}")
         self.stdout.write(self.style.SUCCESS(f"\nDEPLOYED. ConfioPayrollVault: {got}"))
-        self.stdout.write(f"  CUSD_PLUS    = {call_addr('CUSD_PLUS()')}")
-        self.stdout.write(f"  owner        = {call_addr('owner()')}")
+        for name, addr in actual.items():
+            self.stdout.write(f"  {name:<12} = {addr}")
         self.stdout.write("Next: add BSC_PAYROLL_VAULT_ADDRESS to .env.mainnet, BscScan verify, record in DEPLOYMENT.md.")

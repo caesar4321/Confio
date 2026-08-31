@@ -168,7 +168,7 @@ export type MainStackParamList = {
   ConvertSavings: undefined;
   WithdrawSavings: undefined;
   ReceiveSavings: { destination?: 'cusd_plus' | 'usdt' | 'confio' } | undefined;
-  SendUsdt: { token?: 'usdt' | 'cusd_plus' | 'confio' } | undefined;
+  SendUsdt: { token?: 'usdt' | 'cusd_plus' | 'confio'; prefilledAddress?: string } | undefined;
   OndoStocksInfo: undefined;
   StocksList: undefined;
   StockDetail: { ticker: string };

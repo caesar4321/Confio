@@ -36,6 +36,7 @@ class PayrollRun(SoftDeleteModel):
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin'),
         ('CUSD_PLUS', 'Confío Dollar Plus'),
+        ('CUSD_BSC', 'Confío Dollar (BSC)'),
         ('USDT', 'Tether USD (BSC)'),
     ]
 

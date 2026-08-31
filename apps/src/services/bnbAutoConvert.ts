@@ -99,6 +99,8 @@ export interface BnbAutoConvertParams {
   slippageBps: bigint;
   /** cUSD+ vault (server config) — lets the sweep finish the mint leg. */
   vaultAddress?: string;
+  /** Universal cUSD vault for Ondo-ineligible holders. */
+  cusdAddress?: string;
 }
 
 /** Quote the swap through the router's own pricing (eth_call, read-only). */
@@ -180,7 +182,7 @@ export const maybeAutoConvertBnb = async (
   // then run the same resume that mints recorded deposits — swap, record,
   // mint, all in this session. Best-effort: on any failure the beat scan +
   // next foreground deliver the old two-step behavior, funds never at risk.
-  if (params.vaultAddress) {
+  if (params.vaultAddress || params.cusdAddress) {
     try {
       const { apolloClient } = await import('../apollo/client');
       const { data: reg } = await apolloClient.mutate({
@@ -189,7 +191,7 @@ export const maybeAutoConvertBnb = async (
       });
       if (reg?.registerBscUsdtArrival?.recorded) {
         const { resumeSavingsMints } = await import('./savingsLegC');
-        await resumeSavingsMints(params.vaultAddress);
+        await resumeSavingsMints(params.vaultAddress, params.cusdAddress);
       }
     } catch (e) {
       console.warn('[BnbAutoConvert] in-session mint continuation failed (beat scan will finish):', e);

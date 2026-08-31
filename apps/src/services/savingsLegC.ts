@@ -11,7 +11,7 @@
 // call is a no-op if the USDT was already consumed.
 
 import { gql } from '@apollo/client';
-import { subscribeUsdtToSavings } from './cusdPlusVault';
+import { mintUsdtToCusd, subscribeUsdtToSavings } from './cusdPlusVault';
 
 const IN_FLIGHT = gql`
   query CusdPlusConversionsInFlight {
@@ -81,8 +81,11 @@ export const subscribeSavingsMinting = (fn: MintingListener): (() => void) => {
  * minting cUSD+. Safe to call on every foreground; self-guards against
  * concurrent runs. Requires the vault address (from server config).
  */
-export const resumeSavingsMints = async (vaultAddress: string): Promise<void> => {
-  if (!vaultAddress) return;
+export const resumeSavingsMints = async (
+  vaultAddress: string | undefined,
+  cusdAddress?: string,
+): Promise<void> => {
+  if (!vaultAddress && !cusdAddress) return;
   // Coalesce, don't drop. A deposit landing WHILE a run is in flight used to
   // be discarded by this guard: the running pass had already read a zero
   // balance and, with no DEST_ARRIVED rows, never re-read it, so the arrival
@@ -96,10 +99,11 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
   let announced = false;
   try {
     const { apolloClient } = await import('../apollo/client');
-    // Geo-ineligible users keep their arrived USDT raw ("Confío Dollar") —
-    // don't mint. Cache-first: the summary is polled by the portfolio hook;
-    // an unknown answer falls through to attempting (server still gates).
+    // Every raw-USDT arrival becomes a Confío dollar. Eligible holders mint
+    // cUSD+; Ondo-ineligible holders mint universal cUSD. An unknown answer
+    // retains the former fail-safe of trying cUSD+ (the server still gates).
     let usdtOnHandWei = 0n;
+    let savingsEnabled: boolean | undefined;
     try {
       const { data: elig } = await apolloClient.query({
         query: ELIGIBILITY,
@@ -107,9 +111,21 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
         // figure would mint the wrong amount.
         fetchPolicy: 'network-only',
       });
-      if (elig?.cusdPlusSummary?.savingsEnabled === false) return;
+      savingsEnabled = elig?.cusdPlusSummary?.savingsEnabled;
       usdtOnHandWei = BigInt(elig?.cusdPlusSummary?.sweepableUsdtWei ?? '0');
     } catch {}
+    const mintArrivedUsdt = async (amountWei: bigint): Promise<{ mintTx: string }> => {
+      if (savingsEnabled === false) {
+        if (!cusdAddress) throw new Error('cUSD vault not configured');
+        return mintUsdtToCusd({ cusdAddress, usdtWei: amountWei });
+      }
+      if (!vaultAddress) throw new Error('cUSD+ vault not configured');
+      return subscribeUsdtToSavings({
+        vaultAddress,
+        cusdAddress,
+        usdtWei: amountWei,
+      });
+    };
     const { data } = await apolloClient.query({
       query: IN_FLIGHT,
       fetchPolicy: 'network-only',
@@ -125,14 +141,11 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     }
     for (const row of rows) {
       try {
-        const { mintTx } = await subscribeUsdtToSavings({
-          vaultAddress,
+        const { mintTx } = await mintArrivedUsdt(
           // Once DEST_ARRIVED, the server replaces this quoted value with
           // the exact six-decimal amount observed in the USDT Transfer log.
-          usdtWei: usdToWei(row.quotedReceiveUsd),
-          // Direct mint against Ondo's IM — no order book, so 0 floor is safe.
-          minUsdyOut: 0n,
-        });
+          usdToWei(row.quotedReceiveUsd),
+        );
         await apolloClient.mutate({
           mutation: ADVANCE,
           variables: { conversionId: row.conversionId, newStatus: 'COMPLETED', txRef: mintTx },
@@ -172,16 +185,12 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     if (usdtOnHandWei > 0n) {
       if (!announced) { announced = true; setMinting(true); }
       try {
-        await subscribeUsdtToSavings({
-          vaultAddress,
-          usdtWei: usdtOnHandWei,
-          minUsdyOut: 0n,
-        });
+        await mintArrivedUsdt(usdtOnHandWei);
         // No mutation: the RELAY writes the history row, after the gate it
         // actually enforced. The client never asserts a conversion happened.
       } catch (e) {
-        // Includes mint_not_available for a blocked IP — the server refuses
-        // and the USDT simply stays raw. Next foreground retries.
+        // A transient policy/RPC/sponsor failure leaves the USDT untouched;
+        // the next foreground retries the correct cUSD+ or cUSD conversion.
         console.warn('[savingsLegC] usdt sweep failed', e);
       }
     }
@@ -197,7 +206,7 @@ export const resumeSavingsMints = async (vaultAddress: string): Promise<void> =>
     // never recurses on the stack.
     if (rerunRequested) {
       rerunRequested = false;
-      void resumeSavingsMints(vaultAddress);
+      void resumeSavingsMints(vaultAddress, cusdAddress);
     }
   }
 };

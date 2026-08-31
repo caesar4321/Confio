@@ -205,7 +205,7 @@ class BscPurchaseFlowTest(TestCase):
         from presale import bsc_flow
         defaults = dict(accepted_terms=True, not_us_attestation=True)
         defaults.update(kwargs)
-        # quoteTokens → 500 CONFIO, quoteCost → 99.99, balanceOf → 1000 USDT
+        # quoteTokens → 500 CONFIO, quoteCost → 99.99
         answers = {
             bsc_flow.SEL_QUOTE_TOKENS[2:]: 500 * 10**18,
             bsc_flow.SEL_QUOTE_COST[2:]: 99_990_000_000_000_000_000,
@@ -215,8 +215,15 @@ class BscPurchaseFlowTest(TestCase):
             return answers[data[2:10]]
         exec_stub = {'delegate_nonce': '0', 'is_delegated': False,
                      'account_nonce': '7', 'delegate_address': '0x' + 'cc' * 20}
+        funding = {
+            'source': 'cusd_direct', 'unwrap': None,
+            'cusd_vault': '0x' + 'dd' * 20,
+            'to': BSC_ADDR.lower(), 'spendable_wei': 100 * 10**18,
+        }
         with mock.patch.object(bsc_flow, 'execution_params', return_value=exec_stub), \
-             mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_call):
+             mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_call), \
+             mock.patch('cusd_plus.cusd_vault.require_operational'), \
+             mock.patch.object(bsc_flow, '_plan_funding', return_value=funding):
             return bsc_flow.prepare_purchase(self.user, self.account, amount, **defaults)
 
     def test_prepare_gates(self):
@@ -234,17 +241,17 @@ class BscPurchaseFlowTest(TestCase):
         self.assertEqual(res['error'], 'no_bsc_address')
 
     def test_prepare_records_and_builds_exact_batch(self):
-        from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY, USDT_BSC
+        from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY
         res = self._prepare()
         self.assertTrue(res['success'], res)
         self.assertEqual(res['confio_amount'], '500.000000')
         purchase = PresalePurchase.objects.get(internal_id=res['purchase_id'])
-        self.assertEqual(purchase.funding_source, 'direct_cusd')
+        self.assertEqual(purchase.funding_source, 'cusd_direct')
         self.assertEqual(purchase.status, 'processing')
         self.assertTrue(purchase.attested_not_us_resident)
         calls = res['calls']
         cap = 100 * 10**18
-        self.assertEqual(calls[0]['to'], USDT_BSC)
+        self.assertEqual(calls[0]['to'], '0x' + 'dd' * 20)
         self.assertEqual(
             calls[0]['data'],
             '0x' + SEL_APPROVE + VAULT[2:].lower().rjust(64, '0') + format(cap, 'x').rjust(64, '0'))
@@ -252,6 +259,12 @@ class BscPurchaseFlowTest(TestCase):
         self.assertEqual(
             calls[1]['data'],
             '0x' + SEL_PRESALE_BUY + format(500 * 10**18, 'x').rjust(64, '0') + format(cap, 'x').rjust(64, '0'))
+
+    def test_second_prepare_cannot_reserve_same_wallet_funds(self):
+        first = self._prepare()
+        self.assertTrue(first['success'], first)
+        second = self._prepare()
+        self.assertEqual(second, {'success': False, 'error': 'purchase_in_progress'})
 
     def test_submit_verifies_signature_and_policy(self):
         import time as _t
@@ -276,6 +289,7 @@ class BscPurchaseFlowTest(TestCase):
         # the real batch row carries 'executed' | 'reverted' | 'noop' | None.
         fake_batch = mock.Mock(id=1, executed_early=None)
         with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True), \
+             mock.patch('cusd_plus.cusd_vault.require_operational'), \
              mock.patch.object(sponsor_7702, 'send_sponsored_batch',
                                return_value=('0x' + 'ab' * 32, fake_batch)) as sent, \
              mock.patch('presale.tasks.confirm_bsc_presale_purchase'):
@@ -289,16 +303,18 @@ class BscPurchaseFlowTest(TestCase):
         pk2 = eth_keys.PrivateKey(b'\x09' * 32)
         sig2 = pk2.sign_msg_hash(digest)
         bad = '0x' + sig2.r.to_bytes(32, 'big').hex() + sig2.s.to_bytes(32, 'big').hex() + bytes([27 + sig2.v]).hex()
-        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True):
+        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True), \
+             mock.patch('cusd_plus.cusd_vault.require_operational'):
             rej = bsc_flow.submit_purchase(self.user, purchase, 0, deadline, bad)
         self.assertEqual(rej['error'], 'bad_intent_signature')
 
         # tampered stored calldata
         meta = json.loads(purchase.notes)
-        meta['bsc_calls'][1]['data'] = meta['bsc_calls'][1]['data'][:-2] + 'ff'
+        meta['bsc_calls'][0]['data'] = meta['bsc_calls'][0]['data'][:-2] + 'ff'
         purchase.notes = json.dumps(meta)
         purchase.save(update_fields=['notes'])
-        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True):
+        with mock.patch.object(sponsor_7702, 'is_delegated', return_value=True), \
+             mock.patch('cusd_plus.cusd_vault.require_operational'):
             rej2 = bsc_flow.submit_purchase(self.user, purchase, 0, deadline, sig_hex)
         self.assertEqual(rej2['error'], 'bad_calldata')
 
@@ -310,6 +326,7 @@ class BscRedeemFundingTest(TestCase):
     is checked against the contract's own formula."""
 
     SAVINGS_VAULT = '0x3C29417eb4314155e63d4C7D4507852b87763Ed1'
+    CUSD_VAULT = '0x' + 'dd' * 20
     WAD = 10 ** 18
     PPS = 105 * 10 ** 16      # $1.05 per share
     ORACLE_P = 114 * 10 ** 16  # USDY at $1.14
@@ -337,42 +354,47 @@ class BscRedeemFundingTest(TestCase):
             }[data[:10]]
 
         shares_held = int((Decimal(shares_held_usd) / Decimal('1.05')) * self.WAD)
+        cusd_held = int(Decimal(spendable_usd) * self.WAD)
+        def balance(token, _holder):
+            return cusd_held if token.lower() == self.CUSD_VAULT.lower() else shares_held
         exec_stub = {'delegate_nonce': '0', 'is_delegated': False,
                      'account_nonce': '7', 'delegate_address': '0x' + 'cc' * 20}
         with mock.patch.object(bsc_flow, 'execution_params', return_value=exec_stub), \
              mock.patch.object(bsc_flow, '_eth_call', side_effect=fake_eth_call), \
-             mock.patch.object(cplus, 'sweepable_usdt_wei', return_value=int(Decimal(spendable_usd) * self.WAD)), \
              mock.patch.object(cplus, 'vault_address', return_value=self.SAVINGS_VAULT), \
-             mock.patch.object(cplus, 'erc20_balance_raw', return_value=shares_held), \
+             mock.patch.object(cplus, 'erc20_balance_raw', side_effect=balance), \
              mock.patch.object(cplus, 'p_plus_wad', return_value=self.PPS), \
-             mock.patch.object(cplus, 'last_oracle_price_wad', return_value=self.ORACLE_P):
+             mock.patch.object(cplus, 'last_oracle_price_wad', return_value=self.ORACLE_P), \
+             mock.patch.object(cplus, 'redeem_blocked_reason', return_value=None), \
+             mock.patch('cusd_plus.cusd_vault.vault_address', return_value=self.CUSD_VAULT), \
+             mock.patch('cusd_plus.cusd_vault.require_operational'):
             return bsc_flow.prepare_purchase(
                 self.user, self.account, amount, accepted_terms=True, not_us_attestation=True)
 
     def test_wallet_covers_it_no_redeem_leg(self):
         res = self._prepare(spendable_usd=Decimal('150'))
         self.assertTrue(res['success'], res)
-        self.assertEqual(res['funding_source'], 'direct_cusd')
+        self.assertEqual(res['funding_source'], 'cusd_direct')
         self.assertEqual(len(res['calls']), 2)
 
     def test_shortfall_prepends_a_redeem_that_covers_the_gap(self):
         from cusd_plus import vault as cplus
-        from cusd_plus.sponsor_7702 import SEL_REDEEM_TO_USDT
+        from cusd_plus.sponsor_7702 import SEL_UNWRAP_TO_CUSD
 
         res = self._prepare(spendable_usd=Decimal('30'))
         self.assertTrue(res['success'], res)
-        self.assertEqual(res['funding_source'], 'cusd_plus_redeem')
+        self.assertEqual(res['funding_source'], 'cusd_plus_via_cusd')
         self.assertEqual(len(res['calls']), 3)
 
         leg = res['calls'][0]
         self.assertEqual(leg['to'], self.SAVINGS_VAULT.lower())
         data = leg['data'][2:]
-        self.assertEqual(data[:8], SEL_REDEEM_TO_USDT)
+        self.assertEqual(data[:8], SEL_UNWRAP_TO_CUSD)
         shares, min_out = int(data[8:72], 16), int(data[72:136], 16)
         self.assertEqual('0x' + data[136:][-40:], BSC_ADDR.lower())
         # minUsdtOut is the exact gap; the redeem targets slightly more
         self.assertEqual(min_out, 70 * self.WAD)
-        predicted = cplus.redeem_usdt_out(shares, self.PPS, self.ORACLE_P)
+        predicted = cplus.redeem_gross_usdt_out(shares, self.PPS, self.ORACLE_P)
         self.assertGreaterEqual(predicted, 70 * self.WAD)
         self.assertLess(predicted, 70 * self.WAD * 102 // 100)
 
@@ -399,10 +421,10 @@ class BscRedeemFundingTest(TestCase):
             bsc_flow._validate_presale_batch(tampered, purchase)
         self.assertEqual(ctx.exception.code, 'bad_calldata')
 
-    def test_prepared_buy_reserves_its_usdt(self):
+    def test_prepared_buy_does_not_reserve_transient_usdt(self):
         from cusd_plus import vault as cplus
 
         self._prepare(spendable_usd=Decimal('150'))
         with mock.patch.object(cplus, 'usdt_balance_raw', return_value=150 * self.WAD):
-            self.assertEqual(cplus.reserved_usdt_wei(self.user, BSC_ADDR), 100 * self.WAD)
-            self.assertEqual(cplus.sweepable_usdt_wei(self.user, BSC_ADDR), 50 * self.WAD)
+            self.assertEqual(cplus.reserved_usdt_wei(self.user, BSC_ADDR), 0)
+            self.assertEqual(cplus.sweepable_usdt_wei(self.user, BSC_ADDR), 150 * self.WAD)

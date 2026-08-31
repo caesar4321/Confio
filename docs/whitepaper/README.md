@@ -4,7 +4,7 @@
 
 Confío is a fully open-source, non-custodial financial application built for Latin America’s dollar reality. It combines local fiat access, yield-bearing dollars, transfers, payments, payroll, and eligible access to Ondo Stocks in a familiar mobile experience without requiring users to understand crypto.
 
-**Global reference · Version 4.2 · August 2026**<br>
+**Global reference · Version 4.3 · August 2026**<br>
 Julian Moon · Founder & CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
@@ -21,7 +21,7 @@ This paper is the current global reference for Confío’s product architecture,
 2. [The market thesis](#2-the-market-thesis)
 3. [The BNB Smart Chain product system](#3-the-bnb-smart-chain-product-system)
 4. [Why BNB Smart Chain](#4-why-bnb-smart-chain)
-5. [cUSD+: savings that can move](#5-cusd-savings-that-can-move)
+5. [cUSD and cUSD+: money and savings](#5-cusd-and-cusd-money-and-savings)
 6. [Payments, payroll, and Ondo Stocks](#6-payments-payroll-and-ondo-stocks)
 7. [$CONFIO on BNB Smart Chain](#7-confio-on-bnb-smart-chain)
 8. [Wallet, security, and open-source architecture](#8-wallet-security-and-open-source-architecture)
@@ -49,16 +49,17 @@ Confío’s product system now settles entirely on BNB Smart Chain:
 
 | Component | Primary job | Design |
 | --- | --- | --- |
-| USDT | Universal funding, liquidity, and exit rail. | BSC-USDT enters through local and international providers, can be held or transferred directly, and is the input/output asset for cUSD+. |
-| cUSD+ | Primary dollar savings and transaction balance. | USDY-backed accumulating vault shares that can be saved, sent, spent, paid through payroll, or redeemed to USDT. |
+| USDT | External funding, liquidity, and exit asset. | Incoming BSC-USDT is automatically converted while the app is active. Users do not manage a normal raw-USDT balance in the consumer interface. |
+| cUSD | Universal payment dollar. | Upgradeable, 1:1 USDT-backed BSC token for payments and for users who are not eligible for USDY exposure. It is the sole external 0.9% conversion-fee perimeter. |
+| cUSD+ | Eligible dollar savings wrapper. | Upgradeable USDY-backed accumulating shares for Ondo-eligible users. Internal cUSD↔cUSD+ conversion is fee-free and sponsor-gated. |
 | Ondo Stocks | Eligible tokenized-market access. | Users buy from cUSD+ and sell proceeds back into cUSD+ through a dedicated, source-verified router. Every completed purchase and sale carries an explicit 0.30% Confío fee. |
-| $CONFIO | Community and ecosystem token. | Fixed-supply BEP-20 on BNB Smart Chain with a USDT-denominated on-chain presale. It does not back user dollar balances. |
+| $CONFIO | Community and ecosystem token. | Fixed-supply BEP-20 on BNB Smart Chain with a cUSD-funded on-chain presale. It does not back user dollar balances. |
 
 The single-network design is not a generic chain bet. It follows the product’s economic center of gravity: Ondo Finance made its USDY, InstantManager, price oracle, and USDT subscription/redemption path available on BNB Smart Chain. Confío then consolidated payments, payroll, transfers, and $CONFIO onto the same network to eliminate chain switching and fragmented liquidity. <sup>[7, 8, 10]</sup>
 
 As of 23 July 2026, Confío records 8,004 users who completed phone verification and 177 users who completed Didit identity verification by submitting a government-issued identity document and capturing a live selfie for liveness and face-matching checks. The Didit flow has a 61.5% completion rate among users who began it. Confío also records 2,094 push-reachable devices, with 2,092 of those devices used within the last 30 days. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
 
-The cUSD+ vault, Ondo Stocks router, sponsored-transaction delegate, $CONFIO token, replacement $CONFIO presale vault, $CONFIO reward vault, merchant-payment contract, and payroll vault are deployed and source-verified on BNB Smart Chain. The contracts are wired into the production application, with runtime controls governing staged user exposure. The cUSD+ vault is registered for Ondo’s permissioned infrastructure and integrates production USDY, USDT, InstantManager, and oracle contracts. <sup>[8, 9, 17, 18]</sup>
+The cUSD and cUSD+ vaults, Ondo Stocks router, sponsored-transaction delegate, $CONFIO token, replacement $CONFIO presale vault, $CONFIO reward vault, merchant-payment contract, and payroll vault are deployed and source-verified on BNB Smart Chain. The contracts are wired into the production application, with runtime controls governing staged user exposure. The cUSD+ vault is registered for Ondo’s permissioned infrastructure and integrates production USDY, USDT, InstantManager, and oracle contracts. <sup>[8, 9, 17, 18]</sup>
 
 ## 2. The market thesis
 
@@ -105,13 +106,13 @@ Confío presents one dollar experience while using different assets for differen
 
 | User action | Asset or contract | What happens on-chain |
 | --- | --- | --- |
-| Add dollars | USDT | A fiat provider delivers BSC-USDT to the user’s own address. |
-| Save | cUSD+ vault | USDT is subscribed into USDY through Ondo’s InstantManager; the vault issues cUSD+ at its guarded reference value. |
-| Send | cUSD+ or USDT | Eligible internal recipients can receive cUSD+; other recipients receive USDT through an atomic cUSD+ redemption or direct USDT transfer. |
-| Pay a merchant | cUSD+ or $CONFIO, funded from cUSD+ or USDT | The merchant charges in cUSD+ or $CONFIO; the payment contract pays the merchant, enforces the 0.9% fee, and records fee accrual on-chain. |
-| Run payroll | cUSD+ with optional USDT exit | Businesses fund a cUSD+ escrow; authorized delegates sign payouts, and recipients can receive cUSD+ or USDT. |
+| Add dollars | cUSD or cUSD+ | A fiat provider or external wallet delivers BSC-USDT. The app automatically converts it into cUSD for an Ondo-ineligible user or cUSD+ for an eligible user, charging the same 0.9% Confío conversion fee. |
+| Save | cUSD↔cUSD+ wrapper boundary | Eligible users can move cUSD into USDY-backed cUSD+ without a conversion fee; the reverse internal conversion is also free. Both paths require a Confío-sponsored transaction. |
+| Send | cUSD or cUSD+ | Like-for-like transfers stay in the sender’s asset. Cross-eligibility friend transfers convert cUSD and cUSD+ internally without a fee so the recipient receives the asset appropriate for their jurisdiction. |
+| Pay a merchant | cUSD+, cUSD, or $CONFIO | The payment contract pays the merchant, enforces the separate 0.9% Pay fee, and records fee accrual on-chain. Raw USDT remains a legacy allowlisted token but is not authorized by the production backend. |
+| Run payroll | cUSD+ or cUSD | Businesses fund asset-separated escrow; authorized delegates sign payouts, and recipients receive cUSD+ or cUSD according to eligibility. |
 | Buy or sell an Ondo Stock | cUSD+, Ondo Stock token, and stock router | A sponsored transaction settles through Ondo Global Markets. Purchases redeem the required cUSD+ into USDT and deliver the stock token to the user; sales return net proceeds to cUSD+. |
-| Participate in $CONFIO presale | USDT | A sponsored transaction purchases an allocation against an immutable on-chain price curve. |
+| Participate in $CONFIO presale | cUSD | A sponsored transaction purchases an allocation against an immutable on-chain price curve without forcing the user through an extra cUSD/cUSD+→USDT redemption. |
 | Earn and claim rewards | $CONFIO RewardVault | Eligible rewards are recorded cumulatively off-chain and become claimable through signed on-chain claims after the DEX unlock. |
 
 ### 3.1 Public BNB Smart Chain deployments
@@ -120,16 +121,17 @@ All contracts listed below are live on BNB Smart Chain mainnet and source-verifi
 
 | Contract | Address |
 | --- | --- |
+| cUSD vault proxy | [`0x6101cC370635cF2c7f2725EaB010aC407A8d543F`](https://bscscan.com/address/0x6101cC370635cF2c7f2725EaB010aC407A8d543F#code) |
 | cUSD+ vault proxy | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Ondo Stocks router (UUPS proxy) | [`0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | Sponsored-batch delegate | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 | $CONFIO token | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| $CONFIO presale vault | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
+| $CONFIO presale vault | [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
 | $CONFIO reward vault | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | $CONFIO vesting vault | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
-| Invitation escrow | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| Merchant-payment contract | [`0x039Ebe91283c686F23F4C751600a39567967736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
-| Payroll vault | [`0x851cA801c3028D4C0e651d29803f8e35D86d7299`](https://bscscan.com/address/0x851cA801c3028D4C0e651d29803f8e35D86d7299#code) |
+| Invitation escrow | [`0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
+| Merchant-payment contract | [`0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
+| Payroll vault | [`0x851e1a56De5c0ADBB75e904B2E7325e132692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
 
 ### 3.2 Why one network matters
 
@@ -159,7 +161,7 @@ BNB Smart Chain adds:
 - low transaction costs suitable for sponsored consumer activity;
 - mature wallets, RPC providers, explorers, exchanges, and developer tooling;
 - access to BNB Chain’s payments, wallet, DeFi, and RWA ecosystem; and
-- one environment for cUSD+, USDT, $CONFIO, merchant payments, and payroll. <sup>[5, 6, 12]</sup>
+- one environment for cUSD, cUSD+, USDT, $CONFIO, merchant payments, and payroll. <sup>[5, 6, 12]</sup>
 
 Chain ecosystem size does not create product demand by itself. Confío’s value still depends on users, retained balances, reliable exits, distribution, security, and transparent economics.
 
@@ -167,20 +169,22 @@ Chain ecosystem size does not create product demand by itself. Confío’s value
 
 BNB Smart Chain has different decentralization and operational characteristics from other networks. Network interruption, validator coordination, congestion, gas-price changes, RPC failures, or ecosystem-level policy changes remain possible. Confío mitigates these risks with sponsored transactions, multiple RPC paths, explicit emergency exits, non-custodial ownership, and public contract state, but it cannot eliminate base-network risk.
 
-## 5. cUSD+: savings that can move
+## 5. cUSD and cUSD+: money and savings
 
-cUSD+ is an accumulating dollar-denominated vault share backed by USDY held in the deployed cUSD+ vault. Users see a dollar balance rather than vault shares, gas, approvals, or oracle calculations.
+cUSD is the universal payment dollar, backed 1:1 by USDT in its deployed UUPS vault. cUSD+ is an accumulating dollar-denominated savings share backed by USDY in the existing upgraded cUSD+ proxy. The app selects cUSD for users who are not eligible for USDY exposure and cUSD+ for eligible users, while presenting one dollar experience rather than vault shares, gas, approvals, or oracle calculations.
 
 ### 5.1 Deposit and redemption flow
 
-| Deposit | Redemption |
+| Entry | Exit |
 | --- | --- |
-| 1. USDT reaches the user’s BSC address. | 1. The user requests a dollar withdrawal or transfer. |
-| 2. A user-authorized sponsored batch approves USDT and calls the vault. | 2. The vault burns the corresponding cUSD+ shares. |
-| 3. The vault subscribes USDT into USDY through Ondo InstantManager. | 3. USDY is redeemed through InstantManager. |
-| 4. The vault issues cUSD+ at the guarded reference value. | 4. USDT goes directly to the designated user, recipient, or ramp address. |
+| 1. USDT reaches the user’s BSC address from a ramp or an external wallet. | 1. The user requests local-currency withdrawal or an external USDT send. |
+| 2. A user-authorized sponsored batch calls the appropriate fee-bearing mint path. | 2. cUSD burns directly, or cUSD+ burns and redeems USDY through InstantManager. |
+| 3. The cUSD fee perimeter retains 0.9% and mints cUSD, or returns net USDT to cUSD+ for USDY subscription. | 3. The cUSD fee perimeter retains 0.9% of the gross exit value. |
+| 4. The user receives cUSD if Ondo-ineligible or cUSD+ if eligible. | 4. Net USDT goes to the designated external wallet or ramp address. |
 
-The vault, not the end user, is the permissioned USDY purchaser. Users hold cUSD+, not raw USDY. Minting is subject to product eligibility; exits are designed to remain available even when a recipient is not eligible to hold newly minted cUSD+.
+The cUSD vault is the only external conversion-fee perimeter. Its fee is capped in code at 90 basis points. Minting always requires an authorized sponsor; fee-free redemption is restricted to the cUSD+ savings boundary; ordinary fee-bearing redemption remains permissionless so a holder can exit without Confío’s sponsor. cUSD+ follows the same exit principle: normal app minting and fee-free internal conversion require a sponsor, while fee-bearing redemption to USDT is permissionless.
+
+The cUSD+ vault, not the end user, is the permissioned USDY purchaser. Users hold cUSD+, not raw USDY. Minting is subject to product eligibility. Internal cUSD↔cUSD+ conversion is fee-free only because value stays inside the Confío dollar system; it does not create a free external USDT path.
 
 ### 5.2 Accumulating value and yield share
 
@@ -197,33 +201,33 @@ The vault exposes public views for total obligations, backing ratio, and surplus
 
 If the USDY oracle falls or moves beyond a configured guard threshold, value-moving paths halt. Multi-party governance must then record an evidence-linked decision to accept verified appreciation or rebaseline after a verified oracle fault. This reduces automated mispricing risk but cannot remove oracle, issuer, or governance risk.
 
-### 5.4 Savings as the primary transaction balance
+### 5.4 One balance experience across eligibility
 
-cUSD+ is not isolated in a savings tab. It is the preferred balance for internal sends, merchant payments, and payroll because value can continue accumulating until it is spent. When cUSD+ is unsuitable for the recipient or route, Confío can atomically redeem it and deliver USDT instead. Raw USDT remains a first-class fallback rather than a hidden intermediate asset.
+cUSD+ is the preferred representation for eligible users because value can continue accumulating until it is spent. cUSD is the universal payment representation for users who cannot receive USDY exposure. Like-for-like friend transfers remain direct; when sender and recipient eligibility differs, the sponsored flow converts cUSD and cUSD+ internally without charging the 0.9% external conversion fee. Raw USDT is an entry/exit intermediate and emergency asset, not a normal selectable consumer balance.
 
 ## 6. Payments, payroll, and Ondo Stocks
 
 ### 6.1 Person-to-person transfers
 
-The server prepares the exact calls, the user signs them, and Confío sponsors network gas. Depending on the sender’s balance and recipient:
+The server prepares the exact calls, the user signs them, and Confío sponsors network gas. Depending on the sender’s balance and the recipient’s eligibility:
 
 - cUSD+ transfers directly to an eligible Confío recipient;
-- cUSD+ redeems atomically and USDT goes directly to another recipient; or
-- raw USDT transfers directly.
+- cUSD transfers directly to a recipient who should hold cUSD; or
+- a sponsor-authorized, fee-free cUSD↔cUSD+ conversion delivers the appropriate representation across the eligibility boundary.
 
-Confío does not take a platform fee on person-to-person transfers. Provider charges may still apply when money enters or exits through fiat rails.
+Confío does not take a platform fee on person-to-person transfers. The 0.9% conversion fee applies only when value enters from USDT or leaves to USDT, regardless of whether that USDT came from or goes to a fiat ramp or an on-chain wallet.
 
 ### 6.2 Merchant payments
 
-A merchant charges in one of two denominations: **cUSD+**, the dollar balance, or **$CONFIO**, quoted as a token count rather than a dollar amount. Both settle on BNB Smart Chain.
+A merchant charges in **Confío dollars** or **$CONFIO**, quoted as a token count rather than a dollar amount. Dollar settlement uses cUSD+ or cUSD according to the payer and merchant route.
 
-A customer who holds raw USDT can still settle a dollar invoice with it, including a customer who is not eligible to mint cUSD+. The merchant receives the same token the payer spent. USDT is therefore a funding route for the payer, not a third denomination a merchant can quote.
+The payment contract retains raw USDT only as a legacy compatibility token. Once the conversion perimeter is enabled, Confío’s backend does not authorize raw-USDT Pay calls, preventing Pay from becoming a route around the mandatory USDT↔cUSD conversion fee.
 
 The payment contract calculates the 0.9% merchant fee, pays the merchant net amount directly, and accrues only earned fees in the contract for transparent collection. Confío’s backend signs a short-lived authorization over the exact payment terms, and the contract records settlement against the invoice identifier itself. Exactly one payment can settle an invoice, and an identifier cannot be consumed by anyone the backend has not authorized. Each invoice also records the single network permitted to settle it, so one charge cannot be paid twice across networks. The payer’s approval and payment execute atomically in a sponsored batch.
 
 ### 6.3 Payroll and mass payouts
 
-Businesses can hold working capital as cUSD+ in a dedicated escrow while it continues to participate in cUSD+ reference-value growth. The business authorizes delegates to sign specific payouts. Recipients can receive cUSD+ or an atomic USDT redemption, while the payroll contract keeps fee accounting separate from business escrow.
+Businesses can hold working capital as cUSD+ or cUSD in asset-separated escrow. The business authorizes delegates to sign specific payouts. Eligible recipients can receive cUSD+; ineligible recipients receive cUSD through the fee-free internal conversion boundary. A legacy raw-USDT pool remains only for draining or migrating old escrow, while payroll fee accounting stays separate from business principal.
 
 ### 6.4 Ondo Stocks
 
@@ -252,7 +256,7 @@ Allocation, founder ownership, vesting, presale rights, and concentration risks 
 
 ### 7.2 On-chain presale
 
-The BSC presale vault accepts USDT and prices purchases on an immutable piecewise-linear curve tied to cumulative tokens sold:
+The replacement BSC presale vault accepts cUSD and prices purchases on an immutable piecewise-linear curve tied to cumulative tokens sold:
 
 | Cumulative presale allocation | Curve price |
 | --- | --- |
@@ -262,7 +266,9 @@ The BSC presale vault accepts USDT and prices purchases on an immutable piecewis
 
 The curve segments have no administrative repricing function. The contract charges the integral under the curve, records the allocation, prevents split-purchase discounts through its pricing math, and opens claims only after sufficient CONFIO funding. Participation remains subject to eligibility, geographic controls, and the presale terms. <sup>[17]</sup>
 
-**Presale contract:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+The replacement contract was initialized with the exact pre-deployment purchase history, so migrated purchases continue to push the same cumulative curve rather than resetting the price. It is funded for the migrated claim obligation; the superseded vault is paused.
+
+**Presale contract:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
 
 ### 7.3 Rewards and DEX-locked claims
 
@@ -311,9 +317,9 @@ No review method eliminates smart-contract or operational risk.
 
 ### 8.4 Upgradeability and governance
 
-The cUSD+ vault remains upgradeable because it permanently depends on external Ondo contracts that may migrate or change. Irreversible immutability could strand users if an upstream oracle or manager were replaced. Upgrades are therefore controlled through multi-party governance, public implementations, storage-layout checks, and verifiable transaction history.
+The cUSD and cUSD+ vaults remain upgradeable. cUSD+ permanently depends on external Ondo contracts that may migrate or change, while cUSD is the shared payment and fee perimeter used across product contracts. Irreversible immutability could strand users or freeze an ecosystem-wide integration fault. Upgrades are therefore controlled through multi-party governance, public implementations, storage-layout checks, and verifiable transaction history.
 
-Other components use narrower designs where appropriate. The $CONFIO token and presale price curve are non-upgradeable; payment and payroll contracts restrict administrative power to defined operations such as pausing new activity or collecting provably accrued fees.
+Other components use narrower designs where appropriate. The $CONFIO token and presale price curve are non-upgradeable; the replacement payment, payroll, invite, and presale contracts restrict administrative power to defined operations such as pausing new activity, rotating sponsors, or collecting provably accrued fees.
 
 ## 9. Users, distribution, and go-to-market
 
@@ -349,7 +355,9 @@ Confío aligns revenue with useful financial activity rather than speculative tr
 
 | Revenue line | Current policy |
 | --- | --- |
-| Person-to-person transfers | 0% Confío platform fee. Network fees are sponsored; fiat or third-party provider charges may still apply where disclosed. |
+| Enter the Confío dollar system | 0.9% Confío conversion fee when USDT becomes cUSD or cUSD+, whether the USDT arrives through a fiat ramp or an on-chain transfer. People and businesses pay the same rate. |
+| Leave the Confío dollar system | 0.9% Confío conversion fee when cUSD or cUSD+ becomes external USDT, whether the destination is a fiat ramp or an on-chain wallet. People and businesses pay the same rate. |
+| Person-to-person transfers and internal savings conversion | 0% Confío platform fee for internal sends and sponsor-authorized cUSD↔cUSD+ conversion. Network fees are sponsored. |
 | Merchant payments | 0.9% flat Confío platform fee, enforced by the payment contract. |
 | Payroll and mass payouts | 0.9% flat Confío platform fee, with fee shares accrued separately from business escrow. |
 | cUSD+ yield share | 15% of positive USDY reference-price appreciation to Confío and 85% to the cUSD+ holder reference value. Yield is variable and not guaranteed. |
@@ -357,7 +365,9 @@ Confío aligns revenue with useful financial activity rather than speculative tr
 | Fiat-rail economics | Koywe provider pricing and Guardarian revenue-sharing may apply according to the live quote and relevant partner agreement. |
 | Other financial products | Potential fees or revenue share from other eligible RWA, brokerage, card, or business-service partners, subject to separate terms and approvals. |
 
-Network sponsorship is a product cost, not proof that transactions are economically free. Ramp, liquidity, compliance, support, and infrastructure costs remain real.
+The pricing rule is the same one shown on the public website: **0.9% to enter, 0% to move inside, and 0.9% to leave**. Confío Pay is a separate 0.9% service fee. Exchange rates and any third-party provider charges are disclosed separately where applicable. Network sponsorship is a product cost, not proof that every product action is economically free.
+
+Current fee-capable clients show the Confío fee and final amount before confirmation. During the app-store transition, an already-installed legacy build may still render its old “Comisión de Confío — Gratis” label even though the server and contracts apply the 0.9% fee and return the correct post-fee final amount. Legacy builds remain operable during this short compatibility window rather than blocking access while a store review is pending.
 
 ## 11. Compliance and operating model
 
@@ -384,10 +394,10 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 
 | Risk | Current mitigation | Residual exposure |
 | --- | --- | --- |
-| Underlying assets and issuers | cUSD+ holds USDY and discloses its structure, accounting, and eligibility; USDT remains visible as the entry/exit asset. | Depeg, issuer, custody, legal, reserve, and redemption risks remain for USDY and USDT. |
+| Underlying assets and issuers | cUSD is backed by USDT; cUSD+ holds USDY and discloses its structure, accounting, and eligibility; USDT is the external entry/exit asset. | Depeg, issuer, custody, legal, reserve, and redemption risks remain for USDY and USDT. |
 | Smart contracts | Open source, verified deployments, layered tests, continuous adversarial review, bounded controls, and public state. | Bugs, integration failures, and upgrade errors remain possible. |
 | Oracle | Threshold guard halts value paths and requires an evidence-linked governance response. | Incorrect or unavailable data can delay deposits and redemptions. |
-| Liquidity and redemption | cUSD+ has a defined USDT redemption path and the app preserves raw USDT as a fallback asset. | InstantManager liquidity, provider availability, network conditions, or compliance actions may delay exits. |
+| Liquidity and redemption | cUSD and cUSD+ have defined, permissionless fee-bearing USDT redemption paths; Emergency Exit can broadcast directly through multiple public BSC nodes and can fall back to sending cUSD/cUSD+ itself. | InstantManager liquidity, provider availability, network conditions, or compliance actions may delay exits. |
 | Permissioning | Minting and provider access follow applicable eligibility rules; users hold cUSD+ rather than raw USDY. | Ondo or another provider may change eligibility or restrict an address or transaction. |
 | Ondo Stocks and market trading | The stock router is source-verified, UUPS-upgradeable only by the 3-of-5 owner Safe, fee-bounded, user-authorized, and designed to return principal, stock tokens, and settlement excess directly to the user. | Market closure, price movement, slippage, issuer, token, broker, custodian, liquidity, attestation, settlement, eligibility, regulatory, tax, provider, and contract-upgrade risks remain. Trading can be delayed, rejected, restricted, or unavailable. |
 | Key recovery | Device-generated keys and personal-cloud recovery avoid a central key vault. | Loss of device/cloud access, platform changes, or recovery defects can affect access. |
@@ -403,12 +413,12 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 
 | Workstream | Completed / current | Next verifiable gate |
 | --- | --- | --- |
-| cUSD+ | Mainnet proxy deployed, upgraded, source-verified, registered for Ondo infrastructure, and wired to production USDY, USDT, InstantManager, and oracle contracts. | Scale funded use while preserving backing, redemption reliability, and transparent governance. |
+| cUSD/cUSD+ fee system | New cUSD UUPS proxy deployed and source-verified; existing cUSD+ proxy upgraded in place; 90-bps external USDT perimeter and fee-free sponsor-only internal wrapper boundary installed. | Monitor fee-event reconciliation, backing, eligibility routing, legacy-client disclosure, and permissionless exits during rollout. |
 | Sponsored transactions | Ownerless EIP-7702 batch delegate deployed and verified; server policy, ledgers, and canary controls implemented. | Expand canary volume and monitor reliability, sponsor cost, and emergency fallbacks. |
-| Transfers | BSC cUSD+/USDT send flows implemented across backend and mobile client. | Controlled production rollout and retained-use measurement. |
-| Merchant payments | BSC payment flow and non-upgradeable 0.9% fee-accrual contract deployed, source-verified, and wired into production. | Expand staged user exposure and measure merchant settlement, repeat usage, and fee accrual. |
-| Payroll | cUSD+ escrow, delegate-signed payouts, optional USDT exit, backend/client flows, and payroll vault deployed, source-verified, and wired into production. | Pilot with businesses, expand staged user exposure, and verify escrow and payout reliability at meaningful volume. |
-| $CONFIO | Fixed-supply token and replacement continuous-curve presale vault deployed, source-verified, re-seeded, and wired into production on BSC. | Fund claim obligations before claims open and keep tokenomics disclosures synchronized with on-chain state. |
+| Transfers | BSC cUSD/cUSD+ friend flows, cross-eligibility fee-free conversion, and invitation escrow implemented across contracts, backend, and mobile client. | Controlled production rollout and retained-use measurement. |
+| Merchant payments | Replacement cUSD+/cUSD payment contract with the separate 0.9% Pay fee deployed, source-verified, and wired into production. | Expand staged user exposure and measure merchant settlement, repeat usage, and fee accrual. |
+| Payroll | Replacement asset-separated cUSD+/cUSD escrow, delegate-signed payouts, backend/client flows, and payroll vault deployed and source-verified. | Pilot with businesses, expand staged user exposure, and verify escrow and payout reliability at meaningful volume. |
+| $CONFIO | Fixed-supply token and cUSD-funded replacement continuous-curve presale vault deployed, source-verified, historical purchases imported, claim obligation funded, and wired into production on BSC. | Keep tokenomics disclosures synchronized with on-chain state and open claims only under the disclosed controls. |
 | $CONFIO rewards | Canonical RewardVault deployed, source-verified, wired to the canonical token, and locked until DEX launch; database-only accrual uses the live presale-curve price when enabled. | Enable database-only accrual when operationally ready; at DEX time, fund a working tranche, activate the short-deadline EIP-712 signer and sponsored client claim flow, and unlock claims. |
 | Ondo Stocks | Dedicated UUPS router proxy deployed and source-verified at `0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`; app, backend, attestation, sponsored execution, direct-to-user delivery, sell-to-savings flow, and fixed 0.30% fee are implemented. | Complete and maintain the provider, sponsor, rehearsal, canary, eligibility, and runtime activation gates before expanding live trading. |
 | Fiat access | Koywe live across seven LATAM markets; Guardarian live for SEPA and card-based access. | Add verified providers and fallback routes without creating hidden dependencies. |
@@ -416,7 +426,7 @@ No blockchain financial product is risk-free. This table is not exhaustive.
 
 ### 13.1 Measurement principles
 
-Confío distinguishes signups, phone-complete users, verified users, funded users, reachable devices, active users, and retained balances. Core operating measures include funded users, cUSD+ TVL, raw USDT balances, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, merchant volume, payroll volume, and country cohorts.
+Confío distinguishes signups, phone-complete users, verified users, funded users, reachable devices, active users, and retained balances. Core operating measures include funded users, cUSD and cUSD+ obligations, backing, conversion fees, gross deposits, redemptions, net inflow, average and median balance, balance retention, fiat-originated inflow, concentration, merchant volume, payroll volume, and country cohorts.
 
 Distribution is measured as a funnel: content reach, store visit, installation, phone completion, identity verification, first funding, retained balance, repeat deposit or transaction, and referral. Organic acquisition is separated from paid campaigns.
 
@@ -424,19 +434,19 @@ Distribution is measured as a funnel: content reach, store visit, installation, 
 
 > **From deployed infrastructure to retained use**
 >
-> The next proof point is sustained consumer adoption on BNB Smart Chain: funded users, repeat deposits, reliable redemptions, retained cUSD+ balances, USDT liquidity, merchant and payroll activity, and measurable fiat-originated inflow across multiple Latin American markets.
+> The next proof point is sustained consumer adoption on BNB Smart Chain: funded users, repeat deposits, reliable redemptions, retained cUSD/cUSD+ balances, USDT liquidity, merchant and payroll activity, and measurable fiat-originated inflow across multiple Latin American markets.
 
 ## 14. Legal disclaimer
 
-This document is provided for informational and technical-reference purposes only. It is not investment, legal, tax, accounting, or financial advice; it is not a prospectus, offer, solicitation, recommendation, or promise of returns. Product descriptions reflect the current design and status as of 10 August 2026 and may change.
+This document is provided for informational and technical-reference purposes only. It is not investment, legal, tax, accounting, or financial advice; it is not a prospectus, offer, solicitation, recommendation, or promise of returns. Product descriptions reflect the current design and status as of 31 August 2026 and may change.
 
-USDT and cUSD+ are not bank deposits and are not insured by a deposit-insurance scheme. Stablecoins, tokenized notes, smart contracts, blockchains, oracles, fiat providers, market makers, custodians, and other infrastructure can fail, be suspended, lose value, or become subject to new rules.
+USDT, cUSD, and cUSD+ are not bank deposits and are not insured by a deposit-insurance scheme. Stablecoins, tokenized notes, smart contracts, blockchains, oracles, fiat providers, market makers, custodians, and other infrastructure can fail, be suspended, lose value, or become subject to new rules.
 
 Any cUSD+ yield is variable, depends on USDY and the vault, and is not guaranteed. USDY access and cUSD+ minting are subject to Ondo eligibility, compliance conditions, provider availability, and applicable law.
 
 Ondo Stocks are tokenized financial instruments and are not bank deposits or insured savings products. Access and trading depend on eligibility, jurisdiction, market hours and availability, Ondo Global Markets attestations and settlement, blockchain operation, and applicable provider terms and law. The displayed market value and eventual execution price may differ, and a user may be unable to purchase, sell, transfer, or redeem an instrument when desired.
 
-$CONFIO is separate from USDT, cUSD+, and USDY. It does not provide a claim on the backing, revenue, equity, assets, or profits of Confío unless definitive terms expressly state otherwise. Token purchasers should review the separate tokenomics, presale terms, smart contracts, vesting state, treasury concentration, and applicable law.
+$CONFIO is separate from USDT, cUSD, cUSD+, and USDY. It does not provide a claim on the backing, revenue, equity, assets, or profits of Confío unless definitive terms expressly state otherwise. Token purchasers should review the separate tokenomics, presale terms, smart contracts, vesting state, treasury concentration, and applicable law.
 
 Readers should review definitive product terms, risk disclosures, smart contracts, provider terms, and local law before using any service.
 
@@ -456,7 +466,7 @@ Readers should review definitive product terms, risk disclosures, smart contract
 
 7. Ondo Finance documentation, “USDY Basics,” accessed July 2026. https://docs.ondo.finance/general-access-products/usdy/basics
 
-8. Confío, “cUSD+ deployment record - BSC mainnet,” updated 10 August 2026. https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
+8. Confío, “cUSD+ deployment record - BSC mainnet,” updated 31 August 2026. https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
 
 9. BscScan, Confío Dollar+ ERC1967 proxy, address `0x3C29417eb4314155e63d4C7D4507852b87763Ed1`. https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code
 

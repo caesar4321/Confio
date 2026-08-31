@@ -13,22 +13,24 @@ pragma solidity ^0.8.24;
  * signature over the exact payout — the caller (Confío's sponsor, paying
  * gas) is untrusted plumbing.
  *
- * TWO ESCROW ASSETS (v2, 2026-08-02). v1 escrowed cUSD+ SHARES only, which
- * silently made Nómina an ELIGIBLE-EMPLOYER-ONLY product: an Ondo-blocked
- * business holds its dollars as raw USDT, the mint that would turn them into
- * shares is refused by the same geo gate, and `deposit` took nothing else —
+ * THREE ESCROW ASSETS. cUSD+ shares and universal cUSD are the active pools;
+ * the old raw-USDT pool is retained so a replacement deployment can migrate
+ * or drain previously parked payroll float without rewriting history. v1
+ * escrowed cUSD+ SHARES only, which silently made Nómina an
+ * ELIGIBLE-EMPLOYER-ONLY product: an Ondo-blocked business could not mint
+ * shares and `deposit` took no non-yield Confío dollar —
  * so `fundableBalance` read 0 and funding failed "insufficient balance"
  * while the business plainly had money. v1 already paid INELIGIBLE employees
  * (atomic redeemToUsdt inside `payout`); nothing handled an ineligible
- * EMPLOYER. Now each business parks either asset — or both, which is the
+ * EMPLOYER. Now each business parks cUSD+ or cUSD — or both, which is the
  * normal state for anyone whose eligibility changed mid-life — and each
  * payout item names the asset it draws from.
  *
  * DESIGN RULES (house invariants):
- *  - Accounting is PER ASSET and never fungible across the two. cUSD+ is
+ *  - Accounting is PER ASSET and never fungible across the pools. cUSD+ is
  *    accounted in SHARES (yield keeps accruing to parked float: share price
- *    rises, share count is what's stored); USDT is accounted in token units
- *    and earns NOTHING. That asymmetry is inherent, not an oversight — an
+ *    rises, share count is what's stored); cUSD and legacy USDT are accounted
+ *    in token units and earn NOTHING. That asymmetry is inherent — an
  *    employer who cannot legally hold the yield-bearing asset cannot be
  *    given yield by moving it into escrow.
  *  - `withdraw` is NEVER pausable, for either asset. Pause covers deposits
@@ -49,15 +51,12 @@ pragma solidity ^0.8.24;
  *
  * Recipient rails mirror send/bsc_flow.py's A/B split. From cUSD+ escrow:
  *  - eligible recipient  → vault.transfer(recipient, netAmount)  (stays cUSD+)
- *  - ineligible/external → CusdPlusVault.redeemToUsdt(netAmount, minUsdtOut,
- *    recipient) — atomic burn → Ondo IM redeem → USDT lands directly at the
- *    recipient, no custody hop.
- * From USDT escrow there is ONE rail: a plain USDT transfer, whatever the
- * recipient's eligibility. This contract cannot mint (Ondo's InstantManager
- * whitelists per caller), and it does not need to: an eligible employee's
- * own sweep mints their USDT into cUSD+ exactly as it does for a ramp
- * deposit. Paying dollars is this contract's job; deciding they should earn
- * is the recipient's.
+ *  - ineligible recipient → CusdPlusVault.unwrapToCusd(netAmount, minUsdtOut,
+ *    recipient) — atomic, sponsor-authorized internal conversion to cUSD,
+ *    with no USDT-perimeter fee.
+ * From cUSD escrow there is one rail: a plain cUSD transfer. The sponsor can
+ * wrap an eligible recipient later for free. Legacy USDT escrow likewise
+ * transfers USDT and exists only for migration/draining.
  *
  * Fee amounts STAY IN THIS CONTRACT (Julian, 07-31: fees sit in each
  * contract — accounting reads straight off the chain): `accruedFee*`
@@ -65,6 +64,7 @@ pragma solidity ^0.8.24;
  * The standing invariants, one per asset:
  *   CUSD_PLUS.balanceOf(this) == Σ escrowShares + accruedFeeShares
  *   USDT.balanceOf(this)      == Σ escrowUsdt   + accruedFeeUsdt
+ *   CUSD.balanceOf(this)      == Σ escrowCusd   + accruedFeeCusd
  */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -76,9 +76,9 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 interface ICusdPlusVault is IERC20 {
-    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to)
-        external
-        returns (uint256 usdtOut);
+    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to) external returns (uint256 usdtOut);
+
+    function unwrapToCusd(uint256 shares, uint256 minCusdOut, address to) external returns (uint256 cusdOut);
 
     /// Per-address freeze on the underlying token.
     function frozen(address account) external view returns (bool);
@@ -86,6 +86,10 @@ interface ICusdPlusVault is IERC20 {
     /// The USDT this vault redeems into. Read at construction so payroll's
     /// escrow token and the redeem branch's payout token cannot diverge.
     function USDT() external view returns (IERC20);
+
+    /// Universal cUSD configured in the upgraded savings vault. Payroll's
+    /// direct cUSD pool must be the same token unwrapToCusd actually emits.
+    function CUSD() external view returns (address);
 }
 
 contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient {
@@ -96,14 +100,14 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     /// defaulting to one of them.
     enum Asset {
         CusdPlus, // 0 — shares; accrues yield while parked
-        Usdt      // 1 — raw token units; accrues nothing
+        Usdt, // 1 — legacy raw-token pool; retained for draining
+        Cusd // 2 — universal payment dollars; new non-yield pool
     }
 
     // ═════════════════════════ EIP-712 ══════════════════════════════════
 
-    bytes32 private constant DOMAIN_TYPEHASH = keccak256(
-        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-    );
+    bytes32 private constant DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant NAME_HASH = keccak256(bytes("ConfioPayrollVault"));
     /// "2": the Payout struct gained `asset` and renamed shares→amount. The
     /// domain already separates deployments by verifyingContract, but a
@@ -115,35 +119,39 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     );
 
     struct Payout {
-        address business;     // whose escrow is debited; domain of the allowlist
-        address recipient;    // employee wallet
-        Asset asset;          // which pool pays — cUSD+ shares or raw USDT
-        uint256 netAmount;    // to the recipient, in the asset's own units
-        uint256 feeAmount;    // to the fee accrual, same units (may be 0)
-        bool redeemToUsdt;    // cUSD+ only: atomic USDT exit instead of transfer
-        uint256 minUsdtOut;   // slippage floor for the redeem branch (else 0)
-        bytes32 itemId;       // server-derived payroll-item id; replay key
-        uint256 deadline;     // unix seconds; signature dies after this
+        address business; // whose escrow is debited; domain of the allowlist
+        address recipient; // employee wallet
+        Asset asset; // which pool pays — cUSD+, legacy USDT, or cUSD
+        uint256 netAmount; // to the recipient, in the asset's own units
+        uint256 feeAmount; // to the fee accrual, same units (may be 0)
+        bool redeemToUsdt; // legacy name: cUSD+ -> cUSD internal routing
+        uint256 minUsdtOut; // legacy name: minimum cUSD out (else 0)
+        bytes32 itemId; // server-derived payroll-item id; replay key
+        uint256 deadline; // unix seconds; signature dies after this
     }
 
     // ═════════════════════════ State ════════════════════════════════════
 
     ICusdPlusVault public immutable CUSD_PLUS;
     IERC20 public immutable USDT;
+    IERC20 public immutable CUSD;
 
     /// Payout fees accrued in-contract, collectible by the owner (Safe).
     uint256 public accruedFeeShares;
     uint256 public accruedFeeUsdt;
+    uint256 public accruedFeeCusd;
     /// Σ escrow per asset — lets each invariant be CHECKED on-chain, and
     /// bounds what `rescueSurplus` may move (audit 2026-07-31, [P3]: value
     /// sent here by direct transfer instead of `deposit` was unrecoverable).
     uint256 public totalEscrowShares;
     uint256 public totalEscrowUsdt;
+    uint256 public totalEscrowCusd;
     /// Parked per business, per asset. Two mappings rather than one nested
     /// one: each asset's invariant then reads as its own line, and the
     /// getters stay the shape the server already indexes.
     mapping(address => uint256) public escrowShares;
     mapping(address => uint256) public escrowUsdt;
+    mapping(address => uint256) public escrowCusd;
     /// business => delegate => may sign payouts. Asset-independent on
     /// purpose: delegation is "may pay this business's payroll", not "may
     /// pay it in one currency".
@@ -152,9 +160,7 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     mapping(bytes32 => bool) public itemUsed;
 
     event Deposited(address indexed business, Asset indexed asset, uint256 amount);
-    event Withdrawn(
-        address indexed business, address indexed to, Asset indexed asset, uint256 amount
-    );
+    event Withdrawn(address indexed business, address indexed to, Asset indexed asset, uint256 amount);
     event DelegateSet(address indexed business, address indexed delegate, bool allowed);
     event ItemCancelled(address indexed business, bytes32 indexed itemId);
     event PaidOut(
@@ -171,9 +177,12 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     event FeesCollected(address indexed to, Asset indexed asset, uint256 amount);
     event SurplusRescued(address indexed to, Asset indexed asset, uint256 amount);
 
-    constructor(address cusdPlus, address owner_) Ownable(owner_) {
-        require(cusdPlus != address(0), "zero address");
+    constructor(address cusdPlus, address cusd, address owner_) Ownable(owner_) {
+        require(cusdPlus != address(0) && cusd != address(0), "zero address");
+        require(cusdPlus.code.length > 0 && cusd.code.length > 0, "not contract");
         CUSD_PLUS = ICusdPlusVault(cusdPlus);
+        require(ICusdPlusVault(cusdPlus).CUSD() == cusd, "cusd mismatch");
+        CUSD = IERC20(cusd);
         IERC20 usdt = ICusdPlusVault(cusdPlus).USDT();
         require(address(usdt) != address(0), "zero usdt");
         USDT = usdt;
@@ -195,9 +204,12 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         if (asset == Asset.CusdPlus) {
             escrowShares[msg.sender] += amount;
             totalEscrowShares += amount;
-        } else {
+        } else if (asset == Asset.Usdt) {
             escrowUsdt[msg.sender] += amount;
             totalEscrowUsdt += amount;
+        } else {
+            escrowCusd[msg.sender] += amount;
+            totalEscrowCusd += amount;
         }
         emit Deposited(msg.sender, asset, amount);
     }
@@ -244,17 +256,17 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         external
         nonReentrant
         whenNotPaused
-        returns (uint256 usdtOut)
+        returns (uint256 routedOut)
     {
         require(p.recipient != address(0), "zero recipient");
         require(p.netAmount > 0, "zero net");
         require(block.timestamp <= p.deadline, "expired");
-        if (p.asset == Asset.Usdt) {
-            // The redeem rail burns cUSD+ shares; there is nothing to burn
-            // here and the money is already USDT. Both fields are pinned so
+        if (p.asset != Asset.CusdPlus) {
+            // The compatibility rail burns cUSD+ shares; there is nothing to
+            // burn for cUSD/legacy USDT. Both fields are pinned so
             // no signed-but-inert value can drift between the server's
             // vector, the signer's, and the chain's.
-            require(!p.redeemToUsdt, "usdt cannot redeem");
+            require(!p.redeemToUsdt, "asset cannot redeem");
             require(p.minUsdtOut == 0, "min out unused");
         }
 
@@ -277,28 +289,39 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
             // owner collects (cUSD+ fees keep accruing yield meanwhile too).
             if (p.asset == Asset.CusdPlus) {
                 accruedFeeShares += p.feeAmount;
-            } else {
+            } else if (p.asset == Asset.Usdt) {
                 accruedFeeUsdt += p.feeAmount;
+            } else {
+                accruedFeeCusd += p.feeAmount;
             }
         }
         if (p.redeemToUsdt) {
-            // Burns OUR shares; USDT lands directly at the recipient.
-            usdtOut = CUSD_PLUS.redeemToUsdt(p.netAmount, p.minUsdtOut, p.recipient);
+            // Legacy ABI name, current semantics: burn OUR shares and route
+            // fee-free universal cUSD directly to the ineligible recipient.
+            // cUSD+ is upgradeable and its cUSD endpoint can be rotated. A
+            // Payroll deployment is pinned to one cUSD pool, so fail closed
+            // until Payroll is redeployed/coordinated with that rotation.
+            require(CUSD_PLUS.CUSD() == address(CUSD), "cusd mismatch");
+            uint256 recipientBefore = CUSD.balanceOf(p.recipient);
+            uint256 sharesBefore = IERC20(address(CUSD_PLUS)).balanceOf(address(this));
+            routedOut = CUSD_PLUS.unwrapToCusd(p.netAmount, p.minUsdtOut, p.recipient);
+            require(CUSD.balanceOf(p.recipient) - recipientBefore >= p.minUsdtOut, "recipient not paid");
+            require(
+                sharesBefore - IERC20(address(CUSD_PLUS)).balanceOf(address(this)) == p.netAmount, "shares not consumed"
+            );
         } else {
             _token(p.asset).safeTransfer(p.recipient, p.netAmount);
         }
         emit PaidOut(
-            p.business, p.recipient, p.itemId, signer,
-            p.asset, p.netAmount, p.feeAmount, p.redeemToUsdt, usdtOut
+            p.business, p.recipient, p.itemId, signer, p.asset, p.netAmount, p.feeAmount, p.redeemToUsdt, routedOut
         );
     }
 
     /// Exposed so the backend and the signing client can assert digest
     /// parity against the chain (three-way vector pattern).
     function payoutDigest(Payout calldata p) public view returns (bytes32) {
-        bytes32 domainSeparator = keccak256(
-            abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this))
-        );
+        bytes32 domainSeparator =
+            keccak256(abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this)));
         bytes32 structHash = keccak256(
             abi.encode(
                 PAYOUT_TYPEHASH,
@@ -321,7 +344,9 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     }
 
     function _token(Asset asset) private view returns (IERC20) {
-        return asset == Asset.CusdPlus ? IERC20(address(CUSD_PLUS)) : USDT;
+        if (asset == Asset.CusdPlus) return IERC20(address(CUSD_PLUS));
+        if (asset == Asset.Usdt) return USDT;
+        return CUSD;
     }
 
     /// The one place escrow decreases, so "you cannot spend what you have
@@ -332,11 +357,16 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
             require(amount <= held, "insufficient escrow");
             escrowShares[business] = held - amount;
             totalEscrowShares -= amount;
-        } else {
+        } else if (asset == Asset.Usdt) {
             uint256 held = escrowUsdt[business];
             require(amount <= held, "insufficient escrow");
             escrowUsdt[business] = held - amount;
             totalEscrowUsdt -= amount;
+        } else {
+            uint256 held = escrowCusd[business];
+            require(amount <= held, "insufficient escrow");
+            escrowCusd[business] = held - amount;
+            totalEscrowCusd -= amount;
         }
     }
 
@@ -345,18 +375,17 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
     // activity; it has no path to escrowed funds — collectFees is bounded
     // by the accrual counter, so escrow can never be drained through it.
 
-    function collectFees(Asset asset, address to, uint256 amount)
-        external
-        onlyOwner
-        nonReentrant
-    {
+    function collectFees(Asset asset, address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "zero recipient");
-        uint256 accrued = asset == Asset.CusdPlus ? accruedFeeShares : accruedFeeUsdt;
+        uint256 accrued =
+            asset == Asset.CusdPlus ? accruedFeeShares : (asset == Asset.Usdt ? accruedFeeUsdt : accruedFeeCusd);
         require(amount > 0 && amount <= accrued, "exceeds accrued fees");
         if (asset == Asset.CusdPlus) {
             accruedFeeShares = accrued - amount;
-        } else {
+        } else if (asset == Asset.Usdt) {
             accruedFeeUsdt = accrued - amount;
+        } else {
+            accruedFeeCusd = accrued - amount;
         }
         _token(asset).safeTransfer(to, amount);
         emit FeesCollected(to, asset, amount);
@@ -370,21 +399,22 @@ contract ConfioPayrollVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         uint256 balance = _token(asset).balanceOf(address(this));
         uint256 owed = asset == Asset.CusdPlus
             ? totalEscrowShares + accruedFeeShares
-            : totalEscrowUsdt + accruedFeeUsdt;
+            : (asset == Asset.Usdt ? totalEscrowUsdt + accruedFeeUsdt : totalEscrowCusd + accruedFeeCusd);
         return balance > owed ? balance - owed : 0;
     }
 
-    function rescueSurplus(Asset asset, address to, uint256 amount)
-        external
-        onlyOwner
-        nonReentrant
-    {
+    function rescueSurplus(Asset asset, address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "zero recipient");
         require(amount > 0 && amount <= surplus(asset), "exceeds surplus");
         _token(asset).safeTransfer(to, amount);
         emit SurplusRescued(to, asset, amount);
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 }

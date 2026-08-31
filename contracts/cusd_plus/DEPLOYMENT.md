@@ -1,5 +1,163 @@
 # cUSD+ deployment record — BSC mainnet
 
+## Coordinated cUSD fee-perimeter release (90 bps) — deployed 2026-08-31
+
+This release keeps the existing cUSD+ proxy and introduces a new UUPS cUSD
+proxy. The contract rollout and post-deploy reads succeeded. Server config now
+contains the new addresses and ships with `CUSD_CONVERSION_FEE_ENABLED=True`;
+the EC2 cutover, migrations, service restart, and live canaries complete the
+activation.
+
+| Contract | Address | Deployment / upgrade transaction |
+| --- | --- | --- |
+| cUSD implementation | `0xf7F2062b4249aD91f061c29Ed059A3073213a93C` | `0x82f28fbd6fed1d353ecd7d49efacaffd61df5495f2cc14eea635148e8eefcfa3` |
+| **cUSD ERC1967 proxy** | **`0x6101cC370635cF2c7f2725EaB010aC407A8d543F`** | `0x052947b6cd8bf6e6c19dd7e3e422d8aa17d91e9f72d6dfb0a1301ec8beb4b3e4` |
+| cUSD+ implementation | `0x1E5D09badBaE8f7b1b81C30B612ef452e7F7eC44` | `0x223cb081c9a984bff1fd92a9a616877f3f69d0c9827984172c29e77c56eb5ba9` |
+| Stock Router implementation | `0xF933976473Ba2291d5BA5934BA8915A058A3C83a` | `0x87b7aae34cac09529697c7cb26ca7bf97e5fa7e0f574aa4a23b0b4d538fb45ba` |
+| cUSD+/Stock coordinated Safe multisend | existing proxies retained | `0x4120a2c2be2151d264e208b0155578b586c6c58a3fbefe0ee5fa7b1db51c57aa` |
+| ConfioPayContract | `0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA` | `0x960d3d4070f7dbc857545027beadbea4fd97877580f215b7cfd909eb1a04137b` |
+| ConfioPayrollVault | `0x851e1a56De5c0ADBB75e904B2E7325e132692027` | `0x34a17c3656add5b7276b7a6f398c31fe5ba3d4da677384ca851f2160542f6aba` |
+| ConfioInviteEscrow | `0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59` | `0xe3ec4ecb06d0f871e4a3eb280e5f65ea2d1f13f4a5639fdb1e19085d4143f2a3` |
+| ConfioPresaleVault | `0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358` | `0x9954eaedadb9c551bab96cffbdc544c454208fecd19a74e1a14d6f33225806e7` |
+
+Safe nonce 14 installed the cUSD/cUSD+/Stock topology atomically. Safe nonce
+15 paused new purchases on the predecessor Presale
+(`0xf668f9c3f141df415266affe3bb42d5b50d86510fd68ccd9efbcdf567a7d8bf4`).
+The frozen snapshot proved three outstanding buyer allocations totaling
+323.97608200352 CONFIO. Safe nonce 16 imported those allocations, funded the
+replacement with exactly 18,037.82608200352 CONFIO (including the unassigned
+17,713.85 migration pool), and wired the CONFIO token
+(`0xe48de62ee2e758e9270c8bc8bb2ec5aa3ed2ad1d48210047005d51e12aeef65f`).
+`legacyPool == 0`; claims remain deliberately locked.
+
+Post-deploy: cUSD fee = 90 bps, sponsor and savings wiring correct, cUSD fully
+backed at zero supply; cUSD+ owner/supply/pPlus/oracle/backing all survived and
+its USDY yield surplus remained untouched; Stock Router retained owner/state,
+uses the new implementation, and reports 30 bps. Fee event scan starts at
+BSC block `119102396`.
+
+BscScan source verification passed for the cUSD implementation and proxy,
+cUSD+ implementation, Stock Router implementation, Pay, Payroll, Invite, and
+Presale deployments. Existing cUSD+ and Stock proxy addresses remain linked by
+their ERC-1967 implementation slots.
+
+Production configuration is part of the coordinated cutover:
+
+- Set `CUSD_VAULT_ADDRESS` to the deployed cUSD proxy.
+- Set `CUSD_VAULT_FEE_EVENTS_START_BLOCK` to the exact earliest block of
+  the cUSD proxy deployment or cUSD+ upgrade. First-boot fee reconciliation
+  deliberately fails closed when this is zero.
+- Set `KOYWE_BSC_SETTLEMENT_ADDRESSES` and
+  `GUARDARIAN_BSC_SETTLEMENT_ADDRESSES` to verified provider settlement
+  senders when a provider API does not supply its BSC transaction hash.
+  Attribution otherwise fails closed; amount/time alone is never accepted
+  as ramp-origin proof.
+
+Record the final values and deployment transaction hashes here before
+enabling client conversion flows. The fee watcher must first reconcile from
+the configured start block.
+
+### Pre-cutover USDT treasury drain — 2026-08-31
+
+At BSC block ~119,099,137, every current and superseded Confío BSC contract
+was inventoried for USDT before the cUSD fee-perimeter deployment. Four live
+contracts held USDT. The 3-of-5 Safe withdrew only provably treasury-owned
+proceeds/fees to the KMS sponsor; Payroll's business escrow was excluded by
+the contract's accounting guard.
+
+| Source | Treasury USDT withdrawn | Transaction |
+| --- | ---: | --- |
+| Stock Router accrued fees | 2.847502847193699995 | `0x53e38846ea34522544641a5f47ed15da2521d973382198301fbbbbf97fb6c2c6` |
+| Pay accrued fees | 0.01017 | `0xc806c46060cd2a8760e5f5b5be6ffd5dc372a44d7bdf81c07c42673633d36c87` |
+| Presale proceeds | 44.939999999983471928 | `0x263816d12606f643c5709465a83987164fd157b12325cf14a4a2b4f34ab0c32d` |
+| Payroll accrued fees | 0.0099 | `0x882001251543df4f8bc7ef77fbfb8bc451fd7fec608438e5625391f9793ab7c9` |
+| **Total** | **47.807572847177171923** | Safe nonces 10–13 |
+
+The sponsor approved exactly that amount to PancakeSwap V2
+(`0x1a7653d11cf399fa1a1c9029cef88960ad0b425f171e75d822de88288176c777`)
+and swapped it through USDT→WBNB to native BNB with a 50 bps slippage cap
+(`0x8a27f0e0e192f3b7c0b30481ece4c2f70d78428e754dcd49e093ac0f05336aae`).
+Net sponsor BNB increased by 0.069463485346723784 after swap gas. The
+sponsor's pre-existing 0.508264376741423219 USDT was deliberately left
+untouched; Pancake allowance returned to zero.
+
+Post-operation reconciliation at Safe nonce 14:
+
+- Stock Router USDT / `accruedUsdtFees`: 0 / 0
+- Pay USDT / accrued USDT fees: 0 / 0
+- Presale USDT: 0
+- Payroll USDT / `totalEscrowUsdt` / accrued fees / surplus:
+  0.0191 / 0.0191 / 0 / 0 — exact protected business escrow
+- cUSD+ vault, Invite, Reward, Vesting, Batch Delegate, and every recorded
+  superseded Pay/Payroll/Presale/Stock deployment: 0 USDT
+- sponsor: 0.508264376741423219 USDT and 0.089988206527913925 BNB
+
+Deployment order:
+
+1. Run `manage.py deploy_cusd_fee_system` as a dry run, review its predicted
+   addresses and Safe calldata, then repeat with `--broadcast --yes-mainnet`.
+   It deploys `CusdVault` implementation + ERC1967 proxy initialized with the
+   3-of-5 Safe and `feeBps = 90`, the new `CusdPlusVault` implementation, and
+   the new `ConfioStockRouter` implementation for the existing router proxy.
+2. Rehearse the live cUSD+ proxy upgrade with
+   `UpgradeRehearsalV5.fork.t.sol`, and compare storage layout before signing.
+3. Execute one Safe multisend in the printed order: register the KMS sponsor
+   on cUSD, set the existing cUSD+ proxy as cUSD's savings vault, upgrade and
+   initialize cUSD+, upgrade the existing Stock Router proxy, then register
+   that proxy through both cUSD+ `setSponsor(router, true)` and
+   `setStockRouter(router)`.
+4. Read back cUSD `owner`, `feeBps`, `savingsVault`, sponsor status and full
+   backing; read back cUSD+ `CUSD`, `stockRouter`, router sponsor status,
+   owner, supply, pPlus, oracle baseline and backing; read back the Stock
+   Router implementation slot, owner, immutable wiring, `stockFeeBps == 30`,
+   and permissionless `sellToUsdt` selector. Any mismatch aborts activation.
+5. Redeploy `ConfioPayContract` with both cUSD+ and cUSD immutables. Verify all
+   six constructor values using `manage.py deploy_pay_contract` before setting
+   `BSC_PAY_CONTRACT_ADDRESS`/the matching ABI flag.
+6. Redeploy the non-upgradeable `ConfioPayrollVault` with cUSD+ and cUSD. Its
+   appended asset 2 is the active non-yield cUSD pool; asset 1 remains a
+   legacy USDT pool only so old escrow can be drained/migrated. Verify
+   `CUSD_PLUS()`, `CUSD()` and `owner()` before switching
+   `BSC_PAYROLL_VAULT_ADDRESS`.
+7. Redeploy `ConfioInviteEscrow` with cUSD+, cUSD, CONFIO, sponsor and Safe.
+   Stop creating invitations in the predecessor first. Existing invitations
+   remain claimable/reclaimable there until drained; new invitations use the
+   replacement. Verify all five immutable/role reads before switching
+   `BSC_INVITE_ESCROW_ADDRESS`.
+8. Pause the predecessor `ConfioPresaleVault`, then snapshot `totalSold`,
+   `totalClaimed`, the unassigned Algorand migration pool, and every BSC
+   buyer's outstanding `purchased - claimed` allocation. Deploy the replacement
+   with cUSD as `PAYMENT_TOKEN` and the exact four aggregate constructor values.
+   Before switching `BSC_PRESALE_VAULT_ADDRESS`, execute `creditLegacy()` for
+   every outstanding BSC buyer and prove that `legacyPool() == 0` and each
+   imported `purchased(address)` equals the snapshot. Never infer these values
+   from aggregate totals alone. Fund the replacement's outstanding CONFIO
+   liability before claims are unlocked; keep the predecessor paused but
+   claim-capable until its final reconciliation is recorded.
+9. Configure server `CUSD_VAULT_ADDRESS`; compile the same proxy into the app
+   as `BSC_CUSD_VAULT_ADDRESS`. Enable the fee feature flag for the coordinated
+   production release, then run a $1
+   entry, Guardarian checkout disclosure, internal cUSD↔cUSD+ round trip,
+   fee-bearing exit, Pay, friend-send, Invite, Payroll, Presale, off-ramp and
+   Emergency Exit canary all pass.
+10. Enable the server/contract path first. Legacy builds remain operational and
+   pay the 0.9% contract fee; for roughly the review window they can still
+   display stale `Comisión de Confío — Gratis`. New builds disclose the exact
+   contract preview and debit gross/send net on exits.
+
+`StockRouter` remains the Ondo-eligible cUSD+/USDT trading path and must not
+accept cUSD, but its existing proxy is part of this coordinated cutover. The
+new implementation uses the vault's dedicated fee-free stock settlement so
+app trades pay only 30 bps; its contract-only `sellToUsdt` exit is
+permissionless and is never called by Confío's client or server.
+
+Rollback before any new cUSD supply exists: disable the feature flag and Safe
+upgrade cUSD+ back to the recorded implementation. After cUSD supply exists,
+never detach the perimeter blindly. A global pause intentionally blocks both
+conversion and raw-token transfers, including Emergency Exit fallbacks; Safe
+must unpause or deploy a reviewed forward upgrade before holders can exit.
+Diagnose first, then restore an audited exit path through governance.
+
 ## CusdPlusVault — deployed 2026-07-10, upgraded 2026-07-13 (v2) and 2026-07-20 (v4)
 
 | Role | Address |
@@ -418,9 +576,10 @@ was somewhere above the call, not that it approved the recipient).
   by `test_storageLayout_pinnedToLiveProxy`.
 - **Future requirement:** when the standalone `contracts/ondo_stocks`
   `ConfioStockRouter` is deployed it MUST get
-  `setSponsor(router, true)` — `sellToSavings` mints to the user while the
-  router is `msg.sender`, so without it every sell-into-savings reverts
-  `recipient not caller`.
+  both `setSponsor(router, true)` and `setStockRouter(router)`. Stock
+  settlement then uses the dedicated fee-free cUSD+↔USDT surfaces, so the
+  user pays exactly the router's fixed 30 bps instead of an additional
+  90 bps conversion fee.
 - **EXECUTED at Safe nonce 4** (signers 1/3/5 via
   `.kms-local/kms_evm_multisig/sign_safe_transaction.py --execute`; the
   script prompts `Type 'execute bsc' to submit:` — that exact phrase, or it

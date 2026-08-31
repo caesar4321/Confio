@@ -48,7 +48,7 @@ const FriendlyTestimonials = () => {
       number: fmtUsd(presale),
       label: t('Recaudado en preventa $CONFIO', 'Raised in $CONFIO presale', '$CONFIO 프리세일 모금액')
     },
-    { number: t('Gratis', 'Free', '무료'), label: t('Para usuarios normales', 'For regular users', '일반 사용자를 위해') }
+    { number: '0%', label: t('Envíos entre usuarios', 'Transfers between users', '사용자 간 송금') }
   ].filter(Boolean);
 
   return (

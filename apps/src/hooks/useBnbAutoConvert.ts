@@ -25,6 +25,7 @@ const BNB_AUTOCONVERT_PARAMS = gql`
       bnbAutoConvertKeepWei
       bnbAutoConvertSlippageBps
       vaultAddress
+      cusdAddress
     }
   }
 `;
@@ -51,6 +52,7 @@ export const useBnbAutoConvert = (isAuthenticated: boolean): void => {
           keepWei: BigInt(params.bnbAutoConvertKeepWei || '0'),
           slippageBps: BigInt(params.bnbAutoConvertSlippageBps ?? 100),
           vaultAddress: params.vaultAddress || undefined,
+          cusdAddress: params.cusdAddress || undefined,
         });
         if (txHash) {
           console.log('[BnbAutoConvert] swept mis-deposited BNB → USDT:', txHash);
@@ -76,5 +78,5 @@ export const useBnbAutoConvert = (isAuthenticated: boolean): void => {
     return () => sub.remove();
   }, [isAuthenticated, params?.bnbAutoConvertEnabled, params?.pancakeRouter,
       params?.bnbAutoConvertMinSwapWei, params?.bnbAutoConvertKeepWei,
-      params?.bnbAutoConvertSlippageBps, params?.vaultAddress]);
+      params?.bnbAutoConvertSlippageBps, params?.vaultAddress, params?.cusdAddress]);
 };

@@ -37,20 +37,19 @@ describe('FriendlyHeroSection stats', () => {
     );
   });
 
-  it('renders only the static fee block when there is no live data', async () => {
+  it('renders no stat row when there is no live data', async () => {
     renderHero([statsMock(null)]);
     await flushQuery();
 
-    expect(screen.getByText('US$0.00')).toBeInTheDocument();
-    expect(screen.getByText('network fees, always')).toBeInTheDocument();
     // No fallbacks: live blocks must not render without data.
+    expect(screen.queryByText('registered users')).not.toBeInTheDocument();
     expect(screen.queryByText('deposited on-chain')).not.toBeInTheDocument();
     expect(screen.queryByText('raised in presale')).not.toBeInTheDocument();
   });
 
-  it('renders deposited and presale blocks floored to whole dollars when live data exists', async () => {
+  it('renders deposited, presale, and registered-user blocks from live data', async () => {
     renderHero([
-      statsMock({ depositedVolumeUsd: '125430.75', presaleRaisedUsd: '3597.21' }),
+      statsMock({ depositedVolumeUsd: '125430.75', presaleRaisedUsd: '3597.21', registeredUsers: 8164 }),
     ]);
     await flushQuery();
 
@@ -58,13 +57,13 @@ describe('FriendlyHeroSection stats', () => {
     expect(screen.getByText('deposited on-chain')).toBeInTheDocument();
     expect(screen.getByText('US$3,597')).toBeInTheDocument();
     expect(screen.getByText('raised in presale')).toBeInTheDocument();
-    // The fee block always accompanies live stats.
-    expect(screen.getByText('US$0.00')).toBeInTheDocument();
+    expect(screen.getByText('8,164')).toBeInTheDocument();
+    expect(screen.getByText('registered users')).toBeInTheDocument();
   });
 
   it('renders a live block for each field independently', async () => {
     renderHero([
-      statsMock({ depositedVolumeUsd: '52642.4', presaleRaisedUsd: null }),
+      statsMock({ depositedVolumeUsd: '52642.4', presaleRaisedUsd: null, registeredUsers: null }),
     ]);
     await flushQuery();
 
@@ -74,13 +73,13 @@ describe('FriendlyHeroSection stats', () => {
 
   it('hides the whole stat row when a custom title is passed', async () => {
     renderHero(
-      [statsMock({ depositedVolumeUsd: '125430.75', presaleRaisedUsd: '3597.21' })],
+      [statsMock({ depositedVolumeUsd: '125430.75', presaleRaisedUsd: '3597.21', registeredUsers: 8164 })],
       { title: 'Custom page title' }
     );
     await flushQuery();
 
     expect(screen.getByText('Custom page title')).toBeInTheDocument();
-    expect(screen.queryByText('US$0.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('registered users')).not.toBeInTheDocument();
     expect(screen.queryByText('deposited on-chain')).not.toBeInTheDocument();
   });
 });

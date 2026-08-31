@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
+from django.conf import settings
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -26,6 +29,7 @@ GUARDARIAN_CONVERSION_LINK_WINDOW = timedelta(days=14)
 GUARDARIAN_WAITING_FOR_AUTOSWAP = 'deposit_confirmed_waiting_for_user_autoswap'
 GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE = 'deposit_confirmed_autoswap_failed_retryable'
 GUARDARIAN_WAITING_FOR_BLOCKCHAIN_MATCH = 'provider_finished_waiting_for_blockchain_match'
+BSC_RAMP_ATTRIBUTION_WINDOW = timedelta(days=14)
 
 
 def _safe_related(instance, attr_name: str):
@@ -165,13 +169,25 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
 
     if ramp_tx.conversion_id and ramp_tx.conversion:
         if ramp_tx.direction == 'on_ramp':
-            return ramp_tx.conversion.to_amount, 'CUSD'
-        return ramp_tx.conversion.from_amount, 'CUSD'
+            token = (
+                'CUSD_PLUS'
+                if ramp_tx.conversion.conversion_type == 'to_savings'
+                else 'CUSD_BSC'
+                if ramp_tx.conversion.conversion_type == 'usdt_to_cusd'
+                else 'CUSD'
+            )
+            return ramp_tx.conversion.to_amount, token
+        token = (
+            'CUSD_PLUS' if ramp_tx.conversion.conversion_type == 'from_savings'
+            else 'CUSD_BSC' if ramp_tx.conversion.conversion_type == 'cusd_to_usdt'
+            else 'CUSD'
+        )
+        return ramp_tx.conversion.from_amount, token
 
     if ramp_tx.crypto_amount_actual is not None:
-        return ramp_tx.crypto_amount_actual, 'CUSD'
+        return ramp_tx.crypto_amount_actual, ramp_tx.final_currency or 'CUSD'
     if ramp_tx.crypto_amount_estimated is not None:
-        return ramp_tx.crypto_amount_estimated, 'CUSD'
+        return ramp_tx.crypto_amount_estimated, ramp_tx.final_currency or 'CUSD'
     return None, ramp_tx.final_currency or 'CUSD'
 
 
@@ -203,6 +219,10 @@ def _find_koywe_ramp_for_conversion(conversion: Conversion) -> RampTransaction |
 def _find_guardarian_ramp_for_conversion(conversion: Conversion) -> RampTransaction | None:
     if conversion.status != 'COMPLETED':
         return None
+    # BSC attribution must arrive through attribute_bsc_ramp_arrival(), which
+    # requires provider-source proof. This fallback is legacy Algorand only;
+    # admitting BSC here turns the old amount/time heuristic back into a fee
+    # and history attribution bypass.
     if conversion.conversion_type != 'usdc_to_cusd':
         return None
     if not conversion.actor_user_id or not conversion.actor_address:
@@ -210,24 +230,169 @@ def _find_guardarian_ramp_for_conversion(conversion: Conversion) -> RampTransact
     if conversion.from_amount is None:
         return None
 
-    return (
-        RampTransaction.objects
-        .filter(
+    query = RampTransaction.objects.filter(
             provider='guardarian',
             direction='on_ramp',
             actor_user_id=conversion.actor_user_id,
             actor_address=conversion.actor_address,
             conversion__isnull=True,
-            usdc_deposit__isnull=False,
             status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'],
             created_at__gte=timezone.now() - GUARDARIAN_CONVERSION_LINK_WINDOW,
         )
-        .filter(
-            usdc_deposit__amount=conversion.from_amount,
-        )
-        .order_by('-created_at')
-        .first()
+    query = query.filter(
+        usdc_deposit__isnull=False,
+        usdc_deposit__amount=conversion.from_amount,
     )
+    return query.order_by('created_at').first()
+
+
+def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
+                               tx_hash: str, log_index: int,
+                               sender_address: str = '') -> RampTransaction | None:
+    """Persist provider-order attribution when its BSC USDT transfer lands."""
+    address = (actor_address or '').lower()
+    if not address or not tx_hash or amount <= 0:
+        return None
+    tolerance = amount * Decimal('0.05')
+
+    def _provider_hash(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {
+                    'bsc_provider_transfer_tx_hash', 'provider_transfer_tx_hash',
+                    'txHash', 'tx_hash', 'transactionHash', 'transaction_hash',
+                } and isinstance(item, str) and re.fullmatch(r'0x[0-9a-fA-F]{64}', item):
+                    return item.lower()
+            for item in value.values():
+                found = _provider_hash(item)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = _provider_hash(item)
+                if found:
+                    return found
+        return None
+
+    def _allowed_senders(provider: str) -> set[str]:
+        setting_name = (
+            'KOYWE_BSC_SETTLEMENT_ADDRESSES'
+            if provider == 'koywe' else 'GUARDARIAN_BSC_SETTLEMENT_ADDRESSES'
+        )
+        raw = getattr(settings, setting_name, ()) or ()
+        if isinstance(raw, str):
+            raw = raw.split(',')
+        return {str(value).strip().lower() for value in raw if str(value).strip()}
+
+    with transaction.atomic():
+        # Overlapping scanners and rewind scans are normal. Lock every live
+        # candidate through selection + claim so two workers cannot attach
+        # different transfer logs to the same sender-only provider order.
+        candidates = list(RampTransaction.objects.select_for_update().filter(
+            destination='cusd_plus', direction='on_ramp',
+            actor_address__iexact=address, conversion__isnull=True,
+            created_at__gte=timezone.now() - BSC_RAMP_ATTRIBUTION_WINDOW,
+        ).exclude(status='FAILED').order_by('created_at'))
+        explicit_matches = []
+        sender_matches = []
+        for ramp in candidates:
+            metadata = dict(ramp.metadata or {})
+            if metadata.get('bsc_arrival_tx_hash'):
+                continue
+            provider_hash = _provider_hash(metadata)
+            if provider_hash:
+                # An explicit provider hash is authoritative. Never let the
+                # broad hot-wallet allowlist override a mismatch and steal a
+                # sibling order with the same amount.
+                if provider_hash != tx_hash.lower():
+                    continue
+                proof = 'explicit'
+            else:
+                if (sender_address or '').lower() not in _allowed_senders(ramp.provider):
+                    continue
+                proof = 'sender'
+            expected = ramp.crypto_amount_actual or ramp.crypto_amount_estimated
+            if expected is None:
+                continue
+            delta = abs(Decimal(expected) - amount)
+            if delta <= tolerance:
+                (explicit_matches if proof == 'explicit' else sender_matches).append(ramp)
+        # Transaction hashes should identify exactly one order. Sender-only
+        # proof is accepted only when it leaves a single possible live order;
+        # otherwise wait for provider data/manual reconciliation rather than
+        # guess.
+        matches = explicit_matches or sender_matches
+        if len(matches) != 1:
+            return None
+        best = matches[0]
+        metadata = dict(best.metadata or {})
+        metadata.update({
+            'bsc_arrival_tx_hash': tx_hash.lower(),
+            'bsc_arrival_log_index': int(log_index),
+            'bsc_arrival_amount': format(amount, 'f'),
+        })
+        best.metadata = metadata
+        best.crypto_amount_actual = amount
+        best.save(update_fields=['metadata', 'crypto_amount_actual', 'updated_at'])
+        return best
+
+
+def _attributed_bsc_ramps(conversion: Conversion) -> list[RampTransaction]:
+    if (conversion.status != 'COMPLETED'
+            or conversion.conversion_type not in ('to_savings', 'usdt_to_cusd')
+            or conversion.from_amount is None):
+        return []
+    address = (conversion.actor_address or conversion.user_bsc_address or '').lower()
+    if not address:
+        return []
+    remaining = Decimal(conversion.from_amount)
+    linked: list[RampTransaction] = []
+    candidates = RampTransaction.objects.filter(
+        destination='cusd_plus', direction='on_ramp',
+        actor_address__iexact=address, conversion__isnull=True,
+        created_at__gte=conversion.created_at - BSC_RAMP_ATTRIBUTION_WINDOW,
+        created_at__lte=conversion.created_at + BSC_RAMP_ATTRIBUTION_WINDOW,
+    ).exclude(status='FAILED').order_by('created_at')
+    for ramp in candidates:
+        arrival = (ramp.metadata or {}).get('bsc_arrival_amount')
+        if arrival in (None, ''):
+            continue
+        try:
+            amount = Decimal(str(arrival))
+        except Exception:
+            continue
+        if amount <= 0 or amount > remaining:
+            continue
+        linked.append(ramp)
+        remaining -= amount
+    return linked
+
+
+def _bsc_ramp_net_allocations(conversion: Conversion,
+                              ramps: list[RampTransaction]) -> list[Decimal]:
+    """Allocate an aggregate conversion net without crediting it twice."""
+    gross = Decimal(conversion.gross_amount_exact or conversion.from_amount)
+    net = Decimal(conversion.net_amount_exact or conversion.to_amount)
+    if gross <= 0:
+        return [Decimal('0') for _ in ramps]
+    grain = Decimal('0.000001')
+    ramp_gross = [
+        Decimal(str((ramp.metadata or {})['bsc_arrival_amount']))
+        for ramp in ramps
+    ]
+    allocations = [
+        (amount * net / gross).quantize(grain, rounding=ROUND_DOWN)
+        for amount in ramp_gross
+    ]
+    # When attributed ramps cover the complete sweep, give the last ramp the
+    # six-decimal remainder so the displayed allocations sum exactly to the
+    # conversion's displayed net. A mixed direct deposit keeps its own share.
+    if ramps and abs(sum(ramp_gross, Decimal('0')) - gross) < grain:
+        allocations[-1] += (
+            Decimal(conversion.to_amount).quantize(grain, rounding=ROUND_DOWN)
+            - sum(allocations, Decimal('0'))
+        )
+    return allocations
 
 
 def _classify_first_deposit_source(user_id: int | None) -> str:
@@ -299,7 +464,11 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
     actor_type, actor_display_name, actor_user, actor_business = _get_guardarian_actor(guardarian_tx)
     direction = 'off_ramp' if guardarian_tx.transaction_type == 'sell' else 'on_ramp'
     final_amount = guardarian_tx.to_amount_actual if direction == 'on_ramp' else guardarian_tx.from_amount
-    final_currency = 'CUSD'
+    is_bsc_dollar = (
+        (guardarian_tx.network or '').upper() in {'BSC', 'BEP20', 'BNB SMART CHAIN'}
+        and (guardarian_tx.to_currency if direction == 'on_ramp' else guardarian_tx.from_currency).upper() == 'USDT'
+    )
+    final_currency = 'USDT BSC' if is_bsc_dollar else 'CUSD'
     ramp_status, status_detail, completed_at = _derive_guardarian_ramp_outcome(guardarian_tx)
     conversion = None
     if direction == 'on_ramp':
@@ -313,6 +482,11 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
             conversion = None
         if conversion:
             final_amount = conversion.to_amount
+            final_currency = (
+                'CUSD+' if conversion.conversion_type == 'to_savings'
+                else 'CUSD' if conversion.conversion_type == 'usdt_to_cusd'
+                else final_currency
+            )
 
     defaults = {
         'provider': 'guardarian',
@@ -329,8 +503,10 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
             if guardarian_tx.onchain_deposit_id
             else guardarian_tx.onchain_withdrawal.actor_address
             if guardarian_tx.onchain_withdrawal_id
-            else ''
+            else (getattr(guardarian_tx.account, 'bsc_address', '') or '')
+            if is_bsc_dollar else ''
         ),
+        'destination': 'cusd_plus' if is_bsc_dollar else 'cusd',
         'fiat_currency': guardarian_tx.from_currency if direction == 'on_ramp' else guardarian_tx.to_currency,
         'fiat_amount': guardarian_tx.from_amount if direction == 'on_ramp' else None,
         'crypto_currency': guardarian_tx.to_currency if direction == 'on_ramp' else guardarian_tx.from_currency,
@@ -340,8 +516,10 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
         'final_amount': final_amount,
         'status_detail': status_detail if not guardarian_tx.status_details else f'{status_detail}: {guardarian_tx.status_details}',
         'metadata': {
+            **(dict(existing_ramp.metadata or {}) if direction == 'on_ramp' and existing_ramp else {}),
             'guardarian_status': guardarian_tx.status,
             'network': guardarian_tx.network,
+            'confio_fee': guardarian_tx.confio_fee_metadata or {},
         },
         'guardarian_transaction': guardarian_tx,
         'usdc_deposit': guardarian_tx.onchain_deposit,
@@ -687,6 +865,48 @@ def handle_ramp_withdrawal_link(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Conversion)
 def handle_ramp_conversion_link(sender, instance, **kwargs):
+    # BSC provider delivery and foreground mint are distinct transactions.
+    # Link through the source-transfer attribution captured by the BSC
+    # scanner, and allow one sweep conversion to settle several arrivals.
+    attributed = _attributed_bsc_ramps(instance)
+    if attributed:
+        allocations = _bsc_ramp_net_allocations(instance, attributed)
+        final_currency = (
+            'CUSD+' if instance.conversion_type == 'to_savings' else 'CUSD'
+        )
+        for ramp_tx, allocated_net in zip(attributed, allocations):
+            ramp_tx.conversion = instance
+            ramp_tx.actor_address = (
+                instance.actor_address or instance.user_bsc_address
+                or ramp_tx.actor_address
+            )
+            ramp_tx.final_amount = allocated_net
+            ramp_tx.final_currency = final_currency
+            ramp_metadata = dict(ramp_tx.metadata or {})
+            ramp_metadata['conversion_allocation'] = {
+                'gross_amount': ramp_metadata['bsc_arrival_amount'],
+                'net_amount': format(allocated_net, 'f'),
+                'conversion_id': str(instance.internal_id),
+            }
+            ramp_tx.metadata = ramp_metadata
+            update_fields = [
+                'conversion', 'actor_address', 'final_amount',
+                'final_currency', 'metadata', 'updated_at',
+            ]
+            if ramp_tx.provider == 'guardarian':
+                ramp_tx.status = 'COMPLETED'
+                ramp_tx.status_detail = 'conversion_completed'
+                ramp_tx.completed_at = ramp_tx.completed_at or timezone.now()
+                update_fields.extend(['status', 'status_detail', 'completed_at'])
+            ramp_tx.save(update_fields=update_fields)
+        # The Conversion remains the exact fee ledger behind the ramp, but a
+        # second user-visible conversion card would double-count one deposit.
+        # Unified rows are derived mirrors, so retract the conversion mirror
+        # after the ramp rows have been materialized.
+        UnifiedTransactionTable.objects.filter(conversion=instance).delete()
+        Conversion.objects.filter(pk=instance.pk).update(source='ramp')
+        return
+
     # ramp_transactions is now a reverse FK manager (was OneToOne). For the
     # signal we only auto-attach if the conversion isn't already linked. If
     # an admin/script has manually linked multiple ramps (consolidated swap
@@ -733,13 +953,11 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
                 ]
             )
             return
-        ramp_tx.save(
-            update_fields=[
-                'conversion',
-                'actor_address',
-                'updated_at',
-            ]
-        )
+        update_fields = ['conversion', 'actor_address', 'updated_at']
+        if ramp_tx.direction == 'on_ramp' and instance.status == 'COMPLETED':
+            ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
+            update_fields.extend(['final_amount', 'final_currency'])
+        ramp_tx.save(update_fields=update_fields)
         return
     ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
     if instance.status == 'COMPLETED':

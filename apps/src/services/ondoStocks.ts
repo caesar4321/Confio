@@ -11,7 +11,11 @@ import {
   BatchCall,
   encodeCall,
 } from './evmWallet';
-import { encodeBuyStockCall, encodeSellStockCall, GmRouterQuote } from './ondoStocksAbi';
+import {
+  encodeBuyStockCall,
+  encodeSellStockCall,
+  GmRouterQuote,
+} from './ondoStocksAbi';
 import { installBscServerTransport } from './bscServerRpc';
 import {
   getErc20Allowance,
@@ -295,7 +299,6 @@ export const sellStockToSavings = async (params: {
   const expectedShares = predictSubscribeSharesOut(expectedNet, pPlusWad, oraclePriceWad);
   const minShares = (expectedShares * 99n) / 100n;
   if (minUsdt <= 0n || minShares <= 0n) throw new Error('El monto es demasiado pequeño para vender.');
-
   const needsApprove = (await getErc20Allowance(wallet.address, config.routerAddress, quote.assetAddress)) < quantity;
   const calls: BatchCall[] = [
     ...(needsApprove ? [approveCall(quote.assetAddress, config.routerAddress)] : []),

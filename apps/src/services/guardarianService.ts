@@ -2,6 +2,8 @@ import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import appCheckService from './appCheckService';
+import DeviceInfo from 'react-native-device-info';
+import { Platform } from 'react-native';
 
 export interface GuardarianTransactionParams {
   amount: number;
@@ -22,6 +24,11 @@ export interface GuardarianTransactionResponse {
   deposit_address?: string;
   deposit_extra_id?: string; // Memo/Tag
   preauth_token?: string;
+  estimated_exchange_amount?: string | number;
+  confio_fee_bps?: number;
+  confio_gross_crypto_amount?: string;
+  confio_fee_amount?: string;
+  confio_net_crypto_amount?: string;
   errors?: Array<{ code?: string; reason?: string }>;
 }
 
@@ -151,6 +158,9 @@ export async function createGuardarianTransaction(
 
   const headers = {
     'Content-Type': 'application/json',
+    'X-Confio-Platform': Platform.OS,
+    'X-Confio-Build': DeviceInfo.getBuildNumber(),
+    'X-Confio-Fee-Capable': '1',
     ...(await getAuthHeaders()),
   };
 

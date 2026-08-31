@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 from notifications.token_display import token_label
 
 # Batch kinds this task is allowed to settle (audit 2026-07-31 P2 isolation).
-PAY_KINDS = ('pay_cusd_plus', 'pay_usdt', 'pay_confio')
+PAY_KINDS = ('pay_cusd_plus', 'pay_cusd', 'pay_usdt', 'pay_confio')
 
 
 

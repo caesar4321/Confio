@@ -112,19 +112,20 @@ def is_ondo_eligible(user) -> bool:
 
 
 def check_savings_mint_eligibility(user, request_meta) -> bool:
-    """The MINT-side geo stack (2026-07-30): phone country AND IP country.
+    """The cUSD+ MINT-side geo stack: phone country AND IP country.
 
-    Since the phase-out, ramp deposits deliver raw USDT-BSC to everyone and
-    THIS check is where geo-eligibility is actually enforced — on the vault
-    subscribeAndMint relayed through SubmitBscTransaction / SponsorBscBatch.
-    Ineligible users simply keep raw USDT ("Confío Dollar" in the app).
+    USDT arrives through the same external rail for everyone. This check
+    decides whether a normal conversion may mint yield-bearing cUSD+. The
+    fee-capable client routes an ineligible holder to universal cUSD instead;
+    legacy direct cUSD+ mint requests remain refused and leave the transient
+    USDT untouched for a later cUSD conversion or Emergency Exit.
 
     Phone fails CLOSED, IP fails OPEN when unresolvable — Cloudflare fronts
     prod so CF-IPCountry dominates, and an unresolvable IP shouldn't strand an
     attested-eligible user's mint. Both encoded in ONDO_POLICY above.
 
-    Gates the MINT only. Exits (redeemToUsdt, raw USDT transfers, off-ramps)
-    are NEVER gated on this.
+    Gates cUSD+ acquisition only. cUSD issuance and every exit remain outside
+    the Ondo eligibility gate.
     """
     return ONDO_POLICY.evaluate(user, request_meta or {}).allowed
 

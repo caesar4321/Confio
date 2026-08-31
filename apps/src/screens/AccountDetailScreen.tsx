@@ -285,7 +285,8 @@ export const AccountDetailScreen = () => {
 
   // Fetch balances in one query to avoid UI flicker (live + presale-locked)
   const isCusd = route.params.accountType === 'cusd';
-  // The savings account (Confío Dollar+ / raw USDT on BSC) is a THIRD variant,
+  // The dollar account (cUSD+ / cUSD, plus transient raw USDT awaiting the
+  // foreground sweep) is a THIRD variant,
   // merged in from the old standalone SavingsScreen so both live in one
   // detail surface with one history, one receipt path and one set of rows.
   const isSavingsAccount = route.params.accountType === 'cusd_plus';
@@ -297,7 +298,7 @@ export const AccountDetailScreen = () => {
   // Which ledger rows belong to this account. Was an inline ternary repeated
   // at five call sites; a third account type made that untenable.
   const accountTokenTypes = React.useMemo(() => {
-    if (isSavingsAccount) return ['CUSD_PLUS', 'USDT'];
+    if (isSavingsAccount) return ['CUSD_PLUS', 'CUSD_BSC', 'USDT'];
     if (isCusd) return activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'];
     return ['CONFIO'];
   }, [isCusd, isSavingsAccount, activeAccount?.isEmployee]);
@@ -310,7 +311,11 @@ export const AccountDetailScreen = () => {
   );
   // cUSD phase-out: while deposits are paused (server flag, singleton is
   // already cached by Home) this screen goes retiro-only — no Recargar.
-  const { savings: ahorrosSavings, usdtBalanceUsd: ahorrosUsdt } = useSavingsPortfolio();
+  const {
+    savings: ahorrosSavings,
+    usdtBalanceUsd: ahorrosUsdt,
+    cusdBalanceUsd: ahorrosCusd,
+  } = useSavingsPortfolio();
   // Moved below useSavingsPortfolio so it can take the polled USDT balance as
   // its arrival trigger: mounting fires the sweep when the user OPENS this
   // screen, but a deposit landing while they sit here needs the balance to
@@ -320,7 +325,7 @@ export const AccountDetailScreen = () => {
   // position + raw wallet USDT): money must never look like it vanished
   // between landing on-chain and minting into the vault.
   const savingsIsYield = ahorrosSavings.enabled;
-  const savingsAccountTotal = ahorrosSavings.balanceUsd + (ahorrosUsdt || 0);
+  const savingsAccountTotal = ahorrosSavings.balanceUsd + (ahorrosCusd || 0) + (ahorrosUsdt || 0);
   // Adaptive precision (2 dp, 3 dp under 1¢) so small savers still see the
   // daily tick; below display resolution the part is omitted entirely —
   // "+$0.00" reads as broken. Savings-only: stocks report in their own row.
@@ -916,6 +921,8 @@ export const AccountDetailScreen = () => {
           // breakdown from the ledger instead of a hardcoded rate.
           feeAmount: tx.feeAmount || undefined,
           netAmount: tx.netAmount || undefined,
+          fromAmount: tx.fromAmount || tx.from_amount || undefined,
+          toAmount: tx.toAmount || tx.to_amount || undefined,
           amount: isConversion
             ? conversionAmount
             : type === 'ramp' && rampDirection === 'on_ramp' && signedRampFiatAmount
@@ -2215,7 +2222,9 @@ export const AccountDetailScreen = () => {
                   // Same verb, per-account destination: the savings account
                   // receives USDT-BSC on its own address, not an Algorand asset.
                   if (isSavingsAccount) {
-                    (navigation as any).navigate('ReceiveSavings', { destination: 'cusd_plus' });
+                    (navigation as any).navigate('ReceiveSavings', {
+                      destination: savingsIsYield ? 'cusd_plus' : 'usdt',
+                    });
                     return;
                   }
                   navigation.navigate('USDCDeposit', {
@@ -2543,7 +2552,7 @@ export const AccountDetailScreen = () => {
             {/* Savings education + partnership (merged from SavingsScreen).
                 ONE education door rather than inline sections: respaldo,
                 tasa, costos and retiros all live in ProtectedSavings. */}
-            {isSavingsAccount && (
+            {isSavingsAccount && savingsIsYield && (
               <>
                 <TouchableOpacity
                   style={styles.howItWorksRow}
@@ -2558,20 +2567,20 @@ export const AccountDetailScreen = () => {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.howItWorksTitle}>¿Cómo funciona?</Text>
                     <Text style={styles.howItWorksSub}>
-                      {savingsIsYield
-                        ? 'Respaldo, rendimiento y costos — sin letra chica'
-                        : 'Respaldo verificable y costos — sin letra chica'}
+                      Respaldo, rendimiento y costos — sin letra chica
                     </Text>
                   </View>
                   <Icon name="chevron-right" size={18} color={colors.text.light} />
                 </TouchableOpacity>
 
                 {/* Partnership: real logo, nominative use. */}
-                <View style={styles.partnerRow}>
-                  <Text style={styles.partnerText}>En alianza con</Text>
-                  <Image source={OndoLogo} style={styles.partnerLogo} />
-                  <Text style={styles.partnerBrand}>Ondo Finance</Text>
-                </View>
+                {savingsIsYield && (
+                  <View style={styles.partnerRow}>
+                    <Text style={styles.partnerText}>En alianza con</Text>
+                    <Image source={OndoLogo} style={styles.partnerLogo} />
+                    <Text style={styles.partnerBrand}>Ondo Finance</Text>
+                  </View>
+                )}
               </>
             )}
 

@@ -30,7 +30,8 @@ def sync_unified_from_cusd_plus_conversion(conv) -> None:
     try:
         from users.models_unified import UnifiedTransactionTable
 
-        to_savings = conv.conversion_type == 'to_savings'
+        conversion_type = conv.conversion_type
+        to_savings = conversion_type == 'to_savings'
         delivered_as_usdt = to_savings and conv.status == 'DELIVERED_USDT'
         if delivered_as_usdt:
             token_type = 'USDT'
@@ -43,18 +44,39 @@ def sync_unified_from_cusd_plus_conversion(conv) -> None:
             description = (
                 f"Conversión: {conv.from_amount} USDT → {conv.to_amount} cUSD+"
             )
-        else:
+        elif conversion_type == 'from_savings':
             token_type = 'USDT'
-            amount = conv.to_amount
+            # The activity row is rendered as an outgoing cUSD+ debit. Show
+            # the exact gross position burned, not the post-fee USDT output.
+            amount = conv.from_amount
             description = (
                 f"Conversión: {conv.from_amount} cUSD+ → {conv.to_amount} USDT"
             )
+        elif conversion_type == 'usdt_to_cusd':
+            token_type = 'CUSD_BSC'
+            amount = conv.to_amount
+            description = (
+                f"Conversión: {conv.from_amount} USDT → {conv.to_amount} cUSD"
+            )
+        elif conversion_type == 'cusd_to_usdt':
+            token_type = 'USDT'
+            # Same convention as from_savings: outgoing history represents
+            # the Confío-dollar debit. The fee/net remain available on the
+            # conversion for the detail view.
+            amount = conv.from_amount
+            description = (
+                f"Conversión: {conv.from_amount} cUSD → {conv.to_amount} USDT"
+            )
+        else:
+            logger.error('unsupported BSC conversion type %r', conversion_type)
+            return
 
         UnifiedTransactionTable.objects.update_or_create(
             conversion=conv,
             defaults={
                 'transaction_type': 'conversion',
                 'amount': str(amount),
+                'fee_amount': str(conv.fee_amount or ''),
                 'token_type': token_type,
                 'status': _STATUS_MAP.get(conv.status, 'PENDING'),
                 'transaction_hash': conv.to_transaction_hash or conv.bridge_arrival_tx or '',

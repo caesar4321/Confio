@@ -148,7 +148,7 @@ export interface BscPayrollAdminParams {
    * a business can hold both, so the CALLER names one — the server used to
    * derive it, which hid the whole USDT pool from anyone still holding a
    * single cUSD+ share. Omit to use the business's default pool. */
-  tokenType?: 'CUSD_PLUS' | 'USDT';
+  tokenType?: 'CUSD_PLUS' | 'CUSD_BSC' | 'USDT';
 }
 
 /** Business escrow op, signed by the BUSINESS EOA (active account must be

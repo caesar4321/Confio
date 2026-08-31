@@ -432,6 +432,10 @@ class RampQuoteType(graphene.ObjectType):
     network_symbol = graphene.String()
     network_display = graphene.String()
     asset_note = graphene.String()
+    confio_fee_amount = graphene.String()
+    confio_fee_bps = graphene.Int()
+    gross_crypto_amount = graphene.String()
+    net_crypto_amount = graphene.String()
 
     countryCode = graphene.String()
     fiatCurrency = graphene.String()
@@ -448,6 +452,10 @@ class RampQuoteType(graphene.ObjectType):
     networkSymbol = graphene.String()
     networkDisplay = graphene.String()
     assetNote = graphene.String()
+    confioFeeAmount = graphene.String()
+    confioFeeBps = graphene.Int()
+    grossCryptoAmount = graphene.String()
+    netCryptoAmount = graphene.String()
 
     def resolve_countryCode(self, info):
         return self.country_code
@@ -493,6 +501,18 @@ class RampQuoteType(graphene.ObjectType):
 
     def resolve_assetNote(self, info):
         return self.asset_note
+
+    def resolve_confioFeeAmount(self, info):
+        return self.confio_fee_amount
+
+    def resolve_confioFeeBps(self, info):
+        return self.confio_fee_bps
+
+    def resolve_grossCryptoAmount(self, info):
+        return self.gross_crypto_amount
+
+    def resolve_netCryptoAmount(self, info):
+        return self.net_crypto_amount
 
 
 class RampOrderType(graphene.ObjectType):
@@ -959,6 +979,10 @@ class CreateRampOrder(graphene.Mutation):
         if decimal_amount <= 0:
             return RampOrderType(success=False, error='Amount must be greater than zero')
 
+        fee_capable_client = str(
+            getattr(info.context, 'META', {}).get('HTTP_X_CONFIO_FEE_CAPABLE', '')
+        ).strip() == '1'
+
         current_account = _get_ramp_account_for_user(info, user)
         if not current_account:
             return RampOrderType(success=False, error='No active account available for ramp operations')
@@ -969,10 +993,40 @@ class CreateRampOrder(graphene.Mutation):
         if destination not in ('cusd', 'cusd_plus'):
             return RampOrderType(success=False, error='destination must be cusd or cusd_plus')
         savings_rail = destination == 'cusd_plus'
-        # Geo-eligibility moved to the MINT (cusd_plus mint gate, 2026-07-30):
-        # everyone may receive USDT-BSC — ineligible users simply keep it raw
-        # ("Confío Dollar"), the vault mint is refused server-side. Exits
-        # (OFF_RAMP) were never gated and still aren't.
+        fee_rollout = savings_rail and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
+        if fee_rollout:
+            try:
+                from cusd_plus.cusd_vault import require_operational
+                require_operational()
+            except Exception:
+                logger.exception('cUSD perimeter preflight failed before Koywe order creation')
+                return RampOrderType(
+                    success=False,
+                    error='Las conversiones de dólares están pausadas temporalmente.',
+                )
+        provider_order_amount = decimal_amount
+        order_fee_preview = None
+        if fee_rollout and normalized_direction == 'OFF_RAMP':
+            try:
+                from cusd_plus.cusd_vault import WAD, preview_redeem_wei
+                gross_wei = int((decimal_amount * WAD).to_integral_value(rounding=ROUND_DOWN))
+                order_fee_preview = preview_redeem_wei(gross_wei)
+                # New builds fund the exact net. An already-shipped build
+                # ignores confioDepositAmountWei and signs the entered amount;
+                # its provider order must therefore remain that amount. It
+                # still pays the 0.9% on top at redemption during the short
+                # review window, but cannot overfund a smaller order.
+                provider_order_amount = (
+                    order_fee_preview.net if fee_capable_client else decimal_amount)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('cUSD fee preview failed during order creation', exc_info=True)
+                return RampOrderType(
+                    success=False,
+                    error='No pudimos calcular la comisión de Confío.',
+                )
+        # Everyone may receive USDT-BSC settlement. Foreground auto-conversion
+        # routes eligible holders to cUSD+ and ineligible holders to cUSD;
+        # raw USDT is never the user-facing balance.
         if savings_rail and not getattr(current_account, 'bsc_address', None):
             return RampOrderType(
                 success=False,
@@ -1012,9 +1066,9 @@ class CreateRampOrder(graphene.Mutation):
                 if savings_rail:
                     from cusd_plus import vault as cusd_plus_vault
                     # The withdrawable dollar is the WHOLE BSC position, in
-                    # whichever leg it currently sits: minted cUSD+ shares plus
-                    # raw USDT that landed but hasn't minted (and never will,
-                    # for an Ondo-ineligible user). Checking raw USDT alone
+                    # whichever leg it currently sits: cUSD+, cUSD, plus raw
+                    # USDT that landed but has not auto-converted yet. Checking
+                    # raw USDT alone
                     # refused users whose money was simply already earning —
                     # the funding batch redeems the shortfall and pays from
                     # both legs, so both are genuinely spendable.
@@ -1030,22 +1084,32 @@ class CreateRampOrder(graphene.Mutation):
                             current_account.bsc_address, fresh=True))
                         / Decimal(10 ** 18)
                     )
+                    cusd_only_usdt = (
+                        Decimal(cusd_plus_vault.cusd_withdrawable_usdt_wei(
+                            current_account.bsc_address))
+                        / Decimal(10 ** 18)
+                    )
                     available_usdt = (
                         Decimal(cusd_plus_vault.withdrawable_usdt_wei(current_account.bsc_address))
                         / Decimal(10 ** 18)
                     )
+                    if fee_rollout:
+                        # Raw USDT is transient settlement money, not a
+                        # normal withdrawal source. Authorizing against it
+                        # lets a just-arrived deposit fund Koywe without ever
+                        # crossing the fee perimeter.
+                        available_usdt -= raw_usdt
                     # Worth is not the same as withdrawable: redeemToUsdt is
                     # whenNotPaused and refuses while the oracle guard is
                     # tripped. Creating an order the client provably cannot
                     # fund just strands it (re-audit [P2] #9).
                     #
-                    # ONLY when a redeem is actually required. Checking this
-                    # unconditionally turned a vault pause into an EXIT GATE
-                    # on people whose withdrawal never touches the vault — an
-                    # Ondo-ineligible user holds raw USDT and their funding is
-                    # a bare USDT.transfer (round 3 [P1] #2). Exits are never
-                    # gated; that is the whole point of the raw-USDT leg.
-                    if raw_usdt < decimal_amount:
+                    # ONLY when a cUSD+ redeem is actually required. Checking
+                    # this unconditionally would turn a cUSD+ pause into an
+                    # exit gate for an ineligible holder funded entirely by
+                    # cUSD, whose exit never touches the savings vault.
+                    required_provider_usdt = provider_order_amount
+                    if cusd_only_usdt < required_provider_usdt:
                         blocked = cusd_plus_vault.redeem_blocked_reason()
                         if blocked:
                             logger.warning('savings off-ramp refused: %s', blocked)
@@ -1054,12 +1118,16 @@ class CreateRampOrder(graphene.Mutation):
                                 error=('Los retiros desde tu ahorro están pausados por un momento. '
                                        'Vuelve a intentar en unos minutos.'),
                             )
-                    if available_usdt < decimal_amount:
+                    # Actual provider funding, after every contract fee. This
+                    # is net for fee-capable builds and gross for legacy
+                    # fee-on-top compatibility.
+                    required_available_usdt = provider_order_amount
+                    if available_usdt < required_available_usdt:
                         return RampOrderType(
                             success=False,
                             error=(
                                 f'No tienes suficiente saldo disponible para este retiro. '
-                                f'Disponible: {available_usdt:.6f}. Requerido: {decimal_amount:.6f}.'
+                                f'Disponible: {available_usdt:.6f}. Requerido: {required_available_usdt:.6f}.'
                             ),
                         )
                 else:
@@ -1200,7 +1268,7 @@ class CreateRampOrder(graphene.Mutation):
                     )
             result = client.create_ramp_order(
                 direction=normalized_direction,
-                amount=decimal_amount,
+                amount=provider_order_amount,
                 fiat_symbol=fiat_currency or _get_country_fiat_currency(resolved_country_code),
                 payment_method_code=payment_method_code,
                 email=koywe_email,
@@ -1263,7 +1331,32 @@ class CreateRampOrder(graphene.Mutation):
         actor_type = 'business' if current_account.account_type == 'business' else 'user'
         actor_display_name = current_account.display_name or user.get_full_name() or user.username or ''
         actor_address = (current_account.bsc_address if savings_rail else current_account.algorand_address) or ''
-        upsert_koywe_ramp_transaction(
+        if fee_rollout and normalized_direction == 'ON_RAMP':
+            try:
+                from cusd_plus.cusd_vault import WAD, preview_mint_wei
+                delivered_wei = int(
+                    (Decimal(str(result.amount_out)) * WAD).to_integral_value(rounding=ROUND_DOWN)
+                )
+                order_fee_preview = preview_mint_wei(delivered_wei)
+            except Exception as exc:  # noqa: BLE001
+                # The provider order may already exist, so this is an
+                # outcome-ambiguous application failure: keep the reservation
+                # for reconciliation instead of inviting a duplicate order.
+                _mark_ambiguous_koywe_reservation(address_reservation)
+                logger.exception('cUSD entry preview failed after Koywe order creation')
+                return RampOrderType(
+                    success=False,
+                    error='La orden fue creada, pero no pudimos calcular el monto final. Contacta a soporte.',
+                )
+
+        order_payload = dict(result.raw_response or {})
+        if order_fee_preview is not None:
+            order_payload['confioGrossAmount'] = format(order_fee_preview.gross, 'f')
+            order_payload['confioFeeAmount'] = format(order_fee_preview.fee, 'f')
+            order_payload['confioNetAmount'] = format(order_fee_preview.net, 'f')
+            order_payload['confioFeeBps'] = order_fee_preview.fee_bps
+            order_payload['confioFeeMode'] = 'gross_debit_net_provider'
+        ramp_tx = upsert_koywe_ramp_transaction(
             destination=destination,
             actor_user=user,
             actor_business=actor_business,
@@ -1281,8 +1374,11 @@ class CreateRampOrder(graphene.Mutation):
             amount_out=result.amount_out,
             next_action_url=result.next_action_url,
             auth_email=koywe_email,
-            order_payload=result.raw_response,
+            order_payload=order_payload,
         )
+        if normalized_direction == 'ON_RAMP' and order_fee_preview is not None:
+            ramp_tx.final_amount = order_fee_preview.net
+            ramp_tx.save(update_fields=['final_amount', 'updated_at'])
 
         return RampOrderType(
             success=True,
@@ -1293,21 +1389,35 @@ class CreateRampOrder(graphene.Mutation):
             fiat_currency=fiat_currency or _get_country_fiat_currency(resolved_country_code),
             payment_method_code=payment_method_code,
             payment_method_display=result.payment_method_display,
-            amount_in=result.amount_in,
-            amount_out=result.amount_out,
+            amount_in=(str(decimal_amount) if fee_capable_client and order_fee_preview else result.amount_in),
+            amount_out=(
+                format(order_fee_preview.net, 'f')
+                if normalized_direction == 'ON_RAMP' and order_fee_preview is not None
+                else result.amount_out
+            ),
             total_change_display=result.total_change_display,
             rate_display=result.rate_display,
             next_step=result.next_step,
             next_action_url=result.next_action_url,
             payment_details=annotate_koywe_deposit_address(
-                result.raw_response, savings_rail=savings_rail,
+                order_payload, savings_rail=savings_rail,
                 allow_funding=_provider_amount_matches(
-                    result.amount_in, decimal_amount,
+                    result.amount_in, provider_order_amount,
                     enforce=(normalized_direction == 'OFF_RAMP'),
+                ),
+                deposit_amount_wei=(
+                    order_fee_preview.net_wei
+                    if fee_capable_client and order_fee_preview is not None
+                    else None
+                ),
+                gross_debit_amount_wei=(
+                    order_fee_preview.gross_wei
+                    if fee_capable_client and order_fee_preview is not None
+                    else None
                 ),
             ),
             instruction_snapshot=build_koywe_instruction_snapshot(
-                order_payload=result.raw_response,
+                order_payload=order_payload,
                 next_action_url=result.next_action_url,
             ),
         )
@@ -1407,6 +1517,7 @@ class LandingStatsType(graphene.ObjectType):
     figures (Koywe grey-box "On-chain Deposited Volume"; presale raised)."""
     deposited_volume_usd = graphene.Float()
     presale_raised_usd = graphene.Float()
+    registered_users = graphene.Int()
 
 
 class Query(graphene.ObjectType):
@@ -1419,7 +1530,7 @@ class Query(graphene.ObjectType):
         from django.core.cache import cache
         from django.db.models import Sum
 
-        cached = cache.get('landing_stats_v1')
+        cached = cache.get('landing_stats_v2')
         if cached:
             return LandingStatsType(**cached)
 
@@ -1430,11 +1541,25 @@ class Query(graphene.ObjectType):
         from presale.models import PresalePhase
         raised = sum((p.total_raised for p in PresalePhase.objects.all()), Decimal('0'))
 
+        # Reuse the canonical admin/$CONFIO summary metric when available.
+        # Its predicate is a completed phone registration—not Didit KYC or MAU.
+        summary = cache.get('stats_summary_v13') or {}
+        registered_users = summary.get('total_users')
+        if registered_users is None:
+            from users.models import User
+            registered_users = (
+                User.objects
+                .exclude(phone_number__isnull=True)
+                .exclude(phone_number='')
+                .count()
+            )
+
         data = {
             'deposited_volume_usd': float(deposited),
             'presale_raised_usd': float(raised),
+            'registered_users': registered_users,
         }
-        cache.set('landing_stats_v1', data, 600)
+        cache.set('landing_stats_v2', data, 600)
         return LandingStatsType(**data)
 
     koywe_bank_info = graphene.List(
@@ -1458,6 +1583,7 @@ class Query(graphene.ObjectType):
         country_code=graphene.String(),
         fiat_currency=graphene.String(),
         payment_method_code=graphene.String(),
+        destination=graphene.String(),
     )
     ramp_order_status = graphene.Field(
         RampOrderStatusType,
@@ -1602,7 +1728,7 @@ class Query(graphene.ObjectType):
             queryset = queryset.filter(supports_off_ramp=True)
         return queryset.select_related('country', 'bank', 'legacy_payment_method')
 
-    def resolve_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None, payment_method_code=None):
+    def resolve_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None, payment_method_code=None, destination=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or "").strip().upper()
         if normalized_direction not in {"ON_RAMP", "OFF_RAMP"}:
@@ -1619,7 +1745,22 @@ class Query(graphene.ObjectType):
         if normalized_direction == "ON_RAMP" and not (payment_method_code or "").strip():
             raise ValidationError("paymentMethodCode is required for on-ramp quotes")
 
-        client = KoyweClient()
+        destination_l = (destination or '').strip().lower()
+        is_bsc_dollar = destination_l == 'cusd_plus'
+        fee_enabled = is_bsc_dollar and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
+        provider_amount = decimal_amount
+        fee_preview = None
+        if fee_enabled and normalized_direction == 'OFF_RAMP':
+            try:
+                from cusd_plus.cusd_vault import WAD, preview_redeem_wei
+                gross_wei = int((decimal_amount * WAD).to_integral_value(rounding=ROUND_DOWN))
+                fee_preview = preview_redeem_wei(gross_wei)
+                provider_amount = fee_preview.net
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('cUSD fee preview failed for off-ramp quote', exc_info=True)
+                raise ValidationError('No pudimos calcular la comisión de Confío.') from exc
+
+        client = KoyweClient(crypto_symbol='USDT BSC') if is_bsc_dollar else KoyweClient()
         if not client.is_configured:
             raise ValidationError("Koywe credentials are not configured on the server")
 
@@ -1648,7 +1789,7 @@ class Query(graphene.ObjectType):
             ) if user and getattr(user, "is_authenticated", False) else None
             quote = client.get_ramp_quote(
                 direction=normalized_direction,
-                amount=decimal_amount,
+                amount=provider_amount,
                 fiat_symbol=resolved_fiat_symbol,
                 payment_method_code=payment_method_code,
                 email=koywe_email,
@@ -1678,12 +1819,35 @@ class Query(graphene.ObjectType):
             )
             raise ValidationError(str(exc))
 
+        if fee_enabled and normalized_direction == 'ON_RAMP':
+            try:
+                from cusd_plus.cusd_vault import WAD, preview_mint_wei
+                gross_wei = int((Decimal(str(quote['amount_out'])) * WAD).to_integral_value(rounding=ROUND_DOWN))
+                fee_preview = preview_mint_wei(gross_wei)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning('cUSD fee preview failed for on-ramp quote', exc_info=True)
+                raise ValidationError('No pudimos calcular la comisión de Confío.') from exc
+
+        confio_fee = fee_preview.fee if fee_preview else Decimal('0')
+        gross_crypto = fee_preview.gross if fee_preview else (
+            Decimal(str(quote['amount_out'])) if normalized_direction == 'ON_RAMP' else decimal_amount
+        )
+        net_crypto = fee_preview.net if fee_preview else gross_crypto
+        amount_in = decimal_amount if normalized_direction == 'OFF_RAMP' else Decimal(str(quote['amount_in']))
+        amount_out = (
+            net_crypto if normalized_direction == 'ON_RAMP'
+            else Decimal(str(quote['amount_out']))
+        )
+
+        def _plain(value):
+            return format(Decimal(value), 'f')
+
         return RampQuoteType(
             direction=quote["direction"],
             country_code=quote.get("country_code") or resolved_country_code,
             fiat_currency=quote.get("fiat_currency") or (fiat_currency or _get_country_fiat_currency(resolved_country_code)),
-            amount_in=str(quote["amount_in"]),
-            amount_out=str(quote["amount_out"]),
+            amount_in=_plain(amount_in),
+            amount_out=_plain(amount_out),
             exchange_rate=str(quote["exchange_rate"]),
             fee_amount=str(quote["fee_amount"]),
             fee_currency=quote["fee_currency"],
@@ -1695,6 +1859,10 @@ class Query(graphene.ObjectType):
             network_symbol=quote["network_symbol"],
             network_display=quote["network_display"],
             asset_note=quote["asset_note"],
+            confio_fee_amount=_plain(confio_fee),
+            confio_fee_bps=fee_preview.fee_bps if fee_preview else 0,
+            gross_crypto_amount=_plain(gross_crypto),
+            net_crypto_amount=_plain(net_crypto),
         )
 
     def resolve_ramp_order_status(self, info, order_id, country_code=None):
@@ -1764,6 +1932,10 @@ class Query(graphene.ObjectType):
                     enforce=(ramp_tx is None
                              or (getattr(ramp_tx, 'direction', '') or '').lower() == 'off_ramp'),
                 ),
+                deposit_amount_wei=_stored_confio_preview_wei(
+                    ramp_tx, 'confioNetAmount'),
+                gross_debit_amount_wei=_stored_confio_preview_wei(
+                    ramp_tx, 'confioGrossAmount'),
             ),
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=result.raw_response,
@@ -1961,6 +2133,25 @@ def _get_koywe_destination_address(*, current_account) -> str | None:
 # collide with a provider field.
 CONFIO_DEPOSIT_ADDRESS_KEY = 'confioDepositAddress'
 CONFIO_DEPOSIT_NETWORK_KEY = 'confioDepositNetwork'
+CONFIO_DEPOSIT_AMOUNT_WEI_KEY = 'confioDepositAmountWei'
+CONFIO_GROSS_DEBIT_AMOUNT_WEI_KEY = 'confioGrossDebitAmountWei'
+
+
+def _stored_confio_preview_wei(ramp_tx, field: str) -> int | None:
+    """Recover a creation-time fee voucher after app close/resume."""
+    if ramp_tx is None:
+        return None
+    created = ((getattr(ramp_tx, 'metadata', None) or {}).get(
+        'provider_payload_created') or {})
+    raw = created.get(field)
+    if raw is None:
+        return None
+    try:
+        value = Decimal(str(raw))
+        wei = int((value * Decimal(10 ** 18)).to_integral_value(rounding=ROUND_DOWN))
+        return wei if wei > 0 else None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 # Documented Koywe fields that carry the deposit address, ORDER-SPECIFIC
 # FIRST. `providedAddress` is ranked last on purpose: koywe_client's
@@ -2033,7 +2224,9 @@ def _provider_amount_matches(provider_amount_in, requested, *,
 
 
 def annotate_koywe_deposit_address(raw_response, *, savings_rail: bool,
-                                   allow_funding: bool = True):
+                                   allow_funding: bool = True,
+                                   deposit_amount_wei: int | None = None,
+                                   gross_debit_amount_wei: int | None = None):
     """Resolve the deposit address ONCE, server-side, from a documented field.
 
     The client used to walk every string in this blob and fund the first
@@ -2052,6 +2245,8 @@ def annotate_koywe_deposit_address(raw_response, *, savings_rail: bool,
     annotated = dict(raw_response)
     annotated.pop(CONFIO_DEPOSIT_ADDRESS_KEY, None)   # never trust an echo
     annotated.pop(CONFIO_DEPOSIT_NETWORK_KEY, None)
+    annotated.pop(CONFIO_DEPOSIT_AMOUNT_WEI_KEY, None)
+    annotated.pop(CONFIO_GROSS_DEBIT_AMOUNT_WEI_KEY, None)
 
     if not allow_funding:
         # The caller could not reconcile what the provider is charging with
@@ -2120,6 +2315,23 @@ def annotate_koywe_deposit_address(raw_response, *, savings_rail: bool,
         annotated[CONFIO_DEPOSIT_NETWORK_KEY] = 'ALGO'
 
     annotated[CONFIO_DEPOSIT_ADDRESS_KEY] = candidate
+    if deposit_amount_wei is not None:
+        amount_wei = int(deposit_amount_wei)
+        if amount_wei <= 0:
+            logger.error('Refusing to vouch for a non-positive provider amount')
+            annotated.pop(CONFIO_DEPOSIT_ADDRESS_KEY, None)
+            annotated.pop(CONFIO_DEPOSIT_NETWORK_KEY, None)
+            return annotated
+        annotated[CONFIO_DEPOSIT_AMOUNT_WEI_KEY] = str(amount_wei)
+    if gross_debit_amount_wei is not None:
+        gross_wei = int(gross_debit_amount_wei)
+        if gross_wei <= 0:
+            logger.error('Refusing to vouch for a non-positive gross debit')
+            annotated.pop(CONFIO_DEPOSIT_ADDRESS_KEY, None)
+            annotated.pop(CONFIO_DEPOSIT_NETWORK_KEY, None)
+            annotated.pop(CONFIO_DEPOSIT_AMOUNT_WEI_KEY, None)
+            return annotated
+        annotated[CONFIO_GROSS_DEBIT_AMOUNT_WEI_KEY] = str(gross_wei)
     return annotated
 
 

@@ -244,10 +244,33 @@ const extractEvmAddress = (paymentDetails: unknown): string | null => {
   return vouched;
 };
 
+const extractVouchedDepositAmountWei = (paymentDetails: unknown): bigint | null => {
+  const parsed = parsePaymentDetails(paymentDetails);
+  const raw = String(parsed?.confioDepositAmountWei || '').trim();
+  if (!/^[1-9][0-9]*$/.test(raw)) return null;
+  try {
+    return BigInt(raw);
+  } catch {
+    return null;
+  }
+};
+
+const extractVouchedGrossDebitWei = (paymentDetails: unknown): bigint | null => {
+  const parsed = parsePaymentDetails(paymentDetails);
+  const raw = String(parsed?.confioGrossDebitAmountWei || '').trim();
+  if (!/^[1-9][0-9]*$/.test(raw)) return null;
+  try {
+    return BigInt(raw);
+  } catch {
+    return null;
+  }
+};
+
 export const tryFundKoyweSavingsOffRampInBackground = async ({
   amountMicros,
   paymentDetails,
   vaultAddress,
+  cusdAddress,
 }: {
   /** The order's canonical amount in micro-units — the SAME BigInt the order
    *  was created with, never a re-parsed float (see utils/tokenAmount). */
@@ -255,6 +278,8 @@ export const tryFundKoyweSavingsOffRampInBackground = async ({
   paymentDetails: unknown;
   /** cUSD+ vault proxy; omit when the user holds only raw USDT. */
   vaultAddress?: string | null;
+  /** Universal cUSD proxy for non-yield balances. */
+  cusdAddress?: string | null;
 }): Promise<FundingResult> => {
   const destinationAddress = extractEvmAddress(paymentDetails);
   if (!destinationAddress) {
@@ -265,7 +290,10 @@ export const tryFundKoyweSavingsOffRampInBackground = async ({
     return { status: 'failed', reason: 'invalid_amount', destinationAddress };
   }
   const { microsToWei } = await import('../utils/tokenAmount');
-  const amountWei = microsToWei(amountMicros);
+  // Fee-capable servers vouch for the contract-previewed NET provider
+  // amount. Legacy servers omit it, preserving the old exact-input behavior.
+  const amountWei = extractVouchedDepositAmountWei(paymentDetails) ?? microsToWei(amountMicros);
+  const grossDebitWei = extractVouchedGrossDebitWei(paymentDetails);
 
   // NOTE: there is NO durable one-payment-per-order guard here yet. A first
   // attempt at one stored its state in RampTransaction.metadata, which the
@@ -288,7 +316,9 @@ export const tryFundKoyweSavingsOffRampInBackground = async ({
     const res = await fundUsdtDestination({
       to: destinationAddress,
       amountWei,
+      grossDebitWei,
       vaultAddress,
+      cusdAddress,
     });
     return { status: 'submitted', transactionId: res.txHash, destinationAddress };
   } catch (error: any) {

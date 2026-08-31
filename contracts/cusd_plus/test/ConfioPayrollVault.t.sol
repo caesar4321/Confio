@@ -3,21 +3,32 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {CusdPlusVault, IRWADynamicOracle, IOndoInstantManager} from "../CusdPlusVault.sol";
 import {ConfioPayrollVault} from "../ConfioPayrollVault.sol";
+import {MockCusdFeePerimeter} from "./MockCusdFeePerimeter.sol";
 
 // ── Mocks (CusdPlusVault.t.sol pattern: real vault, mocked Ondo edge) ────
 
 contract MockToken is ERC20 {
     constructor(string memory n) ERC20(n, n) {}
-    function mint(address to, uint256 amt) external { _mint(to, amt); }
+
+    function mint(address to, uint256 amt) external {
+        _mint(to, amt);
+    }
 }
 
 contract MockOracle is IRWADynamicOracle {
     uint256 public price = 1e18;
-    function setPrice(uint256 p) external { price = p; }
-    function getPrice() external view returns (uint256) { return price; }
+
+    function setPrice(uint256 p) external {
+        price = p;
+    }
+
+    function getPrice() external view returns (uint256) {
+        return price;
+    }
 }
 
 contract MockInstantManager is IOndoInstantManager {
@@ -63,6 +74,7 @@ contract ConfioPayrollVaultTest is Test {
     MockInstantManager im;
     CusdPlusVault vault; // via proxy
     ConfioPayrollVault payroll;
+    MockCusdFeePerimeter cusd;
 
     address treasury = makeAddr("treasury");
     address safeOwner = makeAddr("safeOwner");
@@ -91,22 +103,19 @@ contract ConfioPayrollVaultTest is Test {
         usdt.mint(address(im), 100_000_000e18);
         usdy.mint(address(im), 100_000_000e18);
 
-        CusdPlusVault impl = new CusdPlusVault(
-            address(usdy), address(usdt), address(im), address(oracle), 1500
-        );
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(CusdPlusVault.initialize, (treasury))
-        );
+        CusdPlusVault impl = new CusdPlusVault(address(usdy), address(usdt), address(im), address(oracle), 1500);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), abi.encodeCall(CusdPlusVault.initialize, (treasury)));
         vault = CusdPlusVault(address(proxy));
+        cusd = new MockCusdFeePerimeter(usdt, 0);
+        vm.prank(treasury);
+        vault.initializeCusd(address(cusd));
         // Mints are sponsor-gated (2026-07-31). Forge leaves tx.origin as
         // the default sender under vm.prank, which mirrors production:
         // user EOA = msg.sender, Confio's KMS sponsor = tx.origin.
         vm.prank(treasury);
         vault.setSponsor(tx.origin, true);
 
-
-        payroll = new ConfioPayrollVault(address(vault), safeOwner);
+        payroll = new ConfioPayrollVault(address(vault), address(cusd), safeOwner);
 
         // Business funds its payroll float in BOTH assets — the normal state
         // for an employer whose Ondo eligibility changed mid-life, and the
@@ -123,14 +132,17 @@ contract ConfioPayrollVaultTest is Test {
         vm.stopPrank();
     }
 
+    function test_constructor_rejects_cusd_mismatch() public {
+        MockCusdFeePerimeter other = new MockCusdFeePerimeter(usdt, 0);
+        vm.expectRevert("cusd mismatch");
+        new ConfioPayrollVault(address(vault), address(other), safeOwner);
+    }
+
     ConfioPayrollVault.Asset constant CUSD_PLUS = ConfioPayrollVault.Asset.CusdPlus;
     ConfioPayrollVault.Asset constant USDT_ASSET = ConfioPayrollVault.Asset.Usdt;
+    ConfioPayrollVault.Asset constant CUSD_ASSET = ConfioPayrollVault.Asset.Cusd;
 
-    function _payout(bytes32 itemId, bool redeem)
-        internal
-        view
-        returns (ConfioPayrollVault.Payout memory)
-    {
+    function _payout(bytes32 itemId, bool redeem) internal view returns (ConfioPayrollVault.Payout memory) {
         return ConfioPayrollVault.Payout({
             business: business,
             recipient: employee,
@@ -146,21 +158,19 @@ contract ConfioPayrollVaultTest is Test {
 
     /// Same payout, drawn from the raw-USDT pool. There is only one rail
     /// out of it, so `redeemToUsdt`/`minUsdtOut` are pinned to zero.
-    function _usdtPayout(bytes32 itemId)
-        internal
-        view
-        returns (ConfioPayrollVault.Payout memory)
-    {
+    function _usdtPayout(bytes32 itemId) internal view returns (ConfioPayrollVault.Payout memory) {
         ConfioPayrollVault.Payout memory p = _payout(itemId, false);
         p.asset = USDT_ASSET;
         return p;
     }
 
-    function _sign(ConfioPayrollVault.Payout memory p, uint256 key)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function _cusdPayout(bytes32 itemId) internal view returns (ConfioPayrollVault.Payout memory) {
+        ConfioPayrollVault.Payout memory p = _payout(itemId, false);
+        p.asset = CUSD_ASSET;
+        return p;
+    }
+
+    function _sign(ConfioPayrollVault.Payout memory p, uint256 key) internal view returns (bytes memory) {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, payroll.payoutDigest(p));
         return abi.encodePacked(r, s, v);
     }
@@ -173,6 +183,25 @@ contract ConfioPayrollVaultTest is Test {
         payroll.withdraw(CUSD_PLUS, 2_000e18, business);
         assertEq(payroll.escrowShares(business), 3_000e18);
         assertEq(vault.balanceOf(business), 7_000e18);
+    }
+
+    function test_cusd_pool_deposit_payout_and_fee_invariant() public {
+        deal(address(cusd), business, 1_000e18);
+        vm.startPrank(business);
+        IERC20(address(cusd)).approve(address(payroll), type(uint256).max);
+        payroll.deposit(CUSD_ASSET, 1_000e18);
+        vm.stopPrank();
+
+        ConfioPayrollVault.Payout memory p = _cusdPayout(bytes32("cusd-pay"));
+        vm.prank(sponsor);
+        payroll.payout(p, _sign(p, delegateKey));
+
+        assertEq(IERC20(address(cusd)).balanceOf(employee), 100e18);
+        assertEq(payroll.escrowCusd(business), 899e18);
+        assertEq(payroll.accruedFeeCusd(), 1e18);
+        assertEq(
+            IERC20(address(cusd)).balanceOf(address(payroll)), payroll.totalEscrowCusd() + payroll.accruedFeeCusd()
+        );
     }
 
     function test_withdraw_beyond_escrow_reverts() public {
@@ -216,8 +245,7 @@ contract ConfioPayrollVaultTest is Test {
         assertEq(payroll.accruedFeeShares(), 1e18, "fee accrues in-contract");
         assertEq(payroll.escrowShares(business), 5_000e18 - 101e18);
         // The standing invariant: contract balance = Σ escrow + accrued fees.
-        assertEq(vault.balanceOf(address(payroll)),
-                 payroll.escrowShares(business) + payroll.accruedFeeShares());
+        assertEq(vault.balanceOf(address(payroll)), payroll.escrowShares(business) + payroll.accruedFeeShares());
     }
 
     function test_payout_transfer_by_business_itself() public {
@@ -227,16 +255,31 @@ contract ConfioPayrollVaultTest is Test {
         assertEq(vault.balanceOf(employee), 100e18);
     }
 
-    // ── Payout: redeem branch ────────────────────────────────────────
+    // ── Payout: cUSD compatibility branch (legacy ABI names) ─────────
 
-    function test_payout_redeem_lands_usdt_at_recipient() public {
+    function test_payout_route_lands_cusd_at_recipient() public {
         ConfioPayrollVault.Payout memory p = _payout("item-3", true);
         vm.prank(sponsor);
-        uint256 usdtOut = payroll.payout(p, _sign(p, delegateKey));
-        assertEq(vault.balanceOf(employee), 0, "no shares on redeem branch");
-        assertEq(usdt.balanceOf(employee), usdtOut);
-        assertGe(usdtOut, 99e18, "minOut honored");
+        uint256 cusdOut = payroll.payout(p, _sign(p, delegateKey));
+        assertEq(vault.balanceOf(employee), 0, "no shares on route branch");
+        assertEq(cusd.balanceOf(employee), cusdOut);
+        assertGe(cusdOut, 99e18, "minOut honored");
+        assertEq(usdt.balanceOf(employee), 0, "internal route must not deliver USDT");
         assertEq(payroll.accruedFeeShares(), 1e18, "fee accrues in shares");
+    }
+
+    function test_payout_route_fails_closed_after_cusd_rotation() public {
+        MockCusdFeePerimeter other = new MockCusdFeePerimeter(usdt, 0);
+        vm.prank(treasury);
+        vault.setCusdVault(address(other));
+
+        ConfioPayrollVault.Payout memory p = _payout("item-rotated-cusd", true);
+        bytes memory sig = _sign(p, delegateKey);
+        vm.expectRevert("cusd mismatch");
+        vm.prank(sponsor);
+        payroll.payout(p, sig);
+        assertEq(payroll.escrowShares(business), 5_000e18);
+        assertFalse(payroll.itemUsed(keccak256(abi.encodePacked(business, bytes32("item-rotated-cusd")))));
     }
 
     function test_payout_redeem_slippage_reverts_whole_payout() public {
@@ -365,11 +408,11 @@ contract ConfioPayrollVaultTest is Test {
         oracle.setPrice(1.01e18); // USDY appreciates (within the drift guard)
         vault.accrue();
         assertEq(payroll.escrowShares(business), before, "share count fixed");
-        // The same 100-share payout now redeems to MORE USDT.
+        // The same 100-share payout now unwraps to MORE cUSD.
         ConfioPayrollVault.Payout memory p = _payout("item-15", true);
         vm.prank(sponsor);
-        uint256 usdtOut = payroll.payout(p, _sign(p, delegateKey));
-        assertGt(usdtOut, 100e18, "yield accrued to escrowed float");
+        uint256 cusdOut = payroll.payout(p, _sign(p, delegateKey));
+        assertGt(cusdOut, 100e18, "yield accrued to escrowed float");
     }
 
     // ── USDT escrow: the Ondo-blocked employer's rail ────────────────
@@ -425,7 +468,7 @@ contract ConfioPayrollVaultTest is Test {
         p.minUsdtOut = 99e18;
         bytes memory sig = _sign(p, delegateKey);
         vm.prank(sponsor);
-        vm.expectRevert("usdt cannot redeem");
+        vm.expectRevert("asset cannot redeem");
         payroll.payout(p, sig);
     }
 
@@ -469,8 +512,7 @@ contract ConfioPayrollVaultTest is Test {
         uint256 before = payroll.escrowUsdt(business);
         oracle.setPrice(1.01e18);
         vault.accrue();
-        assertEq(payroll.escrowUsdt(business), before,
-                 "raw USDT is not a yield-bearing position, in escrow or out");
+        assertEq(payroll.escrowUsdt(business), before, "raw USDT is not a yield-bearing position, in escrow or out");
     }
 
     function test_usdt_withdraw_works_while_paused() public {
@@ -554,10 +596,7 @@ contract ConfioPayrollVaultTest is Test {
         vm.prank(sponsor);
         payroll.payout(p, _sign(p, delegateKey));
         assertEq(payroll.totalEscrowUsdt(), payroll.escrowUsdt(business));
-        assertEq(
-            usdt.balanceOf(address(payroll)),
-            payroll.totalEscrowUsdt() + payroll.accruedFeeUsdt()
-        );
+        assertEq(usdt.balanceOf(address(payroll)), payroll.totalEscrowUsdt() + payroll.accruedFeeUsdt());
     }
 
     function test_usdt_address_derived_from_the_vault() public view {
@@ -572,11 +611,7 @@ contract ConfioPayrollVaultTest is Test {
     // pinned: `asset` sits inside the struct hash, so a client that dropped
     // it would still produce a plausible-looking digest for the other pool.
 
-    function _vectorPayout(ConfioPayrollVault.Asset asset)
-        internal
-        pure
-        returns (ConfioPayrollVault.Payout memory)
-    {
+    function _vectorPayout(ConfioPayrollVault.Asset asset) internal pure returns (ConfioPayrollVault.Payout memory) {
         bool redeem = asset == ConfioPayrollVault.Asset.CusdPlus;
         return ConfioPayrollVault.Payout({
             business: 0x1111111111111111111111111111111111111111,
@@ -699,9 +734,6 @@ contract ConfioPayrollVaultTest is Test {
         vm.prank(sponsor);
         payroll.payout(p, _sign(p, delegateKey));
         assertEq(payroll.totalEscrowShares(), payroll.escrowShares(business));
-        assertEq(
-            vault.balanceOf(address(payroll)),
-            payroll.totalEscrowShares() + payroll.accruedFeeShares()
-        );
+        assertEq(vault.balanceOf(address(payroll)), payroll.totalEscrowShares() + payroll.accruedFeeShares());
     }
 }

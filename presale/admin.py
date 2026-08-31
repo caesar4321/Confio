@@ -1204,6 +1204,7 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         'cusd_amount',
         'confio_amount',
         'price_per_token',
+        'status',
         'transaction_hash',
         'from_address',
         'accepted_terms_version',
@@ -1294,7 +1295,10 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         # Prevent manual creation of purchases
         return False
     
-    actions = ['mark_as_completed', 'mark_as_failed']
+    # Completion is a chain-derived state transition. Never expose an admin
+    # action that can turn a typed hash (including pending/reverted) into real
+    # CONFIO migration credit; reconciliation tasks own that transition.
+    actions = ['mark_as_failed']
     
     def mark_as_completed(self, request, queryset):
         # This action used to FORGE exactly the state the rest of the system
@@ -1309,6 +1313,7 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         # already carry the on-chain hash proving it was broadcast.
         from django.db import transaction
         from django.utils import timezone
+        from users.models_unified import UnifiedTransactionTable
 
         completed = 0
         unpaid = []
@@ -1329,9 +1334,14 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
                 # Both real confirmers increment the locked limit. This action
                 # used to skip it, so manually completed purchases did not
                 # count against the user's per-phase cap.
-                upl.total_purchased += purchase.cusd_amount
+                upl.total_purchased += (
+                    purchase.cusd_amount_exact or purchase.cusd_amount
+                )
                 upl.last_purchase_at = timezone.now()
                 upl.save(update_fields=['total_purchased', 'last_purchase_at'])
+                UnifiedTransactionTable.objects.filter(
+                    presale_purchase=purchase,
+                ).update(status='CONFIRMED', transaction_hash=tx_hash)
                 completed += 1
 
         self.message_user(request, f"{completed} purchase(s) marked as completed.")
@@ -1358,20 +1368,46 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         # Failing it here would free the reservation for an order that
         # actually took the user's funds.
         from blockchain.models import SponsoredBatch
-        candidates = queryset.filter(status__in=['pending', 'processing'])
-        broadcast_ids = set(
-            candidates.exclude(transaction_hash='')
-                      .exclude(transaction_hash__isnull=True)
-                      .values_list('id', flat=True)
+        from django.db import transaction
+        from users.models_unified import UnifiedTransactionTable
+        candidate_ids = list(
+            queryset.filter(status__in=['pending', 'processing'])
+                    .values_list('id', flat=True)
         )
-        live_ids = set(
-            SponsoredBatch.objects.filter(
-                kind='presale_buy',
-                source_id__in=list(candidates.values_list('id', flat=True)),
-                status__in=('signed', 'sent', 'confirmed'),
-            ).values_list('source_id', flat=True)
-        )
-        updated = candidates.exclude(id__in=(live_ids | broadcast_ids)).update(status='failed')
+        with transaction.atomic():
+            # submit_purchase takes this same purchase lock. Hold it while
+            # checking both transaction hash and durable batch state so a
+            # concurrent broadcast cannot slip between the check and failure.
+            locked = list(
+                PresalePurchase.objects.select_for_update()
+                .filter(id__in=candidate_ids, status__in=['pending', 'processing'])
+            )
+            locked_ids = [purchase.id for purchase in locked]
+            broadcast_ids = {
+                purchase.id for purchase in locked
+                if (purchase.transaction_hash or '').strip()
+            }
+            live_ids = set(
+                SponsoredBatch.objects.filter(
+                    kind='presale_buy',
+                    source_id__in=locked_ids,
+                    status__in=('signed', 'sent', 'confirmed'),
+                ).values_list('source_id', flat=True)
+            )
+            failed_ids = [
+                purchase_id for purchase_id in locked_ids
+                if purchase_id not in live_ids and purchase_id not in broadcast_ids
+            ]
+            updated = PresalePurchase.objects.filter(id__in=failed_ids).update(
+                status='failed'
+            )
+            UnifiedTransactionTable.objects.filter(
+                presale_purchase_id__in=failed_ids,
+                status__in=('PENDING', 'PENDING_SIG', 'SPONSORING', 'SIGNED', 'SUBMITTED'),
+            ).update(
+                status='FAILED',
+                error_message='La compra fue cancelada antes de enviarse.',
+            )
         self.message_user(request, f"{updated} purchase(s) marked as failed.")
         if broadcast_ids - live_ids:
             self.message_user(

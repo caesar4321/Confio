@@ -34,11 +34,11 @@ describe('fmtUsd', () => {
 });
 
 describe('LANDING_STATS query', () => {
-  it('requests both traction fields from landingStats', () => {
+  it('requests all public traction fields from landingStats', () => {
     const selections = LANDING_STATS.definitions[0].selectionSet.selections[0]
       .selectionSet.selections.map((s) => s.name.value);
     expect(selections).toEqual(
-      expect.arrayContaining(['depositedVolumeUsd', 'presaleRaisedUsd'])
+      expect.arrayContaining(['depositedVolumeUsd', 'presaleRaisedUsd', 'registeredUsers'])
     );
   });
 });

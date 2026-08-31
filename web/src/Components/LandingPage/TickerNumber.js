@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fmtAmount } from './landingStats';
 
 // Tick-settle — the site's single motion signature (DESIGN.md):
@@ -18,7 +18,7 @@ const TickerNumber = ({ value, decimals = 0, prefix = 'US$', className }) => {
   const currentRef = useRef(0); // last value painted, roll-from-here on updates
   const [settled, setSettled] = useState(false);
 
-  const fmt = (n) => fmtAmount(n, decimals, prefix);
+  const fmt = useCallback((n) => fmtAmount(n, decimals, prefix), [decimals, prefix]);
 
   useEffect(() => {
     const node = ref.current;
@@ -69,7 +69,7 @@ const TickerNumber = ({ value, decimals = 0, prefix = 'US$', className }) => {
       observer.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [value, decimals, prefix]);
+  }, [value, fmt]);
 
   return (
     <span ref={ref} className={className} data-settled={settled || undefined}>

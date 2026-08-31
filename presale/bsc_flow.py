@@ -4,10 +4,10 @@ BSC presale purchase flow — sponsored 7702 batches against ConfioPresaleVault.
 Two-step, server-authoritative:
 
   prepare_purchase   full journey gate (presale active, geo/IP, terms +
-                     not-US attestation, min/max, per-user limit, USDT
+                     not-US attestation, min/max, per-user limit, cUSD
                      balance), on-chain quote (quoteTokens/quoteCost),
                      PresalePurchase record, and the EXACT call batch
-                     [USDT.approve(vault, cap), vault.buy(q, cap)] stored
+                     [cUSD.approve(vault, cap), vault.buy(q, cap)] stored
                      server-side. The client only ever signs what the
                      server stored — it cannot swap calldata.
   submit_purchase    recompute the EIP-712 digest from the STORED calls,
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 ONE_CONFIO = 10 ** 18
 
 # Funding sources this module produces (legacy Algorand buys are 'algorand_cusd')
-BSC_FUNDING_SOURCES = ('direct_cusd', 'cusd_plus_redeem')
+BSC_FUNDING_SOURCES = ('cusd_redeem', 'cusd_direct', 'cusd_plus_via_cusd')
 
 SEL_QUOTE_TOKENS = '0x' + keccak(text='quoteTokens(uint256)')[:4].hex()
 SEL_QUOTE_COST = '0x' + keccak(text='quoteCost(uint256)')[:4].hex()
@@ -102,33 +102,34 @@ def _eth_call(to: str, data: str) -> int:
     return int(raw, 16) if raw and raw != '0x' else 0
 
 
-# Ondo's Instant Manager refuses redemptions under $1, and redeemToUsdt
-# floors TWICE (shares→USDY→USDT), so a redeem leg targets slightly more
-# than the gap it has to cover and never less than the floor.
+# Ondo's Instant Manager refuses redemptions under $1, and unwrapToCusd
+# floors twice (shares→USDY→USDT) before the fee-free savings settlement,
+# so an unwrap leg targets slightly more than the gap and never below the
+# protocol floor.
 MIN_IM_REDEEM_WEI = 10 ** 18            # $1.00 — Ondo's hard floor
 REDEEM_TARGET_FLOOR_WEI = 105 * 10 ** 16  # $1.05 — what we aim for at the floor
 REDEEM_BUFFER_BPS = 50                   # +0.5% over the gap
 
 
-def _build_calls(vault: str, usdt: str, q_wei: int, cap_wei: int, redeem: dict | None = None) -> list:
-    """[ (redeemToUsdt) , approve(vault, cap), buy(q, cap) ] — one atomic batch.
-
-    When savings fund the purchase, the redeem leg runs FIRST inside the same
-    transaction, so the USDT it releases never sits in the wallet where the
-    savings auto-mint (or anything else) could take it back.
-    """
-    from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY, SEL_REDEEM_TO_USDT
+def _build_calls(vault: str, q_wei: int, cap_wei: int, funding: dict) -> list:
+    """Normalize savings to cUSD if needed, then buy without leaving Confío."""
+    from cusd_plus.sponsor_7702 import SEL_APPROVE, SEL_PRESALE_BUY
 
     calls = []
-    if redeem:
+    unwrap = funding.get('unwrap')
+    if unwrap:
         calls.append({
-            'to': redeem['savings_vault'],
+            'to': unwrap['savings_vault'],
             'value': '0',
-            'data': ('0x' + SEL_REDEEM_TO_USDT + _uint_word(redeem['shares'])
-                     + _uint_word(redeem['min_usdt_out']) + _addr_word(redeem['to'])),
+            'data': (
+                '0x' + keccak(text='unwrapToCusd(uint256,uint256,address)')[:4].hex()
+                + _uint_word(unwrap['shares'])
+                + _uint_word(unwrap['min_cusd_out'])
+                + _addr_word(unwrap['to'])
+            ),
         })
     calls.append({
-        'to': usdt,
+        'to': funding['cusd_vault'],
         'value': '0',
         'data': '0x' + SEL_APPROVE + _addr_word(vault) + _uint_word(cap_wei),
     })
@@ -143,9 +144,8 @@ def _build_calls(vault: str, usdt: str, q_wei: int, cap_wei: int, redeem: dict |
 def _plan_funding(user, user_addr: str, amount_wei: int) -> dict:
     """Decide what pays for `amount_wei`.
 
-    Spend raw Confío Dollar (USDT) first — it is idle money and every redeem
-    is an IM round trip — then cover any shortfall by redeeming cUSD+ savings
-    inside the same batch. Returns {'source', 'redeem'} or {'error'}.
+    Use cUSD first and unwrap cUSD+ for any shortfall. Presale is inside the
+    Confío dollar system, so this path never redeems to raw USDT.
 
     The wallet figure is the SWEEPABLE balance (fresh, minus USDT already
     committed to pending sends / off-ramp orders / in-flight sagas): spending
@@ -154,9 +154,19 @@ def _plan_funding(user, user_addr: str, amount_wei: int) -> dict:
     """
     from cusd_plus import vault as cusd_plus_vault
 
-    spendable = cusd_plus_vault.sweepable_usdt_wei(user, user_addr)
-    if spendable >= amount_wei:
-        return {'source': 'direct_cusd', 'redeem': None, 'spendable_wei': spendable}
+    from cusd_plus.cusd_vault import vault_address as cusd_address
+
+    cusd = cusd_address()
+    if not cusd:
+        return {'error': 'insufficient_cusd_balance'}
+    cusd_held = cusd_plus_vault.erc20_balance_raw(cusd, user_addr)
+    base = {
+        'cusd_vault': cusd,
+        'to': user_addr,
+        'spendable_wei': cusd_held,
+    }
+    if cusd_held >= amount_wei:
+        return {'source': 'cusd_direct', 'unwrap': None, **base}
 
     savings_vault = (cusd_plus_vault.vault_address() or '').lower()
     if not savings_vault:
@@ -165,7 +175,7 @@ def _plan_funding(user, user_addr: str, amount_wei: int) -> dict:
     if shares_held <= 0:
         return {'error': 'insufficient_cusd_balance'}
 
-    shortfall = amount_wei - spendable
+    shortfall = amount_wei - cusd_held
     pps = cusd_plus_vault.p_plus_wad()
     oracle_p = cusd_plus_vault.last_oracle_price_wad()
     if pps <= 0 or oracle_p <= 0:
@@ -175,23 +185,24 @@ def _plan_funding(user, user_addr: str, amount_wei: int) -> dict:
         shortfall * (10_000 + REDEEM_BUFFER_BPS) // 10_000,
         REDEEM_TARGET_FLOOR_WEI,
     )
-    # usdtOut ≈ shares × pPlus / 1e18 → invert, round up, cap at what's held.
+    # cUSD out equals the gross USDT redeemed inside the fee-free savings
+    # settlement. Invert shares × pPlus / 1e18, round up, cap at holdings.
     shares = min(-(-target_out * 10 ** 18 // pps), shares_held)
-    predicted_out = cusd_plus_vault.redeem_usdt_out(shares, pps, oracle_p)
+    predicted_out = cusd_plus_vault.redeem_gross_usdt_out(shares, pps, oracle_p)
     if predicted_out < shortfall or predicted_out < MIN_IM_REDEEM_WEI:
         # Either savings genuinely can't cover the gap, or what's left is
         # dust below Ondo's $1 floor — both read the same to the user.
         return {'error': 'insufficient_cusd_balance'}
 
     return {
-        'source': 'cusd_plus_redeem',
-        'spendable_wei': spendable,
-        'redeem': {
+        'source': 'cusd_plus_via_cusd',
+        **base,
+        'unwrap': {
             'savings_vault': savings_vault,
             'shares': shares,
             # The functional floor: deliver at least the gap, or revert the
             # whole batch rather than fail confusingly at the buy.
-            'min_usdt_out': shortfall,
+            'min_cusd_out': shortfall,
             'to': user_addr,
         },
     }
@@ -199,7 +210,6 @@ def _plan_funding(user, user_addr: str, amount_wei: int) -> dict:
 
 def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attestation: bool,
                      client_ip=None, ip_country_hint=None, user_agent: str = '') -> dict:
-    from cusd_plus.sponsor_7702 import USDT_BSC
     from users.legal.documents import TERMS
     from users.models_unified import UnifiedTransactionTable
 
@@ -238,48 +248,69 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     if amount_usd > phase.max_purchase:
         return {'success': False, 'error': 'above_maximum'}
 
-    # Preliminary (non-authoritative) limit check — a fast reject before the
-    # quote RPC. The AUTHORITATIVE, race-safe reservation happens under a row
-    # lock at purchase-creation time below (audit 2026-07-31 P2).
-    upl, _ = UserPresaleLimit.objects.get_or_create(user=user, phase=phase)
-    if phase.max_per_user and upl.total_purchased + amount_usd > phase.max_per_user:
-        return {'success': False, 'error': 'exceeds_user_limit'}
+    # Create the row used for the authoritative lock below. Do not reject on
+    # the user's entered ceiling here: tail-inventory clamping can make the
+    # actual debit materially smaller, and only that bounded debit consumes
+    # the per-user allowance.
+    UserPresaleLimit.objects.get_or_create(user=user, phase=phase)
 
     user_addr = (getattr(account, 'bsc_address', None) or '').lower()
     if not user_addr.startswith('0x') or len(user_addr) != 42:
         return {'success': False, 'error': 'no_bsc_address'}
 
-    # USDT is 18dp on BSC; amounts are dollars with 2dp
+    # cUSD is 18dp on BSC; amounts are dollars with 2dp
     amount_wei = int(amount_usd * Decimal(10) ** 18)
 
-    # On-chain quote: q = tokens the budget buys now; cost = exact charge
-    # for q (≤ budget). The vault clamps q to remaining supply.
+    # The entered amount is the maximum cUSD debit. Presale is an internal
+    # Confío use, so there is no USDT-perimeter conversion fee.
     try:
-        q_wei = _eth_call(vault, SEL_QUOTE_TOKENS + _uint_word(amount_wei))
+        from cusd_plus.cusd_vault import require_operational
+        require_operational()
+        purchase_cap_wei = amount_wei
+        q_wei = _eth_call(vault, SEL_QUOTE_TOKENS + _uint_word(purchase_cap_wei))
         if q_wei <= 0:
             return {'success': False, 'error': 'sold_out'}
         cost_wei = _eth_call(vault, SEL_QUOTE_COST + _uint_word(q_wei))
+        # Fund at most 1% above the current exact cost for curve movement.
+        # This prevents a tail-inventory quote from unwrapping the user's
+        # entire entered maximum and leaving an unnecessary cUSD remainder.
+        funding_net_wei = min(
+            purchase_cap_wei,
+            max(cost_wei, -(-cost_wei * 10_100 // 10_000)),
+        )
         exec_params = execution_params(user_addr)
     except Exception as exc:  # noqa: BLE001
         logger.warning('[PRESALE][BSC] quote rpc failed: %s', exc)
         return {'success': False, 'error': 'quote_unavailable'}
 
-    # Funding: wallet Confío Dollar first, cUSD+ savings for the shortfall.
-    # Execution-time cost can drift UP TO maxPayment (= the stated spend) if
-    # the curve moves first, so funding must cover the CAP, not just the
-    # quoted cost.
+    # Fund the bounded execution cap, not the user's potentially much larger
+    # entered maximum (important when quoteTokens clamps to tail inventory).
     try:
-        plan = _plan_funding(user, user_addr, amount_wei)
+        plan = _plan_funding(user, user_addr, funding_net_wei)
     except Exception:  # noqa: BLE001 — reservations fail closed (vault.py)
         logger.exception('[PRESALE][BSC] funding plan failed for user %s', user.id)
         return {'success': False, 'error': 'funding_plan_failed'}
     if plan.get('error'):
         return {'success': False, 'error': plan['error']}
+    if plan.get('unwrap'):
+        from cusd_plus.vault import redeem_blocked_reason
+        blocked = redeem_blocked_reason()
+        if blocked:
+            logger.warning('[PRESALE][BSC] savings funding blocked: %s', blocked)
+            return {'success': False, 'error': 'savings_redeem_paused'}
 
     confio_amount = (Decimal(q_wei) / Decimal(ONE_CONFIO)).quantize(Decimal('0.000001'))
-    avg_price = (amount_usd / confio_amount).quantize(Decimal('0.0001'))
-    redeem = plan.get('redeem')
-    calls = _build_calls(vault, USDT_BSC, q_wei, amount_wei, redeem=redeem)
+    actual_gross_usd = Decimal(cost_wei) / Decimal(10 ** 18)
+    # Phase limits apply to what will actually be debited, not merely the
+    # user's larger ceiling. Refuse a sub-minimum sellout tail explicitly;
+    # selling it would silently bypass the configured minimum.
+    if actual_gross_usd < phase.min_purchase:
+        return {'success': False, 'error': 'below_minimum'}
+    if actual_gross_usd > phase.max_purchase:
+        return {'success': False, 'error': 'above_maximum'}
+    avg_price = (actual_gross_usd / confio_amount).quantize(Decimal('0.0001'))
+    unwrap = plan.get('unwrap')
+    calls = _build_calls(vault, q_wei, funding_net_wei, plan)
 
     # Race-safe per-user reservation (audit 2026-07-31 P2): total_purchased
     # only counts CONFIRMED purchases, so N concurrent prepares each read the
@@ -290,24 +321,31 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
     # prepare sees it. A stale unsigned row is reaped after 24h
     # (abandon_stale_bsc_purchases), releasing its reservation.
     from django.db import transaction
-    from django.db.models import Sum
     try:
         with transaction.atomic():
             # The UPL row already exists (preliminary check above); lock it so
             # concurrent prepares for this user serialize here.
             locked = UserPresaleLimit.objects.select_for_update().get(
                 user=user, phase=phase)
+            # One outstanding signed intent per user. Besides making recovery
+            # unambiguous, this prevents two parallel prepares from both
+            # reserving the same on-chain cUSD/cUSD+ balance before either is
+            # mined. The row lock serializes the check and creation.
+            if PresalePurchase.objects.filter(
+                user=user,
+                phase=phase,
+                status='processing',
+                funding_source__in=BSC_FUNDING_SOURCES,
+            ).exists():
+                return {'success': False, 'error': 'purchase_in_progress'}
             if phase.max_per_user:
-                in_flight = (PresalePurchase.objects.filter(
-                    user=user, phase=phase, status='processing',
-                    funding_source__in=BSC_FUNDING_SOURCES,
-                ).aggregate(s=Sum('cusd_amount'))['s'] or Decimal('0'))
-                if locked.total_purchased + in_flight + amount_usd > phase.max_per_user:
+                if locked.total_purchased + actual_gross_usd > phase.max_per_user:
                     return {'success': False, 'error': 'exceeds_user_limit'}
             purchase = PresalePurchase.objects.create(
                 user=user,
                 phase=phase,
-                cusd_amount=amount_usd,
+                cusd_amount=actual_gross_usd.quantize(Decimal('0.01')),
+                cusd_amount_exact=actual_gross_usd,
                 confio_amount=confio_amount,
                 price_per_token=avg_price,
                 status='processing',
@@ -324,9 +362,15 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
                     'bsc_calls': calls,
                     'quote_cost_wei': str(cost_wei),
                     'q_wei': str(q_wei),
-                    # Stored so submit can re-derive the redeem leg's exact
-                    # calldata instead of trusting the stored bytes alone.
-                    'redeem': ({k: str(v) for k, v in redeem.items()} if redeem else None),
+                    'cap_wei': str(funding_net_wei),
+                    # Stored so submit can re-derive the optional internal
+                    # unwrap instead of trusting the stored bytes alone.
+                    'funding': {
+                        key: ({k: str(v) for k, v in value.items()}
+                              if isinstance(value, dict) else str(value))
+                        for key, value in plan.items()
+                        if key not in {'spendable_wei'}
+                    },
                 }),
             )
     except Exception:  # noqa: BLE001
@@ -385,7 +429,8 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
         'calls': calls,
         'confio_amount': str(confio_amount),
         'cost': str((Decimal(cost_wei) / Decimal(10) ** 18).quantize(Decimal('0.000001'))),
-        'max_payment': str(amount_usd),
+        'max_payment': str(Decimal(funding_net_wei) / Decimal(10 ** 18)),
+        'confio_fee': '0',
         'avg_price': str(avg_price),
         'funding_source': plan['source'],
         'intent_id': intent_id_hex('presale_buy', purchase.id),
@@ -394,44 +439,40 @@ def prepare_purchase(user, account, amount, accepted_terms: bool, not_us_attesta
 
 
 def _validate_presale_batch(calls: list, purchase) -> None:
-    """Defense-in-depth on the stored batch: [approve(vault, cap), buy(q, cap)]
-    optionally preceded by redeemToUsdt(shares, minOut, buyer) — every field
-    re-derived from the purchase row, never trusted from the stored bytes."""
+    """Defense-in-depth for optional cUSD+ unwrap -> cUSD presale buy."""
     from cusd_plus.sponsor_7702 import (
-        PolicyError, SEL_APPROVE, SEL_PRESALE_BUY, SEL_REDEEM_TO_USDT, USDT_BSC,
+        PolicyError, SEL_APPROVE, SEL_PRESALE_BUY,
     )
 
     vault = presale_vault_address()
     meta = json.loads(purchase.notes or '{}')
     q_wei = int(meta.get('q_wei', '0'))
-    cap_wei = int(purchase.cusd_amount * Decimal(10) ** 18)
-    redeem = meta.get('redeem') or None
+    cap_wei = int(meta.get('cap_wei', '0'))
+    funding = meta.get('funding') or {}
+    unwrap = funding.get('unwrap') or None
 
-    expected_len = 3 if redeem else 2
+    expected_len = 3 if unwrap else 2
     if len(calls) != expected_len:
         raise PolicyError('bad_batch_size')
     if any(int(c['value']) != 0 for c in calls):
         raise PolicyError('value_not_allowed')
 
-    if redeem:
+    if unwrap:
         leg = calls[0]
-        # The recipient MUST be the buyer: a redeem paying anyone else would
-        # drain savings out of the purchase entirely.
-        if leg['to'] != (redeem.get('savings_vault') or '').lower():
+        if leg['to'] != (unwrap.get('savings_vault') or '').lower():
             raise PolicyError('destination_not_allowed')
-        if (redeem.get('to') or '').lower() != (purchase.from_address or '').lower():
+        if (unwrap.get('to') or '').lower() != (purchase.from_address or '').lower():
             raise PolicyError('redeem_recipient_not_allowed')
-        expected_redeem = (
-            SEL_REDEEM_TO_USDT
-            + _uint_word(int(redeem['shares']))
-            + _uint_word(int(redeem['min_usdt_out']))
-            + _addr_word(redeem['to'])
+        expected_unwrap = (
+            keccak(text='unwrapToCusd(uint256,uint256,address)')[:4].hex()
+            + _uint_word(int(unwrap['shares']))
+            + _uint_word(int(unwrap['min_cusd_out']))
+            + _addr_word(unwrap['to'])
         )
-        if leg['data'][2:].lower() != expected_redeem:
+        if leg['data'][2:].lower() != expected_unwrap:
             raise PolicyError('bad_calldata')
-
     approve, buy = calls[-2], calls[-1]
-    if approve['to'] != USDT_BSC or buy['to'] != vault:
+    if approve['to'] != (funding.get('cusd_vault') or '').lower() or buy['to'] != vault:
         raise PolicyError('destination_not_allowed')
     if approve['data'][2:].lower() != (SEL_APPROVE + _addr_word(vault) + _uint_word(cap_wei)):
         raise PolicyError('bad_calldata')
@@ -478,6 +519,26 @@ def submit_purchase(user, purchase, nonce: int, deadline: int, intent_signature:
         user, client_ip=client_ip, ip_country_hint=ip_country_hint)
     if not is_eligible:
         return {'success': False, 'error': error_msg}
+
+    # Operational stop controls are authoritative at broadcast time too. A
+    # valid prepared signature may live for 30 minutes, during which admins
+    # can deactivate the sale/phase or the dollar perimeter can pause.
+    from .models import PresaleSettings
+    purchase.phase.refresh_from_db(fields=['status'])
+    if not PresaleSettings.get_settings().is_presale_active:
+        return {'success': False, 'error': 'presale_inactive'}
+    if purchase.phase.status != 'active':
+        return {'success': False, 'error': 'no_active_phase'}
+    try:
+        from cusd_plus.cusd_vault import require_operational
+        require_operational()
+        if (meta.get('funding') or {}).get('unwrap'):
+            from cusd_plus.vault import redeem_blocked_reason
+            if redeem_blocked_reason():
+                return {'success': False, 'error': 'savings_redeem_paused'}
+    except Exception:
+        logger.warning('[PRESALE][BSC] submit perimeter preflight failed', exc_info=True)
+        return {'success': False, 'error': 'conversion_paused'}
 
     try:
         _validate_presale_batch(calls, purchase)

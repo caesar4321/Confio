@@ -51,13 +51,21 @@ export const ConfioPresaleParticipateScreen = () => {
   // vault (no Algorand session/opt-in at all); 'algorand' = legacy WS flow.
   const isBscFlow = data?.presaleChain === 'bsc';
   // Expensive vault reads — only the BSC rail spends them.
-  const { data: bscBalanceData } = useQuery(GET_BSC_CONFIO_DOLLAR_BALANCE, {
+  const {
+    data: bscBalanceData,
+    loading: bscBalanceLoading,
+    error: bscBalanceError,
+  } = useQuery(GET_BSC_CONFIO_DOLLAR_BALANCE, {
     fetchPolicy: 'cache-and-network',
     skip: !isBscFlow,
   });
   // Legacy cUSD only funds the Algorand rail; shared app-wide, so this is
   // usually a cache hit rather than a request.
-  const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
+  const {
+    data: balancesData,
+    loading: legacyBalancesLoading,
+    error: legacyBalancesError,
+  } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
     skip: isBscFlow,
   });
@@ -77,18 +85,18 @@ export const ConfioPresaleParticipateScreen = () => {
   const serverMin = presale ? parseFloat(presale.minPurchase) : uiMinPurchase;
   const minAmount = serverMin || uiMinPurchase;
   const maxAmount = presale ? parseFloat(presale.maxPurchase) : 1000;
-  // Spendable balance: Confío Dollar (raw USDT-BSC) on the BSC flow,
+  // Spendable balance: universal cUSD on the BSC flow,
   // legacy cUSD (Algorand) otherwise.
-  // BSC: wallet Confío Dollar + savings (the buy batch redeems cUSD+ for any
-  // shortfall in the same transaction, so both are spendable here).
+  // BSC: cUSD + savings. The buy batch normalizes savings to cUSD, then pays
+  // the universal 0.9% conversion fee once before buying.
   const availableCusd = React.useMemo(
     () => isBscFlow
-      ? (bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd ?? 0)
+      ? (bscBalanceData?.cusdPlusSummary?.cusdBalanceUsd ?? 0)
         + (bscBalanceData?.cusdPlusSummary?.balanceUsd ?? 0)
       : parseFloat(balancesData?.myBalances?.cusd || '0'),
     [
       isBscFlow,
-      bscBalanceData?.cusdPlusSummary?.usdtBalanceUsd,
+      bscBalanceData?.cusdPlusSummary?.cusdBalanceUsd,
       bscBalanceData?.cusdPlusSummary?.balanceUsd,
       balancesData?.myBalances?.cusd,
     ]
@@ -121,10 +129,23 @@ export const ConfioPresaleParticipateScreen = () => {
   };
 
   const parsedAmount = parseFloat(amount) || 0;
-  const tokensReceived = calculateTokens(parsedAmount);
+  const conversionFeeBps = isBscFlow
+    ? Number(bscBalanceData?.cusdPlusSummary?.conversionFeeBps ?? 90)
+    : 0;
+  const confioFee = parsedAmount * conversionFeeBps / 10_000;
+  const tokensReceived = calculateTokens(Math.max(0, parsedAmount - confioFee));
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
-  const exceedsBalance = !balancesLoading && parsedAmount > availableCusd;
-  const canSubmit = isValidAmount && parsedAmount > 0 && !exceedsBalance && hasAcceptedTerms && hasAttestedNotUs && !busy;
+  const activeBalancesLoading = isBscFlow ? bscBalanceLoading : legacyBalancesLoading;
+  const activeBalanceError = isBscFlow ? bscBalanceError : legacyBalancesError;
+  const exceedsBalance = !activeBalancesLoading && !activeBalanceError && parsedAmount > availableCusd;
+  const canSubmit = isValidAmount
+    && parsedAmount > 0
+    && !activeBalancesLoading
+    && !activeBalanceError
+    && !exceedsBalance
+    && hasAcceptedTerms
+    && hasAttestedNotUs
+    && !busy;
 
   // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
   // Throws an error if the server returns an error message (e.g., backup check failure)
@@ -345,7 +366,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
     Alert.alert(
       'Confirmar compra',
-      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por $${amount}?`,
+      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por $${amount}?${isBscFlow ? `\nComisión de Confío: $${formatWithLocale(confioFee, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}`,
       [
         {
           text: 'Cancelar',
@@ -503,7 +524,11 @@ export const ConfioPresaleParticipateScreen = () => {
                 <Text style={styles.inputSuffix}>USD</Text>
               </View>
               <Text style={styles.inputHelper}>
-                Saldo: ${formatWithLocale(availableCusd)} • Mínimo: ${minAmount} • Máximo: ${formatWithLocale(maxAmount)}
+                {activeBalancesLoading
+                  ? 'Cargando saldo…'
+                  : activeBalanceError
+                    ? 'No pudimos cargar tu saldo.'
+                    : `Saldo: $${formatWithLocale(availableCusd)} • Mínimo: $${minAmount} • Máximo: $${formatWithLocale(maxAmount)}`}
               </Text>
               <Text style={styles.inputHelper}>
                 {isBscFlow
@@ -524,6 +549,12 @@ export const ConfioPresaleParticipateScreen = () => {
                   <Text style={styles.resultLabel}>Precio actual:</Text>
                   <Text style={styles.resultValue}>${formatPrice(presalePrice)}</Text>
                 </View>
+                {isBscFlow && (
+                  <View style={styles.resultRow}>
+                    <Text style={styles.resultLabel}>Comisión de Confío ({(conversionFeeBps / 100).toLocaleString('es-PE')}%):</Text>
+                    <Text style={styles.resultValue}>${formatWithLocale(confioFee, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  </View>
+                )}
                 {!isValidAmount && (
                   <Text style={styles.errorText}>
                     Monto debe estar entre ${minAmount} y ${formatWithLocale(maxAmount)}

@@ -61,19 +61,25 @@ const PayrollTopUpScreen = () => {
   // seeded from the server's default, and every balance check below runs
   // against the selected one. Deriving it server-side hid the entire USDT
   // pool from anyone still holding a single cUSD+ share (audit 2026-08-02).
-  const [pool, setPool] = useState<'CUSD_PLUS' | 'USDT' | null>(null);
-  const defaultPool = (railStatus?.fundingToken as 'CUSD_PLUS' | 'USDT' | null) ?? null;
+  type PayrollPool = 'CUSD_PLUS' | 'CUSD_BSC' | 'USDT';
+  const [pool, setPool] = useState<PayrollPool | null>(null);
+  const defaultPool = (railStatus?.fundingToken as PayrollPool | null) ?? null;
   const activePool = pool ?? defaultPool;
   const instrument = payrollInstrument(activePool);
   const vaultInstrument = instrument;
   const escrowOf = (p: typeof activePool) =>
-    p === 'USDT' ? railStatus?.escrowUsdtUsd ?? null : railStatus?.escrowCusdPlusUsd ?? null;
+    p === 'CUSD_PLUS' ? railStatus?.escrowCusdPlusUsd ?? null
+      : p === 'CUSD_BSC' ? railStatus?.escrowCusdUsd ?? null
+        : railStatus?.escrowUsdtUsd ?? null;
   const fundableOf = (p: typeof activePool) =>
-    p === 'USDT' ? railStatus?.fundableUsdtUsd ?? null : railStatus?.fundableCusdPlusUsd ?? null;
+    p === 'CUSD_PLUS' ? railStatus?.fundableCusdPlusUsd ?? null
+      : p === 'CUSD_BSC' ? railStatus?.fundableCusdUsd ?? null
+        : railStatus?.fundableUsdtUsd ?? null;
   // Offer the choice only when BOTH pools actually hold something — a single
   // door is the common case and a picker over one option is pure friction.
-  const showPoolPicker =
-    (railStatus?.escrowCusdPlusUsd ?? 0) > 0 && (railStatus?.escrowUsdtUsd ?? 0) > 0;
+  const selectablePools: PayrollPool[] = (['CUSD_PLUS', 'CUSD_BSC', 'USDT'] as const)
+    .filter((p) => p === defaultPool || (escrowOf(p) ?? 0) > 0);
+  const showPoolPicker = selectablePools.length > 1;
   const { data: vaultData, loading: vaultLoading, refetch: refetchVault } = useQuery(GET_PAYROLL_VAULT_BALANCE, {
     fetchPolicy: 'cache-and-network',
     skip: !isBusinessAccount,
@@ -530,7 +536,7 @@ const PayrollTopUpScreen = () => {
             <View style={styles.card}>
               <Text style={styles.cardLabel}>¿Con cuál saldo?</Text>
               <View style={styles.poolRow}>
-                {(['CUSD_PLUS', 'USDT'] as const).map((p) => {
+                {selectablePools.map((p) => {
                   const selected = activePool === p;
                   const label = payrollInstrument(p).name;
                   return (
@@ -588,11 +594,11 @@ const PayrollTopUpScreen = () => {
               )}
             </View>
             <Text style={styles.cardHint}>Moveremos este monto desde la cuenta de negocio hacia la bóveda de nómina.</Text>
-            {/* An Ondo-blocked employer funds in raw USDT. Say so once, here:
+            {/* An Ondo-blocked employer funds in non-yield cUSD. Say so once, here:
                 the money works the same for paying wages, but it does not
                 earn — and finding that out from a flat balance months later
                 is worse than one line now. */}
-            {railStatus?.fundingToken === 'USDT' ? (
+            {railStatus?.fundingToken === 'CUSD_BSC' ? (
               <Text style={styles.cardHint}>
                 Tu nómina se fondea en {vaultInstrument.name}. Paga igual, pero no
                 genera rendimiento en tu país.

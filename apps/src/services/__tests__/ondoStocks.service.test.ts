@@ -9,10 +9,13 @@ const mockQuery = jest.fn();
 const mockMutate = jest.fn();
 const mockExecuteSponsoredBatch = jest.fn();
 const mockGetErc20BalanceWei = jest.fn();
+const mockGetVaultPrices = jest.fn();
 
 jest.mock('../../apollo/client', () => ({ apolloClient: { query: mockQuery, mutate: mockMutate } }));
 jest.mock('../bscServerRpc', () => ({ installBscServerTransport: jest.fn() }));
-jest.mock('../evmWallet', () => ({ encodeCall: jest.fn(() => '0xapprove') }));
+jest.mock('../evmWallet', () => ({
+  encodeCall: jest.fn(() => '0xapprove'),
+}));
 jest.mock('../ondoStocksAbi', () => ({
   encodeBuyStockCall: jest.fn(() => '0xbuy'),
   encodeSellStockCall: jest.fn(() => '0xsell'),
@@ -28,7 +31,7 @@ jest.mock('../sponsored7702', () => ({
 jest.mock('../cusdPlusVault', () => ({
   getErc20Allowance: jest.fn(async () => (1n << 256n) - 1n),
   getErc20BalanceWei: (...args: unknown[]) => mockGetErc20BalanceWei(...args),
-  getVaultPrices: jest.fn(async () => ({ pPlusWad: 10n ** 18n, oraclePriceWad: 10n ** 18n })),
+  getVaultPrices: (...args: unknown[]) => mockGetVaultPrices(...args),
   getVaultShares: jest.fn(),
   predictRedeemUsdtOut: jest.fn(),
   predictSubscribeSharesOut: jest.fn((amount: bigint) => amount),
@@ -68,6 +71,7 @@ describe('Ondo Stocks sell orchestration', () => {
       },
     });
     mockGetErc20BalanceWei.mockResolvedValue(100n * WAD);
+    mockGetVaultPrices.mockResolvedValue({ pPlusWad: WAD, oraclePriceWad: WAD });
     mockExecuteSponsoredBatch.mockResolvedValue({ txHash: `0x${'88'.repeat(32)}` });
   });
 

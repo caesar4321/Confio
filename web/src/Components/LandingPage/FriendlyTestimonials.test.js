@@ -17,7 +17,13 @@ const renderTestimonials = (mocks) =>
 
 const statsMock = (landingStats) => ({
   request: { query: LANDING_STATS },
-  result: { data: { landingStats } },
+  result: {
+    data: {
+      landingStats: landingStats
+        ? { registeredUsers: null, ...landingStats }
+        : null,
+    },
+  },
 });
 
 const flushQuery = async () => {
@@ -27,18 +33,18 @@ const flushQuery = async () => {
 };
 
 describe('FriendlyTestimonials stats', () => {
-  it('renders only the static Free stat when there is no live data', async () => {
+  it('renders only the static transfer-fee stat when there is no live data', async () => {
     renderTestimonials([statsMock(null)]);
     await flushQuery();
 
-    expect(screen.getByText('Free')).toBeInTheDocument();
-    expect(screen.getByText('For regular users')).toBeInTheDocument();
+    expect(screen.getByText('0%')).toBeInTheDocument();
+    expect(screen.getByText('Transfers between users')).toBeInTheDocument();
     // No fallbacks: entries without live data are filtered out entirely.
     expect(screen.queryByText('On-chain deposited volume')).not.toBeInTheDocument();
     expect(screen.queryByText('Raised in $CONFIO presale')).not.toBeInTheDocument();
   });
 
-  it('renders live stats formatted via fmtUsd alongside the Free stat', async () => {
+  it('renders live stats formatted via fmtUsd alongside the transfer-fee stat', async () => {
     renderTestimonials([
       statsMock({ depositedVolumeUsd: '125430.75', presaleRaisedUsd: '3597.21' }),
     ]);
@@ -48,7 +54,7 @@ describe('FriendlyTestimonials stats', () => {
     expect(screen.getByText('On-chain deposited volume')).toBeInTheDocument();
     expect(screen.getByText('US$3,597')).toBeInTheDocument();
     expect(screen.getByText('Raised in $CONFIO presale')).toBeInTheDocument();
-    expect(screen.getByText('Free')).toBeInTheDocument();
+    expect(screen.getByText('0%')).toBeInTheDocument();
   });
 
   it('keeps a partial live stat while filtering the missing one', async () => {
@@ -59,7 +65,7 @@ describe('FriendlyTestimonials stats', () => {
 
     expect(await screen.findByText('US$3,597')).toBeInTheDocument();
     expect(screen.queryByText('On-chain deposited volume')).not.toBeInTheDocument();
-    expect(screen.getByText('Free')).toBeInTheDocument();
+    expect(screen.getByText('0%')).toBeInTheDocument();
   });
 
   it('always renders the three anonymized testimonials', async () => {

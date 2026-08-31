@@ -299,7 +299,8 @@ def monitor_bridge_arrivals():
         ramp_addrs = {a.lower() for a in RampTransaction.objects.filter(
             destination='cusd_plus',
             direction='on_ramp',
-            status__in=('PENDING', 'PROCESSING'),
+            status__in=('PENDING', 'PROCESSING', 'COMPLETED'),
+            conversion__isnull=True,
         ).exclude(actor_address='').values_list('actor_address', flat=True)[:300]}
     except Exception:  # noqa: BLE001
         logger.exception('ramp watch-set union failed')
@@ -418,13 +419,31 @@ def monitor_bridge_arrivals():
                 key, amount_usd, log['transactionHash'],
             )
             continue
+        source = 'external_deposit'
+        if key in ramp_addrs:
+            try:
+                from ramps.signals import attribute_bsc_ramp_arrival
+                matched_ramp = attribute_bsc_ramp_arrival(
+                    actor_address=key,
+                    amount=amount_usd,
+                    tx_hash=log['transactionHash'],
+                    log_index=int(log.get('logIndex', '0x0'), 16),
+                    sender_address=sender,
+                )
+                if matched_ramp is not None:
+                    source = 'ramp'
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    'BSC ramp arrival attribution failed for %s',
+                    log['transactionHash'],
+                )
         _record_inbound_deposit(
             account_id=account_id,
             to_addr=key,
             amount_usd=amount_usd,
             tx_ref=f"{log['transactionHash']}:{int(log.get('logIndex', '0x0'), 16)}",
             tx_hash=log['transactionHash'],
-            source='ramp' if key in ramp_addrs else 'external_deposit',
+            source=source,
             now=now,
             from_addr='0x' + log['topics'][1][-40:],
         )
@@ -856,18 +875,40 @@ def record_savings_mint(*, user, business, actor_type, display_name,
         ).exists():
             logger.info('savings mint %s belongs to an in-flight saga — not recording', tx_hash)
             return None
-        amount = (Decimal(int(amount_wei)) / Decimal(10 ** 18)).quantize(
+        gross_exact = Decimal(int(amount_wei)) / Decimal(10 ** 18)
+        fee_exact = Decimal(0)
+        net_exact = gross_exact
+        fee_bps = 0
+        if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+            from .cusd_vault import preview_mint_wei
+            preview = preview_mint_wei(int(amount_wei))
+            gross_exact = preview.gross
+            fee_exact = preview.fee
+            net_exact = preview.net
+            fee_bps = preview.fee_bps
+        amount = gross_exact.quantize(
             Decimal('0.000001'), rounding=ROUND_DOWN)
+        net_amount = net_exact.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        fee_amount = fee_exact.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
         conv = Conversion.objects.create(
             actor_user=user if actor_type != 'business' else None,
             actor_business=business if actor_type == 'business' else None,
             actor_type=actor_type,
             actor_display_name=display_name or '',
+            actor_address=bsc_address or '',
             conversion_type='to_savings',
             source='external_deposit',
             from_amount=amount,
-            to_amount=amount,
-            quoted_cost_pct=0,
+            to_amount=net_amount,
+            fee_amount=fee_amount,
+            quoted_cost_pct=(Decimal(fee_bps) / Decimal(100)),
+            gross_amount_exact=gross_exact,
+            fee_amount_exact=fee_exact,
+            net_amount_exact=net_exact,
+            conversion_fee_bps=fee_bps,
+            from_asset_id='USDT_BSC',
+            to_asset_id='CUSD_PLUS_BSC',
+            perimeter_direction='entry',
             user_bsc_address=bsc_address or '',
             to_transaction_hash=tx_hash or '',
             # SUBMITTED, not COMPLETED. Broadcast is not execution: the batch
@@ -878,11 +919,62 @@ def record_savings_mint(*, user, business, actor_type, display_name,
             # settle_savings_mint below promotes it once the receipt is final.
             status='SUBMITTED',
         )
-        logger.info('savings mint recorded %s: %s USDT (%s)',
-                    conv.internal_id, amount, tx_hash)
+        logger.info('savings mint recorded %s: gross=%s fee=%s net=%s (%s)',
+                    conv.internal_id, gross_exact, fee_exact, net_exact, tx_hash)
         return conv
     except Exception:  # noqa: BLE001 — history must not fail the relay
         logger.exception('savings mint history write failed for %s', tx_hash)
+        return None
+
+
+def record_cusd_mint(*, user, business, actor_type, display_name,
+                     amount_wei, tx_hash, bsc_address):
+    """Record a sponsor-authorized USDT -> cUSD perimeter entry.
+
+    The gross amount comes from policy-validated calldata and the fee triplet
+    comes from the cUSD contract's read-only preview. Receipt reconciliation
+    promotes SUBMITTED to COMPLETED; a reverted/no-op batch never becomes a
+    completed money event.
+    """
+    from decimal import Decimal, ROUND_DOWN
+    from conversion.models import Conversion
+
+    try:
+        if Conversion.objects.filter(
+            conversion_type='usdt_to_cusd', to_transaction_hash=tx_hash,
+            is_deleted=False,
+        ).exists():
+            return None
+        from .cusd_vault import preview_mint_wei
+        preview = preview_mint_wei(int(amount_wei))
+        display_gross = preview.gross.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        display_net = preview.net.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        display_fee = preview.fee.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        return Conversion.objects.create(
+            actor_user=user if actor_type != 'business' else None,
+            actor_business=business if actor_type == 'business' else None,
+            actor_type=actor_type,
+            actor_display_name=display_name or '',
+            actor_address=bsc_address or '',
+            conversion_type='usdt_to_cusd',
+            source='external_deposit',
+            from_amount=display_gross,
+            to_amount=display_net,
+            fee_amount=display_fee,
+            quoted_cost_pct=Decimal(preview.fee_bps) / Decimal(100),
+            gross_amount_exact=preview.gross,
+            fee_amount_exact=preview.fee,
+            net_amount_exact=preview.net,
+            conversion_fee_bps=preview.fee_bps,
+            from_asset_id='USDT_BSC',
+            to_asset_id='CUSD_BSC',
+            perimeter_direction='entry',
+            user_bsc_address=bsc_address or '',
+            to_transaction_hash=tx_hash or '',
+            status='SUBMITTED',
+        )
+    except Exception:  # noqa: BLE001 — history cannot invalidate broadcast
+        logger.exception('cUSD mint history write failed for %s', tx_hash)
         return None
 
 
@@ -892,9 +984,9 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
     """The raw USDT receipt + deposit notification for an observed inflow.
 
     Shared by both deposit paths. `conv` is the conversion row when one was
-    created, None when the holder is geo-ineligible and the USDT simply stays
-    raw — in which case the RECEIPT is what makes the path idempotent, since
-    the caller's conversion-row dedupe cannot fire on a cursor rewind.
+    created, None while the arrival is still transient or an older client has
+    not converted it yet — in which case the RECEIPT makes the path idempotent
+    because conversion-row dedupe cannot fire on a cursor rewind.
     """
     from send.models import SendTransaction
 
@@ -963,10 +1055,10 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType
-        # Copy branches on eligibility: an ineligible user's deposit stays raw
-        # USDT ("Confío Dollar" in the app) — promising "se sumará a tu
-        # ahorro" would be a lie, since the mint gate will refuse it. Product
-        # name only; USDT stays in the data payload, never in the message.
+        # Copy branches on eligibility: an ineligible user's deposit becomes
+        # universal cUSD ("Confío Dollar" in the app), not yield-bearing
+        # cUSD+. Product name only; the observed USDT receipt remains in the
+        # data payload because that is the actual inbound chain event.
         # Phone country only — this task has no request, so no IP. That is
         # exactly why it no longer opens a conversion row; for the COPY it is
         # still the best signal available and right for the large majority. A
@@ -977,7 +1069,7 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
         if eligible:
             message = f'Recibiste ${amount_usd:.2f} (USDT). Se sumará automáticamente a tu ahorro.'
         else:
-            message = f'Recibiste ${amount_usd:.2f}. Ya está disponible en tu Confío Dollar.'
+            message = f'Recibiste ${amount_usd:.2f} (USDT). Se convertirá automáticamente a Confío Dollar.'
         notif_utils.create_notification(
             user=account.user,
             account=account,
@@ -996,11 +1088,10 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                 'is_external_address': True,
                 'sender_address': from_addr or '',
                 'recipient_address': to_addr or '',
-                # No conversion for an ineligible holder: the notification
-                # opens the USDT receipt instead, so tapping it lands on the
-                # movement that actually exists.
+                # Plain deposits have no saga row; foreground balance sweeping
+                # converts them to cUSD+ or cUSD according to eligibility.
                 'conversion_id': str(conv.internal_id) if conv else '',
-                'pending_auto_mint': eligible,
+                'pending_auto_mint': True,
             },
             **(
                 {'related_object_type': 'Conversion',
@@ -1082,7 +1173,308 @@ def mark_saga_delivered_as_usdt(
         return 0
 
 
-def settle_savings_mint(tx_hash: str, outcome: str) -> None:
+def _cusd_fee_events(receipt):
+    """Return every authoritative cUSD perimeter event in a receipt."""
+    from eth_utils import keccak
+
+    cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+    if not cusd or not receipt:
+        return []
+    topics = {
+        '0x' + keccak(text='MintedWithFee(address,address,uint256,uint256,uint256,uint256)').hex():
+            ('entry', 'usdt_to_cusd'),
+        '0x' + keccak(text='RedeemedWithFee(address,address,uint256,uint256,uint256,uint256)').hex():
+            ('exit', 'cusd_to_usdt'),
+        '0x' + keccak(text='SavingsEntrySettled(uint256,uint256,uint256,uint256)').hex():
+            ('entry', 'to_savings'),
+        '0x' + keccak(text='SavingsExitSettled(address,uint256,uint256,uint256,uint256)').hex():
+            ('exit', 'from_savings'),
+    }
+    events = []
+    for log in receipt.get('logs') or []:
+        if (log.get('address') or '').lower() != cusd:
+            continue
+        log_topics = log.get('topics') or []
+        kind = topics.get((log_topics[0] if log_topics else '').lower())
+        if not kind:
+            continue
+        body = (log.get('data') or '').removeprefix('0x')
+        if len(body) < 256:
+            continue
+        gross, fee, net, fee_bps = (
+            int(body[i:i + 64], 16) for i in range(0, 256, 64)
+        )
+        if gross <= 0 or fee + net != gross or fee_bps > 90:
+            continue
+        try:
+            index = int(log.get('logIndex', '0x0'), 16)
+        except (TypeError, ValueError):
+            index = 0
+        events.append({
+            'direction': kind[0], 'conversion_type': kind[1],
+            'gross_wei': gross, 'fee_wei': fee, 'net_wei': net,
+            'fee_bps': fee_bps,
+            'log_index': index,
+        })
+    return events
+
+
+def _cusd_fee_event(receipt):
+    """Compatibility helper for callers that only need event presence."""
+    events = _cusd_fee_events(receipt)
+    return events[0] if events else None
+
+
+def _reconcile_cusd_fee_event(*, batch, receipt):
+    """Upsert exact entry/exit fee ledger data from finalized chain logs."""
+    from conversion.models import Conversion
+    from users.models import Account
+
+    events = _cusd_fee_events(receipt)
+    if not events:
+        return []
+    fee_send_kinds = {
+        'send_redeem', 'send_cusd_redeem', 'send_mixed_cusd_redeem',
+    }
+    send_tx = None
+    SendTransaction = None
+    batch_kind = getattr(batch, 'kind', '')
+    if batch_kind in fee_send_kinds:
+        # kind + source_id + hash is the same isolation boundary used by the
+        # domain confirmer. A fee-bearing send emits exactly one perimeter
+        # event; anything else is an accounting ambiguity and must fail loud.
+        if batch.source_id is None or len(events) != 1:
+            raise RuntimeError('fee_event_send_ambiguous')
+        from send.models import SendTransaction
+    account = Account.objects.filter(
+        bsc_address__iexact=batch.user_bsc_address,
+        deleted_at__isnull=True,
+    ).select_related('user', 'business').first()
+    rows = []
+    scale = Decimal(10 ** 18)
+    display = lambda v: v.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+
+    from django.db import transaction
+    with transaction.atomic():
+        if SendTransaction is not None:
+            send_tx = SendTransaction.objects.select_for_update().get(pk=batch.source_id)
+            recovered_send = False
+            if send_tx.status == 'PENDING' and not send_tx.transaction_hash:
+                send_tx.transaction_hash = batch.tx_hash
+                send_tx.status = 'SUBMITTED'
+                recovered_send = True
+            if (not send_tx.transaction_hash
+                    or send_tx.transaction_hash.lower() != batch.tx_hash.lower()):
+                raise RuntimeError('fee_event_send_hash_mismatch')
+        for event in events:
+            gross = Decimal(event['gross_wei']) / scale
+            fee = Decimal(event['fee_wei']) / scale
+            net = Decimal(event['net_wei']) / scale
+            row = Conversion.objects.select_for_update().filter(
+                to_transaction_hash=batch.tx_hash,
+                conversion_type=event['conversion_type'],
+                is_deleted=False,
+            ).filter(
+                models.Q(contract_event_index=event['log_index'])
+                | models.Q(contract_event_index__isnull=True)
+            ).first()
+            if row is None and event['direction'] == 'entry' and account is not None:
+                # Recover a foreground mint whose best-effort history write
+                # was lost after broadcast. For cUSD+ first claim the oldest
+                # matching arrived saga; for direct cUSD create the event row.
+                if event['conversion_type'] == 'to_savings':
+                    actor_filter = (
+                        {'actor_business': account.business}
+                        if account.account_type == 'business'
+                        else {'actor_user': account.user}
+                    )
+                    row = Conversion.objects.select_for_update().filter(
+                        conversion_type='to_savings', status='DEST_ARRIVED',
+                        to_amount=display(gross), is_deleted=False,
+                        **actor_filter,
+                    ).order_by('created_at').first()
+                    if row is not None:
+                        row.to_transaction_hash = batch.tx_hash
+                if row is None:
+                    is_business = account.account_type == 'business'
+                    row = Conversion(
+                        actor_user=None if is_business else account.user,
+                        actor_business=account.business if is_business else None,
+                        actor_type='business' if is_business else 'user',
+                        actor_display_name=account.display_name or '',
+                        actor_address=batch.user_bsc_address,
+                        conversion_type=event['conversion_type'],
+                        source='external_deposit',
+                        from_asset_id='USDT_BSC',
+                        to_asset_id=(
+                            'CUSD_PLUS_BSC' if event['conversion_type'] == 'to_savings'
+                            else 'CUSD_BSC'),
+                        perimeter_direction='entry',
+                        user_bsc_address=batch.user_bsc_address,
+                        to_transaction_hash=batch.tx_hash,
+                        status='SUBMITTED',
+                    )
+            if row is None:
+                if account is None:
+                    raise RuntimeError('fee_event_conversion_not_found')
+                is_business = account.account_type == 'business'
+                row = Conversion(
+                    actor_user=None if is_business else account.user,
+                    actor_business=account.business if is_business else None,
+                    actor_type='business' if is_business else 'user',
+                    actor_display_name=account.display_name or '',
+                    actor_address=batch.user_bsc_address,
+                    conversion_type=event['conversion_type'], source='convert',
+                    from_asset_id=(
+                        'CUSD_PLUS_BSC' if event['conversion_type'] == 'from_savings'
+                        else 'CUSD_BSC'),
+                    to_asset_id='USDT_BSC', perimeter_direction='exit',
+                    user_bsc_address=batch.user_bsc_address,
+                    from_transaction_hash=batch.tx_hash,
+                    to_transaction_hash=batch.tx_hash,
+                    status='SUBMITTED',
+                )
+            row.gross_amount_exact = gross
+            row.fee_amount_exact = fee
+            row.net_amount_exact = net
+            row.conversion_fee_bps = event['fee_bps']
+            row.quoted_cost_pct = Decimal(event['fee_bps']) / Decimal(100)
+            row.from_amount = display(gross)
+            row.fee_amount = display(fee)
+            row.to_amount = display(net)
+            row.contract_event_index = event['log_index']
+            if event['direction'] == 'exit':
+                row.status = 'COMPLETED'
+                row.completed_at = timezone.now()
+            row.save()
+            if send_tx is not None:
+                import json
+                metadata = json.loads(send_tx.bsc_calls_json or '{}')
+                metadata['receipt'] = {
+                    'gross': format(gross, 'f'),
+                    'fee': format(fee, 'f'),
+                    'net': format(net, 'f'),
+                    'fee_bps': event['fee_bps'],
+                    'finalized': True,
+                }
+                send_tx.bsc_calls_json = json.dumps(metadata)
+                send_tx.fee_amount = fee
+                send_tx.net_amount = net
+                send_fields = [
+                    'bsc_calls_json', 'fee_amount', 'net_amount', 'updated_at',
+                ]
+                if recovered_send:
+                    send_fields.extend(['transaction_hash', 'status'])
+                send_tx.save(update_fields=send_fields)
+                # Keep Conversion as the immutable exact fee ledger, but the
+                # Send is the single user-visible economic action.
+                from users.models_unified import UnifiedTransactionTable
+                UnifiedTransactionTable.objects.filter(conversion=row).delete()
+            rows.append(row)
+    return rows
+
+
+@shared_task(name='cusd_plus.monitor_cusd_fee_events', bind=True, max_retries=20)
+def monitor_cusd_fee_events(self):
+    """Ingest finalized cUSD perimeter logs, including permissionless exits."""
+    from collections import defaultdict
+    from types import SimpleNamespace
+    from blockchain.models import SponsoredBatch
+    from conversion.models import CusdFeeScanState
+    from users.models import Account
+
+    cusd = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+    if not cusd:
+        return 0
+    finalized = _finalized_block_number()
+    if finalized is None:
+        latest = int(_rpc('eth_blockNumber', []), 16)
+        finalized = max(0, latest - _finality_depth())
+    chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
+    from django.core.cache import cache
+    if not cache.add(f'cusd_fee_scan_lock:{chain_id}', '1', timeout=20):
+        return 0
+    state, _ = CusdFeeScanState.objects.get_or_create(chain_id=chain_id)
+    if state.last_finalized_block and state.last_finalized_hash:
+        prior = _rpc(
+            'eth_getBlockByNumber', [hex(state.last_finalized_block), False]) or {}
+        if (prior.get('hash') or '').lower() != state.last_finalized_hash.lower():
+            # A finalized-hash mismatch usually means the RPC endpoint is on
+            # a different chain. Never advance or silently duplicate ledger
+            # events; operations must investigate the endpoint/cursor.
+            logger.error('cUSD fee cursor finalized hash mismatch at block %s',
+                         state.last_finalized_block)
+            raise self.retry(
+                exc=RuntimeError('cusd_fee_cursor_finalized_hash_mismatch'),
+                countdown=300,
+            )
+    if state.last_finalized_block:
+        start = state.last_finalized_block + 1
+    else:
+        start = int(getattr(settings, 'CUSD_VAULT_FEE_EVENTS_START_BLOCK', 0) or 0)
+        if start <= 0:
+            logger.error(
+                'cUSD fee watcher has no start block; set '
+                'CUSD_VAULT_FEE_EVENTS_START_BLOCK to the deployment/upgrade block'
+            )
+            return 0
+    if start > finalized:
+        return 0
+
+    topic0 = [
+        '0x' + _keccak(text=sig).hex() for sig in (
+            'MintedWithFee(address,address,uint256,uint256,uint256,uint256)',
+            'RedeemedWithFee(address,address,uint256,uint256,uint256,uint256)',
+            'SavingsEntrySettled(uint256,uint256,uint256,uint256)',
+            'SavingsExitSettled(address,uint256,uint256,uint256,uint256)',
+        )
+    ]
+    ingested = 0
+    try:
+        for lo in range(start, finalized + 1, 2_000):
+            hi = min(finalized, lo + 1_999)
+            logs = _rpc('eth_getLogs', [{
+                'address': cusd, 'fromBlock': hex(lo), 'toBlock': hex(hi),
+                'topics': [topic0],
+            }]) or []
+            by_tx = defaultdict(list)
+            for log in logs:
+                tx_hash = log.get('transactionHash')
+                if tx_hash:
+                    by_tx[tx_hash].append(log)
+            for tx_hash, tx_logs in by_tx.items():
+                # Preserve domain identity for sponsored sends. Falling back
+                # to tx.from would see the sponsor, lose kind/source_id, and
+                # recreate the Conversion activity row that send settlement
+                # deliberately suppresses.
+                batch = SponsoredBatch.objects.filter(
+                    tx_hash__iexact=tx_hash,
+                ).first()
+                if batch is None:
+                    tx = _rpc('eth_getTransactionByHash', [tx_hash]) or {}
+                    actor = (tx.get('from') or '').lower()
+                    if not actor or not Account.objects.filter(
+                            bsc_address__iexact=actor,
+                            deleted_at__isnull=True).exists():
+                        continue
+                    batch = SimpleNamespace(
+                        tx_hash=tx_hash, user_bsc_address=actor,
+                    )
+                ingested += len(_reconcile_cusd_fee_event(
+                    batch=batch, receipt={'logs': tx_logs}))
+        final_block = _rpc('eth_getBlockByNumber', [hex(finalized), False]) or {}
+        state.last_finalized_block = finalized
+        state.last_finalized_hash = final_block.get('hash') or ''
+        state.save(update_fields=[
+            'last_finalized_block', 'last_finalized_hash', 'updated_at',
+        ])
+        return ingested
+    except Exception as exc:  # noqa: BLE001 — cursor advances only on success
+        logger.warning('cUSD fee-event scan failed at %s..%s: %s', start, finalized, exc)
+        raise self.retry(countdown=30)
+
+
+def settle_savings_mint(tx_hash: str, outcome: str, receipt=None, batch=None) -> None:
     """Promote or fail the mint row once its receipt is final.
 
     record_savings_mint writes SUBMITTED at broadcast; only here does a row
@@ -1096,9 +1488,16 @@ def settle_savings_mint(tx_hash: str, outcome: str) -> None:
         return
     try:
         row = Conversion.objects.filter(
-            conversion_type='to_savings', to_transaction_hash=tx_hash,
+            conversion_type__in=('to_savings', 'usdt_to_cusd'),
+            to_transaction_hash=tx_hash,
             status='SUBMITTED', is_deleted=False,
         ).first()
+        if outcome == 'confirmed':
+            if batch is not None and receipt is not None:
+                reconciled = _reconcile_cusd_fee_event(batch=batch, receipt=receipt)
+                row = next((r for r in reconciled if r.conversion_type in (
+                    'to_savings', 'usdt_to_cusd')),
+                    row)
         if row is None:
             return
         if outcome == 'confirmed':
@@ -1379,11 +1778,22 @@ def check_sponsored_batch_receipt(self, batch_id: int):
             logger.warning('stock history sync failed for %s: %s', batch.tx_hash, exc)
             raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    # Conversion history is part of settlement, not best-effort telemetry.
+    # Write the finalized event-backed amounts before making the sponsor row
+    # terminal so a transient DB failure remains retryable.
+    if _cusd_fee_event(receipt) is not None:
+        try:
+            _reconcile_cusd_fee_event(batch=batch, receipt=receipt)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('cUSD fee-event reconciliation failed for %s: %s',
+                           batch.tx_hash, exc)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
-    settle_savings_mint(batch.tx_hash, 'confirmed')
+    settle_savings_mint(batch.tx_hash, 'confirmed', receipt=receipt, batch=batch)
     if batch.kind in ('stock_buy', 'stock_sell'):
         from django.core.cache import cache
         from . import vault
@@ -1395,11 +1805,10 @@ def check_sponsored_batch_receipt(self, batch_id: int):
 # Kinds that own a SEPARATE domain confirm task keyed (source_id, batch_id).
 # Everything else (subscribe/redeem/payroll_fund) settles via the batch-level
 # receipt task alone, so promoting the batch is enough.
+from send.kinds import BSC_SEND_KINDS
+
 _DOMAIN_CONFIRM_TASKS = {
-    'send_cusd_plus': 'send.confirm_bsc_send',
-    'send_redeem': 'send.confirm_bsc_send',
-    'send_usdt': 'send.confirm_bsc_send',
-    'send_confio': 'send.confirm_bsc_send',
+    **{kind: 'send.confirm_bsc_send' for kind in BSC_SEND_KINDS},
     'pay_cusd_plus': 'payments.confirm_bsc_payment',
     'pay_usdt': 'payments.confirm_bsc_payment',
     'pay_confio': 'payments.confirm_bsc_payment',
@@ -1498,6 +1907,31 @@ def reconcile_signed_batches():
             out['dropped'] += 1
 
     out.update(_converge_presale_buys(grace_min))
+
+    # A process can die after a durable batch advances to sent/terminal but
+    # before the domain confirmer is enqueued. Re-drive unresolved sends for
+    # every canonical kind; the confirmer is isolated and idempotent.
+    from send.kinds import BSC_SEND_KINDS
+    from send.models import SendTransaction
+    unresolved_send = SendTransaction.objects.filter(
+        pk=models.OuterRef('source_id'),
+        status__in=('PENDING', 'SUBMITTED'),
+    )
+    orphaned_sends = SponsoredBatch.objects.annotate(
+        unresolved_send=models.Exists(unresolved_send),
+    ).filter(
+        unresolved_send=True,
+        kind__in=BSC_SEND_KINDS,
+        status__in=('sent', 'confirmed', 'reverted', 'noop_failed', 'reorged', 'dropped'),
+    ).order_by('id')[:100]
+    domain_requeued = 0
+    for batch in orphaned_sends:
+        current_app.send_task(
+            'send.confirm_bsc_send', args=[batch.source_id, batch.id],
+            countdown=3,
+        )
+        domain_requeued += 1
+    out['send_domain_requeued'] = domain_requeued
     return out
 
 

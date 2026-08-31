@@ -34,3 +34,31 @@ Project-level deferred work captured by /plan-eng-review. Each entry includes co
 - Slack webhook or email destination must be configured in env vars
 
 **Estimated effort:** 30 min dev + test
+
+### Data-triggered whale and institutional conversion pricing
+**Source:** plan-eng-review on 2026-08-29 (cUSD conversion fee system)
+
+**What:** Revisit volume tiers, capped fees, or negotiated institutional conversion pricing only after real high-volume usage demonstrates that the symmetric 0.9% entry/exit fee blocks valuable customers.
+
+**Why:** At 0.9%, a $100,000 conversion costs $900 in each direction. That may become commercially unattractive for institutional or whale users, but V1 has no confirmed requirement and adding exemptions now would weaken the universal fee perimeter.
+
+**Pros:**
+- Lets pricing respond to observed customer behavior instead of speculation.
+- Preserves a simple retail message and contract surface for V1.
+- Avoids provenance heuristics, waiver attestations, and premature per-address policy.
+
+**Cons:**
+- A large early customer may require a manual commercial response before productized tiering exists.
+- Any later on-chain pricing change requires a reviewed cUSD implementation upgrade or a separately approved mechanism.
+
+**Context:**
+- V1 uses one symmetric `feeBps` initialized to 90 with `MAX_FEE_BPS = 90`.
+- The Safe may lower the universal fee, but there are no per-user exceptions.
+- Revisit when a concrete customer or cohort crosses an agreed monthly conversion-volume threshold and fee sensitivity is evidenced in conversion abandonment or direct feedback.
+- Do not treat asset provenance, ramp provider, or wallet origin as a tier signal.
+
+**Depends on / blocked by:**
+- Production conversion-volume and funnel data after the cUSD fee system ships.
+- A concrete pricing decision and legal review for differentiated customer treatment.
+
+**Estimated effort:** product decision first; implementation depends on the selected pricing model

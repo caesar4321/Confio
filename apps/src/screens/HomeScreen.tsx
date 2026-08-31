@@ -541,16 +541,18 @@ export const HomeScreen = () => {
   // Calculate portfolio value including CONFIO marked to current presale
   // price plus the cUSD+ savings position AND raw wallet USDT (Mercado Pago
   // model: the spendable AND yielding dollars are one headline number, and
-  // money must never vanish between USDT landing and the silent mint —
-  // for geo-ineligible users the raw USDT IS their dollar). Stocks stay
+  // money must never vanish between transient USDT landing and the silent
+  // cUSD/cUSD+ conversion). Stocks stay
   // out — the home number must never have a red day; Acciones live in
   // their own row.
   const totalUSDValue = React.useMemo(
     () =>
       cUSDBalance + usdcBalance + confioUsdValue +
-      savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd,
+      savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd +
+      savingsPortfolio.usdtBalanceUsd,
     [cUSDBalance, usdcBalance, confioUsdValue,
-     savingsPortfolio.savings.balanceUsd, savingsPortfolio.usdtBalanceUsd]
+     savingsPortfolio.savings.balanceUsd, savingsPortfolio.cusdBalanceUsd,
+     savingsPortfolio.usdtBalanceUsd]
   );
 
   // Use real exchange rate from API only - no fallbacks
@@ -837,7 +839,7 @@ export const HomeScreen = () => {
     onPress: () => navigateToRampOrEfectivo('TopUp'),
   };
   // The BSC rail is offered whether or not the user is Ondo-eligible: an
-  // ineligible user's top-up lands as plain Confío Dollar (USDT) instead of
+  // ineligible user's top-up lands as plain Confío Dollar (cUSD) instead of
   // minting yield, which is exactly what savingsRechargeOption's subtitle
   // already promises.
   //
@@ -867,11 +869,13 @@ export const HomeScreen = () => {
   // What the BSC withdrawal rail can actually move in ONE operation: BOTH
   // legs. The funding batch redeems the shortfall out of the vault and pays
   // from the combined balance in a single transaction, and the server's
-  // sufficiency check authorizes on raw + position too — so max() understated
+  // sufficiency check authorizes the two Confío-dollar positions. Transient
+  // raw USDT remains visible in the total but waits for foreground conversion
+  // before it can fund a normal withdrawal — so max() understated
   // a split balance and sent users to a door that looked too small to use
   // (audit 2026-08-03 [P2] #13). SUM, matching the sell screens.
   const bscWithdrawableUsd =
-    savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd;
+    savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd;
 
   // Both options land in the user's bank — the differentiator is where the
   // money sits NOW, so subtitles show live balances instead of destinations.
@@ -891,8 +895,8 @@ export const HomeScreen = () => {
     {
       icon: 'trending-up',
       title: 'Desde mis ahorros',
-      // Vault position OR raw USDT — the rail now exits either leg, which is
-      // the only way an Ondo-ineligible user (who never mints shares) can
+      // cUSD+ position, cUSD, or transient USDT — the rail exits every leg,
+      // including an Ondo-ineligible user's universal cUSD, so they can
       // reach a bank. Stocks stay excluded: they can't exit through here, so
       // totalUsd would overstate what's withdrawable.
       subtitle: bscWithdrawableUsd > 0
@@ -1682,16 +1686,16 @@ export const HomeScreen = () => {
                       <Text style={styles.walletSymbol}>
                         {/* Ticker in the subtitle like every other row
                             (CONFIO / cUSD). Ineligible variant stays
-                            ticker-less: that money is raw USDT, not
-                            cUSD+ — no dishonest badge. */}
+                            ticker-less: that money is cUSD, not cUSD+ — no
+                            dishonest yield badge. */}
                         {savingsPortfolio.savings.enabled ? 'cUSD+ · Ahorro que rinde' : 'Dólar digital'}
                       </Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
                       <Text style={styles.walletBalanceText}>
-                        {/* Eligible: vault + landed-not-yet-minted USDT.
-                            Ineligible: the row IS the USDT balance — a
-                            mere wallet, nothing vault-flavored. */}
+                        {/* Eligible: vault + cUSD + landed-not-yet-converted
+                            USDT. Ineligible: the row is universal cUSD plus
+                            any transient arrival, with no yield claim. */}
                         {/* Same rule as the legacy row: an employee without
                             viewBalance sees the wallet, not the figure. */}
                         {/* ALWAYS include the vault balance. Dropping it when
@@ -1701,7 +1705,8 @@ export const HomeScreen = () => {
                             MINTING, never what you already hold. */}
                         {(canViewBalance && showBalance)
                           ? `$${formatFixedFloor(
-                              savingsPortfolio.savings.balanceUsd + savingsPortfolio.usdtBalanceUsd,
+                              savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd +
+                              savingsPortfolio.usdtBalanceUsd,
                               2,
                             )}`
                           : '••••'}

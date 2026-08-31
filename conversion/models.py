@@ -32,9 +32,15 @@ class Conversion(models.Model):
         # the origin is `source`.
         ('to_savings', 'USDT -> cUSD+ (Ahorrar)'),
         ('from_savings', 'cUSD+ -> USDT (Retirar)'),
+        ('usdt_to_cusd', 'USDT -> cUSD (BSC)'),
+        ('cusd_to_usdt', 'cUSD -> USDT (BSC)'),
     ]
 
-    SAVINGS_TYPES = frozenset({'to_savings', 'from_savings'})
+    # All BSC dollar conversions share the exact-fee/sponsored ledger and
+    # unified-history writer. The historical name remains for compatibility.
+    SAVINGS_TYPES = frozenset({
+        'to_savings', 'from_savings', 'usdt_to_cusd', 'cusd_to_usdt',
+    })
 
     # The token pair each type moves, in display form. Single source of truth:
     # the unified ledger and the GraphQL type both read it. Every reader used
@@ -47,6 +53,8 @@ class Conversion(models.Model):
         'usdc_to_algo': ('USDC', 'ALGO'),
         'to_savings': ('USDT', 'cUSD+'),
         'from_savings': ('cUSD+', 'USDT'),
+        'usdt_to_cusd': ('USDT', 'cUSD'),
+        'cusd_to_usdt': ('cUSD', 'USDT'),
     }
 
     @property
@@ -108,6 +116,19 @@ class Conversion(models.Model):
         ('ramp', 'Ramp (Koywe) delivery'),
     ]
 
+    ASSET_CHOICES = [
+        ('CUSD_ALGO', 'cUSD (Algorand)'),
+        ('USDC_ALGO', 'USDC (Algorand)'),
+        ('USDT_BSC', 'USDT (BSC)'),
+        ('CUSD_BSC', 'cUSD (BSC)'),
+        ('CUSD_PLUS_BSC', 'cUSD+ (BSC)'),
+    ]
+    PERIMETER_DIRECTIONS = [
+        ('entry', 'USDT -> Confio dollars'),
+        ('exit', 'Confio dollars -> USDT'),
+        ('internal', 'cUSD <-> cUSD+'),
+    ]
+
     # Unique identifier
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     
@@ -156,6 +177,31 @@ class Conversion(models.Model):
     to_amount = models.DecimalField(max_digits=19, decimal_places=6)  # Amount received after conversion
     exchange_rate = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal('1.000000'))  # Exchange rate used
     fee_amount = models.DecimalField(max_digits=19, decimal_places=6, default=Decimal('0'))  # Fee charged (if any)
+
+    # Exact BSC fee ledger. The six-decimal fields above remain compatibility
+    # projections for existing clients; contract reconciliation uses these
+    # 18-decimal values and never reconstructs a fee from rounded display
+    # amounts.
+    gross_amount_exact = models.DecimalField(
+        max_digits=78, decimal_places=18, null=True, blank=True,
+        help_text='Authoritative gross amount from the prepared call/contract event.',
+    )
+    fee_amount_exact = models.DecimalField(
+        max_digits=78, decimal_places=18, null=True, blank=True,
+        help_text='Authoritative Confio conversion fee at token precision.',
+    )
+    net_amount_exact = models.DecimalField(
+        max_digits=78, decimal_places=18, null=True, blank=True,
+        help_text='Authoritative net amount after the conversion fee.',
+    )
+    conversion_fee_bps = models.PositiveSmallIntegerField(null=True, blank=True)
+    from_asset_id = models.CharField(max_length=32, choices=ASSET_CHOICES, blank=True, default='')
+    to_asset_id = models.CharField(max_length=32, choices=ASSET_CHOICES, blank=True, default='')
+    perimeter_direction = models.CharField(
+        max_length=10, choices=PERIMETER_DIRECTIONS, blank=True, default='',
+    )
+    prepared_intent_id = models.UUIDField(null=True, blank=True, unique=True)
+    contract_event_index = models.PositiveIntegerField(null=True, blank=True)
     
     # Transaction hashes for blockchain tracking. 88 chars fits an Algorand
     # base32 txid as well as an 0x EVM hash.
@@ -210,6 +256,17 @@ class Conversion(models.Model):
             models.Index(fields=['internal_id']),
             models.Index(fields=['created_at']),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['to_transaction_hash', 'contract_event_index'],
+                condition=(
+                    models.Q(contract_event_index__isnull=False)
+                    & models.Q(to_transaction_hash__isnull=False)
+                    & ~models.Q(to_transaction_hash='')
+                ),
+                name='uniq_conversion_contract_event',
+            ),
+        ]
     
     def __str__(self):
         actor_name = self.actor_display_name or "Unknown"
@@ -226,6 +283,17 @@ class Conversion(models.Model):
         
         if self.actor_user and self.actor_business:
             raise ValidationError("Only one of actor_user or actor_business should be set")
+
+        exact = (self.gross_amount_exact, self.fee_amount_exact, self.net_amount_exact)
+        if any(value is not None for value in exact):
+            if any(value is None for value in exact):
+                raise ValidationError('gross, fee, and net exact amounts must be stored together')
+            if any(value < 0 for value in exact):
+                raise ValidationError('exact conversion amounts cannot be negative')
+            if self.gross_amount_exact != self.fee_amount_exact + self.net_amount_exact:
+                raise ValidationError('exact fee plus net must equal gross')
+        if self.conversion_fee_bps is not None and self.conversion_fee_bps > 90:
+            raise ValidationError('conversion fee exceeds the immutable 90 bps ceiling')
     
     @property
     def is_savings(self) -> bool:
@@ -238,7 +306,7 @@ class Conversion(models.Model):
     @property
     def is_completed(self):
         return self.status == 'COMPLETED'
-    
+
     @property
     def is_failed(self):
         return self.status == 'FAILED'
@@ -256,6 +324,18 @@ class Conversion(models.Model):
         self.status = 'FAILED'
         self.error_message = error_message
         self.save()
+
+
+class CusdFeeScanState(models.Model):
+    """Durable finalized-log cursor for permissionless cUSD exits."""
+
+    chain_id = models.PositiveBigIntegerField(primary_key=True)
+    last_finalized_block = models.PositiveBigIntegerField(default=0)
+    last_finalized_hash = models.CharField(max_length=66, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'cusd_fee_scan_state'
 
 
 # Update unified user activity on new conversions

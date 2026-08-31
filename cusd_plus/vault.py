@@ -163,6 +163,25 @@ def last_oracle_price_wad(fresh: bool = False) -> int:
     return cached
 
 
+def current_oracle_price_wad(fresh: bool = False) -> int:
+    """Live USDY price that the next accrue()/mint will consume, 1e18.
+
+    Mint slippage floors must use this value rather than lastOraclePrice:
+    the vault accrues immediately before subscribing, so a stale validated
+    snapshot can overstate the number of USDY tokens the deposit will buy.
+    """
+    addr = oracle_address()
+    if not addr:
+        return last_oracle_price_wad(fresh=fresh)
+    cached = None if fresh else cache.get('cusd_plus_oracle_live_p')
+    if cached is None:
+        cached = _call(addr, SEL_GET_PRICE)
+        if cached <= 0:
+            raise RuntimeError('invalid live USDY oracle price')
+        cache.set('cusd_plus_oracle_live_p', cached, 15)
+    return cached
+
+
 def redeem_blocked_reason() -> str | None:
     """Why a redeem would revert right now, or None if the exit is open.
 
@@ -256,26 +275,9 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
         logger.exception('reserved usdt: in-flight sagas unreadable')
         raise
 
-    try:
-        # Prepared-but-unsigned BSC presale buys: the batch spends wallet USDT
-        # (plus a savings redeem for any shortfall), so an auto-mint — or a
-        # second prepare — must not spend it first. Reserving the full amount
-        # slightly over-reserves a redeem-funded buy; that is the safe
-        # direction, and abandon_stale_bsc_purchases releases it after 24h.
-        from django.db.models import Sum
-        from presale.bsc_flow import BSC_FUNDING_SOURCES
-        from presale.models import PresalePurchase
-        # Aggregate, never slice: a [:50] cap silently stopped reserving the
-        # 51st prepared purchase, so USDT already promised to it read back as
-        # sweepable and could be minted away (Codex audit 2026-08-02, P2).
-        pending_buys = PresalePurchase.objects.filter(
-            user=user, status='processing', transaction_hash__isnull=True,
-            funding_source__in=BSC_FUNDING_SOURCES,
-        ).aggregate(s=Sum('cusd_amount'))['s']
-        total += Decimal(str(pending_buys or 0))
-    except Exception:  # noqa: BLE001
-        logger.exception('reserved usdt: in-flight presale buys unreadable')
-        raise
+    # Presale no longer spends raw USDT. Its atomic batch uses cUSD/cUSD+ and
+    # pays the universal perimeter fee, so a prepared buy reserves no arrival
+    # USDT and cannot block foreground auto-conversion.
 
     return int(total * (10 ** 18))
 
@@ -296,17 +298,29 @@ def sweepable_usdt_wei(user, bsc_address: str) -> int:
     return available if is_safe_mint_amount(available) else 0
 
 
-def redeem_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:
-    """USDT a redeemToUsdt(shares) would actually deliver.
+def redeem_gross_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:
+    """Gross USDT produced by the cUSD+ position before perimeter fees.
 
-    Mirrors CusdPlusVault.redeemToUsdt + _imRedeem exactly:
-        usdyOut = mulDiv(shares, pPlus, p)   # floor
-        usdtOut = usdyOut * p / 1e18         # floor
+    This is also the exact fee-free cUSD output of unwrapToCusd.
     """
     if oracle_p_wad <= 0:
         return 0
     usdy_out = (shares * pps_wad) // oracle_p_wad
     return (usdy_out * oracle_p_wad) // (10 ** 18)
+
+
+def redeem_usdt_out(shares: int, pps_wad: int, oracle_p_wad: int) -> int:
+    """Net USDT a fee-bearing redeemToUsdt(shares) would deliver.
+
+    Mirrors CusdPlusVault.redeemToUsdt + _imRedeem exactly:
+        usdyOut = mulDiv(shares, pPlus, p)   # floor
+        usdtOut = usdyOut * p / 1e18         # floor
+    """
+    gross_usdt = redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad)
+    if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+        from .cusd_vault import preview_redeem_wei
+        return preview_redeem_wei(gross_usdt).net_wei
+    return gross_usdt
 
 
 def withdrawable_usdt_wei(user_bsc_address: str) -> int:
@@ -333,13 +347,28 @@ def withdrawable_usdt_wei(user_bsc_address: str) -> int:
         return 0
     addr = vault_address()
     raw = usdt_balance_raw(user_bsc_address, fresh=True)
+    cusd_net = cusd_withdrawable_usdt_wei(user_bsc_address)
     if not addr:
-        return raw
+        return raw + cusd_net
     shares = erc20_balance_raw(addr, user_bsc_address.lower())
     if shares <= 0:
-        return raw
-    return raw + redeem_usdt_out(
+        return raw + cusd_net
+    return raw + cusd_net + redeem_usdt_out(
         shares, p_plus_wad(fresh=True), last_oracle_price_wad(fresh=True))
+
+
+def cusd_withdrawable_usdt_wei(user_bsc_address: str) -> int:
+    """Net USDT obtainable from the holder's full cUSD balance."""
+    if not user_bsc_address:
+        return 0
+    cusd_addr = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+    if not cusd_addr:
+        return 0
+    cusd_raw = erc20_balance_raw(cusd_addr, user_bsc_address.lower())
+    if cusd_raw <= 0:
+        return 0
+    from .cusd_vault import preview_redeem_wei
+    return preview_redeem_wei(cusd_raw).net_wei
 
 
 def confio_yield_share_bps() -> int:

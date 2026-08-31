@@ -14,7 +14,7 @@ const defaultGraphqlUri = isLocalWeb
   : '/graphql/';
 
 // Error handling link
-const errorLink = onError(({ graphQLErrors, networkError, operation, forward }) => {
+const errorLink = onError(({ graphQLErrors, networkError }) => {
   if (graphQLErrors) {
     for (let err of graphQLErrors) {
       console.error(

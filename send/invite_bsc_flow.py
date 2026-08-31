@@ -2,7 +2,7 @@
 BSC invite & send — the backend half of ConfioInviteEscrow, mirroring the
 Algorand invite_send flow (blockchain/invite_send_transaction_builder.py).
 
-An inviter locks cUSD+ or CONFIO for a phone number that isn't a Confío
+An inviter locks cUSD+, cUSD or CONFIO for a phone number that isn't a Confío
 user yet. Three legs:
 
   create   inviter's 7702 batch [token.approve(escrow, amount),
@@ -11,13 +11,14 @@ user yet. Three legs:
            escrow namespaces storage by (inviter, inviteId) so several
            people can invite the same phone and nobody can squat an id.
   claim    when the invitee joins with a verified bsc_address, the SPONSOR
-           (KMS) calls escrow.claimInvitation(inviteId, inviter, recipient)
+           (KMS) calls the eligibility-aware claimInvitation; the escrow
+           converts cUSD+ <-> cUSD internally when required.
            as a plain tx — the backend is the party that knows who the
            phone belongs to.
   reclaim  after the 7-day window, the inviter's 7702 batch
            [escrow.reclaimInvitation(inviteId)] takes it back.
 
-Only cUSD+ and CONFIO are escrowable (the escrow's allowlist). Dark behind
+Only cUSD+, cUSD and CONFIO are escrowable (the escrow's allowlist). Dark behind
 BSC_INVITE_ENABLED.
 """
 import json
@@ -34,6 +35,7 @@ from eth_utils import keccak, to_checksum_address
 logger = logging.getLogger(__name__)
 
 WAD = 10 ** 18
+INTERNAL_CONVERSION_MIN_OUT_BPS = 9_950
 
 
 def _sel(sig: str) -> str:
@@ -42,10 +44,13 @@ def _sel(sig: str) -> str:
 
 SEL_APPROVE = _sel('approve(address,uint256)')
 SEL_CREATE = _sel('createInvitation(bytes32,address,uint256)')
-SEL_CLAIM = _sel('claimInvitation(bytes32,address,address)')
+SEL_CLAIM = _sel('claimInvitation(bytes32,address,address,bool,uint256)')
 SEL_RECLAIM = _sel('reclaimInvitation(bytes32)')
 
-GAS_CLAIM = 140_000
+# A cross-eligibility claim can unwrap cUSD+ through Ondo and mint cUSD, or
+# perform the inverse wrapper conversion. 140k only covered the old plain
+# ERC-20 transfer claim and would make the new atomic claim under-gassed.
+GAS_CLAIM = 750_000
 
 
 def _escrow() -> str:
@@ -56,6 +61,8 @@ def _token_address(token_type: str) -> str:
     t = (token_type or '').upper()
     if t == 'CUSD_PLUS':
         return (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
+    if t == 'CUSD':
+        return (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
     if t == 'CONFIO':
         return (getattr(settings, 'BSC_CONFIO_TOKEN_ADDRESS', '') or '').lower()
     return ''
@@ -104,6 +111,67 @@ def build_create_calls(token_type: str, amount_wei: int, invite_id32: str) -> li
     ]
 
 
+def _stored_create_calls(phone_invite) -> list:
+    """Return the exact token units prepared for this invite.
+
+    cUSD+ is an accumulating share, so its escrow units cannot be rebuilt
+    later from the displayed dollar amount.  New prepares persist the exact
+    batch on SendTransaction; funded legacy rows also have it from submit.
+    """
+    raw = getattr(getattr(phone_invite, 'send_transaction', None),
+                  'bsc_calls_json', '') or ''
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+        calls = payload.get('calls') or []
+        return calls if isinstance(calls, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _locked_units(phone_invite) -> int:
+    calls = _stored_create_calls(phone_invite)
+    if len(calls) == 2:
+        data = (calls[1].get('data') or '').lower()
+        if data[2:10] == SEL_CREATE and len(data) >= 202:
+            return int(data[138:202], 16)
+    # Compatibility for old draft rows that predate exact-batch persistence.
+    return int(Decimal(phone_invite.amount) * WAD)
+
+
+def _token_units_for_dollars(token_type: str, amount_wei: int) -> int:
+    if token_type != 'CUSD_PLUS':
+        return amount_wei
+    from cusd_plus.vault import p_plus_wad
+    pps = p_plus_wad(fresh=True)
+    if pps <= 0:
+        raise ValueError('invalid share price')
+    return -(-amount_wei * WAD // pps)
+
+
+def _claim_min_amount_out(phone_invite, recipient_eligible: bool) -> int:
+    locked_units = _locked_units(phone_invite)
+    if phone_invite.token_type == 'CUSD' and recipient_eligible:
+        from cusd_plus.vault import current_oracle_price_wad
+        oracle_price = current_oracle_price_wad(fresh=True)
+        if oracle_price <= 0:
+            raise ValueError('invalid oracle price')
+        expected_usdy = locked_units * WAD // oracle_price
+        return expected_usdy * INTERNAL_CONVERSION_MIN_OUT_BPS // 10_000
+    if phone_invite.token_type == 'CUSD_PLUS' and not recipient_eligible:
+        from cusd_plus.vault import (
+            last_oracle_price_wad, p_plus_wad, redeem_gross_usdt_out,
+        )
+        predicted = redeem_gross_usdt_out(
+            locked_units,
+            p_plus_wad(fresh=True),
+            last_oracle_price_wad(fresh=True),
+        )
+        return predicted * INTERNAL_CONVERSION_MIN_OUT_BPS // 10_000
+    return 0
+
+
 def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
                    phone_display: str = '') -> dict:
     """Build + store the create batch on a PhoneInvite row."""
@@ -113,7 +181,8 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
 
     if not _enabled():
         return {'success': False, 'error': 'bsc_invite_disabled'}
-    if (token_type or '').upper() not in ('CUSD_PLUS', 'CONFIO'):
+    requested_token = (token_type or '').upper()
+    if requested_token not in ('CUSD_PLUS', 'CUSD', 'CONFIO'):
         return {'success': False, 'error': 'token_not_escrowable'}
     if not phone_key or ':' not in phone_key:
         return {'success': False, 'error': 'bad_phone_key'}
@@ -132,6 +201,18 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     if not inviter_addr:
         return {'success': False, 'error': 'no_bsc_address'}
 
+    # "Dollars" are one product in the app, but the sender's actual BSC
+    # representation is jurisdiction-dependent. Legacy builds always submit
+    # CUSD_PLUS here, so trusting the client label would try to lock shares an
+    # ineligible sender does not own. Select the canonical asset server-side;
+    # the claim converts it fee-free if the eventual recipient belongs on the
+    # other side of the cUSD/cUSD+ boundary.
+    if requested_token in ('CUSD_PLUS', 'CUSD'):
+        from cusd_plus.eligibility import is_ondo_eligible
+        token_type = 'CUSD_PLUS' if is_ondo_eligible(user) else 'CUSD'
+    else:
+        token_type = 'CONFIO'
+
     try:
         amount_usd = Decimal(str(amount))
     except Exception:  # noqa: BLE001
@@ -139,6 +220,10 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     if amount_usd <= 0:
         return {'success': False, 'error': 'invalid_amount'}
     amount_wei = int(amount_usd * WAD)
+    try:
+        token_units = _token_units_for_dollars(token_type, amount_wei)
+    except ValueError:
+        return {'success': False, 'error': 'invalid_share_price'}
 
     invite_id32 = invite_id_bytes32(phone_key, inviter_addr)
     digits = ''.join(ch for ch in (phone_display or '') if ch.isdigit())
@@ -167,7 +252,10 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             return {'success': False, 'error': 'invite_id_spent'}
         return {'success': False, 'error': 'invite_already_pending'}
 
-    calls = build_create_calls(token_type, amount_wei, invite_id32)
+    calls = build_create_calls(token_type, token_units, invite_id32)
+    stored_batch = json.dumps({
+        'calls': calls, 'kind': 'invite_create', 'inviter': inviter_addr,
+    })
 
     # The history row, created BEFORE the batch is signed (bsc_flow.py does the
     # same for sends). Without it the money leaves for the escrow and the
@@ -185,12 +273,13 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         send_tx.recipient_address = _escrow()
         send_tx.sender_business = sender_business
         send_tx.sender_type = 'business' if sender_business else 'user'
+        send_tx.bsc_calls_json = stored_batch
         send_tx.sender_display_name = (
             sender_business.name if sender_business else (user.get_full_name() or user.username))
         send_tx.save(update_fields=[
             'amount', 'token_type', 'recipient_display_name', 'recipient_phone',
             'sender_address', 'recipient_address', 'sender_business',
-            'sender_type', 'sender_display_name', 'updated_at'])
+            'sender_type', 'sender_display_name', 'bsc_calls_json', 'updated_at'])
         invite.amount = amount_usd
         invite.token_type = token_type.upper()
         invite.phone_number = digits
@@ -231,6 +320,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             invitation_claimed=False,
             invitation_reverted=False,
             idempotency_key=invite_id32[2:],
+            bsc_calls_json=stored_batch,
         )
         invite = PhoneInvite.objects.create(
             rail='bsc',
@@ -244,8 +334,7 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
             token_type=token_type.upper(),
             status='draft',
         )
-    invite.blockchain_calls = json.dumps({'calls': calls, 'kind': 'invite_create',
-                                          'inviter': inviter_addr})
+    invite.blockchain_calls = stored_batch
     # blockchain_calls is a transient attr the mutation reads; the row's
     # authority is invitation_id + phone_key (the batch is reconstructible).
     return {
@@ -291,7 +380,9 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     if not inviter_addr:
         return {'success': False, 'error': 'no_bsc_address'}
     invite_id32 = '0x' + phone_invite.invitation_id
-    calls = build_create_calls(phone_invite.token_type, int(Decimal(phone_invite.amount) * WAD), invite_id32)
+    calls = _stored_create_calls(phone_invite)
+    if not calls:
+        return {'success': False, 'error': 'invite_requires_reprepare'}
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
 
     now = int(time.time())
@@ -456,9 +547,21 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     if recipient_addr == inviter_addr:
         return {'success': False, 'error': 'recipient_is_inviter'}
 
+    from cusd_plus.eligibility import is_ondo_eligible
+
     escrow = _escrow()
     invite_id32 = phone_invite.invitation_id
-    calldata = '0x' + SEL_CLAIM + invite_id32 + _addr_word(inviter_addr) + _addr_word(recipient_addr)
+    recipient_eligible = is_ondo_eligible(recipient_user)
+    try:
+        min_amount_out = _claim_min_amount_out(phone_invite, recipient_eligible)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('[INVITE][BSC] claim quote failed %s: %s', invite_id32, exc)
+        return {'success': False, 'error': 'quote_unavailable'}
+    calldata = (
+        '0x' + SEL_CLAIM + invite_id32 + _addr_word(inviter_addr)
+        + _addr_word(recipient_addr) + _uint_word(1 if recipient_eligible else 0)
+        + _uint_word(min_amount_out)
+    )
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
 
     signer = get_bsc_sponsor_signer_from_settings()
@@ -574,7 +677,7 @@ def claim_pending_bsc_invites(recipient_user, phone_key: str) -> int:
     # the BSC sponsor, so a single mislabelled field cannot misroute money.
     pending = PhoneInvite.objects.filter(
         rail='bsc', phone_key=phone_key, status='pending',
-        token_type__in=('CUSD_PLUS', 'CONFIO'), deleted_at__isnull=True,
+        token_type__in=('CUSD_PLUS', 'CUSD', 'CONFIO'), deleted_at__isnull=True,
     ).exclude(inviter_address='')
     for inv in pending:
         try:

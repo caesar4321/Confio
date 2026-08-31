@@ -553,9 +553,17 @@ class KoyweClient:
             'rate_display': rate_display,
             'total_change_display': total_change_display,
             'token_symbol': self.crypto_symbol,
-            'network_symbol': getattr(settings, 'KOYWE_CRYPTO_SYMBOL', self.crypto_symbol),
-            'network_display': RAMP_NETWORK_DISPLAY,
-            'asset_note': RAMP_USDC_ALGORAND_NOTE,
+            'network_symbol': self.crypto_symbol,
+            'network_display': (
+                'BNB Smart Chain (BEP-20)'
+                if self.crypto_symbol.upper() == 'USDT BSC'
+                else RAMP_NETWORK_DISPLAY
+            ),
+            'asset_note': (
+                'USDT por BNB Smart Chain (BEP-20)'
+                if self.crypto_symbol.upper() == 'USDT BSC'
+                else RAMP_USDC_ALGORAND_NOTE
+            ),
         }
 
     def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, external_id: str | None = None, document_number: str | None = None) -> dict[str, Any]:

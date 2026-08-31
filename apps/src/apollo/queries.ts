@@ -1765,6 +1765,7 @@ export const GET_RAMP_QUOTE = gql`
     $countryCode: String
     $fiatCurrency: String
     $paymentMethodCode: String
+    $destination: String
   ) {
     rampQuote(
       direction: $direction
@@ -1772,6 +1773,7 @@ export const GET_RAMP_QUOTE = gql`
       countryCode: $countryCode
       fiatCurrency: $fiatCurrency
       paymentMethodCode: $paymentMethodCode
+      destination: $destination
     ) {
       direction
       countryCode
@@ -1789,6 +1791,10 @@ export const GET_RAMP_QUOTE = gql`
       networkSymbol
       networkDisplay
       assetNote
+      confioFeeAmount
+      confioFeeBps
+      grossCryptoAmount
+      netCryptoAmount
     }
   }
 `;
@@ -4020,13 +4026,14 @@ export const GET_PRESALE_STATUS = gql`
   }
 `;
 
-// Presale spendable funds on BSC: wallet Confío Dollar plus savings, which
-// the buy batch can redeem in the same transaction (presale/bsc_flow.py).
+// Presale spendable funds on BSC: cUSD plus savings. Raw USDT is transient
+// and cannot bypass the universal conversion perimeter.
 export const GET_BSC_CONFIO_DOLLAR_BALANCE = gql`
   query GetBscConfioDollarBalance {
     cusdPlusSummary {
-      usdtBalanceUsd
+      cusdBalanceUsd
       balanceUsd
+      conversionFeeBps
     }
   }
 `;

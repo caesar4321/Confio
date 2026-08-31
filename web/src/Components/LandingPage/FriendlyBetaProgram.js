@@ -2,8 +2,9 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyBetaProgram.module.css';
-const pioneroBadge = process.env.PUBLIC_URL + '/images/PioneroBeta.png';
 import { useLanguage } from '../../contexts/LanguageContext';
+
+const pioneroBadge = process.env.PUBLIC_URL + '/images/PioneroBeta.png';
 
 const FriendlyBetaProgram = () => {
   const [ref, inView] = useInView({

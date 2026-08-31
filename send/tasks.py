@@ -130,6 +130,7 @@ def _notify_send_parties(s) -> None:
 @shared_task(name='send.confirm_bsc_send', bind=True, max_retries=25)
 def confirm_bsc_send(self, send_id: int, batch_id: int):
     from blockchain.models import SponsoredBatch
+    from .kinds import BSC_SEND_KINDS
     from .models import SendTransaction
 
     try:
@@ -137,18 +138,33 @@ def confirm_bsc_send(self, send_id: int, batch_id: int):
         batch = SponsoredBatch.objects.get(id=batch_id)
     except (SendTransaction.DoesNotExist, SponsoredBatch.DoesNotExist):
         return
-    if s.status != 'SUBMITTED':
-        return  # already resolved
-
     # Isolation (audit 2026-07-31 P2): this batch must actually be THIS
     # send's batch — right flow, right source row, right hash — before it
     # can settle the row. Blocks a mis-scheduled/duplicate task settling a
     # row with someone else's batch.
-    if (batch.kind not in ('send_cusd_plus', 'send_redeem', 'send_usdt')
+    if (batch.kind not in BSC_SEND_KINDS
             or batch.source_id != s.id
-            or (s.transaction_hash and batch.tx_hash != s.transaction_hash)):
+            or (s.transaction_hash
+                and batch.tx_hash.lower() != s.transaction_hash.lower())):
         logger.error('[SEND][BSC] batch %s does not match send %s — refusing to settle', batch.id, s.id)
         return
+
+    # Crash convergence: the durable batch can exist before submit_bsc_send
+    # writes the domain hash/status. Adopt only this isolated batch; a
+    # conditional UPDATE prevents overwriting any concurrently advanced row.
+    if s.status == 'PENDING' and not s.transaction_hash:
+        adopted = SendTransaction.objects.filter(
+            pk=s.pk, status='PENDING', transaction_hash='',
+        ).update(
+            transaction_hash=batch.tx_hash,
+            status='SUBMITTED',
+            updated_at=timezone.now(),
+        )
+        if adopted:
+            s.transaction_hash = batch.tx_hash
+            s.status = 'SUBMITTED'
+    if s.status != 'SUBMITTED':
+        return  # already resolved or concurrently advanced
 
     if batch.status in ('signed', 'sent'):
         # Fast early, slow tail (cusd_plus.tasks._retry_countdown): BSC

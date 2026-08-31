@@ -48,6 +48,7 @@ contract DeployRehearsal is Script {
             address(new ERC1967Proxy(address(routerImpl), abi.encodeCall(ConfioStockRouter.initialize, (deployer))))
         );
         vault.setSponsor(address(router), true);
+        vault.setStockRouter(address(router));
 
         vm.stopBroadcast();
 

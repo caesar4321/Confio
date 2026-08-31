@@ -23,15 +23,33 @@ from django.db import transaction
 logger = logging.getLogger(__name__)
 
 
+def _bsc_cusd_token(token_type, *, is_bsc=False):
+    """Keep Algorand cUSD and BSC cUSD distinct in the unified feed."""
+    token = (token_type or '').upper()
+    return 'CUSD_BSC' if token == 'CUSD' and is_bsc else token
+
+
 def create_unified_transaction_from_send(send_transaction):
     """Create or update UnifiedTransactionTable from SendTransaction"""
     try:
+        exact_net = send_transaction.net_amount
+        exact_fee = send_transaction.fee_amount
+        exact_gross = (
+            exact_net + exact_fee if exact_net is not None
+            else send_transaction.amount
+        )
         unified, created = UnifiedTransactionTable.objects.update_or_create(
             send_transaction=send_transaction,
             defaults={
                 'transaction_type': 'send',
-                'amount': send_transaction.amount,
-                'token_type': (send_transaction.token_type or '').upper(),
+                'amount': format(Decimal(exact_gross), 'f'),
+                'fee_amount': (
+                    format(Decimal(exact_fee), 'f') if exact_fee else ''
+                ),
+                'token_type': _bsc_cusd_token(
+                    send_transaction.token_type,
+                    is_bsc=bool(send_transaction.bsc_calls_json),
+                ),
                 'status': send_transaction.status,
                 'transaction_hash': send_transaction.transaction_hash or '',
                 'error_message': send_transaction.error_message or '',
@@ -120,7 +138,13 @@ def create_unified_transaction_from_payment(payment_transaction):
                 # merchant's card and balance claimed the full invoice amount.
                 'fee_amount': _payment_fee_amount(payment_transaction),
                 # Normalize to uppercase to align with filters and choices
-                'token_type': (payment_transaction.token_type or '').upper(),
+                'token_type': _bsc_cusd_token(
+                    payment_transaction.token_type,
+                    is_bsc=bool(
+                        payment_transaction.invoice_id
+                        and payment_transaction.invoice.settlement_chain == 'BSC'
+                    ),
+                ),
                 'status': 'CONFIRMED' if payment_transaction.status == 'PAID' else payment_transaction.status,
                 'transaction_hash': payment_transaction.transaction_hash or '',
                 'error_message': payment_transaction.error_message or '',

@@ -386,7 +386,7 @@ class CreatePayrollRun(graphene.Mutation):
         from . import bsc_flow
         # The rail no longer determines the token by itself: on BSC the run
         # is denominated in the pool this employer can actually park into
-        # (cUSD+, or raw USDT when Ondo blocks them). PINNED here, at
+        # (cUSD+ when Ondo-eligible, otherwise universal cUSD). PINNED here, at
         # creation — a run must keep paying out of the escrow it was funded
         # into even if the employer's eligibility changes mid-run.
         normalized_token = bsc_flow.rail_token(
@@ -556,7 +556,7 @@ class PreparePayrollItemPayout(graphene.Mutation):
         # this, flipping BSC_PAYROLL_ENABLED off between creation and payout
         # let a cUSD+ run fall through to here and be paid out of the
         # Algorand vault: a different pot of money than the run describes.
-        if item.run.token_type in ('CUSD_PLUS', 'USDT'):
+        if item.run.token_type in ('CUSD_PLUS', 'CUSD_BSC', 'USDT'):
             return PreparePayrollItemPayout(
                 item=None, run=None, success=False,
                 errors=["Esta nómina se paga desde la bóveda en BNB Chain, "
@@ -1842,24 +1842,27 @@ class PayrollRailStatusType(graphene.ObjectType):
                     "Differs from `rail` only while the kill switch is on with money still parked.")
     token_type = graphene.String(
         description="Token a run created now is denominated in — CUSD_PLUS on BSC, "
-                    "or USDT for an Ondo-blocked employer whose float can only be raw")
+                    "or CUSD_BSC for an Ondo-blocked employer")
     funding_token = graphene.String(
-        description="DEFAULT pool for a top-up: CUSD_PLUS or USDT. A hint, not a "
+        description="DEFAULT pool for a top-up: CUSD_PLUS or CUSD_BSC. A hint, not a "
                     "constraint — the client may fund or withdraw either pool "
                     "explicitly. Names the asset fundableBalanceUsd is measured in.")
     escrow_cusd_plus_usd = graphene.Float(
         description="Payroll escrow parked as cUSD+ shares, in USD. null = unknown")
     escrow_usdt_usd = graphene.Float(
-        description="Payroll escrow parked as raw USDT, in USD. null = unknown")
+        description="Legacy payroll escrow parked as raw USDT, in USD. null = unknown")
+    escrow_cusd_usd = graphene.Float(
+        description="Payroll escrow parked as universal cUSD, in USD. null = unknown")
     fundable_cusd_plus_usd = graphene.Float(
         description="Business wallet cUSD+ position a top-up could park, in USD")
     fundable_usdt_usd = graphene.Float(
-        description="Business wallet raw USDT a top-up could park, in USD")
+        description="Legacy business-wallet raw USDT, in USD")
+    fundable_cusd_usd = graphene.Float(
+        description="Business wallet cUSD a top-up could park, in USD")
     vault_balance_usd = graphene.Float(description="Payroll escrow, in USD")
     fundable_balance_usd = graphene.Float(
         description="Business balance a top-up can draw from, in USD, measured in "
-                    "whatever fundingToken names — the cUSD+ position, or the raw "
-                    "USDT wallet balance for an Ondo-blocked employer")
+                    "whatever fundingToken names — the cUSD+ position or universal cUSD")
     activated = graphene.Boolean(description="At least one signer is allowlisted, so a payout can be authorized")
     delegate_employee_ids = graphene.List(
         graphene.ID, description="BusinessEmployee ids whose signer is allowlisted on the rail")
@@ -2203,7 +2206,7 @@ class Query(graphene.ObjectType):
                 # What a top-up spends — in the asset this business can
                 # actually park. Reporting the cUSD+ position unconditionally
                 # told an Ondo-blocked employer it had $0.00 to fund with
-                # while it held thousands in raw USDT, and the funding call
+                # while it held thousands in cUSD, and the funding call
                 # then failed "insufficient balance" on money it owned.
                 # Same answer prepare_bsc_payroll_admin builds the batch from.
                 funding_token = bsc_flow.funding_token(biz_acct, user)
@@ -2273,9 +2276,12 @@ class Query(graphene.ObjectType):
             escrow_cusd_plus_usd=(escrow_split.get('CUSD_PLUS')
                                   if may_see_balance else None),
             escrow_usdt_usd=(escrow_split.get('USDT') if may_see_balance else None),
+            escrow_cusd_usd=(escrow_split.get('CUSD') if may_see_balance else None),
             fundable_cusd_plus_usd=(fundable_split.get('CUSD_PLUS')
                                     if (may_see_balance and in_business_ctx) else None),
             fundable_usdt_usd=(fundable_split.get('USDT')
+                               if (may_see_balance and in_business_ctx) else None),
+            fundable_cusd_usd=(fundable_split.get('CUSD')
                                if (may_see_balance and in_business_ctx) else None),
             activated=activated,
             delegate_employee_ids=delegate_ids,
@@ -2323,7 +2329,7 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
         allowed = graphene.Boolean(required=False)
         token_type = graphene.String(
             required=False,
-            description="Which escrow pool to fund/withdraw: CUSD_PLUS or USDT. "
+            description="Which escrow pool to fund/withdraw: CUSD_PLUS, CUSD_BSC, or legacy USDT. "
                         "Omit to use the business's default pool.")
 
     success = graphene.Boolean()
@@ -2332,7 +2338,7 @@ class PrepareBscPayrollAdmin(graphene.Mutation):
     calls = graphene.List(BscPayrollCallType)
     shares = graphene.String()
     asset = graphene.Int(
-        description="Escrow pool this batch touches: 0 = cUSD+ shares, 1 = raw USDT")
+        description="Escrow pool: 0 = cUSD+ shares, 1 = legacy USDT, 2 = cUSD")
     token_type = graphene.String(
         description="The same pool by name — what the top-up is denominated in")
     delegate_address = graphene.String()

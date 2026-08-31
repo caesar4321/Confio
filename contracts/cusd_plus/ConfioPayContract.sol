@@ -34,18 +34,23 @@ pragma solidity ^0.8.24;
  * builder and payments/bsc_flow.py), sends net = gross − fee to the
  * merchant, pulls the fee into this contract, and consumes the invoiceId.
  *
- * House rules: token allowlist fixed at deploy (cUSD+ vault shares +
- * BSC-USDT + CONFIO); non-upgradeable; owner (Safe) can collect accrued
+ * House rules: token allowlist fixed at deploy (cUSD+ shares + universal
+ * cUSD + legacy BSC-USDT + CONFIO); non-upgradeable; owner (Safe) can collect accrued
  * fees, rotate the payment signer, and pause NEW payments; no path to
  * anything but the fee accrual. Merchant payout is a direct transfer —
  * nothing but fees ever rests here.
  *
  * The allowlist is not the charge menu (2026-08-01, ChargeScreen migration).
- * A merchant charges in exactly two denominations — cUSD+ or CONFIO — and
- * USDT is here as the PAYER's funding fallback: someone holding raw USDT
- * (including anyone geo-ineligible to mint cUSD+) settles a dollar invoice
- * with it and the merchant receives that same token. Dropping USDT would
- * match the menu but lock ineligible payers out of paying merchants at all.
+ * A merchant charges in exactly two denominations — dollars or CONFIO.
+ * cUSD+ and cUSD are the active dollar rails. USDT remains allowlisted only
+ * for already-authorized legacy batches during the coordinated migration;
+ * once the fee perimeter is live the backend never authorizes raw-USDT Pay,
+ * so Pay cannot bypass the mandatory USDT <-> cUSD conversion fee.
+ *
+ * The EIP-712 field names `redeemToUsdt` and `minUsdtOut` are retained for
+ * wire compatibility. In the current contract they mean "route cUSD+ to
+ * universal cUSD" and "minimum cUSD out". This is an internal, sponsor-only,
+ * fee-free compatibility conversion; it never crosses the USDT perimeter.
  */
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -59,11 +64,8 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
 interface ICusdPlusVault {
-    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to)
-        external
-        returns (uint256 usdtOut);
+    function unwrapToCusd(uint256 shares, uint256 minCusdOut, address to) external returns (uint256 cusdOut);
 }
-
 
 contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, EIP712 {
     using SafeERC20 for IERC20;
@@ -71,6 +73,7 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
     uint256 public constant FEE_BPS = 90; // 0.9%, ceiling division
 
     IERC20 public immutable CUSD_PLUS;
+    IERC20 public immutable CUSD;
     IERC20 public immutable USDT;
     /// CONFIO (BEP-20, re-issued 2026-07-31). A charge denomination in its
     /// own right — amounts are a token COUNT, not USD — settled through the
@@ -103,21 +106,21 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         uint256 gross,
         uint256 fee,
         bool redeemedToUsdt,
-        uint256 usdtOut
+        uint256 routedOut
     );
     event FeesCollected(address indexed token, address indexed to, uint256 amount);
     event PaymentSignerChanged(address indexed previous, address indexed current);
 
-    constructor(address cusdPlus, address usdt, address confio, address signer_, address owner_)
+    constructor(address cusdPlus, address cusd, address usdt, address confio, address signer_, address owner_)
         Ownable(owner_)
         EIP712("ConfioPay", "1")
     {
         require(
-            cusdPlus != address(0) && usdt != address(0) && confio != address(0),
-            "zero address"
+            cusdPlus != address(0) && cusd != address(0) && usdt != address(0) && confio != address(0), "zero address"
         );
         require(signer_ != address(0), "zero signer");
         CUSD_PLUS = IERC20(cusdPlus);
+        CUSD = IERC20(cusd);
         USDT = IERC20(usdt);
         CONFIO = IERC20(confio);
         paymentSigner = signer_;
@@ -143,10 +146,11 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         uint256 minUsdtOut,
         uint256 deadline
     ) public view returns (bytes32) {
-        return _hashTypedDataV4(keccak256(abi.encode(
-            PAY_TYPEHASH, invoiceId, payer, token, gross, merchant,
-            redeemToUsdt, minUsdtOut, deadline
-        )));
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(PAY_TYPEHASH, invoiceId, payer, token, gross, merchant, redeemToUsdt, minUsdtOut, deadline)
+            )
+        );
     }
 
     /// Called BY the payer (their EOA, via the sponsored 7702 batch that
@@ -161,15 +165,10 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         uint256 minUsdtOut,
         uint256 deadline,
         bytes calldata authSig
-    )
-        external
-        nonReentrant
-        whenNotPaused
-        returns (uint256 fee)
-    {
+    ) external nonReentrant whenNotPaused returns (uint256 fee) {
         require(block.timestamp <= deadline, "authorization expired");
         require(
-            token == address(CUSD_PLUS) || token == address(USDT) || token == address(CONFIO),
+            token == address(CUSD_PLUS) || token == address(CUSD) || token == address(USDT) || token == address(CONFIO),
             "token not allowed"
         );
         require(merchant != address(0) && merchant != address(this), "bad merchant");
@@ -177,12 +176,8 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         require(!invoiceDone[invoiceId], "invoice done");
 
         // The backend must have authorized THESE exact terms for THIS payer.
-        bytes32 digest = payDigest(invoiceId, msg.sender, token, gross, merchant,
-                                   redeemToUsdt, minUsdtOut, deadline);
-        require(
-            SignatureChecker.isValidSignatureNow(paymentSigner, digest, authSig),
-            "bad authorization"
-        );
+        bytes32 digest = payDigest(invoiceId, msg.sender, token, gross, merchant, redeemToUsdt, minUsdtOut, deadline);
+        require(SignatureChecker.isValidSignatureNow(paymentSigner, digest, authSig), "bad authorization");
 
         fee = feeFor(gross);
         // The merchant must actually receive something: at gross == 1 the
@@ -197,11 +192,11 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         // Merchant leg. Mirrors ConfioPayrollVault.payout(): the routing is a
         // SIGNED parameter, so the backend decides eligibility and the chain
         // enforces that the decision was authorized. A merchant who cannot
-        // hold cUSD+ is paid in USDT atomically, in this one call — no
+        // hold cUSD+ is paid in universal cUSD atomically, in this one call — no
         // sibling redeem in the caller's batch, nothing for a validator to
         // police.
         uint256 net = gross - fee;
-        uint256 usdtOut;
+        uint256 routedOut;
         if (redeemToUsdt) {
             require(token == address(CUSD_PLUS), "redeem needs cUSD+");
             require(minUsdtOut > 0, "minOut required");
@@ -209,24 +204,21 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
 
             // Trust the OUTCOME, not the return value. CUSD_PLUS is a UUPS
             // proxy: a faulty or hostile implementation could return a
-            // plausible usdtOut while paying the merchant nothing and leaving
+            // plausible routedOut while paying the merchant nothing and leaving
             // `net` here — where collectFees, bounded by accruedFees, could
             // never retrieve it. Measure what the merchant actually received
             // and what we actually spent, and revert unless both hold.
-            uint256 merchantBefore = USDT.balanceOf(merchant);
+            uint256 merchantBefore = CUSD.balanceOf(merchant);
             uint256 sharesBefore = IERC20(token).balanceOf(address(this));
-            usdtOut = ICusdPlusVault(address(CUSD_PLUS)).redeemToUsdt(net, minUsdtOut, merchant);
-            require(USDT.balanceOf(merchant) - merchantBefore >= minUsdtOut,
-                    "merchant not paid");
-            require(sharesBefore - IERC20(token).balanceOf(address(this)) == net,
-                    "shares not consumed");
+            routedOut = ICusdPlusVault(address(CUSD_PLUS)).unwrapToCusd(net, minUsdtOut, merchant);
+            require(CUSD.balanceOf(merchant) - merchantBefore >= minUsdtOut, "merchant not paid");
+            require(sharesBefore - IERC20(token).balanceOf(address(this)) == net, "shares not consumed");
         } else {
             require(minUsdtOut == 0, "minOut without redeem");
             IERC20(token).safeTransferFrom(msg.sender, merchant, net);
         }
 
-        emit PaymentMade(invoiceId, msg.sender, merchant, token, gross, fee,
-                         redeemToUsdt, usdtOut);
+        emit PaymentMade(invoiceId, msg.sender, merchant, token, gross, fee, redeemToUsdt, routedOut);
     }
 
     // ═════════════════════════ Admin ════════════════════════════════════
@@ -239,11 +231,7 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         paymentSigner = signer_;
     }
 
-    function collectFees(address token, address to, uint256 amount)
-        external
-        onlyOwner
-        nonReentrant
-    {
+    function collectFees(address token, address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "zero recipient");
         require(amount > 0 && amount <= accruedFees[token], "exceeds accrued fees");
         accruedFees[token] -= amount;
@@ -251,6 +239,11 @@ contract ConfioPayContract is Ownable2Step, Pausable, ReentrancyGuardTransient, 
         emit FeesCollected(token, to, amount);
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 }

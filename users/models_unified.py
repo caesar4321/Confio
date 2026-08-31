@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 # anything else belongs to no screen: it is money the user can never see.
 # That has already happened twice in production — 67 conversion rows written
 # as lowercase 'cUSD', and the presale card the BSC rail filed under 'CUSD'.
-CANONICAL_TOKEN_TYPES = frozenset({'CUSD', 'CONFIO', 'USDC', 'ALGO', 'CUSD_PLUS', 'USDT'})
+CANONICAL_TOKEN_TYPES = frozenset({
+    'CUSD', 'CUSD_BSC', 'CONFIO', 'USDC', 'ALGO', 'CUSD_PLUS', 'USDT',
+})
 
 # Every non-canonical spelling any writer in this repo can produce. The ramp
 # rail is the main source: Koywe reports a product name, not a ledger token
@@ -82,6 +84,7 @@ class UnifiedTransactionTable(models.Model):
 
     TOKEN_TYPES = [
         ('CUSD', 'Confío Dollar'),
+        ('CUSD_BSC', 'Confío Dollar (BSC)'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin'),
         ('ALGO', 'ALGO'),
