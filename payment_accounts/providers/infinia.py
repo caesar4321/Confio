@@ -155,6 +155,10 @@ class InfiniaProvider(PaymentAccountProvider):
         destination = (operation.external_destination or {}).get('destination_account')
         if not destination:
             raise ProviderCapabilityError('Infinia payout destination is incomplete')
+        # `source_amount` is the face-value amount for this provider leg. This
+        # adapter is deliberately fee-blind: it must never calculate or
+        # describe a Confio platform fee. The on-chain cUSD perimeter charges
+        # once when value crosses between USDT and Confio dollars.
         payload = {
             'originId': operation.idempotency_key,
             'amount': float(operation.source_amount),
@@ -179,6 +183,8 @@ class InfiniaProvider(PaymentAccountProvider):
     def create_transfer(self, operation):
         if not operation.source_account or not operation.destination_account:
             raise ProviderCapabilityError('Infinia internal transfer requires both accounts')
+        # Provider conversions/transfers are face-value instructions. The
+        # on-chain cUSD perimeter, not an Infinia leg, owns Confio's fee.
         payload = {
             'idempotency_key': operation.idempotency_key,
             'source_account_id': operation.source_account.provider_account_id,

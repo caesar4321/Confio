@@ -2,7 +2,12 @@ from types import SimpleNamespace
 
 from django.test import SimpleTestCase, override_settings
 
-from payment_accounts.schema import _destination_details
+from payment_accounts.models import MoneyFlow, MoneyOperation
+from payment_accounts.schema import (
+    MoneyFlowType,
+    MoneyOperationType,
+    _destination_details,
+)
 from payment_accounts.services import (
     PaymentAccountError,
     _validate_infinia_destination,
@@ -44,6 +49,21 @@ class DestinationValidationTests(SimpleTestCase):
                     'accountType': 'SAVINGS',
                 },
             )
+
+
+class PlatformFeeBoundaryTests(SimpleTestCase):
+    def test_payment_account_models_do_not_store_platform_fee(self):
+        self.assertNotIn(
+            'confio_fee', {field.name for field in MoneyFlow._meta.get_fields()}
+        )
+        self.assertNotIn(
+            'confio_fee',
+            {field.name for field in MoneyOperation._meta.get_fields()},
+        )
+
+    def test_payment_account_graphql_does_not_expose_platform_fee(self):
+        self.assertNotIn('confio_fee', MoneyFlowType._meta.fields)
+        self.assertNotIn('confio_fee', MoneyOperationType._meta.fields)
 
 
 @override_settings(COBRE_PAYMENT_ACCOUNTS_ENABLED=True)
