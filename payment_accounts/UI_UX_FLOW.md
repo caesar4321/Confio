@@ -521,7 +521,7 @@ Show:
 - User pays in Confío Dollar/cUSD+
 - Recipient receives local currency
 - Exchange rate and expiry
-- Confío fee
+- Confío fee from the cUSD mint/redeem quote (never recalculated by the payment-account provider)
 - Provider/network cost if passed through
 - Total debit
 - Expected delivery time

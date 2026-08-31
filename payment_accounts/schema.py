@@ -244,7 +244,7 @@ class MoneyOperationType(DjangoObjectType):
         fields = (
             'internal_id', 'provider', 'operation_type', 'status', 'provider_status',
             'source_asset', 'source_amount', 'target_asset', 'target_amount',
-            'provider_fee', 'confio_fee', 'failure_code', 'failure_detail',
+            'provider_fee', 'failure_code', 'failure_detail',
             'created_at', 'submitted_at', 'settled_at',
         )
 
@@ -255,7 +255,7 @@ class MoneyFlowType(DjangoObjectType):
         fields = (
             'internal_id', 'kind', 'status', 'source_asset', 'source_amount',
             'target_asset', 'target_amount', 'gross_amount', 'net_amount',
-            'confio_fee', 'provider_cost', 'created_at', 'completed_at', 'operations',
+            'provider_cost', 'created_at', 'completed_at', 'operations',
         )
 
 

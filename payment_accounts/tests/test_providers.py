@@ -99,7 +99,7 @@ class AdapterPayloadTests(SimpleTestCase):
         client.create_payout.return_value = {'id': 'po_1', 'status': 'IN_PROGRESS'}
         operation = SimpleNamespace(
             idempotency_key='idem',
-            source_amount=10,
+            source_amount=Decimal('100.00'),
             source_account=SimpleNamespace(provider_account_id='account_1'),
             external_destination={'destination_account': {'country': 'CO'}},
         )
@@ -107,8 +107,12 @@ class AdapterPayloadTests(SimpleTestCase):
         result = InfiniaProvider(client=client).create_payout(operation)
 
         payload = client.create_payout.call_args.args[0]
-        self.assertEqual(payload['originId'], 'idem')
-        self.assertEqual(payload['sourceAccountId'], 'account_1')
+        self.assertEqual(payload, {
+            'originId': 'idem',
+            'amount': 100.0,
+            'sourceAccountId': 'account_1',
+            'destinationAccount': {'country': 'CO'},
+        })
         self.assertEqual(result.status, 'processing')
 
     def test_infinia_completed_transfer_remains_settling_until_credit(self):
@@ -127,6 +131,29 @@ class AdapterPayloadTests(SimpleTestCase):
         result = InfiniaProvider(client=client).create_transfer(operation)
 
         self.assertEqual(result.status, 'settling')
+
+    def test_infinia_transfer_passes_full_provider_amount_without_platform_fee(self):
+        client = mock.Mock()
+        client.create_internal_transfer.return_value = {
+            'id': 'it_2', 'status': 'IN_PROGRESS'
+        }
+        operation = SimpleNamespace(
+            idempotency_key='idem-face-value',
+            source_amount=Decimal('100.00'),
+            source_account=SimpleNamespace(provider_account_id='source'),
+            destination_account=SimpleNamespace(provider_account_id='target'),
+            provider_data={},
+        )
+
+        InfiniaProvider(client=client).create_transfer(operation)
+
+        payload = client.create_internal_transfer.call_args.args[0]
+        self.assertEqual(payload, {
+            'idempotency_key': 'idem-face-value',
+            'source_account_id': 'source',
+            'target_account_id': 'target',
+            'source_amount': 100.0,
+        })
 
     def test_infinia_account_uses_alpha2_and_balance_details(self):
         client = mock.Mock()

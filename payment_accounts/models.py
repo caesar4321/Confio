@@ -260,7 +260,6 @@ class MoneyFlow(models.Model):
     target_amount = models.DecimalField(max_digits=38, decimal_places=18, null=True, blank=True)
     gross_amount = models.DecimalField(max_digits=38, decimal_places=18, null=True, blank=True)
     net_amount = models.DecimalField(max_digits=38, decimal_places=18, null=True, blank=True)
-    confio_fee = models.DecimalField(max_digits=38, decimal_places=18, default=0)
     provider_cost = models.DecimalField(max_digits=38, decimal_places=18, default=0)
     fee_asset = models.CharField(max_length=24, blank=True, default='')
     legacy_ramp_transaction = models.ForeignKey(
@@ -335,7 +334,6 @@ class MoneyOperation(models.Model):
     target_asset = models.CharField(max_length=24, blank=True, default='')
     target_amount = models.DecimalField(max_digits=38, decimal_places=18, null=True, blank=True)
     provider_fee = models.DecimalField(max_digits=38, decimal_places=18, default=0)
-    confio_fee = models.DecimalField(max_digits=38, decimal_places=18, default=0)
     fee_asset = models.CharField(max_length=24, blank=True, default='')
     failure_code = models.CharField(max_length=100, blank=True, default='')
     failure_detail = models.TextField(blank=True, default='')

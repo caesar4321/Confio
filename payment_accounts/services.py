@@ -891,9 +891,6 @@ def _sync_flow_status(flow):
         flow.provider_cost = sum(
             (operation.provider_fee for operation in operations), Decimal('0')
         )
-        flow.confio_fee = sum(
-            (operation.confio_fee for operation in operations), Decimal('0')
-        )
         final_amount = next(
             (
                 operation.target_amount
@@ -905,6 +902,6 @@ def _sync_flow_status(flow):
         if final_amount is not None:
             flow.target_amount = final_amount
     flow.save(update_fields=[
-        'status', 'completed_at', 'provider_cost', 'confio_fee',
+        'status', 'completed_at', 'provider_cost',
         'target_amount', 'updated_at',
     ])

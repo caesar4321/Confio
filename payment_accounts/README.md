@@ -88,6 +88,19 @@ always resolved from JWT-owned database rows. Money-moving mutations require a
 client-generated `requestId` UUID; retries with the same UUID return the
 original operation, while reuse with different immutable details is rejected.
 
+## Fee boundary
+
+`payment_accounts` never calculates or deducts a Confío platform fee. Amounts
+sent to any payment-account provider are face-value amounts for that provider
+leg. A provider's own fee, when returned by the provider, remains recorded as
+`provider_fee` / `provider_cost`.
+
+The Confío conversion fee is assessed once at the USDT <-> cUSD on-chain
+perimeter and recorded in the canonical conversion ledger. Depending on flow
+direction, that on-chain boundary may occur before or after a provider leg. Its
+fee must not be copied into provider payloads or duplicated in payment-account
+records.
+
 ## Configuration
 
 Required settings are loaded from environment/Secrets Manager:
