@@ -122,6 +122,17 @@ interface Transaction {
   transactionHash?: string;
   rampDirection?: string;
   rampProvider?: string;
+  rampFiatAmount?: string;
+  rampFiatCurrency?: string;
+  feeAmount?: string;
+  netAmount?: string;
+  fromAmount?: string;
+  toAmount?: string;
+  walletAmount?: string;
+  walletCurrency?: string;
+  creditedCurrency?: string;
+  grossAmount?: string;
+  grossCurrency?: string;
 }
 
 // Set Spanish locale for moment
@@ -852,16 +863,14 @@ export const AccountDetailScreen = () => {
           const sign = tx.direction === 'sent' ? '-' : '+';
           signedDisplayAmount = `${sign}${signedDisplayAmount}`;
         }
+        // displayAmount remains gross for compatibility with released detail
+        // screens. A statement card is a balance delta, so credits use the
+        // authoritative server net while debits keep the gross removed.
+        const signedBalanceAmount = tx.direction === 'received' && tx.netAmount
+          ? `+${String(tx.netAmount).replace(/^[+-]/, '')}`
+          : signedDisplayAmount;
 
         const rampDirection = (tx.rampDirection || '').toLowerCase();
-        const rampFiatAmountRaw = tx.rampFiatAmount;
-        const rampFiatAmount = rampFiatAmountRaw === undefined || rampFiatAmountRaw === null
-          ? ''
-          : String(rampFiatAmountRaw).trim();
-        const signedRampFiatAmount = rampFiatAmount
-          ? ((rampFiatAmount.startsWith('+') || rampFiatAmount.startsWith('-')) ? rampFiatAmount : `+${rampFiatAmount}`)
-          : '';
-
         // Map backend status to UI status labels
         const rawStatus = (tx.status || '').toUpperCase();
         const mappedStatus: 'completed' | 'pending' | 'failed' = (() => {
@@ -925,9 +934,7 @@ export const AccountDetailScreen = () => {
           toAmount: tx.toAmount || tx.to_amount || undefined,
           amount: isConversion
             ? conversionAmount
-            : type === 'ramp' && rampDirection === 'on_ramp' && signedRampFiatAmount
-              ? signedRampFiatAmount
-              : signedDisplayAmount,
+            : signedBalanceAmount,
           // For conversions, show the currency of the amount displayed: the destination token for '+' and source for '-'
           currency: isConversion
             // The denomination of the amount shown above: the token arriving
@@ -936,14 +943,16 @@ export const AccountDetailScreen = () => {
               ? conversionToToken
               : conversionFromToken)
             : type === 'ramp'
-              ? (
-                rampDirection === 'on_ramp'
-                  ? (tx.rampFiatCurrency || 'cUSD')
-                  : 'cUSD'
-              )
+              ? (tx.tokenType || 'CUSD')
             : (() => {
               const normalizedToken = (tx.tokenType || '').toUpperCase();
               const isCusdToken = normalizedToken === 'CUSD' || normalizedToken.includes('CONFIO DOLLAR') || normalizedToken.includes('CUSD ');
+              // The destination asset is independent of the configured fee.
+              // A governance-approved 0 bps conversion still credits cUSD or
+              // cUSD+, not the raw USDT observed by the deposit scanner.
+              if (type === 'received' && tx.toToken) {
+                return tx.toToken;
+              }
               if (type === 'payroll' || type === 'humanitarian' || isCusdToken) {
                 return 'cUSD';
               }
@@ -992,6 +1001,18 @@ export const AccountDetailScreen = () => {
           rampProvider: tx.rampProvider,
           rampFiatAmount: tx.rampFiatAmount,
           rampFiatCurrency: tx.rampFiatCurrency,
+          // Preserve the crypto side before the on-ramp card swaps its hero
+          // amount/currency to local fiat. Transaction detail needs both to
+          // show gross fiat, the USD conversion fee, and net Confío dollars.
+          walletAmount: type === 'ramp' ? (tx.netAmount || tx.amount) : undefined,
+          walletCurrency: type === 'ramp' ? tx.tokenType : undefined,
+          creditedCurrency: type === 'received' && tx.toToken
+            ? (tx.toToken || tx.tokenType)
+            : undefined,
+          // Cards show the signed BALANCE DELTA. Receipts still need the
+          // ledger gross and original token to explain gross - fee = net.
+          grossAmount: tx.amount,
+          grossCurrency: tx.tokenType,
         };
 
         // Debug final transaction for external deposits
@@ -1419,6 +1440,22 @@ export const AccountDetailScreen = () => {
       false;
 
     const handlePress = () => {
+      const detailAmount = (() => {
+        if (transaction.type === 'conversion') return transaction.amount;
+        if (transaction.type === 'ramp' && transaction.rampDirection === 'on_ramp'
+            && transaction.rampFiatAmount) {
+          const fiat = String(transaction.rampFiatAmount).replace(/^[+-]/, '');
+          return `+${fiat}`;
+        }
+        if (!transaction.grossAmount) return transaction.amount;
+        const gross = String(transaction.grossAmount).replace(/^[+-]/, '');
+        return transaction.amount.startsWith('-') ? `-${gross}` : `+${gross}`;
+      })();
+      const detailCurrency = (
+        transaction.type === 'ramp'
+        && transaction.rampDirection === 'on_ramp'
+        && transaction.rampFiatCurrency
+      ) ? transaction.rampFiatCurrency : (transaction.grossCurrency || transaction.currency);
       const params = {
         transactionType: transaction.type,
         transactionData: {
@@ -1434,9 +1471,20 @@ export const AccountDetailScreen = () => {
             : (transaction.type === 'payment' && transaction.amount.startsWith('-'))
               ? transaction.to
               : transaction.to,
-          amount: transaction.amount,
-          currency: transaction.currency,
+          amount: detailAmount,
+          currency: detailCurrency,
           secondaryCurrency: transaction.secondaryCurrency,
+          feeAmount: transaction.feeAmount,
+          netAmount: transaction.netAmount,
+          fromAmount: transaction.fromAmount,
+          toAmount: transaction.toAmount,
+          creditedCurrency: transaction.creditedCurrency,
+          walletAmount: transaction.walletAmount,
+          walletCurrency: transaction.walletCurrency,
+          rampDirection: transaction.rampDirection,
+          rampProvider: transaction.rampProvider,
+          rampFiatAmount: transaction.rampFiatAmount,
+          rampFiatCurrency: transaction.rampFiatCurrency,
           date: moment(transaction.date).format('YYYY-MM-DD'),
           time: transaction.time,
           timestamp: transaction.date,

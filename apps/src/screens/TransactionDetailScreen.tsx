@@ -169,9 +169,8 @@ const formatPhoneNumber = (phone: string | undefined): string => {
   return phone; // Return as-is if we can't format it
 };
 
-// The fee the SERVER recorded for this transaction, falling back to the
-// legacy 0.9% only when the row predates feeAmount. The rate must not be
-// hardcoded here: it is wrong the moment a rate changes or a flow prices
+// The fee the SERVER recorded for this transaction. The rate must not be
+// reconstructed here: it is wrong the moment a rate changes or a flow prices
 // differently, and it is what made this screen subtract the fee twice when
 // the backend briefly sent a netted amount. See docs/ledger-amounts.md.
 const serverFee = (tx: any): number | null => {
@@ -924,6 +923,9 @@ export const TransactionDetailScreen = () => {
       to: tx.recipientDisplayName || tx.recipientUser?.firstName || (transactionData as any)?.recipientName || 'Usuario',
       toAddress: tx.recipientAddress,
       amount: resolvedType === 'sent' ? `-${tx.amount}` : `+${tx.amount}`,
+      feeAmount: tx.feeAmount ?? (transactionData as any)?.feeAmount ?? (transactionData as any)?.fee_amount,
+      netAmount: tx.netAmount ?? (transactionData as any)?.netAmount ?? (transactionData as any)?.net_amount,
+      creditedCurrency: tx.toToken ?? (transactionData as any)?.creditedCurrency,
       currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
       date: moment.utc(tx.createdAt).local().format('YYYY-MM-DD'),
       time: moment.utc(tx.createdAt).local().format('HH:mm'),
@@ -1657,9 +1659,60 @@ export const TransactionDetailScreen = () => {
     const items: ReceiptItem[] = [];
     const currency = formatTokenLabel(currentTx.currency) || 'cUSD';
     const isPaymentDebit = currentTx.type === 'payment' && !!currentTx.amount?.startsWith('-');
+    const isRampReceipt = (currentTx.type || '').toLowerCase() === 'ramp';
+    const rampDirection = isRampReceipt
+      ? normalizeRampDirection(
+        currentTx.rampDirection || currentTx.ramp_direction || currentTx.direction,
+        currentTx.amount,
+        currentTx.formattedTitle || currentTx.title,
+      )
+      : null;
 
     const isConversionReceipt = currentTx.type === 'exchange' || currentTx.type === 'conversion';
-    if (isConversionReceipt) {
+    if (isRampReceipt) {
+      const fee = serverFee(currentTx);
+      const walletCurrency = formatTokenLabel(
+        currentTx.walletCurrency || currentTx.tokenType || currentTx.token_type,
+      ) || 'USD';
+      const walletAmount = currentTx.walletAmount
+        || currentTx.wallet_amount
+        || currentTx.netAmount
+        || currentTx.net_amount;
+
+      if (rampDirection === 'on_ramp') {
+        items.push({ label: 'Monto pagado', value: `${formatAmount(currentTx.amount)} ${currency}` });
+        if (fee !== null && fee > 0) {
+          items.push({
+            label: 'Comisión de Confío',
+            value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} USD`,
+          });
+        }
+        if (walletAmount !== undefined && walletAmount !== null && walletAmount !== '') {
+          items.push({
+            label: 'Monto recibido',
+            value: `${formatAmount(walletAmount)} ${walletCurrency}`,
+            color: colors.text.primary,
+          });
+        }
+      } else {
+        items.push({ label: 'Monto enviado', value: `${formatAmount(currentTx.amount)} ${currency}` });
+        if (fee !== null && fee > 0) {
+          items.push({
+            label: 'Comisión de Confío',
+            value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
+          });
+        }
+        const fiatAmount = currentTx.rampFiatAmount || currentTx.ramp_fiat_amount;
+        const fiatCurrency = currentTx.rampFiatCurrency || currentTx.ramp_fiat_currency;
+        if (fiatAmount !== undefined && fiatAmount !== null && fiatAmount !== '') {
+          items.push({
+            label: 'Monto recibido',
+            value: `${formatAmount(fiatAmount)} ${fiatCurrency || ''}`.trim(),
+            color: colors.text.primary,
+          });
+        }
+      }
+    } else if (isConversionReceipt) {
       const gross = currentTx.fromAmount ?? currentTx.from_amount ?? currentTx.amount;
       const net = currentTx.toAmount ?? currentTx.to_amount ?? currentTx.netAmount ?? currentTx.net_amount;
       const fee = serverFee(currentTx);
@@ -1687,6 +1740,31 @@ export const TransactionDetailScreen = () => {
           ? 'Monto recibido'
           : 'Monto enviado';
       items.push({ label: amountLabel, value: `${formatAmount(currentTx.amount)} ${currency}` });
+
+      // External wallet sends are represented by one SendTransaction whose
+      // gross, exact conversion fee and net are supplied by the server.  The
+      // old receipt rendered only the gross even though all three values had
+      // already reached this screen.
+      if (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'received') {
+        const fee = serverFee(currentTx);
+        if (fee !== null && fee > 0) {
+          items.push({
+            label: 'Comisión de Confío',
+            value: `- ${(fee < 0.01) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
+          });
+          const net = currentTx.netAmount ?? currentTx.net_amount;
+          if (net !== undefined && net !== null && net !== '') {
+            const creditedCurrency = formatTokenLabel(
+              currentTx.creditedCurrency || currentTx.toToken || currentTx.to_token,
+            ) || currency;
+            items.push({
+              label: currentTx.type === 'received' ? 'Monto acreditado' : 'Recibe la billetera',
+              value: `${formatAmount(net)} ${currentTx.type === 'received' ? creditedCurrency : currency}`,
+              color: colors.text.primary,
+            });
+          }
+        }
+      }
     }
     items.push({ label: 'Comisión de red', value: 'Gratis · cubre Confío', color: colors.primaryDark });
 
@@ -1694,17 +1772,17 @@ export const TransactionDetailScreen = () => {
       const fee = serverFee(currentTx) ?? computeConfioFee(currentTx.amount);
       if (fee > 0) {
         items.push({
-          label: 'Comisión Confío (0.9%)',
+          label: 'Comisión de Confío',
           value: `- ${(fee < 0.01 && fee > 0) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
         });
       }
     }
 
-    if (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment') {
+    if (!isRampReceipt && (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment')) {
       const raw = currentTx.amount;
       const sign = typeof raw === 'string' && raw.startsWith('-') ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
       const grossAbs = typeof raw === 'string' ? parseFloat(raw.replace(/[+-]/g, '')) : (Number(raw) || 0);
-      let totalLabel = currentTx.type === 'sent' ? 'Total enviado' : 'Total recibido';
+      let totalLabel = (currentTx.type === 'sent' || sign === '-') ? 'Total enviado' : 'Total recibido';
       let totalAbs = grossAbs;
       if (currentTx.type === 'payment') {
         totalLabel = isPaymentDebit ? 'Total pagado' : 'Total recibido';

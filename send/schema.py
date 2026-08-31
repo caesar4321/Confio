@@ -1,18 +1,56 @@
-import graphene
-from graphene_django import DjangoObjectType
-from send.models import SendTransaction
-from django.contrib.auth import get_user_model
-from graphql_jwt.decorators import login_required
-from django.utils import timezone
-from django.db import transaction
-from django.db.models import Q
+import json
 from decimal import Decimal
 from typing import List, Optional
 
+import graphene
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+from graphene_django import DjangoObjectType
+from graphql_jwt.decorators import login_required
+
+from send.models import SendTransaction
+
 User = get_user_model()
+
+
+def _send_unified_receipt(send):
+    cache_name = '_detail_unified_receipt'
+    if not hasattr(send, cache_name):
+        from users.models_unified import UnifiedTransactionTable
+        setattr(send, cache_name, UnifiedTransactionTable.objects.filter(
+            send_transaction=send, deleted_at__isnull=True,
+        ).select_related('send_transaction').first())
+    return getattr(send, cache_name)
+
+
+def _send_prepared_receipt(send):
+    """Return the immutable prepare-time gross/fee/net disclosure, if any.
+
+    Finalized model columns still win. This fills the short interval between
+    broadcast and event reconciliation without asking the client to apply the
+    current contract rate to an older prepared transaction.
+    """
+    cache_name = '_detail_prepared_receipt'
+    if not hasattr(send, cache_name):
+        try:
+            metadata = json.loads(getattr(send, 'bsc_calls_json', '') or '{}')
+            receipt = (metadata.get('receipt') or {}) if isinstance(metadata, dict) else {}
+            if not isinstance(receipt, dict):
+                receipt = {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            receipt = {}
+        setattr(send, cache_name, receipt)
+    return getattr(send, cache_name)
+
 
 class SendTransactionType(DjangoObjectType):
     """GraphQL type for SendTransaction model"""
+    fee_amount = graphene.String()
+    net_amount = graphene.String()
+    to_token = graphene.String()
+
     class Meta:
         model = SendTransaction
         fields = (
@@ -44,6 +82,40 @@ class SendTransactionType(DjangoObjectType):
             'invitation_reverted',
             'invitation_expires_at'
         )
+
+    def resolve_fee_amount(self, info):
+        # net_amount is populated by final event reconciliation. Once present,
+        # the finalized fee is authoritative even when it is exactly zero; a
+        # truthiness check would incorrectly resurrect an older prepared fee.
+        if self.net_amount is not None:
+            return str(self.fee_amount or 0)
+        prepared = _send_prepared_receipt(self).get('fee')
+        if prepared not in (None, ''):
+            return str(prepared)
+        row = _send_unified_receipt(self)
+        if row is None:
+            return ''
+        from users.graphql_views import UnifiedTransactionType
+        return UnifiedTransactionType.resolve_fee_amount(row, info)
+
+    def resolve_net_amount(self, info):
+        if self.net_amount is not None:
+            return str(self.net_amount)
+        prepared = _send_prepared_receipt(self).get('net')
+        if prepared not in (None, ''):
+            return str(prepared)
+        row = _send_unified_receipt(self)
+        if row is None:
+            return str(self.amount)
+        from users.graphql_views import UnifiedTransactionType
+        return UnifiedTransactionType.resolve_net_amount(row, info)
+
+    def resolve_to_token(self, info):
+        row = _send_unified_receipt(self)
+        if row is None:
+            return None
+        from users.graphql_views import UnifiedTransactionType
+        return UnifiedTransactionType.resolve_to_token(row, info)
     
 
 

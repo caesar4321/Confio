@@ -74,6 +74,11 @@ def _notify_send_parties(s) -> None:
         'transaction_hash': s.transaction_hash,
         'amount': amount_str,
         'token_type': s.token_type,
+        # Exact contract receipt accounting. Transaction detail must not
+        # rediscover a rate (or call a stale notification "free") when the
+        # finalized SendTransaction already knows gross/fee/net.
+        'fee_amount': str(s.fee_amount or ''),
+        'net_amount': str(s.net_amount if s.net_amount is not None else s.amount),
         'sender_name': sender_name,
         'recipient_name': recipient_name,
         # Stated, not inferred: the client should never have to guess which

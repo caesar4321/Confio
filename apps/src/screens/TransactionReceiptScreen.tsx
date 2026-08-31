@@ -28,6 +28,7 @@ type RouteProps = RouteProp<MainStackParamList, 'TransactionReceipt'>;
 export const TransactionReceiptScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
+  const { userProfile } = useAuth();
   const transaction = route.params?.transaction as any;
   const viewShotRef = useRef<ViewShot>(null);
 
@@ -55,6 +56,16 @@ export const TransactionReceiptScreen = () => {
   };
 
   const counterpartyUser = transaction.counterpartyUser || transaction.recipientUser || transaction.senderUser;
+  const transferDirection = String(
+    transaction.type || transaction.transactionType || transaction.transaction_type || ''
+  ).toLowerCase();
+  const isOutgoingTransfer = ['sent', 'send', 'withdrawal'].includes(transferDirection)
+    || String(transaction.amount || '').trim().startsWith('-');
+  const isIncomingTransfer = ['received', 'receive', 'deposit'].includes(transferDirection)
+    || String(transaction.amount || '').trim().startsWith('+');
+  const authenticatedUserName = userProfile?.firstName
+    ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim()
+    : (userProfile?.username || '');
 
   // Formatters
   // Formatters
@@ -149,11 +160,16 @@ export const TransactionReceiptScreen = () => {
       transaction.sender_name,
       transaction.senderName,
       transaction.fromName,
-      transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName}` : '',
+      transaction.from,
+      transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName || ''}`.trim() : '',
+      isIncomingTransfer && counterpartyUser?.firstName
+        ? `${counterpartyUser.firstName} ${counterpartyUser.lastName || ''}`.trim()
+        : '',
+      isOutgoingTransfer ? authenticatedUserName : '',
       transaction.senderAddress ? `Externo (${transaction.senderAddress.slice(0, 4)}...${transaction.senderAddress.slice(-4)})` : '',
       'Billetera Externa'
     );
-    const sUsername = transaction.senderUser?.username;
+    const sUsername = transaction.senderUser?.username || (isOutgoingTransfer ? userProfile?.username : undefined);
     const sAddr = transaction.senderAddress || transaction.fromAddress;
     senderDetail = sUsername
       ? `@${sUsername}`
@@ -165,7 +181,12 @@ export const TransactionReceiptScreen = () => {
       transaction.recipient_name,
       transaction.recipientName,
       transaction.toName,
-      transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName}` : '',
+      transaction.to,
+      transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName || ''}`.trim() : '',
+      isOutgoingTransfer && counterpartyUser?.firstName
+        ? `${counterpartyUser.firstName} ${counterpartyUser.lastName || ''}`.trim()
+        : '',
+      isIncomingTransfer ? authenticatedUserName : '',
       'Usuario'
     );
     const rUsername = transaction.recipientUser?.username;
