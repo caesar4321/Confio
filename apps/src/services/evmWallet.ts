@@ -566,12 +566,22 @@ export function deriveIntentId(calls: BatchCall[], requestId?: string): string {
   const stockSell = selector(
     'sellToSavings((uint256,uint256,bytes32,address,uint256,uint256,uint256,uint8,bytes32),bytes,uint256,uint256,uint256)',
   ).slice(2);
+  const cusdRedeem = selector('redeemWithFee(uint256,uint256,address)').slice(2);
+  const wrapCusd = selector('wrapCusd(uint256,uint256,address)').slice(2);
+  const unwrapToCusd = selector('unwrapToCusd(uint256,uint256,address)').slice(2);
+  const mintCusd = selector('mintWithFee(uint256,uint256,address)').slice(2);
   const kind = selectors.has(stockBuy)
     ? 'stock_buy'
     : selectors.has(stockSell)
       ? 'stock_sell'
-      : selectors.has(SEL_REDEEM_TO_USDT)
+      : selectors.has(SEL_REDEEM_TO_USDT) || selectors.has(cusdRedeem)
         ? 'redeem'
+        : selectors.has(wrapCusd)
+          ? 'wrap_cusd'
+          : selectors.has(unwrapToCusd)
+            ? 'unwrap_to_cusd'
+            : selectors.has(mintCusd)
+              ? 'mint_cusd'
         : 'subscribe';
   return '0x' + bytesToHex(keccak_256(utf8ToBytes(`${kind}:${requestId || ''}`)));
 }
