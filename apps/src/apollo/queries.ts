@@ -9,6 +9,8 @@ export const GET_STATS_SUMMARY = gql`
       protectedSavings
       totalValueLocked
       usdyReserve
+      cusdBscCirculating
+      cusdBscReserve
       presaleCusdRaised
       presaleCusdRaised7d
       ondoStocksTvl
@@ -3160,8 +3162,8 @@ export const GET_PAYMENT_TRANSACTION_BY_ID = gql`
 
 // NEW: JWT-context-aware transactions query
 export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
-  query GetCurrentAccountTransactions($limit: Int, $offset: Int, $tokenTypes: [String]) {
-    currentAccountTransactions(limit: $limit, offset: $offset, tokenTypes: $tokenTypes) {
+  query GetCurrentAccountTransactions($limit: Int, $offset: Int, $tokenTypes: [String], $transactionTypes: [String]) {
+    currentAccountTransactions(limit: $limit, offset: $offset, tokenTypes: $tokenTypes, transactionTypes: $transactionTypes) {
       id
       transactionType
       createdAt

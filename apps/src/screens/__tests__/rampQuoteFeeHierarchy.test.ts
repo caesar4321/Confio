@@ -67,4 +67,24 @@ describe('ramp quote fee hierarchy', () => {
     expect(source).toContain('amount: detailAmount');
     expect(source).toContain('currency: detailCurrency');
   });
+
+  it('does not hide ramp history behind an asset allowlist', () => {
+    const source = readScreen('RampHistoryScreen.tsx');
+    const queries = readFileSync(resolve(__dirname, '../../apollo/queries.ts'), 'utf8');
+    const queryBlock = source.slice(
+      source.indexOf('useQuery(GET_CURRENT_ACCOUNT_TRANSACTIONS'),
+      source.indexOf('const rampTransactions'),
+    );
+
+    expect(queryBlock).toContain("transactionTypes: ['ramp']");
+    expect(queryBlock).not.toContain('tokenTypes');
+    expect(queries).toContain('$transactionTypes: [String]');
+    expect(queries).toContain('transactionTypes: $transactionTypes');
+    expect(source).toContain('onEndReached={() => void loadMore()}');
+    expect(source).toContain("(tx.transactionType || '').toLowerCase() === 'ramp'");
+    expect(source).toContain("normalized === 'CUSD' || normalized === 'CUSD_BSC'");
+    expect(source).toContain("normalized === 'CUSD_PLUS'");
+    expect(source).toContain("'USDC', 'USDT', 'ALGO', 'BNB'");
+    expect(source).not.toContain("const currency = isOffRamp ? 'cUSD'");
+  });
 });

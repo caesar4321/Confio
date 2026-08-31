@@ -63,6 +63,12 @@ export const ConfioTokenInfoScreen = () => {
   ];
 
   const s = data?.statsSummary;
+  const protectedSavingsTotal =
+    s?.totalValueLocked == null ||
+    s?.cusdBscReserve == null ||
+    s?.usdyReserve == null
+      ? null
+      : s.totalValueLocked + s.cusdBscReserve + s.usdyReserve;
   const liveLabel = s?.statsSource === 'algorand' ? 'en blockchain' : 'actualizado';
   const usersNew7d = Math.max(0, Math.round(s?.usersNew7d ?? 0));
   const presaleRaised7d = Math.max(0, s?.presaleCusdRaised7d ?? 0);
@@ -90,9 +96,11 @@ export const ConfioTokenInfoScreen = () => {
     },
     {
       label: 'Ahorros Protegidos',
-      value: `$${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)}`,
+      value: protectedSavingsTotal == null
+        ? '—'
+        : `$${formatWholeNumber(protectedSavingsTotal)}`,
       growth: liveLabel,
-      description: 'Reservas verificables que respaldan tus dólares: USDY para cUSD+ (tu ahorro con rendimiento) y USDC para cUSD.',
+      description: 'Reservas verificables: USDC para el antiguo a-cUSD, USDT para cUSD y USDY para cUSD+.',
       route: 'ProtectedSavings',
     },
     {

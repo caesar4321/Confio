@@ -147,6 +147,19 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
 
         self.assertEqual(_viewer_address_for(row, account), '0xBSC')
 
+    def test_bnb_uses_the_bsc_viewer_address(self):
+        from types import SimpleNamespace
+        from users.graphql_views import _viewer_address_for
+
+        account = SimpleNamespace(
+            bsc_address='0xBSC', algorand_address='ALGORAND')
+        row = SimpleNamespace(
+            token_type='BNB', from_address='', to_address='',
+            sender_address='', counterparty_address='',
+        )
+
+        self.assertEqual(_viewer_address_for(row, account), '0xBSC')
+
     def test_aggregate_ramp_uses_its_own_allocated_fee(self):
         from types import SimpleNamespace
         from users.graphql_views import UnifiedTransactionType
@@ -382,6 +395,71 @@ class UnifiedRampFeeResolverTestCase(SimpleTestCase):
             SendTransactionType.resolve_net_amount(send, None), '100')
         self.assertIsNone(
             SendTransactionType.resolve_fee_bps(send, None))
+
+
+class CurrentAccountTransactionFilterTestCase(TestCase):
+    def setUp(self):
+        from users.models import Account
+
+        self.user = User.objects.create_user(
+            username='ramp-history-filter',
+            email='ramp-history-filter@example.com',
+            password='testpass123',
+            firebase_uid='ramp-history-filter-firebase',
+        )
+        self.account = Account.objects.create(
+            user=self.user,
+            account_type='personal',
+            account_index=0,
+            algorand_address='H' * 58,
+            bsc_address='0x' + ('12' * 20),
+        )
+
+    def _row(self, transaction_type, token_type='CUSD'):
+        from users.models_unified import UnifiedTransactionTable
+
+        return UnifiedTransactionTable.objects.create(
+            transaction_type=transaction_type,
+            amount='10.000000',
+            token_type=token_type,
+            status='FAILED',
+            sender_user=self.user,
+            sender_type='user',
+            counterparty_type='external',
+            transaction_date=timezone.now(),
+        )
+
+    @patch(
+        'users.jwt_context.get_jwt_business_context_with_validation',
+        return_value={
+            'account_type': 'personal',
+            'account_index': 0,
+            'business_id': None,
+        },
+    )
+    def test_operation_filter_is_applied_before_pagination(self, _jwt_context):
+        from types import SimpleNamespace
+        from users.graphql_views import UnifiedTransactionQuery
+
+        ramp = self._row('ramp', token_type='BNB')
+        legacy_uppercase_ramp = self._row('RAMP', token_type='ALGO')
+        self._row('reward')  # Newer, but irrelevant to ramp history.
+        info = SimpleNamespace(
+            context=SimpleNamespace(user=self.user),
+        )
+
+        rows = UnifiedTransactionQuery().resolve_current_account_transactions(
+            info,
+            limit=2,
+            offset=0,
+            transaction_types=['RAMP'],
+        )
+
+        self.assertEqual(
+            [row.id for row in rows],
+            [legacy_uppercase_ramp.id, ramp.id],
+        )
+        self.assertEqual([row.token_type for row in rows], ['ALGO', 'BNB'])
 
 
 class UserSoftDeleteAuthTestCase(TestCase):

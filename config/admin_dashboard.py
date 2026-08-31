@@ -761,10 +761,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             created_at__gte=today_start
         ).exclude(status='FAILED').count()
         
-        # Conversion metrics. `Conversion` carries BOTH rails since the
+        # Conversion metrics. `Conversion` carries multiple rails since the
         # savings sagas merged into it (2026-08-01), so an unfiltered count
         # blurs an Algorand USDC swap with a BSC savings saga. Report the
-        # total and the per-rail split.
+        # total and the savings subset separately.
         from conversion.models import Conversion
         conversions_today_qs = Conversion.objects.filter(created_at__gte=today_start)
         conversions_7d_qs = Conversion.objects.filter(created_at__gte=last_7_start)
@@ -843,11 +843,11 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['usdc_to_cusd_volume'] = conversions_volume['usdc_to_cusd'] or Decimal('0')
         context['cusd_to_usdc_volume'] = conversions_volume['cusd_to_usdc'] or Decimal('0')
 
-        # Calculate net USDC inflow (positive means more USDC → cUSD)
+        # Calculate net legacy-rail inflow (positive means more USDC → a-cUSD)
         context['net_usdc_inflow'] = context['usdc_to_cusd_volume'] - context['cusd_to_usdc_volume']
 
-        # Live cUSD supply and collateral come from the cUSD contract, with a
-        # database fallback if algod is unavailable.
+        # Live legacy a-cUSD supply and collateral come from the Algorand
+        # contract, with a database fallback if algod is unavailable.
         from blockchain.cusd_metrics import get_cusd_platform_metrics
         cusd_metrics = get_cusd_platform_metrics()
         context['circulating_cusd'] = cusd_metrics.circulating_cusd
@@ -855,21 +855,20 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['cusd_metrics_source'] = cusd_metrics.source
         context['cusd_metrics_as_of'] = cusd_metrics.as_of
 
-        # ── cUSD+ (BSC savings rail) ──────────────────────────────────────
-        # The second dollar rail. Its supply/collateral live in the BSC vault
-        # and its user-facing flow lives in the savings sagas, so it needs
-        # both a chain read and a database read — same shape as the cUSD
-        # block above, deliberately kept separate rather than summed: the
-        # two rails have different collateral (USDC vs USDY) and different
-        # failure modes, and one blended number would hide both.
+        # ── BSC cUSD payment perimeter + cUSD+ savings rail ───────────────
+        # These stay separate from legacy a-cUSD and from each other: cUSD is
+        # backed by USDT, cUSD+ by USDY, and one blended number would hide a
+        # collateral or fee-accounting failure in either contract.
         from cusd_plus.metrics import (
             get_bnb_autoconvert_stats,
+            get_cusd_bsc_platform_metrics,
             get_cusd_plus_platform_metrics,
             get_savings_saga_stats,
             get_sponsorship_stats,
             get_stock_router_metrics,
             get_stock_trade_stats,
         )
+        context['cusd_bsc_metrics'] = get_cusd_bsc_platform_metrics()
         cusd_plus_metrics = get_cusd_plus_platform_metrics()
         context['cusd_plus_metrics'] = cusd_plus_metrics
         context['cusd_plus_circulating'] = cusd_plus_metrics.circulating_cusd_plus

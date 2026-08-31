@@ -643,7 +643,7 @@ def _viewer_address_for(transaction, account):
     rendered with no direction and an "Unknown" counterparty.
     """
     token = (getattr(transaction, 'token_type', '') or '').upper()
-    if token in ('CUSD_BSC', 'CUSD_PLUS', 'USDT'):
+    if token in ('CUSD_BSC', 'CUSD_PLUS', 'USDT', 'BNB'):
         return getattr(account, 'bsc_address', None) or ''
     # Token labels are not the ultimate chain authority: CONFIO exists on
     # both chains, and future dual-chain assets can too. A 0x endpoint makes
@@ -674,6 +674,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         limit=graphene.Int(default_value=50),
         offset=graphene.Int(default_value=0),
         token_types=graphene.List(graphene.String),
+        transaction_types=graphene.List(graphene.String),
         description="Get unified transactions for current JWT account context"
     )
     
@@ -776,7 +777,9 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         return transactions
     
-    def resolve_current_account_transactions(self, info, limit=50, offset=0, token_types=None):
+    def resolve_current_account_transactions(
+            self, info, limit=50, offset=0, token_types=None,
+            transaction_types=None):
         """Resolve unified transactions using JWT account context"""
         from .jwt_context import get_jwt_business_context_with_validation
         
@@ -860,6 +863,21 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             from django.db.models.functions import Upper
             wanted = [t.upper() for t in token_types]
             queryset = queryset.annotate(tok_upper=Upper('token_type')).filter(tok_upper__in=wanted)
+
+        # Apply operation filtering before pagination.  History screens must
+        # not fetch a mixed page and discard unrelated rows client-side: a
+        # busy account could otherwise have every ramp row pushed beyond the
+        # first page even though those rows exist in the ledger.
+        if transaction_types:
+            from django.db.models.functions import Lower
+            wanted_types = [
+                str(value).strip().lower()
+                for value in transaction_types
+                if str(value).strip()
+            ]
+            queryset = queryset.annotate(
+                transaction_type_lower=Lower('transaction_type'),
+            ).filter(transaction_type_lower__in=wanted_types)
 
         queryset = queryset.select_related(
             'send_transaction',

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -32,6 +32,8 @@ type RampFilter = 'all' | 'on_ramp' | 'off_ramp';
 type ListRow =
   | { kind: 'section'; label: string; key: string }
   | { kind: 'item'; data: any; key: string };
+
+const PAGE_SIZE = 50;
 
 /* ─── helpers ─── */
 
@@ -123,7 +125,8 @@ const getSectionKey = (dateString?: string | null): string => {
 
 const getCurrencyLabel = (tokenType?: string | null): string => {
   const normalized = String(tokenType || '').trim().toUpperCase();
-  if (normalized === 'CUSD') return 'cUSD';
+  if (normalized === 'CUSD' || normalized === 'CUSD_BSC') return 'cUSD';
+  if (normalized === 'CUSD_PLUS') return 'cUSD+';
   if (normalized === 'USDC POLYGON' || normalized === 'USDC SOLANA' || normalized === 'USDC-A') return 'cUSD';
   return tokenType || 'cUSD';
 };
@@ -131,7 +134,7 @@ const getCurrencyLabel = (tokenType?: string | null): string => {
 const formatAmount = (raw: string | number, currency?: string): string => {
   const num = parseFloat(String(raw).replace(/[+-]/g, ''));
   if (isNaN(num)) return String(raw);
-  const isCrypto = !currency || ['CUSD', 'USDC', 'ALGO', 'cUSD'].includes(currency.toUpperCase());
+  const isCrypto = !currency || ['CUSD', 'CUSD+', 'CUSD_BSC', 'CUSD_PLUS', 'USDC', 'USDT', 'ALGO', 'BNB'].includes(currency.toUpperCase());
   if (isCrypto) {
     return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   }
@@ -145,8 +148,8 @@ const formatPrimaryRampAmount = (item: any, isOffRamp: boolean): { amount: strin
     return { amount: formatAmount(fiatAmount, fiatCurrency), currency: fiatCurrency };
   }
   const rawAmount = String(item.displayAmount || item.amount || '').trim();
-  if (!rawAmount || rawAmount === '--') return { amount: '--', currency: isOffRamp ? 'cUSD' : getCurrencyLabel(item.tokenType) };
-  const currency = isOffRamp ? 'cUSD' : getCurrencyLabel(item.tokenType);
+  if (!rawAmount || rawAmount === '--') return { amount: '--', currency: getCurrencyLabel(item.tokenType) };
+  const currency = getCurrencyLabel(item.tokenType);
   return { amount: formatAmount(rawAmount, currency), currency };
 };
 
@@ -157,19 +160,62 @@ export const RampHistoryScreen = () => {
   const route = useRoute<RouteProps>();
   const { activeAccount } = useAccount();
   const [selectedFilter, setSelectedFilter] = useState<RampFilter>(route.params?.initialFilter || 'all');
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
-  const tokenTypes = useMemo(() => {
-    if (!activeAccount) return ['CUSD', 'USDC', 'ALGO'];
-    if (activeAccount.type === 'business') return ['CUSD', 'USDC', 'ALGO'];
-    return activeAccount.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'];
-  }, [activeAccount]);
-
-  const { data, loading, refetch } = useQuery(GET_CURRENT_ACCOUNT_TRANSACTIONS, {
-    variables: { limit: 100, offset: 0, tokenTypes },
+  const { data, loading, refetch, fetchMore } = useQuery(GET_CURRENT_ACCOUNT_TRANSACTIONS, {
+    // This is an operation-history screen, not an asset ledger. Fetch every
+    // rail while filtering by operation on the server, before pagination, so
+    // Algorand cUSD/USDC/ALGO,
+    // BSC cUSD/cUSD+/USDT/BNB, and future ramp assets cannot disappear just
+    // because a separate token allowlist has not been updated yet.
+    variables: { limit: PAGE_SIZE, offset: 0, transactionTypes: ['ramp'] },
     skip: !activeAccount,
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: true,
   });
+
+  const onRefresh = useCallback(async () => {
+    setHasMore(true);
+    await refetch({
+      limit: PAGE_SIZE,
+      offset: 0,
+      transactionTypes: ['ramp'],
+    });
+  }, [refetch]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+
+    const currentTransactions = data?.currentAccountTransactions || [];
+    setLoadingMore(true);
+    try {
+      const result = await fetchMore({
+        variables: {
+          limit: PAGE_SIZE,
+          offset: currentTransactions.length,
+          transactionTypes: ['ramp'],
+        },
+        updateQuery: (previous, { fetchMoreResult }) => {
+          const incoming = fetchMoreResult?.currentAccountTransactions || [];
+          if (!incoming.length) return previous;
+          const existing = previous?.currentAccountTransactions || [];
+          const knownIds = new Set(existing.map((transaction: any) => transaction.id));
+          return {
+            ...previous,
+            currentAccountTransactions: [
+              ...existing,
+              ...incoming.filter((transaction: any) => !knownIds.has(transaction.id)),
+            ],
+          };
+        },
+      });
+      const incoming = result.data?.currentAccountTransactions || [];
+      setHasMore(incoming.length === PAGE_SIZE);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [data?.currentAccountTransactions, fetchMore, hasMore, loading, loadingMore]);
 
   const rampTransactions = useMemo(() => {
     const transactions = data?.currentAccountTransactions || [];
@@ -334,8 +380,8 @@ export const RampHistoryScreen = () => {
         windowSize={21}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={() => void refetch()}
+            refreshing={loading && !loadingMore}
+            onRefresh={() => void onRefresh()}
             tintColor={colors.primary}
             colors={[colors.primaryDark]}
           />
@@ -366,12 +412,19 @@ export const RampHistoryScreen = () => {
                 </View>
                 <Text style={styles.emptyTitle}>Sin operaciones aún</Text>
                 <Text style={styles.emptyText}>
-                  Cuando completes una recarga o un retiro, aparecerá aquí.
+                  Cuando generes una recarga o un retiro, aparecerá aquí con su estado.
                 </Text>
               </>
             )}
           </View>
         )}
+        ListFooterComponent={loadingMore ? (
+          <View style={styles.footerLoader}>
+            <ActivityIndicator color={colors.primaryDark} />
+          </View>
+        ) : null}
+        onEndReached={() => void loadMore()}
+        onEndReachedThreshold={0.4}
         renderItem={renderRow}
       />
     </SafeAreaView>
@@ -391,6 +444,9 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingBottom: 56,
+  },
+  footerLoader: {
+    paddingVertical: 20,
   },
 
   /* ── Filters ── */

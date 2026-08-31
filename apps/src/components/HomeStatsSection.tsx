@@ -22,6 +22,7 @@ type StatsSummary = {
   protectedSavings?: number | null;
   totalValueLocked?: number | null;
   usdyReserve?: number | null;
+  cusdBscReserve?: number | null;
   presaleCusdRaised?: number | null;
   ondoStocksTvl?: number | null;
 };
@@ -116,28 +117,23 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = currency.thousandsSeparator;
   const decimalSeparator = currency.decimalSeparator;
-  // Savings spans BOTH rails now: cUSD (USDC 1:1) and cUSD+ (USDY, valued
-  // at the oracle). Summed here rather than server-side so each stat field
-  // keeps one meaning — ProtectedSavings shows them per-rail.
-  const cusdTvl = s?.totalValueLocked ?? s?.protectedSavings ?? null;
-  const usdyReserve = s?.usdyReserve ?? 0;
+  // Keep each reserve independent in the API and add them only for this
+  // portfolio-level tile: legacy a-cUSD/USDC, cUSD/USDT, cUSD+/USDY.
+  const legacyCusdReserve = s?.totalValueLocked ?? s?.protectedSavings ?? null;
+  const cusdReserve = s?.cusdBscReserve ?? null;
+  const usdyReserve = s?.usdyReserve ?? null;
   // Missing network data is unknown, not a real zero. This matters now that
   // the universal server snapshot deliberately bypasses Apollo's local read.
-  const tvl = cusdTvl == null ? null : cusdTvl + usdyReserve;
-  // cUSD phase-out (2026-07-31): the descriptor names ONLY the assets that
-  // actually back the figure, so it retires "USDC" by itself as cUSD drains
-  // into cUSD+ — no follow-up release, and never a backing claim the
-  // composition doesn't support. Threshold, not zero: a dust remainder of
-  // cUSD shouldn't keep a deprecated ticker on the home screen forever.
-  const cusdShare = cusdTvl != null && tvl != null && tvl > 0 ? cusdTvl / tvl : 1;
-  const backingDescriptor =
-    tvl == null
-      ? 'Reservas'
-      : cusdShare < 0.01
-        ? 'USDY'
-        : usdyReserve <= 0
-          ? 'USDC'
-          : 'USDC · USDY';
+  const tvl = legacyCusdReserve == null || cusdReserve == null || usdyReserve == null
+    ? null
+    : legacyCusdReserve + cusdReserve + usdyReserve;
+  const backingDescriptor = tvl == null
+    ? 'Reservas'
+    : [
+        (legacyCusdReserve ?? 0) / Math.max(tvl, 1) >= 0.01 ? 'USDC' : null,
+        (cusdReserve ?? 0) / Math.max(tvl, 1) >= 0.01 ? 'USDT' : null,
+        (usdyReserve ?? 0) / Math.max(tvl, 1) >= 0.01 ? 'USDY' : null,
+      ].filter(Boolean).join(' · ') || 'Reservas';
   const verified = s?.diditVerifiedUsers ?? 0;
   const fmt = (value: number | null | undefined) =>
     formatLocale(value, thousandsSeparator, decimalSeparator);

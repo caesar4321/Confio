@@ -698,6 +698,8 @@ class StatsSummaryType(graphene.ObjectType):
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
     usdy_reserve = graphene.Float()  # USD value of the USDY backing cUSD+ (BSC vault)
+    cusd_bsc_circulating = graphene.Float()  # Universal cUSD owed to holders
+    cusd_bsc_reserve = graphene.Float()  # USDT reserved for cUSD holders, excluding fees
     ondo_stocks_tvl = graphene.Float()  # Cached market value held by confirmed Confío stock traders
     circulating_cusd = graphene.Float()
     presale_cusd_raised = graphene.Float()
@@ -1637,7 +1639,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v13'
+		cache_key = 'stats_summary_v14'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1686,10 +1688,12 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			for r in country_rows
 		]
 
-		# Protected savings and TVL come from the cUSD contract when algod is available.
+		# Legacy a-cUSD savings and TVL come from Algorand when available.
 		from cusd_plus import vault as cusd_plus_vault
+		from cusd_plus.metrics import get_cusd_bsc_platform_metrics
 		from blockchain.cusd_metrics import get_cusd_platform_metrics
 		cusd_metrics = get_cusd_platform_metrics()
+		cusd_bsc_metrics = get_cusd_bsc_platform_metrics()
 		protected_savings = float(cusd_metrics.total_supply)
 		total_value_locked = float(cusd_metrics.tvl_cusd)
 		circulating_cusd = float(cusd_metrics.circulating_cusd)
@@ -1721,9 +1725,17 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			# USD value of the USDY backing cUSD+ (vault balance x oracle
 			# price — USDY accrues in price, so a token count would both
 			# understate the reserve and look frozen). Kept SEPARATE from
-			# total_value_locked, which is the cUSD/USDC side: the app shows
+			# total_value_locked, which is the legacy a-cUSD/USDC side: the app shows
 			# one pill per rail, each labelled with its own asset.
 			'usdy_reserve': cusd_plus_vault.usdy_reserve_usd(),
+			'cusd_bsc_circulating': (
+				float(cusd_bsc_metrics.circulating_cusd)
+				if cusd_bsc_metrics.circulating_cusd is not None else None
+			),
+			'cusd_bsc_reserve': (
+				float(cusd_bsc_metrics.usdt_reserve_usd)
+				if cusd_bsc_metrics.usdt_reserve_usd is not None else None
+			),
 			# Current chain balances × current Ondo display prices. This is a
 			# marked-to-market holdings metric, intentionally distinct from the
 			# settled buy/sell volume shown in operations.

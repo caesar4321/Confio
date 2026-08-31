@@ -6,6 +6,7 @@ const statsSummary = {
   totalUsers: 12345,
   diditVerifiedUsers: 987,
   totalValueLocked: 54321,
+  cusdBscReserve: 500,
   usdyReserve: 1000,
   presaleCusdRaised: 6789,
   ondoStocksTvl: 4321,
@@ -108,6 +109,22 @@ describe('HomeStatsSection layout', () => {
     const ahorros = tileLabels(render(true).root)[1];
     expect(ahorros).toContain('— USD');
     expect(ahorros).not.toContain('0 USD');
+  });
+
+  it('does not understate savings when one reserve read is unavailable', () => {
+    mockUseQuery.mockImplementationOnce(() => ({
+      data: {
+        statsSummary: {
+          ...statsSummary,
+          usdyReserve: null,
+        },
+      },
+      refetch: mockRefetch,
+    } as any));
+
+    const ahorros = tileLabels(render(true).root)[1];
+    expect(ahorros).toContain('— USD');
+    expect(ahorros).not.toContain('54.821 USD');
   });
 
   it('labels the stock figure as current market value rather than cost basis', () => {
