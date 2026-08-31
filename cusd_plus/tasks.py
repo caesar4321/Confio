@@ -1794,10 +1794,15 @@ def check_sponsored_batch_receipt(self, batch_id: int):
     batch.status = 'confirmed'
     batch.save(update_fields=['status', 'block_number', 'block_hash', 'updated_at'])
     settle_savings_mint(batch.tx_hash, 'confirmed', receipt=receipt, batch=batch)
-    if batch.kind in ('stock_buy', 'stock_sell'):
-        from django.core.cache import cache
+    if batch.kind in ('stock_buy', 'stock_sell', 'wrap_cusd', 'unwrap_to_cusd'):
+        # Internal eligibility normalization changes the same cached cUSD+
+        # position as a stock trade. Invalidate only after finality so the UI
+        # cannot repopulate the cache with the pre-conversion balance while
+        # the transaction is still pending.
         from . import vault
         vault.invalidate_position(batch.user_bsc_address)
+    if batch.kind in ('stock_buy', 'stock_sell'):
+        from django.core.cache import cache
         cache.delete(f'gm_hold:{batch.user_bsc_address.lower()}')
     logger.info('7702 batch %s CONFIRMED final at block %s', batch.tx_hash, blk_num)
 

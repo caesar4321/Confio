@@ -50,6 +50,10 @@ const MAX_UINT256 = (1n << 256n) - 1n;
  */
 const IM_MIN_REDEEM_WEI = 10n ** 18n;
 const IM_MIN_TARGET_WEI = (105n * 10n ** 18n) / 100n;
+// A $1.00 cUSD wrap can lose a wei to USDY/share flooring and create a
+// cUSD+ position whose full unwind falls below Ondo's exact $1 redemption
+// floor. Match the server's public six-decimal safety buffer.
+export const INTERNAL_CUSD_MIN_WRAP_WEI = IM_MIN_REDEEM_WEI + 10n ** 12n;
 
 export interface SubscribeParams {
   /** cUSD+ vault proxy address (from server config). */
@@ -77,6 +81,14 @@ export interface MintCusdParams {
   usdtWei: bigint;
   /** Minimum net cUSD after the contract-authoritative 0.9% fee. */
   minCusdOut?: bigint;
+  wallet?: DerivedEvmWallet;
+}
+
+export interface InternalCusdConversionParams {
+  /** cUSD+ savings vault proxy. */
+  vaultAddress: string;
+  /** Universal cUSD proxy. */
+  cusdAddress: string;
   wallet?: DerivedEvmWallet;
 }
 
@@ -203,6 +215,96 @@ export const mintUsdtToCusd = async (params: MintCusdParams): Promise<SubscribeR
     mintTx: rec.txHash,
     recipient: from,
   };
+};
+
+/**
+ * Normalize an eligible holder's entire universal cUSD balance into cUSD+.
+ * This stays inside the Confio-dollar perimeter, so wrapCusd is fee-free;
+ * the sponsor gate is still mandatory and the user signs the exact batch.
+ * Returns null below $1.000001 (Ondo cannot safely unwind a position minted
+ * from exactly $1 after integer flooring).
+ */
+export const wrapAllCusdToSavings = async (
+  params: InternalCusdConversionParams,
+): Promise<{ txHash: string } | null> => {
+  installBscServerTransport();
+  const wallet = params.wallet ?? (await getActiveEvmWallet());
+  const cusdWei = await getErc20BalanceWei(params.cusdAddress, wallet.address);
+  if (cusdWei < INTERNAL_CUSD_MIN_WRAP_WEI) return null;
+
+  const oraclePriceWad = await getCurrentOraclePrice(params.vaultAddress);
+  if (oraclePriceWad <= 0n) throw new Error('invalid USDY oracle price');
+  const expectedUsdy = cusdWei * 10n ** 18n / oraclePriceWad;
+  const minUsdyOut = expectedUsdy * INTERNAL_CONVERSION_MIN_OUT_BPS / 10_000n;
+  const needsApprove = (
+    await getErc20Allowance(wallet.address, params.vaultAddress, params.cusdAddress)
+  ) < cusdWei;
+  const calls: BatchCall[] = [
+    ...(needsApprove ? [{
+      to: params.cusdAddress,
+      valueWei: 0n,
+      data: encodeCall('approve(address,uint256)', [
+        { type: 'address', value: params.vaultAddress },
+        { type: 'uint', value: MAX_UINT256 },
+      ]),
+    }] : []),
+    {
+      to: params.vaultAddress,
+      valueWei: 0n,
+      data: encodeCall('wrapCusd(uint256,uint256,address)', [
+        { type: 'uint', value: cusdWei },
+        { type: 'uint', value: minUsdyOut },
+        { type: 'address', value: wallet.address },
+      ]),
+    },
+  ];
+  const sponsored = await fetchSponsored7702Params();
+  if (!sponsored.enabled || !sponsored.delegateAddress) {
+    throw new Error('cUSD internal conversion requires sponsor');
+  }
+  const receipt = await executeSponsoredBatch({
+    wallet,
+    calls,
+    delegateAddress: sponsored.delegateAddress,
+  });
+  return { txHash: receipt.txHash };
+};
+
+/**
+ * Normalize an ineligible holder's entire cUSD+ position into universal
+ * cUSD. This is the fee-free inverse of wrapAllCusdToSavings and deliberately
+ * never crosses the external USDT perimeter.
+ */
+export const unwrapAllSavingsToCusd = async (
+  params: InternalCusdConversionParams,
+): Promise<{ txHash: string } | null> => {
+  installBscServerTransport();
+  const wallet = params.wallet ?? (await getActiveEvmWallet());
+  const shares = await getVaultShares(params.vaultAddress, wallet.address);
+  if (shares <= 0n) return null;
+  const { pPlusWad, oraclePriceWad } = await getVaultPrices(params.vaultAddress);
+  const expectedCusd = predictRedeemUsdtOut(shares, pPlusWad, oraclePriceWad);
+  if (expectedCusd < IM_MIN_REDEEM_WEI) return null;
+  const minCusdOut = expectedCusd * INTERNAL_CONVERSION_MIN_OUT_BPS / 10_000n;
+
+  const sponsored = await fetchSponsored7702Params();
+  if (!sponsored.enabled || !sponsored.delegateAddress) {
+    throw new Error('cUSD internal conversion requires sponsor');
+  }
+  const receipt = await executeSponsoredBatch({
+    wallet,
+    calls: [{
+      to: params.vaultAddress,
+      valueWei: 0n,
+      data: encodeCall('unwrapToCusd(uint256,uint256,address)', [
+        { type: 'uint', value: shares },
+        { type: 'uint', value: minCusdOut },
+        { type: 'address', value: wallet.address },
+      ]),
+    }],
+    delegateAddress: sponsored.delegateAddress,
+  });
+  return { txHash: receipt.txHash };
 };
 
 /**

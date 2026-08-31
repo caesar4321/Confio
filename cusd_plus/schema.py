@@ -1404,8 +1404,7 @@ class SponsorBscBatch(graphene.Mutation):
             # Enforce this server-side so an older or modified client cannot
             # create a position that rounds below Ondo's exact $1 exit floor.
             from .vault import is_safe_mint_amount
-            if (mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT
-                    and mint_refusal_error is None
+            if (mint_refusal_error is None
                     and not is_safe_mint_amount(mint_amount_wei)):
                 mint_refusal_error = 'mint_below_redeemable_minimum'
                 mint_refusal_amount = mint_amount_wei
@@ -1467,10 +1466,15 @@ class SponsorBscBatch(graphene.Mutation):
             # calldata policy and the wallet's intent signature prove this is
             # the holder's request. Nothing is broadcast on this path.
             if mint_refusal_error is not None:
-                from .tasks import mark_saga_delivered_as_usdt
-                mark_saga_delivered_as_usdt(
-                    user_addr, mint_refusal_amount,
-                    refusal_source='sponsored')
+                # Only subscribeAndMint consumes raw USDT belonging to an
+                # arrived savings saga. wrapCusd is an internal cUSD→cUSD+
+                # normalization; refusing it must never close an unrelated
+                # raw-USDT arrival row for the same holder.
+                if mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
+                    from .tasks import mark_saga_delivered_as_usdt
+                    mark_saga_delivered_as_usdt(
+                        user_addr, mint_refusal_amount,
+                        refusal_source='sponsored')
                 return SponsorBscBatch(success=False, error=mint_refusal_error)
 
             # Delegation state decides whether an authorization must ride

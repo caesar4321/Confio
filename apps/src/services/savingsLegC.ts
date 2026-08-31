@@ -11,7 +11,13 @@
 // call is a no-op if the USDT was already consumed.
 
 import { gql } from '@apollo/client';
-import { mintUsdtToCusd, subscribeUsdtToSavings } from './cusdPlusVault';
+import {
+  INTERNAL_CUSD_MIN_WRAP_WEI,
+  mintUsdtToCusd,
+  subscribeUsdtToSavings,
+  unwrapAllSavingsToCusd,
+  wrapAllCusdToSavings,
+} from './cusdPlusVault';
 
 const IN_FLIGHT = gql`
   query CusdPlusConversionsInFlight {
@@ -32,6 +38,8 @@ const ELIGIBILITY = gql`
     cusdPlusSummary {
       savingsEnabled
       sweepableUsdtWei
+      balanceUsd
+      cusdBalanceWei
     }
   }
 `;
@@ -104,6 +112,8 @@ export const resumeSavingsMints = async (
     // retains the former fail-safe of trying cUSD+ (the server still gates).
     let usdtOnHandWei = 0n;
     let savingsEnabled: boolean | undefined;
+    let cusdPlusBalanceUsd = 0;
+    let cusdBalanceWei = 0n;
     try {
       const { data: elig } = await apolloClient.query({
         query: ELIGIBILITY,
@@ -113,6 +123,8 @@ export const resumeSavingsMints = async (
       });
       savingsEnabled = elig?.cusdPlusSummary?.savingsEnabled;
       usdtOnHandWei = BigInt(elig?.cusdPlusSummary?.sweepableUsdtWei ?? '0');
+      cusdPlusBalanceUsd = Number(elig?.cusdPlusSummary?.balanceUsd ?? 0);
+      cusdBalanceWei = BigInt(elig?.cusdPlusSummary?.cusdBalanceWei ?? '0');
     } catch {}
     const mintArrivedUsdt = async (amountWei: bigint): Promise<{ mintTx: string }> => {
       if (savingsEnabled === false) {
@@ -133,6 +145,33 @@ export const resumeSavingsMints = async (
     const rows = (data?.cusdPlusConversionsInFlight || []).filter(
       (r: any) => r.status === 'DEST_ARRIVED',
     );
+
+    // Eligibility can change after dollars have already been minted. The UI
+    // immediately selects the new canonical rail, so normalize the old rail
+    // on the same foreground pass: eligible cUSD -> cUSD+, ineligible cUSD+
+    // -> cUSD. Both contract calls are sponsor-only, user-signed and fee-free.
+    // Dust below Ondo's $1 processing floor remains visible in the unified
+    // total and is retried after a later receipt grows it above the floor.
+    const railMismatch = (
+      savingsEnabled === true && cusdBalanceWei >= INTERNAL_CUSD_MIN_WRAP_WEI
+    ) || (
+      savingsEnabled === false && cusdPlusBalanceUsd >= 1
+    );
+    if (railMismatch && vaultAddress && cusdAddress) {
+      announced = true;
+      setMinting(true);
+      try {
+        if (savingsEnabled === true) {
+          await wrapAllCusdToSavings({ vaultAddress, cusdAddress });
+        } else {
+          await unwrapAllSavingsToCusd({ vaultAddress, cusdAddress });
+        }
+      } catch (e) {
+        // A policy/RPC/sponsor failure cannot strand funds: the source token
+        // remains in the user's address and the next foreground retries.
+        console.warn('[savingsLegC] eligibility rail normalization failed', e);
+      }
+    }
     // Announce only once there is real work: the resume runs on every
     // foreground, and flashing a modal on the empty case would be noise.
     if (rows.length) {

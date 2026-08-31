@@ -10,12 +10,18 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { gql, useQuery } from '@apollo/client';
 import { resumeSavingsMints, subscribeSavingsMinting } from '../services/savingsLegC';
+import { INTERNAL_CUSD_MIN_WRAP_WEI } from '../services/cusdPlusVault';
 
 const VAULT_ADDRESS = gql`
   query CusdPlusVaultAddress {
     cusdPlusConvertParams {
       vaultAddress
       cusdAddress
+    }
+    cusdPlusSummary {
+      savingsEnabled
+      balanceUsd
+      cusdBalanceWei
     }
   }
 `;
@@ -38,11 +44,22 @@ export const useSavingsResume = (
   enabled: boolean = true,
   usdtOnHandUsd?: number,
 ): { mintingSavings: boolean } => {
-  const { data } = useQuery(VAULT_ADDRESS, { fetchPolicy: 'cache-first' });
+  const { data } = useQuery(VAULT_ADDRESS, {
+    fetchPolicy: 'cache-and-network',
+    pollInterval: 60_000,
+  });
   const vaultAddress: string | undefined = data?.cusdPlusConvertParams?.vaultAddress;
   const cusdAddress: string | undefined = data?.cusdPlusConvertParams?.cusdAddress;
   const appState = useRef(AppState.currentState);
   const [mintingSavings, setMintingSavings] = useState(false);
+  const savingsEnabled: boolean | undefined = data?.cusdPlusSummary?.savingsEnabled;
+  const cusdPlusBalanceUsd = Number(data?.cusdPlusSummary?.balanceUsd ?? 0);
+  let cusdBalanceWei = 0n;
+  try {
+    cusdBalanceWei = BigInt(data?.cusdPlusSummary?.cusdBalanceWei ?? '0');
+  } catch {
+    // A malformed display response must not trigger a money-moving action.
+  }
 
   // Shared module state, so every mounted surface shows the spinner even when
   // a different one won the race to actually run the mint. Unsubscribing on
@@ -80,6 +97,18 @@ export const useSavingsResume = (
     }
     lastMintable.current = mintable ? onHand : 0;
   }, [vaultAddress, cusdAddress, enabled, usdtOnHandUsd]);
+
+  // Eligibility may change while the app remains foregrounded. The summary
+  // poll also drives the UI's cUSD/cUSD+ presentation, so use that exact
+  // authoritative answer to trigger the fee-free rail normalization rather
+  // than waiting for a background/foreground cycle.
+  const railMismatch = savingsEnabled === true
+    ? cusdBalanceWei >= INTERNAL_CUSD_MIN_WRAP_WEI
+    : savingsEnabled === false && cusdPlusBalanceUsd >= 1;
+  useEffect(() => {
+    if ((!vaultAddress && !cusdAddress) || !enabled || !railMismatch) return;
+    resumeSavingsMints(vaultAddress, cusdAddress);
+  }, [vaultAddress, cusdAddress, enabled, railMismatch]);
 
   return { mintingSavings };
 };
