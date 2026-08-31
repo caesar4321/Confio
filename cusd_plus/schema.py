@@ -637,7 +637,10 @@ class Query(graphene.ObjectType):
         except Exception:
             import logging
             logging.getLogger(__name__).exception('gm_ohlc upstream failed')
-            return []
+            # Null distinguishes an upstream failure from a valid asset with
+            # no candles yet. The list field is nullable by design so clients
+            # can keep cached data or show an honest retry state.
+            return None
         return [
             GmCandleType(
                 timestamp=float(c['timestamp']),
