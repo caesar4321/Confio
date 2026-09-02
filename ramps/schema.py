@@ -1396,10 +1396,6 @@ class CreateRampOrder(graphene.Mutation):
             auth_email=koywe_email,
             order_payload=order_payload,
         )
-        if normalized_direction == 'ON_RAMP' and order_fee_preview is not None:
-            ramp_tx.final_amount = order_fee_preview.net
-            ramp_tx.save(update_fields=['final_amount', 'updated_at'])
-
         return RampOrderType(
             success=True,
             error=None,
