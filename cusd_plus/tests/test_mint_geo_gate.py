@@ -174,14 +174,62 @@ class LegacyRelayGateTests(SimpleTestCase):
         self.assertEqual(res.error, 'bad_calldata')
         rpc.assert_not_called()
 
-    def test_raw_usdt_transfer_relays_for_ineligible_user(self):
-        # THE exit: a geo-blocked user moving arrived USDT out. Never gated.
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_raw_usdt_transfer_is_blocked_on_legacy_relay(self):
+        transfer = bytes.fromhex('a9059cbb') + b'\x00' * 64
+        raw = _legacy_tx(USDT, 0, transfer)
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, _user('US', uid=14))
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'raw_usdt_transfer_not_allowed')
+        rpc.assert_not_called()
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
+    def test_raw_usdt_transfer_relay_returns_with_kill_switch_off(self):
         transfer = bytes.fromhex('a9059cbb') + b'\x00' * 64
         raw = _legacy_tx(USDT, 0, transfer)
         with mock.patch('cusd_plus.tasks._rpc', return_value='0xdef') as rpc:
-            res = self._submit(raw, _user('US', uid=14))
+            res = self._submit(raw, _user('US', uid=19))
         self.assertTrue(res.success, res.error)
         rpc.assert_called_once()
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_usdt_approval_still_relays_for_vault_conversion(self):
+        approve = (
+            bytes.fromhex('095ea7b3')
+            + bytes.fromhex(VAULT[2:].rjust(64, '0'))
+            + (2 * 10**18).to_bytes(32, 'big')
+        )
+        raw = _legacy_tx(USDT, 0, approve)
+        with mock.patch('cusd_plus.tasks._rpc', return_value='0xapprove') as rpc:
+            res = self._submit(raw, _user('US', uid=20))
+        self.assertTrue(res.success, res.error)
+        rpc.assert_called_once()
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_usdt_approval_cannot_target_arbitrary_spender(self):
+        attacker = '0x' + '99' * 20
+        approve = (
+            bytes.fromhex('095ea7b3')
+            + bytes.fromhex(attacker[2:].rjust(64, '0'))
+            + (2 * 10**18).to_bytes(32, 'big')
+        )
+        raw = _legacy_tx(USDT, 0, approve)
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, _user('US', uid=22))
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'approve_spender_not_allowed')
+        rpc.assert_not_called()
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_usdt_transfer_from_is_not_a_legacy_relay_escape(self):
+        transfer_from = bytes.fromhex('23b872dd') + b'\x00' * 96
+        raw = _legacy_tx(USDT, 0, transfer_from)
+        with mock.patch('cusd_plus.tasks._rpc') as rpc:
+            res = self._submit(raw, _user('US', uid=21))
+        self.assertFalse(res.success)
+        self.assertEqual(res.error, 'selector_not_allowed')
+        rpc.assert_not_called()
 
     def test_self_redeem_relays_for_ineligible_user(self):
         # Exit #2: redeeming an existing vault position is never geo-gated.

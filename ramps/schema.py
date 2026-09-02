@@ -1003,17 +1003,15 @@ class CreateRampOrder(graphene.Mutation):
                 success=False,
                 error='Tu cuenta de ahorro aún no está activada en este dispositivo. Actualiza la app e inicia sesión de nuevo.',
             )
-        if (fee_rollout and normalized_direction == 'OFF_RAMP'
-                and not fee_capable_client):
+        if fee_rollout and not fee_capable_client:
             from cusd_plus.eligibility import check_savings_mint_eligibility
             if not check_savings_mint_eligibility(
                     user, getattr(info.context, 'META', {})):
-                # Ineligible holders now own universal cUSD-BSC. Legacy
-                # builds only know the pre-integration USDT/cUSD+ funding
-                # paths, so letting the order through guarantees a failure
-                # even after foreground normalization has completed. This
-                # compatibility gate precedes RPC-dependent fee preflights so
-                # the actionable update message cannot be masked by an outage.
+                # Ineligible holders now use universal cUSD-BSC. Legacy builds
+                # cannot convert a new on-ramp delivery into cUSD and can fund
+                # an off-ramp only from raw USDT/cUSD+, bypassing or breaking
+                # the fee perimeter. Block both directions before provider or
+                # RPC work; eligible legacy builds can still use cUSD+.
                 return RampOrderType(
                     success=False,
                     error=CUSD_BSC_LEGACY_UPDATE_MESSAGE,
@@ -1277,7 +1275,10 @@ class CreateRampOrder(graphene.Mutation):
                         actor_address=actor_address,
                         destination='cusd_plus',
                         fiat_currency=fiat_currency or _get_country_fiat_currency(resolved_country_code),
-                        final_currency=('CUSD+' if normalized_direction == 'ON_RAMP' else 'USDT BSC'),
+                        # The provider has not delivered or converted anything
+                        # yet. Do not guess cUSD versus cUSD+ from the requested
+                        # destination; the completed conversion is authoritative.
+                        final_currency='USDT BSC',
                         status_detail='Koywe order creation reserved',
                         metadata={
                             'wallet_address_reserved': True,

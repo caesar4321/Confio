@@ -674,7 +674,7 @@ def guardarian_transaction_proxy(request):
     fee_capable_client = str(
         request.META.get('HTTP_X_CONFIO_FEE_CAPABLE', '')
     ).strip() == '1'
-    if (is_bsc_dollar_sell
+    if ((is_savings_rail or is_bsc_dollar_sell)
             and getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
             and not fee_capable_client):
         from cusd_plus.eligibility import (
@@ -682,10 +682,10 @@ def guardarian_transaction_proxy(request):
             check_savings_mint_eligibility,
         )
         if not check_savings_mint_eligibility(user, request.META):
-            # Ineligible holders now own universal cUSD-BSC. Legacy builds
-            # only know how to fund this Guardarian order from raw USDT or
-            # cUSD+, so they cannot complete it after normalization. Refuse
-            # before fee/RPC preflights to keep the response actionable.
+            # Ineligible holders now use universal cUSD-BSC. Legacy builds
+            # cannot normalize a new buy into cUSD and can fund a sell only
+            # from raw USDT/cUSD+, so both directions would bypass or break
+            # the fee perimeter. Refuse before provider/RPC work.
             return JsonResponse(
                 {'error': CUSD_BSC_LEGACY_UPDATE_MESSAGE},
                 status=426,

@@ -94,6 +94,10 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
   invalid_recipient_address: 'La dirección no es válida.',
   self_send_not_allowed: 'Esa dirección es tuya — elige otro destinatario.',
   insufficient_balance: 'Saldo insuficiente.',
+  conversion_pending:
+    'Estamos terminando de convertir tu depósito. Inténtalo de nuevo en un momento.',
+  client_update_required: 'Actualiza Confío para enviar este saldo.',
+  raw_usdt_transfer_not_allowed: 'Actualiza Confío para enviar este saldo.',
   // Ondo's redemption floor. Only reachable when the money must leave the
   // savings position to reach this recipient — say what to do, not what broke.
   redeem_below_minimum:

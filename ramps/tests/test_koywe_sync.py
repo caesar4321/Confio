@@ -17,6 +17,7 @@ from ramps.koywe_client import (
 from ramps.koywe_sync import (
     build_koywe_instruction_snapshot,
     _merge_koywe_metadata,
+    sync_koywe_ramp_transaction_from_order,
     upsert_koywe_ramp_transaction,
 )
 from ramps.models import RampTransaction
@@ -25,6 +26,53 @@ from users.models import Account
 
 
 User = get_user_model()
+
+
+class KoyweFinalCurrencyUnitTests(SimpleTestCase):
+    def _sync(self, conversion):
+        ramp = SimpleNamespace(
+            direction='on_ramp',
+            destination='cusd_plus',
+            conversion=conversion,
+            fiat_amount=None,
+            crypto_amount_estimated=None,
+            crypto_amount_actual=None,
+            final_amount=None,
+            final_currency='USDT BSC',
+            status='PROCESSING',
+            status_detail='',
+            completed_at=None,
+            metadata={},
+            usdc_deposit_id=1,
+            save=mock.Mock(),
+        )
+        sync_koywe_ramp_transaction_from_order(
+            ramp_tx=ramp,
+            order_payload={
+                'status': 'COMPLETED',
+                'amountIn': '100',
+                'amountOut': '20',
+            },
+        )
+        return ramp
+
+    def test_completed_cusd_conversion_uses_canonical_bsc_identifier(self):
+        ramp = self._sync(SimpleNamespace(
+            status='COMPLETED',
+            conversion_type='usdt_to_cusd',
+        ))
+        self.assertEqual(ramp.final_currency, 'CUSD_BSC')
+
+    def test_completed_savings_conversion_uses_cusd_plus(self):
+        ramp = self._sync(SimpleNamespace(
+            status='COMPLETED',
+            conversion_type='to_savings',
+        ))
+        self.assertEqual(ramp.final_currency, 'CUSD+')
+
+    def test_provider_completion_without_conversion_remains_raw_usdt(self):
+        ramp = self._sync(None)
+        self.assertEqual(ramp.final_currency, 'USDT BSC')
 
 
 class KoyweNotificationTimingUnitTests(SimpleTestCase):
