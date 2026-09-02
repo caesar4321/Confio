@@ -60,19 +60,60 @@ class KoyweFinalCurrencyUnitTests(SimpleTestCase):
         ramp = self._sync(SimpleNamespace(
             status='COMPLETED',
             conversion_type='usdt_to_cusd',
+            to_amount=Decimal('19.82'),
         ))
         self.assertEqual(ramp.final_currency, 'CUSD_BSC')
+        self.assertEqual(ramp.final_amount, Decimal('19.82'))
 
     def test_completed_savings_conversion_uses_cusd_plus(self):
         ramp = self._sync(SimpleNamespace(
             status='COMPLETED',
             conversion_type='to_savings',
+            to_amount=Decimal('19.82'),
         ))
         self.assertEqual(ramp.final_currency, 'CUSD+')
+        self.assertEqual(ramp.final_amount, Decimal('19.82'))
 
     def test_provider_completion_without_conversion_remains_raw_usdt(self):
         ramp = self._sync(None)
         self.assertEqual(ramp.final_currency, 'USDT BSC')
+        self.assertEqual(ramp.final_amount, Decimal('20'))
+
+    def test_fee_preview_does_not_replace_unconverted_raw_usdt_amount(self):
+        ramp = SimpleNamespace(
+            direction='on_ramp',
+            destination='cusd_plus',
+            conversion=None,
+            fiat_amount=None,
+            crypto_amount_estimated=None,
+            crypto_amount_actual=None,
+            final_amount=Decimal('19.82'),
+            final_currency='USDT BSC',
+            status='PROCESSING',
+            status_detail='',
+            completed_at=None,
+            metadata={
+                'provider_payload_created': {
+                    'confioGrossAmount': '20',
+                    'confioFeeAmount': '0.18',
+                    'confioNetAmount': '19.82',
+                },
+            },
+            usdc_deposit_id=1,
+            save=mock.Mock(),
+        )
+
+        sync_koywe_ramp_transaction_from_order(
+            ramp_tx=ramp,
+            order_payload={
+                'status': 'COMPLETED',
+                'amountIn': '100',
+                'amountOut': '20',
+            },
+        )
+
+        self.assertEqual(ramp.final_currency, 'USDT BSC')
+        self.assertEqual(ramp.final_amount, Decimal('20'))
 
 
 class KoyweNotificationTimingUnitTests(SimpleTestCase):

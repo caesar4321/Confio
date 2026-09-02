@@ -613,12 +613,14 @@ def sync_koywe_ramp_transaction_from_order(
         if ramp_status == 'COMPLETED' and amount_out is not None:
             ramp_tx.crypto_amount_actual = amount_out
         ramp_tx.final_currency = destination_asset if is_savings_rail else 'CUSD'
-        created = ((ramp_tx.metadata or {}).get('provider_payload_created') or {})
-        fee_net = _to_decimal(created.get('confioNetAmount'))
-        # Provider status payloads report gross USDT delivery. Once the
-        # contract fee preview was persisted, never overwrite the user's
-        # post-fee product amount with that gross value.
-        ramp_tx.final_amount = fee_net or amount_out or ramp_tx.final_amount
+        # The fee preview is a quote, not proof that conversion happened.
+        # Until a completed Conversion is linked, the final asset is raw USDT
+        # and its amount must be the provider-delivered gross amount. Only the
+        # completed contract ledger makes the post-fee net authoritative.
+        if conversion is not None and conversion.status == 'COMPLETED':
+            ramp_tx.final_amount = conversion.to_amount or amount_out
+        else:
+            ramp_tx.final_amount = amount_out or ramp_tx.final_amount
     else:
         ramp_tx.fiat_amount = amount_out or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_in or ramp_tx.crypto_amount_estimated
