@@ -216,12 +216,11 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
 
     if ramp_tx.conversion_id and ramp_tx.conversion:
         if ramp_tx.direction == 'on_ramp':
-            token = (
-                'CUSD_PLUS'
-                if ramp_tx.conversion.conversion_type == 'to_savings'
-                else 'CUSD_BSC'
-                if ramp_tx.conversion.conversion_type == 'usdt_to_cusd'
-                else 'CUSD'
+            from ramps.currencies import bsc_final_currency
+
+            token = bsc_final_currency(
+                ramp_tx.conversion.conversion_type,
+                fallback='CUSD',
             )
             return ramp_tx.conversion.to_amount, token
         token = (
@@ -393,8 +392,9 @@ def _attributed_bsc_ramps(conversion: Conversion) -> list[RampTransaction]:
     if not address:
         return []
     remaining = Decimal(conversion.from_amount)
+    grain = Decimal('0.000001')
     linked: list[RampTransaction] = []
-    candidates = RampTransaction.objects.filter(
+    candidates = RampTransaction.objects.select_for_update().filter(
         destination='cusd_plus', direction='on_ramp',
         actor_address__iexact=address, conversion__isnull=True,
         created_at__gte=conversion.created_at - BSC_RAMP_ATTRIBUTION_WINDOW,
@@ -408,11 +408,21 @@ def _attributed_bsc_ramps(conversion: Conversion) -> list[RampTransaction]:
             amount = Decimal(str(arrival))
         except Exception:
             continue
-        if amount <= 0 or amount > remaining:
-            continue
+        if amount <= 0:
+            return []
+        # Auto-conversion sweeps the wallet's attributable arrivals in order.
+        # Never skip an older proven arrival or accept a partial prefix: that
+        # previously attached a $540 ramp to a later $643 conversion merely
+        # because 540 <= 643, after which two ramps pointed at one fee row.
+        if amount > remaining + grain:
+            return []
         linked.append(ramp)
         remaining -= amount
-    return linked
+        if abs(remaining) <= grain:
+            return linked
+    # A partial allocation is not attribution. Leave the conversion and ramp
+    # unlinked for reconciliation rather than asserting a false relationship.
+    return []
 
 
 def _bsc_ramp_net_allocations(conversion: Conversion,
@@ -508,6 +518,8 @@ def _first_deposit_referral_attribution(user_id: int | None) -> tuple[dict, str]
 
 
 def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) -> RampTransaction:
+    from ramps.currencies import RAW_USDT_BSC, bsc_final_currency
+
     actor_type, actor_display_name, actor_user, actor_business = _get_guardarian_actor(guardarian_tx)
     direction = 'off_ramp' if guardarian_tx.transaction_type == 'sell' else 'on_ramp'
     final_amount = guardarian_tx.to_amount_actual if direction == 'on_ramp' else guardarian_tx.from_amount
@@ -515,7 +527,7 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
         (guardarian_tx.network or '').upper() in {'BSC', 'BEP20', 'BNB SMART CHAIN'}
         and (guardarian_tx.to_currency if direction == 'on_ramp' else guardarian_tx.from_currency).upper() == 'USDT'
     )
-    final_currency = 'USDT BSC' if is_bsc_dollar else 'CUSD'
+    final_currency = RAW_USDT_BSC if is_bsc_dollar else 'CUSD'
     ramp_status, status_detail, completed_at = _derive_guardarian_ramp_outcome(guardarian_tx)
     conversion = None
     if direction == 'on_ramp':
@@ -529,10 +541,9 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
             conversion = None
         if conversion:
             final_amount = conversion.to_amount
-            final_currency = (
-                'CUSD+' if conversion.conversion_type == 'to_savings'
-                else 'CUSD' if conversion.conversion_type == 'usdt_to_cusd'
-                else final_currency
+            final_currency = bsc_final_currency(
+                conversion.conversion_type,
+                fallback=final_currency,
             )
 
     defaults = {
@@ -915,16 +926,26 @@ def handle_ramp_withdrawal_link(sender, instance, **kwargs):
 
 
 @receiver(post_save, sender=Conversion)
+@transaction.atomic
 def handle_ramp_conversion_link(sender, instance, **kwargs):
     # BSC provider delivery and foreground mint are distinct transactions.
     # Link through the source-transfer attribution captured by the BSC
     # scanner, and allow one sweep conversion to settle several arrivals.
-    attributed = _attributed_bsc_ramps(instance)
+    # A legacy/direct relation is already authoritative. Do not additionally
+    # sweep other unlinked arrivals into the same conversion; the attributed
+    # path is exclusively for a conversion that has no ramp relation yet.
+    try:
+        already_linked = bool(list(
+            instance.ramp_transactions.select_for_update().all()[:1]
+        ))
+    except Exception:
+        already_linked = False
+    attributed = [] if already_linked else _attributed_bsc_ramps(instance)
     if attributed:
+        from ramps.currencies import bsc_final_currency
+
         allocations = _bsc_ramp_net_allocations(instance, attributed)
-        final_currency = (
-            'CUSD+' if instance.conversion_type == 'to_savings' else 'CUSD'
-        )
+        final_currency = bsc_final_currency(instance.conversion_type)
         for ramp_tx, allocated_net in zip(attributed, allocations):
             ramp_tx.conversion = instance
             ramp_tx.actor_address = (

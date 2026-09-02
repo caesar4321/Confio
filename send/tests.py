@@ -73,13 +73,15 @@ def _recipient_user(eligible_country='VE', uid=2):
     CUSD_PLUS_VAULT_ADDRESS=VAULT,
     CUSD_VAULT_ADDRESS=CUSD,
     BSC_SEND_ENABLED=True,
+    CUSD_CONVERSION_FEE_ENABLED=False,
 )
 class PrepareCallShapeTests(SimpleTestCase):
     """The A/B/C matrix, exercised with mocked balances + ORM."""
 
     def _prepare(self, amount='10', shares_value=100 * WAD, cusd=0, usdt=0,
                  recipient_user=None, recipient_business=None,
-                 recipient_addr=RECIPIENT, token='', locked_recipient_addr=None):
+                 recipient_addr=RECIPIENT, token='', locked_recipient_addr=None,
+                 fee_capable_client=False):
         captured = {}
 
         def _create(**kwargs):
@@ -110,7 +112,8 @@ class PrepareCallShapeTests(SimpleTestCase):
             objs.create.side_effect = _create
             result = bsc_flow.prepare_bsc_send(
                 _sender_user(), _jwt_ctx(), amount,
-                recipient_user_id='2', token=token)
+                recipient_user_id='2', token=token,
+                fee_capable_client=fee_capable_client)
         return result, captured, pps
 
     def test_case_a_eligible_recipient_gets_vault_transfer(self):
@@ -197,22 +200,24 @@ class PrepareCallShapeTests(SimpleTestCase):
     @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
     def test_transient_raw_usdt_cannot_fund_internal_friend_send(self):
         result, _, _ = self._prepare(
-            shares_value=0, usdt=100 * WAD, recipient_user=_recipient_user('VE'))
+            shares_value=0, usdt=100 * WAD,
+            recipient_user=_recipient_user('VE'), fee_capable_client=True)
         self.assertEqual(result['error'], 'conversion_pending')
 
     @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
-    def test_legacy_raw_usdt_can_send_directly_to_external_address(self):
+    def test_legacy_raw_usdt_cannot_send_to_external_address(self):
         result, row, _ = self._prepare(
             shares_value=0, usdt=100 * WAD, recipient_user=None)
-        self.assertTrue(result['success'], result)
-        call = result['calls'][0]
-        self.assertEqual(call['to'], USDT_BSC)
-        self.assertTrue(call['data'][2:].startswith(SEL_TRANSFER))
-        self.assertEqual(int(call['data'][74:138], 16), 10 * WAD)
-        meta = json.loads(row['bsc_calls_json'])
-        self.assertEqual(meta['kind'], 'send_usdt')
-        self.assertEqual(result['fee_amount'], '0')
-        self.assertEqual(result['net_amount'], '10')
+        self.assertEqual(result['error'], 'client_update_required')
+        self.assertEqual(row, {})
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_current_client_waits_for_raw_usdt_conversion(self):
+        result, row, _ = self._prepare(
+            shares_value=0, usdt=100 * WAD, recipient_user=None,
+            fee_capable_client=True)
+        self.assertEqual(result['error'], 'conversion_pending')
+        self.assertEqual(row, {})
 
     def test_cusd_to_ineligible_friend_is_fee_free_transfer(self):
         result, row, _ = self._prepare(
@@ -297,7 +302,8 @@ class PrepareCallShapeTests(SimpleTestCase):
     @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
     def test_explicit_cusd_plus_cannot_spend_transient_usdt(self):
         result, _, _ = self._prepare(
-            shares_value=0, usdt=100 * WAD, token='CUSD_PLUS')
+            shares_value=0, usdt=100 * WAD, token='CUSD_PLUS',
+            fee_capable_client=True)
         self.assertEqual(result['error'], 'conversion_pending')
 
     def test_mixed_balance_can_send_to_ineligible_friend(self):
@@ -367,7 +373,8 @@ class PrepareCallShapeTests(SimpleTestCase):
     # MAX re-requests 2.99 → that's a full-position send, never an overdraft.
 
     def _prepare_raw(self, amount, shares_raw, usdt=0, token='',
-                     pps=11 * WAD // 10, recipient_user=None):
+                     pps=11 * WAD // 10, recipient_user=None,
+                     fee_capable_client=False):
         captured = {}
 
         def _create(**kwargs):
@@ -390,7 +397,8 @@ class PrepareCallShapeTests(SimpleTestCase):
             objs.create.side_effect = _create
             result = bsc_flow.prepare_bsc_send(
                 _sender_user(), _jwt_ctx(), amount,
-                recipient_user_id='2', token=token)
+                recipient_user_id='2', token=token,
+                fee_capable_client=fee_capable_client)
         return result, captured
 
     def test_max_on_dust_short_position_redeems_full_position(self):
@@ -491,6 +499,24 @@ class PrepareCallShapeTests(SimpleTestCase):
         self.assertTrue(result['success'], result)
         self.assertEqual(result['token_type'], 'USDT')
         self.assertEqual(result['calls'][0]['to'], USDT_BSC)
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_redeem_below_minimum_waits_for_conversion_when_fee_is_live(self):
+        with mock.patch(
+            'cusd_plus.cusd_vault.preview_redeem_wei',
+            side_effect=lambda gross: SimpleNamespace(
+                gross_wei=gross,
+                fee_wei=gross * 90 // 10_000,
+                net_wei=gross - (gross * 90 // 10_000),
+                fee_bps=90,
+            ),
+        ):
+            result, row = self._prepare_raw(
+                '0.5', shares_raw=WAD // 2, usdt=10 * WAD,
+                fee_capable_client=True,
+            )
+        self.assertEqual(result['error'], 'conversion_pending')
+        self.assertEqual(row, {})
 
     def test_redeem_below_minimum_with_no_usdt_still_refuses(self):
         result, _ = self._prepare_raw('0.5', shares_raw=WAD // 2, usdt=0)

@@ -544,11 +544,11 @@ def upsert_koywe_ramp_transaction(
         ),
         'crypto_amount_estimated': crypto_estimated,
         'crypto_amount_actual': None,
-        # Final product depends on the rail: the savings rail ends in cUSD+
-        # (delivered as USDT-BSC, minted on confirmation), the default rail
-        # in cUSD.
+        # The BSC savings rail first delivers raw USDT. Eligibility and the
+        # completed conversion determine whether its final product is cUSD or
+        # cUSD+; never guess that product while creating the provider row.
         'final_currency': (
-            ('CUSD+' if destination == 'cusd_plus' else 'CUSD')
+            ('USDT BSC' if destination == 'cusd_plus' else 'CUSD')
             if normalized_direction == 'on_ramp'
             else ('USDT BSC' if destination == 'cusd_plus'
                   else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'))
@@ -598,13 +598,14 @@ def sync_koywe_ramp_transaction_from_order(
     # routing also considers request IP and the finalized contract event is
     # the source of truth. Until that Conversion is linked, USDT is merely a
     # transient arrival and must not be presented as cUSD+.
-    destination_asset = 'USDT BSC'
+    from ramps.currencies import RAW_USDT_BSC, bsc_final_currency
+
+    destination_asset = RAW_USDT_BSC
     conversion = getattr(ramp_tx, 'conversion', None)
     if conversion is not None and conversion.status == 'COMPLETED':
-        destination_asset = (
-            'CUSD+' if conversion.conversion_type == 'to_savings'
-            else 'CUSD' if conversion.conversion_type == 'usdt_to_cusd'
-            else destination_asset
+        destination_asset = bsc_final_currency(
+            conversion.conversion_type,
+            fallback=destination_asset,
         )
     if direction == 'on_ramp':
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
@@ -622,7 +623,7 @@ def sync_koywe_ramp_transaction_from_order(
         ramp_tx.fiat_amount = amount_out or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_in or ramp_tx.crypto_amount_estimated
         ramp_tx.crypto_amount_actual = amount_in or ramp_tx.crypto_amount_actual
-        ramp_tx.final_currency = ('USDT BSC' if is_savings_rail
+        ramp_tx.final_currency = (RAW_USDT_BSC if is_savings_rail
                                   else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'))
         ramp_tx.final_amount = amount_in or ramp_tx.final_amount
 

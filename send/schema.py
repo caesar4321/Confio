@@ -362,6 +362,12 @@ class PrepareBscSend(graphene.Mutation):
         if not jwt_ctx:
             return PrepareBscSend(success=False, error='permission_denied')
 
+        fee_capable_client = str(
+            getattr(info.context, 'META', {}).get(
+                'HTTP_X_CONFIO_FEE_CAPABLE', ''
+            )
+        ).strip() == '1'
+
         result = bsc_flow.prepare_bsc_send(
             user, jwt_ctx, amount,
             recipient_user_id=recipient_user_id,
@@ -370,6 +376,7 @@ class PrepareBscSend(graphene.Mutation):
             memo=memo or '',
             idempotency_key=idempotency_key or '',
             token=token_type or '',
+            fee_capable_client=fee_capable_client,
         )
         if not result.get('success'):
             return PrepareBscSend(success=False, error=result.get('error'))

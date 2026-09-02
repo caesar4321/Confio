@@ -7,6 +7,38 @@ from ramps.schema import CreateRampOrder
 
 
 class BscOfframpSourceTests(SimpleTestCase):
+    def _create_onramp(self, *, meta):
+        user = SimpleNamespace(is_authenticated=True, id=8, phone_country='BR')
+        account = SimpleNamespace(
+            bsc_address='0x' + ('2' * 40),
+            account_type='personal',
+        )
+        info = SimpleNamespace(context=SimpleNamespace(user=user, META=meta))
+        client = mock.Mock(is_configured=True)
+        with mock.patch('ramps.schema._employee_ramp_denial', return_value=None), \
+             mock.patch('ramps.schema._resolve_ramp_country_code', return_value='BR'), \
+             mock.patch('ramps.schema._get_ramp_account_for_user', return_value=account), \
+             mock.patch('ramps.schema.KoyweClient', return_value=client):
+            result = CreateRampOrder().mutate(
+                info,
+                direction='ON_RAMP',
+                amount='100',
+                payment_method_code='PIX',
+                country_code='BR',
+                fiat_currency='BRL',
+                destination='cusd_plus',
+            )
+        return result, client
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=True)
+    def test_legacy_ineligible_bsc_onramp_requires_update(self):
+        result, client = self._create_onramp(meta={'HTTP_CF_IPCOUNTRY': 'BR'})
+
+        self.assertFalse(result.success)
+        self.assertIn('Actualiza la app', result.error)
+        self.assertIn('cUSD en BNB Smart Chain', result.error)
+        client.create_ramp_order.assert_not_called()
+
     def _create_order(
         self,
         *,

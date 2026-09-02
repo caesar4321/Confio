@@ -228,7 +228,7 @@ def _lock_internal_recipient_account(recipient_user, recipient_business):
 def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                      recipient_phone=None, recipient_address=None,
                      memo: str = '', idempotency_key: str = '',
-                     token: str = '') -> dict:
+                     token: str = '', fee_capable_client: bool = False) -> dict:
     """Build and store the send. `jwt_ctx` is the validated JWT business
     context (send_funds already enforced by the mutation). `token` empty =
     dollar-value send (shapes A–C); 'CUSD_PLUS'/'CONFIO' = the explicit
@@ -470,12 +470,16 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 receipt_net_wei = redeem_out_wei
                 if gross_redeem_wei < cp_vault.ONDO_MIN_REDEEM_WEI and (
                         usdt_raw + MAX_SEND_DUST_WEI >= amount_wei):
-                    # Not a dead end: raw USDT covers this send. Refusing
-                    # outright stranded a user holding $0.50 of savings and
-                    # plenty of USDT (audit 2026-08-01). This branch is
-                    # external-only: raw USDT already is the required output
-                    # asset, so converting it into cUSD merely to redeem it
-                    # again would be both unnecessary and fee-wasteful.
+                    if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+                        return {
+                            'success': False,
+                            'error': (
+                                'conversion_pending' if fee_capable_client
+                                else 'client_update_required'
+                            ),
+                        }
+                    # Kill-switch rollback only: before the cUSD perimeter,
+                    # raw USDT could cover an external send directly.
                     if amount_wei > usdt_raw:
                         amount_wei = usdt_raw
                     kind = 'send_usdt'
@@ -639,17 +643,19 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 }]
             mixed_meta = {'shares': str(shares), 'unwrap_min': str(shortfall)}
         elif usdt_raw + MAX_SEND_DUST_WEI >= amount_wei:
-            # External destinations always receive USDT. If the holder
-            # already has raw USDT (notably a pre-cUSD legacy balance), send
-            # that output asset directly: there is no conversion to charge.
-            # Internal Confío recipients still wait for foreground
-            # conversion so friend sends use cUSD/cUSD+ and cannot bypass the
-            # entry perimeter.
-            if (getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False)
-                    and (requested == 'CUSD_PLUS'
-                         or recipient_user is not None
-                         or recipient_business is not None)):
-                return {'success': False, 'error': 'conversion_pending'}
+            # With the conversion perimeter live, normal Send never spends a
+            # transient or legacy raw-USDT balance. A current app retries once
+            # foreground conversion has produced cUSD/cUSD+; a legacy app is
+            # told to update. Emergency Exit remains a separate public-RPC
+            # path and is intentionally unaffected.
+            if getattr(settings, 'CUSD_CONVERSION_FEE_ENABLED', False):
+                return {
+                    'success': False,
+                    'error': (
+                        'conversion_pending' if fee_capable_client
+                        else 'client_update_required'
+                    ),
+                }
             if amount_wei > usdt_raw:
                 amount_wei = usdt_raw  # dust-short MAX → the full wallet balance
             if amount_wei <= 0:

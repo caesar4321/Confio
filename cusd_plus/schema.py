@@ -1120,9 +1120,56 @@ class SubmitBscTransaction(graphene.Mutation):
             )
             return SubmitBscTransaction(success=False, error='signer_not_active_account')
 
+        # Legacy builds could fall back from the sponsored send rail to this
+        # client-signed relay and submit a raw USDT transfer. Once the cUSD
+        # perimeter is live that would let pre-cUSD balances leave through a
+        # normal app flow without ever paying the conversion fee. Keep USDT
+        # approvals relayable (vault mint/redeem still need them), but refuse
+        # the ERC-20 transfer selector. Emergency Exit does not use this
+        # endpoint: it broadcasts directly to bundled public BSC RPCs.
+        usdt_addr = '0x55d398326f99059ff775485246999027b3197955'
+        data_hex = fields[5].hex()
+        if to_addr == usdt_addr:
+            selector = data_hex[:8]
+            fee_enabled = getattr(
+                settings, 'CUSD_CONVERSION_FEE_ENABLED', False
+            )
+            if fee_enabled and selector == 'a9059cbb':  # transfer(address,uint256)
+                return SubmitBscTransaction(
+                    success=False,
+                    error='raw_usdt_transfer_not_allowed',
+                )
+            # USDT is present in the destination allowlist for the vault's
+            # approval leg, not as a general-purpose token call relay. Retain
+            # direct transfer only behind the conversion-fee kill switch.
+            if selector != '095ea7b3' and not (
+                not fee_enabled and selector == 'a9059cbb'
+            ):
+                return SubmitBscTransaction(
+                    success=False,
+                    error='selector_not_allowed',
+                )
+            if selector == '095ea7b3':  # approve(address,uint256)
+                if len(data_hex) != 8 + 128:
+                    return SubmitBscTransaction(
+                        success=False,
+                        error='bad_calldata',
+                    )
+                spender = '0x' + data_hex[8:72][-40:]
+                allowed_spenders = {
+                    (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower(),
+                    (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower(),
+                }
+                allowed_spenders.discard('')
+                if spender not in allowed_spenders:
+                    return SubmitBscTransaction(
+                        success=False,
+                        error='approve_spender_not_allowed',
+                    )
+
         allowed = {
             (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower(),
-            '0x55d398326f99059ff775485246999027b3197955',  # USDT (approve leg)
+            usdt_addr,  # USDT (approve leg only while the fee is enabled)
         }
         allowed |= {a.lower() for a in getattr(settings, 'BSC_RELAY_EXTRA_ALLOWED', [])}
 

@@ -256,6 +256,49 @@ class GuardarianTransactionProxyTests(SimpleTestCase):
     )
     @patch('security.integrity_service.app_check_service.verify_request_header')
     @patch('config.views.jwt_decode')
+    @patch('cusd_plus.cusd_vault.current_fee_bps', side_effect=RuntimeError('RPC unavailable'))
+    @patch('config.views.requests.post')
+    def test_legacy_ineligible_bsc_buy_requires_update_before_fee_preflight(
+        self, mock_post, mock_fee_bps, mock_jwt_decode, mock_app_check,
+    ):
+        self.user.phone_country = 'BR'
+        mock_app_check.return_value = {'success': True}
+        mock_jwt_decode.return_value = {
+            'user_id': self.user.id,
+            'account_type': 'personal',
+            'account_index': 0,
+        }
+        request = self.factory.post(
+            '/api/guardarian/transaction/',
+            data=json.dumps({
+                'amount': 500,
+                'from_currency': 'BRL',
+                'to_currency': 'USDT',
+                'to_network': 'BSC',
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION='JWT test-token',
+            HTTP_X_FIREBASE_APPCHECK='test-app-check',
+            HTTP_CF_IPCOUNTRY='BR',
+        )
+
+        with patch('users.models.User.objects.get', return_value=self.user):
+            response = guardarian_transaction_proxy(request)
+
+        self.assertEqual(response.status_code, 426)
+        body = json.loads(response.content)
+        self.assertIn('Actualiza la app', body['error'])
+        self.assertIn('cUSD en BNB Smart Chain', body['error'])
+        mock_fee_bps.assert_not_called()
+        mock_post.assert_not_called()
+
+    @override_settings(
+        GUARDARIAN_API_KEY='test-api-key',
+        GUARDARIAN_API_URL='https://api-payments.guardarian.com/v1',
+        CUSD_CONVERSION_FEE_ENABLED=True,
+    )
+    @patch('security.integrity_service.app_check_service.verify_request_header')
+    @patch('config.views.jwt_decode')
     @patch('cusd_plus.cusd_vault.current_fee_bps', return_value=90)
     @patch('cusd_plus.cusd_vault.preview_redeem_wei')
     @patch('config.views.requests.post')
