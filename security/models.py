@@ -664,6 +664,19 @@ class UserBan(SoftDeleteModel):
         return True
 
 
+class RegistrationRestriction(models.Model):
+    """Exact source denylist for new accounts; existing users keep access."""
+
+    kind = models.CharField(max_length=16, choices=[('ip', 'IP'), ('device', 'Device fingerprint')])
+    value = models.CharField(max_length=255)
+    reason = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['kind', 'value'], name='unique_registration_source')]
+
+
 class IPAddress(models.Model):
     """Track IP addresses for security and fraud detection"""
     
