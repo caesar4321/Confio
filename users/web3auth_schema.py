@@ -592,6 +592,14 @@ class Web3AuthLoginMutation(graphene.Mutation):
 
             # Check for soft-deleted accounts before attempting login or recreation
             existing_any_state = User.all_objects.filter(firebase_uid=firebase_uid).first()
+            # Public login bypasses authenticated-request middleware. Enforce
+            # bans here, before account creation, device tracking or JWT issue.
+            from security.login_restrictions import login_is_restricted
+            if login_is_restricted(existing_any_state, device_fingerprint, getattr(info.context, 'META', {})):
+                return cls(
+                    success=False,
+                    error="Acceso restringido. Contacta con soporte.",
+                )
             if existing_any_state and existing_any_state.deleted_at:
                 logger.warning("Login blocked for soft-deleted user %s", firebase_uid)
                 return cls(
