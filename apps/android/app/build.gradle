@@ -166,7 +166,8 @@ android {
             signingConfig signingConfigs.release
             debuggable false
             minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            shrinkResources enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             firebaseCrashlytics {
                 nativeSymbolUploadEnabled true
                 unstrippedNativeLibsDir "${buildDir}/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib"
