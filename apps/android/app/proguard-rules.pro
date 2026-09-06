@@ -13,31 +13,17 @@
 
 # React Native Firebase
 -keep class io.invertase.firebase.** { *; }
--keep class com.google.firebase.** { *; }
--dontwarn com.google.firebase.**
 
-# Google Play Services (Auth, Integrity)
--keep class com.google.android.gms.** { *; }
--dontwarn com.google.android.gms.**
+# Firebase, Google Play Services, AndroidX and OkHttp ship consumer rules.
+# Let those rules protect reflective entry points instead of keeping entire
+# packages: blanket keeps prevent R8 from shrinking and obfuscating libraries.
 
 # React Native Vision Camera
 -keep class com.mrousavy.camera.** { *; }
 
-# OkHttp (Network)
--keepattributes Signature
--keepattributes *Annotation*
--keep class okhttp3.** { *; }
--keep interface okhttp3.** { *; }
--dontwarn okhttp3.**
-
 # Hermés
 -keep class com.facebook.hermes.unicode.** { *; }
 -keep class com.facebook.jni.** { *; }
-
-# Android X & Support Libraries
--keep class androidx.** { *; }
--keep interface androidx.** { *; }
--dontwarn androidx.**
 
 # React Native Screens
 -keep class com.swmansion.rnscreens.** { *; }
@@ -62,6 +48,13 @@
 
 # Didit React Native bridge
 -keep class com.sdkreactnative.** { *; }
+
+# Didit enumerates ReactModuleInfo constructors and invokes them with booleans.
+# Preserve their signatures: R8 can otherwise replace a boolean parameter with
+# an int, causing an IllegalArgumentException while creating the React context.
+-keepclassmembers class com.facebook.react.module.model.ReactModuleInfo {
+    public <init>(...);
+}
 
 # Preserve metadata used by reflective/generic parsing in release builds
 -keepattributes Signature
