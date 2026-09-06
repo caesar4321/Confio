@@ -3,6 +3,22 @@ import { googleDriveStorage, GoogleDriveStorageError } from '../googleDriveStora
 describe('googleDriveStorage', () => {
     const originalFetch = global.fetch;
 
+    it('does not treat a failed revision listing as an empty history', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: false, status: 401, text: jest.fn().mockResolvedValue('{}'),
+        });
+        await expect(googleDriveStorage.listRevisions('token', 'file')).rejects.toMatchObject({
+            name: 'GoogleDriveStorageError', status: 401, operation: 'revisions',
+        });
+    });
+
+    it('types network failures without exposing transport diagnostics', async () => {
+        global.fetch = jest.fn().mockRejectedValue(new TypeError('private transport details'));
+        await expect(googleDriveStorage.listFiles('token')).rejects.toMatchObject({
+            name: 'GoogleDriveStorageError', status: 0, reason: 'network_error',
+        });
+    });
+
     afterEach(() => {
         jest.useRealTimers();
         global.fetch = originalFetch;
