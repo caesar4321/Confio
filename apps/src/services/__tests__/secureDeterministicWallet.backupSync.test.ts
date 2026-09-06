@@ -529,7 +529,7 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
         allowGenerate: true,
         expectedAddress,
       })
-    ).rejects.toThrow(/respaldo correcto/i);
+    ).rejects.toMatchObject({ code: 'mismatch' });
 
     // It must not have been uploaded as if it were the real wallet.
     expect(encBackupUploads()).toHaveLength(0);
@@ -578,7 +578,7 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
         expectedAddress,
         expectedEvmAddress: '0x000000000000000000000000000000000000dead',
       })
-    ).rejects.toThrow(/respaldo/i);
+    ).rejects.toMatchObject({ code: 'mismatch' });
 
     expect(encBackupUploads()).toHaveLength(0);
   });
@@ -623,7 +623,7 @@ describe('getOrCreateMasterSecret Drive backup sync contract', () => {
         allowGenerate: true,
         expectedAddress,
       })
-    ).rejects.toThrow(/respaldo/i);
+    ).rejects.toMatchObject({ code: 'mismatch' });
 
     // The legacy secret must survive intact: not tombstoned, not deleted.
     expect(mockMemoryStore.get(legacyAlias)).toEqual(wrongLegacy);
@@ -699,6 +699,56 @@ describe('Drive backup format v2', () => {
     });
 
     expect(secret).toEqual(MASTER_SECRET);
+  });
+
+  it.each([
+    ['missing', 'empty'],
+    ['unreadable', 'corrupt'],
+    ['mismatch', 'other-wallet'],
+    ['drive_access', 'download-failure'],
+    ['drive_access', 'trash-failure'],
+    ['drive_access', 'revision-failure'],
+  ])('reports %s for %s without creating a replacement', async (code, scenario) => {
+    (googleDriveStorage.listRevisions as jest.Mock).mockResolvedValue([]);
+    putOnDrive(scenario === 'other-wallet'
+      ? sealV2(new Uint8Array(32).fill(8))
+      : 'invalid backup');
+    if (scenario === 'empty') {
+      (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+    }
+    if (scenario === 'download-failure') {
+      (googleDriveStorage.downloadFile as jest.Mock).mockRejectedValue(new Error('download failed'));
+    }
+    if (scenario === 'revision-failure') {
+      (googleDriveStorage.listRevisions as jest.Mock).mockRejectedValue(new Error('Drive unavailable'));
+    }
+    if (scenario === 'trash-failure') {
+      (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_t, _name, trash) => {
+        if (trash) throw new Error('Drive unavailable');
+        return [];
+      });
+    }
+    await expect(getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google', allowGenerate: false, expectedAddress,
+    })).rejects.toMatchObject({ code });
+    expect(mockMemoryStore.has(subjectAlias())).toBe(false);
+    expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+  });
+
+  it('recovers a matching backup even when an earlier candidate cannot be downloaded', async () => {
+    (googleDriveStorage.listRevisions as jest.Mock).mockResolvedValue([]);
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_token, name, trash) =>
+      name || trash ? [] : [
+        { id: 'failed', name: 'confio_wallet_v2_failed.enc', createdTime: '2025-01-01' },
+        { id: 'good', name: 'confio_wallet_v2_good.enc', createdTime: '2026-01-01' },
+      ]);
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_token, id) => {
+      if (id === 'failed') throw new Error('offline');
+      return sealV2(MASTER_SECRET);
+    });
+    await expect(getOrCreateMasterSecret(USER_SUB, 'drive-token', {
+      provider: 'google', allowGenerate: false, expectedAddress,
+    })).resolves.toEqual(MASTER_SECRET);
   });
 
   // The whole point of moving off unauthenticated CBC: a flipped byte must be

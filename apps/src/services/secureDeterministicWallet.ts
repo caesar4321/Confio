@@ -28,6 +28,7 @@ import { deriveEvmKeyFromMasterSecret, DerivedEvmWallet, signEip191Message } fro
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, strictBase64ToBytes, NonCanonicalBase64Error } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
+import { WalletRecoveryError } from './walletRecoveryErrors';
 
 const decodeUtf8 = (bytes: Uint8Array): string => {
   if (typeof TextDecoder !== 'undefined') {
@@ -680,9 +681,7 @@ function assertAnchors(
   what: string
 ): void {
   if (anchorVerdict(secret, options) === 'mismatch') {
-    throw new Error(
-      'No encontramos el respaldo correcto de tu billetera. Intenta con la cuenta de Google donde guardaste tu respaldo o contáctanos para ayudarte.'
-    );
+    throw new WalletRecoveryError('mismatch');
   }
   console.log(`[MasterSecret] Anchor check passed for ${what}.`);
 }
@@ -695,9 +694,10 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-export class CorruptMasterSecretError extends Error {
+export class CorruptMasterSecretError extends WalletRecoveryError {
   constructor(source: string, length: number) {
-    super(
+    super('local_corrupt');
+    this.message = (
       `[MasterSecret] Stored secret from ${source} is ${length < 0 ? 'not canonical base64' : `${length} bytes, expected ${MASTER_SECRET_BYTES}`}. ` +
       'Refusing to continue: this is corruption, not absence, and generating a replacement would ' +
       'overwrite the only copy of a wallet that may hold funds.'
@@ -710,12 +710,9 @@ export class CorruptMasterSecretError extends Error {
  * Raised when a corrupt local secret could not be repaired from Drive. The
  * user-facing text is Spanish because this surfaces directly in sign-in.
  */
-export class CorruptMasterSecretRecoveryError extends Error {
+export class CorruptMasterSecretRecoveryError extends WalletRecoveryError {
   constructor() {
-    super(
-      'Los datos de tu billetera en este dispositivo están dañados y no encontramos un respaldo válido en Google Drive. ' +
-      'Inicia sesión con la cuenta de Google donde guardaste tu respaldo, o contáctanos para ayudarte.'
-    );
+    super('local_corrupt');
     this.name = 'CorruptMasterSecretRecoveryError';
   }
 }
@@ -1103,10 +1100,12 @@ async function findOldestRestorableDriveBackup(
 
   const activeFiles = await googleDriveStorage.listFiles(accessToken);
   let trashedFiles: any[] = [];
+  let incompleteSearch = false;
   try {
     trashedFiles = await googleDriveStorage.listFiles(accessToken, undefined, true);
   } catch (e) {
     console.warn('[MasterSecret] Failed to list trashed Drive backups:', e);
+    incompleteSearch = true;
   }
 
   const files = [...activeFiles, ...trashedFiles].filter((f: any) =>
@@ -1126,6 +1125,7 @@ async function findOldestRestorableDriveBackup(
   const distinctV2FileCount = v2WalletIds.size;
 
   if (files.length === 0) {
+    if (incompleteSearch) throw new WalletRecoveryError('drive_access');
     return {
       foundAny: false,
       secret: null,
@@ -1162,6 +1162,7 @@ async function findOldestRestorableDriveBackup(
       }
     } catch (e) {
       console.warn('[MasterSecret] Failed to list Drive backup revisions:', file.name, e);
+      incompleteSearch = true;
     }
   }
 
@@ -1173,13 +1174,16 @@ async function findOldestRestorableDriveBackup(
   });
 
   let foundDecryptable = false;
+  let candidateValidationFailed = false;
   for (const candidate of candidates) {
+    let downloaded = false;
     try {
       const content = await googleDriveStorage.downloadFile(
         accessToken,
         candidate.fileId,
         candidate.revisionId
       );
+      downloaded = true;
       const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
       if (decrypted) {
         foundDecryptable = true;
@@ -1215,9 +1219,13 @@ async function findOldestRestorableDriveBackup(
       }
     } catch (e) {
       console.warn('[MasterSecret] Failed to restore Drive backup candidate:', candidate.name, e);
+      if (!downloaded) incompleteSearch = true;
+      else candidateValidationFailed = true;
     }
   }
 
+  if (incompleteSearch) throw new WalletRecoveryError('drive_access');
+  if (candidateValidationFailed) throw new WalletRecoveryError('unexpected');
   return {
     foundAny: true,
     secret: null,
@@ -1936,9 +1944,7 @@ export async function getOrCreateMasterSecret(
         const restoredDeviceHint = (restore.deviceHint || '').toLowerCase();
         const restoredFromAndroid = restoredDeviceHint.includes('android');
         if (options?.expectedAddress && restoredAddress !== options.expectedAddress) {
-          throw new Error(
-            'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
-          );
+          throw new WalletRecoveryError('mismatch');
         }
 
         // EVM anchor (BSC-only accounts): the restored secret must derive to
@@ -1950,9 +1956,7 @@ export async function getOrCreateMasterSecret(
         if (!options?.expectedAddress && options?.expectedEvmAddress) {
           const restoredEvm = derivePersonalEvmAddress(restore.secret);
           if (restoredEvm !== options.expectedEvmAddress.toLowerCase()) {
-            throw new Error(
-              'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
-            );
+            throw new WalletRecoveryError('mismatch');
           }
           evmAnchorValidated = true;
         }
@@ -2050,9 +2054,9 @@ export async function getOrCreateMasterSecret(
         }
       } else if (restore.foundAny) {
         if ((options?.expectedAddress || options?.expectedEvmAddress) && restore.foundDecryptable) {
-          throw new Error('No encontramos en este Google Drive el respaldo de la billetera registrada para esta cuenta.');
+          throw new WalletRecoveryError('mismatch');
         }
-        throw new Error('[MasterSecret] Existing Drive wallet backups were found but none could be decrypted; refusing to generate a replacement secret.');
+        throw new WalletRecoveryError('unreadable');
       }
     }
 
@@ -2132,7 +2136,7 @@ export async function getOrCreateMasterSecret(
       } else {
         // No legacy secret to migrate, so from here on we would be GENERATING.
         if (options?.allowGenerate === false) {
-          throw new Error('[MasterSecret] Existing wallet requires recovery; refusing to generate replacement secret.');
+          throw new WalletRecoveryError(accessToken ? 'missing' : 'unexpected');
         }
 
         // An anchor means the server already knows this account's wallet, so

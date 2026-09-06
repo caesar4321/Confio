@@ -92,7 +92,7 @@ async function driveFetch(
         if (error?.name === 'AbortError') {
             throw new GoogleDriveStorageError(operation, 0, 'request_timeout');
         }
-        throw error;
+        throw new GoogleDriveStorageError(operation, 0, 'network_error');
     } finally {
         clearTimeout(timeout);
     }
@@ -191,13 +191,12 @@ export const googleDriveStorage = {
                 }
             );
 
-            if (!response.ok) return [];
+            if (!response.ok) throw await createDriveError('revisions', response);
 
             const data = await response.json();
             return data.revisions || [];
         } catch (e) {
-
-            return [];
+            throw e;
         }
     },
 

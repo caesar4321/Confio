@@ -6,6 +6,7 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import { jwtDecode } from 'jwt-decode';
+import { walletRecoveryMessage } from './walletRecoveryErrors';
 import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
 import auth from '@react-native-firebase/auth';
@@ -436,17 +437,6 @@ export class AccountDeactivatedError extends Error {
   }
 }
 
-/**
- * True when a Drive recovery attempt failed because Drive could not be READ
- * (auth/permission/network), as opposed to Drive being readable but holding
- * no matching backup. The two cases need different user guidance.
- */
-function isDriveReadFailure(error: any): boolean {
-  if (!error) return false;
-  if (error.name === 'GoogleDriveStorageError') return true;
-  const message = String(error.message || '');
-  return /network request failed|timeout|timed out/i.test(message);
-}
 
 
 export class AuthService {
@@ -1551,10 +1541,7 @@ export class AuthService {
               // A Drive API/permission/network failure is NOT "backup missing":
               // telling the user to try another Google account sends them away
               // from the account that actually holds their backup.
-              if (isDriveReadFailure(driveRecoveryErr)) {
-                throw new Error('No pudimos leer tu Google Drive para buscar tu respaldo. Revisa tu conexión e inténtalo de nuevo con la misma cuenta de Google.');
-              }
-              throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
+              throw new Error(walletRecoveryMessage(driveRecoveryErr));
             }
           } else {
             // Generation was allowed, so this is a NEW user — but "allowed to
@@ -1989,10 +1976,7 @@ export class AuthService {
             console.log('[AuthService] Apple BSC-only wallet recovered from Google Drive.');
           } catch (driveRecoveryErr: any) {
             console.error('[AuthService] Failed to recover Apple BSC-only wallet from Drive:', driveRecoveryErr);
-            if (isDriveReadFailure(driveRecoveryErr)) {
-              throw new Error('No pudimos leer tu Google Drive para buscar tu respaldo. Revisa tu conexión e inténtalo de nuevo con la misma cuenta de Google.');
-            }
-            throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
+            throw new Error(walletRecoveryMessage(driveRecoveryErr));
           }
         }
         console.log('Master secret checked/created for Apple user (BSC-only)');
@@ -2053,10 +2037,7 @@ export class AuthService {
               console.log('[AuthService] Apple V2 wallet recovered from Google Drive.');
             } catch (driveRecoveryErr: any) {
               console.error('[AuthService] Failed to recover Apple V2 wallet from Drive:', driveRecoveryErr);
-              if (isDriveReadFailure(driveRecoveryErr)) {
-                throw new Error('No pudimos leer tu Google Drive para buscar tu respaldo. Revisa tu conexión e inténtalo de nuevo con la misma cuenta de Google.');
-              }
-              throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
+              throw new Error(walletRecoveryMessage(driveRecoveryErr));
             }
           }
           if (allowV2SecretGeneration) {
