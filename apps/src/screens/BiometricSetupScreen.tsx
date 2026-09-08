@@ -19,7 +19,7 @@ export const BiometricSetupScreen = () => {
   const insets = useSafeAreaInsets();
   const route = useRoute<BiometricRouteProp>();
   const origin = route.params?.origin || 'login';
-  const { completeBiometricAndEnter, continueWithoutDeviceProtection } = useAuth();
+  const { completeBiometricAndEnter } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [supportedHint, setSupportedHint] = useState<string | null>(null);
@@ -97,30 +97,6 @@ export const BiometricSetupScreen = () => {
       setIsProcessing(false);
     }
   }, [completeBiometricAndEnter, isProcessing]);
-
-  // Only offered after an activation attempt has actually failed, so this is a
-  // way out of a dead end rather than a shortcut past setup.
-  const handleContinueWithoutProtection = useCallback(() => {
-    if (isProcessing) return;
-    Alert.alert(
-      'Continuar sin protección',
-      'Confío no te pedirá tu huella, rostro ni código para abrir la app ni para confirmar envíos y pagos.\n\n' +
-      'Cualquier persona que desbloquee este teléfono podrá mover tu dinero. Tu llave sigue guardada y respaldada igual que siempre.\n\n' +
-      'Puedes activar la protección más tarde desde tu Perfil.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Continuar sin protección',
-          style: 'destructive',
-          onPress: async () => {
-            setIsProcessing(true);
-            const ok = await continueWithoutDeviceProtection(origin);
-            if (!ok) setIsProcessing(false);
-          },
-        },
-      ],
-    );
-  }, [continueWithoutDeviceProtection, isProcessing, origin]);
 
   const handleBack = useCallback(() => {
     if (!isProcessing) {
@@ -293,26 +269,12 @@ export const BiometricSetupScreen = () => {
         />
         <Text style={styles.caption}>Necesario para mantener segura tu cuenta y tus transacciones.</Text>
         {showSettingsButton && (
-          <>
-            <Button
-              title="Abrir ajustes de seguridad"
-              variant="secondary"
-              onPress={handleOpenSettings}
-              style={styles.settingsButton}
-            />
-            <TouchableOpacity
-              onPress={handleContinueWithoutProtection}
-              disabled={isProcessing}
-              style={styles.optOutLink}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="Continuar sin protección"
-            >
-              <Text style={styles.optOutText}>
-                Ya la tengo activada y aún no funciona · Continuar sin protección
-              </Text>
-            </TouchableOpacity>
-          </>
+          <Button
+            title="Abrir ajustes de seguridad"
+            variant="secondary"
+            onPress={handleOpenSettings}
+            style={styles.settingsButton}
+          />
         )}
       </ScrollView>
     </View>
@@ -429,17 +391,6 @@ const styles = StyleSheet.create({
   },
   settingsButton: {
     marginTop: 16,
-  },
-  optOutLink: {
-    marginTop: 18,
-    paddingVertical: 4,
-  },
-  optOutText: {
-    textAlign: 'center',
-    fontSize: 13,
-    lineHeight: 18,
-    color: colors.text.secondary,
-    textDecorationLine: 'underline',
   },
 });
 

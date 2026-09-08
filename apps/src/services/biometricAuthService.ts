@@ -6,17 +6,11 @@ import { secureRandomBytes } from '../setup/entropyGuard';
 
 const BIOMETRIC_SECRET_SERVICE = 'com.confio.biometric.guard';
 const BIOMETRIC_PREFS_SERVICE = 'com.confio.biometric.prefs';
-// Deliberately a separate service: disable() resets BIOMETRIC_PREFS_SERVICE
-// wholesale, and the opt-out must survive that so a user who escaped the
-// enrollment loop is never dropped back into it.
-const BIOMETRIC_OPTOUT_SERVICE = 'com.confio.biometric.optout';
 const BIOMETRIC_SECRET_USERNAME = 'biometric_unlock';
 const BIOMETRIC_PREFS_USERNAME = 'biometric_pref';
-const BIOMETRIC_OPTOUT_USERNAME = 'biometric_optout';
 
 class BiometricAuthService {
   private cachedSupported: boolean | null = null;
-  private cachedOptOut: boolean | null = null;
   private isAuthenticating: boolean = false;
   private lastAuthenticationTime: number = 0;
   private readonly DEBOUNCE_MS = 1500; // Prevent multiple prompts within 1.5 seconds
@@ -45,7 +39,6 @@ class BiometricAuthService {
    */
   invalidateCache(): void {
     this.cachedSupported = null;
-    this.cachedOptOut = null;
   }
 
   /**
@@ -85,62 +78,6 @@ class BiometricAuthService {
       console.error('[BiometricAuthService] Failed to read biometric preference:', error);
       return false;
     }
-  }
-
-  /**
-   * Whether the user explicitly chose to run without device protection.
-   *
-   * This exists because `isSupported()` returning true does not imply the
-   * Keystore/Keychain guard key can actually be created and read back. Weak
-   * (Class 2) sensors, OEM Keystore quirks and invalidated key material all
-   * produce devices where the user *has* a PIN or fingerprint enrolled but
-   * `enable()` can never succeed — leaving them permanently stuck on the
-   * setup screen with no way into the app.
-   */
-  async isOptedOut(): Promise<boolean> {
-    if (this.cachedOptOut !== null) return this.cachedOptOut;
-    try {
-      const marker = await Keychain.getGenericPassword({
-        service: BIOMETRIC_OPTOUT_SERVICE,
-        username: BIOMETRIC_OPTOUT_USERNAME,
-      });
-      this.cachedOptOut = !!marker && marker.password === 'opted_out';
-      return this.cachedOptOut;
-    } catch (error) {
-      // Fail closed: an unreadable marker must not silently drop the guard.
-      console.warn('[BiometricAuthService] Failed to read opt-out marker:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Record an explicit user decision to continue without device protection.
-   * Clears any half-written guard key first so no stale, unusable Keystore
-   * entry is left behind to fail later prompts.
-   */
-  async optOut(): Promise<void> {
-    await this.disable();
-    await Keychain.setGenericPassword(
-      BIOMETRIC_OPTOUT_USERNAME,
-      'opted_out',
-      {
-        service: BIOMETRIC_OPTOUT_SERVICE,
-        accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
-      }
-    );
-    this.cachedOptOut = true;
-  }
-
-  /**
-   * Undo the opt-out (user re-enabling protection from Profile).
-   */
-  async clearOptOut(): Promise<void> {
-    try {
-      await Keychain.resetGenericPassword({ service: BIOMETRIC_OPTOUT_SERVICE });
-    } catch (error) {
-      console.warn('[BiometricAuthService] Failed to clear opt-out marker:', error);
-    }
-    this.cachedOptOut = false;
   }
 
   /**
@@ -264,10 +201,6 @@ class BiometricAuthService {
       return false;
     }
 
-    // A successful enable supersedes any earlier opt-out. Without this the
-    // guard would report itself enabled while authenticate() kept
-    // short-circuiting on the stale marker.
-    await this.clearOptOut();
     await this.setPreference(true, mode);
     return true;
   }
@@ -306,15 +239,6 @@ class BiometricAuthService {
 
     if (this.isAuthenticating) {
       return false;
-    }
-
-    // An explicit opt-out has to cover the signing prompts too, not just the
-    // setup screen. Releasing only the setup gate would move the dead end from
-    // login to the first send/pay, which is worse: the user gets in and then
-    // cannot move funds. `accessControlOverride` is only passed by enable()'s
-    // own verification, which must still perform a real prompt.
-    if (!accessControlOverride && await this.isOptedOut()) {
-      return true;
     }
 
     if (this.lastSuccessTime > 0 && timeSinceLastSuccess < this.SUCCESS_COOLDOWN_MS) {
