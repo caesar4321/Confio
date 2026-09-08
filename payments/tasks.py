@@ -12,7 +12,6 @@ import logging
 from decimal import Decimal
 
 from celery import shared_task
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -20,67 +19,52 @@ logger = logging.getLogger(__name__)
 # omitted CUSD, so a legacy payment read "Pagaste 5 CUSD a …".
 from notifications.token_display import token_label
 
-# Batch kinds this task is allowed to settle (audit 2026-07-31 P2 isolation).
-PAY_KINDS = ('pay_cusd_plus', 'pay_cusd', 'pay_usdt', 'pay_confio')
-
-
-
 
 @shared_task(name='payments.confirm_bsc_payment', bind=True, max_retries=20)
 def confirm_bsc_payment(self, payment_id: int, batch_id: int):
+    from billing.finalizer import (
+        FinalizationRejected,
+        ReceiptPending,
+        finalize_bsc_payment,
+    )
     from blockchain.models import SponsoredBatch
+    from .models import Invoice, PaymentTransaction
+
+    try:
+        result = finalize_bsc_payment(payment_id=payment_id, batch_id=batch_id)
+    except ReceiptPending:
+        raise self.retry(countdown=15)
+    except FinalizationRejected as exc:
+        logger.error('[PAY][BSC] refusing payment %s finalization: %s',
+                     payment_id, exc)
+        return
+    except (PaymentTransaction.DoesNotExist, SponsoredBatch.DoesNotExist,
+            Invoice.DoesNotExist):
+        return
+
+    if not result.transitioned:
+        return
+    if result.outcome == 'confirmed':
+        logger.info('[PAY][BSC] %s confirmed: %s',
+                    result.payment_internal_id, result.transaction_hash)
+    else:
+        logger.warning('[PAY][BSC] %s failed: batch %s',
+                       result.payment_internal_id, batch_id)
+
+
+def _send_bsc_payment_notifications(payment_id: int):
+    """Send user-visible effects after the financial transaction commits."""
     from notifications import utils as notif_utils
     from notifications.models import NotificationType as NotifType
     from .models import PaymentTransaction
 
     try:
         p = PaymentTransaction.objects.select_related(
-            'invoice', 'payer_user', 'merchant_business', 'merchant_account',
-            'payer_account',
-        ).get(id=payment_id)
-        batch = SponsoredBatch.objects.get(id=batch_id)
-    except (PaymentTransaction.DoesNotExist, SponsoredBatch.DoesNotExist):
+            'payer_user', 'merchant_business', 'merchant_account_user',
+            'merchant_account', 'payer_account', 'payer_business',
+        ).get(id=payment_id, status='CONFIRMED')
+    except PaymentTransaction.DoesNotExist:
         return
-    if p.status != 'SUBMITTED':
-        return  # already resolved
-
-    # Isolation (audit 2026-07-31 P2).
-    if (batch.kind not in PAY_KINDS
-            or batch.source_id != p.id
-            or (p.transaction_hash and batch.tx_hash != p.transaction_hash)):
-        logger.error('[PAY][BSC] batch %s does not match payment %s — refusing to settle', batch.id, p.id)
-        return
-
-    if batch.status in ('signed', 'sent'):
-        raise self.retry(countdown=15)
-
-    if batch.status != 'confirmed':  # reverted / noop_failed / reorged
-        p.status = 'FAILED'
-        p.error_message = f'batch_{batch.status}'
-        p.save(update_fields=['status', 'error_message', 'updated_at'])
-        logger.warning('[PAY][BSC] %s failed: batch %s %s',
-                       p.internal_id, batch.id, batch.status)
-        return
-
-    # ONE transaction. These were two independent saves, and the retry guard
-    # above returns as soon as the payment leaves SUBMITTED — so a worker that
-    # died between them left the payment CONFIRMED, the invoice PENDING, and
-    # nothing that would ever revisit it. The invoice must become PAID with
-    # the payment or not at all.
-    from django.db import transaction as _db_tx
-    with _db_tx.atomic():
-        p.status = 'CONFIRMED'
-        p.save(update_fields=['status', 'updated_at'])
-
-        invoice = p.invoice
-        if invoice and invoice.status != 'PAID':
-            invoice.status = 'PAID'
-            invoice.paid_at = timezone.now()
-            invoice.paid_by_user = p.payer_user
-            invoice.paid_by_business = p.payer_business
-            invoice.save(update_fields=[
-                'status', 'paid_at', 'paid_by_user', 'paid_by_business', 'updated_at',
-            ])
 
     from .bsc_flow import WAD, payment_fee_wei
     gross = Decimal(p.amount)
@@ -140,7 +124,7 @@ def confirm_bsc_payment(self, payment_id: int, batch_id: int):
     except Exception:  # noqa: BLE001
         logger.exception('payment notifications failed for %s', p.internal_id)
 
-    logger.info('[PAY][BSC] %s confirmed (%s %s): %s',
+    logger.info('[PAY][BSC] %s notifications sent (%s %s): %s',
                 p.internal_id, gross, token, p.transaction_hash)
 
 
@@ -161,50 +145,83 @@ def reconcile_stranded_bsc_payments():
     Both are repaired from the batch, which is the durable record: it is
     written before broadcast and carries the real hash.
     """
-    from blockchain.models import SponsoredBatch
+    from blockchain.models import PAYMENT_BATCH_KINDS, SponsoredBatch
+    from django.db import transaction
+    from django.db.models import Exists, OuterRef, Q
     from .models import PaymentTransaction
 
     TERMINAL = ('confirmed', 'reverted', 'dropped', 'reorged', 'noop_failed')
+    RECONCILABLE = ('sent',) + TERMINAL
 
     repaired = requeued = 0
-    batches = (SponsoredBatch.objects
-               .filter(kind__in=PAY_KINDS, status__in=('sent',) + TERMINAL)
-               .exclude(source_id=None).order_by('-id')[:300])
-    for batch in batches:
-        p = PaymentTransaction.objects.filter(id=batch.source_id).first()
-        if p is None:
+    payment_batches = SponsoredBatch.objects.filter(
+        source_id=OuterRef('pk'), kind__in=PAYMENT_BATCH_KINDS)
+    # Select the *oldest actionable payments*, not the newest batch rows.
+    # A fixed newest-300 batch window permanently starved an old unresolved
+    # payment whenever normal traffic kept adding more than 300 newer rows.
+    candidates = list(
+        PaymentTransaction.objects
+        .filter(status__in=('PENDING_BLOCKCHAIN', 'SUBMITTED'))
+        .annotate(
+            has_live_batch=Exists(payment_batches.filter(
+                status__in=('sent', 'confirmed'))),
+            has_hash_batch=Exists(payment_batches.filter(
+                tx_hash=OuterRef('transaction_hash'), status__in=RECONCILABLE)),
+        )
+        .filter(
+            Q(status='PENDING_BLOCKCHAIN', has_live_batch=True)
+            | Q(status='SUBMITTED', has_hash_batch=True)
+        )
+        .order_by('updated_at', 'id')
+        .values_list('id', flat=True)[:300]
+    )
+
+    for payment_id in candidates:
+        snapshot = PaymentTransaction.objects.filter(id=payment_id).only(
+            'status', 'transaction_hash').first()
+        if snapshot is None:
             continue
-        if p.status == 'PENDING_BLOCKCHAIN':
-            # Adopt only a LIVE batch — one that was broadcast and has not
-            # failed. Two rules had to hold at once and wall-clock ordering
-            # could not express either:
-            #
-            #   a dead batch must never hijack a re-prepared payment (a
-            #   reverted/dropped batch means that attempt failed, so the fresh
-            #   attempt owns the row), and
-            #
-            #   a genuinely broadcast batch must still be adopted even when a
-            #   concurrent re-prepare has since touched the payment — which is
-            #   what the created_at >= updated_at test got wrong, because
-            #   prepare_bsc_payment re-saves the row and auto_now moves
-            #   updated_at past the batch, permanently skipping the very case
-            #   this sweep exists to repair.
-            #
-            # 'sent'/'confirmed' says exactly "this one went out and did not
-            # fail", and cpsb_unique_active_payment guarantees at most one of
-            # them per payment, so there is nothing to disambiguate.
-            if batch.status not in ('sent', 'confirmed'):
-                continue
-            p.transaction_hash = batch.tx_hash
-            p.status = 'SUBMITTED'
-            p.save(update_fields=['transaction_hash', 'status', 'updated_at'])
-            repaired += 1
-            logger.warning(
-                '[PAY][BSC] repaired %s: batch %s was %s while the payment was '
-                'still PENDING_BLOCKCHAIN', p.internal_id, batch.id, batch.status)
-        if p.status == 'SUBMITTED' and batch.status in TERMINAL:
-            confirm_bsc_payment.apply_async(args=[p.id, batch.id])
-            requeued += 1
+        batch_query = SponsoredBatch.objects.filter(
+            source_id=payment_id, kind__in=PAYMENT_BATCH_KINDS)
+        if snapshot.status == 'PENDING_BLOCKCHAIN':
+            batch = batch_query.filter(status__in=('sent', 'confirmed')).first()
+        elif snapshot.status == 'SUBMITTED':
+            batch = batch_query.filter(
+                tx_hash=snapshot.transaction_hash, status__in=RECONCILABLE).first()
+        else:
+            continue
+        if batch is None:
+            continue
+
+        with transaction.atomic():
+            # Match the confirmer's lock order and recheck after locking.
+            batch = SponsoredBatch.objects.select_for_update().get(id=batch.id)
+            p = PaymentTransaction.objects.select_for_update().get(id=payment_id)
+
+            if p.status == 'PENDING_BLOCKCHAIN':
+                if (batch.source_id != p.id
+                        or batch.kind not in PAYMENT_BATCH_KINDS
+                        or batch.status not in ('sent', 'confirmed')):
+                    continue
+                p.transaction_hash = batch.tx_hash
+                p.status = 'SUBMITTED'
+                p.save(update_fields=['transaction_hash', 'status', 'updated_at'])
+                repaired += 1
+                logger.warning(
+                    '[PAY][BSC] repaired %s: batch %s was %s while the payment '
+                    'was still PENDING_BLOCKCHAIN',
+                    p.internal_id, batch.id, batch.status)
+
+            if (p.status == 'SUBMITTED'
+                    and batch.source_id == p.id
+                    and batch.kind in PAYMENT_BATCH_KINDS
+                    and batch.tx_hash == p.transaction_hash
+                    and batch.status in RECONCILABLE):
+                transaction.on_commit(
+                    lambda pid=p.id, bid=batch.id:
+                    confirm_bsc_payment.apply_async(args=[pid, bid])
+                )
+                requeued += 1
     if repaired or requeued:
         logger.info('[PAY][BSC] reconcile: %s repaired, %s re-queued',
                     repaired, requeued)

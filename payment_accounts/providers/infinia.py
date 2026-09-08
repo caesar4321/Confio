@@ -191,7 +191,9 @@ class InfiniaProvider(PaymentAccountProvider):
             'target_account_id': operation.destination_account.provider_account_id,
             'source_amount': float(operation.source_amount),
         }
-        quote_id = (operation.provider_data or {}).get('quote_id')
+        # Journey quote binding survives response/error payload replacement.
+        journey = getattr(operation.money_flow, 'infinia_journey', None) if getattr(operation, 'money_flow_id', None) else None
+        quote_id = journey.fx_quote.get('id') if journey else (operation.provider_data or {}).get('quote_id')
         if quote_id:
             payload['quote_id'] = quote_id
         callback_base = getattr(settings, 'PAYMENT_ACCOUNTS_CALLBACK_BASE_URL', '').rstrip('/')

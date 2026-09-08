@@ -935,6 +935,11 @@ class MessagingService {
       }
 
       switch (parts[0]) {
+        case 'memberships':
+          this.navigateInsideMain('Memberships', {
+            obligationId: typeof transactionData?.obligation === 'string' ? transactionData.obligation : undefined,
+          });
+          break;
         case 'verification':
           // Navigate to Verification explanation screen
           navigationRef.current?.navigate('Main' as never, {

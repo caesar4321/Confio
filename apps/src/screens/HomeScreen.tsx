@@ -49,6 +49,7 @@ import {
   GET_ALL_PRESALE_PHASES,
   CHECK_REFERRAL_STATUS,
   GET_ACTIVE_HUMANITARIAN_CAMPAIGNS,
+  GET_MY_BILLING_SUMMARY,
 } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
@@ -263,6 +264,13 @@ export const HomeScreen = () => {
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
   const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
   const isEmployeeDelegate = !!activeAccount?.isEmployee;
+  const { data: billingSummaryData, refetch: refetchBillingSummary } = useQuery(GET_MY_BILLING_SUMMARY, {
+    skip: !isAuthReady || !isPersonalAccount,
+    fetchPolicy: 'cache-and-network',
+  });
+  useFocusEffect(useCallback(() => {
+    if (isAuthReady && isPersonalAccount) refetchBillingSummary().catch(() => undefined);
+  }, [isAuthReady, isPersonalAccount, refetchBillingSummary]));
   const { data: pendingPayrollData, refetch: refetchPendingPayroll } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
     skip: !activeAccount,
     fetchPolicy: 'cache-and-network',
@@ -742,6 +750,7 @@ export const HomeScreen = () => {
       ]);
       await Promise.all([
         refetchMyBalances(),
+        isAuthReady && isPersonalAccount ? refetchBillingSummary() : Promise.resolve(),
         // Pull-to-refresh has to move the BSC dollar row too, otherwise the
         // gesture visibly does nothing for the balance most users came to
         // check. (Server-side read cache is 30s, so this is as fresh as the
@@ -753,7 +762,7 @@ export const HomeScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshAccounts, refetchMyBalances]);
+  }, [isAuthReady, isPersonalAccount, refreshAccounts, refetchBillingSummary, refetchMyBalances]);
 
   const handleClaimInvite = useCallback(async () => {
     if (claimingInvite) return;
@@ -1483,6 +1492,31 @@ export const HomeScreen = () => {
             onPress={() => navigation.navigate('HumanitarianAid', { slug: activeHumanitarianCampaign.slug })}
             style={{ marginHorizontal: 16, marginBottom: 12 }}
           />
+        )}
+
+        {isAuthReady && isPersonalAccount && billingSummaryData?.myBillingSummary?.linked && billingSummaryData?.myBillingSummary?.entry && (
+          <TouchableOpacity
+            style={[styles.payrollCard, { marginHorizontal: 16, marginBottom: 12, backgroundColor: colors.white, elevation: 0, shadowOpacity: 0 }]}
+            onPress={() => navigation.navigate('Memberships', { obligationId: billingSummaryData.myBillingSummary.entry.id })}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+          >
+            <View style={[styles.payrollIconWrap, { backgroundColor: colors.primary }]}>
+              <Icon name="award" size={20} color={colors.white} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.payrollTitle}>{billingSummaryData.myBillingSummary.entry.institutionName} · Cuota de {new Date(`${billingSummaryData.myBillingSummary.entry.periodStart}T12:00:00`).toLocaleDateString('es-PE', { month: 'long', year: 'numeric' })}</Text>
+              <Text style={styles.payrollSubtitle}>
+                {billingSummaryData.myBillingSummary.entry.applicationStatus
+                  ? 'Pago confirmado · Actualización de tu institución pendiente. No necesitas pagar nuevamente.'
+                  : billingSummaryData.myBillingSummary.entry.status === 'payment_pending'
+                    ? 'Pago en proceso · Revisa su estado antes de intentar nuevamente.'
+                    : `${new Intl.NumberFormat('es-PE', { style: 'currency', currency: billingSummaryData.myBillingSummary.entry.currency }).format(Number(billingSummaryData.myBillingSummary.entry.amountRemainingMinor) / 100)} · Vence ${new Date(billingSummaryData.myBillingSummary.entry.dueAt).toLocaleDateString('es-PE')}`}
+              </Text>
+              <Text style={styles.payrollSubtitle}>{billingSummaryData.myBillingSummary.entry.status === 'paid' || billingSummaryData.myBillingSummary.entry.status === 'payment_pending' ? 'Ver estado' : 'Ver cuota'}</Text>
+            </View>
+            <Icon name="chevron-right" size={18} color={colors.text.light} />
+          </TouchableOpacity>
         )}
 
         {/* CONFIO Presale Banner - claims unlocked */}

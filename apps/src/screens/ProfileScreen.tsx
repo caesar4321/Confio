@@ -4,7 +4,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -348,7 +348,8 @@ export const ProfileScreen = () => {
   };
 
   const displayInfo = getDisplayInfo();
-
+  const authReady = useAuthReady();
+  const personalAccount = activeAccount?.type.toLowerCase() === 'personal';
   const { data: referralData } = useQuery(GET_MY_REFERRALS, {
     fetchPolicy: 'cache-and-network',
   });
@@ -700,6 +701,22 @@ export const ProfileScreen = () => {
                   <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </TouchableOpacity>
               )}
+
+            {/* Always present for personal accounts, but last in the cluster:
+                an unlinked member cannot discover institution linking otherwise,
+                and it sits below Verificacion because KYC is a prerequisite for
+                applying to an institution. Home stays conditional on a real bill. */}
+            {authReady && personalAccount && (
+              <TouchableOpacity
+                style={styles.cardOption}
+                onPress={() => navigation.navigate('Memberships')}
+                accessibilityRole="button"
+              >
+                <Icon name="award" size={18} color={colors.text.secondary} />
+                <Text style={styles.cardOptionText}>Mis instituciones</Text>
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
+              </TouchableOpacity>
+            )}
 
             {/* Notification settings entry is currently hidden.
           <TouchableOpacity 

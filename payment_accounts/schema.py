@@ -1,6 +1,7 @@
 import graphene
 import logging
 from django.conf import settings
+from django.utils import timezone
 from graphene_django import DjangoObjectType
 
 from payment_accounts.eligibility import (
@@ -22,7 +23,11 @@ from payment_accounts.models import (
     MoneyOperation,
     PayoutDestination,
     ProviderProfile,
+    PaymentBridgeQuote,
+    PaymentBridgeTransfer,
 )
+from payment_accounts.allbridge_next import NextError
+from payment_accounts.bridge import quote_provider_funding
 from payment_accounts.services import (
     PaymentAccountError,
     create_and_submit_payout,
@@ -40,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 def _public_error(exc):
     if isinstance(exc, (
-        PaymentAccountError, ComplianceHandoffError,
+        PaymentAccountError, ComplianceHandoffError, NextError,
         EligibilityDenied, EligibilityPolicyNotConfigured,
     )):
         return str(exc)
@@ -249,13 +254,202 @@ class MoneyOperationType(DjangoObjectType):
         )
 
 
+class BridgeRelayerFeeType(graphene.ObjectType):
+    token_id = graphene.String(required=True)
+    amount_units = graphene.String(required=True)
+
+
+class BridgeRouteType(graphene.ObjectType):
+    index = graphene.Int(required=True)
+    messenger = graphene.String(required=True)
+    amount_out_units = graphene.String(required=True)
+    relayer_fees = graphene.List(graphene.NonNull(BridgeRelayerFeeType), required=True)
+
+
+class BridgeCallType(graphene.ObjectType):
+    to = graphene.String(required=True)
+    value = graphene.String(required=True)
+    data = graphene.String(required=True)
+
+
+class BridgeAuthorizationInput(graphene.InputObjectType):
+    chain_id = graphene.Int(required=True)
+    address = graphene.String(required=True)
+    nonce = graphene.String(required=True)
+    y_parity = graphene.Int(required=True)
+    r = graphene.String(required=True)
+    s = graphene.String(required=True)
+
+
+class PaymentBridgeTransferType(DjangoObjectType):
+    calls = graphene.List(graphene.NonNull(BridgeCallType), required=True)
+    intent_id = graphene.String(required=True)
+    authorization_nonce = graphene.String(required=True)
+    source_address = graphene.String(required=True)
+    destination_address = graphene.String(required=True)
+    source_token_id = graphene.String(required=True)
+    amount_units = graphene.String(required=True)
+    fee_units = graphene.String(required=True)
+    gross_redeem_units = graphene.String(required=True)
+    wallet_usdt_units = graphene.String(required=True)
+    provider_credited = graphene.Boolean(required=True)
+    # Scalars use strings for uint256 / Unix deadlines; never GraphQL Int.
+    deadline = graphene.String(required=True)
+
+    class Meta:
+        model = PaymentBridgeTransfer
+        convert_choices_to_enum = False
+        fields = ('internal_id', 'status', 'deposit_address', 'amount_out_min', 'amount_out',
+                  'source_tx_hash', 'destination_tx_hash', 'actual_out_units', 'failure_code', 'created_at')
+
+    def resolve_provider_credited(self, info):
+        return bool(self.provider_credit_id)
+
+    def resolve_calls(self, info):
+        return self.calls
+
+    def resolve_intent_id(self, info):
+        from cusd_plus.sponsor_7702 import intent_id_for
+        return '0x' + intent_id_for('payment_bridge', client_request_id='bridge:' + str(self.internal_id)).hex()
+
+    def resolve_authorization_nonce(self, info):
+        from .bridge_chain import authorization_nonce
+        return '0x' + authorization_nonce(self).hex()
+
+    def resolve_source_address(self, info):
+        return self.quote.source_address
+
+    def resolve_destination_address(self, info):
+        return self.quote.destination_address
+
+    def resolve_source_token_id(self, info):
+        return self.quote.source_token_id
+
+    def resolve_amount_units(self, info):
+        return self.quote.amount_units
+
+    def resolve_fee_units(self, info):
+        return self.binding.get('funding', {}).get('fee_units', '0')
+
+    def resolve_gross_redeem_units(self, info):
+        return self.binding.get('funding', {}).get('gross_redeem_units', '0')
+
+    def resolve_wallet_usdt_units(self, info):
+        return self.binding.get('funding', {}).get('wallet_usdt_units', '0')
+
+    def resolve_deadline(self, info):
+        return str(self.deadline)
+
+
+class PaymentBridgeQuoteType(DjangoObjectType):
+    routes = graphene.List(graphene.NonNull(BridgeRouteType), required=True)
+    expired = graphene.Boolean(required=True)
+
+    class Meta:
+        model = PaymentBridgeQuote
+        fields = (
+            'internal_id', 'source_token_id', 'destination_token_id',
+            'amount_units', 'expires_at', 'created_at', 'transfer',
+        )
+
+    def resolve_routes(self, info):
+        return [BridgeRouteType(
+            index=index, messenger=route['messenger'], amount_out_units=route['amountOut'],
+            relayer_fees=[BridgeRelayerFeeType(token_id=f['tokenId'], amount_units=f['amount'])
+                          for f in route['relayerFees']],
+        ) for index, route in enumerate(self.routes)]
+
+    def resolve_expired(self, info):
+        from django.utils import timezone
+        return self.expires_at <= timezone.now()
+
+
+class QuotePaymentBridge(graphene.Mutation):
+    class Arguments:
+        funding_instruction_id = graphene.UUID(required=True)
+        amount = graphene.Decimal(required=True)
+        request_id = graphene.UUID(required=True)
+        direction = graphene.String(default_value='to_provider')
+
+    success = graphene.Boolean(required=True)
+    quote = graphene.Field(PaymentBridgeQuoteType)
+    errors = graphene.List(graphene.String, required=True)
+
+    @classmethod
+    def mutate(cls, root, info, funding_instruction_id, amount, request_id, direction='to_provider'):
+        try:
+            account = _active_account(info, permission='send_funds', owner_only=True)
+            quote = quote_provider_funding(
+                confio_account=account, funding_instruction_id=funding_instruction_id,
+                amount=amount, request_id=request_id,
+                direction=direction,
+            )
+            return cls(success=True, quote=quote, errors=[])
+        except Exception as exc:
+            return cls(success=False, quote=None, errors=[_public_error(exc)])
+
+
+class PreparePaymentBridge(graphene.Mutation):
+    class Arguments:
+        quote_id = graphene.UUID(required=True)
+        route_index = graphene.Int(default_value=0)
+
+    success = graphene.Boolean(required=True)
+    transfer = graphene.Field(PaymentBridgeTransferType)
+    errors = graphene.List(graphene.String, required=True)
+
+    @classmethod
+    def mutate(cls, root, info, quote_id, route_index=0):
+        from .bridge_execution import prepare_bridge
+        try:
+            owner = _active_account(info, permission='send_funds', owner_only=True)
+            return cls(success=True, transfer=prepare_bridge(owner, quote_id, route_index), errors=[])
+        except Exception as exc:
+            return cls(success=False, errors=[_public_error(exc)])
+
+
+class SubmitPaymentBridge(graphene.Mutation):
+    class Arguments:
+        transfer_id = graphene.UUID(required=True)
+        signature = graphene.String(required=True)
+        nonce = graphene.String(default_value='0')
+        authorization = BridgeAuthorizationInput()
+
+    success = graphene.Boolean(required=True)
+    transfer = graphene.Field(PaymentBridgeTransferType)
+    errors = graphene.List(graphene.String, required=True)
+
+    @classmethod
+    def mutate(cls, root, info, transfer_id, signature, nonce='0', authorization=None):
+        from .bridge_execution import submit_bridge
+        try:
+            owner = _active_account(info, permission='send_funds', owner_only=True)
+            return cls(success=True, transfer=submit_bridge(owner, transfer_id, signature,
+                       nonce=nonce, authorization=authorization), errors=[])
+        except Exception as exc:
+            return cls(success=False, errors=[_public_error(exc)])
+
+
+class BridgeAvailabilityType(graphene.ObjectType):
+    has_history = graphene.Boolean(required=True)
+    to_provider = graphene.Boolean(required=True)
+    to_wallet = graphene.Boolean(required=True)
+
+
+class BridgeInstructionType(graphene.ObjectType):
+    internal_id = graphene.UUID(required=True)
+    country = graphene.String(required=True)
+    holder_name = graphene.String(required=True)
+    can_fund = graphene.Boolean(required=True)
+
+
 class MoneyFlowType(DjangoObjectType):
     class Meta:
         model = MoneyFlow
         fields = (
             'internal_id', 'kind', 'status', 'source_asset', 'source_amount',
             'target_asset', 'target_amount', 'gross_amount', 'net_amount',
-            'provider_cost', 'created_at', 'completed_at', 'operations',
+            'provider_cost', 'created_at', 'completed_at', 'operations', 'bridge_quote',
         )
 
 
@@ -456,7 +650,68 @@ class CreatePaymentTransfer(graphene.Mutation):
             return cls(success=False, operation=None, errors=[_public_error(exc)])
 
 
-class Query(graphene.ObjectType):
+from .journey_schema import JourneyQuery, JourneyMutation
+from .cobre_journey_schema import CobreJourneyQuery, CobreJourneyMutation
+
+
+class Query(JourneyQuery, CobreJourneyQuery, graphene.ObjectType):
+    payment_bridge = graphene.Field(PaymentBridgeTransferType, internal_id=graphene.UUID(required=True))
+
+    def resolve_payment_bridge(self, info, internal_id):
+        owner = _active_account(info, permission='view_transactions')
+        return PaymentBridgeTransfer.objects.filter(internal_id=internal_id, quote__confio_account=owner).select_related('quote').first()
+
+    payment_bridge_instructions = graphene.List(graphene.NonNull(BridgeInstructionType), required=True)
+    payment_bridge_availability = graphene.Field(BridgeAvailabilityType, required=True)
+    my_payment_bridges = graphene.List(graphene.NonNull(PaymentBridgeTransferType), required=True,
+                                      limit=graphene.Int(default_value=20), offset=graphene.Int(default_value=0))
+
+    def resolve_payment_bridge_availability(self, info):
+        owner = _active_account(info, permission='view_balance')
+        from .models import InfiniaJourney, CobreJourney
+        quotes = getattr(settings, 'PAYMENT_BRIDGE_QUOTES_ENABLED', False)
+        return BridgeAvailabilityType(
+            has_history=(PaymentBridgeTransfer.objects.filter(quote__confio_account=owner).exists()
+                         or InfiniaJourney.objects.filter(confio_account=owner).exists()
+                         or CobreJourney.objects.filter(confio_account=owner).exists()),
+            to_provider=quotes and getattr(settings, 'PAYMENT_BRIDGE_BSC_ENABLED', False) and getattr(settings, 'CUSD_PLUS_7702_ENABLED', False),
+            to_wallet=quotes and getattr(settings, 'PAYMENT_BRIDGE_POLYGON_ENABLED', False),
+        )
+
+    def resolve_payment_bridge_instructions(self, info):
+        from .bridge import verified_destination
+        owner = _active_account(info, permission='view_balance')
+        if not getattr(settings, 'PAYMENT_BRIDGE_QUOTES_ENABLED', False):
+            return []
+        result = []
+        for row in FundingInstruction.objects.filter(
+            financial_account__provider_profile__confio_account=owner,
+            financial_account__status='active', financial_account__provider_profile__status='active', status='active',
+        ).select_related('financial_account__provider_profile'):
+            from .services import _require_provider_enabled
+            try:
+                _require_provider_enabled(row.financial_account.provider)
+            except PaymentAccountError:
+                continue
+            if row.expires_at and row.expires_at <= timezone.now():
+                continue
+            can_fund = False
+            try:
+                verified_destination(row, owner)
+                can_fund = getattr(settings, 'PAYMENT_BRIDGE_BSC_ENABLED', False)
+            except (PaymentAccountError, NextError):
+                pass
+            if can_fund or getattr(settings, 'PAYMENT_BRIDGE_POLYGON_ENABLED', False):
+                result.append(BridgeInstructionType(internal_id=row.internal_id,
+                    country=row.financial_account.country, holder_name=row.holder_display_name,
+                    can_fund=can_fund))
+        return result
+
+    def resolve_my_payment_bridges(self, info, limit=20, offset=0):
+        owner = _active_account(info, permission='view_transactions')
+        start = max(0, offset)
+        return PaymentBridgeTransfer.objects.filter(quote__confio_account=owner).select_related('quote').order_by('-created_at')[
+            start:start + max(1, min(limit, 100))]
     my_payment_accounts = graphene.List(FinancialAccountType, required=True)
     my_money_flows = graphene.List(MoneyFlowType, required=True, limit=graphene.Int(default_value=50))
     my_payout_destinations = graphene.List(PayoutDestinationType, required=True)
@@ -480,7 +735,7 @@ class Query(graphene.ObjectType):
         account = _active_account(info, permission='view_transactions')
         limit = max(1, min(int(limit or 50), 100))
         return MoneyFlow.objects.filter(confio_account=account).prefetch_related(
-            'operations'
+            'operations', 'bridge_quote'
         )[:limit]
 
     def resolve_my_payout_destinations(self, info):
@@ -513,7 +768,10 @@ class Query(graphene.ObjectType):
         )
 
 
-class Mutation(graphene.ObjectType):
+class Mutation(JourneyMutation, CobreJourneyMutation, graphene.ObjectType):
+    prepare_payment_bridge = PreparePaymentBridge.Field()
+    submit_payment_bridge = SubmitPaymentBridge.Field()
+    quote_payment_bridge = QuotePaymentBridge.Field()
     provision_payment_account = ProvisionPaymentAccount.Field()
     create_receiving_instruction = CreateReceivingInstruction.Field()
     create_payout_destination = CreatePayoutDestination.Field()

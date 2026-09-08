@@ -612,42 +612,21 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     opt_in_transactions=[]
                 )
             
-            # Find or create user based on Firebase UID
-            user, created = User.objects.get_or_create(
-                firebase_uid=firebase_uid,
-                defaults={
-                    'email': email or f'{firebase_uid}@confio.placeholder',
-                    'first_name': first_name,
-                    'last_name': last_name,
-                    'username': generate_compliant_username(email or firebase_uid),
-                    'platform_os': platform_os  # Save OS for new users
-                }
-            )
-            if not created:
-                is_valid, _ = validate_username(user.username or "")
-                if not is_valid:
-                    user.username = generate_compliant_username(email or firebase_uid, exclude_user_id=user.id)
-                    user.username = generate_compliant_username(email or firebase_uid, exclude_user_id=user.id)
-                    user.save(update_fields=['username'])
-            
-            # Firebase App Check (Warning Mode) - Post-User Resolution
+            # Decide attestation before creating accounts or firing signup hooks.
+            # Failed first-time attempts have an anonymous diagnostic verdict.
+            user = existing_any_state
             try:
                 from security.integrity_service import app_check_service
+                from security.app_check_diagnostics import login_diagnostics
                 
                 # Safely get token and debug error from headers or META
                 token_header = ''
-                debug_error = ''
                 if hasattr(info.context, 'headers') and info.context.headers:
                     token_header = info.context.headers.get('X-Firebase-AppCheck', '')
-                    debug_error = info.context.headers.get('X-AppCheck-Debug-Error', '')
                 elif hasattr(info.context, 'META') and info.context.META:
                     token_header = info.context.META.get('HTTP_X_FIREBASE_APPCHECK', '')
-                    debug_error = info.context.META.get('HTTP_X_APPCHECK_DEBUG_ERROR', '')
                 
-                # Debug logging to investigate failure
-                token_status = "present" if token_header else "missing"
-                token_preview = token_header[:10] + "..." if token_header else "None"
-                logger.info(f"Web3Auth App Check Debug: Token {token_status} ({token_preview}), User {user.id}" + (f", Client Error: {debug_error}" if debug_error else ""))
+                diagnostics = login_diagnostics(info.context)
 
                 # Ensure fingerprint_str doesn't exceed 255 chars (DB limit)
                 fingerprint_str = ''
@@ -657,23 +636,45 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     fingerprint_str = calculate_device_fingerprint(fingerprint_data)
                 
                 # Determine correct action based on flow
-                verdict_action = 'signup' if created else 'login'
+                verdict_action = 'login' if user else 'signup'
 
                 ac_result = app_check_service.verify_and_record(
                     user=user,
                     token=token_header,
                     action=verdict_action,
                     device_fingerprint=fingerprint_str,
-                    should_enforce=True
+                    should_enforce=getattr(settings, 'APP_CHECK_LOGIN_ENFORCE', True),
+                    diagnostics=diagnostics,
                 )
-                if not ac_result.get('success', True):
+                if not ac_result.get('success', False):
                     app_check_error = ac_result.get('error') or ''
                     if app_check_error == 'Missing App Check Token':
                         return cls(success=False, error="No se pudo verificar el dispositivo en este intento. Revisa Google Play Services, conexión y vuelve a intentar.")
                     return cls(success=False, error="Dispositivo no verificado (App Check failed). Por favor, usa la app oficial.")
-            except Exception as e:
-                logger.error(f"App Check verification failed: {e}")
+            except Exception:
+                logger.error('Login App Check policy/recording failed')
                 return cls(success=False, error="Error de seguridad. Intenta nuevamente o actualiza la app.")
+
+            # Only admitted requests may create a user or trigger signup hooks.
+            user, created = User.objects.get_or_create(
+                firebase_uid=firebase_uid,
+                defaults={
+                    'email': email or f'{firebase_uid}@confio.placeholder',
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'username': generate_compliant_username(email or firebase_uid),
+                    'platform_os': platform_os,
+                }
+            )
+            if ac_result.get('verdict_id'):
+                from security.models import IntegrityVerdict
+                IntegrityVerdict.objects.filter(
+                    pk=ac_result['verdict_id'], user__isnull=True).update(user=user)
+            if not created:
+                is_valid, _ = validate_username(user.username or '')
+                if not is_valid:
+                    user.username = generate_compliant_username(email or firebase_uid, exclude_user_id=user.id)
+                    user.save(update_fields=['username'])
             
             # Update user info and last_login
             if not created:

@@ -4,6 +4,7 @@ import { setContext } from '@apollo/client/link/context';
 import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
 import { getApiUrl } from '../config/env';
+import { appCheckDiagnosticCode } from '../utils/appCheckDiagnostics';
 import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
 import { AccountManager } from '../utils/accountManager';
@@ -147,15 +148,16 @@ const banClearLink = new ApolloLink((operation, forward) =>
 );
 
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
+  const isMembershipClaim = operation.operationName === 'ClaimInstitutionMembership';
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {
-        message: err.message,
+        message: isMembershipClaim ? 'Membership claim failed' : err.message,
         locations: err.locations,
         path: err.path,
-        extensions: err.extensions,
+        extensions: isMembershipClaim ? undefined : err.extensions,
         operation: operation.operationName,
-        variables: operation.variables
+        variables: isMembershipClaim ? '[REDACTED]' : operation.variables
       });
 
       // Handle specific error codes
@@ -216,12 +218,12 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   if (networkError) {
     const ne = networkError as any;
     console.error('[Network error]:', {
-      message: networkError.message,
+      message: isMembershipClaim ? 'Membership claim request failed' : networkError.message,
       name: networkError.name,
-      stack: networkError.stack,
+      stack: isMembershipClaim ? undefined : networkError.stack,
       statusCode: ne.statusCode,
       operation: operation.operationName,
-      variables: operation.variables
+      variables: isMembershipClaim ? '[REDACTED]' : operation.variables
     });
 
     // Ban detection. Real-device ground truth (2026-07-22): the middleware's
@@ -299,12 +301,12 @@ const authLink = setContext(async (operation, previousContext) => {
     } else {
       const appCheckDebugError = appCheckService.getLastErrorForDebug();
       if (appCheckDebugError) {
-        nextHeaders['X-AppCheck-Debug-Error'] = appCheckDebugError;
+        nextHeaders['X-AppCheck-Debug-Error'] = appCheckDiagnosticCode(appCheckDebugError);
       }
     }
   } catch (acError: any) {
     // DEBUG: Send error to backend to see why it failed
-    nextHeaders['X-AppCheck-Debug-Error'] = acError?.message || String(acError);
+    nextHeaders['X-AppCheck-Debug-Error'] = appCheckDiagnosticCode(acError?.message);
   }
 
   // Session-establishing operations must be independent of any stale JWT

@@ -2014,6 +2014,8 @@ confio_admin_site.register(RampWebhookEvent, RampWebhookEventAdmin)
 
 # Persistent provider accounts and named/omnibus money flows
 from payment_accounts.admin import (
+    PaymentBridgeQuoteAdmin,
+    PaymentBridgeTransferAdmin,
     EligibilityPolicyAdmin,
     FinancialAccountAdmin,
     MoneyFlowAdmin,
@@ -2021,6 +2023,8 @@ from payment_accounts.admin import (
     ProviderProfileAdmin,
 )
 from payment_accounts.models import (
+    PaymentBridgeQuote,
+    PaymentBridgeTransfer,
     AccountCapability,
     EligibilityDecision,
     EligibilityPolicy,
@@ -2038,6 +2042,8 @@ confio_admin_site.register(EligibilityPolicy, EligibilityPolicyAdmin)
 confio_admin_site.register(ProviderProfile, ProviderProfileAdmin)
 confio_admin_site.register(FinancialAccount, FinancialAccountAdmin)
 confio_admin_site.register(MoneyFlow, MoneyFlowAdmin)
+confio_admin_site.register(PaymentBridgeQuote, PaymentBridgeQuoteAdmin)
+confio_admin_site.register(PaymentBridgeTransfer, PaymentBridgeTransferAdmin)
 confio_admin_site.register(MoneyOperation, MoneyOperationAdmin)
 confio_admin_site.register(FundingInstruction)
 confio_admin_site.register(AccountCapability)
@@ -2133,3 +2139,49 @@ from blockchain.admin import OndoStockTradeAdmin, PendingAutoSwapAdmin, Sponsore
 confio_admin_site.register(SponsoredBatch, SponsoredBatchAdmin)
 confio_admin_site.register(OndoStockTrade, OndoStockTradeAdmin)
 confio_admin_site.register(PendingAutoSwap, PendingAutoSwapAdmin)
+
+# Institutional collections pilot. Financial rows are read-only; operators
+# can inspect each milestone and explicitly retry institution application.
+from billing.admin import (
+    BillingObligationAdmin,
+    BillingPaymentAdmin,
+    BillingScheduleAdmin,
+    CipSandboxApplicationReceiptAdmin,
+    CipSandboxMemberAdmin,
+    InstitutionApplicationAdmin,
+    InstitutionConnectionAdmin,
+    ObligationSubjectAdmin,
+    PaymentEffectAdmin, PaymentAllocationEntryAdmin, SettlementLegAdmin,
+)
+from billing.models import (
+    BillingObligation,
+    BillingPayment,
+    BillingSchedule,
+    CipSandboxApplicationReceipt,
+    CipSandboxMember,
+    InstitutionApplication,
+    InstitutionConnection,
+    ObligationSubject,
+    PaymentEffect, PaymentAllocationEntry, SettlementLeg,
+)
+
+confio_admin_site.register(ObligationSubject, ObligationSubjectAdmin)
+confio_admin_site.register(PaymentEffect, PaymentEffectAdmin)
+confio_admin_site.register(PaymentAllocationEntry, PaymentAllocationEntryAdmin)
+confio_admin_site.register(SettlementLeg, SettlementLegAdmin)
+confio_admin_site.register(BillingSchedule, BillingScheduleAdmin)
+confio_admin_site.register(BillingObligation, BillingObligationAdmin)
+confio_admin_site.register(BillingPayment, BillingPaymentAdmin)
+confio_admin_site.register(InstitutionConnection, InstitutionConnectionAdmin)
+confio_admin_site.register(InstitutionApplication, InstitutionApplicationAdmin)
+confio_admin_site.register(CipSandboxMember, CipSandboxMemberAdmin)
+confio_admin_site.register(
+    CipSandboxApplicationReceipt, CipSandboxApplicationReceiptAdmin)
+
+from payment_accounts.models import InfiniaJourney
+from payment_accounts.admin import InfiniaJourneyAdmin
+confio_admin_site.register(InfiniaJourney, InfiniaJourneyAdmin)
+
+from payment_accounts.models import CobreJourney
+from payment_accounts.admin import CobreJourneyAdmin
+confio_admin_site.register(CobreJourney, CobreJourneyAdmin)

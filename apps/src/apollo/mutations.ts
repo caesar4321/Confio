@@ -1,5 +1,25 @@
 import { gql } from '@apollo/client';
 
+export const CREATE_MEMBER_PAYMENT_INTENT = gql`
+  mutation CreateMemberPaymentIntent($obligationId: String!) {
+    createMemberPaymentIntent(obligationId: $obligationId) {
+      success
+      invoiceId
+      expiresAt
+      errors
+    }
+  }
+`;
+
+export const CLAIM_INSTITUTION_MEMBERSHIP = gql`
+  mutation ClaimInstitutionMembership($provider: String!, $token: String!) {
+    claimInstitutionMembership(provider: $provider, token: $token) {
+      success
+      errors
+    }
+  }
+`;
+
 export const APPLY_HUMANITARIAN_VOLUNTEER = gql`
   mutation ApplyHumanitarianVolunteer(
     $campaignSlug: String!

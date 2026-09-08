@@ -1789,6 +1789,21 @@ def check_sponsored_batch_receipt(self, batch_id: int):
                            batch.tx_hash, exc)
             raise self.retry(countdown=_retry_countdown(self.request.retries))
 
+    # Billing-linked payments require the exact finalized PaymentMade event
+    # before the sponsor row can become terminal. This keeps missing,
+    # ambiguous, or contradictory settlement evidence retryable instead of
+    # allowing a commercial invoice to be marked paid from a status bit.
+    from blockchain.models import PAYMENT_BATCH_KINDS
+    if batch.kind in PAYMENT_BATCH_KINDS:
+        from billing.settlement import persist_finalized_payment_settlement
+        try:
+            persist_finalized_payment_settlement(
+                batch_id=batch.id, receipt=receipt)
+        except Exception as exc:  # noqa: BLE001 - evidence/DB failures retry
+            logger.warning('payment settlement evidence failed for %s: %s',
+                           batch.tx_hash, exc)
+            raise self.retry(countdown=_retry_countdown(self.request.retries))
+
     batch.block_number = blk_num
     batch.block_hash = blk_hash
     batch.status = 'confirmed'
@@ -1815,6 +1830,7 @@ from send.kinds import BSC_SEND_KINDS
 _DOMAIN_CONFIRM_TASKS = {
     **{kind: 'send.confirm_bsc_send' for kind in BSC_SEND_KINDS},
     'pay_cusd_plus': 'payments.confirm_bsc_payment',
+    'pay_cusd': 'payments.confirm_bsc_payment',
     'pay_usdt': 'payments.confirm_bsc_payment',
     'pay_confio': 'payments.confirm_bsc_payment',
     'payroll_payout': 'payroll.confirm_bsc_payroll_payout',

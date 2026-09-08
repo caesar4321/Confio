@@ -104,6 +104,7 @@ interface AuthContextType {
   handleSuccessfulLogin: (isPhoneVerified: boolean, requiresBackupCompletion?: boolean) => Promise<void>;
   completePhoneVerification: () => Promise<void>;
   completeBiometricAndEnter: () => Promise<boolean>;
+  continueWithoutDeviceProtection: (source?: 'login' | 'phoneVerification') => Promise<boolean>;
   profileData: ProfileData | null;
   isProfileLoading: boolean;
   refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
@@ -626,6 +627,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
     const skipRevalidate = options?.skipRevalidate === true;
     try {
+      // Checked before isSupported(): the users this exists for DO have a PIN
+      // or biometric enrolled, so isSupported() is true for them and the
+      // unsupported-device escape below never fires.
+      if (await biometricAuthService.isOptedOut()) {
+        return { ok: true, alreadyEnabled: true, didAuthenticate: false };
+      }
+
       const supported = await biometricAuthService.isSupported();
       if (!supported) return { ok: true, alreadyEnabled: true, didAuthenticate: false };
 
@@ -643,6 +651,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         if (stillValid) {
           lastBiometricSuccessRef.current = Date.now();
           return { ok: true, alreadyEnabled: true, didAuthenticate: true };
+        }
+        // A failed revalidation used to disable() unconditionally and fall
+        // through to enable(). But authenticate() also returns false when the
+        // user simply taps Cancel, when the sensor is in lockout, or on a
+        // re-entrant call — so one cancelled prompt destroyed a WORKING
+        // enrollment and demanded a fresh one. If that re-enrollment then
+        // failed, the user was stuck being asked to set up protection they
+        // had already set up. Only wipe when the key is genuinely invalidated.
+        if (!biometricAuthService.isPermanentInvalidation()) {
+          return { ok: false, alreadyEnabled: true, didAuthenticate: false };
         }
         await biometricAuthService.disable();
       }
@@ -779,10 +797,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   const completeBiometricAndEnter = async (source: 'login' | 'phoneVerification' = 'login'): Promise<boolean> => {
+    if (await biometricAuthService.isOptedOut()) {
+      await completeAuthenticatedEntry(source);
+      return true;
+    }
+
     const supported = await biometricAuthService.isSupported();
     if (!supported) {
-      Alert.alert('Biometría no disponible', 'Este dispositivo no tiene biometría disponible para proteger tu cuenta.', [{ text: 'OK' }]);
-      return false;
+      // Devices with no lock screen at all: enforceBiometricEnrollment() and
+      // the setup screen's own hint both say we continue, and cold start does.
+      // Blocking only the fresh-login path stranded these users.
+      await completeAuthenticatedEntry(source);
+      return true;
     }
 
     const biometricResult = await enforceBiometricEnrollment();
@@ -804,6 +830,25 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
 
     lastBiometricSuccessRef.current = Date.now();
+    await completeAuthenticatedEntry(source);
+    return true;
+  };
+
+  /**
+   * Escape hatch for devices where the guard key cannot be created despite a
+   * PIN/biometric being enrolled. Records the decision and enters the app.
+   * The caller is responsible for confirming the choice with the user first.
+   */
+  const continueWithoutDeviceProtection = async (
+    source: 'login' | 'phoneVerification' = 'login',
+  ): Promise<boolean> => {
+    try {
+      await biometricAuthService.optOut();
+    } catch (error) {
+      console.error('[AuthContext] Failed to record device-protection opt-out:', error);
+      Alert.alert('No pudimos guardar tu preferencia', 'Inténtalo nuevamente.', [{ text: 'OK' }]);
+      return false;
+    }
     await completeAuthenticatedEntry(source);
     return true;
   };
@@ -1243,6 +1288,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       handleSuccessfulLogin,
       completePhoneVerification,
       completeBiometricAndEnter,
+      continueWithoutDeviceProtection,
       profileData,
       isProfileLoading,
       refreshProfile,

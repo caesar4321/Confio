@@ -4,6 +4,19 @@ from django.utils import timezone
 from users.models import Account
 
 
+# Every funding/routing kind that settles a PaymentTransaction. This is the
+# runtime source of truth for the database guard, submit collision adoption,
+# receipt confirmation, and stranded-payment reconciliation. Historical
+# migrations intentionally keep their own frozen tuple.
+PAYMENT_BATCH_KINDS = (
+    'pay_cusd_plus',
+    'pay_cusd',
+    'pay_usdt',
+    'pay_confio',
+)
+LIVE_SPONSORED_BATCH_STATUSES = ('signed', 'sent', 'confirmed')
+
+
 class Balance(models.Model):
     """Cached token balances for accounts"""
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='balances')
@@ -318,7 +331,7 @@ class SponsoredBatch(models.Model):
     user_bsc_address = models.CharField(max_length=42)
     # 'subscribe' | 'redeem' | 'presale_buy' | Phase-2 kinds:
     # send_cusd_plus | send_redeem | send_usdt | send_confio | pay_cusd_plus |
-    # pay_usdt | pay_confio | payroll_fund | payroll_payout | invite_create |
+    # pay_cusd | pay_usdt | pay_confio | payroll_fund | payroll_payout | invite_create |
     # invite_reclaim | ...
     kind = models.CharField(max_length=32)
     # The domain row this batch settles (SendTransaction / PaymentTransaction
@@ -452,8 +465,8 @@ class SponsoredBatch(models.Model):
             models.UniqueConstraint(
                 fields=['source_id'],
                 condition=models.Q(
-                    kind__in=('pay_cusd_plus', 'pay_usdt', 'pay_confio'),
-                    status__in=('signed', 'sent', 'confirmed'),
+                    kind__in=PAYMENT_BATCH_KINDS,
+                    status__in=LIVE_SPONSORED_BATCH_STATUSES,
                 ),
                 name='cpsb_unique_active_payment',
             ),

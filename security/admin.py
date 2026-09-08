@@ -1527,6 +1527,8 @@ class IntegrityVerdictAdmin(admin.ModelAdmin):
     )
     
     def user_link(self, obj):
+        if not obj.user_id:
+            return 'Pre-signup (no account created)'
         url = reverse('admin:users_user_change', args=[obj.user.id])
         return format_html('<a href="{}">{}</a>', url, obj.user.username)
     user_link.short_description = 'User'
