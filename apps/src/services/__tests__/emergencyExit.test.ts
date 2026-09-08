@@ -315,7 +315,7 @@ describe('bsc exit checkpoint', () => {
     const mod = loadExit(send);
     const store = memStore();
     const res = await run(mod, store);
-    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
     expect(store.map.size).toBe(0); // nothing left to poison the next exit
   });
 
@@ -346,8 +346,8 @@ describe('bsc exit checkpoint', () => {
     const store = memStore();
     await run(mod, store);
     const second = await run(mod, store);
-    expect(second.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
-    expect(send).toHaveBeenCalledTimes(4); // 2 legs x 2 exits, not 2
+    expect(second.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
+    expect(send).toHaveBeenCalledTimes(6); // 3 legs x 2 exits, not 3
   });
 
   it('ignores a checkpoint older than its TTL', async () => {
@@ -357,11 +357,11 @@ describe('bsc exit checkpoint', () => {
     const store = memStore({
       [key]: JSON.stringify({
         ts: Date.now() - 31 * 60 * 1000,
-        steps: { redeemCusdPlus: '0xold', transferUsdt: '0xold' },
+        steps: { redeemCusdPlus: '0xold', redeemCusd: '0xold', transferUsdt: '0xold' },
       }),
     });
     const res = await run(mod, store);
-    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
   });
 
   it('ignores a checkpoint timestamp from the future after a device clock rollback', async () => {
@@ -371,11 +371,11 @@ describe('bsc exit checkpoint', () => {
     const store = memStore({
       [key]: JSON.stringify({
         ts: Date.now() + 60 * 60 * 1000,
-        steps: { redeemCusdPlus: '0xold', transferUsdt: '0xold' },
+        steps: { redeemCusdPlus: '0xold', redeemCusd: '0xold', transferUsdt: '0xold' },
       }),
     });
     const res = await run(mod, store);
-    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
   });
 
   it('a FRESH checkpoint still resumes — and reports nothing sent now', async () => {
@@ -385,7 +385,7 @@ describe('bsc exit checkpoint', () => {
     const store = memStore({
       [key]: JSON.stringify({
         ts: Date.now(),
-        steps: { redeemCusdPlus: '0xold', transferUsdt: '0xold' },
+        steps: { redeemCusdPlus: '0xold', redeemCusd: '0xold', transferUsdt: '0xold' },
       }),
     });
     const res = await run(mod, store);
@@ -399,10 +399,10 @@ describe('bsc exit checkpoint', () => {
     const mod = loadExit(send);
     const v1key = `confio_emergency_bsc_ck_v2_${ACCOUNT_KEY}_${DEST.toLowerCase()}`;
     const store = memStore({
-      [v1key]: JSON.stringify({ redeemCusdPlus: '0xold', transferUsdt: '0xold' }),
+      [v1key]: JSON.stringify({ redeemCusdPlus: '0xold', redeemCusd: '0xold', transferUsdt: '0xold' }),
     });
     const res = await run(mod, store);
-    expect(res.sentNow).toEqual(['redeemCusdPlus', 'transferUsdt']);
+    expect(res.sentNow).toEqual(['redeemCusdPlus', 'redeemCusd', 'transferUsdt']);
   });
 
   it('transfers only the canonical CONFIO contract balance', async () => {
@@ -506,14 +506,15 @@ describe('bsc exit checkpoint', () => {
       status: '0x1', transactionHash: '0x' + 'ab'.repeat(32), blockNumber: '0x1', logs: [],
     };
     const send = jest.fn()
-      .mockRejectedValueOnce(definitive) // redeem
+      .mockRejectedValueOnce(definitive) // cUSD+ redeem
       .mockRejectedValueOnce(definitive) // raw cUSD+ fallback
+      .mockResolvedValueOnce(okReceipt)  // cUSD redeem is unaffected
       .mockResolvedValueOnce(okReceipt); // later raw USDT still exits
     const mod = loadExit(send);
     const result = await run(mod, memStore());
     expect(result.unresolved).toEqual(['cUSD+']);
-    expect(result.sentNow).toEqual(['transferUsdt']);
-    expect(send).toHaveBeenCalledTimes(3);
+    expect(result.sentNow).toEqual(['redeemCusd', 'transferUsdt']);
+    expect(send).toHaveBeenCalledTimes(4);
   });
 
   it('records skipped legs without counting them as sent', async () => {
@@ -539,6 +540,7 @@ describe('bsc exit checkpoint', () => {
     expect(res.sentNow).toEqual([]);
     expect(res.txids).toEqual({
       redeemCusdPlus: 'skipped_zero',
+      redeemCusd: 'skipped_zero',
       transferUsdt: 'skipped_zero',
       transferConfio: 'skipped_zero',
     });
