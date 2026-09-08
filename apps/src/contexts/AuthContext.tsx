@@ -104,7 +104,6 @@ interface AuthContextType {
   handleSuccessfulLogin: (isPhoneVerified: boolean, requiresBackupCompletion?: boolean) => Promise<void>;
   completePhoneVerification: () => Promise<void>;
   completeBiometricAndEnter: () => Promise<boolean>;
-  continueWithoutDeviceProtection: (source?: 'login' | 'phoneVerification') => Promise<boolean>;
   profileData: ProfileData | null;
   isProfileLoading: boolean;
   refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
@@ -627,13 +626,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
     const skipRevalidate = options?.skipRevalidate === true;
     try {
-      // Checked before isSupported(): the users this exists for DO have a PIN
-      // or biometric enrolled, so isSupported() is true for them and the
-      // unsupported-device escape below never fires.
-      if (await biometricAuthService.isOptedOut()) {
-        return { ok: true, alreadyEnabled: true, didAuthenticate: false };
-      }
-
       const supported = await biometricAuthService.isSupported();
       if (!supported) return { ok: true, alreadyEnabled: true, didAuthenticate: false };
 
@@ -797,11 +789,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   const completeBiometricAndEnter = async (source: 'login' | 'phoneVerification' = 'login'): Promise<boolean> => {
-    if (await biometricAuthService.isOptedOut()) {
-      await completeAuthenticatedEntry(source);
-      return true;
-    }
-
     const supported = await biometricAuthService.isSupported();
     if (!supported) {
       // Devices with no lock screen at all: enforceBiometricEnrollment() and
@@ -830,25 +817,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
 
     lastBiometricSuccessRef.current = Date.now();
-    await completeAuthenticatedEntry(source);
-    return true;
-  };
-
-  /**
-   * Escape hatch for devices where the guard key cannot be created despite a
-   * PIN/biometric being enrolled. Records the decision and enters the app.
-   * The caller is responsible for confirming the choice with the user first.
-   */
-  const continueWithoutDeviceProtection = async (
-    source: 'login' | 'phoneVerification' = 'login',
-  ): Promise<boolean> => {
-    try {
-      await biometricAuthService.optOut();
-    } catch (error) {
-      console.error('[AuthContext] Failed to record device-protection opt-out:', error);
-      Alert.alert('No pudimos guardar tu preferencia', 'Inténtalo nuevamente.', [{ text: 'OK' }]);
-      return false;
-    }
     await completeAuthenticatedEntry(source);
     return true;
   };
@@ -1288,7 +1256,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       handleSuccessfulLogin,
       completePhoneVerification,
       completeBiometricAndEnter,
-      continueWithoutDeviceProtection,
       profileData,
       isProfileLoading,
       refreshProfile,
