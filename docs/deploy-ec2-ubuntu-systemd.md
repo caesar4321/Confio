@@ -63,6 +63,32 @@ Management
 - Start/Restart: `sudo systemctl restart daphne celery celery-beat`
 - Logs: `sudo journalctl -u daphne -f`, `sudo journalctl -u celery -f`, `sudo journalctl -u celery-beat -f`
 
+Routine Deploy
+--------------
+Run these in order. Installing dependencies BEFORE restarting is not optional:
+`git pull` can introduce a new entry in `INSTALLED_APPS` whose package is not
+yet installed. The running process keeps serving from memory, so nothing looks
+wrong until the next restart fails to boot. A local `manage.py check` will not
+catch it either, because the local virtualenv already has the dependency.
+
+```bash
+cd /opt/confio
+git pull --ff-only
+myvenv/bin/pip install -r requirements.txt
+myvenv/bin/python manage.py check          # fails here rather than mid-restart
+myvenv/bin/python manage.py showmigrations --plan | grep '^\[ \]'   # review first
+myvenv/bin/python manage.py migrate --noinput
+sudo systemctl restart daphne celery celery-beat
+systemctl is-active daphne celery celery-beat
+```
+
+Verify afterwards that the deployed commit is the one you pushed
+(`git log --oneline -1`) and that nothing is erroring:
+`sudo journalctl -u daphne --since '5 min ago' -p err --no-pager`.
+
+The virtualenv is `/opt/confio/myvenv`, matching the `myvenv/bin/python`
+convention in CLAUDE.md. There is no `/opt/confio/venv`.
+
 Wallet Reenrollment Release Gate
 --------------------------------
 When a backend release includes the legacy wallet reenrollment assessment
@@ -72,9 +98,9 @@ finite legacy cohort:
 
 ```bash
 cd /opt/confio
-sudo /opt/confio/venv/bin/python manage.py migrate --noinput
+sudo /opt/confio/myvenv/bin/python manage.py migrate --noinput
 sudo systemctl restart daphne celery celery-beat
-sudo /opt/confio/venv/bin/python manage.py precompute_wallet_reenrollment
+sudo /opt/confio/myvenv/bin/python manage.py precompute_wallet_reenrollment
 ```
 
 The precompute command scans candidates synchronously and exits non-zero if any
