@@ -37,6 +37,10 @@ export type MainStackParamList = {
   BottomTabs: NavigatorScreenParams<BottomTabParamList>;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
+  Memberships: { provider?: string; token?: string; obligationId?: string } | undefined;
+  InfiniaPayment: undefined;
+  CobrePayment: undefined;
+  LocalAccountFunding: undefined;
   PayoutMethods: undefined;
   RampAddress: undefined;
   ConfioAddress: undefined;
@@ -335,7 +339,8 @@ export type MainStackParamList = {
     hash: string;
   };
   PaymentConfirmation: {
-    invoiceData: {
+    invoiceId?: string;
+    invoiceData?: {
       id: string;
       invoiceId: string;
       amount: string;

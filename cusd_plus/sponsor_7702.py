@@ -936,7 +936,7 @@ def release_sponsor_nonce_lock(token=None) -> None:
 def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline: int,
                          intent_sig: str, authorization: Optional[dict], kind: str,
                          source_id: Optional[int] = None, *,
-                         client_request_id: str = '', intent_id: Optional[bytes] = None):
+                         client_request_id: str = '', intent_id: Optional[bytes] = None, persist_signed=None):
     """Build, sign (KMS) and broadcast the sponsored transaction: type-4
     when an authorization rides along (first use — EIP-7702 requires a
     NON-EMPTY authorization list in a type-4), plain type-2 to the already-
@@ -1044,6 +1044,10 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
                     max_fee_wei=str(fee_per_gas),
                     status='signed',
                 )
+                if persist_signed is not None:
+                    # Trusted domain callback; commit recovery evidence in the
+                    # SAME transaction as the batch, before broadcast.
+                    persist_signed(batch, raw)
         except IntegrityError as exc:
             existing = None
             reason = 'delegate_nonce'

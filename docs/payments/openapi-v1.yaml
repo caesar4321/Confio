@@ -1,0 +1,421 @@
+openapi: 3.1.0
+info:
+  title: Confio Billing API
+  version: '2026-09-01'
+  description: >-
+    Tenant-isolated institutional billing. Amounts are commercial PEN values;
+    settlement evidence reports exact token base units. The 0.9% protocol fee
+    is deducted from the receiver's gross settlement amount. Keys beginning
+    sk_test_ and sk_live_ address separate resources. All mutation requests need
+    an Idempotency-Key (maximum 255 UTF-8 bytes); exact replays retain their
+    original response, including one-time signing secrets, for at least seven
+    days and include Idempotent-Replayed: true. Unknown body fields are rejected.
+    Every response includes Confio-Request-Id. Authenticated requests expose
+    RateLimit-Limit, RateLimit-Remaining and RateLimit-Reset headers; 429 includes
+    Retry-After. Pagination cursors are opaque and must be reused with the same
+    filters. Required scope names match resource names with :read or :write;
+    applications uses applications:read, settlements uses settlements:read,
+    and webhook deliveries use webhook_endpoints:read/write.
+servers:
+  - url: https://api.confio.lat/v1
+security:
+  - bearerAuth: []
+paths:
+  /subjects:
+    get:
+      operationId: listSubjects
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/UpdatedAfter'}
+        - {name: external_id, in: query, schema: {type: string}}
+      responses: {'200': {description: Subject page, content: {application/json: {schema: {$ref: '#/components/schemas/SubjectPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+    post:
+      operationId: createSubject
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SubjectCreate'}}}}
+      responses: {'201': {description: Subject created, content: {application/json: {schema: {$ref: '#/components/schemas/Subject'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /subjects/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrieveSubject, responses: {'200': {description: Subject, content: {application/json: {schema: {$ref: '#/components/schemas/Subject'}}}}, default: {$ref: '#/components/responses/Error'}}}
+    patch:
+      operationId: updateSubject
+      parameters:
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+        - {name: If-Match, in: header, required: true, schema: {type: integer}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SubjectPatch'}}}}
+      responses: {'200': {description: Updated subject, content: {application/json: {schema: {$ref: '#/components/schemas/Subject'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /obligations:
+    get:
+      operationId: listObligations
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/UpdatedAfter'}
+        - {$ref: '#/components/parameters/Subject'}
+        - {$ref: '#/components/parameters/Status'}
+        - {name: external_id, in: query, schema: {type: string}}
+      responses: {'200': {description: Obligation page, content: {application/json: {schema: {$ref: '#/components/schemas/ObligationPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+    post:
+      operationId: createObligation
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ObligationCreate'}}}}
+      responses: {'201': {description: Obligation created, content: {application/json: {schema: {$ref: '#/components/schemas/Obligation'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /obligations/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrieveObligation, responses: {'200': {description: Obligation, content: {application/json: {schema: {$ref: '#/components/schemas/Obligation'}}}}, default: {$ref: '#/components/responses/Error'}}}
+  /payments:
+    get:
+      operationId: listPayments
+      parameters: [{$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/UpdatedAfter'}, {$ref: '#/components/parameters/Subject'}, {$ref: '#/components/parameters/Obligation'}, {$ref: '#/components/parameters/Status'}]
+      responses: {'200': {description: Payment page, content: {application/json: {schema: {$ref: '#/components/schemas/PaymentPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /payments/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrievePayment, responses: {'200': {description: Payment, content: {application/json: {schema: {$ref: '#/components/schemas/Payment'}}}}, default: {$ref: '#/components/responses/Error'}}}
+  /settlements:
+    get:
+      operationId: listSettlements
+      parameters: [{$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Payment'}]
+      responses: {'200': {description: Exact chain settlement page, content: {application/json: {schema: {$ref: '#/components/schemas/SettlementPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /applications:
+    get:
+      operationId: listInstitutionApplications
+      parameters: [{$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/UpdatedAfter'}, {$ref: '#/components/parameters/Payment'}, {$ref: '#/components/parameters/Obligation'}, {$ref: '#/components/parameters/Status'}]
+      responses: {'200': {description: Institution application page, content: {application/json: {schema: {$ref: '#/components/schemas/ApplicationPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /applications/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrieveInstitutionApplication, responses: {'200': {description: Institution application, content: {application/json: {schema: {$ref: '#/components/schemas/Application'}}}}, default: {$ref: '#/components/responses/Error'}}}
+  /events:
+    get:
+      operationId: listEvents
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {name: type, in: query, schema: {type: string}}
+        - {name: created_after, in: query, schema: {type: string, format: date-time}}
+      responses: {'200': {description: Event page, content: {application/json: {schema: {$ref: '#/components/schemas/EventPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /events/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrieveEvent, responses: {'200': {description: Event, content: {application/json: {schema: {$ref: '#/components/schemas/Event'}}}}, default: {$ref: '#/components/responses/Error'}}}
+  /webhook_endpoints:
+    get: {operationId: listWebhookEndpoints, responses: {'200': {description: Endpoint list, content: {application/json: {schema: {type: object, required: [data], properties: {data: {type: array, items: {$ref: '#/components/schemas/Endpoint'}}}}}}}, default: {$ref: '#/components/responses/Error'}}}
+    post:
+      operationId: createWebhookEndpoint
+      description: Returns the signing secret once. HTTPS public destinations only.
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EndpointCreate'}}}}
+      responses: {'201': {description: Endpoint and one-time signing secret, content: {application/json: {schema: {$ref: '#/components/schemas/EndpointWithSecret'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /webhook_endpoints/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrieveWebhookEndpoint, responses: {'200': {description: Endpoint, content: {application/json: {schema: {$ref: '#/components/schemas/Endpoint'}}}}, default: {$ref: '#/components/responses/Error'}}}
+    patch:
+      operationId: updateWebhookEndpoint
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EndpointPatch'}}}}
+      responses: {'200': {description: Updated endpoint, content: {application/json: {schema: {$ref: '#/components/schemas/Endpoint'}}}}, default: {$ref: '#/components/responses/Error'}}
+    delete:
+      operationId: disableWebhookEndpoint
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      responses: {'204': {description: Endpoint disabled}, default: {$ref: '#/components/responses/Error'}}
+  /webhook_endpoints/{id}/rotate_secret:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    post:
+      operationId: rotateWebhookSecret
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      responses: {'200': {description: Endpoint and one-time new secret, content: {application/json: {schema: {$ref: '#/components/schemas/EndpointWithSecret'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /webhook_endpoints/{id}/test:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    post:
+      operationId: testWebhookEndpoint
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      responses: {'201': {description: Durable test delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Delivery'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /webhook_deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Status'}
+        - {name: event, in: query, schema: {type: string}}
+      responses: {'200': {description: Delivery page, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPage'}}}}, default: {$ref: '#/components/responses/Error'}}
+  /webhook_deliveries/{id}:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    get: {operationId: retrieveWebhookDelivery, responses: {'200': {description: Delivery, content: {application/json: {schema: {$ref: '#/components/schemas/Delivery'}}}}, default: {$ref: '#/components/responses/Error'}}}
+  /webhook_deliveries/{id}/replay:
+    parameters: [{$ref: '#/components/parameters/ResourceId'}]
+    post:
+      operationId: replayWebhookDelivery
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      responses: {'201': {description: New durable replay attempt, content: {application/json: {schema: {$ref: '#/components/schemas/Delivery'}}}}, default: {$ref: '#/components/responses/Error'}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  parameters:
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+    Cursor: {name: starting_after, in: query, description: Opaque next_cursor from the previous page., schema: {type: string}}
+    UpdatedAfter: {name: updated_after, in: query, schema: {type: string, format: date-time}}
+    Subject: {name: subject, in: query, schema: {type: string}}
+    Obligation: {name: obligation, in: query, schema: {type: string}}
+    Payment: {name: payment, in: query, schema: {type: string}}
+    Status: {name: status, in: query, schema: {type: string}}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, maxLength: 255}
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+  responses:
+    Error:
+      description: >-
+        Structured error. 400 invalid input, 401 invalid/revoked/wrong-mode key,
+        403 missing scope, 404 resource not found in this tenant and mode,
+        409 idempotency or version conflict, 429 rate limit. Server errors may
+        require retry; reuse the same Idempotency-Key and body.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message, param, request_id, retryable, doc_url]
+          properties:
+            type: {type: string}
+            code: {type: string}
+            message: {type: string}
+            param: {type: [string, 'null']}
+            request_id: {type: string}
+            retryable: {type: boolean}
+            doc_url: {type: string, format: uri}
+    Resource:
+      type: object
+      required: [id, object, created_at]
+      properties:
+        id: {type: string}
+        object: {type: string}
+        created_at: {type: string, format: date-time}
+    SubjectCreate:
+      type: object
+      additionalProperties: false
+      required: [external_id]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 255}
+        subject_type: {type: string, enum: [person, business, membership, other], default: person}
+        masked_reference: {type: string, maxLength: 80, default: ''}
+        locale: {type: string, maxLength: 16, default: es-PE}
+        timezone: {type: string, maxLength: 64, default: America/Lima}
+    SubjectPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        masked_reference: {type: string, maxLength: 80}
+        status: {type: string, enum: [active, archived, blocked]}
+        locale: {type: string, maxLength: 16}
+        timezone: {type: string, maxLength: 64}
+    Subject:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [external_id, type, masked_reference, status, locale, timezone, version, updated_at]
+          properties:
+            object: {const: subject}
+            external_id: {type: string}
+            type: {type: string}
+            masked_reference: {type: string}
+            status: {type: string, enum: [active, archived, blocked]}
+            locale: {type: string}
+            timezone: {type: string}
+            version: {type: integer, minimum: 1}
+            updated_at: {type: string, format: date-time}
+    CommercialAmount:
+      type: object
+      additionalProperties: false
+      required: [value, currency]
+      properties:
+        value: {type: string, pattern: '^\d+\.\d{2}$', description: Decimal PEN amount. Write minimum 0.01; maximum 92233720368547758.07.}
+        currency: {type: string, enum: [PEN]}
+    Period:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        start: {type: string, format: date}
+        end: {type: string, format: date, description: Inclusive end; cannot precede start.}
+    ObligationCreate:
+      type: object
+      additionalProperties: false
+      required: [external_id, subject, commercial_amount, period, due_at]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 255}
+        subject: {type: string, maxLength: 40}
+        commercial_amount: {$ref: '#/components/schemas/CommercialAmount'}
+        period: {$ref: '#/components/schemas/Period'}
+        issued_at: {type: string, format: date-time}
+        due_at: {type: string, format: date-time}
+        description: {type: string, maxLength: 500, default: ''}
+    Obligation:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [external_id, subject, commercial_amount, amount_paid, amount_remaining, period, issued_at, due_at, status, updated_at]
+          properties:
+            object: {const: obligation}
+            external_id: {type: string}
+            subject: {type: string}
+            commercial_amount: {$ref: '#/components/schemas/CommercialAmount'}
+            amount_paid: {$ref: '#/components/schemas/CommercialAmount'}
+            amount_remaining: {$ref: '#/components/schemas/CommercialAmount'}
+            period: {$ref: '#/components/schemas/Period'}
+            issued_at: {type: string, format: date-time}
+            due_at: {type: string, format: date-time}
+            status: {type: string}
+            updated_at: {type: string, format: date-time}
+    Units: {type: string, pattern: '^\d+$', description: Exact integer base units as a decimal string; do not convert to a floating-point number.}
+    Payment:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [status, billing_invoice, payment_intent, commercial_amount, settlement, confirmed_at]
+          properties:
+            object: {const: payment}
+            status: {type: string}
+            billing_invoice: {type: string}
+            payment_intent: {type: string}
+            commercial_amount:
+              type: object
+              required: [minor_units, currency]
+              properties: {minor_units: {type: integer}, currency: {type: string}}
+            settlement:
+              type: object
+              required: [asset, decimals, gross_units, fee_units, receiver_net_units, chain, transaction_hash]
+              properties:
+                asset: {type: string}
+                decimals: {type: integer}
+                gross_units: {$ref: '#/components/schemas/Units'}
+                fee_units: {$ref: '#/components/schemas/Units'}
+                receiver_net_units: {$ref: '#/components/schemas/Units'}
+                chain: {type: string}
+                transaction_hash: {type: string}
+            confirmed_at: {type: [string, 'null'], format: date-time}
+    Settlement:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [payment, chain_id, contract_version, receiver_address, input_asset, input_decimals, gross_units, fee_units, input_net_units, routed, output_asset, output_decimals, output_units, transaction_hash, block_number, log_index]
+          properties:
+            object: {const: settlement}
+            payment: {type: string}
+            chain_id: {type: integer}
+            contract_version: {type: string}
+            receiver_address: {type: string}
+            input_asset: {type: string}
+            input_decimals: {type: integer}
+            gross_units: {$ref: '#/components/schemas/Units'}
+            fee_units: {$ref: '#/components/schemas/Units'}
+            input_net_units: {$ref: '#/components/schemas/Units'}
+            routed: {type: boolean}
+            output_asset: {type: string}
+            output_decimals: {type: integer}
+            output_units: {$ref: '#/components/schemas/Units'}
+            transaction_hash: {type: string}
+            block_number: {type: integer}
+            log_index: {type: integer}
+    Application:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [payment, status, attempts, acknowledgement_reference, returned_status, returned_version, payment_confirmed_at, institution_applied_at]
+          properties:
+            object: {const: institution_application}
+            payment: {type: string}
+            status: {type: string}
+            attempts: {type: integer}
+            acknowledgement_reference: {type: string}
+            returned_status: {type: string, enum: ['', active, inactive, habil, inhabil], description: Reviewed public status code; empty for unrecognized provider-specific states.}
+            returned_version: {type: string}
+            payment_confirmed_at: {type: string, format: date-time}
+            institution_applied_at: {type: [string, 'null'], format: date-time}
+    Event:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [type, api_version, data]
+          properties:
+            object: {const: event}
+            type: {type: string}
+            api_version: {type: string}
+            data: {type: object, additionalProperties: true}
+    EndpointCreate:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: {type: string, format: uri, maxLength: 500, description: Public HTTPS destination on port 443, without credentials.}
+        event_types: {type: array, maxItems: 50, default: [], items: {type: string, maxLength: 80}, description: Empty list subscribes to all events.}
+        description: {type: string, maxLength: 160, default: ''}
+    EndpointPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        status: {type: string, enum: [active, disabled]}
+        description: {type: string, maxLength: 160}
+    Endpoint:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [mode, url, event_types, status, description, updated_at]
+          properties:
+            object: {const: webhook_endpoint}
+            mode: {type: string, enum: [test, live]}
+            url: {type: string, format: uri}
+            event_types: {type: array, items: {type: string}}
+            status: {type: string, enum: [active, disabled]}
+            description: {type: string}
+            updated_at: {type: string, format: date-time}
+    EndpointWithSecret:
+      allOf:
+        - {$ref: '#/components/schemas/Endpoint'}
+        - type: object
+          required: [signing_secret]
+          properties: {signing_secret: {type: string, description: Save securely. Returned only by create/rotate and their exact idempotent replays.}}
+    Delivery:
+      allOf:
+        - {$ref: '#/components/schemas/Resource'}
+        - type: object
+          required: [event, endpoint, replay_number, status, attempts, response_status, last_error, delivered_at]
+          properties:
+            object: {const: webhook_delivery}
+            event: {type: string}
+            endpoint: {type: string}
+            replay_number: {type: integer}
+            status: {type: string, enum: [pending, leased, delivered, retrying, failed]}
+            attempts: {type: integer}
+            response_status: {type: [integer, 'null']}
+            last_error: {type: string}
+            delivered_at: {type: [string, 'null'], format: date-time}
+    Page:
+      type: object
+      required: [data, has_more, next_cursor]
+      properties:
+        data: {type: array, items: {type: object}}
+        has_more: {type: boolean}
+        next_cursor: {type: [string, 'null']}
+    SubjectPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Subject'}}}}]
+    ObligationPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Obligation'}}}}]
+    PaymentPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Payment'}}}}]
+    SettlementPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Settlement'}}}}]
+    ApplicationPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Application'}}}}]
+    EventPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Event'}}}}]
+    DeliveryPage:
+      allOf: [{$ref: '#/components/schemas/Page'}, {properties: {data: {type: array, items: {$ref: '#/components/schemas/Delivery'}}}}]

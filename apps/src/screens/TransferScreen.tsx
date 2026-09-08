@@ -23,6 +23,7 @@ import { ContactSyncProgress } from '../components/common/ContactSyncProgress';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
+import { BRIDGE_AVAILABILITY } from '../services/paymentBridge';
 import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
 import { useRampCountry } from '../hooks/useRampCountry';
 import {
@@ -749,6 +750,11 @@ export const TransferScreen = () => {
   // "billetera" here means a fintech wallet (the LATAM meaning); a blockchain
   // destination is always "dirección", never "wallet".
   // ---------------------------------------------------------------------
+  const { data: bridgeAvailability } = useQuery(BRIDGE_AVAILABILITY, { fetchPolicy: 'network-only' });
+  const bridgeOptions = (bridgeAvailability?.paymentBridgeAvailability?.hasHistory || bridgeAvailability?.paymentBridgeAvailability?.toProvider || bridgeAvailability?.paymentBridgeAvailability?.toWallet) ? [{
+    id: 'local-account-funding', icon: 'repeat', title: 'Dólares y cuenta local', subtitle: 'Mover dólares y consultar envíos',
+    onPress: () => { setShowLocalSendSelection(false); setShowLocalReceiveSelection(false); navigation.navigate('LocalAccountFunding'); },
+  }] : [];
   const [showLocalSendSelection, setShowLocalSendSelection] = useState(false);
   const [showLocalReceiveSelection, setShowLocalReceiveSelection] = useState(false);
   // Phone country is an ORDERING hint only — it puts the user's own rail
@@ -1767,13 +1773,14 @@ export const TransferScreen = () => {
           visible={showLocalSendSelection}
           title="¿A dónde quieres enviar?"
           onClose={() => setShowLocalSendSelection(false)}
-          options={localSendRails.map(rail => railToOption(rail, 'send'))}
+          options={[...bridgeOptions, ...localSendRails.map(rail => railToOption(rail, 'send'))]}
         />
         <RouteSheet
           visible={showLocalReceiveSelection}
           title="¿Dónde quieres recibir?"
           onClose={() => setShowLocalReceiveSelection(false)}
           options={[
+            ...bridgeOptions,
             ...activeLocalReceiveOptions,
             ...localReceiveRails
               // A corridor the user already has an active account for would

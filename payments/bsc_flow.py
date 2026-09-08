@@ -48,6 +48,7 @@ import time
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,37 @@ def _notify_merchant_needs_app(invoice, payer_user) -> None:
 
 
 def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
+    if getattr(invoice, 'billing_payment_intent', None) is None:
+        return _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key)
+    from billing.models import BillingInvoice, BillingObligation, BillingPayment, BillingPaymentIntent
+    from .models import Invoice, PaymentTransaction
+
+    class PreparationChanged(Exception):
+        pass
+
+    for _ in range(3):
+        try:
+            with transaction.atomic():
+                payment_query = PaymentTransaction.objects.filter(invoice_id=invoice.pk)
+                payment_ids = list(payment_query.order_by('id').values_list('id', flat=True))
+                list(PaymentTransaction.objects.select_for_update().filter(
+                    id__in=payment_ids).order_by('id'))
+                persisted = Invoice.objects.select_for_update().get(pk=invoice.pk)
+                if payment_ids != list(payment_query.order_by('id').values_list('id', flat=True)):
+                    raise PreparationChanged()
+                list(BillingPayment.objects.select_for_update().filter(
+                    legacy_payment_id__in=payment_ids).order_by('id'))
+                intent = BillingPaymentIntent.objects.select_for_update().get(legacy_invoice=persisted)
+                billing_invoice = BillingInvoice.objects.select_for_update().get(pk=intent.billing_invoice_id)
+                list(BillingObligation.objects.select_for_update().filter(
+                    invoice_links__invoice=billing_invoice).order_by('id'))
+                return _prepare_bsc_payment_locked(user, jwt_ctx, persisted, idempotency_key)
+        except PreparationChanged:
+            continue
+    return {'success': False, 'error': 'payment_in_progress'}
+
+
+def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
     from cusd_plus import vault as cp_vault
     from cusd_plus.sponsor_7702 import (SEL_APPROVE, SEL_PAY, SEL_PAY_V4,
                                         SEL_REDEEM_TO_USDT,
@@ -249,6 +281,26 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
         return {'success': False, 'error': 'invoice_not_pending'}
     if getattr(invoice, 'is_expired', False):
         return {'success': False, 'error': 'invoice_expired'}
+    # Institution-created invoices are private payment requests. The opaque
+    # invoice id is not authorization to pay (or inspect) another member's
+    # dues, so bind preparation to the payer chosen by the billing intent.
+    billing_intent = getattr(invoice, 'billing_payment_intent', None)
+    if billing_intent is not None:
+        from billing.member_payments import MemberCheckoutError, require_member_payments_enabled
+        try:
+            require_member_payments_enabled(billing_intent.billing_invoice.subject)
+        except MemberCheckoutError as exc:
+            return {'success': False, 'error': str(exc)}
+        if billing_intent.payer_user_id != user.id:
+            return {'success': False, 'error': 'invoice_not_found'}
+        if billing_intent.expires_at <= timezone.now():
+            return {'success': False, 'error': 'invoice_expired'}
+        from billing.models import ACTIVE_PAYMENT_INTENT_STATUSES, ObligationStatus
+        if billing_intent.status not in ACTIVE_PAYMENT_INTENT_STATUSES:
+            return {'success': False, 'error': 'invoice_not_pending'}
+        if billing_intent.billing_invoice.obligation_links.exclude(obligation__status__in=(
+                ObligationStatus.OPEN, ObligationStatus.PAST_DUE, ObligationStatus.PAYMENT_PENDING)).exists():
+            return {'success': False, 'error': 'obligation_not_payable'}
     # The invoice names its rail (Codex audit 2026-08-01 [P1]). token_type
     # cannot: 'CONFIO' is the wire value on BOTH sides of the migration, so
     # keying off it left the same PENDING row preparable here AND on the
@@ -266,11 +318,13 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
             return {'success': False, 'error': 'self_pay_not_allowed'}
         payer_account = Account.objects.filter(
             business_id=jwt_ctx['business_id'], account_type='business',
+            deleted_at__isnull=True,
             account_index=jwt_ctx.get('account_index', 0)).first()
         payer_business = payer_account.business if payer_account else None
     else:
         payer_account = user.accounts.filter(
             account_type='personal',
+            deleted_at__isnull=True,
             account_index=jwt_ctx.get('account_index', 0)).first()
         payer_business = None
     payer_addr = (getattr(payer_account, 'bsc_address', None) or '').lower()
@@ -280,6 +334,7 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     # Merchant destination: the business account's registered address.
     merchant_account = Account.objects.filter(
         business=invoice.merchant_business, account_type='business',
+        deleted_at__isnull=True,
     ).order_by('account_index').first()
     merchant_addr = (getattr(merchant_account, 'bsc_address', None) or '').lower()
     if not merchant_addr:
@@ -294,6 +349,34 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     net_wei = gross_wei - fee_wei
     if net_wei <= 0 or fee_wei <= 0:
         return {'success': False, 'error': 'invalid_amount'}
+
+    if billing_intent is not None:
+        from blockchain.models import LIVE_SPONSORED_BATCH_STATUSES, PAYMENT_BATCH_KINDS, SponsoredBatch
+        prepared_payment = PaymentTransaction.objects.filter(
+            invoice=invoice, payer_user=user, deleted_at__isnull=True).first()
+        if prepared_payment and prepared_payment.blockchain_data:
+            if (prepared_payment.status != 'PENDING_BLOCKCHAIN'
+                    or SponsoredBatch.objects.filter(source_id=prepared_payment.id,
+                        kind__in=PAYMENT_BATCH_KINDS,
+                        status__in=LIVE_SPONSORED_BATCH_STATUSES).exists()):
+                return {'success': False, 'error': 'payment_in_progress'}
+            if (prepared_payment.payer_account_id != payer_account.id
+                    or prepared_payment.payer_address.lower() != payer_addr):
+                return {'success': False, 'error': 'payment_account_changed'}
+            meta = prepared_payment.blockchain_data
+            if int(meta.get('pay_deadline') or 0) <= int(time.time()):
+                return {'success': False, 'error': 'invoice_expired'}
+            if not _invoice_terms_unchanged(invoice, prepared_payment):
+                return {'success': False, 'error': 'invoice_terms_changed'}
+            # An earlier device may still submit the server-authorized call.
+            # Preserve its payer, asset and units until expiry, even if the
+            # oracle or currently preferred funding asset has changed.
+            from cusd_plus.sponsor_7702 import intent_id_hex
+            return {'success': True, 'payment_id': prepared_payment.internal_id,
+                    'calls': meta['bsc_calls'], 'token_type': prepared_payment.token_type,
+                    'net': str(Decimal(net_wei) / WAD),
+                    'fee': str(Decimal(fee_wei) / WAD),
+                    'intent_id': intent_id_hex(meta['kind'], prepared_payment.id)}
 
     if invoice_token == 'CONFIO':
         # The token IS the denomination — no funding fork, no share price.
@@ -471,6 +554,8 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     invoice_id32 = invoice_id_bytes32(invoice.internal_id)
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
     pay_deadline = int(time.time()) + PAY_AUTH_TTL
+    if billing_intent is not None:
+        pay_deadline = min(pay_deadline, int(billing_intent.expires_at.timestamp()))
     digest = pay_authorization_digest(
         pay_contract, chain_id, invoice_id32, payer_addr, token,
         gross_units, merchant_addr, pay_deadline,
@@ -538,9 +623,18 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     # revert the loser, but we refuse to waste a sponsor tx over it.
     if payment_tx.status == 'SUBMITTED':
         return {'success': False, 'error': 'payment_in_progress'}
+    if billing_intent is not None:
+        from blockchain.models import LIVE_SPONSORED_BATCH_STATUSES, PAYMENT_BATCH_KINDS, SponsoredBatch
+        if SponsoredBatch.objects.filter(
+                source_id=payment_tx.id, kind__in=PAYMENT_BATCH_KINDS,
+                status__in=LIVE_SPONSORED_BATCH_STATUSES).exists():
+            return {'success': False, 'error': 'payment_in_progress'}
     payment_tx.token_type = token_type
     payment_tx.payer_address = payer_addr
     payment_tx.merchant_address = merchant_addr
+    payment_tx.payer_account = payer_account
+    payment_tx.payer_business = payer_business
+    payment_tx.payer_type = 'business' if payer_business else 'user'
     payment_tx.blockchain_data = {
         'bsc_calls': calls, 'kind': kind,
         'pay_deadline': pay_deadline,
@@ -550,8 +644,17 @@ def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> di
     payment_tx.status = 'PENDING_BLOCKCHAIN'
     payment_tx.save(update_fields=[
         'token_type', 'payer_address', 'merchant_address', 'blockchain_data',
-        'status', 'updated_at',
+        'payer_account', 'payer_business', 'payer_type', 'status', 'updated_at',
     ])
+    if billing_intent is not None:
+        # The BillingPayment snapshots what Pay will actually consume. A
+        # dollar invoice may be funded with cUSD, cUSD+ shares, or USDT, so
+        # use the selected input asset/units rather than the quote label.
+        from billing.member_payments import attach_prepared_bsc_payment
+        attach_prepared_bsc_payment(
+            payment_intent_id=billing_intent.id, legacy_payment=payment_tx,
+            payer_account=payer_account, payer_business=payer_business,
+            token_type=token_type, gross_units=gross_units, funding_kind=kind)
     # Unified row via the existing payment post_save signal.
 
     from cusd_plus.sponsor_7702 import intent_id_hex
@@ -648,12 +751,12 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
     amount, the deadline hasn't lapsed, and the embedded server authorization
     recovers to the expected paymentSigner — the contract re-enforces all of
     it on-chain, but a bad batch never reaches the sponsor."""
-    payer_addr = (getattr(payment_tx, 'payer_address', '') or '').lower()
-    if not payer_addr:
-        raise PolicyError('payer_address_missing')
     from cusd_plus.sponsor_7702 import (PolicyError, SEL_APPROVE, SEL_PAY,
                                         SEL_PAY_V4, SEL_REDEEM_TO_USDT,
                                         SEL_UNWRAP_TO_CUSD, USDT_BSC)
+    payer_addr = (getattr(payment_tx, 'payer_address', '') or '').lower()
+    if not payer_addr:
+        raise PolicyError('payer_address_missing')
 
     vault = _vault_address()
     pay_contract = _pay_contract()
@@ -758,6 +861,16 @@ def _validate_payment_batch(calls: list, payment_tx) -> None:
         raise PolicyError('bad_authorization')
 
 
+def _same_payment_batch(sponsor_7702, batch, payment_tx, payer_addr, kind, calls):
+    """Can a losing submit safely adopt this database-winning batch?"""
+    return bool(
+        batch
+        and batch.source_id == payment_tx.id
+        and (batch.user_bsc_address or '').lower() == payer_addr
+        and sponsor_7702.batch_matches_calls(batch, kind, calls)
+    )
+
+
 def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
                        authorization=None) -> dict:
     from cusd_plus import sponsor_7702
@@ -767,6 +880,18 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     if payment_tx.status != 'PENDING_BLOCKCHAIN' or not payment_tx.blockchain_data:
         return {'success': False, 'error': 'payment_not_pending'}
     invoice = payment_tx.invoice
+    billing_intent = getattr(invoice, 'billing_payment_intent', None)
+    if billing_intent is not None:
+        from billing.member_payments import MemberCheckoutError, require_member_payments_enabled
+        try:
+            require_member_payments_enabled(billing_intent.billing_invoice.subject)
+        except MemberCheckoutError as exc:
+            return {'success': False, 'error': str(exc)}
+        if (billing_intent.status not in ('requires_confirmation', 'processing')
+                or billing_intent.expires_at <= timezone.now()
+                or billing_intent.payer_user_id != user.id
+                or billing_intent.payer_account_id != payment_tx.payer_account_id):
+            return {'success': False, 'error': 'billing_payment_not_pending'}
     if invoice.status != 'PENDING' or getattr(invoice, 'is_expired', False):
         return {'success': False, 'error': 'invoice_not_pending'}
     # Rail re-checked at BROADCAST time, mirroring the Algorand submit: the
@@ -818,6 +943,33 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, payer_addr, calls, int(nonce), int(deadline),
             intent_signature, auth_dict, kind, source_id=payment_tx.id)
+    except sponsor_7702.ExistingSponsoredBatch as exc:
+        existing = exc.batch
+        if not _same_payment_batch(
+                sponsor_7702, existing, payment_tx, payer_addr, kind, calls):
+            return {'success': False, 'error': 'payment_already_in_flight'}
+        # The database winner owns this economic payment. Adopt it exactly as
+        # send/bsc_flow does instead of reporting a failure that invites the
+        # payer to retry money already in flight.
+        tx_hash, batch = existing.tx_hash, existing
+    except IntegrityError:
+        # send_sponsored_batch historically recognized source collisions only
+        # for send kinds. The payment source constraint can therefore surface
+        # as a raw IntegrityError when two payment submits use different
+        # delegate nonces. Resolve and validate the durable winner here.
+        from blockchain.models import (LIVE_SPONSORED_BATCH_STATUSES,
+                                       PAYMENT_BATCH_KINDS, SponsoredBatch)
+        existing = SponsoredBatch.objects.filter(
+            source_id=payment_tx.id,
+            kind__in=PAYMENT_BATCH_KINDS,
+            status__in=LIVE_SPONSORED_BATCH_STATUSES,
+        ).order_by('-id').first()
+        if not _same_payment_batch(
+                sponsor_7702, existing, payment_tx, payer_addr, kind, calls):
+            logger.exception('[PAY][BSC] unresolved sponsored-batch conflict for %s',
+                             payment_tx.internal_id)
+            return {'success': False, 'error': 'payment_already_in_flight'}
+        tx_hash, batch = existing.tx_hash, existing
     except sponsor_7702.PolicyError as exc:
         if exc.code == 'stale_auth_nonce':
             return {'success': False, 'error': exc.code, 'authorization_required': True}
@@ -826,9 +978,7 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
         logger.exception('[PAY][BSC] sponsored payment failed for %s', payment_tx.internal_id)
         return {'success': False, 'error': str(exc)[:200]}
 
-    payment_tx.transaction_hash = tx_hash
-    payment_tx.status = 'SUBMITTED'
-    payment_tx.save(update_fields=['transaction_hash', 'status', 'updated_at'])
+    _record_submitted_payment(payment_tx.id, tx_hash)
 
     try:
         from cusd_plus.vault import invalidate_position
@@ -843,3 +993,11 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
     # See send/bsc_flow.py: sponsor-observed execution, not settlement.
     return {'success': True, 'transaction_hash': tx_hash,
             'execution': getattr(batch, 'executed_early', None)}
+
+
+def _record_submitted_payment(payment_id, tx_hash):
+    """A late broadcast response must not undo concurrent confirmation."""
+    from .models import PaymentTransaction
+    return PaymentTransaction.objects.filter(
+        pk=payment_id, status='PENDING_BLOCKCHAIN', deleted_at__isnull=True,
+    ).update(transaction_hash=tx_hash, status='SUBMITTED', updated_at=timezone.now())

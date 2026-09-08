@@ -1,5 +1,41 @@
 import { gql } from '@apollo/client';
 
+export const GET_MY_BILLING_SUMMARY = gql`
+  query GetMyBillingSummary {
+    myBillingSummary {
+      linked
+      openCount
+      totalDueMinor
+      currency
+      entry {
+        id institutionName periodStart dueAt amountRemainingMinor currency status applicationStatus
+      }
+    }
+  }
+`;
+
+export const GET_MY_BILLING_OBLIGATIONS = gql`
+  query GetMyBillingObligations {
+    myBillingObligations {
+      id
+      institutionName
+      memberReference
+      amountMinor
+      amountRemainingMinor
+      currency
+      periodKey
+      periodStart
+      periodEnd
+      dueAt
+      status
+      description
+      institutionApplicationStatus
+      institutionMemberStatus
+      institutionAppliedAt
+    }
+  }
+`;
+
 export const GET_STATS_SUMMARY = gql`
   query GetStatsSummary {
     statsSummary {

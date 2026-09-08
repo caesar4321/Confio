@@ -16,11 +16,15 @@ properties that make the [approve, pay] batch safe:
 Runs without a database (ORM + RPC mocked, house style):
     myvenv/bin/python manage.py test payments.test_bsc_flow
 """
+from datetime import timedelta
 from decimal import Decimal
+import time
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase, override_settings
+from django.db import IntegrityError, transaction
+from django.test import SimpleTestCase, TransactionTestCase, override_settings
+from django.utils import timezone
 from eth_abi import decode as abi_decode, encode as abi_encode
 from eth_keys import keys
 from eth_utils import to_checksum_address
@@ -173,6 +177,7 @@ class PrepareBatchTests(SimpleTestCase):
         self.assertEqual(row.blockchain_data['pay_signer'], TEST_SIGNER)
         self.assertGreater(row.blockchain_data['pay_deadline'], 0)
 
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
     def test_usdt_fallback_batch(self):
         result, _, _ = self._prepare(self._invoice('10'), shares_value=0, usdt=100 * WAD)
         self.assertTrue(result['success'], result)
@@ -295,7 +300,8 @@ class PrepareBatchTests(SimpleTestCase):
         self.assertEqual(result['error'], 'bsc_pay_disabled')
 
 
-@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN,
+@override_settings(CUSD_PLUS_VAULT_ADDRESS=VAULT, CUSD_VAULT_ADDRESS=CUSD,
+                   BSC_CONFIO_TOKEN_ADDRESS=CONFIO_TOKEN,
                    BSC_PAY_CONTRACT_ADDRESS=PAY_CONTRACT)
 class SubmitValidatorTests(SimpleTestCase):
     GROSS = 10 * WAD
@@ -332,6 +338,7 @@ class SubmitValidatorTests(SimpleTestCase):
 
     def test_valid_batch_passes(self):
         for token, kind in ((USDT_BSC, 'pay_usdt'), (VAULT, 'pay_cusd_plus'),
+                            (CUSD.lower(), 'pay_cusd'),
                             (CONFIO_TOKEN.lower(), 'pay_confio')):
             bsc_flow._validate_payment_batch(
                 [self._approve(token), self._pay(token)], self._tx(kind))
@@ -412,3 +419,179 @@ class SubmitValidatorTests(SimpleTestCase):
         calls = [self._approve(USDT_BSC), self._pay(USDT_BSC, signer=attacker)]
         with self.assertRaises(PolicyError):
             bsc_flow._validate_payment_batch(calls, self._tx())
+
+
+class PaymentBatchInvariantTests(SimpleTestCase):
+    def test_runtime_payment_constraint_includes_every_payment_kind(self):
+        from blockchain.models import PAYMENT_BATCH_KINDS, SponsoredBatch
+
+        constraint = next(
+            item for item in SponsoredBatch._meta.constraints
+            if item.name == 'cpsb_unique_active_payment'
+        )
+        self.assertEqual(
+            set(PAYMENT_BATCH_KINDS),
+            {'pay_cusd_plus', 'pay_cusd', 'pay_usdt', 'pay_confio'},
+        )
+        self.assertEqual(
+            set(constraint.condition.children[0][1]), set(PAYMENT_BATCH_KINDS))
+
+    @mock.patch('payments.tasks.confirm_bsc_payment.apply_async')
+    @mock.patch('cusd_plus.vault.invalidate_position')
+    def test_losing_submit_adopts_matching_database_winner(self, _invalidate, enqueue):
+        from cusd_plus import sponsor_7702
+
+        user = SimpleNamespace(id=7)
+        invoice = SimpleNamespace(
+            status='PENDING', is_expired=False, settlement_chain='BSC',
+            internal_id='invoice-race')
+        payment = SimpleNamespace(
+            id=88, internal_id='payment-race', payer_user_id=7,
+            payer_address=PAYER, merchant_address=MERCHANT,
+            status='PENDING_BLOCKCHAIN', invoice=invoice,
+            blockchain_data={'kind': 'pay_cusd', 'bsc_calls': []},
+            save=mock.Mock(), transaction_hash='')
+        winner = SimpleNamespace(
+            id=99, source_id=88, user_bsc_address=PAYER,
+            tx_hash='0x' + '05' * 32, executed_early=None)
+
+        with mock.patch.object(bsc_flow, '_invoice_terms_unchanged', return_value=True), \
+             mock.patch.object(bsc_flow, '_record_submitted_payment') as record_submission, \
+             mock.patch.object(bsc_flow, '_payer_still_authorized', return_value=True), \
+             mock.patch.object(bsc_flow, '_validate_payment_batch'), \
+             mock.patch.object(sponsor_7702, 'recover_intent_signer', return_value=PAYER), \
+             mock.patch.object(sponsor_7702, 'is_delegated', return_value=True), \
+             mock.patch.object(sponsor_7702, 'batch_matches_calls', return_value=True), \
+             mock.patch.object(
+                 sponsor_7702, 'send_sponsored_batch',
+                 side_effect=sponsor_7702.ExistingSponsoredBatch(
+                     winner, 'source_id')):
+            result = bsc_flow.submit_bsc_payment(
+                user, payment, nonce=1, deadline=int(time.time()) + 60,
+                intent_signature='0xsignature')
+
+        self.assertTrue(result['success'])
+        record_submission.assert_called_once_with(payment.id, winner.tx_hash)
+        enqueue.assert_called_once_with(args=[payment.id, winner.id], countdown=8)
+
+
+class BscPaymentRecoveryTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from users.models import Account, Business
+        from payments.models import Invoice, PaymentTransaction
+
+        User = get_user_model()
+        self.merchant_user = User.objects.create_user(
+            username='merchant-recovery', firebase_uid='merchant-recovery-uid')
+        self.payer_user = User.objects.create_user(
+            username='payer-recovery', firebase_uid='payer-recovery-uid')
+        self.business = Business.objects.create(
+            name='Recovery Merchant', category='services')
+        self.merchant_account = Account.objects.create(
+            user=self.merchant_user, account_type='business', account_index=0,
+            business=self.business, bsc_address=MERCHANT)
+        self.payer_account = Account.objects.create(
+            user=self.payer_user, account_type='personal', account_index=0,
+            bsc_address=PAYER)
+        self.invoice = Invoice.objects.create(
+            created_by_user=self.merchant_user,
+            merchant_business=self.business,
+            merchant_account=self.merchant_account,
+            merchant_display_name=self.business.name,
+            amount=Decimal('10'), token_type='CUSD_PLUS',
+            settlement_chain='BSC', status='PENDING',
+            expires_at=timezone.now() + timedelta(hours=23),
+        )
+        self.payment = PaymentTransaction.objects.create(
+            payer_user=self.payer_user,
+            merchant_account_user=self.merchant_user,
+            merchant_business=self.business,
+            payer_display_name='Payer',
+            merchant_display_name=self.business.name,
+            payer_account=self.payer_account,
+            merchant_account=self.merchant_account,
+            payer_address=PAYER,
+            merchant_address=MERCHANT,
+            amount=Decimal('10'), token_type='CUSD',
+            status='PENDING_BLOCKCHAIN', transaction_hash='',
+            invoice=self.invoice,
+        )
+
+    def _batch(self, *, tx_hash, status='sent', source_id=None,
+               delegate_nonce=1, kind='pay_cusd'):
+        from blockchain.models import SponsoredBatch
+
+        return SponsoredBatch.objects.create(
+            user=self.payer_user, user_bsc_address=PAYER,
+            kind=kind,
+            source_id=self.payment.id if source_id is None else source_id,
+            num_calls=2, calls_json='[]', tx_hash=tx_hash,
+            delegate_nonce=delegate_nonce, delegate_nonce_claimed=True,
+            gas_limit=300000, max_fee_wei='1', status=status,
+        )
+
+    def test_database_rejects_second_live_cusd_batch_for_payment(self):
+        self._batch(tx_hash='0x' + '01' * 32, delegate_nonce=1)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._batch(tx_hash='0x' + '02' * 32, delegate_nonce=2)
+
+    def test_late_submit_response_cannot_revert_confirmation(self):
+        from payments.bsc_flow import _record_submitted_payment
+        confirmed_hash = '0x' + 'ab' * 32
+        type(self.payment).objects.filter(pk=self.payment.pk).update(
+            status='CONFIRMED', transaction_hash=confirmed_hash)
+        self.assertEqual(_record_submitted_payment(self.payment.id, '0x' + 'cd' * 32), 0)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, 'CONFIRMED')
+        self.assertEqual(self.payment.transaction_hash, confirmed_hash)
+
+    @mock.patch('payments.tasks.confirm_bsc_payment.apply_async')
+    def test_reconciliation_cannot_starve_old_actionable_payment(self, enqueue):
+        from blockchain.models import SponsoredBatch
+        from payments.tasks import reconcile_stranded_bsc_payments
+
+        old = self._batch(tx_hash='0x' + '03' * 32, status='confirmed')
+        # More rows than the old newest-batch window. None maps to a payment,
+        # but all would previously displace the old actionable batch.
+        SponsoredBatch.objects.bulk_create([
+            SponsoredBatch(
+                user=self.payer_user, user_bsc_address=PAYER,
+                kind='pay_cusd', source_id=10_000 + index,
+                num_calls=2, calls_json='[]',
+                tx_hash='0x' + format(index + 100, '064x'),
+                delegate_nonce=10_000 + index,
+                delegate_nonce_claimed=True, gas_limit=300000,
+                max_fee_wei='1', status='reverted',
+            )
+            for index in range(301)
+        ])
+
+        result = reconcile_stranded_bsc_payments.run()
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, 'SUBMITTED')
+        self.assertEqual(self.payment.transaction_hash, old.tx_hash)
+        self.assertEqual(result, {'repaired': 1, 'requeued': 1})
+        enqueue.assert_called_once_with(args=[self.payment.id, old.id])
+
+    @mock.patch('notifications.utils.create_notification')
+    def test_duplicate_confirmation_has_one_transition_and_one_effect_set(self, notify):
+        from payments.tasks import confirm_bsc_payment
+
+        tx_hash = '0x' + '04' * 32
+        batch = self._batch(tx_hash=tx_hash, status='confirmed')
+        type(self.payment).objects.filter(id=self.payment.id).update(
+            status='SUBMITTED', transaction_hash=tx_hash)
+
+        confirm_bsc_payment.run(self.payment.id, batch.id)
+        confirm_bsc_payment.run(self.payment.id, batch.id)
+
+        self.payment.refresh_from_db()
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.payment.status, 'CONFIRMED')
+        self.assertEqual(self.invoice.status, 'PAID')
+        self.assertEqual(notify.call_count, 2)  # merchant + payer, once each

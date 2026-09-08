@@ -420,6 +420,13 @@ class GetInvoice(graphene.Mutation):
             invoice = Invoice.objects.get(
                 internal_id=invoice_id
             )
+            billing_intent = getattr(invoice, 'billing_payment_intent', None)
+            if billing_intent is not None:
+                user = getattr(info.context, 'user', None)
+                if not (user and user.is_authenticated
+                        and billing_intent.payer_user_id == user.id):
+                    return GetInvoice(
+                        invoice=None, success=False, errors=["Invoice not found"])
             
             # Check if expired
             if invoice.is_expired:
@@ -876,9 +883,15 @@ class Query(graphene.ObjectType):
     )
 
     def resolve_invoice(self, info, invoice_id):
-        # Anyone can view an invoice by ID
         try:
-            return Invoice.objects.get(internal_id=invoice_id)
+            invoice = Invoice.objects.get(internal_id=invoice_id)
+            billing_intent = getattr(invoice, 'billing_payment_intent', None)
+            if billing_intent is not None:
+                user = getattr(info.context, 'user', None)
+                if not (user and user.is_authenticated
+                        and billing_intent.payer_user_id == user.id):
+                    return None
+            return invoice
         except Invoice.DoesNotExist:
             return None
 
@@ -887,7 +900,7 @@ class Query(graphene.ObjectType):
 
     def resolve_resolveInvoice(self, info, invoiceId):
         try:
-            return Invoice.objects.get(internal_id=invoiceId)
+            return Query.resolve_invoice(self, info, invoiceId)
         except Invoice.DoesNotExist:
             return None
 
@@ -1134,10 +1147,23 @@ class SubmitBscInvoicePayment(graphene.Mutation):
         if _bsc_rate_limited(user.id, 'bsc_pay_submit', 10):
             return SubmitBscInvoicePayment(success=False, error='rate_limited')
 
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_ctx = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not jwt_ctx:
+            return SubmitBscInvoicePayment(success=False, error='permission_denied')
+
         payment_tx = PaymentTransaction.objects.filter(
             internal_id=payment_id, deleted_at__isnull=True).first()
         if not payment_tx:
             return SubmitBscInvoicePayment(success=False, error='payment_not_found')
+        account = payment_tx.payer_account
+        if (account is None or account.deleted_at is not None
+                or account.account_type != jwt_ctx['account_type']
+                or account.account_index != jwt_ctx.get('account_index', 0)
+                or (account.account_type == 'business'
+                    and account.business_id != jwt_ctx.get('business_id'))
+                or (account.account_type == 'personal' and account.user_id != user.id)):
+            return SubmitBscInvoicePayment(success=False, error='permission_denied')
 
         result = bsc_flow.submit_bsc_payment(
             user, payment_tx, nonce, deadline, intent_signature, authorization)

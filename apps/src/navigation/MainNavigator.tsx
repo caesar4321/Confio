@@ -33,6 +33,9 @@ import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
 import { RegisterFinancieraScreen } from '../screens/RegisterFinancieraScreen';
 import { MyFinancierasScreen } from '../screens/MyFinancierasScreen';
 import RampInstructionsScreen from '../screens/RampInstructionsScreen';
+import InfiniaPaymentScreen from '../screens/InfiniaPaymentScreen';
+import CobrePaymentScreen from '../screens/CobrePaymentScreen';
+import LocalAccountFundingScreen from '../screens/LocalAccountFundingScreen';
 import RampHistoryScreen from '../screens/RampHistoryScreen';
 
 // ... existing imports ...
@@ -52,6 +55,7 @@ import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
 import { PaymentConfirmationScreen } from '../screens/PaymentConfirmationScreen';
+import { MembershipsScreen } from '../screens/MembershipsScreen';
 import { PaymentProcessingScreen } from '../screens/PaymentProcessingScreen';
 import { PaymentSuccessScreen } from '../screens/PaymentSuccessScreen';
 import { BusinessPaymentSuccessScreen } from '../screens/BusinessPaymentSuccessScreen';
@@ -270,6 +274,9 @@ export const MainNavigator = () => {
             headerShown: false,
           }}
         />
+        <Stack.Screen name="InfiniaPayment" component={InfiniaPaymentScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="CobrePayment" component={CobrePaymentScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="LocalAccountFunding" component={LocalAccountFundingScreen} options={{ headerShown: false }} />
         <Stack.Screen
           name="WithdrawSavings"
           component={WithdrawSavingsScreen}
@@ -474,6 +481,11 @@ export const MainNavigator = () => {
             gestureEnabled: false, // Prevent back gesture
             animation: 'slide_from_right'
           }}
+        />
+        <Stack.Screen
+          name="Memberships"
+          component={MembershipsScreen}
+          options={{ headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="PaymentConfirmation"

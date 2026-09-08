@@ -1205,6 +1205,7 @@ class IntegrityVerdict(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='integrity_verdicts',
+        null=True, blank=True,
         help_text="User being verified"
     )
     device_fingerprint = models.CharField(
@@ -1280,7 +1281,8 @@ class IntegrityVerdict(models.Model):
     
     def __str__(self):
         status = "✓" if self.passed else "✗"
-        return f"{status} {self.user.username} - {self.trigger_action} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+        username = self.user.username if self.user_id else 'Pre-signup'
+        return f"{status} {username} - {self.trigger_action} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
     
     @classmethod
     def has_historical_violation(cls, user) -> bool:

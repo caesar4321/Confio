@@ -85,7 +85,8 @@ class AppCheckService:
         token: str,
         action: str,
         device_fingerprint: str = '',
-        should_enforce: bool = True
+        should_enforce: bool = True,
+        diagnostics: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Full verification flow:
@@ -99,6 +100,8 @@ class AppCheckService:
         
         Returns dict with verification result.
         """
+        if diagnostics is not None:
+            diagnostics = {**diagnostics, 'enforced': bool(should_enforce)}
         if not token:
              # If no token provided
             verdict = IntegrityVerdict.objects.create(
@@ -108,14 +111,15 @@ class AppCheckService:
                 app_licensing='MISSING_TOKEN',
                 passed=False,
                 trigger_action=action,
-                error_message='Token not provided'
+                error_message='Token not provided',
+                raw_response={'login_diagnostics': diagnostics} if diagnostics else {},
             )
             passed = False
-            has_historical_violation = IntegrityVerdict.has_historical_violation(user)
+            has_historical_violation = IntegrityVerdict.has_historical_violation(user) if user else False
             
             is_blocked = should_enforce
             
-            logger.warning(f"[AppCheck] User {user.id} - Action: {action} - Missing Token - Blocked: {is_blocked}")
+            logger.warning(f"[AppCheck] User {getattr(user, 'id', None)} - Action: {action} - Missing Token - Blocked: {is_blocked}")
             
             return {
                 'success': not is_blocked,
@@ -141,12 +145,12 @@ class AppCheckService:
             is_rooted=False,
             passed=passed,
             trigger_action=action,
-            raw_response=verification,
+            raw_response={**verification, **({'login_diagnostics': diagnostics} if diagnostics else {})},
             error_message=verification.get('error', '') or '',
         )
         
         # Check historical violations
-        has_historical_violation = IntegrityVerdict.has_historical_violation(user)
+        has_historical_violation = IntegrityVerdict.has_historical_violation(user) if user else False
         
         # Determine blocking
         # Logic: If enforcement is ON, block if check failed.
@@ -165,11 +169,11 @@ class AppCheckService:
         # Log result
         if not passed:
             logger.warning(
-                f"[AppCheck] User {user.id} - Action: {action} - "
+                f"[AppCheck] User {getattr(user, 'id', None)} - Action: {action} - "
                 f"Passed: {passed}, Blocked: {is_blocked}"
             )
         else:
-            logger.info(f"[AppCheck] User {user.id} - Action: {action} - Passed")
+            logger.info(f"[AppCheck] User {getattr(user, 'id', None)} - Action: {action} - Passed")
         
         return result
 

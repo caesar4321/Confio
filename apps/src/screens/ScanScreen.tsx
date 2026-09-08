@@ -13,6 +13,7 @@ import { useRoute, RouteProp, useNavigation, useFocusEffect, useIsFocused } from
 import { BottomTabParamList } from '../types/navigation';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
+import { parseInstitutionLink } from '../utils/institutionLinks';
 
 type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
 
@@ -87,6 +88,12 @@ export const ScanScreen = () => {
 
   const handleQRCodeScanned = async (scannedData: string) => {
     if (isProcessing) return; // Prevent multiple processing
+    const institutionLink = parseInstitutionLink(scannedData);
+    if (institutionLink) {
+      setIsProcessing(true);
+      (navigation as any).navigate('Memberships', institutionLink);
+      return;
+    }
 
 
     // Show success indicator
@@ -173,6 +180,11 @@ export const ScanScreen = () => {
       setScannedSuccessfully(false);
     }
   };
+
+  useFocusEffect(useCallback(() => {
+    setIsProcessing(false);
+    setScannedSuccessfully(false);
+  }, []));
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],

@@ -292,6 +292,9 @@ def _infinia_capabilities(account):
 
 def sync_capabilities(account):
     if account.provider == 'cobre':
+        if (account.country, account.asset) != ('COL', 'COP'):
+            # StableFX and crypto payout entitlements require explicit program approval.
+            return
         confirmed = {
             'receive_third_party': 'Cobre Bre-B salary receipt confirmed',
             'send_third_party': 'Cobre Colombia Bre-B payout supported',
@@ -685,15 +688,32 @@ def create_money_operation(
 
 def submit_money_operation(operation):
     with transaction.atomic():
-        operation = MoneyOperation.objects.select_for_update(of=('self',)).select_related(
+        operation = MoneyOperation.objects.select_for_update(of=('self',), no_key=True).select_related(
             'source_account', 'destination_account', 'money_flow'
         ).get(pk=operation.pk)
         if operation.status not in {'created', 'unknown'}:
             return operation
         if not operation.source_account or operation.source_account.status != 'active':
             raise PaymentAccountError('An active source account is required')
+        if operation.provider in {'infinia', 'cobre'}:
+            from .models import InfiniaJourney, CobreJourney
+            journey_model = InfiniaJourney if operation.provider == 'infinia' else CobreJourney
+            from django.db.models import Q
+            own_journey = journey_model.objects.select_for_update().filter(money_flow_id=operation.money_flow_id).first()
+            # Refund webhooks lock the journey before updating its balance.
+            # Keep this order and allow FK inserts to take KEY SHARE locks.
+            operation.source_account = FinancialAccount.objects.select_for_update(no_key=True).get(pk=operation.source_account_id)
+            if operation.source_account.status != 'active':
+                raise PaymentAccountError('An active source account is required')
+            if own_journey and own_journey.stage in {'completed', 'failed', 'needs_review'}:
+                raise PaymentAccountError('The payment journey does not allow further submissions')
+            account_filter = Q(local_account=operation.source_account) | Q(crypto_account=operation.source_account)
+            if operation.provider == 'cobre':
+                account_filter |= Q(copco_account=operation.source_account)
+            if journey_model.objects.filter(account_filter).exclude(stage__in=['completed', 'failed']).exclude(money_flow_id=operation.money_flow_id).exists():
+                raise PaymentAccountError('Provider funds are reserved by an active journey')
         if operation.operation_type == 'payout':
-            _require_capability(operation.source_account, 'send_third_party')
+            _require_capability(operation.source_account, 'crypto_payout' if operation.provider == 'cobre' and operation.source_account.asset == 'USD_STABLE' else 'send_third_party')
         elif operation.operation_type in {'internal_transfer', 'conversion'}:
             _require_capability(operation.source_account, 'convert')
         operation.status = 'submitted'
@@ -708,27 +728,32 @@ def submit_money_operation(operation):
         else:
             raise PaymentAccountError(f'Unsupported submitted operation {operation.operation_type}')
     except ProviderAPIError as exc:
-        operation.status = 'unknown' if exc.retryable else 'failed'
-        operation.failure_code = str(exc.status_code or 'provider_error')
-        operation.failure_detail = str(exc)
-        operation.provider_data = exc.payload or {}
-        operation.save(
-            update_fields=[
-                'status', 'failure_code', 'failure_detail', 'provider_data', 'updated_at'
-            ]
-        )
-        _sync_flow_status(operation.money_flow)
+        with transaction.atomic():
+            operation = MoneyOperation.objects.select_for_update(no_key=True).get(pk=operation.pk)
+            # A webhook can settle while POST is still returning. Never replace
+            # that newer state with an older transport outcome.
+            if operation.status != 'submitted':
+                return operation
+            operation.status = 'unknown' if exc.retryable else 'failed'
+            operation.failure_code = str(exc.status_code or 'provider_error')
+            operation.failure_detail = str(exc)
+            operation.provider_data = exc.payload or {}
+            operation.save(update_fields=[
+                'status', 'failure_code', 'failure_detail', 'provider_data', 'updated_at'])
+            _sync_flow_status(operation.money_flow)
         if not exc.retryable:
             raise
         return operation
     except ProviderCapabilityError as exc:
-        operation.status = 'failed'
-        operation.failure_code = 'provider_capability_error'
-        operation.failure_detail = str(exc)
-        operation.save(
-            update_fields=['status', 'failure_code', 'failure_detail', 'updated_at']
-        )
-        _sync_flow_status(operation.money_flow)
+        with transaction.atomic():
+            operation = MoneyOperation.objects.select_for_update(no_key=True).get(pk=operation.pk)
+            if operation.status != 'submitted':
+                return operation
+            operation.status = 'failed'
+            operation.failure_code = 'provider_capability_error'
+            operation.failure_detail = str(exc)
+            operation.save(update_fields=['status', 'failure_code', 'failure_detail', 'updated_at'])
+            _sync_flow_status(operation.money_flow)
         raise PaymentAccountError(str(exc)) from exc
     return apply_operation_result(operation, result)
 
@@ -837,15 +862,30 @@ def create_and_submit_transfer(
 
 @transaction.atomic
 def apply_operation_result(operation, result):
-    operation = MoneyOperation.objects.select_for_update(of=('self',)).select_related(
+    operation = MoneyOperation.objects.select_for_update(of=('self',), no_key=True).select_related(
         'money_flow'
     ).get(pk=operation.pk)
+    if result.resource_id and operation.provider_operation_id and result.resource_id != operation.provider_operation_id:
+        operation.status = 'needs_review'
+        operation.failure_code = 'provider_operation_id_changed'
+        operation.save(update_fields=['status', 'failure_code', 'updated_at'])
+        _sync_flow_status(operation.money_flow)
+        return operation
+    if result.resource_id and not operation.provider_operation_id:
+        operation.provider_operation_id = result.resource_id
+        operation.save(update_fields=['provider_operation_id', 'updated_at'])
+    if (operation.status in {'succeeded', 'failed', 'reversed'} and result.status in {'succeeded', 'failed', 'reversed'}
+            and result.status != operation.status and not (operation.status == 'succeeded' and result.status == 'reversed')):
+        operation.status = 'needs_review'
+        operation.failure_code = 'provider_terminal_status_conflict'
+        operation.save(update_fields=['status', 'failure_code', 'updated_at'])
+        _sync_flow_status(operation.money_flow)
+        return operation
     if result.status != operation.status and result.status not in ALLOWED_OPERATION_TRANSITIONS.get(
         operation.status, set()
     ):
-        operation.provider_status = result.provider_status
-        operation.provider_data = result.raw
-        operation.save(update_fields=['provider_status', 'provider_data', 'updated_at'])
+        # Preserve newer webhook evidence; still reconcile a newly bound ID.
+        _sync_flow_status(operation.money_flow)
         return operation
     operation.provider_operation_id = result.resource_id or operation.provider_operation_id
     operation.status = result.status
@@ -874,6 +914,21 @@ def apply_operation_result(operation, result):
 
 def _sync_flow_status(flow):
     if not flow:
+        return
+    if (flow.metadata or {}).get('orchestrator') in {'infinia', 'cobre'}:
+        # A converted leg is only one stage; the journey owns completion.
+        # Late failures/reversals must still reopen a completed customer flow.
+        from .infinia_journeys import has_refund
+        from .cobre_journeys import has_source_credit
+        refunded = any((has_refund(op) if flow.metadata['orchestrator'] == 'infinia' else has_source_credit(op))
+                       for op in flow.operations.select_related('source_account'))
+        if refunded or flow.operations.filter(status__in=['failed', 'reversed', 'needs_review']).exists():
+            from .models import InfiniaJourney, CobreJourney
+            journey_model = InfiniaJourney if flow.metadata['orchestrator'] == 'infinia' else CobreJourney
+            journey_model.objects.filter(money_flow=flow).update(stage='needs_review',
+                failure_code='provider_leg_requires_review', updated_at=timezone.now())
+            flow.status = 'needs_review'
+            flow.save(update_fields=['status', 'updated_at'])
         return
     operations = list(flow.operations.all())
     statuses = {operation.status for operation in operations}

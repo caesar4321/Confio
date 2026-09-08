@@ -963,6 +963,26 @@ class ReceiptCheckerTests(SimpleTestCase):
         self._run(batch, self._receipt(logs=[{'address': '0x' + '22' * 20, 'topics': []}]))
         self.assertEqual(batch.status, 'confirmed')
 
+    def test_billing_payment_persists_event_evidence_before_confirmation(self):
+        batch = self._batch(kind='pay_cusd')
+        batch.id = 99
+        receipt = self._receipt(logs=[self._exec_log()])
+        with mock.patch(
+                'billing.settlement.persist_finalized_payment_settlement') as persist:
+            self._run(batch, receipt)
+        persist.assert_called_once_with(batch_id=99, receipt=receipt)
+        self.assertEqual(batch.status, 'confirmed')
+
+    def test_billing_evidence_failure_keeps_batch_retryable(self):
+        batch = self._batch(kind='pay_cusd')
+        batch.id = 99
+        receipt = self._receipt(logs=[self._exec_log()])
+        with mock.patch(
+                'billing.settlement.persist_finalized_payment_settlement',
+                side_effect=RuntimeError('database unavailable')):
+            self._run(batch, receipt)
+        self.assertEqual(batch.status, 'sent')
+
 
 @override_settings(CUSD_PLUS_SIGNED_GRACE_MIN=0)
 class ReconcileSignedBatchesTests(SimpleTestCase):
@@ -1011,6 +1031,14 @@ class ReconcileSignedBatchesTests(SimpleTestCase):
         self.assertEqual(result['dropped'], 1)
         receipt_task.apply_async.assert_not_called()
         # domain confirm still gets nudged so the row fails and the user retries
+        capp.send_task.assert_called_once_with(
+            'payments.confirm_bsc_payment', args=[5, 99], countdown=10)
+
+    def test_cusd_payment_recovery_reenqueues_domain_finalizer(self):
+        batch = self._batch(kind='pay_cusd', source_id=5)
+        result, receipt_task, capp = self._run(batch, {'hash': self.TXH})
+        self.assertEqual(result['promoted'], 1)
+        receipt_task.apply_async.assert_called_once()
         capp.send_task.assert_called_once_with(
             'payments.confirm_bsc_payment', args=[5, 99], countdown=10)
 

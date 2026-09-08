@@ -88,9 +88,10 @@ class LoggingGraphQLView(GraphQLView):
             try:
                 body = json.loads(request.body)
                 query = body.get('query', '')
+                membership_claim = 'claimInstitutionMembership' in query
                 if _should_log_graphql_request_details():
-                    logger.info("GraphQL Query: %s", query)
-                    logger.info("GraphQL Variables: %s", body.get('variables', {}))
+                    logger.info("GraphQL Query: %s", '[membership claim redacted]' if membership_claim else query)
+                    logger.info("GraphQL Variables: %s", '[redacted]' if membership_claim else body.get('variables', {}))
 
                 # Derive and align request account context from JWT prior to logging
                 try:
@@ -131,8 +132,8 @@ class LoggingGraphQLView(GraphQLView):
                 ):
                     logger.info(
                         "CONVERSION MUTATION DETECTED - Query: %s, Variables: %s",
-                        query[:200],
-                        body.get('variables', {}),
+                        '[membership claim redacted]' if membership_claim else query[:200],
+                        '[redacted]' if membership_claim else body.get('variables', {}),
                     )
             except Exception as e:
                 logger.error("Error parsing GraphQL request: %s", str(e))
@@ -158,6 +159,7 @@ urlpatterns = [
     path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path('confio-control-panel/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
+    path('v1/', include('billing.api.urls')),
     path('portal/login/', portal_login_redirect, name='portal_login'),
     path('portal/login-complete/', portal_login_complete, name='portal_login_complete'),
     path('portal/logout/', portal_logout, name='portal_logout'),

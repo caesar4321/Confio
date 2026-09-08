@@ -374,6 +374,12 @@ export const NotificationScreen = () => {
     if (notification.actionUrl) {
       // Parse deep link and navigate accordingly
       const url = notification.actionUrl;
+      if (/^(confio:\/\/|\/)memberships\/?$/.test(url)) {
+        navigation.navigate('Memberships', {
+          obligationId: typeof parsedData.obligation === 'string' ? parsedData.obligation : undefined,
+        });
+        return;
+      }
       if (url.includes('verification')) {
         navigation.navigate('Verification');
         return;

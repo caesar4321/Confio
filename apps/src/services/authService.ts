@@ -1196,10 +1196,9 @@ export class AuthService {
       perfLog('Starting backend authentication');
       onProgress?.('Verificando seguridad del dispositivo...');
       const { appCheckService } = await import('./appCheckService');
-      const appCheckToken = await appCheckService.primeTokenForAuth();
-      if (!appCheckToken) {
-        throw new Error(appCheckService.getAuthFailureMessage());
-      }
+      // Missing attestation must reach the server for policy and diagnostics.
+      // This does not bypass Firebase authentication or server enforcement.
+      await appCheckService.primeTokenForAuth();
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,
@@ -1884,10 +1883,8 @@ export class AuthService {
       console.log('Authenticating with backend (Apple)...');
       onProgress?.('Verificando seguridad del dispositivo...');
       const { appCheckService } = await import('./appCheckService');
-      const appCheckToken = await appCheckService.primeTokenForAuth();
-      if (!appCheckToken) {
-        throw new Error(appCheckService.getAuthFailureMessage());
-      }
+      // Keep Apple and Google login under the same server-side policy.
+      await appCheckService.primeTokenForAuth();
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,

@@ -107,6 +107,8 @@ class CobreProvider(PaymentAccountProvider):
         return ProviderResult(str(response['id']), status, raw_status, response)
 
     def create_payout(self, operation):
+        if operation.source_account.asset == 'USD_STABLE':
+            return self._create_stable_payout(operation)
         if operation.source_account.country != 'COL' or operation.source_account.asset != 'COP':
             raise ProviderCapabilityError('Cobre Bre-B payout requires a Colombia COP balance')
         source_id = operation.source_account.provider_account_id
@@ -172,6 +174,8 @@ class CobreProvider(PaymentAccountProvider):
         return ProviderResult(str(response['id']), 'active', 'CREATED', response)
 
     def create_transfer(self, operation):
+        if getattr(operation, 'operation_type', 'conversion') == 'internal_transfer':
+            return self._create_cop_ramp(operation)
         if not operation.source_account or not operation.destination_account:
             raise ProviderCapabilityError('Cobre StableFX requires source and destination balances')
         source_asset = operation.source_account.asset.upper()
@@ -186,11 +190,19 @@ class CobreProvider(PaymentAccountProvider):
         minor_value = operation.source_amount * Decimal('100')
         if minor_value != minor_value.to_integral_value():
             raise ProviderCapabilityError('Cobre StableFX amount exceeds provider precision')
-        quote = self.client.create_fx_quote({
+        journey = self._journey(operation)
+        quote = journey.fx_quote if journey else self.client.create_fx_quote({
             'currency_pair': f'{source_asset.lower()}/{target_asset.lower()}',
             'source_amount': int(minor_value),
             'type': 'static_quote',
         })
+        if journey:
+            # Retries always retain the original quote, including after a
+            # timeout. Cobre may return the original idempotent result even
+            # after quote expiry; never request a replacement priced leg.
+            if (quote.get('currency_pair') != f'{source_asset.lower()}/{target_asset.lower()}'
+                    or Decimal(str(quote.get('source_amount'))) != minor_value):
+                raise ProviderCapabilityError('Persisted StableFX quote does not match operation')
         quote_id = quote.get('id')
         if not quote_id:
             raise ProviderCapabilityError('Cobre StableFX quote response has no id')
@@ -210,6 +222,58 @@ class CobreProvider(PaymentAccountProvider):
             response['target_amount'] = str(
                 Decimal(str(destination_minor)) / Decimal('100')
             )
+        status, raw_status = operation_status(response)
+        return ProviderResult(str(response['id']), status, raw_status, response)
+
+    @staticmethod
+    def _journey(operation):
+        from payment_accounts.models import CobreJourney
+        if not getattr(operation, 'money_flow_id', None):
+            return None
+        return CobreJourney.objects.filter(money_flow_id=operation.money_flow_id).first()
+
+    def _create_cop_ramp(self, operation):
+        journey = self._journey(operation)
+        if not journey or journey.ramp_operation_id != operation.pk:
+            raise ProviderCapabilityError('COP ramp requires an authorized Cobre journey')
+        pair = (operation.source_account.asset, operation.destination_account.asset)
+        if pair not in {('COP', 'COPCO'), ('COPCO', 'COP')}:
+            raise ProviderCapabilityError('Unsupported Cobre ramp pair')
+        from payment_accounts.cobre_journeys import minor
+        response = self.client.create_money_movement({
+            'amount': minor(operation.source_amount),
+            'source_id': operation.source_account.provider_account_id,
+            'destination_id': operation.destination_account.provider_account_id,
+            'metadata': {'description': 'Confio COP conversion', **({'settlement_type': 'standard'} if pair[0] == 'COPCO' else {})},
+            'checker_approval': False, 'external_id': operation.idempotency_key,
+        }, idempotency_key=operation.idempotency_key)
+        status, raw_status = operation_status(response)
+        return ProviderResult(str(response['id']), status, raw_status, response)
+
+    def _create_stable_payout(self, operation):
+        journey = self._journey(operation)
+        if not journey or journey.payout_operation_id != operation.pk or journey.direction != 'to_wallet':
+            raise ProviderCapabilityError('Stable payout requires an authorized Cobre journey')
+        from payment_accounts.cobre_journeys import minor
+        from payment_accounts.allbridge_next import address
+        counterparty_id = journey.destination_snapshot['provider_counterparty_id']
+        cp = self.client.get_counterparty(counterparty_id)
+        meta = cp.get('metadata') or {}
+        if (str(cp.get('id')) != counterparty_id or cp.get('type') != 'global_deposit_np'
+                or meta.get('counterparty_verification_status') != 'verified'
+                or str(meta.get('counterparty_chain', '')).lower() != 'polygon'
+                or str(meta.get('counterparty_wallet_address', '')).lower() != journey.wallet_address
+                or address(journey.confio_account.bsc_address) != journey.wallet_address):
+            raise ProviderCapabilityError('Cobre beneficiary is not verified for the authorized Polygon wallet')
+        if operation.source_amount < 1:
+            raise ProviderCapabilityError('Stable payout requires at least one dollar')
+        response = self.client.create_money_movement({
+            'amount': minor(operation.source_amount),
+            'source_id': operation.source_account.provider_account_id,
+            'destination_id': counterparty_id,
+            'metadata': {'description': 'Confio wallet withdrawal'},
+            'checker_approval': False, 'external_id': operation.idempotency_key,
+        }, idempotency_key=operation.idempotency_key)
         status, raw_status = operation_status(response)
         return ProviderResult(str(response['id']), status, raw_status, response)
 

@@ -2,6 +2,7 @@ import hashlib
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -123,7 +124,7 @@ def _process_locked_webhook_event(event):
     account = None
     account_id = normalized.get('account_id')
     if account_id:
-        account = FinancialAccount.objects.filter(provider_account_id=account_id).first()
+        account = FinancialAccount.objects.filter(provider_account_id=account_id, provider_profile__provider=event.provider).first()
     if account and event.event_type.lower() in {
         'account', 'account.updated', 'account_status', 'account.status_updated'
     }:
@@ -194,7 +195,8 @@ def _record_ledger_entry(event, normalized, account, operation):
     transaction_type = str(
         operation_payload.get('type') or content.get('type') or ''
     ).lower()
-    if amount < 0 or transaction_type in {'debit', 'outgoing', 'payout'}:
+    if amount < 0 or transaction_type in {'debit', 'outgoing', 'payout'} or (
+            event.provider == 'cobre' and content.get('credit_debit_type') == 'debit'):
         direction = 'debit'
     amount = abs(amount)
     entry_id = str(
@@ -244,27 +246,30 @@ def _record_ledger_entry(event, normalized, account, operation):
         )
         entry.operation = operation
         entry.save(update_fields=['operation'])
-    if balance is not None and (
-        not account.balance_updated_at or occurred_at >= account.balance_updated_at
-    ):
-        account.current_balance = balance
-        account.available_balance = balance
-        account.balance_updated_at = occurred_at
-        account.save(
-            update_fields=[
-                'current_balance', 'available_balance', 'balance_updated_at', 'updated_at'
-            ]
-        )
+    if event.provider == 'cobre' and created:
+        from .cobre_journeys import observe_refund
+        observe_refund(entry)
+    if event.provider == 'infinia' and created:
+        from .infinia_journeys import observe_refund
+        observe_refund(entry)
+    if balance is not None:
+        # Compare in the UPDATE, not against an instance loaded before another
+        # webhook committed. A delayed event cannot regress the displayed balance.
+        FinancialAccount.objects.filter(pk=account.pk).filter(
+            Q(balance_updated_at__isnull=True) | Q(balance_updated_at__lte=occurred_at)
+        ).update(current_balance=balance, available_balance=balance, balance_updated_at=occurred_at)
     if (
         operation
         and operation.destination_account_id == account.id
         and direction == 'credit'
         and operation.status == 'settling'
     ):
-        operation.status = 'succeeded'
-        operation.settled_at = timezone.now()
-        operation.save(update_fields=['status', 'settled_at', 'updated_at'])
-        _sync_flow_status(operation.money_flow)
+        # A later failure/refund may commit after the operation was loaded.
+        # Credit arrival can settle only an operation still awaiting settlement.
+        changed = MoneyOperation.objects.filter(pk=operation.pk, status='settling').update(
+            status='succeeded', settled_at=timezone.now(), updated_at=timezone.now())
+        if changed:
+            _sync_flow_status(operation.money_flow)
 
 
 def _create_unsolicited_operation(*, event, account, entry, direction, amount, asset, payload):

@@ -10,6 +10,7 @@
  */
 
 import { Platform } from 'react-native';
+import { appCheckDiagnosticCode } from '../utils/appCheckDiagnostics';
 import appCheck from '@react-native-firebase/app-check';
 import {
     ALLOW_APP_CHECK_DEBUG,
@@ -178,7 +179,7 @@ export class AppCheckService {
             return null;
         } catch (error: any) {
             const normalizedError = this.normalizeError(error);
-            console.warn('[AppCheck] Token fetch failed:', normalizedError);
+            console.warn('[AppCheck] Token fetch failed:', appCheckDiagnosticCode(normalizedError));
             this.recordFailure(`${forceRefresh ? 'FORCE_REFRESH_FAILED' : 'FETCH_FAILED'}:${normalizedError}`);
             return null;
         }

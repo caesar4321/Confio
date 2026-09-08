@@ -31,6 +31,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { APP_LAYOUT } from '../config/layout';
 import { formatTokenLabel } from '../utils/tokenDisplay';
+import { useRampCountry } from '../hooks/useRampCountry';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -81,6 +82,7 @@ export const PaymentConfirmationScreen = () => {
   const [prepared, setPrepared] = useState<any | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const navLock = useRef(false);
+  const { navigateToRampOrEfectivo } = useRampCountry();
 
   // Extract params (invoiceData is normal flow, invoiceId is deep link)
   const { invoiceData: initialInvoiceData, invoiceId } = route.params as any;
@@ -101,7 +103,13 @@ export const PaymentConfirmationScreen = () => {
       const { data } = await getInvoice({ variables: { invoiceId: id } });
 
       if (data?.getInvoice?.success && data?.getInvoice?.invoice) {
-        setFetchedInvoiceData(data.getInvoice.invoice);
+        const fetched = data.getInvoice.invoice;
+        setFetchedInvoiceData({
+          ...fetched,
+          // GraphQL names the relation createdByUser; scanned invoice data
+          // historically called the same object merchantUser.
+          merchantUser: fetched.merchantUser || fetched.createdByUser,
+        });
       } else {
         const msg = data?.getInvoice?.errors?.[0] || 'Factura no encontrada';
         Alert.alert('Error', msg);
@@ -175,7 +183,7 @@ export const PaymentConfirmationScreen = () => {
   // Balances must be read for the account the JWT is currently on: without
   // the auth gate an account switch can serve the PREVIOUS account's cached
   // number, and a zero-before-first-result reads as "no funds".
-  const { data: confioBalanceData, loading: confioBalanceLoading } = useQuery(
+  const { data: confioBalanceData, loading: confioBalanceLoading, refetch: refetchConfioBalance } = useQuery(
     GET_BSC_CONFIO_TOKEN_BALANCE,
     {
       skip: !isConfioInvoice || !isBscInvoice || !authReady,
@@ -231,6 +239,35 @@ export const PaymentConfirmationScreen = () => {
   const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+
+  // Normalize both rails into the snapshot used by the existing receipt UI.
+  // Returning from Recarga focuses this screen again, so refresh the same
+  // account-scoped balance instead of adding a Yape-specific callback.
+  useEffect(() => {
+    if (!authReady || !isBscInvoice || railPending) {
+      setBalanceSnapshot(null);
+      return;
+    }
+    if (isConfioInvoice) {
+      if (confioBalanceReady) setBalanceSnapshot(String(bscConfioBalance));
+    } else if (!savingsPortfolio.loading) {
+      setBalanceSnapshot(String(
+        savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd,
+      ));
+    }
+  }, [authReady, bscConfioBalance, confioBalanceReady, isBscInvoice, isConfioInvoice,
+      railPending, savingsPortfolio.cusdBalanceUsd,
+      savingsPortfolio.loading, savingsPortfolio.savings.balanceUsd]);
+
+  useFocusEffect(useCallback(() => {
+    if (!authReady || !invoiceData || !isBscInvoice || railPending) return;
+    if (isConfioInvoice) {
+      refetchConfioBalance().catch(() => undefined);
+    } else {
+      savingsPortfolio.refetch().catch(() => undefined);
+    }
+  }, [authReady, invoiceData, isBscInvoice, isConfioInvoice, railPending,
+      refetchConfioBalance, savingsPortfolio.refetch]));
 
   useEffect(() => {
     if (!invoiceData) return; // Guard clause
@@ -379,9 +416,9 @@ export const PaymentConfirmationScreen = () => {
   );
   const requestedAmount = parseFloat(currentPayment.amount || '0');
   const canPayBsc =
-    isBscInvoice
+    authReady && isBscInvoice
     && !railPending
-    && ((isDollarInvoice && bscDollarAvailable >= requestedAmount)
+    && ((isDollarInvoice && !savingsPortfolio.loading && bscDollarAvailable >= requestedAmount)
       // Never judge a CONFIO balance we haven't actually received: an
       // unloaded 0 would read as "no funds" and block a payable invoice.
       || (isConfioInvoice && confioBalanceReady && bscConfioBalance >= requestedAmount));
@@ -681,7 +718,7 @@ export const PaymentConfirmationScreen = () => {
             <ReceiptCard
               items={[
                 { label: 'Monto', value: `$${formatAmount(currentPayment.amount)} ${currentPayment.currency}` },
-                { label: 'Comisión para ti', value: 'Gratis · cubre Confío', color: colors.primaryDark },
+                { label: 'Comisión para ti', value: 'Sin cargo adicional · la asume el comercio', color: colors.primaryDark },
                 { label: 'Total a pagar', value: `$${formatAmount(currentPayment.amount)} ${currentPayment.currency}`, color: colors.text.primary },
               ]}
               style={styles.receiptCard}
@@ -712,6 +749,15 @@ export const PaymentConfirmationScreen = () => {
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
+            {!isConfioInvoice && balanceSnapshot != null && !balanceError && !hasEnoughBalance && (
+              <Button
+                title="Recargar"
+                onPress={() => navigateToRampOrEfectivo('TopUp', {
+                  destination: isBscInvoice ? 'cusd_plus' : 'cusd',
+                })}
+                accessibilityLabel="Recargar saldo para pagar"
+              />
+            )}
             <Button
               title={hasEnoughBalance ? 'Confirmar Pago' : (balanceSnapshot == null ? 'Cargando saldo…' : 'Saldo Insuficiente')}
               onPress={handleConfirmPayment}

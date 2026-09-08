@@ -272,3 +272,29 @@ class WebhookAccountingTests(TestCase):
                 external_destination={'key': '@persona'},
                 client_request_id=request_id,
             )
+
+    def test_stale_account_instance_cannot_regress_newer_provider_balance(self):
+        from payment_accounts.webhooks import _record_ledger_entry
+        from payment_accounts.models import ProviderWebhookEvent
+        from django.utils.dateparse import parse_datetime
+        account=self._account(self._profile('cobre'),'balance-race')
+        newer=parse_datetime('2026-09-05T12:00:00Z')
+        FinancialAccount.objects.filter(pk=account.pk).update(current_balance=900,available_balance=900,balance_updated_at=newer)
+        event=ProviderWebhookEvent.objects.create(provider='cobre',event_id='old-balance',event_type='accounts.balance.credit',payload={},raw_body='{}')
+        normalized={'resource_id':'old-credit','payload':{'content':{'id':'old-credit','type':'credit',
+            'amount':100,'currency':'cop','current_balance':10000,'created_at':'2026-09-05T11:00:00Z'}}}
+        _record_ledger_entry(event,normalized,account,None)
+        account.refresh_from_db();self.assertEqual(account.current_balance,Decimal('900'));self.assertEqual(account.balance_updated_at,newer)
+
+    def test_late_credit_cannot_overwrite_concurrent_conversion_failure(self):
+        from payment_accounts.webhooks import _record_ledger_entry
+        from payment_accounts.models import ProviderWebhookEvent
+        account=self._account(self._profile('infinia'),'credit-race',country='XXX',asset='USDC_POL')
+        op=MoneyOperation.objects.create(provider='infinia',operation_type='conversion',destination_account=account,
+            source_asset='PEN',source_amount='10',target_asset='USDC_POL',status='settling',idempotency_key='credit-race')
+        MoneyOperation.objects.filter(pk=op.pk).update(status='failed')
+        event=ProviderWebhookEvent.objects.create(provider='infinia',event_id='late-credit',event_type='movement.created',payload={},raw_body='{}')
+        normalized={'resource_id':'late-movement','payload':{'id':'late-movement','amount':'2.5','currency':'USDC_POL',
+            'operation':{'type':'INTERNAL_TRANSFER','operation_id':'transfer-race'}}}
+        _record_ledger_entry(event,normalized,account,op)
+        op.refresh_from_db();self.assertEqual(op.status,'failed')

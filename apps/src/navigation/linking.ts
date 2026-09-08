@@ -9,6 +9,7 @@ const linking: LinkingOptions<RootStackParamList> = {
                 screens: {
                     VerifyTransaction: 'verify/:hash',
                     PaymentConfirmation: 'pay/:invoiceId',
+                    Memberships: 'memberships',
                 },
             },
             Auth: {

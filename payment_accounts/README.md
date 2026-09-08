@@ -1,5 +1,12 @@
 # Payment accounts
 
+The [implicit bridging implementation](BRIDGING.md) adds disabled-by-default
+NEXT execution between BSC USDT and native Polygon USDC, source sponsorship,
+background recovery and app history. Provider credit and fiat payout remain
+separate from on-chain bridge delivery; see its rollout and settlement limits.
+[Infinia journeys](INFINIA_JOURNEYS.md) now compose provider conversion and payout
+with durable parent state and an explicit owner-approved minimum FX output.
+
 `payment_accounts` owns persistent provider accounts and the money operations
 performed through them. It does not replace `ramps`: legacy quoted/order-based
 providers remain in `ramps`, while a customer-facing fiat/crypto journey can
@@ -65,9 +72,9 @@ evidence fails closed. The public mutation requires `shareComplianceData=true`.
 `MoneyOperation`. Canonical statuses retain the original provider status
 alongside them. A documented Cobre StableFX operation is supported only when
 both sides are existing `usd_stable`/`copco` balances. The adapter deliberately
-rejects an end-user Bre-B `COP` balance: Cobre must contract and document the
-bridge from that balance before Confío can compose receive → convert → crypto
-delivery. Infinia account-to-account conversion uses Internal Transfer and
+rejects an end-user Bre-B `COP` balance. The separate COP/COPco on/off-ramp and verified-credit payment sequence is now
+implemented in [Cobre journeys](COBRE_JOURNEYS.md), behind its own disabled-by-default
+flag. NEXT bridge flags alone do not enable it. Infinia account-to-account conversion uses Internal Transfer and
 remains `settling` until the destination movement credit arrives.
 
 Non-terminal operations older than 30 minutes are reconciled every ten minutes

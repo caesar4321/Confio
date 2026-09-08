@@ -172,6 +172,9 @@ class CobreClient(BaseProviderClient):
             'GET', '/money_movements', params={'external_id': external_id, 'page_size': 1}
         )
 
+    def get_counterparty(self, counterparty_id):
+        return self.request('GET', f'/counterparties/{counterparty_id}')
+
     def create_fx_quote(self, payload):
         return self.request('POST', '/fx_quotes', payload=payload)
 
@@ -296,6 +299,9 @@ class InfiniaClient(BaseProviderClient):
                 if isinstance(data, dict):
                     return data
             raise
+
+    def create_transfer_quote(self, payload):
+        return self.request('POST', '/v1/accounts/internal-transfer/quote/', payload=payload)
 
     def create_internal_transfer(self, payload):
         return self.request('POST', '/v1/accounts/internal-transfer/', payload=payload)

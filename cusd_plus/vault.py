@@ -275,6 +275,15 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
         logger.exception('reserved usdt: in-flight sagas unreadable')
         raise
 
+    from payment_accounts.models import PaymentBridgeTransfer
+    from django.db.models import Q
+    from django.utils import timezone
+    bridge_reservations = PaymentBridgeTransfer.objects.filter(
+        quote__source_token_id='BSC:USDT', quote__source_address=addr,
+    ).filter(Q(status='submitted') | Q(status='prepared', deadline__gt=int(timezone.now().timestamp())))
+    for bridge in bridge_reservations.only('binding').iterator():
+        total += Decimal(bridge.binding.get('funding', {}).get('wallet_usdt_units', '0')) / Decimal(10**18)
+
     # Presale no longer spends raw USDT. Its atomic batch uses cUSD/cUSD+ and
     # pays the universal perimeter fee, so a prepared buy reserves no arrival
     # USDT and cannot block foreground auto-conversion.

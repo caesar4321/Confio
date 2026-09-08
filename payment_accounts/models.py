@@ -282,6 +282,69 @@ class MoneyFlow(models.Model):
         ]
 
 
+class PaymentBridgeQuote(models.Model):
+    """Immutable pricing snapshot, not proof of a transfer or provider credit."""
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT)
+    request_id = models.UUIDField()
+    money_flow = models.OneToOneField(
+        MoneyFlow, on_delete=models.PROTECT, related_name='bridge_quote'
+    )
+    funding_instruction = models.ForeignKey(FundingInstruction, on_delete=models.PROTECT)
+    source_address = models.CharField(max_length=42)
+    destination_address = models.CharField(max_length=42)
+    source_token_id = models.CharField(max_length=24, default='BSC:USDT')
+    destination_token_id = models.CharField(max_length=24, default='POL:USDC')
+    amount_units = models.CharField(max_length=78)
+    routes = models.JSONField()
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['confio_account', 'request_id'], name='payment_bridge_quote_request_uniq'
+        )]
+
+
+class PaymentBridgeTransfer(models.Model):
+    """A single authorized bridge, including durable source submission evidence."""
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    quote = models.OneToOneField(PaymentBridgeQuote, on_delete=models.PROTECT, related_name='transfer')
+    status = models.CharField(max_length=24, default='prepared', choices=[
+        ('prepared', 'Awaiting authorization'), ('submitted', 'Source submitted'),
+        ('bridging', 'Bridging'), ('delivered', 'Delivered on chain'),
+        ('refunded', 'Refunded'), ('failed', 'Source failed'),
+        ('expired', 'Authorization expired'), ('needs_review', 'Needs review'),
+    ])
+    deposit_address = models.CharField(max_length=42, unique=True)
+    amount_out_min = models.CharField(max_length=78)
+    amount_out = models.CharField(max_length=78)
+    deadline = models.BigIntegerField()
+    calls = models.JSONField(default=list)
+    binding = models.JSONField(default=dict)
+    source_tx_hash = models.CharField(max_length=66, blank=True)
+    destination_tx_hash = models.CharField(max_length=66, blank=True)
+    batch = models.OneToOneField('blockchain.SponsoredBatch', on_delete=models.PROTECT, null=True, blank=True)
+    provider_credit = models.OneToOneField('LedgerEntry', on_delete=models.PROTECT, null=True, blank=True, related_name='bridge_transfer')
+    # Source sponsorship. Persist signed bytes before broadcasting;
+    # a worker can re-broadcast the SAME transaction after an ambiguous result.
+    signed_raw_tx = models.TextField(blank=True)
+    sponsor_address = models.CharField(max_length=42, blank=True)
+    sponsor_nonce = models.BigIntegerField(null=True, blank=True)
+    actual_out_units = models.CharField(max_length=78, blank=True)
+    failure_code = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['sponsor_address', 'sponsor_nonce'],
+            condition=Q(sponsor_nonce__isnull=False), name='payment_bridge_polygon_nonce_uniq',
+        )]
+        indexes = [models.Index(fields=['status', 'updated_at'], name='pay_bridge_status_idx')]
+
+
 class MoneyOperation(models.Model):
     TYPE_CHOICES = [
         ('deposit', 'Deposit'),
@@ -534,3 +597,63 @@ class EligibilityDecision(models.Model):
             models.Index(fields=['confio_account', '-decided_at']),
             models.Index(fields=['decision', '-decided_at']),
         ]
+
+
+class InfiniaJourney(models.Model):
+    """Owner-authorized provider legs; a child success never completes the journey."""
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    money_flow = models.OneToOneField(MoneyFlow, on_delete=models.PROTECT, related_name='infinia_journey')
+    request_id = models.UUIDField()
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT)
+    direction = models.CharField(max_length=16, choices=[('to_bank', 'To bank'), ('to_wallet', 'To wallet')])
+    stage = models.CharField(max_length=32, default='awaiting_credit')
+    local_account = models.ForeignKey(FinancialAccount, on_delete=models.PROTECT, related_name='+')
+    crypto_account = models.ForeignKey(FinancialAccount, on_delete=models.PROTECT, related_name='+')
+    funding_credit = models.OneToOneField('LedgerEntry', on_delete=models.PROTECT, null=True, blank=True, related_name='funded_journey')
+    bridge = models.OneToOneField(PaymentBridgeTransfer, on_delete=models.PROTECT, null=True, blank=True, related_name='infinia_journey')
+    minimum_fx_output = models.DecimalField(max_digits=38, decimal_places=18)
+    destination_snapshot = models.JSONField(default=dict)
+    wallet_address = models.CharField(max_length=42)
+    wallet_arrival_units = models.CharField(max_length=78, blank=True)
+    wallet_arrival_tx_hash = models.CharField(max_length=66, blank=True)
+    fx_quote = models.JSONField(default=dict)
+    fx_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    payout_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    failure_code = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['confio_account', 'request_id'], name='infinia_journey_request_uniq')]
+        indexes = [models.Index(fields=['stage', 'updated_at'], name='infinia_journey_stage_idx')]
+
+
+class CobreJourney(models.Model):
+    """Owner-authorized provider legs; a child success never completes the journey."""
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    money_flow = models.OneToOneField(MoneyFlow, on_delete=models.PROTECT, related_name='cobre_journey')
+    request_id = models.UUIDField()
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT)
+    direction = models.CharField(max_length=16, choices=[('to_bank', 'To bank'), ('to_wallet', 'To wallet')])
+    stage = models.CharField(max_length=32, default='awaiting_credit')
+    local_account = models.ForeignKey(FinancialAccount, on_delete=models.PROTECT, related_name='+')
+    crypto_account = models.ForeignKey(FinancialAccount, on_delete=models.PROTECT, related_name='+')
+    copco_account = models.ForeignKey(FinancialAccount, on_delete=models.PROTECT, related_name='+')
+    ramp_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    funding_credit = models.OneToOneField('LedgerEntry', on_delete=models.PROTECT, null=True, blank=True, related_name='cobre_funded_journey')
+    bridge = models.OneToOneField(PaymentBridgeTransfer, on_delete=models.PROTECT, null=True, blank=True, related_name='cobre_journey')
+    minimum_fx_output = models.DecimalField(max_digits=38, decimal_places=18)
+    destination_snapshot = models.JSONField(default=dict)
+    wallet_address = models.CharField(max_length=42)
+    wallet_arrival_units = models.CharField(max_length=78, blank=True)
+    wallet_arrival_tx_hash = models.CharField(max_length=66, blank=True)
+    fx_quote = models.JSONField(default=dict)
+    fx_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    payout_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    failure_code = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['confio_account', 'request_id'], name='cobre_journey_request_uniq')]
+        indexes = [models.Index(fields=['stage', 'updated_at'], name='cobre_journey_stage_idx')]
