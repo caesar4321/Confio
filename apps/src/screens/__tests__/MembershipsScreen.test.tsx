@@ -9,12 +9,20 @@ const mockNavigation = { navigate: jest.fn(), goBack: jest.fn(), setParams: jest
 let mockParams: any;
 let mockRows: any[];
 let mockSummary: any;
+let mockDirectory: any;
 let mockFocus: (() => void) | undefined;
 jest.mock('@apollo/client', () => ({
   gql: (parts: TemplateStringsArray) => parts.join(''),
-  useQuery: (query: string) => (String(query).includes('myBillingSummary')
-    ? { data: mockSummary, loading: false, refetch: jest.fn() }
-    : { data: { myBillingObligations: mockRows }, loading: false, refetch: mockRefetch }),
+  useQuery: (query: string) => {
+    const q = String(query);
+    if (q.includes('institutionDirectory')) {
+      return { data: mockDirectory, loading: false, refetch: jest.fn() };
+    }
+    if (q.includes('myBillingSummary')) {
+      return { data: mockSummary, loading: false, refetch: jest.fn() };
+    }
+    return { data: { myBillingObligations: mockRows }, loading: false, refetch: mockRefetch };
+  },
   useMutation: (query: string) => [query.includes('ClaimInstitutionMembership') ? mockClaim : mockCreate],
 }));
 jest.mock('@react-navigation/native', () => ({
@@ -33,6 +41,7 @@ describe('membership checkout', () => {
     jest.clearAllMocks();
     mockRows = [];
     mockSummary = { myBillingSummary: { linked: false } };
+    mockDirectory = undefined;
     mockParams = undefined;
     jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   });
@@ -203,6 +212,57 @@ describe('membership checkout', () => {
     const firstIndex = (name: string) => copy.findIndex(entry => entry === name);
     expect(firstIndex('CIP')).toBeGreaterThanOrEqual(0);
     expect(firstIndex('CIP')).toBeLessThan(firstIndex('Colegio Zeta'));
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('lists institutions with a not-yet-linkable one marked, and keeps scan/paste', async () => {
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Colegio de Ingenieros del Perú', provider: 'cip', linkingAvailable: false },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Colegio de Ingenieros del Perú');
+    expect(copy).toContain('Próximamente');
+    // The directory is additive: it must never replace the paths that work today.
+    expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
+    expect(pressLabel(tree, 'Tengo un enlace o código')).toBeTruthy();
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('a linkable institution carries no Proximamente badge', async () => {
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Colegio Listo', provider: 'cip', linkingAvailable: true },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Colegio Listo');
+    expect(copy).not.toContain('Próximamente');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('a directory that fails to load never hides the working linking paths', async () => {
+    mockDirectory = undefined; // server without institutionDirectory, errorPolicy: all
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Vincula tu institución');
+    expect(copy).not.toContain('Instituciones en Confío');
+    expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('does not show the directory to an already linked member', async () => {
+    mockSummary = { myBillingSummary: { linked: true } };
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Colegio de Ingenieros del Perú', provider: 'cip', linkingAvailable: false },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Estás al día');
+    expect(copy).not.toContain('Instituciones en Confío');
     await act(async () => { tree.unmount(); });
   });
 });

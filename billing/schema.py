@@ -9,7 +9,8 @@ from users.models import Account
 
 from .identity_tokens import InvalidInstitutionToken, consume_identity_token
 from .member_payments import MemberCheckoutError, create_member_payment_intent
-from .models import BillingObligation, InstitutionApplication, InstitutionIdentitySession, ObligationSubject
+from .models import (BillingObligation, InstitutionApplication, InstitutionConnection,
+                     InstitutionIdentitySession, ObligationSubject)
 
 
 class MemberObligationType(graphene.ObjectType):
@@ -41,6 +42,19 @@ class MemberBillingEntryType(graphene.ObjectType):
     application_status = graphene.String()
 
 
+class InstitutionDirectoryEntryType(graphene.ObjectType):
+    """A discoverable institution. Listing is deliberately independent of whether
+    payments are switched on: this is how a member finds their colegio, not how
+    money moves."""
+
+    id = graphene.NonNull(graphene.String)
+    name = graphene.NonNull(graphene.String)
+    provider = graphene.NonNull(graphene.String)
+    # False means listed but not yet linkable. Derived, never stored, so it can
+    # never claim an institution is ready when its endpoint is absent.
+    linking_available = graphene.NonNull(graphene.Boolean)
+
+
 class MemberBillingSummaryType(graphene.ObjectType):
     linked = graphene.NonNull(graphene.Boolean)
     open_count = graphene.NonNull(graphene.Int)
@@ -67,6 +81,31 @@ def _member_context(info, permission=None):
 class Query(graphene.ObjectType):
     my_billing_obligations = graphene.NonNull(graphene.List(graphene.NonNull(MemberObligationType)))
     my_billing_summary = graphene.NonNull(MemberBillingSummaryType)
+    institution_directory = graphene.NonNull(
+        graphene.List(graphene.NonNull(InstitutionDirectoryEntryType)))
+
+    @login_required
+    def resolve_institution_directory(self, info):
+        _member_context(info)
+        # Ordered by name: with a single counterparty, per-country priority
+        # ordering would be infrastructure for a problem that does not exist
+        # yet. Revisit when a second institution is real.
+        rows = (
+            InstitutionConnection.objects
+            .select_related('business')
+            .filter(mode='live', business__deleted_at__isnull=True)
+            .exclude(status='disabled')
+            .order_by('business__name', 'id')
+        )
+        return [
+            InstitutionDirectoryEntryType(
+                id=row.public_id,
+                name=row.business.name,
+                provider=row.provider,
+                linking_available=bool(
+                    row.verification_url and row.status == 'active' and row.live_approved),
+            ) for row in rows
+        ]
 
     @login_required
     def resolve_my_billing_obligations(self, info):
