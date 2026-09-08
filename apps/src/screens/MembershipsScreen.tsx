@@ -269,7 +269,6 @@ export const MembershipsScreen = () => {
                 <Text style={styles.secondaryText}>Tengo un enlace o código</Text>
               </TouchableOpacity>
             )}
-            <Text style={styles.muted}>Vincular con el enlace de tu institución no tiene costo. Sus cuotas se pagan por separado.</Text>
             <Text style={styles.fine}>Un QR público no verifica tu identidad. Confío no te pedirá tu DNI en esta pantalla.</Text>
           </View>
         ) : obligations.length === 0 ? (
