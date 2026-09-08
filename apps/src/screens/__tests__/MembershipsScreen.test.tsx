@@ -125,12 +125,14 @@ describe('membership checkout', () => {
     return button;
   };
 
-  it('offers both linking paths and states the cost when not linked', async () => {
+  it('offers both linking paths and makes no pricing claim when not linked', async () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
     expect(copy).toContain('Vincula tu institución');
-    expect(copy).toContain('no tiene costo');
+    // Linking is paid on BOTH paths, and no charge is implemented yet, so a
+    // discovery surface must not claim free or quote a price.
+    expect(copy).not.toMatch(/no tiene costo|gratis|US\$/);
     expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
     expect(pressLabel(tree, 'Tengo un enlace o código')).toBeTruthy();
     await act(async () => { tree.unmount(); });
