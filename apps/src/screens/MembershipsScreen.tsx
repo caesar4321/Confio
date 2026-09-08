@@ -15,7 +15,11 @@ import { useMutation, useQuery } from '@apollo/client';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 
-import { GET_MY_BILLING_OBLIGATIONS, GET_MY_BILLING_SUMMARY } from '../apollo/queries';
+import {
+  GET_INSTITUTION_DIRECTORY,
+  GET_MY_BILLING_OBLIGATIONS,
+  GET_MY_BILLING_SUMMARY,
+} from '../apollo/queries';
 import { parseInstitutionLink } from '../utils/institutionLinks';
 import {
   CLAIM_INSTITUTION_MEMBERSHIP,
@@ -44,6 +48,13 @@ type Obligation = {
 
 const money = (minor: number, currency: string) =>
   new Intl.NumberFormat('es-PE', { style: 'currency', currency }).format(minor / 100);
+
+type DirectoryEntry = {
+  id: string;
+  name: string;
+  provider: string;
+  linkingAvailable: boolean;
+};
 
 type InstitutionGroup = { institutionName: string; rows: Obligation[] };
 
@@ -104,6 +115,13 @@ export const MembershipsScreen = () => {
   const { data: summaryData, loading: summaryLoading } = useQuery(GET_MY_BILLING_SUMMARY, {
     skip: !authReady,
     fetchPolicy: 'cache-and-network',
+  });
+  // Its own document, not a field on a shared query: a server without
+  // institutionDirectory fails this alone and leaves scan/paste working.
+  const { data: directoryData } = useQuery(GET_INSTITUTION_DIRECTORY, {
+    skip: !authReady,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
   });
   const [createIntent] = useMutation(CREATE_MEMBER_PAYMENT_INTENT);
   const [claimMembership] = useMutation(CLAIM_INSTITUTION_MEMBERSHIP);
@@ -183,6 +201,7 @@ export const MembershipsScreen = () => {
   // query can never downgrade a linked member to the "vincula tu institución"
   // state. Unknown stays unknown rather than becoming a confident negative.
   const linked = obligations.length > 0 || !!summaryData?.myBillingSummary?.linked;
+  const directory: DirectoryEntry[] = directoryData?.institutionDirectory || [];
   const outstandingGroups = groupByInstitution(outstanding);
   const showInstitutionHeaders = outstandingGroups.length > 1;
 
@@ -226,6 +245,22 @@ export const MembershipsScreen = () => {
             <Icon name="users" size={30} color={colors.primary} />
             <Text style={styles.emptyTitle}>Vincula tu institución</Text>
             <Text style={styles.muted}>Cuando tu institución te envíe su enlace personal de verificación, sus cuotas aparecerán aquí y podrás pagarlas desde Confío.</Text>
+            {directory.length > 0 && (
+              <View style={styles.directory}>
+                <Text style={styles.directoryTitle}>Instituciones en Confío</Text>
+                {directory.map(entry => (
+                  <View key={entry.id} style={styles.directoryRow}>
+                    <Icon name="award" size={18} color={colors.primary} />
+                    <Text style={styles.directoryName}>{entry.name}</Text>
+                    {/* Rows are inert until the member-number flow exists; a tap
+                        that goes nowhere is worse than no affordance. */}
+                    {!entry.linkingAvailable && (
+                      <Text style={styles.soonBadge}>Próximamente</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => navigation.navigate('Scan')}
@@ -359,6 +394,11 @@ const styles = StyleSheet.create({
   muted: { color: colors.text.secondary, textAlign: 'center', lineHeight: 20 },
   link: { color: colors.primaryDark, fontWeight: '700' },
   fine: { fontSize: 12, color: colors.text.light, textAlign: 'center', lineHeight: 17 },
+  directory: { alignSelf: 'stretch', backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 6 },
+  directoryTitle: { fontSize: 12, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', marginTop: 10, marginBottom: 4 },
+  directoryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  directoryName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary },
+  soonBadge: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, backgroundColor: colors.neutral, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
   primaryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', minHeight: 48, borderRadius: 12, backgroundColor: colors.primary, paddingHorizontal: 16 },
   primaryText: { color: colors.white, fontWeight: '700', fontSize: 15 },
   secondaryButton: { alignSelf: 'stretch', minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },

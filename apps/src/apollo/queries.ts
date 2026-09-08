@@ -14,6 +14,17 @@ export const GET_MY_BILLING_SUMMARY = gql`
   }
 `;
 
+export const GET_INSTITUTION_DIRECTORY = gql`
+  query GetInstitutionDirectory {
+    institutionDirectory {
+      id
+      name
+      provider
+      linkingAvailable
+    }
+  }
+`;
+
 export const GET_MY_BILLING_OBLIGATIONS = gql`
   query GetMyBillingObligations {
     myBillingObligations {
