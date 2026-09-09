@@ -4,13 +4,14 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import { useMutation, useQuery } from '@apollo/client';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -289,27 +290,24 @@ export const MembershipsScreen = () => {
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.headerBar}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            accessibilityLabel="Volver"
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Icon name="arrow-left" size={24} color={colors.white} />
-          </TouchableOpacity>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          <View style={{ width: 24 }} />
-        </View>
-        {linked && (
-          <Text style={styles.headerNote}>
-            {outstanding.length === 0
-              ? 'Estás al día'
-              : `${outstanding.length} ${outstanding.length === 1 ? 'cuota pendiente' : 'cuotas pendientes'}`}
-          </Text>
-        )}
-      </View>
+    <View style={styles.safe}>
+      {/* The global default is dark-content on white; an emerald header needs
+          light-content, and the shared Header owns the top inset so the band
+          extends under the status bar instead of starting below it. */}
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <Header
+        navigation={navigation as any}
+        title={title}
+        subtitle={linked
+          ? (outstanding.length === 0
+            ? 'Estás al día'
+            : `${outstanding.length} ${outstanding.length === 1 ? 'cuota pendiente' : 'cuotas pendientes'}`)
+          : undefined}
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+        onBackPress={() => navigation.goBack()}
+      />
       <View style={styles.body}>
       <ScrollView
         contentContainerStyle={styles.content}
@@ -443,18 +441,14 @@ export const MembershipsScreen = () => {
         )}
       </ScrollView>
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   // Card language mirrors HomeScreen's walletCard: soft elevation, never a
   // 1px border. Borders read as wireframe next to the rest of the app.
-  safe: { flex: 1, backgroundColor: colors.primary },
-  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 18, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
-  headerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: colors.white },
-  headerNote: { marginTop: 6, textAlign: 'center', fontSize: 13, color: 'rgba(255,255,255,0.85)', fontWeight: '500' },
+  safe: { flex: 1, backgroundColor: colors.neutral },
   body: { flex: 1, backgroundColor: colors.neutral },
   content: { padding: 16, paddingBottom: 40 },
   center: { paddingVertical: 64, alignItems: 'center', gap: 12 },
