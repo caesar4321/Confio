@@ -45,7 +45,15 @@ export const InstitutionLogo = ({
         source={{ uri: logoUrl }}
         onError={() => setFailed(true)}
         accessibilityLabel={name}
-        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.white }}
+        // contain, not the default cover: institution crests are rarely square
+        // (CIP's is 98x94) and cover would clip the ring of the seal.
+        resizeMode="contain"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: colors.white,
+        }}
       />
     );
   }
