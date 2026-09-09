@@ -12,7 +12,7 @@ def login_diagnostics(request):
     error = header('X-AppCheck-Debug-Error').lower()
     code = 'none' if not error else 'unknown'
     allowed = {'attestation_rejected', 'backoff', 'rate_limited', 'api_unavailable',
-               'service_unavailable', 'play_store_missing', 'network_error', 'empty_token'}
+               'service_unavailable', 'play_store_missing', 'network_error', 'empty_token', 'fetch_timeout'}
     if error in allowed:
         code = error
     for needle, category in (
@@ -21,6 +21,7 @@ def login_diagnostics(request):
         ('api_not_available', 'api_unavailable'),
         ('cannot_bind_to_service', 'service_unavailable'),
         ('play_store_not_found', 'play_store_missing'),
+        ('appcheck_fetch_timeout', 'fetch_timeout'),
         ('network', 'network_error'), ('empty_token', 'empty_token'),
     ):
         if needle in error:

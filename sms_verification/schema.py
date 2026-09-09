@@ -130,19 +130,27 @@ class InitiateSMSVerification(graphene.Mutation):
                 pass
 
             # --- Firebase App Check Enforcement ---
-            from security.integrity_service import app_check_service
-            
+            # This path predates verify_and_record() and calls verify_token()
+            # directly, so it must consult the global switch itself. The five
+            # rate limiters below (phone cooldown, per-user, per-IP, per-phone,
+            # per-device) are independent of App Check and always apply.
+            from security.integrity_service import app_check_service, app_check_enforcement_enabled
+
+            enforce_app_check = app_check_enforcement_enabled()
+
             # Extract App Check token from headers
             token_header = getattr(info.context, 'headers', {}).get('X-Firebase-AppCheck', getattr(info.context, 'META', {}).get('HTTP_X_FIREBASE_APPCHECK', ''))
-            
+
             if not token_header:
-                logger.warning(f"SMS requested without App Check token by user {user.id} to {phone_e164}")
-                return InitiateSMSVerification(success=False, error="Actualiza la aplicación a la última versión para continuar.")
-                
-            verification = app_check_service.verify_token(token_header)
-            if not verification.get('valid', False):
-                logger.warning(f"SMS requested with INVALID App Check token by user {user.id} to {phone_e164}")
-                return InitiateSMSVerification(success=False, error="Límites de seguridad excedidos. Intenta más tarde o actualiza tu app.")
+                logger.warning(f"SMS requested without App Check token by user {user.id} to {phone_e164} (enforced={enforce_app_check})")
+                if enforce_app_check:
+                    return InitiateSMSVerification(success=False, error="Actualiza la aplicación a la última versión para continuar.")
+            else:
+                verification = app_check_service.verify_token(token_header)
+                if not verification.get('valid', False):
+                    logger.warning(f"SMS requested with INVALID App Check token by user {user.id} to {phone_e164} (enforced={enforce_app_check})")
+                    if enforce_app_check:
+                        return InitiateSMSVerification(success=False, error="Límites de seguridad excedidos. Intenta más tarde o actualiza tu app.")
 
             if not phone_e164:
                 valid, phone_e164, _resolved_iso, lookup_line_type = lookup_phone_with_line_type(

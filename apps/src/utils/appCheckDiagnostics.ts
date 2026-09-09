@@ -8,6 +8,7 @@ export function appCheckDiagnosticCode(value: unknown): string {
     ['api_not_available', 'api_unavailable'], ['cannot_bind_to_service', 'service_unavailable'],
     ['play_store_not_found', 'play_store_missing'], ['network', 'network_error'],
     ['empty_token', 'empty_token'],
+    ['appcheck_fetch_timeout', 'fetch_timeout'],
   ];
   return categories.find(([needle]) => error.includes(needle))?.[1] || 'unknown';
 }
