@@ -104,6 +104,7 @@ export const MembershipsScreen = () => {
   const [payingId, setPayingId] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [codeValue, setCodeValue] = useState('');
   const [codeError, setCodeError] = useState('');
   const authReady = useAuthReady();
@@ -207,6 +208,86 @@ export const MembershipsScreen = () => {
   const outstandingGroups = groupByInstitution(outstanding);
   const showInstitutionHeaders = outstandingGroups.length > 1;
 
+  // One definition, rendered in both states. A linked member must still be
+  // able to add a second institution; gating this on !linked recreated the
+  // discovery problem one step further down the funnel.
+  const addInstitutionBlock = (
+    <View style={styles.addBlock}>
+      {directory.length > 0 && (
+        <View style={styles.directory}>
+          {/* "Disponibles para vincular", never "Instituciones en Confío":
+              the heading has to say these are NOT yours yet. */}
+          <Text style={styles.directoryTitle}>Disponibles para vincular</Text>
+          {directory.map((entry, index) => (
+            <View
+              key={entry.id}
+              style={[styles.directoryRow, index > 0 && styles.directoryRowDivided]}
+            >
+              <InstitutionLogo
+                name={entry.name}
+                logoUrl={entry.logoUrl}
+                size={36}
+                background={colors.primaryDark}
+              />
+              <Text style={styles.directoryName} numberOfLines={2}>{entry.name}</Text>
+              {/* A verb is what disambiguates a row from an owned card. Owned
+                  cards carry money; available rows carry an action. Inert
+                  until the member-number flow exists. */}
+              {entry.linkingAvailable
+                ? <Text style={styles.linkAction}>Vincular</Text>
+                : <Text style={styles.soonBadge}>Próximamente</Text>}
+            </View>
+          ))}
+        </View>
+      )}
+      <Text style={styles.addHint}>¿Tu institución te envió un enlace?</Text>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={() => navigation.navigate('Scan')}
+        accessibilityRole="button"
+        accessibilityLabel="Escanear QR"
+      >
+        <Icon name="maximize" size={18} color={colors.white} />
+        <Text style={styles.primaryText}>Escanear QR</Text>
+      </TouchableOpacity>
+      {codeOpen ? (
+        <View style={styles.codeBox}>
+          <TextInput
+            style={styles.input}
+            value={codeValue}
+            onChangeText={value => { setCodeValue(value); if (codeError) setCodeError(''); }}
+            placeholder="Pega aquí el enlace de tu institución"
+            placeholderTextColor={colors.text.light}
+            autoCapitalize="none"
+            autoCorrect={false}
+            multiline
+            accessibilityLabel="Enlace de tu institución"
+          />
+          {!!codeError && <Text style={styles.errorText}>{codeError}</Text>}
+          <TouchableOpacity
+            style={[styles.primaryButton, !codeValue.trim() && styles.buttonDisabled]}
+            disabled={!codeValue.trim()}
+            onPress={submitCode}
+            accessibilityRole="button"
+            accessibilityLabel="Continuar"
+          >
+            <Text style={styles.primaryText}>Continuar</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => setCodeOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Tengo un enlace o código"
+        >
+          <Text style={styles.secondaryText}>Tengo un enlace o código</Text>
+        </TouchableOpacity>
+      )}
+      <Text style={styles.fine}>Un QR público no verifica tu identidad. Confío no te pedirá tu DNI en esta pantalla.</Text>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
@@ -261,76 +342,9 @@ export const MembershipsScreen = () => {
             <View style={styles.emptyDisc}>
               <Icon name="users" size={30} color={colors.primaryDark} />
             </View>
-            <Text style={styles.emptyTitle}>Vincula tu institución</Text>
-            <Text style={styles.muted}>Cuando tu institución te envíe su enlace personal de verificación, sus cuotas aparecerán aquí y podrás pagarlas desde Confío.</Text>
-            {directory.length > 0 && (
-              <View style={styles.directory}>
-                <Text style={styles.directoryTitle}>Instituciones en Confío</Text>
-                {directory.map((entry, index) => (
-                  <View
-                    key={entry.id}
-                    style={[styles.directoryRow, index > 0 && styles.directoryRowDivided]}
-                  >
-                    <InstitutionLogo
-                      name={entry.name}
-                      logoUrl={entry.logoUrl}
-                      size={36}
-                      background={colors.primaryDark}
-                    />
-                    <Text style={styles.directoryName} numberOfLines={2}>{entry.name}</Text>
-                    {/* Rows are inert until the member-number flow exists; a tap
-                        that goes nowhere is worse than no affordance. */}
-                    {!entry.linkingAvailable && (
-                      <Text style={styles.soonBadge}>Próximamente</Text>
-                    )}
-                  </View>
-                ))}
-              </View>
-            )}
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => navigation.navigate('Scan')}
-              accessibilityRole="button"
-              accessibilityLabel="Escanear QR"
-            >
-              <Icon name="maximize" size={18} color={colors.white} />
-              <Text style={styles.primaryText}>Escanear QR</Text>
-            </TouchableOpacity>
-            {codeOpen ? (
-              <View style={styles.codeBox}>
-                <TextInput
-                  style={styles.input}
-                  value={codeValue}
-                  onChangeText={value => { setCodeValue(value); if (codeError) setCodeError(''); }}
-                  placeholder="Pega aquí el enlace de tu institución"
-                  placeholderTextColor={colors.text.light}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  multiline
-                  accessibilityLabel="Enlace de tu institución"
-                />
-                {!!codeError && <Text style={styles.errorText}>{codeError}</Text>}
-                <TouchableOpacity
-                  style={[styles.primaryButton, !codeValue.trim() && styles.buttonDisabled]}
-                  disabled={!codeValue.trim()}
-                  onPress={submitCode}
-                  accessibilityRole="button"
-                  accessibilityLabel="Continuar"
-                >
-                  <Text style={styles.primaryText}>Continuar</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() => setCodeOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Tengo un enlace o código"
-              >
-                <Text style={styles.secondaryText}>Tengo un enlace o código</Text>
-              </TouchableOpacity>
-            )}
-            <Text style={styles.fine}>Un QR público no verifica tu identidad. Confío no te pedirá tu DNI en esta pantalla.</Text>
+            <Text style={styles.emptyTitle}>Aún no tienes instituciones</Text>
+            <Text style={styles.muted}>Vincula la tuya para ver y pagar sus cuotas desde Confío.</Text>
+            {addInstitutionBlock}
           </View>
         ) : obligations.length === 0 ? (
           <View style={styles.empty}>
@@ -339,10 +353,13 @@ export const MembershipsScreen = () => {
             </View>
             <Text style={styles.emptyTitle}>Estás al día</Text>
             <Text style={styles.muted}>Tu institución aún no ha emitido cuotas. Cuando lo haga, aparecerán aquí.</Text>
+            {addInstitutionBlock}
           </View>
         ) : (
           <>
-            {(!selected || selected.status !== 'paid') && <Text style={styles.section}>Por pagar</Text>}
+            {(!selected || selected.status !== 'paid') && (
+              <Text style={styles.section}>Tus cuotas por pagar</Text>
+            )}
             {!selected && outstanding.length === 0 && <Text style={styles.muted}>Estás al día.</Text>}
             {outstandingGroups.map(group => (
               <View key={group.institutionName}>
@@ -406,6 +423,22 @@ export const MembershipsScreen = () => {
                 </View>
               </>
             )}
+            {!selected && (
+              addOpen ? (
+                <View style={styles.addOpenWrap}>{addInstitutionBlock}</View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.addRow}
+                  onPress={() => setAddOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Agregar otra institución"
+                >
+                  <Icon name="plus-circle" size={20} color={colors.primaryDark} />
+                  <Text style={styles.addRowText}>Agregar otra institución</Text>
+                  <Icon name="chevron-right" size={16} color={colors.text.light} />
+                </TouchableOpacity>
+              )
+            )}
           </>
         )}
       </ScrollView>
@@ -439,6 +472,12 @@ const styles = StyleSheet.create({
   directoryRowDivided: { borderTopWidth: 1, borderTopColor: colors.borderLight },
   directoryDisc: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   directoryName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary, lineHeight: 20 },
+  addBlock: { alignSelf: 'stretch', gap: 12, marginTop: 4 },
+  addOpenWrap: { marginTop: 20 },
+  addHint: { fontSize: 13, color: colors.text.secondary, textAlign: 'center', marginTop: 4 },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 16, marginTop: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  addRowText: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.primaryDark },
+  linkAction: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
   soonBadge: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, backgroundColor: colors.neutralDark, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, overflow: 'hidden' },
 
   primaryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', minHeight: 52, borderRadius: 14, backgroundColor: colors.primary, paddingHorizontal: 16, shadowColor: colors.primaryDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
