@@ -9,14 +9,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from users.models import Account
-        from users.tasks import assess_wallet_reenrollment_account
+        from users.tasks import assess_wallet_reenrollment_account, _reenrollment_cohort
         from users.web3auth_schema import _wallet_reenrollment_assessment
 
         candidates = Account.objects.filter(
+            _reenrollment_cohort(),
             account_type='personal',
             account_index=0,
             algorand_address__isnull=False,
-            is_keyless_migrated=False,
             deleted_at__isnull=True,
         ).only(
             'id',
@@ -40,10 +40,10 @@ class Command(BaseCommand):
 
         remaining = 0
         remaining_candidates = Account.objects.filter(
+            _reenrollment_cohort(),
             account_type='personal',
             account_index=0,
             algorand_address__isnull=False,
-            is_keyless_migrated=False,
             deleted_at__isnull=True,
         ).only(
             'id',

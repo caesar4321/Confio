@@ -9,6 +9,11 @@ import logging
 from functools import wraps
 from django.db import connection
 from django.db import transaction
+from django.db.models import Q
+
+
+def _reenrollment_cohort():
+    return Q(is_keyless_migrated=False) | Q(bsc_address__isnull=True) | Q(bsc_address='')
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,7 @@ def assess_wallet_reenrollment_account(account_id, lease=None):
         _release_wallet_reenrollment_assessment_lease,
         _store_wallet_reenrollment_assessment,
         _wallet_reenrollment_assessment,
+        _wallet_reenrollment_candidate,
     )
 
     if lease:
@@ -51,11 +57,11 @@ def assess_wallet_reenrollment_account(account_id, lease=None):
         return 'already_running'
     try:
         account = Account.objects.filter(
+            _reenrollment_cohort(),
             id=account_id,
             account_type='personal',
             account_index=0,
             algorand_address__isnull=False,
-            is_keyless_migrated=False,
             deleted_at__isnull=True,
         ).first()
         if not account:
@@ -71,7 +77,7 @@ def assess_wallet_reenrollment_account(account_id, lease=None):
             locked = Account.objects.select_for_update().filter(pk=account.pk).first()
             if (
                 not locked
-                or locked.is_keyless_migrated
+                or not _wallet_reenrollment_candidate(locked)
                 or locked.algorand_address != old_algorand
                 or (locked.bsc_address or '').lower() != old_bsc.lower()
                 or locked.wallet_reenrollment_assessment_lease != lease
@@ -98,10 +104,10 @@ def queue_wallet_reenrollment_assessments(batch_size=25):
         return 0
     retry_before = timezone.now() - timedelta(minutes=5)
     candidates = Account.objects.filter(
+        _reenrollment_cohort(),
         account_type='personal',
         account_index=0,
         algorand_address__isnull=False,
-        is_keyless_migrated=False,
         deleted_at__isnull=True,
     ).only(
         'id',
