@@ -138,7 +138,7 @@ describe('membership checkout', () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).toContain('Vincula tu institución');
+    expect(copy).toContain('Aún no tienes instituciones');
     // Linking is paid on BOTH paths, and no charge is implemented yet, so a
     // discovery surface must not claim free or quote a price.
     expect(copy).not.toMatch(/no tiene costo|gratis|US\$/);
@@ -153,7 +153,7 @@ describe('membership checkout', () => {
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
     expect(copy).toContain('Estás al día');
-    expect(copy).not.toContain('Vincula tu institución');
+    expect(copy).not.toContain('Aún no tienes instituciones');
     await act(async () => { tree.unmount(); });
   });
 
@@ -165,7 +165,7 @@ describe('membership checkout', () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).not.toContain('Vincula tu institución');
+    expect(copy).not.toContain('Aún no tienes instituciones');
     expect(copy).toContain('CIP');
     await act(async () => { tree.unmount(); });
   });
@@ -247,22 +247,67 @@ describe('membership checkout', () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).toContain('Vincula tu institución');
-    expect(copy).not.toContain('Instituciones en Confío');
+    expect(copy).toContain('Aún no tienes instituciones');
+    expect(copy).not.toContain('Disponibles para vincular');
     expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
     await act(async () => { tree.unmount(); });
   });
 
-  it('does not show the directory to an already linked member', async () => {
-    mockSummary = { myBillingSummary: { linked: true } };
+  it('says available institutions are not yours, and owned dues are', async () => {
     mockDirectory = { institutionDirectory: [
       { id: 'c1', name: 'Colegio de Ingenieros del Perú', provider: 'cip', linkingAvailable: false },
     ] };
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).toContain('Estás al día');
+    // The heading must never imply ownership of a merely-listed institution.
+    expect(copy).toContain('Disponibles para vincular');
     expect(copy).not.toContain('Instituciones en Confío');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('a linkable row carries an action verb so it cannot read as owned', async () => {
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Colegio Listo', provider: 'cip', linkingAvailable: true },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Vincular');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('a linked member can still reach the directory to add another', async () => {
+    mockRows = [{ id: 'a', institutionName: 'CIP', memberReference: '••42',
+      amountMinor: 3500, amountRemainingMinor: 3500, currency: 'PEN', status: 'open',
+      dueAt: '2026-09-30T12:00:00Z' }];
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Otro Colegio', provider: 'oc', linkingAvailable: false },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    let copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    // Collapsed by default: owned dues stay the subject of the screen.
+    expect(copy).toContain('Tus cuotas por pagar');
+    expect(copy).not.toContain('Disponibles para vincular');
+
+    await act(async () => { pressLabel(tree, 'Agregar otra institución').props.onPress(); });
+    copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Disponibles para vincular');
+    expect(copy).toContain('Otro Colegio');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('a linked member with no dues can also add another institution', async () => {
+    mockSummary = { myBillingSummary: { linked: true } };
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Otro Colegio', provider: 'oc', linkingAvailable: false },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Estás al día');
+    expect(copy).toContain('Disponibles para vincular');
     await act(async () => { tree.unmount(); });
   });
 });
