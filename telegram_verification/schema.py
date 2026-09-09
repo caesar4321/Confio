@@ -71,7 +71,8 @@ class InitiateTelegramVerification(graphene.Mutation):
                 return InitiateTelegramVerification(success=False, error="Número inválido. Verifica el número e inténtalo nuevamente.")
         logger.info('Formatted phone number: %s', formatted_phone)
         
-        logger.info('Request headers: %s', dict(getattr(info.context, 'headers', {})))
+        # Never log inbound headers: they carry the user's Authorization
+        # bearer, session Cookie and X-Firebase-AppCheck token.
         user = getattr(info.context, 'user', None)
         logger.info('User: %s, Is authenticated: %s', user, getattr(user, 'is_authenticated', False))
         
@@ -93,7 +94,6 @@ class InitiateTelegramVerification(graphene.Mutation):
         ttl = 600  # 10 minutes
         
         logger.info('Initiating Telegram verification for phone number: %s', formatted_phone)
-        logger.info('Using Telegram Gateway Token: %s...', TELEGRAM_GATEWAY_TOKEN[:10] if TELEGRAM_GATEWAY_TOKEN else 'None')
 
         # Reviewer bypass: create a local verification record without calling Telegram API
         review_code = get_review_test_code_for_phone(formatted_phone)
@@ -154,10 +154,9 @@ class InitiateTelegramVerification(graphene.Mutation):
                 'code_length': 6  # Set code length to 6 digits
             }
             
-            logger.info('Sending request to Telegram API:')
-            logger.info('URL: %s', request_url)
-            logger.info('Headers: %s', request_headers)
-            logger.info('Data: %s', request_data)
+            # request_headers holds the gateway bearer and request_data holds
+            # the subscriber phone number: log neither.
+            logger.info('Sending verification request to Telegram Gateway (ttl=%s)', ttl)
             
             response = requests.post(
                 request_url,
@@ -165,9 +164,11 @@ class InitiateTelegramVerification(graphene.Mutation):
                 json=request_data
             )
             
-            logger.info('Telegram API Response Status Code: %s', response.status_code)
-            logger.info('Telegram API Response Headers: %s', dict(response.headers))
-            logger.info('Telegram API Response Body: %s', response.text)
+            logger.info('Telegram Gateway response status: %s', response.status_code)
+            if response.status_code >= 400:
+                # Body only on failure, truncated: it is provider diagnostics,
+                # not something to retain for every successful send.
+                logger.warning('Telegram Gateway error body: %s', response.text[:300])
             
             data = response.json()
             if not data.get('ok'):
@@ -353,9 +354,11 @@ class VerifyTelegramCode(graphene.Mutation):
                     }
                 )
                 
-                logger.info('Telegram API Response Status Code: %s', response.status_code)
-                logger.info('Telegram API Response Headers: %s', dict(response.headers))
-                logger.info('Telegram API Response Body: %s', response.text)
+                logger.info('Telegram Gateway check status: %s', response.status_code)
+                if response.status_code >= 400:
+                    # This body describes a one-time-code check; keep it out of
+                    # the journal except when the call actually failed.
+                    logger.warning('Telegram Gateway error body: %s', response.text[:300])
                 
                 data = response.json()
                 if not data.get('ok'):
