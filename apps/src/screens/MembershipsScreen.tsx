@@ -21,6 +21,7 @@ import {
   GET_MY_BILLING_SUMMARY,
 } from '../apollo/queries';
 import { parseInstitutionLink } from '../utils/institutionLinks';
+import { InstitutionLogo } from '../components/InstitutionLogo';
 import {
   CLAIM_INSTITUTION_MEMBERSHIP,
   CREATE_MEMBER_PAYMENT_INTENT,
@@ -53,6 +54,7 @@ type DirectoryEntry = {
   id: string;
   name: string;
   provider: string;
+  logoUrl?: string | null;
   linkingAvailable: boolean;
 };
 
@@ -269,9 +271,12 @@ export const MembershipsScreen = () => {
                     key={entry.id}
                     style={[styles.directoryRow, index > 0 && styles.directoryRowDivided]}
                   >
-                    <View style={styles.directoryDisc}>
-                      <Icon name="award" size={18} color={colors.primaryDark} />
-                    </View>
+                    <InstitutionLogo
+                      name={entry.name}
+                      logoUrl={entry.logoUrl}
+                      size={36}
+                      background={colors.primaryDark}
+                    />
                     <Text style={styles.directoryName} numberOfLines={2}>{entry.name}</Text>
                     {/* Rows are inert until the member-number flow exists; a tap
                         that goes nowhere is worse than no affordance. */}
@@ -347,7 +352,7 @@ export const MembershipsScreen = () => {
                 {group.rows.map(row => (
                   <View key={row.id} style={styles.card}>
                     <View style={styles.cardTop}>
-                      <View style={styles.logo}><Icon name="award" size={20} color={colors.white} /></View>
+                      <InstitutionLogo name={row.institutionName} size={44} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.institution}>{row.institutionName}</Text>
                         <Text style={styles.reference}>{row.memberReference}</Text>

@@ -24,6 +24,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--name', required=True, help='Institution name as members will read it')
         parser.add_argument('--provider', required=True, help='Connector slug, e.g. cip')
+        parser.add_argument('--logo-url', default=None,
+                            help='Optional https logo. Omit and members see a monogram.')
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -39,11 +41,20 @@ class Command(BaseCommand):
             raise CommandError(f'{businesses.count()} live businesses already named {name!r}')
         business = businesses.first() or Business.objects.create(name=name, category='services')
 
+        logo_url = (options.get('logo_url') or '').strip()
+        if logo_url and not logo_url.startswith('https://'):
+            raise CommandError('--logo-url must be https')
+
         connection, created = InstitutionConnection.objects.get_or_create(
             business=business, provider=provider, mode='live',
             # Defaults keep it listed but unlinkable: no endpoint, not approved.
-            defaults={'status': 'sandbox', 'live_approved': False},
+            defaults={'status': 'sandbox', 'live_approved': False, 'logo_url': logo_url},
         )
+        # Re-running with a logo is how an asset arrives later; re-running
+        # without one must never wipe the logo already configured.
+        if logo_url and connection.logo_url != logo_url:
+            connection.logo_url = logo_url
+            connection.save(update_fields=('logo_url', 'updated_at'))
         linkable = bool(
             connection.verification_url and connection.status == 'active'
             and connection.live_approved)

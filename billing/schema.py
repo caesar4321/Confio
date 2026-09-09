@@ -50,6 +50,7 @@ class InstitutionDirectoryEntryType(graphene.ObjectType):
     id = graphene.NonNull(graphene.String)
     name = graphene.NonNull(graphene.String)
     provider = graphene.NonNull(graphene.String)
+    logo_url = graphene.String()
     # False means listed but not yet linkable. Derived, never stored, so it can
     # never claim an institution is ready when its endpoint is absent.
     linking_available = graphene.NonNull(graphene.Boolean)
@@ -102,6 +103,7 @@ class Query(graphene.ObjectType):
                 id=row.public_id,
                 name=row.business.name,
                 provider=row.provider,
+                logo_url=row.logo_url or None,
                 linking_available=bool(
                     row.verification_url and row.status == 'active' and row.live_approved),
             ) for row in rows
