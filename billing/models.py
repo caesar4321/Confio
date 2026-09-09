@@ -798,6 +798,9 @@ class InstitutionConnection(TimestampedModel):
     mode = models.CharField(max_length=8, choices=BusinessApiKey.MODE_CHOICES)
     verification_url = models.URLField(max_length=500, blank=True)
     application_url = models.URLField(max_length=500, blank=True)
+    # Shown to members while choosing their institution. Blank is the normal
+    # case: the app falls back to a monogram rather than a broken image.
+    logo_url = models.URLField(max_length=500, blank=True)
     bearer_token = EncryptedCharField(max_length=1024, blank=True)
     status = models.CharField(
         max_length=16, choices=[('sandbox', 'Sandbox'), ('active', 'Active'),

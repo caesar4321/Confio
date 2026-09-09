@@ -20,6 +20,7 @@ export const GET_INSTITUTION_DIRECTORY = gql`
       id
       name
       provider
+      logoUrl
       linkingAvailable
     }
   }
