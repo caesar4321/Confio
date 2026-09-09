@@ -191,6 +191,11 @@ def classify_sponsored_empty_wallet(account_info, transactions, address, sponsor
 
         return {'eligible': False, 'reason': 'unsupported_transaction'}
 
+    if not transactions and amount == 0 and not assets and not account_info.get('auth-addr'):
+        return {
+            'eligible': True, 'reason': 'never_funded_wallet',
+            'sponsor_funding': 0, 'current_amount': 0,
+        }
     if not saw_sponsor_funding or sponsor_funding < amount:
         return {'eligible': False, 'reason': 'unproven_funding'}
 
@@ -264,6 +269,7 @@ def revalidate_sponsored_empty_wallet_reenrollment(
     snapshot_round,
     sponsor_funding,
     max_pages=10,
+    inspection_reason=None,
 ):
     """Revalidate a recent complete inspection using only the round delta.
 
@@ -276,7 +282,8 @@ def revalidate_sponsored_empty_wallet_reenrollment(
     try:
         snapshot_round = int(snapshot_round or 0)
         sponsor_funding = int(sponsor_funding or 0)
-        if snapshot_round <= 0 or sponsor_funding <= 0:
+        never_funded = inspection_reason == 'never_funded_wallet' and sponsor_funding == 0
+        if snapshot_round <= 0 or (sponsor_funding <= 0 and not never_funded):
             return {'eligible': False, 'reason': 'missing_inspection_snapshot'}
 
         account_info = algod_client.account_info(address)
@@ -318,7 +325,7 @@ def revalidate_sponsored_empty_wallet_reenrollment(
             sponsor = next(iter(LEGACY_ALGORAND_SPONSOR_ADDRESSES), None)
         result = classify_sponsored_empty_wallet(
             account_info,
-            [{
+            [] if never_funded else [{
                 'tx-type': 'pay',
                 'sender': sponsor,
                 'payment-transaction': {

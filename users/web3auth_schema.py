@@ -26,7 +26,7 @@ User = get_user_model()
 WALLET_REENROLLMENT_GRANT_SALT = 'confio.wallet-reenrollment.v1'
 WALLET_REENROLLMENT_PREPARATION_SALT = 'confio.wallet-reenrollment-preparation.v1'
 WALLET_REENROLLMENT_GRANT_MAX_AGE_SECONDS = 10 * 60
-WALLET_REENROLLMENT_ASSESSMENT_VERSION = 1
+WALLET_REENROLLMENT_ASSESSMENT_VERSION = 2
 WALLET_REENROLLMENT_PERMANENT_REFUSALS = {
     'asset_balance',
     'onchain_state',
@@ -57,6 +57,18 @@ def _should_run_algorand_onboarding(created, client_supplied_address, effective_
     return bool(created and client_supplied_address and effective_address)
 
 
+def _wallet_reenrollment_candidate(account):
+    # Migrated accounts with a BSC anchor stay on ordinary recovery. This
+    # extension covers stranded Algorand-only accounts, not arbitrary resets.
+    return bool(account and account.algorand_address and (
+        not account.is_keyless_migrated or not account.bsc_address
+    ))
+
+
+def _valid_reenrollment_funding(funding, reason):
+    return funding > 0 or (funding == 0 and reason == 'never_funded_wallet')
+
+
 def _wallet_reenrollment_assessment(account):
     value = getattr(account, 'wallet_reenrollment_assessment', None) or {}
     if (
@@ -69,7 +81,7 @@ def _wallet_reenrollment_assessment(account):
         return None
     if value.get('status') == 'eligible' and (
         int(value.get('snapshot_round') or 0) <= 0
-        or int(value.get('sponsor_funding') or 0) <= 0
+        or not _valid_reenrollment_funding(int(value.get('sponsor_funding') or 0), value.get('reason'))
     ):
         return None
     return value
@@ -214,8 +226,9 @@ def _issue_wallet_reenrollment_grant(
         'inspection_round': int(inspection.get('snapshot_round') or 0),
         'sponsor_funding': int(inspection.get('sponsor_funding') or 0),
         'nonce': secrets.token_urlsafe(32),
+        'inspection_reason': inspection.get('reason'),
     }
-    if payload['inspection_round'] <= 0 or payload['sponsor_funding'] <= 0:
+    if payload['inspection_round'] <= 0 or not _valid_reenrollment_funding(payload['sponsor_funding'], payload['inspection_reason']):
         raise ValueError('A complete wallet inspection is required')
     return (
         _wallet_reenrollment_challenge(payload),
@@ -243,7 +256,7 @@ def _verify_wallet_reenrollment_grant(grant, user, account, address, signature):
             or not payload.get('google_subject')
             or not _is_recent_google_auth(payload.get('google_auth_time'))
             or int(payload.get('inspection_round') or 0) <= 0
-            or int(payload.get('sponsor_funding') or 0) <= 0
+            or not _valid_reenrollment_funding(int(payload.get('sponsor_funding') or 0), payload.get('inspection_reason'))
             or not payload.get('nonce')
         ):
             return None
@@ -322,6 +335,7 @@ def _revalidate_wallet_reenrollment(account, grant_payload):
         getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None),
         grant_payload.get('inspection_round'),
         grant_payload.get('sponsor_funding'),
+        inspection_reason=grant_payload.get('inspection_reason'),
     )
 
 
@@ -843,7 +857,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 and _is_recent_google_auth(google_auth_time)
                 and existing_account
                 and existing_account.algorand_address
-                and not existing_account.is_keyless_migrated
+                and _wallet_reenrollment_candidate(existing_account)
             ):
                 assessment = _wallet_reenrollment_assessment(existing_account)
                 if assessment and assessment.get('status') == 'eligible':
@@ -1675,7 +1689,7 @@ class PrepareWalletReenrollmentMutation(graphene.Mutation):
             )
             .first()
         )
-        if not account or account.is_keyless_migrated or not account.algorand_address:
+        if not _wallet_reenrollment_candidate(account):
             return cls(success=False, error='Account is not eligible for wallet reenrollment')
 
         preparation = _verify_wallet_reenrollment_preparation(
@@ -1700,7 +1714,7 @@ class PrepareWalletReenrollmentMutation(graphene.Mutation):
                     if (
                         not locked
                         or locked.wallet_reenrollment_assessment_lease != lease
-                        or locked.is_keyless_migrated
+                        or not _wallet_reenrollment_candidate(locked)
                         or locked.algorand_address != account.algorand_address
                         or (locked.bsc_address or '').lower()
                         != (account.bsc_address or '').lower()
@@ -1802,7 +1816,7 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                 and inspected_account.bsc_address.lower() == address.lower()
             ):
                 return cls(success=True, error=None)
-            if inspected_account.is_keyless_migrated or not inspected_account.algorand_address:
+            if not _wallet_reenrollment_candidate(inspected_account):
                 return cls(success=False, error='Account is not eligible for wallet reenrollment')
 
             inspected_grant = _verify_wallet_reenrollment_grant(
@@ -1848,7 +1862,7 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                 ):
                     return cls(success=True, error=None)
 
-                if account.is_keyless_migrated or not account.algorand_address:
+                if not _wallet_reenrollment_candidate(account):
                     return cls(success=False, error='Account is not eligible for wallet reenrollment')
 
                 grant_payload = _verify_wallet_reenrollment_grant(
