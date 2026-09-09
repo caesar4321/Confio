@@ -639,7 +639,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     token=token_header,
                     action=verdict_action,
                     device_fingerprint=fingerprint_str,
-                    should_enforce=getattr(settings, 'APP_CHECK_LOGIN_ENFORCE', True),
+                    should_enforce=True,  # ANDed with the global APP_CHECK_ENFORCE switch
                     diagnostics=diagnostics,
                 )
                 if not ac_result.get('success', False):

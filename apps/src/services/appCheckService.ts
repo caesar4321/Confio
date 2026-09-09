@@ -37,6 +37,12 @@ export class AppCheckService {
     private static readonly ERROR_DEBUG_WINDOW_MS = 2 * 60 * 1000;
     private static readonly FETCH_ATTEMPT_COOLDOWN_MS = 10 * 1000;
     private static readonly AUTH_RETRY_COOLDOWN_MS = 30 * 1000;
+    // getToken() has no timeout of its own. primeTokenForAuth() awaits it on
+    // the login path, so on networks that advertise IPv6 and black-hole it the
+    // exchange can hang through ~2 minutes of TCP retries and take login with
+    // it. Attestation is never worth stalling sign-in for: bound it and treat
+    // an overrun as a normal token failure.
+    private static readonly TOKEN_FETCH_TIMEOUT_MS = 5 * 1000;
 
     private isDebugAllowed(): boolean {
         return String(ALLOW_APP_CHECK_DEBUG).toLowerCase() === 'true';
@@ -105,6 +111,23 @@ export class AppCheckService {
         return this.initPromise;
     }
 
+    /**
+     * Bound a token fetch. The underlying native promise is left to settle on
+     * its own — we only stop waiting on it, so a late success still populates
+     * lastToken through the normal path on the next call.
+     */
+    private withTimeout<T>(promise: Promise<T>): Promise<T> {
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(
+                () => reject(new Error('APPCHECK_FETCH_TIMEOUT')),
+                AppCheckService.TOKEN_FETCH_TIMEOUT_MS,
+            );
+        });
+
+        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+    }
+
     private normalizeError(error: any): string {
         if (!error) {
             return 'UNKNOWN_ERROR';
@@ -167,7 +190,7 @@ export class AppCheckService {
             }
 
             this.lastFetchAttemptAt = Date.now();
-            const { token } = await appCheck().getToken(forceRefresh);
+            const { token } = await this.withTimeout(appCheck().getToken(forceRefresh));
             if (token) {
                 this.lastToken = token;
                 this.lastTokenAt = Date.now();

@@ -20,6 +20,17 @@ from .models import IntegrityVerdict
 logger = logging.getLogger(__name__)
 
 
+def app_check_enforcement_enabled() -> bool:
+    """
+    The global App Check kill switch.
+
+    All-or-nothing by design. When False, attestation still runs and every
+    verdict is still recorded for telemetry, but no surface blocks on it.
+    Read through getattr so a settings module without the flag fails closed.
+    """
+    return bool(getattr(settings, 'APP_CHECK_ENFORCE', True))
+
+
 def get_firebase_app():
     """Get or initialize Firebase Admin app."""
     try:
@@ -97,9 +108,16 @@ class AppCheckService:
         Args:
             should_enforce: If True, returns success=False when check fails (Blocking Mode).
                           If False, returns success=True even if check fails (Warning Mode).
-        
+                          ANDed with settings.APP_CHECK_ENFORCE below, so the
+                          global kill switch always wins.
+
         Returns dict with verification result.
         """
+        # Single choke point for the global switch. Call sites keep passing
+        # should_enforce=True; resolving it here means a new caller cannot
+        # accidentally opt out of the kill switch by hardcoding True.
+        should_enforce = should_enforce and app_check_enforcement_enabled()
+
         if diagnostics is not None:
             diagnostics = {**diagnostics, 'enforced': bool(should_enforce)}
         if not token:
