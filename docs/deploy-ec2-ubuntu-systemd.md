@@ -109,6 +109,14 @@ Indexer, BSC RPC, or database failures. Release the new iOS/Android build only
 when the final line reports `remaining=0`. The daily Celery Beat task retries
 future transient failures; it is not a substitute for this release gate.
 
+Assessment version 2 retains compatible version-1 `sponsor_only_empty_wallet`
+eligible proofs with matching wallet addresses and valid snapshot/funding data.
+Those accounts do not need a manual reset or a forced rescan after deployment.
+Version-1 refusals are not reused: the precompute command reassesses them under
+the new eligibility rules. Compatibility does not rewrite stored proofs or
+bypass completion checks; replacement still rechecks chain state and pending
+database activity immediately before retiring the old wallet address.
+
 Notes
 -----
 - If your project path or user differs, edit the unit files or adjust `scripts/install_systemd_ubuntu.sh` before installing.
