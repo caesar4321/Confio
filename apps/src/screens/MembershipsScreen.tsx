@@ -206,14 +206,28 @@ export const MembershipsScreen = () => {
   const showInstitutionHeaders = outstandingGroups.length > 1;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} accessibilityLabel="Volver">
-          <Icon name="arrow-left" size={24} color={colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{title}</Text>
-        <View style={{ width: 24 }} />
+        <View style={styles.headerBar}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Volver"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Icon name="arrow-left" size={24} color={colors.white} />
+          </TouchableOpacity>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        {linked && (
+          <Text style={styles.headerNote}>
+            {outstanding.length === 0
+              ? 'Estás al día'
+              : `${outstanding.length} ${outstanding.length === 1 ? 'cuota pendiente' : 'cuotas pendientes'}`}
+          </Text>
+        )}
       </View>
+      <View style={styles.body}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => refetch()} />}
@@ -242,16 +256,23 @@ export const MembershipsScreen = () => {
           </View>
         ) : !linked ? (
           <View style={styles.empty}>
-            <Icon name="users" size={30} color={colors.primary} />
+            <View style={styles.emptyDisc}>
+              <Icon name="users" size={30} color={colors.primaryDark} />
+            </View>
             <Text style={styles.emptyTitle}>Vincula tu institución</Text>
             <Text style={styles.muted}>Cuando tu institución te envíe su enlace personal de verificación, sus cuotas aparecerán aquí y podrás pagarlas desde Confío.</Text>
             {directory.length > 0 && (
               <View style={styles.directory}>
                 <Text style={styles.directoryTitle}>Instituciones en Confío</Text>
-                {directory.map(entry => (
-                  <View key={entry.id} style={styles.directoryRow}>
-                    <Icon name="award" size={18} color={colors.primary} />
-                    <Text style={styles.directoryName}>{entry.name}</Text>
+                {directory.map((entry, index) => (
+                  <View
+                    key={entry.id}
+                    style={[styles.directoryRow, index > 0 && styles.directoryRowDivided]}
+                  >
+                    <View style={styles.directoryDisc}>
+                      <Icon name="award" size={18} color={colors.primaryDark} />
+                    </View>
+                    <Text style={styles.directoryName} numberOfLines={2}>{entry.name}</Text>
                     {/* Rows are inert until the member-number flow exists; a tap
                         that goes nowhere is worse than no affordance. */}
                     {!entry.linkingAvailable && (
@@ -308,7 +329,9 @@ export const MembershipsScreen = () => {
           </View>
         ) : obligations.length === 0 ? (
           <View style={styles.empty}>
-            <Icon name="check-circle" size={30} color={colors.primary} />
+            <View style={styles.emptyDisc}>
+              <Icon name="check-circle" size={30} color={colors.primaryDark} />
+            </View>
             <Text style={styles.emptyTitle}>Estás al día</Text>
             <Text style={styles.muted}>Tu institución aún no ha emitido cuotas. Cuando lo haga, aparecerán aquí.</Text>
           </View>
@@ -354,8 +377,9 @@ export const MembershipsScreen = () => {
             {paid.length > 0 && (
               <>
                 <Text style={styles.section}>Historial</Text>
-                {[...paid].sort((a, b) => Number(b.id === selected?.id) - Number(a.id === selected?.id)).map(row => (
-                  <View key={row.id} style={styles.historyRow}>
+                <View style={styles.historyCard}>
+                {[...paid].sort((a, b) => Number(b.id === selected?.id) - Number(a.id === selected?.id)).map((row, index) => (
+                  <View key={row.id} style={[styles.historyRow, index > 0 && styles.historyRowDivided]}>
                     <Icon name="check-circle" size={20} color={colors.primary} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.institution}>{row.institutionName}</Text>
@@ -374,52 +398,72 @@ export const MembershipsScreen = () => {
                     <Text style={styles.historyAmount}>{money(row.amountMinor, row.currency)}</Text>
                   </View>
                 ))}
+                </View>
               </>
             )}
           </>
         )}
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.neutral },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
-  title: { fontSize: 18, fontWeight: '700', color: colors.text.primary },
+  // Card language mirrors HomeScreen's walletCard: soft elevation, never a
+  // 1px border. Borders read as wireframe next to the rest of the app.
+  safe: { flex: 1, backgroundColor: colors.primary },
+  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 18, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
+  headerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  title: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: colors.white },
+  headerNote: { marginTop: 6, textAlign: 'center', fontSize: 13, color: 'rgba(255,255,255,0.85)', fontWeight: '500' },
+  body: { flex: 1, backgroundColor: colors.neutral },
   content: { padding: 16, paddingBottom: 40 },
   center: { paddingVertical: 64, alignItems: 'center', gap: 12 },
-  empty: { marginTop: 48, alignItems: 'center', padding: 24, gap: 12 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center', color: colors.text.primary },
-  muted: { color: colors.text.secondary, textAlign: 'center', lineHeight: 20 },
-  link: { color: colors.primaryDark, fontWeight: '700' },
+
+  empty: { marginTop: 32, alignItems: 'center', paddingHorizontal: 8, gap: 14 },
+  emptyDisc: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  emptyTitle: { fontSize: 19, fontWeight: '700', textAlign: 'center', color: colors.text.primary, letterSpacing: -0.2 },
+  muted: { color: colors.text.secondary, textAlign: 'center', fontSize: 14, lineHeight: 21 },
   fine: { fontSize: 12, color: colors.text.light, textAlign: 'center', lineHeight: 17 },
-  directory: { alignSelf: 'stretch', backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 6 },
-  directoryTitle: { fontSize: 12, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', marginTop: 10, marginBottom: 4 },
-  directoryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
-  directoryName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary },
-  soonBadge: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, backgroundColor: colors.neutral, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
-  primaryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', minHeight: 48, borderRadius: 12, backgroundColor: colors.primary, paddingHorizontal: 16 },
-  primaryText: { color: colors.white, fontWeight: '700', fontSize: 15 },
-  secondaryButton: { alignSelf: 'stretch', minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  link: { color: colors.primaryDark, fontWeight: '700' },
+
+  directory: { alignSelf: 'stretch', backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 14, paddingBottom: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  directoryTitle: { fontSize: 11, fontWeight: '700', color: colors.text.light, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 2 },
+  directoryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  directoryRowDivided: { borderTopWidth: 1, borderTopColor: colors.borderLight },
+  directoryDisc: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  directoryName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary, lineHeight: 20 },
+  soonBadge: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, backgroundColor: colors.neutralDark, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, overflow: 'hidden' },
+
+  primaryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', minHeight: 52, borderRadius: 14, backgroundColor: colors.primary, paddingHorizontal: 16, shadowColor: colors.primaryDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
+  primaryText: { color: colors.white, fontWeight: '700', fontSize: 16 },
+  secondaryButton: { alignSelf: 'stretch', minHeight: 52, borderRadius: 14, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
   secondaryText: { color: colors.text.primary, fontWeight: '700', fontSize: 15 },
-  buttonDisabled: { opacity: 0.5 },
-  codeBox: { alignSelf: 'stretch', gap: 10 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white, paddingHorizontal: 14, paddingVertical: 12, minHeight: 72, color: colors.text.primary, fontSize: 14, textAlignVertical: 'top' },
+  buttonDisabled: { opacity: 0.5, shadowOpacity: 0 },
+  codeBox: { alignSelf: 'stretch', gap: 12 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, backgroundColor: colors.white, paddingHorizontal: 14, paddingVertical: 12, minHeight: 76, color: colors.text.primary, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
   errorText: { color: colors.danger, fontSize: 13, lineHeight: 18 },
-  groupHeader: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginTop: 6, marginBottom: 10 },
-  section: { fontSize: 14, fontWeight: '700', color: colors.text.secondary, marginTop: 12, marginBottom: 10, textTransform: 'uppercase' },
-  card: { backgroundColor: colors.white, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.border },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logo: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
-  institution: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+
+  groupHeader: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginTop: 8, marginBottom: 10 },
+  section: { fontSize: 11, fontWeight: '700', color: colors.text.light, marginTop: 20, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
+
+  card: { backgroundColor: colors.white, borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  // 44/22 circle on primaryDark: identical to HomeScreen's walletLogoContainer.
+  logo: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDark },
+  institution: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   reference: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
-  badge: { fontSize: 11, fontWeight: '700', color: colors.primaryDark, backgroundColor: colors.primaryLight, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
-  badgeLate: { color: colors.danger, backgroundColor: '#FEECEC' },
-  amount: { fontSize: 28, fontWeight: '800', color: colors.text.primary, marginTop: 18 },
+  badge: { fontSize: 11, fontWeight: '700', color: colors.primaryDark, backgroundColor: colors.primaryLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, overflow: 'hidden' },
+  badgeLate: { color: colors.error.text, backgroundColor: colors.error.background },
+  // Tabular figures per DESIGN.md: aligned money, never monospace.
+  amount: { fontSize: 32, fontWeight: '800', color: colors.text.primary, marginTop: 16, letterSpacing: -0.8, fontVariant: ['tabular-nums'] },
   period: { fontSize: 13, color: colors.text.secondary, marginTop: 4 },
-  payButton: { marginTop: 16, minHeight: 48, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  payText: { color: colors.white, fontWeight: '700', fontSize: 15 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
-  historyAmount: { color: colors.text.primary, fontWeight: '700' },
+  payButton: { marginTop: 16, minHeight: 52, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primaryDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
+  payText: { color: colors.white, fontWeight: '700', fontSize: 16 },
+
+  historyCard: { backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  historyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  historyRowDivided: { borderTopWidth: 1, borderTopColor: colors.borderLight },
+  historyAmount: { color: colors.text.primary, fontWeight: '700', fontVariant: ['tabular-nums'] },
 });
