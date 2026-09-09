@@ -34,6 +34,7 @@ jest.mock('../../contexts/AuthContext', () => ({ useAuthReady: () => true }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 
+import { Header } from '../../navigation/Header';
 import { MembershipsScreen } from '../MembershipsScreen';
 
 describe('membership checkout', () => {
@@ -308,6 +309,32 @@ describe('membership checkout', () => {
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
     expect(copy).toContain('Estás al día');
     expect(copy).toContain('Disponibles para vincular');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('uses the shared Header so the emerald band owns the status bar inset', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    // Hand-rolling a header here previously dropped the iOS top inset and left
+    // dark-content status bar text on an emerald band.
+    const header = tree.root.findByType(Header);
+    expect(header.props.backgroundColor).toBe('#34D399');
+    expect(header.props.isLight).toBe(true);
+    expect(header.props.showBackButton).toBe(true);
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('puts the dues count in the header subtitle only once linked', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    expect(tree.root.findByType(Header).props.subtitle).toBeUndefined();
+    await act(async () => { tree.unmount(); });
+
+    mockRows = [{ id: 'a', institutionName: 'CIP', memberReference: '••42',
+      amountMinor: 3500, amountRemainingMinor: 3500, currency: 'PEN', status: 'open',
+      dueAt: '2026-09-30T12:00:00Z' }];
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    expect(tree.root.findByType(Header).props.subtitle).toBe('1 cuota pendiente');
     await act(async () => { tree.unmount(); });
   });
 });
