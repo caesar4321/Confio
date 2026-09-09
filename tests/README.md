@@ -52,6 +52,16 @@ Utility scripts for verification and debugging:
 
 ## Running Tests
 
+The wallet assessment compatibility regression suite runs offline without
+Django initialization, a database, cloud credentials, or blockchain access:
+
+```bash
+myvenv/bin/python -m unittest tests.test_wallet_reenrollment_assessment
+```
+
+It covers compatible version-1 eligible proofs, refusals needing reassessment,
+address changes, malformed proofs, and version-2 eligibility.
+
 All integration tests require Django to be set up. Each test is a standalone script:
 
 ```bash
@@ -68,15 +78,15 @@ chmod +x tests/integration/rewards/test_actual_claim.py
 
 ## Environment Requirements
 
-These tests require:
+The integration tests require:
 - Django environment with proper settings (`config.settings`)
 - Algorand testnet access (configured in environment variables)
 - Database with test data (users, accounts, etc.)
 
 ## Important Notes
 
-1. **Manual Tests**: These are integration tests designed to be run manually, not automated unit tests
-2. **Django Setup**: All tests include Django setup code at the top
+1. **Manual Tests**: The integration scripts are designed to be run manually; the offline regression suite above uses automated unit tests
+2. **Django Setup**: Integration scripts initialize Django; the offline regression suite does not
 3. **Test Data**: Some tests reference specific users/addresses and may need updating
 4. **Network Access**: Tests interact with Algorand testnet and require network connectivity
 

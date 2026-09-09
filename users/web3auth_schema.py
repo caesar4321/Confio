@@ -19,6 +19,11 @@ from .migration_safety import (
 )
 from .utils_username import generate_compliant_username
 from .validators import validate_username
+from .wallet_reenrollment_assessment import (
+    WALLET_REENROLLMENT_ASSESSMENT_VERSION,
+    valid_reenrollment_funding as _valid_reenrollment_funding,
+    wallet_reenrollment_assessment as _wallet_reenrollment_assessment,
+)
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -26,7 +31,6 @@ User = get_user_model()
 WALLET_REENROLLMENT_GRANT_SALT = 'confio.wallet-reenrollment.v1'
 WALLET_REENROLLMENT_PREPARATION_SALT = 'confio.wallet-reenrollment-preparation.v1'
 WALLET_REENROLLMENT_GRANT_MAX_AGE_SECONDS = 10 * 60
-WALLET_REENROLLMENT_ASSESSMENT_VERSION = 2
 WALLET_REENROLLMENT_PERMANENT_REFUSALS = {
     'asset_balance',
     'onchain_state',
@@ -63,28 +67,6 @@ def _wallet_reenrollment_candidate(account):
     return bool(account and account.algorand_address and (
         not account.is_keyless_migrated or not account.bsc_address
     ))
-
-
-def _valid_reenrollment_funding(funding, reason):
-    return funding > 0 or (funding == 0 and reason == 'never_funded_wallet')
-
-
-def _wallet_reenrollment_assessment(account):
-    value = getattr(account, 'wallet_reenrollment_assessment', None) or {}
-    if (
-        value.get('version') != WALLET_REENROLLMENT_ASSESSMENT_VERSION
-        or value.get('old_algorand_address') != account.algorand_address
-        or (value.get('old_bsc_address') or '').lower()
-        != (getattr(account, 'bsc_address', None) or '').lower()
-        or value.get('status') not in ('eligible', 'ineligible')
-    ):
-        return None
-    if value.get('status') == 'eligible' and (
-        int(value.get('snapshot_round') or 0) <= 0
-        or not _valid_reenrollment_funding(int(value.get('sponsor_funding') or 0), value.get('reason'))
-    ):
-        return None
-    return value
 
 
 def _store_wallet_reenrollment_assessment(account, inspection):
