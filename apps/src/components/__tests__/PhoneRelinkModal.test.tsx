@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Modal, Text } from 'react-native';
+import { AccessibilityInfo, Modal, ScrollView, Text } from 'react-native';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -61,6 +61,15 @@ const press = (tree: renderer.ReactTestRenderer, label: string) => {
 const text = (tree: renderer.ReactTestRenderer) => JSON.stringify(tree.toJSON());
 
 describe('PhoneRelinkModal', () => {
+  let announce: jest.SpyInstance;
+  beforeEach(() => {
+    // RN's jest setup already mocks this as a shared jest.fn, which spyOn returns
+    // as-is, so calls from earlier tests must be cleared explicitly.
+    announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+    announce.mockClear();
+  });
+  afterEach(() => jest.restoreAllMocks());
+
   it('names the number, both accounts, and that funds stay behind', () => {
     const { tree } = render();
     expect(text(tree)).toContain('+58 4121234567');
@@ -137,6 +146,41 @@ describe('PhoneRelinkModal', () => {
     });
     expect(text(tree)).toContain('Correo no disponible');
     expect(text(tree)).toContain('La cuenta con la que iniciaste sesión');
+  });
+
+  it('scrolls replaced accounts back into view and announces the change', () => {
+    const { tree, onAnswer } = render({ prompt: makePrompt({ phase: 'confirming' }) });
+    expect(announce).not.toHaveBeenCalled();
+    const scroll = tree.root.findByType(ScrollView).instance;
+    scroll.scrollTo = jest.fn();
+    act(() => {
+      tree.update(element({ onAnswer, prompt: makePrompt({ id: 8, replaced: true }) }));
+    });
+    expect(scroll.scrollTo).toHaveBeenCalledWith({ y: 0, animated: false });
+    expect(announce).toHaveBeenCalledWith(expect.stringContaining('cambiaron'));
+
+    // Approving the replacement must not re-announce it.
+    announce.mockClear();
+    act(() => {
+      tree.update(element({ onAnswer, prompt: makePrompt({ id: 8, replaced: true, phase: 'confirming' }) }));
+    });
+    expect(announce).not.toHaveBeenCalled();
+  });
+
+  it('announces a retry for screen readers', () => {
+    render({ prompt: makePrompt({ phase: 'retry' }) });
+    expect(announce).toHaveBeenCalledWith(expect.stringContaining('No pudimos confirmar el cambio'));
+  });
+
+  it('moves the footer into the scrolling content when the window is too short', () => {
+    const { tree } = render({ prompt: makePrompt({ phase: 'retry' }) });
+    const scrolledButtons = () => tree.root.findByType(ScrollView).findAll(
+      node => node.props.accessibilityLabel === 'Reintentar' && typeof node.props.onPress === 'function',
+    );
+    expect(scrolledButtons()).toHaveLength(0);
+    const [footer] = tree.root.findAll(node => node.props.testID === 'phone-relink-footer');
+    act(() => footer.props.onLayout({ nativeEvent: { layout: { height: 100000 } } }));
+    expect(scrolledButtons().length).toBeGreaterThan(0);
   });
 
   it('renders nothing without a prompt', () => {

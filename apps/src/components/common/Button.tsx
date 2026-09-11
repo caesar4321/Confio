@@ -79,6 +79,10 @@ const styles = StyleSheet.create({
   text: {
     fontSize: fontSize.body,
     fontWeight: fontWeight.semibold,
+    // Text in a row container never wraps unless it may shrink: without this a
+    // long label at large accessibility font sizes runs past the button edge.
+    flexShrink: 1,
+    textAlign: 'center',
   },
   disabled: {
     opacity: 0.6,
