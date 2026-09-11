@@ -115,6 +115,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const explainSessionEnded = () => Alert.alert(
+  'Vuelve a iniciar sesión',
+  'Tu sesión ya no está disponible. Continúa con la misma cuenta de Google o Apple que usaste para crear tu cuenta de Confío.',
+  [{ text: 'Entendido' }],
+);
+
 interface AuthProviderProps {
   children: React.ReactNode;
   navigationRef: RefObject<NavigationContainerRef<RootStackParamList> | null>;
@@ -472,6 +478,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // Monitor for credential invalidation (e.g., token version mismatch on server)
   useEffect(() => {
     if (!isAuthenticated) return;
+    let sessionEndHandled = false;
 
     const checkInterval = setInterval(async () => {
       try {
@@ -481,9 +488,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         });
 
         // If credentials are gone but we're still marked as authenticated, log out
-        if (!credentials && isAuthenticated) {
+        if (!credentials && isAuthenticated && !sessionEndHandled) {
+          sessionEndHandled = true;
+          resetAuthReady();
           setIsAuthenticated(false);
           setProfileData(null);
+          explainSessionEnded();
 
           // Navigate directly to Login screen (not phone verification)
           if (isNavigationReady && navigationRef.current) {
@@ -505,7 +515,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       }
     }, 1000); // Check every second
 
-    return () => clearInterval(checkInterval);
+    return () => {
+      sessionEndHandled = true;
+      clearInterval(checkInterval);
+    };
   }, [isAuthenticated, isNavigationReady]);
 
   // Refresh on resume to ensure valid access token before UI queries
@@ -1130,6 +1143,25 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 }, 0);
                 return;
               }
+            }
+
+            // Refresh/profile requests above can invalidate the stored session.
+            // Do not flash Home and wait for the credential monitor to eject it.
+            let startupSessionMissing = false;
+            try {
+              startupSessionMissing = !(await getStoredAuthCredentials());
+            } catch (credentialError) {
+              // We already read the session and unlocked it above. A native
+              // storage error is not evidence that it has been invalidated.
+              console.warn('[AuthContext] Could not recheck startup credentials:', credentialError);
+            }
+            if (startupSessionMissing) {
+              resetAuthReady();
+              setIsAuthenticated(false);
+              setProfileData(null);
+              explainSessionEnded();
+              navigateToScreen('Auth');
+              return;
             }
 
             // Mark authenticated and go to Main immediately to avoid splash hanging

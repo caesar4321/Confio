@@ -5,9 +5,7 @@ import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
 import { getApiUrl } from '../config/env';
 import { appCheckDiagnosticCode } from '../utils/appCheckDiagnostics';
-import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
-import { AccountManager } from '../utils/accountManager';
 import appCheckService from '../services/appCheckService';
 import { shouldSkipStoredJwt } from './authPolicy';
 // RN-free module — safe to import statically (heavier emergencyExit modules
@@ -32,24 +30,45 @@ interface CustomJwtPayload {
   business_id?: string;
 }
 
-const REFRESH_TOKEN = gql`
-  mutation RefreshToken($refreshToken: String!) {
-    refreshToken(refreshToken: $refreshToken) {
-      token
-      payload
-      refreshExpiresIn
-    }
-  }
-`;
-
 const httpLink = createHttpLink({
   uri: getApiUrl(),
 });
 
-// Single-flight refresh mutex shared across links
-let refreshPromise: Promise<string> | null = null;
+type SessionTokens = { accessToken: string; refreshToken: string };
+// Coalesce requests only for the same session AND account context.
+const refreshPromises = new Map<string, Promise<string>>();
 
-async function getStoredTokens(): Promise<{ accessToken?: string; refreshToken?: string; } | null> {
+// Only an explicit rejection of the refresh credential ends the session.
+// Transport failures, App Check errors and server outages are retryable.
+class InvalidRefreshTokenError extends Error {}
+class SessionChangedError extends Error {
+  constructor() { super('Session changed during token refresh'); }
+}
+
+const INVALID_REFRESH_MESSAGES = new Set([
+  'Signature has expired',
+  'Invalid payload',
+  'Invalid refresh token',
+  'Token has been invalidated',
+  'Token version mismatch',
+  'User not found',
+  'User account is inactive',
+]);
+
+function refreshAccessToken(tokens: SessionTokens): Promise<string> {
+  const key = JSON.stringify(tokens);
+  let promise = refreshPromises.get(key);
+  if (!promise) {
+    promise = performRefreshWithFetch(tokens).finally(() => {
+      // A rejected promise must not poison all subsequent refresh attempts.
+      refreshPromises.delete(key);
+    });
+    refreshPromises.set(key, promise);
+  }
+  return promise;
+}
+
+async function getStoredTokens(): Promise<SessionTokens | null> {
   try {
     const credentials = await Keychain.getGenericPassword({
       service: AUTH_KEYCHAIN_SERVICE,
@@ -57,17 +76,40 @@ async function getStoredTokens(): Promise<{ accessToken?: string; refreshToken?:
     });
     if (!credentials) return null;
     const parsed = JSON.parse((credentials as any).password || '{}');
+    if (typeof parsed.accessToken !== 'string' || typeof parsed.refreshToken !== 'string') return null;
     return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
   } catch (e) {
     return null;
   }
 }
 
-async function performRefreshWithFetch(rt: string): Promise<string> {
-  const startTime = Date.now();
+async function assertCurrentSession(expected: SessionTokens): Promise<void> {
+  const current = await getStoredTokens();
+  if (current?.accessToken !== expected.accessToken || current?.refreshToken !== expected.refreshToken) {
+    throw new SessionChangedError();
+  }
+}
+
+async function clearRejectedSession(expected: SessionTokens): Promise<void> {
+  await assertCurrentSession(expected);
+  await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
+}
+
+async function performRefreshWithFetch(tokens: SessionTokens): Promise<string> {
+  const decoded = jwtDecode<CustomJwtPayload>(tokens.accessToken);
   const body = {
-    query: `mutation RefreshToken($refreshToken: String!) {\n      refreshToken(refreshToken: $refreshToken) {\n        token\n        payload\n        refreshExpiresIn\n      }\n    }`,
-    variables: { refreshToken: rt },
+    operationName: 'RefreshToken',
+    query: `mutation RefreshToken($refreshToken: String!, $accountType: String, $accountIndex: Int, $businessId: ID) {
+      refreshToken(refreshToken: $refreshToken, accountType: $accountType, accountIndex: $accountIndex, businessId: $businessId) {
+        token
+      }
+    }`,
+    variables: {
+      refreshToken: tokens.refreshToken,
+      accountType: decoded.account_type || 'personal',
+      accountIndex: decoded.account_index ?? 0,
+      businessId: decoded.business_id,
+    },
   };
   const res = await fetch(getApiUrl(), {
     method: 'POST',
@@ -90,12 +132,23 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
     }).catch(() => {});
     throw new Error('Failed to refresh token');
   }
+  if (!res.ok) throw new Error('Failed to refresh token');
   const json = await res.json();
   const newAccess = json?.data?.refreshToken?.token;
-  if (!newAccess) throw new Error('Failed to refresh token');
+  if (typeof newAccess !== 'string' || !newAccess) {
+    const rejected = json?.errors?.some((error: { message?: string }) =>
+      INVALID_REFRESH_MESSAGES.has(error.message || '') ||
+      error.message?.startsWith('Invalid token payload'),
+    );
+    if (rejected) throw new InvalidRefreshTokenError('Invalid refresh token');
+    throw new Error('Failed to refresh token');
+  }
+  // Sign-out, fresh login and account switching may happen during fetch.
+  // Never restore or overwrite the credentials that replaced this pair.
+  await assertCurrentSession(tokens);
   await Keychain.setGenericPassword(
     AUTH_KEYCHAIN_USERNAME,
-    JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
+    JSON.stringify({ accessToken: newAccess, refreshToken: tokens.refreshToken }),
     {
       service: AUTH_KEYCHAIN_SERVICE,
       username: AUTH_KEYCHAIN_USERNAME,
@@ -147,6 +200,20 @@ const banClearLink = new ApolloLink((operation, forward) =>
   }),
 );
 
+// Apollo 3's error-link teardown does not reliably unsubscribe an async
+// retry. Track the original request so cancellation also prevents replay.
+const requestLifetimeLink = new ApolloLink((operation, forward) =>
+  new ApolloObservable((observer) => {
+    let active = true;
+    operation.setContext({ authRequestIsActive: () => active });
+    const subscription = forward(operation).subscribe(observer);
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }),
+);
+
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
   const isMembershipClaim = operation.operationName === 'ClaimInstitutionMembership';
   if (graphQLErrors) {
@@ -165,52 +232,49 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
         console.error(`[GraphQL error code]: ${err.extensions.code}`);
       }
 
-      // Check for token version mismatch or invalidation - force logout
-      if (err.message === 'Token has been invalidated' ||
-        err.message === 'Token version mismatch' ||
-        err.message.includes('Invalid token payload')) {
-        // Clear stored credentials immediately
-        Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE }).catch(console.error);
-        // Don't retry - user must log in again
-        return;
+      const context = operation.getContext();
+      // Pinned requests must never change identity. Public auth operations
+      // establish their own identity and must not refresh/replay another one.
+      if (context.pinnedAuthToken || shouldSkipStoredJwt(operation.operationName, !!context.skipAuth)) {
+        continue;
       }
-
-      if (err.message === 'Signature has expired' || err.message === 'Invalid payload') {
-        // Token has expired or is invalid, perform a single-flight refresh
+      const tokens = context.sessionTokens as SessionTokens | undefined;
+      const invalidated = err.message === 'Token has been invalidated' ||
+        err.message === 'Token version mismatch' || err.message.startsWith('Invalid token payload');
+      const expired = err.message === 'Signature has expired' || err.message === 'Invalid payload';
+      if (tokens && (invalidated || expired)) {
         return new ApolloObservable<FetchResult>((observer) => {
-          (async () => {
+          let cancelled = false;
+          const isCancelled = () => cancelled || context.authRequestIsActive?.() === false;
+          let retry: { unsubscribe: () => void } | undefined;
+          void (async () => {
             try {
-              const stored = await getStoredTokens();
-              const rt = stored?.refreshToken;
-              if (!rt) throw new Error('No refresh token found');
-
-              if (!refreshPromise) {
-                refreshPromise = (async () => {
-                  try {
-                    return await performRefreshWithFetch(rt);
-                  } finally {
-                    // Do not null here; let awaiters read the resolved token and then clear below
-                  }
-                })();
-              }
-
-              const newToken = await refreshPromise;
-              // Clear the promise for next time
-              refreshPromise = null;
-
-              // Retry the original operation with new token. Auth link will attach it.
-              forward(operation).subscribe(observer);
+              await assertCurrentSession(tokens);
+              if (isCancelled()) return;
+              if (invalidated) throw new InvalidRefreshTokenError(err.message);
+              const newToken = await refreshAccessToken(tokens);
+              if (isCancelled()) return;
+              const refreshedTokens = { ...tokens, accessToken: newToken };
+              await assertCurrentSession(refreshedTokens);
+              if (isCancelled()) return;
+              // forward starts downstream of authLink, so replace the header.
+              operation.setContext(({ headers = {} }: { headers?: Record<string, string> }) => ({
+                headers: { ...headers, Authorization: `JWT ${newToken}` },
+                sessionTokens: refreshedTokens,
+              }));
+              retry = forward(operation).subscribe(observer);
             } catch (error) {
-              // Only clear tokens if refresh token is expired or invalid
-              if (error instanceof Error &&
-                (error.message.includes('expired') ||
-                  error.message.includes('Invalid refresh token') ||
-                  error.message.includes('No refresh token found'))) {
-                await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
+              if (error instanceof InvalidRefreshTokenError) {
+                try { await clearRejectedSession(tokens); }
+                catch (storageError) { console.warn('[Auth] Could not clear rejected session:', storageError); }
               }
-              observer.error(error);
+              if (!isCancelled()) observer.error(error);
             }
           })();
+          return () => {
+            cancelled = true;
+            retry?.unsubscribe();
+          };
         });
       }
     }
@@ -373,113 +437,49 @@ const authLink = setContext(async (operation, previousContext) => {
       return { headers: nextHeaders };
     }
 
-    // Check if token is expired or about to expire (within 5 minutes)
+    const tokens: SessionTokens = { accessToken: token, refreshToken };
+    let decoded: CustomJwtPayload;
     try {
-      let decoded = jwtDecode<CustomJwtPayload>(token);
-
-      const ctx = (typeof (operation as any).getContext === 'function') ? (operation as any).getContext() : previousContext;
-      const hardSkipForAccounts = operation.operationName === 'GetUserAccounts';
-      const shouldSkipProactive = hardSkipForAccounts || !!(ctx?.skipProactiveRefresh);
-
-      const currentTime = Date.now() / 1000;
-      const fiveMinutes = 5 * 60; // 5 minutes in seconds
-
-      // For GetUserAccounts we do not refresh here; allow request to hit server first
-      if (!hardSkipForAccounts && decoded.exp && (decoded.exp < currentTime || decoded.exp - currentTime < fiveMinutes)) {
-        try {
-          if (!refreshPromise) {
-            refreshPromise = (async () => {
-              return await performRefreshWithFetch(refreshToken);
-            })();
-          }
-          const newAccess = await refreshPromise;
-          refreshPromise = null;
-
-          nextHeaders['Authorization'] = `JWT ${newAccess}`;
-          return { headers: nextHeaders };
-        } catch (error) {
-          console.error('Token refresh failed:', error);
-          try { await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE }); } catch { }
-          return { headers: nextHeaders };
-        }
-      }
-
-      // Verify token has required fields
-      if (!decoded.user_id || decoded.type !== 'access') {
-        await Keychain.resetGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME
-        });
-        return { headers: nextHeaders };
-      }
-
-      // Proactively refresh if access token is expired or near expiry
-      if (hardSkipForAccounts) {
-        nextHeaders['Authorization'] = `JWT ${token}`;
-        return { headers: nextHeaders } as any;
-      }
-
-      if (!shouldSkipProactive) {
-        try {
-          const now = Math.floor(Date.now() / 1000);
-          const exp = (decoded as any)?.exp ?? 0;
-          const willExpireSoon = exp <= now + 30; // 30s safety window
-          if (willExpireSoon) {
-            const credentialsForRefresh = await Keychain.getGenericPassword({
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME
-            });
-            if (credentialsForRefresh && (credentialsForRefresh as any).password) {
-              const stored = JSON.parse((credentialsForRefresh as any).password);
-              const rt = stored.refreshToken;
-              if (rt) {
-                const { data } = await apolloClient.mutate({
-                  mutation: REFRESH_TOKEN,
-                  variables: { refreshToken: rt },
-                  context: { skipAuth: true }
-                });
-                if (data?.refreshToken?.token) {
-                  const newAccess = data.refreshToken.token;
-                  await Keychain.setGenericPassword(
-                    AUTH_KEYCHAIN_USERNAME,
-                    JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
-                    {
-                      service: AUTH_KEYCHAIN_SERVICE,
-                      username: AUTH_KEYCHAIN_USERNAME,
-                      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
-                    }
-                  );
-                  // Replace local token/decoded with refreshed values
-                  token = newAccess;
-                }
-              }
-            }
-          }
-        } catch (refreshError) {
-          console.error('Proactive refresh error:', refreshError);
-        }
-      }
-
-      // Always include the token in the header for authenticated requests
-      nextHeaders['Authorization'] = `JWT ${token}`;
-
-      return { headers: nextHeaders };
-
+      decoded = jwtDecode<CustomJwtPayload>(token);
     } catch (error) {
-      console.error('Error decoding token:', error);
-      await Keychain.resetGenericPassword({
-        service: AUTH_KEYCHAIN_SERVICE
-      });
+      await clearRejectedSession(tokens);
       return { headers: nextHeaders };
     }
+    if (!decoded.user_id || decoded.type !== 'access') {
+      await clearRejectedSession(tokens);
+      return { headers: nextHeaders };
+    }
+
+    const skipProactive = operation.operationName === 'GetUserAccounts' || !!previousContext?.skipProactiveRefresh;
+    const expiresSoon = !decoded.exp || decoded.exp <= Date.now() / 1000 + 5 * 60;
+    if (!skipProactive && expiresSoon) {
+      try {
+        token = await refreshAccessToken(tokens);
+      } catch (error) {
+        if (error instanceof SessionChangedError) throw error;
+        if (error instanceof InvalidRefreshTokenError) {
+          await clearRejectedSession(tokens);
+          throw error;
+        }
+        // Temporary refresh failures do not invalidate the existing token.
+        // Check that an intervening sign-out/account switch did not replace it.
+        await assertCurrentSession(tokens);
+        console.error('Token refresh failed:', error);
+      }
+    }
+    const activeTokens = { ...tokens, accessToken: token };
+    await assertCurrentSession(activeTokens);
+    nextHeaders['Authorization'] = `JWT ${token}`;
+    return { headers: nextHeaders, sessionTokens: activeTokens };
+
   } catch (error) {
     console.error('Error in authLink:', error);
-    return { headers: nextHeaders };
+    throw error;
   }
 });
 
 export const apolloClient = new ApolloClient({
-  link: from([authLink, errorLink, banClearLink, httpLink]),
+  link: from([requestLifetimeLink, authLink, errorLink, banClearLink, httpLink]),
   cache: new InMemoryCache({
     typePolicies: {
       // cusdPlusSummary is an id-less singleton queried with DIFFERENT field
