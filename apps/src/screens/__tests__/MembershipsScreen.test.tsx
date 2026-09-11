@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockClaim = jest.fn();
@@ -335,6 +335,33 @@ describe('membership checkout', () => {
       dueAt: '2026-09-30T12:00:00Z' }];
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     expect(tree.root.findByType(Header).props.subtitle).toBe('1 cuota pendiente');
+    await act(async () => { tree.unmount(); });
+  });
+
+  it('never gives a Text a rounded background, which iOS renders invisible', async () => {
+    // iOS RCTTextView is a plain UIView, so a Text's borderRadius bypasses
+    // RCTView's clamping; with overflow:hidden a 999 radius masks the label
+    // away. Android clamps, so this only ever shows up on iPhone. Jest cannot
+    // run iOS, so encode the rule: pills must be a View wrapping a Text.
+    mockRows = [{ id: 'late', institutionName: 'CIP', memberReference: '••42',
+      amountMinor: 3500, amountRemainingMinor: 3500, currency: 'PEN', status: 'past_due',
+      dueAt: '2026-08-31T12:00:00Z' }];
+    mockDirectory = { institutionDirectory: [
+      { id: 'c1', name: 'Otro Colegio', provider: 'oc', linkingAvailable: false },
+    ] };
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
+    await act(async () => { pressLabel(tree, 'Agregar otra institución').props.onPress(); });
+
+    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+    expect(copy).toContain('Vencida');
+    expect(copy).toContain('Próximamente');
+
+    const offenders = tree.root.findAllByType(Text)
+      .map(node => ({ text: node.props.children, style: StyleSheet.flatten(node.props.style) || {} }))
+      .filter(({ style }) => Number(style.borderRadius) > 0
+        && (style.overflow === 'hidden' || style.backgroundColor !== undefined));
+    expect(offenders.map(({ text }) => text)).toEqual([]);
     await act(async () => { tree.unmount(); });
   });
 });
