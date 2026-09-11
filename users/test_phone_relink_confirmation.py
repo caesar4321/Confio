@@ -27,7 +27,7 @@ class PhoneRelinkConfirmationTests(TestCase):
                 result, proof = self.verify(channel, confirm=False)
                 self.assertFalse(result.success)
                 self.assertIsNotNone(result.relink_confirmation)
-                self.assertEqual(result.relink_confirmation.accounts[0].email, 'previous@example.com')
+                self.assertEqual(result.relink_confirmation.accounts[0].email, 'pr•••@example.com')
                 self.assertEqual(result.relink_confirmation.accounts[0].username, 'old')
                 self.assertFalse(proof.is_verified)
                 self.assertEqual(self.old.phone_key, '57:3132587634')
@@ -40,6 +40,19 @@ class PhoneRelinkConfirmationTests(TestCase):
         self.assertIsNone(self.old.phone_key)
         self.assertEqual(self.new.phone_key, '57:3132587634')
         self.claim.assert_called_once()
+
+    def test_token_carries_neither_the_email_nor_a_guessable_owner_fingerprint(self):
+        import hashlib
+        import json
+        from django.core import signing
+        from users.phone_linking import CONFIRMATION_SALT
+        result, _ = self.verify('sms', confirm=False)
+        payload = signing.loads(result.relink_confirmation.token, salt=CONFIRMATION_SALT)
+        self.assertNotIn('previous@example.com', json.dumps(payload))
+        # An unkeyed hash of the owner tuple would confirm email guesses offline.
+        unkeyed = hashlib.sha256(json.dumps(
+            [(self.old.pk, self.old.email, self.old.username)], ensure_ascii=True).encode()).hexdigest()
+        self.assertNotEqual(payload['owners'], unkeyed)
 
     def test_invalid_code_does_not_disclose_account(self):
         for channel in ('sms', 'telegram'):
@@ -82,7 +95,7 @@ class PhoneRelinkConfirmationTests(TestCase):
             email='replacement@example.com', phone_country='CO', phone_number=self.phone)
         result = self.confirm(result.relink_confirmation.token)
         self.assertFalse(result.success)
-        self.assertEqual(result.relink_confirmation.accounts[0].email, replacement.email)
+        self.assertEqual(result.relink_confirmation.accounts[0].email, 're•••@example.com')
         replacement.refresh_from_db()
         self.assertEqual(replacement.phone_key, '57:3132587634')
         self.assertTrue(self.confirm(result.relink_confirmation.token).success)
@@ -154,7 +167,7 @@ class PhoneRelinkConfirmationTests(TestCase):
             }''', context_value=SimpleNamespace(user=self.new))
         self.assertIsNone(result.errors)
         preview = result.data['verifySmsCode']['relinkConfirmation']
-        self.assertEqual(preview['accounts'], [{'email': 'previous@example.com', 'username': 'old'}])
+        self.assertEqual(preview['accounts'], [{'email': 'pr•••@example.com', 'username': 'old'}])
         result = schema.execute('''mutation($token: String!) {
           confirmPhoneRelink(token: $token) { success error relinkConfirmation { token } }
         }''', variable_values={'token': preview['token']}, context_value=SimpleNamespace(user=self.new))
