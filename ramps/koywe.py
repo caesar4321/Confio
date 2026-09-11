@@ -205,6 +205,18 @@ COUNTRY_METHODS = {
                 "supports_off_ramp": True,
             },
             {
+                "code": "BREB",
+                "display_name": "Bre-B",
+                "provider_type": "bank",
+                "icon": "zap",
+                "description": "La opción más rápida",
+                "requires_account_number": True,
+                "requires_phone": False,
+                "requires_email": False,
+                "supports_on_ramp": False,
+                "supports_off_ramp": True,
+            },
+            {
                 "code": "WIRECO",
                 "display_name": "Transferencia bancaria",
                 "provider_type": "bank",
@@ -589,7 +601,7 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
                 "required": False,
             },
         ]
-    elif country_code == "CO" and code == "WIRECO":
+    elif country_code == "CO" and code in {"WIRECO", "BREB"}:
         schema["providerFields"] = [
             {
                 "key": "bankName",
@@ -599,6 +611,15 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
                 "picker": "bank",
             },
         ]
+        if code == "BREB":
+            schema["defaultProviderMetadata"] = {"rail": "BREB"}
+            schema["accountField"] = {
+                **account_field,
+                "label": "Llave Bre-B",
+                "placeholder": "Celular con +57, NIT, correo o alias",
+                "keyboardType": "default",
+                "maxLength": 254,
+            }
     elif country_code == "CO" and code == "NEQUI":
         schema["defaultProviderMetadata"] = {
             "bankCode": "co_nequi",

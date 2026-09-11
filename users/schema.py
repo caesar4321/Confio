@@ -4248,6 +4248,16 @@ class CreateBankInfo(graphene.Mutation):
                     error=f"{effective_bank.country.identification_name} es requerido para cuentas bancarias en {effective_bank.country.name}"
                 )
 
+            from ramps.breb import payout_rail, validate_saved_payout_rail
+            try:
+                normalized_metadata = validate_saved_payout_rail(
+                    metadata=_normalize_provider_metadata(provider_metadata),
+                    payment_method=ramp_payment_method or payment_method,
+                    account_number=account_number, account_type=account_type,
+                )
+            except ValueError as exc:
+                return CreateBankInfo(success=False, error=str(exc))
+
             # Check for duplicate payment method
             duplicate_filter = {'account': account}
             if ramp_payment_method:
@@ -4255,13 +4265,15 @@ class CreateBankInfo(graphene.Mutation):
             elif payment_method:
                 duplicate_filter['payment_method'] = payment_method
             if requires_account_number and account_number:
-                duplicate_filter['account_number'] = account_number
+                duplicate_filter['account_number'] = account_number.strip()
             elif requires_phone and phone_number:
                 duplicate_filter['phone_number'] = phone_number
             elif requires_email and stored_email:
                 duplicate_filter['email'] = stored_email
-            existing = BankInfo.objects.filter(**duplicate_filter).first()
-            if existing:
+            # Identical digits can name a bank account and a Bre-B key.
+            # Compare rails only among destinations with the same identifier.
+            existing_metadata = BankInfo.objects.filter(**duplicate_filter).values_list('provider_metadata', flat=True)
+            if any(payout_rail(entry) == payout_rail(normalized_metadata) for entry in existing_metadata):
                 return CreateBankInfo(success=False, error="Ya tienes registrado este método de pago")
 
             # Create bank info
@@ -4276,7 +4288,7 @@ class CreateBankInfo(graphene.Mutation):
                 username=username.strip() if username else None,
                 account_type=account_type,
                 identification_number=identification_number.strip() if identification_number else None,
-                provider_metadata=_normalize_provider_metadata(provider_metadata),
+                provider_metadata=normalized_metadata,
                 is_default=is_default
             )
 
@@ -4405,6 +4417,20 @@ class UpdateBankInfo(graphene.Mutation):
             if requires_email and not stored_email:
                 return UpdateBankInfo(success=False, error="Email es requerido para este método de pago")
 
+            from ramps.breb import payout_rail, validate_saved_payout_rail
+            # Older clients may omit metadata. Never turn a saved Bre-B key
+            # into a traditional bank destination merely by editing its name.
+            if provider_metadata is None and payout_rail(bank_info.provider_metadata) == 'BREB':
+                provider_metadata = bank_info.provider_metadata
+            try:
+                normalized_metadata = validate_saved_payout_rail(
+                    metadata=_normalize_provider_metadata(provider_metadata),
+                    payment_method=validation_payment_method,
+                    account_number=account_number, account_type=account_type,
+                )
+            except ValueError as exc:
+                return UpdateBankInfo(success=False, error=str(exc))
+
             # Update bank info
             bank_info.account_holder_name = account_holder_name.strip()
             bank_info.account_number = account_number.strip() if account_number else None
@@ -4413,7 +4439,7 @@ class UpdateBankInfo(graphene.Mutation):
             bank_info.username = username.strip() if username else None
             bank_info.account_type = account_type
             bank_info.identification_number = identification_number.strip() if identification_number else None
-            bank_info.provider_metadata = _normalize_provider_metadata(provider_metadata)
+            bank_info.provider_metadata = normalized_metadata
             bank_info.is_default = is_default
             bank_info.save()
 
