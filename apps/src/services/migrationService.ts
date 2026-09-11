@@ -4,6 +4,7 @@ import { apolloClient } from '../apollo/client';
 import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { gql } from '@apollo/client';
 import { oauthStorage } from './oauthStorageService';
+import { GET_MY_MIGRATION_STATUS } from '../apollo/queries';
 
 const MARK_WALLET_MIGRATED = gql`
     mutation MarkWalletMigrated($migratedFromAddress: String) {
@@ -51,6 +52,19 @@ interface MigrationStatus {
     v1Assets?: number[];
     v1Address?: string;
     v2Address?: string;
+}
+
+/**
+ * The V2 secret is backed up to Drive before any V1 funds move, and the Drive
+ * token only lives in memory after a Google sign-in. On a cold start it is
+ * gone, so the caller has to ask the user to reconnect Drive — an interactive
+ * step — instead of reporting a generic failure the user can never clear.
+ */
+export class DriveAuthorizationRequiredError extends Error {
+    constructor() {
+        super('Debes activar el respaldo en Google Drive antes de migrar tu billetera.');
+        this.name = 'DriveAuthorizationRequiredError';
+    }
 }
 
 class WalletMigrationService {
@@ -157,6 +171,44 @@ class WalletMigrationService {
     }
 
     /**
+     * Whether the server would sweep this V1: PrepareAtomicMigration accepts
+     * only a row the caller owns that registers it and is not yet migrated.
+     * Undefined means "unknown", never "no".
+     */
+    private async isSweepableByServer(
+        v1Address: string,
+        accountIndex: number,
+        businessId?: string,
+    ): Promise<boolean | undefined> {
+        try {
+            const { data } = await apolloClient.query({
+                query: GET_MY_MIGRATION_STATUS,
+                fetchPolicy: 'network-only',
+            });
+            const accounts = data?.userAccounts;
+            if (!Array.isArray(accounts)) return undefined;
+            const contextRow = accounts.find((a: any) => (businessId
+                ? a?.accountType?.toLowerCase() === 'business' && String(a?.business?.id) === String(businessId)
+                : a?.accountType?.toLowerCase() === 'personal' && (a?.accountIndex ?? 0) === accountIndex));
+            // Without this context's own row we cannot tell "not registered"
+            // from "not signed in": an anonymous request (a failed Keychain
+            // read) gets an empty list.
+            if (!contextRow) return undefined;
+            // userAccounts also lists business rows the user only works for
+            // and carries no ownership, while the server sweeps only rows the
+            // caller owns. A V1 registered on some other row cannot be
+            // classified from here: it is neither "sweep" nor "clear".
+            if (accounts.some((a: any) => a !== contextRow && a?.algorandAddress === v1Address)) {
+                return undefined;
+            }
+            return contextRow.algorandAddress === v1Address && !contextRow.isKeylessMigrated;
+        } catch (e) {
+            console.warn('[MigrationService] Could not read the registered wallet address; status unknown.', e);
+            return undefined;
+        }
+    }
+
+    /**
      * Check if the current user needs to migrate from V1 to V2.
      * Logic:
      * 1. If V2 secret exists AND V1 wallet is empty/closed -> False (Done).
@@ -238,6 +290,22 @@ class WalletMigrationService {
             const spendableAlgo = Math.max(0, Number(v1Info.amount || 0) - Number(v1Info['min-balance'] || 0));
             const hasMaterialAlgo = spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS;
             const hasMaterialV1Value = hasRelevantAssets || hasMaterialAlgo;
+
+            // Only ask for what the server will sponsor: PrepareAtomicMigration
+            // sweeps nothing but a V1 that one of the caller's rows registers
+            // and has not migrated, and Algorand is deprecated, so no other V1
+            // will ever be swept. Asking anyway trapped already-migrated users
+            // behind a modal that could never succeed (user 1120, 2026-09-10).
+            if (hasMaterialV1Value) {
+                const sweepable = await this.isSweepableByServer(v1Address, accountIndex, businessId);
+                if (sweepable === undefined) {
+                    return { needsMigration: false, statusUnknown: true };
+                }
+                if (!sweepable) {
+                    console.log('[MigrationService] V1 is not a registered unmigrated wallet; the server will not sweep it.');
+                    return { needsMigration: false, v1Address, v1Balance: balance };
+                }
+            }
 
             // V1 is considered empty only if it has no relevant asset opt-ins and
             // no spendable ALGO worth sweeping. ALGO-only V1 wallets still need V2
@@ -376,7 +444,7 @@ class WalletMigrationService {
             // it can only use a token already obtained during login/backup.
             const driveAccessToken = authService.getCachedDriveAccessToken();
             if (!driveAccessToken) {
-                throw new Error('Debes activar el respaldo en Google Drive antes de migrar tu billetera.');
+                throw new DriveAuthorizationRequiredError();
             }
 
             // requireCloudSync is NOT optional here. Without it,
