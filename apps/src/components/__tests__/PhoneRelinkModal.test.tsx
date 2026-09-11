@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Modal } from 'react-native';
+import { Modal, Text } from 'react-native';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -25,9 +25,9 @@ const makePrompt = (overrides: Partial<PhoneRelinkPrompt> = {}): PhoneRelinkProm
   ...overrides,
 });
 
-const element = (
-  props: Partial<React.ComponentProps<typeof PhoneRelinkModal>> & { onAnswer: jest.Mock },
-) => (
+type ModalProps = React.ComponentProps<typeof PhoneRelinkModal>;
+
+const element = (props: Partial<Omit<ModalProps, 'onAnswer'>> & Pick<ModalProps, 'onAnswer'>) => (
   <PhoneRelinkModal
     prompt={makePrompt()}
     phoneLabel="+58 4121234567"
@@ -36,7 +36,7 @@ const element = (
   />
 );
 
-const render = (props: Partial<React.ComponentProps<typeof PhoneRelinkModal>> = {}) => {
+const render = (props: Partial<Omit<ModalProps, 'onAnswer'>> = {}) => {
   const onAnswer = jest.fn();
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -72,8 +72,8 @@ describe('PhoneRelinkModal', () => {
 
   it('never truncates account identifiers', () => {
     const { tree } = render();
-    const identifiers = tree.root.findAll(
-      node => node.type === 'Text' && ['previous@example.com', '@previous'].includes(node.props.children),
+    const identifiers = tree.root.findAllByType(Text).filter(
+      node => ['previous@example.com', '@previous'].includes(node.props.children),
     );
     expect(identifiers).toHaveLength(2);
     identifiers.forEach(node => expect(node.props.numberOfLines).toBeUndefined());
