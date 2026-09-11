@@ -7,9 +7,11 @@ from django.core import signing
 from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 
 from .models import User
 from .country_codes import COUNTRY_CODES
+from .masking import mask_email
 from .phone_utils import normalize_phone, phone_lookup_key
 from .review_numbers import is_review_test_phone_key
 
@@ -21,6 +23,7 @@ class PhoneLinkError(ValueError):
 
 
 CONFIRMATION_SALT = 'users.phone-relink.v1'
+OWNERS_DIGEST_SALT = 'users.phone-relink.owners.v1'
 
 
 class PhoneRelinkRequired(PhoneLinkError):
@@ -98,11 +101,15 @@ def link_verified_phone(user, verification, country_code, confirmation_token=Non
         if owners and not is_review_test_phone_key(phone_key):
             if current.phone_number:
                 raise PhoneLinkError('Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.')
-            accounts = [{'email': owner.email or '', 'username': owner.username or ''}
+            # Whoever holds the number now may not be the previous owner: show
+            # enough to recognize one's own account, never the full address.
+            accounts = [{'email': mask_email(owner.email), 'username': owner.username or ''}
                         for owner in owners]
-            owner_digest = hashlib.sha256(json.dumps(
+            # Keyed: the signed token is readable by the client, and a plain hash
+            # would let it confirm guesses of the masked email offline.
+            owner_digest = salted_hmac(OWNERS_DIGEST_SALT, json.dumps(
                 [(owner.pk, owner.email, owner.username) for owner in owners],
-                ensure_ascii=True).encode()).hexdigest()
+                ensure_ascii=True), algorithm='sha256').hexdigest()
             if not confirmation or confirmation.get('owners') != owner_digest:
                 token = signing.dumps({**context, 'owners': owner_digest}, salt=CONFIRMATION_SALT)
                 raise PhoneRelinkRequired(token, accounts)

@@ -38,7 +38,7 @@ class PhonePreviewRecoveryTests(TestCase):
                 self.assertFalse(proof.is_verified)
                 result = self.retry(channel)
                 self.assertFalse(result.success)
-                self.assertEqual(result.relink_confirmation.accounts[0].email, self.old.email)
+                self.assertEqual(result.relink_confirmation.accounts[0].email, 'pr•••@example.com')
                 self.old.refresh_from_db()
                 self.assertEqual(self.old.phone_key, '57:3132587634')
                 self.claim.assert_not_called()
