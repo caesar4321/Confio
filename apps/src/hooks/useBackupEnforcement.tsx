@@ -5,6 +5,7 @@ import { AuthService } from '../services/authService';
 import { useApolloClient, useQuery } from '@apollo/client';
 import { GET_MY_BALANCES, GET_MY_MIGRATION_STATUS } from '../apollo/queries';
 import { BackupConsentModal } from '../components/BackupConsentModal';
+import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
 import { AnalyticsService } from '../services/analyticsService';
 import { migrationService } from '../services/migrationService';
 import { oauthStorage } from '../services/oauthStorageService';
@@ -23,6 +24,7 @@ export const useBackupEnforcement = () => {
     const { userProfile, refreshProfile } = useAuth();
     const apolloClient = useApolloClient();
     const [modalVisible, setModalVisible] = useState(false);
+    const [storageFullVisible, setStorageFullVisible] = useState(false);
     const [, setStrictMode] = useState(false);
     const [migrationVisible, setMigrationVisible] = useState(false);
     const [migrationStatus, setMigrationStatus] = useState('Verificando estado de la billetera...');
@@ -290,10 +292,7 @@ export const useBackupEnforcement = () => {
         });
     }, [ensureV2Migration, userProfile, myBalancesData, verifyInboundSigningWallet]);
 
-    const handleContinue = async () => {
-        // We close the modal to allow native Google Sign In UI to show
-        setModalVisible(false);
-
+    const attemptDriveBackup = async () => {
         try {
             AnalyticsService.logBackupAttempt('google_drive');
             const result = await AuthService.getInstance().enableDriveBackup();
@@ -302,6 +301,10 @@ export const useBackupEnforcement = () => {
                 Alert.alert('Respaldo Activado', 'Tu copia de seguridad está lista.');
                 await refreshProfile();
                 resolveRef.current?.(true);
+            } else if (result.storageFull) {
+                // Only the user can free Google storage. Keep the gated action
+                // pending until they retry or dismiss the how-to prompt.
+                setStorageFullVisible(true);
             } else {
                 // If strict (Presale), we must fail.
                 resolveRef.current?.(false);
@@ -310,6 +313,22 @@ export const useBackupEnforcement = () => {
             console.error('Backup enforcement error:', error);
             resolveRef.current?.(false);
         }
+    };
+
+    const handleContinue = async () => {
+        // We close the modal to allow native Google Sign In UI to show
+        setModalVisible(false);
+        await attemptDriveBackup();
+    };
+
+    const handleStorageFullRetry = () => {
+        setStorageFullVisible(false);
+        attemptDriveBackup();
+    };
+
+    const handleStorageFullClose = () => {
+        setStorageFullVisible(false);
+        resolveRef.current?.(false);
     };
 
     const BackupEnforcementModal = () => (
@@ -327,6 +346,11 @@ export const useBackupEnforcement = () => {
                 visible={modalVisible}
                 onContinue={handleContinue}
                 onCancel={() => { }}
+            />
+            <DriveStorageFullModal
+                visible={storageFullVisible}
+                onRetry={handleStorageFullRetry}
+                onClose={handleStorageFullClose}
             />
         </>
     );

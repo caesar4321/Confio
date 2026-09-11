@@ -1664,6 +1664,188 @@ export async function getExistingLocalV2MasterSecret(
   );
 }
 
+/** Clear only retired Algo display aliases plus disposable legacy session
+ * caches after the server commits BSC-only reconciliation. Never touch master
+ * secrets, backup receipts, or address-bound recovery copies.
+ */
+export async function clearReconciledLegacyWallets(contexts: Array<{
+  accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
+}>): Promise<void> {
+  const services = new Set<string>();
+  for (const context of contexts) {
+    if (!Number.isSafeInteger(context.accountIndex) || context.accountIndex < 0
+        || !['personal', 'business'].includes(context.accountType)
+        || (context.accountType === 'business' && !context.businessId)
+        || (context.accountType === 'personal' && context.businessId)) {
+      throw new Error('Invalid wallet account context');
+    }
+    const key = context.accountType === 'business'
+      ? `algo_address_business_${context.businessId}_${context.accountIndex}`
+      : `algo_address_personal_${context.accountIndex}`;
+    services.add(`com.confio.algorand.addresses.${key}`);
+  }
+  if (!services.size) return;
+  const { default: algorandService } = await import('./algorandService');
+  // Clears currentAccount and the derivation service's inMemSeeds/currentScope;
+  // existing clearWallet only clears disposable legacy caches, not V2 secrets.
+  await algorandService.clearWallet();
+  for (const service of services) {
+    await Keychain.resetGenericPassword({ service });
+    const remaining = await Keychain.getGenericPassword({ service });
+    if (remaining && remaining.password) throw new Error('Could not clear the retired wallet address');
+  }
+}
+
+/** Recover existing key material only. Never generate or rewrite a Drive backup.
+ * Without a Drive token this inspects Keychain. With one, the single canonical
+ * Drive manifest is authoritative, independently of the old server address.
+ * The closure keeps key material inside this module.
+ */
+export async function getSignInWalletCandidate(userSub: string, driveToken?: string, options?: {
+  // Compatibility-only recovery of the old subject-named file. Every known
+  // registration must match; this path must never authorize replacement.
+  legacyRegistrations: Array<{
+    accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
+    algorandAddress?: string | null; bscAddress?: string | null;
+  }>;
+}) {
+  if (!userSub) throw new WalletRecoveryError('unexpected');
+  const { credentialStorage } = await import('./credentialStorage');
+  const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
+  const alias = `confio_master_secret_v2_${safeSub}`;
+  const idAlias = `confio_wallet_id_v2_${safeSub}`;
+  const pendingReportAlias = `confio_backup_report_pending_v1_${safeSub}`;
+  let secret: Uint8Array | null;
+  let walletId: string | null = null;
+  if (driveToken) {
+    const { googleDriveStorage } = await import('./googleDriveStorage');
+    const manifests = await googleDriveStorage.listFiles(driveToken, MANIFEST_FILENAME);
+    if (options?.legacyRegistrations) {
+      // A canonical manifest, even an unreadable one, takes precedence. Do
+      // not scan history, trash or unrelated files when repairing sign-in.
+      if (manifests.length || !options.legacyRegistrations.some(row => row.algorandAddress || row.bscAddress)) {
+        throw new WalletRecoveryError('missing');
+      }
+      const files = await googleDriveStorage.listFiles(driveToken, `${alias}.json`);
+      if (!files.length) throw new WalletRecoveryError('missing');
+      if (files.length !== 1) throw new WalletRecoveryError('unreadable');
+      secret = decryptBackup(await googleDriveStorage.downloadFile(driveToken, files[0].id),
+        require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+      if (!secret) throw new WalletRecoveryError('unreadable');
+    } else {
+      if (!manifests.length) throw new WalletRecoveryError('missing');
+      // Ambiguity is not permission to pick another wallet or generate a key.
+      if (manifests.length !== 1) throw new WalletRecoveryError('unreadable');
+      let manifest: any;
+      try {
+        manifest = JSON.parse(await googleDriveStorage.downloadFile(driveToken, manifests[0].id));
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new WalletRecoveryError('unreadable');
+        throw error;
+      }
+      if (!Array.isArray(manifest?.wallets) || manifest.wallets.length !== 1) {
+        throw new WalletRecoveryError('unreadable');
+      }
+      walletId = manifest.wallets[0]?.id;
+      if (typeof walletId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(walletId)) {
+        throw new WalletRecoveryError('unreadable');
+      }
+      const files = await googleDriveStorage.listFiles(driveToken, `confio_wallet_v2_${walletId}.enc`);
+      if (!files.length) throw new WalletRecoveryError('missing');
+      if (files.length !== 1) throw new WalletRecoveryError('unreadable');
+      const body = await googleDriveStorage.downloadFile(driveToken, files[0].id);
+      secret = decryptBackup(body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+      if (!secret) throw new WalletRecoveryError('unreadable');
+    }
+  } else {
+    secret = await getExistingLocalV2MasterSecret(userSub);
+    if (!secret) return null;
+    const id = await credentialStorage.retrieveSecret(idAlias);
+    walletId = id ? decodeUtf8(id) : null;
+  }
+  const recovered = storedMasterSecret(secret, 'sign-in recovery');
+  if (!recovered) throw new WalletRecoveryError('unreadable');
+  const forAccount = (context: {
+    accountType: 'personal' | 'business'; accountIndex: number; businessId?: string | null;
+  }) => {
+    if (!Number.isSafeInteger(context.accountIndex) || context.accountIndex < 0
+        || !['personal', 'business'].includes(context.accountType)
+        || (context.accountType === 'business' && !context.businessId)
+        || (context.accountType === 'personal' && context.businessId)) {
+      throw new Error('Invalid wallet account context');
+    }
+    const opts = {
+      accountType: context.accountType,
+      accountIndex: context.accountIndex,
+      businessId: context.businessId || undefined,
+    };
+    const wallet = deriveEvmKeyFromMasterSecret(recovered, opts);
+    return {
+      algorandAddress: deriveV2AddressPure(recovered, opts),
+      bscAddress: wallet.address,
+      sign: (message: string) => signEip191Message(message, wallet.privKeyHex),
+      publish: async () => {
+        // Each owned context has its own durable receiving-address slot.
+        // Derivation/proof preparation alone must never publish a candidate.
+        const accountKey = evmAccountKey(opts);
+        const stored = await Keychain.setGenericPassword('evm_address', wallet.address, {
+          service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${accountKey}`,
+        });
+        if (stored === false) throw new Error('Could not store the active wallet address');
+        evmAddressMemory[accountKey] = wallet.address;
+        // Sign-in activates primary personal. Publishing sibling accounts
+        // must not change the unkeyed active-wallet slot to a business key.
+        if (opts.accountType === 'personal' && opts.accountIndex === 0) lastDerivedEvmWallet = wallet;
+      },
+    };
+  };
+  const primary = forAccount({ accountType: 'personal', accountIndex: 0 });
+  if (options?.legacyRegistrations && !options.legacyRegistrations.every(row => {
+    const wallet = forAccount(row);
+    return (!row.algorandAddress || row.algorandAddress === wallet.algorandAddress)
+      && (!row.bscAddress || row.bscAddress.toLowerCase() === wallet.bscAddress.toLowerCase());
+  })) throw new WalletRecoveryError('mismatch');
+  const algo = primary.algorandAddress;
+  return {
+    ...primary,
+    forAccount,
+    hasPendingBackupReport: async () => {
+      const pending = await credentialStorage.retrieveSecretStrict(pendingReportAlias);
+      return !!pending && decodeUtf8(pending) === primary.bscAddress.toLowerCase();
+    },
+    clearPendingBackupReport: async () => {
+      const pending = await credentialStorage.retrieveSecretStrict(pendingReportAlias);
+      if (pending && decodeUtf8(pending) === primary.bscAddress.toLowerCase()) {
+        await credentialStorage.deleteSecret(pendingReportAlias);
+      }
+    },
+    persist: async () => {
+      if (driveToken) {
+        // This exact secret was decrypted from the canonical Drive file.
+        // Record only its public address before rebinding Keychain: a killed
+        // app/lost report response can acknowledge it on the next sign-in.
+        const receipt = stringToUtf8Bytes(primary.bscAddress.toLowerCase());
+        await credentialStorage.storeSecret(pendingReportAlias, receipt);
+        const rereadReceipt = await credentialStorage.retrieveSecretStrict(pendingReportAlias);
+        if (!rereadReceipt || !secretsEqual(rereadReceipt, receipt)) throw new WalletRecoveryError('local_corrupt');
+      }
+      // Retain the previous valid key under its address alias; never erase it
+      // merely because it is no longer the active subject-bound key.
+      try {
+        const previous = await getExistingLocalV2MasterSecret(userSub);
+        if (previous) await storeAddressBoundMasterSecret(credentialStorage, derivePersonalV2Address(previous), previous);
+      } catch (error) {
+        if (!(error instanceof CorruptMasterSecretError)) throw error;
+      }
+      await credentialStorage.storeSecret(alias, recovered);
+      await credentialStorage.storeSecret(idAlias, stringToUtf8Bytes(walletId || generateUUID()));
+      await storeAddressBoundMasterSecret(credentialStorage, algo, recovered);
+      const reread = await getExistingLocalV2MasterSecret(userSub);
+      if (!reread || !secretsEqual(reread, recovered)) throw new WalletRecoveryError('local_corrupt');
+    },
+  };
+}
+
 /**
  * Get-or-Create Master Secret.
  * 

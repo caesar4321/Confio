@@ -7,6 +7,8 @@ import {
 } from '@react-native-google-signin/google-signin';
 import { jwtDecode } from 'jwt-decode';
 import { walletRecoveryMessage } from './walletRecoveryErrors';
+import { reconcileSignInWallet } from './signInWalletReconciliation';
+import { persistSignInSession } from './signInSessionStorage';
 import { canReplaceAfterRecoveryFailure, collisionRefusalMessage } from './walletReenrollmentDecision';
 import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
@@ -34,6 +36,7 @@ import {
   GoogleDriveScopeMissingError,
   isDriveAuthorizationFailure,
   runWithDriveAuthorizationRetry,
+  isDriveStorageQuotaError,
 } from './googleDriveAuthPolicy';
 
 const LEGACY_ALGOD_INSPECTION_TIMEOUT_MS = 8_000;
@@ -907,6 +910,8 @@ export class AuthService {
     success: boolean;
     error?: string;
     supportCode?: string;
+    /** Google storage is full: only the user can fix it by freeing space. */
+    storageFull?: boolean;
   }> {
     console.log('[AuthService] Enabling Drive backup for current user...');
 
@@ -957,6 +962,7 @@ export class AuthService {
         success: false,
         error: error?.message || 'Error desconocido',
         supportCode: driveSupportCode(error),
+        storageFull: isDriveStorageQuotaError(error),
       };
     }
   }
@@ -1201,7 +1207,7 @@ export class AuthService {
       // This does not bypass Firebase authentication or server enforcement.
       await appCheckService.primeTokenForAuth();
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
-      const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
+      const { data: { web3AuthLogin: loginResponse } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,
         variables: {
           firebaseIdToken: firebaseToken,
@@ -1210,6 +1216,8 @@ export class AuthService {
           platformOs: Platform.OS
         }
       });
+      // Apollo results may be frozen; reconciliation updates only this sign-in's copy.
+      const authData = loginResponse ? { ...loginResponse, user: { ...loginResponse.user } } : null;
       console.log('Backend authentication response:', authData ? 'Data received' : 'No data');
       perfLog('Backend authenticated');
 
@@ -1238,7 +1246,7 @@ export class AuthService {
         if (!cleared) {
           // Some Keychain implementations transiently fail deletion. An
           // invalid payload prevents cold start from accepting a partial JWT.
-          await Keychain.setGenericPassword(
+          const invalidated = await Keychain.setGenericPassword(
             AUTH_KEYCHAIN_USERNAME,
             JSON.stringify({ accessToken: '', refreshToken: '' }),
             {
@@ -1247,6 +1255,7 @@ export class AuthService {
               accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
             },
           );
+          if (invalidated === false) throw new Error('Could not invalidate the previous session');
         }
       };
 
@@ -1293,70 +1302,18 @@ export class AuthService {
       // This is only a safety offer. It must never trigger wallet creation by
       // itself. Normal restoration below first has to prove an actual address
       // collision before the offer may be consumed.
-      const walletReenrollmentOfferAvailable = !!authData.walletReenrollmentAllowed;
+      let walletReenrollmentOfferAvailable = !!authData.walletReenrollmentAllowed;
 
       let backendTokensPersisted = false;
       const persistBackendTokens = async () => {
         if (backendTokensPersisted) return;
-        if (!authData.accessToken) {
-          console.error('No auth tokens received from Web3Auth login');
-          throw new Error('No auth tokens received from server');
-        }
-        console.log('About to store tokens in Keychain:', {
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME,
-          hasAccessToken: !!authData.accessToken,
-          hasRefreshToken: !!authData.refreshToken,
-          accessTokenLength: authData.accessToken?.length,
-          refreshTokenLength: authData.refreshToken?.length
-        });
-
-        try {
-          await Keychain.setGenericPassword(
-            AUTH_KEYCHAIN_USERNAME,
-            JSON.stringify({
-              accessToken: authData.accessToken,
-              refreshToken: authData.refreshToken
-            }),
-            {
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
-            }
-          );
-
-          // Verify token was stored
-          const checkCredentials = await Keychain.getGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME
-          });
-
-          if (checkCredentials === false) {
-            console.log('JWT in Keychain right after saving: No credentials');
-            throw new Error('Failed to verify token storage in Keychain');
-          } else {
-            console.log('JWT in Keychain right after saving:', {
-              hasCredentials: true,
-              hasPassword: !!checkCredentials.password,
-              passwordLength: checkCredentials.password.length
-            });
-            if (!checkCredentials.password) {
-              throw new Error('Failed to verify token storage in Keychain');
-            }
-          }
-          backendTokensPersisted = true;
-        } catch (error) {
-          console.error('Error storing or verifying tokens:', error);
-          throw error;
-        }
+        await persistSignInSession(authData.accessToken, authData.refreshToken);
+        backendTokensPersisted = true;
       };
 
-      // A reenrollment JWT is request-scoped until the destructive transition
-      // commits. Persisting it first lets a hard-killed app cold-start into
-      // Main and skip the login response that carries the reenrollment grant.
-      if (!walletReenrollmentOfferAvailable) {
-        await persistBackendTokens();
-      }
+      // Keep every fresh JWT request-scoped until sign-in reconciliation has
+      // finished, including funded/unknown wallets without a reenrollment
+      // offer. A hard kill cannot run catch-based session cleanup.
 
       // Historical self-heal: a small set of Google accounts generated a V2
       // wallet locally but were stored as V1 after Drive sync failed. The
@@ -1474,6 +1431,32 @@ export class AuthService {
       // with a server-side Algorand address must recover the matching secret
       // instead of silently minting a replacement V2 wallet.
       // ----------------------------------------------------------------------
+      try {
+        const reconciled = await reconcileSignInWallet({
+          provider: 'google', subject: googleSubject, firebaseToken, authData,
+          client: apolloClient,
+          beforeWalletChange: () => invalidateBackendSession('before sign-in wallet reconciliation'),
+          getLegacyV1Address: async account => {
+            const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+            const wallet = await SecureDeterministicWalletService.getInstance().restoreLegacyV1Wallet(
+              'https://accounts.google.com', googleSubject, GOOGLE_CLIENT_IDS.production.web, 'google',
+              account.accountType, account.accountIndex, account.businessId || undefined, authData.accessToken,
+            );
+            return wallet.address;
+          },
+          getGoogleDriveToken: async () => {
+            driveAccessToken = driveAccessToken || await this.getDriveAccessTokenOnly({ expectedGoogleSubject: googleSubject }) || undefined;
+            return driveAccessToken || null;
+          },
+        });
+        // Inventory can revoke a legacy primary-only offer when owned
+        // siblings exist. All later recovery closures must see that decision.
+        walletReenrollmentOfferAvailable = !!authData.walletReenrollmentAllowed;
+        if (reconciled || !walletReenrollmentOfferAvailable) await persistBackendTokens();
+      } catch (error) {
+        await invalidateBackendSession('after sign-in wallet reconciliation failure');
+        throw error;
+      }
       let serverAlgorandAddress = authData.user?.algorandAddress || null;
       // Algorand deprecated: BSC-only returning users have NO Algorand address,
       // so the registered BSC address is the wallet anchor. Never silently mint
@@ -1907,7 +1890,7 @@ export class AuthService {
       // Keep Apple and Google login under the same server-side policy.
       await appCheckService.primeTokenForAuth();
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
-      const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
+      const { data: { web3AuthLogin: loginResponse } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,
         variables: {
           firebaseIdToken: firebaseToken,
@@ -1917,6 +1900,7 @@ export class AuthService {
         }
       });
 
+      const authData = loginResponse ? { ...loginResponse, user: { ...loginResponse.user } } : null;
       if (!authData || !authData.success) {
         const backendError = authData?.error || 'Backend authentication failed';
         const normalizedError = backendError.toLowerCase();
@@ -1929,27 +1913,29 @@ export class AuthService {
         void emitNewUserSignupOnce(authData.user?.id, 'apple');
       }
 
-      // Store Django JWT tokens immediately so subsequent GraphQL is authenticated
-      if (authData.accessToken) {
-        try {
-          await Keychain.setGenericPassword(
-            AUTH_KEYCHAIN_USERNAME,
-            JSON.stringify({
-              accessToken: authData.accessToken,
-              refreshToken: authData.refreshToken
-            }),
-            {
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
-            }
-          );
-          console.log('Stored JWT tokens in Keychain before processing opt-ins (Apple)');
-        } catch (e) {
-          console.error('Failed to store tokens before opt-ins (Apple):', e);
-          // Continue, but follow-up GraphQL may fail if tokens missing
-        }
+      try {
+        await reconcileSignInWallet({
+          provider: 'apple', subject: appleSub, firebaseToken, authData,
+          client: apolloClient,
+          beforeWalletChange: async () => {
+            const invalidated = await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, JSON.stringify({
+              accessToken: '', refreshToken: '',
+            }), { service: AUTH_KEYCHAIN_SERVICE });
+            if (invalidated === false) throw new Error('Could not invalidate the previous session');
+          },
+          getGoogleDriveToken: async () => null, // Apple recovery stays in Keychain.
+        });
+      } catch (error) {
+        // No partial sign-in may cold-start into Main after a failed commit.
+        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, JSON.stringify({
+          accessToken: '', refreshToken: '',
+        }), { service: AUTH_KEYCHAIN_SERVICE });
+        throw error;
       }
+
+      // Reconciliation may have suspended the previous session. Never report
+      // successful login until the new credentials survive a Keychain read.
+      await persistSignInSession(authData.accessToken, authData.refreshToken);
 
 
 
@@ -1978,24 +1964,7 @@ export class AuthService {
           if (allowAppleSecretGeneration) {
             throw v2Err;
           }
-          // Returning wallet-holder with no local secret: recover from Google
-          // Drive backup instead of generating a replacement.
-          onProgress?.('Recuperando tu billetera con Google Drive...');
-          const recoveryDriveToken = await this.getDriveAccessTokenOnly();
-          if (!recoveryDriveToken) {
-            throw new Error('Para entrar a esta cuenta necesitamos recuperar tu billetera. Concede acceso a Google Drive con la cuenta donde guardaste tu respaldo.');
-          }
-          try {
-            await getOrCreateMasterSecret(appleSub, recoveryDriveToken, {
-              allowGenerate: false,
-              provider: 'apple',
-              expectedEvmAddress: serverBscAddressApple,
-            });
-            console.log('[AuthService] Apple BSC-only wallet recovered from Google Drive.');
-          } catch (driveRecoveryErr: any) {
-            console.error('[AuthService] Failed to recover Apple BSC-only wallet from Drive:', driveRecoveryErr);
-            throw new Error(walletRecoveryMessage(driveRecoveryErr));
-          }
+          throw new Error('No pudimos recuperar tu billetera desde el llavero de Apple. Verifica iCloud y vuelve a intentarlo. No desinstales Confío. Código: RECOVERY-APPLE-KEYCHAIN.');
         }
         console.log('Master secret checked/created for Apple user (BSC-only)');
         registerBscAddressBestEffort();
@@ -2040,23 +2009,7 @@ export class AuthService {
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
-            onProgress?.('Recuperando tu billetera con Google Drive...');
-            const driveAccessToken = await this.getDriveAccessTokenOnly();
-            if (!driveAccessToken) {
-              throw new Error('Para entrar a esta cuenta necesitamos recuperar tu billetera. Toca Continuar con Google y elige la misma cuenta de Google donde guardaste tu respaldo.');
-            }
-
-            try {
-              await getOrCreateMasterSecret(appleSub, driveAccessToken, {
-                allowGenerate: false,
-                provider: 'apple',
-                expectedAddress: serverAlgorandAddress,
-              });
-              console.log('[AuthService] Apple V2 wallet recovered from Google Drive.');
-            } catch (driveRecoveryErr: any) {
-              console.error('[AuthService] Failed to recover Apple V2 wallet from Drive:', driveRecoveryErr);
-              throw new Error(walletRecoveryMessage(driveRecoveryErr));
-            }
+            throw new Error('No pudimos recuperar tu billetera desde el llavero de Apple. Verifica iCloud y vuelve a intentarlo. No desinstales Confío. Código: RECOVERY-APPLE-KEYCHAIN.');
           }
           if (allowV2SecretGeneration) {
             throw v2Err;

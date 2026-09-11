@@ -8,6 +8,7 @@ import { useApolloClient } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
 import { GET_ME } from '../apollo/queries';
 import authService from '../services/authService';
+import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
 
 export const BackupCompletionScreen = () => {
   const apolloClient = useApolloClient();
@@ -15,6 +16,7 @@ export const BackupCompletionScreen = () => {
   const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [supportCode, setSupportCode] = useState<string | null>(null);
+  const [showStorageFull, setShowStorageFull] = useState(false);
 
   useEffect(() => {
     refreshProfile('personal').catch(err => {    });
@@ -50,6 +52,7 @@ export const BackupCompletionScreen = () => {
 
       setError(result.error || 'No pudimos terminar el respaldo seguro.');
       setSupportCode(result.supportCode || null);
+      setShowStorageFull(!!result.storageFull);
     } catch (retryErr: any) {
       setError(retryErr?.message || 'No pudimos terminar el respaldo seguro.');
     } finally {
@@ -162,6 +165,15 @@ export const BackupCompletionScreen = () => {
           <Text style={styles.secondaryText}>Salir por ahora</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <DriveStorageFullModal
+        visible={showStorageFull}
+        onRetry={() => {
+          setShowStorageFull(false);
+          handleRetryBackup();
+        }}
+        onClose={() => setShowStorageFull(false)}
+      />
     </SafeAreaView>
   );
 };

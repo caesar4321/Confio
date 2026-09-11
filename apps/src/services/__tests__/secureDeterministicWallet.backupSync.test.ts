@@ -10,6 +10,7 @@
  * Drive.
  */
 import { sha256 } from '@noble/hashes/sha256';
+import { Buffer } from 'buffer';
 import { utf8ToBytes, bytesToHex } from '@noble/hashes/utils';
 import { bytesToBase64 } from '../../utils/encoding';
 
@@ -82,6 +83,10 @@ jest.mock('../googleDriveStorage', () => ({
 import {
   createWalletReenrollmentDriveAttestation,
   getExistingLocalV2MasterSecret,
+  getSignInWalletCandidate,
+  getEvmAddressForDisplay,
+  getDerivedEvmWallet,
+  clearReconciledLegacyWallets,
   getOrCreateMasterSecret,
   deriveV2AddressPure,
   reportBackupStatus,
@@ -102,6 +107,246 @@ const walletIdAlias = () =>
 const expectedAddress = deriveV2AddressPure(MASTER_SECRET, {
   accountType: 'personal',
   accountIndex: 0,
+});
+
+describe('sign-in canonical wallet recovery', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockMemoryStore.clear();
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+  });
+
+  it('Keychain absence does not generate a secret', async () => {
+    expect(await getSignInWalletCandidate(USER_SUB)).toBeNull();
+    expect(mockMemoryStore.size).toBe(0);
+  });
+
+  it('Keychain recovery proves ownership and verifies persistence', async () => {
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    const candidate = await getSignInWalletCandidate(USER_SUB);
+    expect(candidate?.algorandAddress).toBe(expectedAddress);
+    const { secp256k1 } = require('@noble/curves/secp256k1.js');
+    const { keccak_256 } = require('@noble/hashes/sha3');
+    const signature = Buffer.from(candidate!.sign('challenge').slice(2), 'hex');
+    const digest = keccak_256(utf8ToBytes('\x19Ethereum Signed Message:\n9challenge'));
+    const publicKey = secp256k1.recoverPublicKey(
+      Uint8Array.from([signature[64] - 27, ...signature.subarray(0, 64)]), digest, { prehash: false });
+    const uncompressed = secp256k1.Point.fromBytes(publicKey).toBytes(false);
+    expect('0x' + bytesToHex(keccak_256(uncompressed.slice(1)).slice(12))).toBe(candidate!.bscAddress.toLowerCase());
+    await candidate!.persist();
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(MASTER_SECRET);
+    expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+  });
+
+  it('missing canonical backup never falls back to local or generates', async () => {
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    await expect(getSignInWalletCandidate(USER_SUB, 'drive-token')).rejects.toMatchObject({ code: 'missing' });
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(MASTER_SECRET);
+    expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+  });
+
+  it('publishes the recovered receiving address only after durable cache storage', async () => {
+    const Keychain = require('react-native-keychain');
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    const previous = await getSignInWalletCandidate(USER_SUB);
+    await previous!.publish();
+    mockMemoryStore.set(subjectAlias(), new Uint8Array(32).fill(29));
+    const replacement = await getSignInWalletCandidate(USER_SUB);
+    let finishWrite!: (value: boolean) => void;
+    Keychain.setGenericPassword.mockImplementationOnce(() => new Promise(resolve => { finishWrite = resolve; }));
+    const publishing = replacement!.publish();
+    expect(await getEvmAddressForDisplay('personal_0')).toBe(previous!.bscAddress);
+    finishWrite(true);
+    await publishing;
+    expect(Keychain.setGenericPassword).toHaveBeenLastCalledWith('evm_address', replacement!.bscAddress, {
+      service: 'confio_evm_address_v1_personal_0',
+    });
+    expect(await getEvmAddressForDisplay('personal_0')).toBe(replacement!.bscAddress);
+  });
+
+  it('does not publish a replacement when Keychain rejects the display write', async () => {
+    const Keychain = require('react-native-keychain');
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    const wallet = await getSignInWalletCandidate(USER_SUB);
+    Keychain.setGenericPassword.mockResolvedValueOnce(false);
+    await expect(wallet!.publish()).rejects.toThrow('Could not store the active wallet address');
+  });
+
+  it('derives and proves each owned account without exposing keys or publishing candidates', async () => {
+    const Keychain = require('react-native-keychain');
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    const candidate = (await getSignInWalletCandidate(USER_SUB))!;
+    const context = { accountType: 'business' as const, accountIndex: 2, businessId: '42' };
+    const business = candidate.forAccount(context);
+    const nextIndex = candidate.forAccount({ ...context, accountIndex: 3 });
+    const otherBusiness = candidate.forAccount({ ...context, businessId: '43' });
+    const otherPersonal = candidate.forAccount({ accountType: 'personal', accountIndex: 1 });
+    expect(new Set([candidate.bscAddress, business.bscAddress, nextIndex.bscAddress, otherBusiness.bscAddress, otherPersonal.bscAddress]).size).toBe(5);
+    expect(business.bscAddress).toBe(deriveEvmKeyFromMasterSecret(MASTER_SECRET, context).address);
+    expect(business.algorandAddress).toBe(deriveV2AddressPure(MASTER_SECRET, context));
+    expect(Object.keys(business).sort()).toEqual(['algorandAddress', 'bscAddress', 'publish', 'sign']);
+    expect(Keychain.setGenericPassword).not.toHaveBeenCalled();
+    const { secp256k1 } = require('@noble/curves/secp256k1.js');
+    const { keccak_256 } = require('@noble/hashes/sha3');
+    const signature = Buffer.from(business.sign('challenge').slice(2), 'hex');
+    const digest = keccak_256(utf8ToBytes('\x19Ethereum Signed Message:\n9challenge'));
+    const publicKey = secp256k1.recoverPublicKey(
+      Uint8Array.from([signature[64] - 27, ...signature.subarray(0, 64)]), digest, { prehash: false });
+    const uncompressed = secp256k1.Point.fromBytes(publicKey).toBytes(false);
+    expect('0x' + bytesToHex(keccak_256(uncompressed.slice(1)).slice(12))).toBe(business.bscAddress.toLowerCase());
+  });
+
+  it('publishes business slots durably without changing the active personal wallet', async () => {
+    const Keychain = require('react-native-keychain');
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    const candidate = (await getSignInWalletCandidate(USER_SUB))!;
+    await candidate.publish();
+    const business = candidate.forAccount({ accountType: 'business', accountIndex: 4, businessId: '98' });
+    let finishWrite!: (value: boolean) => void;
+    Keychain.setGenericPassword.mockImplementationOnce(() => new Promise(resolve => { finishWrite = resolve; }));
+    let finished = false;
+    const publishing = business.publish().then(() => { finished = true; });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    finishWrite(true);
+    await publishing;
+    expect(Keychain.setGenericPassword).toHaveBeenLastCalledWith('evm_address', business.bscAddress, {
+      service: 'confio_evm_address_v1_business_98_4',
+    });
+    expect(await getEvmAddressForDisplay('business_98_4')).toBe(business.bscAddress);
+    expect(await getEvmAddressForDisplay('personal_0')).toBe(candidate.bscAddress);
+    expect(getDerivedEvmWallet()?.address).toBe(candidate.bscAddress);
+  });
+
+  it.each([
+    { accountType: 'business', accountIndex: 0 },
+    { accountType: 'personal', accountIndex: -1 },
+    { accountType: 'personal', accountIndex: 1.5 },
+    { accountType: 'personal', accountIndex: 0, businessId: '1' },
+  ])('rejects invalid reconciliation context %j', async context => {
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    const candidate = (await getSignInWalletCandidate(USER_SUB))!;
+    expect(() => candidate.forAccount(context as any)).toThrow('Invalid wallet account context');
+  });
+
+  it('clears retired Algo signing/display caches without deleting master secrets', async () => {
+    const Keychain = require('react-native-keychain');
+    const { credentialStorage } = require('../credentialStorage');
+    const { default: algo } = await import('../algorandService');
+    const service = SecureDeterministicWalletService.getInstance() as any;
+    service.inMemSeeds.set('legacy-scope', 'old-seed');
+    service.currentScope.set('current', 'legacy-scope');
+    await algo.setCurrentAddress('old-algo');
+    mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+    mockMemoryStore.set('confio_master_secret_by_address_old', MASTER_SECRET);
+    await clearReconciledLegacyWallets([
+      { accountType: 'personal', accountIndex: 0 },
+      { accountType: 'business', accountIndex: 2, businessId: '44' },
+    ]);
+    expect(algo.getCurrentAccount()).toBeNull();
+    expect(service.inMemSeeds.size).toBe(0);
+    expect(service.currentScope.size).toBe(0);
+    expect(Keychain.resetGenericPassword.mock.calls).toEqual([
+      [{ service: 'com.confio.algorand.addresses.algo_address_personal_0' }],
+      [{ service: 'com.confio.algorand.addresses.algo_address_business_44_2' }],
+    ]);
+    expect(credentialStorage.deleteSecret).not.toHaveBeenCalled();
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(MASTER_SECRET);
+    expect(mockMemoryStore.get('confio_master_secret_by_address_old')).toEqual(MASTER_SECRET);
+  });
+
+  it('rejects incomplete retirement cleanup when a cached address survives deletion', async () => {
+    const Keychain = require('react-native-keychain');
+    Keychain.getGenericPassword.mockResolvedValueOnce({ password: 'retired-algo' });
+    await expect(clearReconciledLegacyWallets([{ accountType: 'personal', accountIndex: 0 }]))
+      .rejects.toThrow('Could not clear the retired wallet address');
+  });
+
+  it('does not widen empty or invalid cleanup scope', async () => {
+    const Keychain = require('react-native-keychain');
+    await clearReconciledLegacyWallets([]);
+    await expect(clearReconciledLegacyWallets([{ accountType: 'business', accountIndex: 0 }]))
+      .rejects.toThrow('Invalid wallet account context');
+    expect(Keychain.resetGenericPassword).not.toHaveBeenCalled();
+  });
+
+  it('recovers the exact old subject-named file only when every registered wallet matches', async () => {
+    const opts = { accountType: 'business' as const, accountIndex: 2, businessId: '42' };
+    const registrations: NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations'] = [
+      { accountType: 'personal' as const, accountIndex: 0, algorandAddress: expectedAddress },
+      { ...opts, bscAddress: deriveEvmKeyFromMasterSecret(MASTER_SECRET, opts).address },
+    ];
+    const backup = require('crypto-js/aes').encrypt(bytesToBase64(MASTER_SECRET), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_token, name) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [];
+      if (name === `${subjectAlias()}.json`) return [{ id: 'legacy' }];
+      throw new Error('Unexpected history scan');
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockResolvedValue(backup);
+    const recovered = await getSignInWalletCandidate(USER_SUB, 'drive-token', { legacyRegistrations: registrations });
+    expect(recovered?.algorandAddress).toBe(expectedAddress);
+    expect(mockMemoryStore.size).toBe(0);
+    await recovered!.persist();
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(MASTER_SECRET);
+    expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    expect(googleDriveStorage.updateFile).not.toHaveBeenCalled();
+    expect(googleDriveStorage.listRevisions).not.toHaveBeenCalled();
+    registrations[1].bscAddress = '0x' + '12'.repeat(20);
+    await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { legacyRegistrations: registrations }))
+      .rejects.toMatchObject({ code: 'mismatch' });
+  });
+
+  it('does not recover a legacy file over an existing canonical manifest or without anchors', async () => {
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([{ id: 'manifest' }]);
+    await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', {
+      legacyRegistrations: [{ accountType: 'personal', accountIndex: 0, algorandAddress: expectedAddress }],
+    })).rejects.toMatchObject({ code: 'missing' });
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+    await expect(getSignInWalletCandidate(USER_SUB, 'drive-token', { legacyRegistrations: [] }))
+      .rejects.toMatchObject({ code: 'missing' });
+    expect(googleDriveStorage.downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('ambiguous manifests are refused without uploading', async () => {
+    (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([{ id: 'one' }, { id: 'two' }]);
+    await expect(getSignInWalletCandidate(USER_SUB, 'drive-token')).rejects.toMatchObject({ code: 'unreadable' });
+    expect(mockMemoryStore.size).toBe(0);
+  });
+
+  it('reads the canonical file rather than searching history or uploading the local key', async () => {
+    const alternate = new Uint8Array(32).fill(19);
+    mockMemoryStore.set(subjectAlias(), alternate);
+    const AES = require('crypto-js/aes');
+    const backup = AES.encrypt(bytesToBase64(MASTER_SECRET), 'ConfioWallet_Backup_Key_v1_DoNotShare').toString();
+    (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_token, name) => {
+      if (name === 'confio_wallet_manifest_v2.json') return [{ id: 'manifest' }];
+      if (name === 'confio_wallet_v2_canonical.enc') return [{ id: 'canonical' }];
+      throw new Error('Unexpected Drive scan');
+    });
+    (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_token, id) =>
+      id === 'manifest' ? JSON.stringify({ wallets: [{ id: 'canonical' }] }) : backup);
+    const wallet = await getSignInWalletCandidate(USER_SUB, 'drive-token');
+    expect(wallet?.algorandAddress).toBe(expectedAddress);
+    // Reading does not overwrite the device. Persistence is explicit and tested.
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(alternate);
+    await wallet!.persist();
+    expect(mockMemoryStore.get(subjectAlias())).toEqual(MASTER_SECRET);
+    expect([...mockMemoryStore.values()]).toContainEqual(alternate);
+    expect(googleDriveStorage.updateFile).not.toHaveBeenCalled();
+    expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    expect(googleDriveStorage.listRevisions).not.toHaveBeenCalled();
+    expect(await wallet!.hasPendingBackupReport()).toBe(true);
+    // Receipt is public, scoped to the subject and exact replacement address.
+    const localAgain = await getSignInWalletCandidate(USER_SUB);
+    expect(await localAgain!.hasPendingBackupReport()).toBe(true);
+    mockMemoryStore.set(subjectAlias(), alternate);
+    const otherWallet = await getSignInWalletCandidate(USER_SUB);
+    expect(await otherWallet!.hasPendingBackupReport()).toBe(false);
+    await otherWallet!.clearPendingBackupReport();
+    expect(await wallet!.hasPendingBackupReport()).toBe(true);
+    await wallet!.clearPendingBackupReport();
+    expect(await wallet!.hasPendingBackupReport()).toBe(false);
+  });
 });
 
 describe('local V2 collision probe', () => {

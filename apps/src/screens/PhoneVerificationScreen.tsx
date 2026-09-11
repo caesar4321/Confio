@@ -22,13 +22,16 @@ import Feather from 'react-native-vector-icons/Feather';
 import TelegramLogo from '../assets/svg/TelegramLogo.svg';
 import { Country, filterCountries } from '../utils/countries';
 import { useMutation } from '@apollo/client';
-import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER, INITIATE_SMS_VERIFICATION, VERIFY_SMS_CODE } from '../apollo/queries';
+import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, INITIATE_SMS_VERIFICATION, VERIFY_SMS_CODE, CONFIRM_PHONE_RELINK } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { PhoneRelinkModal } from '../components/PhoneRelinkModal';
+import { usePhoneRelinkPrompt } from '../hooks/usePhoneRelinkPrompt';
+import { createPhoneRelinkFlow, PhoneVerificationResult } from '../utils/phoneRelinkFlow';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
@@ -66,9 +69,18 @@ const PhoneVerificationScreen = () => {
 
   const [initiateTelegramVerification, { loading: loadingInitiate }] = useMutation(INITIATE_TELEGRAM_VERIFICATION);
   const [verifyTelegramCode, { loading: loadingVerify }] = useMutation(VERIFY_TELEGRAM_CODE);
-  const [updatePhoneNumber] = useMutation(UPDATE_PHONE_NUMBER);
   const [initiateSmsVerification] = useMutation(INITIATE_SMS_VERIFICATION);
   const [verifySmsCode] = useMutation(VERIFY_SMS_CODE);
+  const [confirmPhoneRelink] = useMutation(CONFIRM_PHONE_RELINK);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const verificationInFlight = useRef(false);
+  const relinkFlow = useRef(createPhoneRelinkFlow());
+  const mounted = useRef(true);
+  const relinkPrompt = usePhoneRelinkPrompt();
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const CODE_REQUEST_COOLDOWN_SECONDS = 30;
 
@@ -99,6 +111,8 @@ const PhoneVerificationScreen = () => {
   };
 
   const handleBack = () => {
+    if (verificationInFlight.current) return;
+    relinkFlow.current.clear();
     if (currentScreen === 'method') {
       setCurrentScreen('phone');
     } else if (currentScreen === 'code') {
@@ -176,39 +190,54 @@ const PhoneVerificationScreen = () => {
     });
   };
 
+  // The relink modal stays presented (asking, confirming, retrying) until the
+  // flow settles, and only then closes.
+  const resolveRelinkConfirmation = async (verify: () => Promise<PhoneVerificationResult | null | undefined>) => {
+    try {
+      return await relinkFlow.current.run({
+        verify,
+        confirm: async token => {
+          const response = await confirmPhoneRelink({ variables: { token } });
+          return response.data?.confirmPhoneRelink;
+        },
+        ask: relinkPrompt.ask,
+        retry: relinkPrompt.retry,
+        isActive: () => mounted.current,
+        reset: () => {
+          setCurrentScreen('phone');
+          setVerificationCode(['', '', '', '', '', '']);
+        },
+      });
+    } finally {
+      if (mounted.current) relinkPrompt.close();
+    }
+  };
+
   const handleVerifyCode = async () => {
+    if (verificationInFlight.current) return;
+    verificationInFlight.current = true;
+    setIsVerifying(true);
     try {
       if (verificationMethod === 'telegram') {
         // Format phone number: remove any spaces, dashes, or other separators
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
 
-        const { data } = await verifyTelegramCode({
-          variables: {
-            phoneNumber: cleanPhoneNumber,
-            countryCode: selectedCountry?.[2] || 'AR', // ISO country code
-            code: verificationCode.join('') // Join the code array into a single string
-          }
+        const result = await resolveRelinkConfirmation(async () => {
+          const { data } = await verifyTelegramCode({
+            variables: {
+              phoneNumber: cleanPhoneNumber,
+              countryCode: selectedCountry?.[2] || 'AR', // ISO country code
+              code: verificationCode.join(''),
+            },
+          });
+          return data?.verifyTelegramCode;
         });
-
-        if (data.verifyTelegramCode.success) {
+        if (!result) return;
+        if (result.success) {
           // Check if we're in the profile update flow (user is already authenticated)
           if (isProfileUpdateFlow) {
-            // Update the user's phone number in the database
-            const { data: updateData } = await updatePhoneNumber({
-              variables: {
-                countryCode: selectedCountry?.[1] || '+54', // Phone code (e.g., '+54')
-                phoneNumber: cleanPhoneNumber,
-              },
-            });
-
-            if (updateData?.updatePhoneNumber?.success) {
-              // Frictionless save: the updated number on the previous screen
-              // is the confirmation.
-              refreshProfile('personal');
-              navigation.goBack();
-            } else {
-              setBanner({ variant: 'error', message: updateData?.updatePhoneNumber?.error || 'No se pudo actualizar el número de teléfono' });
-            }
+            await refreshProfile('personal');
+            navigation.goBack();
           } else {
             // Auth flow - phone is verified server-side. Hand off to
             // completePhoneVerification, which resets the nav stack to
@@ -222,7 +251,7 @@ const PhoneVerificationScreen = () => {
             await completePhoneVerification();
           }
         } else {
-          const errorMessage = data.verifyTelegramCode.error || 'Verification failed';
+          const errorMessage = result.error || 'Verification failed';
           if (errorMessage.includes('Mensaje no entregado')) {
             Alert.alert(
               'Telegram no disponible',
@@ -245,40 +274,37 @@ const PhoneVerificationScreen = () => {
         }
       } else if (verificationMethod === 'sms') {
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
-        const { data } = await verifySmsCode({
-          variables: {
-            phoneNumber: cleanPhoneNumber,
-            countryCode: selectedCountry?.[2] || 'AR',
-            code: verificationCode.join(''),
-          },
+        const result = await resolveRelinkConfirmation(async () => {
+          const { data } = await verifySmsCode({
+            variables: {
+              phoneNumber: cleanPhoneNumber,
+              countryCode: selectedCountry?.[2] || 'AR',
+              code: verificationCode.join(''),
+            },
+          });
+          return data?.verifySmsCode;
         });
-        if (data?.verifySmsCode?.success) {
+        if (!result) return;
+        if (result.success) {
           if (isProfileUpdateFlow) {
-            const { data: updateData } = await updatePhoneNumber({
-              variables: {
-                countryCode: selectedCountry?.[1] || '+54',
-                phoneNumber: cleanPhoneNumber,
-              },
-            });
-            if (updateData?.updatePhoneNumber?.success) {
-              refreshProfile('personal');
-              navigation.goBack();
-            } else {
-              setBanner({ variant: 'error', message: updateData?.updatePhoneNumber?.error || 'No se pudo actualizar el número de teléfono' });
-            }
+            await refreshProfile('personal');
+            navigation.goBack();
           } else {
             // See sibling Telegram branch above for why we don't also
             // call safeNavigateToMain here.
             await completePhoneVerification();
           }
         } else {
-          setBanner({ variant: 'error', message: data?.verifySmsCode?.error || 'No se pudo verificar el código' });
+          setBanner({ variant: 'error', message: result.error || 'No se pudo verificar el código' });
         }
       } else {
         setBanner({ variant: 'error', message: 'Método de verificación inválido' });
       }
     } catch (e) {
       setBanner({ variant: 'error', message: 'Error de conexión. Intenta de nuevo.' });
+    } finally {
+      verificationInFlight.current = false;
+      if (mounted.current) setIsVerifying(false);
     }
   };
 
@@ -308,7 +334,9 @@ const PhoneVerificationScreen = () => {
   };
 
   const handleResendCode = async () => {
-    if (!verificationMethod) return;
+    if (verificationInFlight.current || !verificationMethod) return;
+    relinkFlow.current.clear();
+    setVerificationCode(['', '', '', '', '', '']);
     if (verificationMethod === 'sms') {
       await handleSendSmsCode();
     } else {
@@ -536,14 +564,15 @@ const PhoneVerificationScreen = () => {
         <Button
           title="Verificar"
           onPress={handleContinue}
-          disabled={verificationCode.join('').length !== 6}
+          disabled={isVerifying || verificationCode.join('').length !== 6}
+          loading={isVerifying}
           style={{ backgroundColor: verificationCode.join('').length !== 6 ? colors.borderMedium : colors.primary, marginBottom: 24 }}
         />
 
         <TouchableOpacity
           style={[styles.resendButton, (isRequestingCode || codeRequestCooldown > 0) && styles.disabledLink]}
           onPress={handleResendCode}
-          disabled={isRequestingCode || codeRequestCooldown > 0}
+          disabled={isVerifying || isRequestingCode || codeRequestCooldown > 0}
         >
           <Text style={styles.resendButtonText}>¿No recibiste el código? </Text>
           <Text style={[styles.resendButtonText, { color: colors.primary }]}>
@@ -637,6 +666,13 @@ const PhoneVerificationScreen = () => {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <PhoneRelinkModal
+        prompt={relinkPrompt.prompt}
+        phoneLabel={`${selectedCountry?.[1] || ''} ${phoneNumber}`.trim()}
+        currentAccount={userProfile}
+        onAnswer={relinkPrompt.answer}
+      />
     </KeyboardAvoidingView>
   );
 };

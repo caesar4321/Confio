@@ -12,6 +12,7 @@ import { MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
 import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
+import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
 import { useQuery } from '@apollo/client';
 import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
@@ -69,6 +70,7 @@ export const ProfileScreen = () => {
   // light band at the bottom. Explicit dimensions force a redraw.
   const [fieldSize, setFieldSize] = React.useState({ width: 0, height: 0 });
   const [showBackupModal, setShowBackupModal] = React.useState(false);
+  const [showDriveStorageFull, setShowDriveStorageFull] = React.useState(false);
   const [driveBackupEnabled, setDriveBackupEnabled] = React.useState(false);
   const [biometricAvailable, setBiometricAvailable] = React.useState(false);
   const [biometricEnabled, setBiometricEnabled] = React.useState(false);
@@ -205,6 +207,26 @@ export const ProfileScreen = () => {
       if (!bioSuccess) return;
     }
     setShowBackupModal(true);
+  };
+
+  const runDriveBackup = async () => {
+    try {
+      // Logic to enable drive: trigger sign-in with scope
+      AnalyticsService.logBackupAttempt('google_drive');
+      const result = await authService.enableDriveBackup();
+
+      if (result.success) {
+        driveBackupManuallyEnabled.current = true;
+        setDriveBackupEnabled(true);
+        Alert.alert('Respaldo Activado', 'Tu copia de seguridad en Google Drive está activa y sincronizada.');
+      } else if (result.storageFull) {
+        setShowDriveStorageFull(true);
+      } else if (result.error) {
+        Alert.alert('Error', result.error);
+      }
+    } catch (e) {
+      console.warn('[ProfileScreen] Drive backup failed:', e);
+    }
   };
 
   const handleBiometricUpdate = React.useCallback(async () => {
@@ -950,24 +972,19 @@ export const ProfileScreen = () => {
       {/* Google Drive Backup Modal */}
       <BackupConsentModal
         visible={showBackupModal}
-        onContinue={async () => {
+        onContinue={() => {
           setShowBackupModal(false);
-          try {
-            // Logic to enable drive: trigger sign-in with scope
-            AnalyticsService.logBackupAttempt('google_drive');
-            const result = await authService.enableDriveBackup();
-
-            if (result.success) {
-              driveBackupManuallyEnabled.current = true;
-              setDriveBackupEnabled(true);
-              Alert.alert('Respaldo Activado', 'Tu copia de seguridad en Google Drive está activa y sincronizada.');
-            } else if (result.error) {
-              Alert.alert('Error', result.error);
-            }
-          } catch (e) {
-          }
+          runDriveBackup();
         }}
         onCancel={() => setShowBackupModal(false)}
+      />
+      <DriveStorageFullModal
+        visible={showDriveStorageFull}
+        onRetry={() => {
+          setShowDriveStorageFull(false);
+          runDriveBackup();
+        }}
+        onClose={() => setShowDriveStorageFull(false)}
       />
     </>
   );
