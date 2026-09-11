@@ -588,6 +588,10 @@ export const VERIFY_TELEGRAM_CODE = gql`
     verifyTelegramCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
       success
       error
+      relinkConfirmation {
+        token
+        accounts { email username }
+      }
     }
   }
 `;
@@ -607,6 +611,24 @@ export const VERIFY_SMS_CODE = gql`
     verifySmsCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
       success
       error
+      relinkConfirmation {
+        token
+        accounts { email username }
+      }
+    }
+  }
+`;
+
+export const CONFIRM_PHONE_RELINK = gql`
+  mutation ConfirmPhoneRelink($token: String!) {
+    confirmPhoneRelink(token: $token) {
+      success
+      error
+      retryable
+      relinkConfirmation {
+        token
+        accounts { email username }
+      }
     }
   }
 `;

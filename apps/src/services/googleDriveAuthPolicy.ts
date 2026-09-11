@@ -47,6 +47,13 @@ export const isDriveAuthorizationFailure = (error: DriveAuthorizationFailure | n
   return error.status === 403 && !NON_REAUTHORIZABLE_DRIVE_REASONS.has(error.reason || '');
 };
 
+// Once the user's Google storage (shared with Gmail, Photos and WhatsApp
+// backups) is full, Drive rejects every write. Neither a retry nor a fresh
+// authorization can fix that — only the user freeing space can — so callers
+// show how to free space instead of a generic error.
+export const isDriveStorageQuotaError = (error: DriveAuthorizationFailure | null | undefined): boolean =>
+  error?.name === 'GoogleDriveStorageError' && error.reason === 'storageQuotaExceeded';
+
 export const driveSupportCode = (error: DriveAuthorizationFailure | null | undefined): string | undefined => {
   if (typeof error?.supportCode !== 'string') return undefined;
   return /^DRIVE-[A-Z0-9_-]{1,96}$/.test(error.supportCode)

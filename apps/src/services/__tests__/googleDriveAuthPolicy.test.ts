@@ -4,6 +4,7 @@ import {
   GoogleDriveAccountMismatchError,
   GoogleDriveReauthorizationCancelledError,
   isDriveAuthorizationFailure,
+  isDriveStorageQuotaError,
   runWithDriveAuthorizationRetry,
 } from '../googleDriveAuthPolicy';
 
@@ -28,6 +29,26 @@ describe('googleDriveAuthPolicy', () => {
     })).toBe(false);
     expect(isDriveAuthorizationFailure({ name: 'ApolloError', status: 401 })).toBe(false);
     expect(isDriveAuthorizationFailure({ name: 'GoogleDriveStorageError', status: 429 })).toBe(false);
+  });
+
+  it('recognizes a full Google storage quota so callers can show how to free space', () => {
+    expect(isDriveStorageQuotaError({
+      name: 'GoogleDriveStorageError',
+      status: 403,
+      reason: 'storageQuotaExceeded',
+    })).toBe(true);
+    expect(isDriveStorageQuotaError({
+      name: 'GoogleDriveStorageError',
+      status: 403,
+      reason: 'domainPolicy',
+    })).toBe(false);
+    expect(isDriveStorageQuotaError({ name: 'GoogleDriveStorageError', status: 403 })).toBe(false);
+    expect(isDriveStorageQuotaError({
+      name: 'ApolloError',
+      status: 403,
+      reason: 'storageQuotaExceeded',
+    })).toBe(false);
+    expect(isDriveStorageQuotaError(null)).toBe(false);
   });
 
   it('rejects a Drive account that differs from the logged-in Google identity', () => {
