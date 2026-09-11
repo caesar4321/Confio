@@ -236,7 +236,14 @@ export const MembershipsScreen = () => {
                   until the member-number flow exists. */}
               {entry.linkingAvailable
                 ? <Text style={styles.linkAction}>Vincular</Text>
-                : <Text style={styles.soonBadge}>Próximamente</Text>}
+                : (
+                  // The View owns the pill. On iOS RCTTextView is a plain
+                  // UIView, so a Text's borderRadius skips RCTView's clamping:
+                  // radius 999 plus overflow:hidden masked the label away.
+                  <View style={styles.soonPill}>
+                    <Text style={styles.soonPillText}>Próximamente</Text>
+                  </View>
+                )}
             </View>
           ))}
         </View>
@@ -372,9 +379,11 @@ export const MembershipsScreen = () => {
                         <Text style={styles.institution}>{row.institutionName}</Text>
                         <Text style={styles.reference}>{row.memberReference}</Text>
                       </View>
-                      <Text style={[styles.badge, row.status === 'past_due' && styles.badgeLate]}>
-                        {statusCopy[row.status] || row.status}
-                      </Text>
+                      <View style={[styles.statusPill, row.status === 'past_due' && styles.statusPillLate]}>
+                        <Text style={[styles.statusPillText, row.status === 'past_due' && styles.statusPillTextLate]}>
+                          {statusCopy[row.status] || row.status}
+                        </Text>
+                      </View>
                     </View>
                     <Text style={styles.amount}>{money(row.amountRemainingMinor, row.currency)}</Text>
                     <Text style={styles.period}>{row.description || row.periodKey || `${row.periodStart} – ${row.periodEnd}`}</Text>
@@ -472,7 +481,10 @@ const styles = StyleSheet.create({
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 16, marginTop: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
   addRowText: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.primaryDark },
   linkAction: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
-  soonBadge: { fontSize: 11, fontWeight: '700', color: colors.text.secondary, backgroundColor: colors.neutralDark, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, overflow: 'hidden' },
+  // Pills are a View (background, radius) around a Text (type, colour). Never
+  // put a rounded background on a Text: iOS does not clamp its radius.
+  soonPill: { flexShrink: 0, backgroundColor: colors.neutralDark, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  soonPillText: { fontSize: 11, fontWeight: '700', color: colors.text.secondary },
 
   primaryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', minHeight: 52, borderRadius: 14, backgroundColor: colors.primary, paddingHorizontal: 16, shadowColor: colors.primaryDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
   primaryText: { color: colors.white, fontWeight: '700', fontSize: 16 },
@@ -492,8 +504,10 @@ const styles = StyleSheet.create({
   logo: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDark },
   institution: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   reference: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
-  badge: { fontSize: 11, fontWeight: '700', color: colors.primaryDark, backgroundColor: colors.primaryLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, overflow: 'hidden' },
-  badgeLate: { color: colors.error.text, backgroundColor: colors.error.background },
+  statusPill: { flexShrink: 0, backgroundColor: colors.primaryLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  statusPillLate: { backgroundColor: colors.error.background },
+  statusPillText: { fontSize: 11, fontWeight: '700', color: colors.primaryDark },
+  statusPillTextLate: { color: colors.error.text },
   // Tabular figures per DESIGN.md: aligned money, never monospace.
   amount: { fontSize: 32, fontWeight: '800', color: colors.text.primary, marginTop: 16, letterSpacing: -0.8, fontVariant: ['tabular-nums'] },
   period: { fontSize: 13, color: colors.text.secondary, marginTop: 4 },
