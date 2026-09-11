@@ -4,6 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings
 from django.db import IntegrityError
+from django.db.models import F
 import hmac
 import hashlib
 import logging
@@ -19,10 +20,10 @@ from .twilio_verify import (
 )
 from users.country_codes import COUNTRY_CODES
 from users.phone_utils import normalize_phone
-from users.models import Account
-from blockchain.invite_send_mutations import ClaimInviteForPhone
+from users.phone_linking import link_verified_phone, PhoneLinkError, PhoneRelinkRequired, claim_verified_phone_invites
+from users.phone_code_approval import cached_code_approval, record_code_approval
+from users.phone_link_schema import PhoneRelinkConfirmation, confirmation_result
 from users.review_numbers import (
-    is_review_test_phone_key,
     review_test_pairs,
     find_matching_review_number,
 )
@@ -269,6 +270,7 @@ class VerifySMSCode(graphene.Mutation):
 
     success = graphene.Boolean()
     error = graphene.String()
+    relink_confirmation = graphene.Field(PhoneRelinkConfirmation)
 
     @classmethod
     def mutate(cls, root, info, phone_number, country_code, code):
@@ -295,142 +297,49 @@ class VerifySMSCode(graphene.Mutation):
         if not ver:
             return VerifySMSCode(success=False, error="No active verification request found")
 
-        # Store review test number bypass
-        try:
-            for p, c in review_test_pairs():
-                if phone_e164 == p:
-                    if code != c:
-                        return VerifySMSCode(success=False, error="Invalid verification code")
-                    # Mark verified and update user phone as in the normal success path
-                    try:
-                        phone_key = normalize_phone(phone_number, country_code)
-                        allow_duplicates = is_review_test_phone_key(phone_key)
-                        if not allow_duplicates:
-                            from users.models import User as UserModel
-                            duplicate_exists = UserModel.objects.filter(
-                                phone_key=phone_key,
-                                deleted_at__isnull=True
-                            ).exclude(id=user.id).exists()
-                            if duplicate_exists:
-                                return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
-
-                        user.phone_number = phone_key.split(':', 1)[-1]
-                        user.phone_country = country_code
-                        user.save()
-
-                        # Upsert local verification record
-                        v = SMSVerification.objects.filter(
-                            user=user, phone_number=phone_e164, is_verified=False
-                        ).order_by('-created_at').first()
-                        if v:
-                            v.is_verified = True
-                            v.save(update_fields=['is_verified'])
-                        else:
-                            SMSVerification.objects.create(
-                                user=user,
-                                phone_number=phone_e164,
-                                code_hash=_hmac_code(phone_e164, c),
-                                expires_at=timezone.now() + timedelta(seconds=getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)),
-                                is_verified=True,
-                            )
-
-                        # Best-effort auto-claim invite
-                        try:
-                            pk = normalize_phone(phone_number, country_code)
-                            # BSC invites (cUSD+/CONFIO) release via the escrow
-                            # sponsor; all pending ones for this phone at once.
-                            from send.invite_bsc_flow import claim_pending_bsc_invites
-                            claim_pending_bsc_invites(user, pk)
-                            # Legacy Algorand invite (single, first pending).
-                            acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
-                            recipient_addr = getattr(acct, 'algorand_address', None)
-                            if recipient_addr:
-                                from send.models import PhoneInvite
-                                inv = PhoneInvite.objects.filter(
-                                    rail='algorand',
-                                    phone_key=pk,
-                                    status='pending',
-                                    token_type__in=('CUSD', 'CONFIO', 'USDC'),
-                                    deleted_at__isnull=True
-                                ).order_by('-created_at').first()
-                                if inv:
-                                    ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
-                        except Exception as ce:
-                            logger.exception('Auto-claim invite failed (review bypass): %s', ce)
-
-                        return VerifySMSCode(success=True, error=None)
-                    except IntegrityError:
-                        return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
-        except Exception:
-            # Ignore bypass errors and continue with normal flow
+        # Reviewer codes use the same atomic link path as provider-approved codes.
+        review_code = next((c for p, c in review_test_pairs() if p == phone_e164), None)
+        cached_approval = cached_code_approval(ver, code) if review_code is None else None
+        if cached_approval is False:
+            return VerifySMSCode(success=False, error="Invalid verification code or maximum attempts exceeded")
+        if cached_approval is True:
             pass
+        elif review_code is not None:
+            if code != review_code:
+                return VerifySMSCode(success=False, error="Invalid verification code")
+        else:
+            # Attempts control (retain local rate limit).
+            if ver.attempts >= 5:
+                return VerifySMSCode(success=False, error="Maximum number of verification attempts exceeded")
+            try:
+                approved, status = check_verification(phone_e164, code)
+            except TwilioVerifyError as e:
+                logger.exception("Twilio Verify check error: %s", e)
+                approved = False
+            if not approved:
+                SMSVerification.objects.filter(pk=ver.pk).update(attempts=F('attempts') + 1)
+                return VerifySMSCode(success=False, error="Invalid verification code")
 
-        # Attempts control (retain local rate limit)
-        max_attempts = 5
-        if ver.attempts >= max_attempts:
-            return VerifySMSCode(success=False, error="Maximum number of verification attempts exceeded")
+        if review_code is None and cached_approval is not True:
+            if not record_code_approval(ver, code):
+                return VerifySMSCode(success=False, error="Solicita un nuevo código de verificación.")
 
-        # Verify via Twilio Verify
+        # Transfer an existing link only after the provider approves the code.
         try:
-            approved, status = check_verification(phone_e164, code)
-        except TwilioVerifyError as e:
-            logger.exception("Twilio Verify check error: %s", e)
-            ver.attempts = ver.attempts + 1
-            ver.save(update_fields=['attempts'])
-            return VerifySMSCode(success=False, error="Invalid verification code")
-
-        if not approved:
-            ver.attempts = ver.attempts + 1
-            ver.save(update_fields=['attempts'])
-            return VerifySMSCode(success=False, error="Invalid verification code")
-
-        # Valid code — update user phone (avoid duplicates)
-        try:
-            phone_key = normalize_phone(phone_number, country_code)
-            allow_duplicates = is_review_test_phone_key(phone_key)
-            if not allow_duplicates:
-                from users.models import User as UserModel
-                duplicate_exists = UserModel.objects.filter(
-                    phone_key=phone_key,
-                    deleted_at__isnull=True
-                ).exclude(id=user.id).exists()
-                if duplicate_exists:
-                    return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
-
-            user.phone_number = phone_key.split(':', 1)[-1]
-            user.phone_country = country_code
-            user.save()
-
-            ver.is_verified = True
-            ver.save(update_fields=['is_verified'])
+            phone_key = link_verified_phone(user, ver, country_code)
 
             # Cleanup other pending records for this phone
             SMSVerification.objects.filter(
                 user=user, phone_number=phone_e164, is_verified=False
             ).exclude(id=ver.id).delete()
 
-            # Best-effort auto-claim invitation as in Telegram flow
-            try:
-                pk = normalize_phone(phone_number, country_code)
-                from send.invite_bsc_flow import claim_pending_bsc_invites
-                claim_pending_bsc_invites(user, pk)
-                acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
-                recipient_addr = getattr(acct, 'algorand_address', None)
-                if recipient_addr:
-                    from send.models import PhoneInvite
-                    inv = PhoneInvite.objects.filter(
-                        rail='algorand',
-                        phone_key=pk,
-                        status='pending',
-                        token_type__in=('CUSD', 'CONFIO', 'USDC'),
-                        deleted_at__isnull=True
-                    ).order_by('-created_at').first()
-                    if inv:
-                        ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
-            except Exception as ce:
-                logger.exception('Auto-claim invite failed: %s', ce)
+            claim_verified_phone_invites(user, info, phone_key)
 
             return VerifySMSCode(success=True, error=None)
+        except PhoneRelinkRequired as required:
+            return VerifySMSCode(success=False, error=str(required), relink_confirmation=confirmation_result(required))
+        except PhoneLinkError as e:
+            return VerifySMSCode(success=False, error=str(e))
         except IntegrityError:
             return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
         except Exception as e:

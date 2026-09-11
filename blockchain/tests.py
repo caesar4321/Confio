@@ -52,10 +52,139 @@ class SignedTxnPayloadExtractionTest(SimpleTestCase):
         self.assertEqual(_extract_signed_txn_payload(signed_txn), raw_txn)
 
 
+class SponsoredOptInSubmissionTest(SimpleTestCase):
+    def _payload(self, groups):
+        import base64
+        import msgpack
+
+        return base64.b64encode(b''.join(
+            msgpack.packb({
+                'sig': b's' * 64,
+                'txn': {
+                    'grp': group,
+                    'type': 'axfer',
+                    'snd': b'a' * 32,
+                    'arcv': b'a' * 32,
+                    'xaid': asset_id,
+                },
+            }, use_bin_type=True)
+            for asset_id, group in enumerate(groups, start=1)
+        )).decode()
+
+    def _submit(self, payload, sponsor='signed-sponsor'):
+        return SubmitSponsoredGroupMutation.mutate(
+            None,
+            SimpleNamespace(context=SimpleNamespace(
+                user=SimpleNamespace(id=1, is_authenticated=True),
+            )),
+            signed_user_txn=payload,
+            signed_sponsor_txn=sponsor,
+        )
+
+    def test_three_asset_opt_ins_reach_broadcast_unchanged(self):
+        payload = self._payload([b'g' * 32] * 3)
+        with patch('send.models.SendTransaction.all_objects.filter') as reservations, patch(
+            'blockchain.mutations.algorand_sponsor_service.submit_sponsored_group',
+            new_callable=AsyncMock,
+            return_value={'success': True, 'tx_id': 'T' * 52, 'confirmed_round': 123},
+        ) as broadcast:
+            reservations.return_value.select_related.return_value.first.return_value = None
+            result = self._submit(payload)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.transaction_id, 'T' * 52)
+        self.assertEqual(reservations.call_args.kwargs['idempotency_key'], (b'g' * 32).hex())
+        broadcast.assert_awaited_once_with(
+            signed_user_txn=payload, signed_sponsor_txn='signed-sponsor',
+        )
+
+    def test_sdk_signed_opt_ins_preserve_bytes_through_sponsor_service(self):
+        import base64
+        from unittest.mock import Mock
+        from algosdk import account, encoding, transaction
+        from blockchain.algorand_sponsor_service import algorand_sponsor_service
+
+        user_key, user_address = account.generate_account()
+        sponsor_key, sponsor_address = account.generate_account()
+        params = transaction.SuggestedParams(
+            fee=0, first=1, last=1000,
+            gh=base64.b64encode(b'g' * 32).decode(), flat_fee=True,
+        )
+        funding = transaction.PaymentTxn(sponsor_address, params, user_address, 400_000)
+        funding.fee = 4000
+        opt_ins = [
+            transaction.AssetTransferTxn(user_address, params, user_address, 0, asset_id)
+            for asset_id in (1, 2, 31566704)
+        ]
+        transaction.assign_group_id([funding, *opt_ins])
+        sponsor = encoding.msgpack_encode(funding.sign(sponsor_key))
+        user_bytes = b''.join(
+            base64.b64decode(encoding.msgpack_encode(txn.sign(user_key)))
+            for txn in opt_ins
+        )
+        payload = base64.b64encode(user_bytes).decode()
+        algod = Mock()
+        algod.send_raw_transaction.return_value = funding.get_txid()
+
+        with patch('send.models.SendTransaction.all_objects.filter') as reservations, patch.object(
+            algorand_sponsor_service, '_algod_client', algod,
+        ), patch.object(algorand_sponsor_service, '_update_sponsor_stats', new_callable=AsyncMock), patch(
+            'send.models.SendTransaction.all_objects.update_or_create',
+        ) as persist:
+            reservations.return_value.select_related.return_value.first.return_value = None
+            result = self._submit(payload, sponsor)
+
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(result.transaction_id, funding.get_txid())
+        algod.send_raw_transaction.assert_called_once_with(
+            base64.b64encode(base64.b64decode(sponsor) + user_bytes).decode(),
+        )
+        persist.assert_not_called()
+
+    def test_invalid_batches_never_reach_broadcast(self):
+        import base64
+
+        valid = base64.b64decode(self._payload([b'g' * 32]))
+        payloads = [
+            self._payload([b'g' * 32, b'h' * 32]),
+            self._payload([None, None]),
+            base64.b64encode(valid + b'\x81').decode(),  # Truncated trailing object
+            base64.b64encode(valid + b'\xc0').decode(),  # Non-transaction object
+            '',
+        ]
+        for payload in payloads:
+            with self.subTest(payload=payload), patch(
+                'blockchain.mutations.algorand_sponsor_service.submit_sponsored_group',
+                new_callable=AsyncMock,
+            ) as broadcast:
+                result = self._submit(payload)
+            self.assertFalse(result.success)
+            broadcast.assert_not_called()
+
+    def test_batch_still_checks_expired_recipient_reservation(self):
+        from datetime import timedelta
+        from unittest.mock import Mock
+
+        reservation = Mock(created_at=timezone.now() - timedelta(hours=25))
+        with patch('send.models.SendTransaction.all_objects.filter') as reservations, patch(
+            'blockchain.mutations.algorand_sponsor_service.submit_sponsored_group',
+            new_callable=AsyncMock,
+        ) as broadcast:
+            reservations.return_value.select_related.return_value.first.return_value = reservation
+            result = self._submit(self._payload([b'g' * 32] * 3))
+
+        self.assertFalse(result.success)
+        self.assertIn('expired', result.error.lower())
+        self.assertEqual(reservation.status, 'FAILED')
+        reservation.save.assert_called_once()
+        broadcast.assert_not_called()
+
+
 class PreparedRecipientReservationSubmitTest(TestCase):
     def test_submit_locks_secondary_account_by_reserved_address(self):
         import base64
         import msgpack
+        from algosdk.encoding import encode_address
 
         sender = User.objects.create_user(
             username='secondary-reservation-sender',
@@ -73,7 +202,7 @@ class PreparedRecipientReservationSubmitTest(TestCase):
             user=recipient,
             account_type='personal',
             account_index=1,
-            algorand_address='B' * 58,
+            algorand_address=encode_address(b'b' * 32),
         )
         group = b'g' * 32
         reservation = SendTransaction.objects.create(
@@ -563,6 +692,14 @@ class ReferralWithdrawalPolicyTest(TestCase):
             reference_id='referral_claim:test-exhausted',
             description='Referral claim reward',
         )
+        # Referral availability is derived from withdrawal logs, not the
+        # aggregate balance's total_spent (which includes other spending).
+        from achievements.models import ReferralWithdrawalLog
+        ReferralWithdrawalLog.objects.create(
+            user=self.user,
+            amount=Decimal('130'),
+            reference_id='test-exhausted-referral-withdrawal',
+        )
 
         ctx_patch, algod_patch, sponsor_patch = self._patch_context()
         with ctx_patch, algod_patch, sponsor_patch:
@@ -590,6 +727,9 @@ class ReferralWithdrawalPolicyTest(TestCase):
             account_index=0,
             algorand_address='B' * 58,
         )
+        # Achievement creation in setUp updates activity through a queryset;
+        # refresh the cached user before comparing prepare's side effects.
+        self.user.refresh_from_db(fields=['last_activity_at'])
         sender_activity_before = self.user.last_activity_at
         recipient_activity_before = recipient.last_activity_at
 

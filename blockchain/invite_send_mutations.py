@@ -13,6 +13,7 @@ import logging
 from typing import List, Optional
 
 from django.conf import settings
+from django.db import transaction as db_transaction
 from algosdk.v2client import algod
 from algosdk import encoding as algo_encoding
 from algosdk import transaction
@@ -993,7 +994,46 @@ class ClaimInviteForPhone(graphene.Mutation):
     txid = graphene.String()
 
     @classmethod
+    @db_transaction.atomic
     def mutate(cls, root, info, recipient_address, phone=None, phone_country=None, invitation_id=None):
+        from users.models import User
+        from users.phone_utils import normalize_phone, phone_lookup_key
+        from send.models import PhoneInvite
+
+        request_user = getattr(info.context, 'user', None)
+        if not request_user or not request_user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+        # Keep ownership stable through signing/execution. Phone relinking also
+        # takes User before Account, so both operations serialize in that order.
+        user = User.objects.select_for_update().filter(
+            pk=request_user.pk, is_active=True).first()
+        if not user or not user.phone_number or not user.phone_key:
+            return cls(success=False, error='Verifica tu número antes de reclamar la invitación.')
+        account = Account.objects.select_for_update().filter(
+            user=user, account_type='personal', account_index=0,
+            algorand_address=recipient_address, deleted_at__isnull=True).first()
+        if not account:
+            return cls(success=False, error='La dirección no corresponde a tu cuenta personal.')
+        if phone and (phone_lookup_key(phone) or normalize_phone(phone, phone_country)) != user.phone_key:
+            return cls(success=False, error='La invitación no corresponde a tu número verificado.')
+        invites = PhoneInvite.objects.select_for_update().filter(
+            rail='algorand', phone_key=user.phone_key)
+        if invitation_id:
+            invite = invites.filter(invitation_id=invitation_id).first()
+        else:
+            invite = invites.filter(status='pending').order_by('-created_at').first()
+        if not invite:
+            return cls(success=False, error='La invitación no corresponde a tu número verificado.')
+        if invite.status == 'claimed' and invite.claimed_by_id == user.pk:
+            return cls(success=True, txid=invite.claimed_txid or '')
+        if invite.status != 'pending' or invite.claimed_by_id not in (None, user.pk):
+            return cls(success=False, error='La invitación ya no está disponible.')
+        info.context.user = user
+        return cls._mutate_verified(root, info, recipient_address,
+            invitation_id=invite.invitation_id)
+
+    @classmethod
+    def _mutate_verified(cls, root, info, recipient_address, invitation_id):
         user = info.context.user
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
@@ -1046,78 +1086,6 @@ class ClaimInviteForPhone(graphene.Mutation):
                 )
             )
 
-        # Determine the invitation id to claim
-        if not invitation_id:
-            # If phone provided, derive from normalized phone (legacy behavior)
-            if phone:
-                # Build ordered list of possible phone keys to tolerate missing country code on creation
-                phone_keys = []
-                canonical_key = builder.normalize_phone(phone, phone_country)
-                if canonical_key:
-                    phone_keys.append(canonical_key)
-                digits_only = ''.join(ch for ch in phone if ch.isdigit())
-                if digits_only and digits_only not in phone_keys:
-                    phone_keys.append(digits_only)
-                if not phone_keys:
-                    return cls(success=False, error='Proporciona un número en formato internacional (+CC ...) o un país válido para normalizar el teléfono.')
-
-                # Resolve invitation id by checking on-chain boxes using candidate keys
-                resolved_invitation_id = None
-                for key in phone_keys:
-                    candidate_id = builder.make_invitation_id(key)
-                    try:
-                        _ = algod_client.application_box_by_name(builder.app_id, candidate_id.encode())
-                        resolved_invitation_id = candidate_id
-                        break
-                    except Exception:
-                        continue
-
-                if resolved_invitation_id:
-                    invitation_id = resolved_invitation_id
-                else:
-                    # Fallback to DB lookup in case the box read failed but DB has the invite
-                    from send.models import PhoneInvite
-                    inv = PhoneInvite.objects.filter(
-                        rail='algorand',
-                        phone_key__in=phone_keys,
-                        status='pending',
-                        deleted_at__isnull=True
-                    ).order_by('-created_at').first()
-                    if inv:
-                        invitation_id = inv.invitation_id
-                    else:
-                        return cls(success=False, error='No se encontró una invitación activa para este número. Pide al remitente que la cree nuevamente e inténtalo de nuevo.')
-
-            else:
-                # Resolve invitation for current user's phone strictly via PhoneInvite pending row.
-                try:
-                    from users.phone_utils import normalize_phone as _norm
-                    u = info.context.user
-                    user_phone = getattr(u, 'phone_number', None)
-                    user_country = getattr(u, 'phone_country', None)
-                    phone_key = _norm(user_phone or '', user_country or '')
-                    if not phone_key or ':' not in phone_key:
-                        return cls(success=False, error='No se pudo resolver tu número de teléfono para reclamar la invitación.')
-                    from send.models import PhoneInvite
-                    # Support legacy phone_key that duplicated calling code in digits
-                    try:
-                        cc, local = phone_key.split(':', 1)
-                        alt_phone_key = f"{cc}:{cc}{local}"
-                    except Exception:
-                        alt_phone_key = phone_key
-                    inv = PhoneInvite.objects.filter(
-                        rail='algorand',
-                        phone_key=phone_key,
-                        status='pending',
-                        deleted_at__isnull=True
-                    ).order_by('-created_at').first()
-                    if not inv:
-                        return cls(success=False, error='No se encontró una invitación activa para tu número.')
-                    invitation_id = inv.invitation_id
-                except Exception as e:
-                    logger.exception('[ClaimInviteForPhone] Failed resolving PhoneInvite for user phone: %s', e)
-                    return cls(success=False, error='Error interno al resolver la invitación')
-
         logger.info('[ClaimInviteForPhone] Resolving invitation_id=%s for recipient=%s', invitation_id, recipient_address)
         # Pre-validate invitation id length: receipt key 'r:' + id must be <= 64 bytes
         try:
@@ -1131,22 +1099,13 @@ class ClaimInviteForPhone(graphene.Mutation):
         except Exception:
             return cls(success=False, error='No se encontró una invitación activa para este número. Pide al remitente que la cree nuevamente e inténtalo de nuevo.')
 
-        # If receipt box already exists, treat as already-claimed and return success (idempotent)
+        # A receipt without a matching recorded claimant cannot authorize a new claim.
         try:
             _ = algod_client.application_box_by_name(builder.app_id, ('r:' + invitation_id).encode())
-            logger.info('[ClaimInviteForPhone] Receipt box already exists for %s - treating as already claimed', invitation_id)
-            # Best-effort DB update for PhoneInvite
-            try:
-                from send.models import PhoneInvite
-                inv = PhoneInvite.objects.filter(invitation_id=invitation_id).first()
-                if inv and inv.status != 'claimed':
-                    inv.status = 'claimed'
-                    inv.claimed_by = user
-                    inv.claimed_at = timezone.now()
-                    inv.save(update_fields=['status', 'claimed_by', 'claimed_at', 'updated_at'])
-            except Exception:
-                pass
-            return cls(success=True, txid='')
+            logger.info('[ClaimInviteForPhone] Receipt box already exists for %s', invitation_id)
+            # An existing receipt proves settlement, not who received it. Do
+            # not attribute a past on-chain claim to the current phone owner.
+            return cls(success=False, error='La invitación ya fue reclamada.')
         except Exception:
             pass
 

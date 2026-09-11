@@ -19,6 +19,7 @@ from django.db import transaction as db_transaction
 
 from blockchain.kms_manager import get_kms_signer_from_settings
 from users.models import Account
+from users.wallet_address_writes import persist_legacy_wallet_fields
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +173,7 @@ class AlgorandAccountManager:
                 }
             
             # Update account with Algorand address
-            account.algorand_address = algorand_address  # Using algorand_address field temporarily
-            account.save()
+            persist_legacy_wallet_fields(account, algorand_address=algorand_address)
 
             if not algorand_onboarding_enabled():
                 logger.info(f"Algorand onboarding disabled: stored address for {user.email} without funding/opt-ins")
@@ -313,8 +313,7 @@ class AlgorandAccountManager:
 
                 # Persist the address strictly on this account row
                 old = account.algorand_address or ''
-                account.algorand_address = addr
-                account.save(update_fields=['algorand_address'])
+                persist_legacy_wallet_fields(account, algorand_address=addr)
                 logger.info("Updated account %s (%s/%s) address %s -> %s", account.id, account.account_type, account.account_index, old, addr)
 
             # Skip funding/opt-ins if explicitly requested (e.g. client handling atomic opt-in)

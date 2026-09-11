@@ -532,10 +532,9 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     # when the invite came from a business account — the claim would revert and
     # the money would sit in escrow until expiry. Use the address we recorded.
     inviter_addr = (phone_invite.inviter_address or '').lower()
-    # Revalidate ownership at SIGNING time, not at scheduling time. This runs
-    # asynchronously (post-create auto-claim, retry task), and a phone can move
-    # between accounts in the meantime — releasing to whoever was resolved
-    # minutes ago would pay the wrong person (Codex follow-up audit P1).
+    # Reject an already mismatched recipient early. A matching in-memory user
+    # may still be stale; current ownership is locked and checked again when
+    # reserving the claim below.
     if (getattr(recipient_user, 'phone_key', None) or '') != phone_invite.phone_key:
         return {'success': False, 'error': 'recipient_phone_changed'}
 
@@ -583,7 +582,16 @@ def claim_for_recipient(phone_invite, recipient_user) -> dict:
     # is what stops a reclaim from being prepared against a slot whose claim is
     # already on its way, and what stops a second auto-claim double-broadcast.
     with transaction.atomic():
-        from users.models import Account
+        from users.models import Account, User
+
+        # Verification can transfer the number after this job loaded its user.
+        # Reserve against current ownership, taking User before Account just as
+        # phone linking does (its user-save signal also touches the account).
+        locked_user = User.objects.select_for_update().filter(
+            pk=recipient_user.pk, is_active=True,
+        ).first()
+        if not locked_user or locked_user.phone_key != phone_invite.phone_key:
+            return {'success': False, 'error': 'recipient_phone_changed'}
 
         locked_recipient = Account.objects.select_for_update().filter(
             pk=getattr(rec_acct, 'pk', None),

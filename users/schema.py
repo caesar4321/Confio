@@ -1,4 +1,5 @@
 import graphene
+from .phone_link_schema import ConfirmPhoneRelink
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
 from .models import (
@@ -23,6 +24,7 @@ from achievements.referral_security import (
 InfluencerReferral = UserReferral
 from django.db import transaction as db_transaction
 from django.db import IntegrityError
+from .wallet_address_writes import persist_legacy_wallet_fields
 from django.db.models import Sum, Q, F
 from decimal import Decimal, ROUND_DOWN
 from .country_codes import COUNTRY_CODES
@@ -2809,26 +2811,13 @@ class UpdatePhoneNumber(graphene.Mutation):
 		if not iso_country_code:
 			return UpdatePhoneNumber(success=False, error="Invalid country code")
 
-		# Update user's phone number and canonical phone key
-		try:
-			canonical_phone = normalize_phone(phone_number, country_code).split(':', 1)[-1]
-			phone_key = normalize_phone(phone_number, country_code)
-			allow_duplicates = is_review_test_phone_key(phone_key)
-			if not allow_duplicates:
-				duplicate_exists = User.objects.filter(
-					phone_key=phone_key,
-					deleted_at__isnull=True
-				).exclude(id=user.id).exists()
-				if duplicate_exists:
-					return UpdatePhoneNumber(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
-
-			user.phone_country = iso_country_code  # Store ISO code
-			user.phone_number = canonical_phone
-			user.phone_key = phone_key
-			user.save()
+		# Compatibility acknowledgement for older clients that call this after
+		# verifySmsCode/verifyTelegramCode. Only those mutations may link a phone.
+		phone_key = normalize_phone(phone_number, country_code)
+		current = User.objects.filter(pk=user.pk).only('phone_number', 'phone_key').first()
+		if current and current.phone_number and current.phone_key == phone_key:
 			return UpdatePhoneNumber(success=True, error=None)
-		except Exception as e:
-			return UpdatePhoneNumber(success=False, error=str(e))
+		return UpdatePhoneNumber(success=False, error="Verifica tu número de teléfono antes de actualizarlo.")
 
 class UpdateUsername(graphene.Mutation):
 	class Arguments:
@@ -3642,6 +3631,12 @@ class UpdateAccountBscAddress(graphene.Mutation):
             .exclude(pk=account.pk)
             .exists()
         )
+        # Historical ownership remains reserved after sign-in reconciliation.
+        # A fresh account must not claim a former wallet of another identity.
+        from .models import RetiredWalletAddress
+        taken = taken or RetiredWalletAddress.objects.filter(
+            chain=RetiredWalletAddress.CHAIN_BSC, address=addr.lower(),
+        ).exclude(account=account).exists()
         if taken:
             logger.warning(
                 "[bsc_address] rejected already-registered address for account=%s user=%s",
@@ -3652,9 +3647,20 @@ class UpdateAccountBscAddress(graphene.Mutation):
                 success=False,
                 error="Esa dirección BSC ya está registrada en otra cuenta.",
             )
-        account.bsc_address = addr
         try:
-            account.save(update_fields=['bsc_address'])
+            # Reconciliation can replace this wallet after the checks above.
+            # A background request holding the old Account must not restore it.
+            updated = Account.objects.filter(
+                pk=account.pk,
+                bsc_address=account.bsc_address,
+                algorand_address=account.algorand_address,
+                is_keyless_migrated=account.is_keyless_migrated,
+            ).update(bsc_address=addr)
+            if not updated:
+                return UpdateAccountBscAddress(
+                    success=False,
+                    error="La billetera cambió. Vuelve a iniciar sesión.",
+                )
         except IntegrityError:
             # Lost the race against a concurrent registration of the same
             # address: both .exists() checks above passed, the other writer
@@ -3756,15 +3762,17 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                 if blocker:
                     return UpdateAccountAlgorandAddress(success=False, error=blocker)
 
-            # Update the Algorand address
-            account.algorand_address = algorand_address
+            from .models import RetiredWalletAddress
+            if RetiredWalletAddress.is_retired('algorand', algorand_address):
+                return UpdateAccountAlgorandAddress(
+                    success=False, error="Esta billetera anterior ya no está activa.")
             
             # NOTE: is_keyless_migrated is NOT set here. The ONLY way to mark an account
             # as V2 migrated is via the dedicated MarkWalletMigrated mutation, which is
             # called by the frontend migration flow after a successful fund sweep.
             # Old clients may still send isV2Wallet=true but it is intentionally ignored.
             
-            account.save()
+            persist_legacy_wallet_fields(account, algorand_address=algorand_address)
 
             # After setting address, check/fund and prepare asset opt-ins for CONFIO and cUSD
             # Algorand deprecation: with onboarding disabled we only store the
@@ -6070,6 +6078,7 @@ class Mutation(EmployeeMutations, FunnelMutations, graphene.ObjectType):
     report_backup_status = ReportBackupStatus.Field()
 
     update_phone_number = UpdatePhoneNumber.Field()
+    confirm_phone_relink = ConfirmPhoneRelink.Field()
     update_username = UpdateUsername.Field()
     update_user_profile = UpdateUserProfile.Field()
     submit_confio_icp = SubmitConfioIcp.Field()

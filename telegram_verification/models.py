@@ -8,6 +8,8 @@ class TelegramVerification(SoftDeleteModel):
     request_id = models.CharField(max_length=128, unique=True)
     expires_at = models.DateTimeField()
     is_verified = models.BooleanField(default=False)
+    approved_code_hash = models.CharField(max_length=64, blank=True, default='')
+    attempts = models.PositiveIntegerField(default=0)
     
     class Meta:
         indexes = [
