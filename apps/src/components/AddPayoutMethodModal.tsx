@@ -38,6 +38,7 @@ const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'NEQUI',
   'BANCOLOMBIA',
   'WIRECO',
+  'BREB',
   'WIREMX',
   'STP',
   'WIREPE',
@@ -540,6 +541,9 @@ export const AddPayoutMethodModal = ({
     return parseRampFieldSchema(selectedPaymentMethod);
   }, [selectedPaymentMethod?.fieldSchema]);
 
+  const supportsBreb = countryCode === 'CO' && ['WIRECO', 'BANCOLOMBIA'].includes(methodCode);
+  const isBreb = countryCode === 'CO' && (methodCode === 'BREB' || (supportsBreb && formData.providerMetadata.rail === 'BREB'));
+
   const fieldCopy = useMemo(() => {
     const defaultAccount: FieldConfig = {
       label: selectedPaymentMethod?.providerType === 'bank' ? 'Número de cuenta' : 'Identificador',
@@ -562,6 +566,15 @@ export const AddPayoutMethodModal = ({
       required: false,
       keyboardType: 'email-address' as const,
     };
+
+    if (isBreb) {
+      return {
+        account: { ...defaultAccount, label: 'Llave Bre-B', placeholder: 'Celular con +57, NIT, correo o alias', show: true, required: true, maxLength: 254 },
+        phone: { ...defaultPhone, show: false, required: false },
+        email: defaultEmail,
+        holderLabel: 'Titular de la cuenta asociada a la llave',
+      };
+    }
 
     if (serverFieldSchema) {
       return {
@@ -652,7 +665,7 @@ export const AddPayoutMethodModal = ({
       email: defaultEmail,
       holderLabel: selectedPaymentMethod?.providerType === 'fintech' ? 'Titular de la cuenta o billetera' : 'Titular de la cuenta',
     };
-  }, [countryCode, methodCode, selectedPaymentMethod?.providerType, serverFieldSchema]);
+  }, [countryCode, methodCode, selectedPaymentMethod?.providerType, serverFieldSchema, isBreb]);
 
   const payoutEmailField = useMemo(
     () => ({ ...fieldCopy.email, show: false, required: false }),
@@ -660,6 +673,7 @@ export const AddPayoutMethodModal = ({
   );
 
   const showAccountTypeField = useMemo(() => {
+    if (isBreb) return true;
     if (typeof serverFieldSchema?.showAccountTypeField === 'boolean') {
       return serverFieldSchema.showAccountTypeField;
     }
@@ -667,11 +681,11 @@ export const AddPayoutMethodModal = ({
       return false;
     }
     return true;
-  }, [countryCode, methodCode, selectedPaymentMethod, serverFieldSchema]);
+  }, [countryCode, methodCode, selectedPaymentMethod, serverFieldSchema, isBreb]);
 
-  const accountTypeRequired = typeof serverFieldSchema?.accountTypeRequired === 'boolean'
+  const accountTypeRequired = isBreb || (typeof serverFieldSchema?.accountTypeRequired === 'boolean'
     ? serverFieldSchema.accountTypeRequired
-    : showAccountTypeField;
+    : showAccountTypeField);
 
   const providerFieldConfigs = useMemo<ProviderFieldConfig[]>(() => {
     if (!selectedPaymentMethod) {
@@ -820,6 +834,10 @@ export const AddPayoutMethodModal = ({
     }
 
     const accountNumberValue = String(formData.accountNumber || '').trim();
+    if (isBreb && (/\s/.test(accountNumberValue) || (accountNumberValue.startsWith('+') && !accountNumberValue.includes('@') && !/^\+573[0-9]{9}$/.test(accountNumberValue)))) {
+      setFormError('Ingresa la llave sin espacios. Para celular, incluye +57 y los 10 dígitos.');
+      return false;
+    }
     if (fieldCopy.account.show && accountNumberValue) {
       if (countryCode === 'AR' && methodCode === 'WIREAR') {
         const digitsOnly = accountNumberValue.replace(/\D/g, '');
@@ -871,6 +889,7 @@ export const AddPayoutMethodModal = ({
     setIsSubmitting(true);
     try {
       const enrichedProviderMetadata = { ...formData.providerMetadata };
+      if (isBreb) enrichedProviderMetadata.rail = 'BREB';
       if (countryCode === 'MX' && methodCode === 'STP' && !enrichedProviderMetadata.bankCode) {
         enrichedProviderMetadata.bankCode = 'STP';
       }
@@ -889,7 +908,8 @@ export const AddPayoutMethodModal = ({
         username: formData.username.trim() || null,
         accountType: showAccountTypeField ? toPayoutAccountType(formData.accountType) : null,
         identificationNumber: formData.identificationNumber.trim() || null,
-        providerMetadata: Object.keys(enrichedProviderMetadata).length
+        // An edit must explicitly clear metadata when switching away from a rail.
+        providerMetadata: isEditing || Object.keys(enrichedProviderMetadata).length
           ? JSON.stringify(enrichedProviderMetadata)
           : null,
         isDefault: formData.isDefault,
@@ -989,7 +1009,8 @@ export const AddPayoutMethodModal = ({
         <View style={{ flex: 1, marginLeft: 12 }}>
           <Text style={styles.pickerItemText}>{method.displayName}</Text>
           <Text style={styles.providerTypeSubtext}>
-            {method.providerType === 'bank' ? 'Banco' :
+            {(method.code || method.name || '').toUpperCase() === 'BREB' ? 'La opción más rápida' :
+              method.providerType === 'bank' ? 'Banco' :
               method.providerType === 'fintech' ? 'Billetera Digital' :
                 method.providerType}
           </Text>
@@ -1324,6 +1345,46 @@ export const AddPayoutMethodModal = ({
           )}
         </View>
 
+        {supportsBreb && (
+          <>
+            <Text style={styles.sectionHeader}>Cómo recibir el retiro</Text>
+            <View style={styles.card}>
+              {[{ value: '', label: 'Cuenta bancaria' }, { value: 'BREB', label: 'Llave Bre-B' }].map(option => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={styles.radioRow}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: (isBreb ? 'BREB' : '') === option.value }}
+                  onPress={() => setFormData(prev => {
+                    if ((prev.providerMetadata.rail || '') === option.value) return prev;
+                    const metadata = { ...prev.providerMetadata };
+                    if (option.value) metadata.rail = option.value;
+                    else delete metadata.rail;
+                    return { ...prev, accountNumber: '', providerMetadata: metadata };
+                  })}
+                >
+                  <View style={[styles.radioCircle, (isBreb ? 'BREB' : '') === option.value && styles.radioCircleSelected]}>
+                    {(isBreb ? 'BREB' : '') === option.value && <View style={styles.radioInner} />}
+                  </View>
+                  <Text style={styles.radioLabel}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+              {isBreb && (
+                <View style={styles.fieldInCard}>
+                  <Text style={styles.helpText}>Confirma en tu banco que la llave está activa y corresponde al titular y a la cuenta seleccionados. Si la llave es inválida o el titular no coincide, el retiro fallará.</Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+
+        {isBreb && methodCode === 'BREB' && (
+          <InlineBanner
+            message="Confirma en tu banco que la llave está activa y corresponde al titular y a la cuenta seleccionados. Si la llave es inválida o el titular no coincide, el retiro fallará."
+            variant="info"
+          />
+        )}
+
         {/* ── Section: Datos de la cuenta ── */}
         {(fieldCopy.account.show || fieldCopy.phone.show || payoutEmailField.show || providerFieldConfigs.length > 0) && (
           <>
@@ -1339,6 +1400,8 @@ export const AddPayoutMethodModal = ({
                     onChangeText={(value) => setFormData(prev => ({ ...prev, accountNumber: value }))}
                     placeholder={fieldCopy.account.placeholder}
                     placeholderTextColor={colors.text.light}
+                    autoCapitalize={isBreb ? "none" : undefined}
+                    autoCorrect={isBreb ? false : undefined}
                     keyboardType={fieldCopy.account.keyboardType}
                     maxLength={fieldCopy.account.maxLength}
                     onFocus={() => setFocusedField('account')}

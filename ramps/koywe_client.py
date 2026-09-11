@@ -12,6 +12,7 @@ from django.core.cache import cache
 
 from security.models import normalize_brazilian_cpf
 from ramps.koywe import RAMP_NETWORK_DISPLAY, RAMP_USDC_ALGORAND_NOTE
+from ramps.breb import payout_rail, validate_breb_key
 
 logger = logging.getLogger(__name__)
 
@@ -477,6 +478,11 @@ class KoyweClient:
     def resolve_payment_provider(self, *, fiat_symbol: str, payment_method_code: str, email: str | None = None) -> tuple[str, str, dict[str, Any] | None]:
         providers = self.list_payment_providers(fiat_symbol=fiat_symbol, email=email)
         normalized = (payment_method_code or '').strip().upper()
+        # Bre-B is a destination rail, not a separate Koywe payment provider.
+        if normalized == 'BREB':
+            if fiat_symbol.upper() != 'COP':
+                raise KoyweError('Bre-B solo está disponible para retiros en Colombia (COP).')
+            normalized = 'WIRECO'
         normalized_alias = normalized.replace('_', '-')
         for provider in providers:
             provider_code = str(provider.get('code') or provider.get('symbol') or provider.get('name') or '').strip().upper()
@@ -596,6 +602,23 @@ class KoyweClient:
 
     def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, fiat_symbol: str, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> dict[str, Any]:
         alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
+        provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
+        rail = payout_rail(provider_metadata)
+        destination_method = getattr(bank_info, 'ramp_payment_method', None) or getattr(bank_info, 'payment_method', None)
+        destination_code = str(getattr(destination_method, 'code', None) or getattr(destination_method, 'name', '')).upper()
+        if destination_code == 'BREB' and not rail:
+            rail = 'BREB'
+        if rail:
+            if rail != 'BREB':
+                raise KoyweError('La vía de retiro seleccionada no es válida.')
+            try:
+                key = validate_breb_key(
+                    account_number=bank_info.account_number,
+                    account_type=getattr(bank_info, 'account_type', None),
+                    country_code=alpha3, fiat_symbol=fiat_symbol,
+                )
+            except ValueError as exc:
+                raise KoyweError(str(exc)) from exc
         normalized_contact_profile = self._normalize_contact_profile(
             contact_profile=contact_profile,
             country_code=country_code,
@@ -608,7 +631,6 @@ class KoyweClient:
         )
         if resolved_email:
             email = resolved_email
-        provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
         payment_method = getattr(bank_info, 'payment_method', None)
         payment_method_code = (
             getattr(payment_method, 'name', None)
@@ -635,6 +657,11 @@ class KoyweClient:
             payload['documentNumber'] = document_number
         if account_number is not None:
             payload['accountNumber'] = str(account_number)
+        if rail == 'BREB':
+            # The key is opaque: never strip email/alias characters or prefer
+            # unrelated PIX/CCI metadata over the explicitly selected Bre-B key.
+            payload['rail'] = 'BREB'
+            payload['accountNumber'] = key
         if alpha3 == 'ARG' and payment_method_code == 'WIREAR':
             normalized_account_number = ''.join(ch for ch in str(payload.get('accountNumber') or '') if ch.isdigit())
             if len(normalized_account_number) != 22:
@@ -704,6 +731,13 @@ class KoyweClient:
 
     def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> KoyweOrderResult:
         normalized_direction = direction.upper()
+        if str(payment_method_code or '').upper() == 'BREB':
+            if normalized_direction != 'OFF_RAMP' or country_code.upper() not in {'CO', 'COL'} or fiat_symbol.upper() != 'COP':
+                raise KoyweError('Bre-B solo está disponible para retiros en Colombia (COP).')
+            destination_method = getattr(bank_info, 'ramp_payment_method', None) or getattr(bank_info, 'payment_method', None)
+            destination_code = str(getattr(destination_method, 'code', None) or getattr(destination_method, 'name', '')).upper()
+            if destination_code != 'BREB' and payout_rail(getattr(bank_info, 'provider_metadata', None)) != 'BREB':
+                raise KoyweError('Selecciona una cuenta con llave Bre-B para este retiro.')
         if normalized_direction == 'ON_RAMP' and not wallet_address:
             raise KoyweError('The active account does not have a destination wallet address configured')
         normalized_contact_profile = self._normalize_contact_profile(
@@ -772,7 +806,7 @@ class KoyweClient:
             amount_out=str(quote.get('amountOut') or ''),
             total_change_display=str(quote.get('totalChangeDisplay') or ''),
             rate_display=str(quote.get('rateDisplay') or ''),
-            payment_method_display=payment_method_display,
+            payment_method_display='Bre-B' if str(payment_method_code).upper() == 'BREB' else payment_method_display,
             next_step=next_step,
             next_action_url=next_action_url,
             payment_provider=payment_provider,

@@ -14,6 +14,7 @@ from datetime import timedelta
 import logging
 import uuid
 from .phone_utils import normalize_phone, canonicalize_phone_digits
+from ramps.breb import payout_rail
 
 logger = logging.getLogger(__name__)
 
@@ -958,7 +959,7 @@ class BankInfo(SoftDeleteModel):
     
     # Flexible recipient information (depends on payment method type)
     account_number = models.CharField(
-        max_length=50,
+        max_length=254,
         blank=True,
         null=True,
         help_text="Account number (for banks) or identifier (for some fintech)"
@@ -1169,6 +1170,9 @@ class BankInfo(SoftDeleteModel):
     @property
     def full_bank_name(self):
         """Get the full bank/payment method name"""
+        if payout_rail(self.provider_metadata) == 'BREB':
+            bank_name = (self.provider_metadata or {}).get('bankName')
+            return f"Bre-B · {bank_name}" if bank_name else "Bre-B"
         if self.payment_method:
             return self.payment_method.display_name
         elif self.bank:
@@ -1178,6 +1182,8 @@ class BankInfo(SoftDeleteModel):
     @property
     def summary_text(self):
         """Get a summary text for display in lists"""
+        if payout_rail(self.provider_metadata) == 'BREB':
+            return f"{self.full_bank_name} - {self.get_account_type_display()} - {self.get_masked_account_number()}"
         if self.payment_method:
             # Handle different payment method types
             if self.payment_method.provider_type == 'BANK' and self.account_number:

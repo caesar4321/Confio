@@ -1,6 +1,6 @@
 # Koywe Test Matrix
 
-Last updated: 2026-04-01
+Last updated: 2026-09-11 (Bre-B local checks; provider results below retain their original dates)
 
 ## Scope
 
@@ -16,6 +16,45 @@ It is not a generic product document. It is the current engineering truth for Co
 - Treat sandbox as contract validation only.
 - Treat production as the source of truth for real provider behavior.
 - Do not assume sandbox redirect/provider behavior matches production.
+
+## Bre-B payouts (local implementation, September 2026)
+
+The provider announcement supplied on September 11 says to add `rail: "BREB"`
+to `POST /rest/bank-accounts` for COP destinations. `accountNumber` carries the
+key; `bankCode` and `accountType` remain required. Omitting the rail retains a
+traditional bank transfer. Invalid keys or holder mismatches fail terminally.
+The linked [provider documentation](https://docs-crypto.koywe.com/api-documentation/breb-payouts)
+was unavailable during implementation, so this contract is based on the supplied
+announcement, not a new live-provider verification.
+
+In Confío, choose **Bre-B** directly in Colombia’s payout-method picker. It opens
+the key form and requires a bank and account type. Existing bank forms also retain
+the **Llave Bre-B** option for compatibility. Keys remain opaque, including email punctuation
+and alias case. Local checks reject empty, whitespace-containing, overlength,
+and malformed international phone keys. These checks do **not** establish
+that the key is active or belongs to the named holder; the form asks users to
+confirm that in their bank app.
+
+The local catalog code `BREB` resolves through Koywe’s existing `WIRECO` provider;
+the destination registration supplies the actual Bre-B rail. The catalog is synced
+when ramp methods are requested. Both the backend and mobile changes must be
+released for the standalone picker option to appear.
+
+Before rollout, apply `users.0043_bankinfo_breb_key_length` to allow email keys
+longer than the previous 50-character account-number limit. No live payout or
+production database migration was run in this work.
+
+Regression coverage:
+
+- `ramps/tests/test_koywe_breb.py`: registration payload, terminal rejection,
+  key formats, saving/editing, duplicate identities across rails, omitted versus
+  cleared metadata, ramp-only Bancolombia, and migration field consistency.
+- `apps/src/components/__tests__/AddPayoutMethodModal.breb.test.tsx`: create/edit
+  form submissions, validation, opaque keys, and country/method/rail switches.
+
+When editing, omitted/null metadata preserves an existing Bre-B rail. An explicit
+metadata object without `rail` removes it; current mobile edits always send an
+object. This prevents an old client's omission from silently changing routing.
 
 ## Confirmed Contract Findings
 
