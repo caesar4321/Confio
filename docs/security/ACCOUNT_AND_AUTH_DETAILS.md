@@ -2,6 +2,11 @@
 
 This document provides a deep dive into Confío's V2 account system, authentication flows, and security architecture.
 
+> Historical behavior: the restore order, wallet-picker description and conflict
+> resolution below predate current sign-in reconciliation. For current canonical
+> backup recovery, missing-key handling and registration changes, use
+> [Wallet reconciliation during social sign-in](../signin-wallet-reconciliation.md).
+
 ## 1. Authentication Flow
 
 Confío uses a "Keyless Self-Custody" model (V2).
