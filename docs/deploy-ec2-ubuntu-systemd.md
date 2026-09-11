@@ -89,6 +89,17 @@ Verify afterwards that the deployed commit is the one you pushed
 The virtualenv is `/opt/confio/myvenv`, matching the `myvenv/bin/python`
 convention in CLAUDE.md. There is no `/opt/confio/venv`.
 
+Social Sign-In and Phone Relinking Release
+-----------------------------------------
+Deploy the backend before distributing the mobile build. The routine deploy above
+must apply `sms_verification.0003_code_approval` and
+`telegram_verification.0003_code_approval` before restarting Daphne, Celery and Beat.
+They add cached approved-code hashes and Telegram attempt counts; no wallet-table
+migration is needed. Verify both migrations show `[X]` in `showmigrations`, then
+check service health. See [sign-in and phone relinking](signin-wallet-reconciliation.md)
+for protocol compatibility, regression suites and device checks. The inventory-based
+reconciliation protocol does not depend on the older empty-wallet precompute gate below.
+
 Wallet Reenrollment Release Gate
 --------------------------------
 When a backend release includes the legacy wallet reenrollment assessment
