@@ -7,6 +7,7 @@ import {
 } from '@react-native-google-signin/google-signin';
 import { jwtDecode } from 'jwt-decode';
 import { walletRecoveryMessage } from './walletRecoveryErrors';
+import { canReplaceAfterRecoveryFailure, collisionRefusalMessage } from './walletReenrollmentDecision';
 import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
 import auth from '@react-native-firebase/auth';
@@ -1125,7 +1126,7 @@ export class AuthService {
       perfLog('Resolved Google sign-in tokens');
 
       // Use the accessToken for Drive sync if user chose "Accept"
-      const driveAccessToken = enableDrive ? accessToken : undefined;
+      let driveAccessToken = enableDrive ? accessToken : undefined;
       this.driveAccessToken = driveAccessToken || null;
       console.log(`[AuthService] enableDrive=${enableDrive}, driveAccessToken=${driveAccessToken ? 'obtained' : 'skipped'}`);
 
@@ -1473,7 +1474,7 @@ export class AuthService {
       // with a server-side Algorand address must recover the matching secret
       // instead of silently minting a replacement V2 wallet.
       // ----------------------------------------------------------------------
-      const serverAlgorandAddress = authData.user?.algorandAddress || null;
+      let serverAlgorandAddress = authData.user?.algorandAddress || null;
       // Algorand deprecated: BSC-only returning users have NO Algorand address,
       // so the registered BSC address is the wallet anchor. Never silently mint
       // a replacement master secret when the server knows a wallet on either
@@ -1482,6 +1483,7 @@ export class AuthService {
       const serverBscAddress = authData.user?.bscAddress || null;
       const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddress);
       let verifiedV2AlgorandAddress: string | null = null;
+      let walletReenrollmentCompleted = false;
       if (authData.isKeylessMigrated) {
         console.log('[AuthService] ⚡️ User is V2 Native/Migrated. Verifying Master Secret...', {
           isNewUser: !!authData.isNewUser,
@@ -1537,10 +1539,30 @@ export class AuthService {
               console.log('[AuthService] ✅ Google V2 wallet recovered from Drive.');
             } catch (driveRecoveryErr: any) {
               console.error('[AuthService] Failed to recover Google V2 wallet from Drive:', driveRecoveryErr);
+              if (canReplaceAfterRecoveryFailure(driveRecoveryErr, walletReenrollmentOfferAvailable, !!serverAlgorandAddress, !!serverBscAddress)) {
+                // Also preserve any different legacy wallet this identity can
+                // derive. Server permission covers only its registered anchor.
+                const legacy = await this.getLegacyAddressIfMigrationPending(
+                  'https://accounts.google.com', googleSubject, GOOGLE_CLIENT_IDS.production.web,
+                  'google', { type: 'personal', index: 0 }, serverAlgorandAddress || undefined,
+                  authData.accessToken,
+                );
+                if (!legacy.inspectionSucceeded) {
+                  throw new Error('No pudimos verificar tu billetera anterior. Inténtalo de nuevo. Código: RECOVERY-LEGACY-CHECK.');
+                }
+                if (legacy.legacyAddress && legacy.derivedLegacyAddress !== serverAlgorandAddress) {
+                  throw new Error(collisionRefusalMessage(true));
+                }
+                driveAccessToken = recoveryDriveToken;
+                await completeWalletReenrollmentAfterCollision();
+                walletReenrollmentCompleted = true;
+                serverAlgorandAddress = null;
+              } else {
               // A Drive API/permission/network failure is NOT "backup missing":
               // telling the user to try another Google account sends them away
               // from the account that actually holds their backup.
               throw new Error(walletRecoveryMessage(driveRecoveryErr));
+              }
             }
           } else {
             // Generation was allowed, so this is a NEW user — but "allowed to
@@ -1563,7 +1585,6 @@ export class AuthService {
       // their funds to BSC. Algorand is deprecated — new users are BSC-only
       // and never generate an Algorand address.
       let algorandAddress: string | null = null;
-      let walletReenrollmentCompleted = false;
       if (serverAlgorandAddress) {
         const googleContext: AccountContext = { type: 'personal', index: 0 };
         const googleIss = 'https://accounts.google.com';
@@ -1646,7 +1667,7 @@ export class AuthService {
             serverAlgorandAddress,
             localAlgorandAddress: restoredAlgorandAddress,
           });
-          throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta desde Google Drive antes de continuar.');
+          throw new Error(collisionRefusalMessage(!!legacyAddressWithValue));
         }
         if (reenrollmentDecision === 'repair_collision') {
           console.log('[AuthService] Verified server/client wallet collision; consuming safe reenrollment offer.');
