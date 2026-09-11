@@ -1441,9 +1441,29 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     from django.db import transaction as db_transaction
                     from send.models import SendTransaction
 
-                    decoded = msgpack.unpackb(base64.b64decode(signed_user_txn), raw=False)
-                    txn_dict = decoded.get('txn', {}) if isinstance(decoded, dict) else {}
-                    group_bytes = txn_dict.get('grp')
+                    # Asset opt-ins concatenate several signed MessagePack
+                    # objects. Decode the entire stream, keeping the original
+                    # signed bytes untouched for broadcast. Explicit unpack()
+                    # calls also reject a truncated trailing object instead
+                    # of silently stopping iteration at the last full one.
+                    raw_user_txns = base64.b64decode(signed_user_txn)
+                    unpacker = msgpack.Unpacker(raw=False)
+                    unpacker.feed(raw_user_txns)
+                    groups = []
+                    while unpacker.tell() < len(raw_user_txns):
+                        decoded = unpacker.unpack()
+                        if not isinstance(decoded, dict) or not isinstance(decoded.get('txn'), dict):
+                            raise ValueError('Invalid signed transaction')
+                        groups.append(decoded['txn'].get('grp'))
+                    if not groups:
+                        raise ValueError('Empty signed transaction group')
+                    group_bytes = groups[0]
+                    if len(groups) > 1 and (
+                        not isinstance(group_bytes, bytes)
+                        or len(group_bytes) != 32
+                        or any(group != group_bytes for group in groups)
+                    ):
+                        raise ValueError('Signed transactions must belong to the same group')
                     group_id = group_bytes.hex() if isinstance(group_bytes, bytes) else ''
                     if group_id:
                         # Prepared reservations are intentionally soft-hidden

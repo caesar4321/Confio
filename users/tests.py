@@ -1851,7 +1851,8 @@ class WalletReenrollmentMutationTestCase(TestCase):
         from users.models import RetiredWalletAddress
         from users.web3auth_schema import CompleteWalletReenrollmentMutation
 
-        self.account.bsc_address = '0x' + ('3' * 40)
+        old_bsc = '0x' + ('3' * 40)
+        self.account.bsc_address = old_bsc
         self.account.save(update_fields=['bsc_address'])
         inspect_algo_mock.return_value = {'eligible': True, 'reason': 'sponsor_only_empty_wallet'}
         inspect_bsc_mock.return_value = {'eligible': True, 'reason': 'unused_bsc_anchor'}

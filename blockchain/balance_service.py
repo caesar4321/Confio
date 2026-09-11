@@ -53,6 +53,10 @@ class BalanceService:
         Returns:
             Dict with 'amount', 'available', 'pending', 'last_synced'
         """
+        if not account.algorand_address:
+            # The account may now use a reconciled BSC wallet. Cached legacy
+            # holdings are not that wallet's spendable funds.
+            return {**cls._format_return(None), 'is_stale': False}
         # Critical operations or force refresh always hit blockchain
         if verify_critical or force_refresh:
             try:
@@ -126,6 +130,9 @@ class BalanceService:
     def get_all_balances(cls, account: Account, verify_critical: bool = False, force_refresh: bool = False) -> Dict[str, Dict]:
         """Get all token balances for an account using a single chain snapshot when needed."""
         tokens = ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']
+        if not account.algorand_address:
+            return {token.lower(): {**cls._format_return(None), 'is_stale': False}
+                    for token in tokens}
         # Quick path: if not forcing, try cached values and decide if refresh is needed
         if not force_refresh:
             cached = {t: cls._get_cached_balance(account, t) for t in tokens}
@@ -301,6 +308,8 @@ class BalanceService:
     @classmethod
     def _get_cached_balance(cls, account: Account, token: str) -> Optional[Balance]:
         """Get balance from database cache"""
+        if not account.algorand_address:
+            return None
         # Check Redis first
         cache_key = f"balance:{account.id}:{token}"
         cached = cache.get(cache_key)

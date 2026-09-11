@@ -10,13 +10,12 @@ from users.country_codes import COUNTRY_CODES
 import logging
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
-from users.phone_utils import normalize_phone
-from users.models import Account
-from blockchain.invite_send_mutations import ClaimInviteForPhone
+from users.phone_linking import link_verified_phone, PhoneLinkError, PhoneRelinkRequired, claim_verified_phone_invites
+from users.phone_code_approval import cached_code_approval, record_code_approval
+from users.phone_link_schema import PhoneRelinkConfirmation, confirmation_result
 from sms_verification.twilio_verify import canonicalize_phone_via_lookup, TwilioVerifyError
 from users.review_numbers import (
     get_review_test_code_for_phone,
-    is_review_test_phone_key,
     find_matching_review_number,
 )
 import time
@@ -224,6 +223,7 @@ class VerifyTelegramCode(graphene.Mutation):
 
     success = graphene.Boolean()
     error = graphene.String()
+    relink_confirmation = graphene.Field(PhoneRelinkConfirmation)
 
     @classmethod
     def mutate(cls, root, info, phone_number, country_code, code):
@@ -263,48 +263,15 @@ class VerifyTelegramCode(graphene.Mutation):
 
             def finalize_success():
                 try:
-                    user.phone_number = normalize_phone(phone_number, country_code).split(':', 1)[-1]
-                    user.phone_country = country_code  # Store ISO country code
-                    user.save()
-                    verification.is_verified = True
-                    verification.save(update_fields=['is_verified'])
+                    phone_key = link_verified_phone(user, verification, country_code)
 
-                    # Auto-claim any existing invitation for this phone (best-effort)
-                    try:
-                        res = None
-                        pk = normalize_phone(phone_number, country_code)
-                        # BSC invites (cUSD+/CONFIO) release via the escrow sponsor.
-                        from send.invite_bsc_flow import claim_pending_bsc_invites
-                        claim_pending_bsc_invites(user, pk)
-                        acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
-                        recipient_addr = getattr(acct, 'algorand_address', None)
-                        if recipient_addr:
-                            # Resolve the latest legacy Algorand PhoneInvite and claim by invitation_id
-                            try:
-                                from send.models import PhoneInvite
-                                inv = PhoneInvite.objects.filter(
-                                    rail='algorand',
-                                    phone_key=pk,
-                                    status='pending',
-                                    token_type__in=('CUSD', 'CONFIO', 'USDC'),
-                                    deleted_at__isnull=True
-                                ).order_by('-created_at').first()
-                                if inv:
-                                    res = ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
-                                else:
-                                    logger.info('Auto-claim skipped: no pending PhoneInvite found for phone_key=%s', pk)
-                            except Exception:
-                                logger.info('Auto-claim skipped due to DB lookup failure; will not attempt fallback claim')
-                            if res is not None:
-                                ok = getattr(res, 'success', False)
-                                err = getattr(res, 'error', None)
-                                logger.info('Auto-claim invite result: success=%s error=%s', ok, err)
-                        else:
-                            logger.info('Auto-claim skipped: no personal account address found')
-                    except Exception as ce:
-                        logger.exception('Auto-claim invite failed: %s', ce)
+                    claim_verified_phone_invites(user, info, phone_key)
 
                     return VerifyTelegramCode(success=True, error=None)
+                except PhoneRelinkRequired as required:
+                    return VerifyTelegramCode(success=False, error=str(required), relink_confirmation=confirmation_result(required))
+                except PhoneLinkError as e:
+                    return VerifyTelegramCode(success=False, error=str(e))
                 except IntegrityError as e:
                     logger.exception('Phone save failed due to uniqueness: %s', e)
                     return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
@@ -318,19 +285,14 @@ class VerifyTelegramCode(graphene.Mutation):
                 logger.info('Review test phone detected during Telegram verification')
                 if code != review_code:
                     return VerifyTelegramCode(success=False, error="Código de verificación inválido. Por favor verifica el código e inténtalo nuevamente.")
-                phone_key = normalize_phone(phone_number, country_code)
-                allow_duplicates = is_review_test_phone_key(phone_key)
-                if not allow_duplicates:
-                    from users.models import User as UserModel
-                    duplicate_exists = UserModel.objects.filter(
-                        phone_key=phone_key,
-                        deleted_at__isnull=True
-                    ).exclude(id=user.id).exists()
-                    if duplicate_exists:
-                        logger.error('Phone already in use by another account: %s', phone_key)
-                        return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
                 return finalize_success()
             
+            cached_approval = cached_code_approval(verification, code)
+            if cached_approval is False:
+                return VerifyTelegramCode(success=False, error="Código inválido o límite de intentos excedido. Solicita un nuevo código.")
+            if cached_approval is True:
+                return finalize_success()
+
             TELEGRAM_GATEWAY_TOKEN = settings.TELEGRAM_API_TOKEN
             
             # Try up to 3 times with a small delay between attempts
@@ -338,7 +300,7 @@ class VerifyTelegramCode(graphene.Mutation):
             attempt = 0
             last_error = None
             
-            logger.info('Starting verification process for code: %s', code)
+            logger.info('Starting Telegram code verification')
             
             while attempt < max_attempts:
                 if attempt > 0:
@@ -405,20 +367,8 @@ class VerifyTelegramCode(graphene.Mutation):
                 # Only return success if the code is explicitly valid
                 if status == 'code_valid':
                     logger.info('Code verification successful')
-                    # Before changing user phone, check for duplicates using canonical key
-                    user = info.context.user
-                    phone_key = normalize_phone(phone_number, country_code)
-                    allow_duplicates = is_review_test_phone_key(phone_key)
-                    if not allow_duplicates:
-                        from users.models import User as UserModel
-                        duplicate_exists = UserModel.objects.filter(
-                            phone_key=phone_key,
-                            deleted_at__isnull=True
-                        ).exclude(id=user.id).exists()
-                        if duplicate_exists:
-                            logger.error('Phone already in use by another account: %s', phone_key)
-                            return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
-
+                    if not record_code_approval(verification, code):
+                        return VerifyTelegramCode(success=False, error='Solicita un nuevo código de verificación.')
                     return finalize_success()
                 elif status == 'code_invalid':
                     logger.info('Code verification failed: invalid code')

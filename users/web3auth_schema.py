@@ -19,6 +19,8 @@ from .migration_safety import (
 )
 from .utils_username import generate_compliant_username
 from .validators import validate_username
+from .wallet_reconciliation import PrepareWalletReconciliation, CompleteWalletReconciliation
+from .wallet_address_writes import persist_legacy_wallet_fields
 from .wallet_reenrollment_assessment import (
     WALLET_REENROLLMENT_ASSESSMENT_VERSION,
     valid_reenrollment_funding as _valid_reenrollment_funding,
@@ -67,6 +69,18 @@ def _wallet_reenrollment_candidate(account):
     return bool(account and account.algorand_address and (
         not account.is_keyless_migrated or not account.bsc_address
     ))
+
+
+def _legacy_reenrollment_has_owned_siblings(account):
+    """Single-wallet protocol cannot replace a master secret's other contexts."""
+    return bool(account and Account.objects.filter(
+        user_id=account.user_id, deleted_at__isnull=True,
+    ).exclude(pk=account.pk).exists())
+
+
+LEGACY_REENROLLMENT_INVENTORY_ERROR = (
+    'Actualiza la app e inicia sesión para recuperar todas tus billeteras juntas.'
+)
 
 
 def _store_wallet_reenrollment_assessment(account, inspection):
@@ -840,6 +854,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 and existing_account
                 and existing_account.algorand_address
                 and _wallet_reenrollment_candidate(existing_account)
+                and not _legacy_reenrollment_has_owned_siblings(existing_account)
             ):
                 assessment = _wallet_reenrollment_assessment(existing_account)
                 if assessment and assessment.get('status') == 'eligible':
@@ -1212,6 +1227,10 @@ class UpdateAlgorandAddressMutation(graphene.Mutation):
             if not algorand_address or len(algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address')
 
+            # Retired ownership applies even before this user has an account.
+            if RetiredWalletAddress.is_retired('algorand', algorand_address):
+                return cls(success=False, error='Esta billetera anterior ya no está activa.')
+
             # Update the user's personal account
             account = user.accounts.filter(account_type='personal').first()
             if account:
@@ -1224,15 +1243,14 @@ class UpdateAlgorandAddressMutation(graphene.Mutation):
                         success=False,
                         error='Esta cuenta ya tiene una billetera registrada. Usa la app actualizada para cambiarla.'
                     )
-                account.algorand_address = algorand_address
-                account.save()
+                persist_legacy_wallet_fields(account, algorand_address=algorand_address)
             else:
                 # Create account if it doesn't exist
-                Account.objects.create(
+                account = Account.objects.create(
                     user=user,
                     account_type='personal',
-                    algorand_address=algorand_address
                 )
+                persist_legacy_wallet_fields(account, algorand_address=algorand_address)
 
             return cls(success=True, user=user)
             
@@ -1673,6 +1691,8 @@ class PrepareWalletReenrollmentMutation(graphene.Mutation):
         )
         if not _wallet_reenrollment_candidate(account):
             return cls(success=False, error='Account is not eligible for wallet reenrollment')
+        if _legacy_reenrollment_has_owned_siblings(account):
+            return cls(success=False, error=LEGACY_REENROLLMENT_INVENTORY_ERROR)
 
         preparation = _verify_wallet_reenrollment_preparation(
             preparation_token,
@@ -1728,6 +1748,9 @@ class PrepareWalletReenrollmentMutation(graphene.Mutation):
                 wallet_reenrollment_allowed=False,
             )
 
+        # Slow inspection may overlap creation of another owned context.
+        if _legacy_reenrollment_has_owned_siblings(account):
+            return cls(success=False, error=LEGACY_REENROLLMENT_INVENTORY_ERROR)
         challenge, grant = _issue_wallet_reenrollment_grant(
             user,
             account,
@@ -1791,6 +1814,8 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
             )
             if not inspected_account:
                 return cls(success=False, error='Account not found')
+            if _legacy_reenrollment_has_owned_siblings(inspected_account):
+                return cls(success=False, error=LEGACY_REENROLLMENT_INVENTORY_ERROR)
             if (
                 inspected_account.is_keyless_migrated
                 and not inspected_account.algorand_address
@@ -1822,6 +1847,11 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                 inspected_bsc = _inspect_stale_bsc_reenrollment(inspected_account)
 
             with transaction.atomic():
+                # Same owner-first order as whole-inventory reconciliation and
+                # Account creation. Recheck siblings after acquiring this lock.
+                owner = User.objects.select_for_update().get(pk=user.pk)
+                if not owner.is_active or owner.firebase_uid != user.firebase_uid:
+                    return cls(success=False, error='Authentication required')
                 account = (
                     Account.objects.select_for_update()
                     .filter(
@@ -1834,6 +1864,8 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                 )
                 if not account:
                     return cls(success=False, error='Account not found')
+                if _legacy_reenrollment_has_owned_siblings(account):
+                    return cls(success=False, error=LEGACY_REENROLLMENT_INVENTORY_ERROR)
 
                 # Safe retry after a response was lost.
                 if (
@@ -1915,15 +1947,20 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                         return cls(success=False, error='The previous BSC wallet is not safe to replace')
 
                 duplicate = (
-                    Account.objects.filter(
+                    Account.all_objects.filter(
                         bsc_address__iexact=address,
-                        deleted_at__isnull=True,
                     )
                     .exclude(pk=account.pk)
                     .exists()
                 )
                 if duplicate:
                     return cls(success=False, error='BSC address is already registered')
+                if RetiredWalletAddress.objects.filter(
+                    chain=RetiredWalletAddress.CHAIN_BSC,
+                    address=RetiredWalletAddress.normalize_address(
+                        RetiredWalletAddress.CHAIN_BSC, address),
+                ).exclude(account=account).exists():
+                    return cls(success=False, error='BSC address belongs to another account')
 
                 old_address = account.algorand_address
                 old_bsc_address = account.bsc_address
@@ -1956,11 +1993,15 @@ class CompleteWalletReenrollmentMutation(graphene.Mutation):
                     ).exclude(account=account).exists():
                         return cls(success=False, error='Previous wallet address is already retired')
                 for chain, retired_address in retired_destinations:
-                    RetiredWalletAddress.objects.get_or_create(
+                    retired, _ = RetiredWalletAddress.objects.get_or_create(
                         chain=chain,
                         address=retired_address,
                         defaults={'account': account, 'user': user},
                     )
+                    # Another retirement can win after the precheck. Raising
+                    # rolls back any audit rows already inserted in this call.
+                    if retired.account_id != account.pk:
+                        raise IntegrityError('Historical address ownership conflict')
 
                 account.algorand_address = None
                 account.bsc_address = address
@@ -2062,20 +2103,18 @@ class MarkWalletMigratedMutation(graphene.Mutation):
                         ),
                     )
             
-            update_fields = ['is_keyless_migrated']
-            account.is_keyless_migrated = True
+            wallet_changes = {'is_keyless_migrated': True}
 
             if new_address:
                 # Validate format
                 if len(new_address) == 58:
                     old_address = account.algorand_address
-                    account.algorand_address = new_address
-                    update_fields.append('algorand_address')
+                    wallet_changes['algorand_address'] = new_address
                     logger.info(f"Updating address for migration: {old_address} -> {new_address}")
                 else:
                     logger.warning(f"Invalid new address format provided for migration: {new_address}")
 
-            account.save(update_fields=update_fields)
+            persist_legacy_wallet_fields(account, **wallet_changes)
             
             logger.info(f"Marked account {account.id} (User {user.id}) as migrated to V2")
             
@@ -2087,6 +2126,8 @@ class MarkWalletMigratedMutation(graphene.Mutation):
 
 
 class Web3AuthMutation(graphene.ObjectType):
+    prepare_wallet_reconciliation = PrepareWalletReconciliation.Field()
+    complete_wallet_reconciliation = CompleteWalletReconciliation.Field()
     web3_auth_login = Web3AuthLoginMutation.Field()
     add_algorand_wallet = AddAlgorandWalletMutation.Field()
     update_algorand_address = UpdateAlgorandAddressMutation.Field()
@@ -2150,6 +2191,8 @@ class Web3AuthQuery(graphene.ObjectType):
 
 
 class Mutation(graphene.ObjectType):
+    prepare_wallet_reconciliation = PrepareWalletReconciliation.Field()
+    complete_wallet_reconciliation = CompleteWalletReconciliation.Field()
     web3auth_login = Web3AuthLoginMutation.Field()
     add_algorand_wallet = AddAlgorandWalletMutation.Field()
     update_algorand_address = UpdateAlgorandAddressMutation.Field()

@@ -1,7 +1,7 @@
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxLengthValidator, MinValueValidator, MaxValueValidator
-from django.db import models
+from django.db import models, router, transaction
 from django.db.models.functions import Lower
 from django.db.models import Q
 from django.conf import settings
@@ -201,9 +201,54 @@ class User(AbstractUser, SoftDeleteModel):
     def __str__(self):
         return self.username or self.email or self.firebase_uid
 
-    def save(self, *args, **kwargs):
-        # Auto-maintain canonical phone key for uniqueness
-        try:
+    _phone_fields = frozenset({'phone_number', 'phone_country', 'phone_key'})
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_phone = {
+            name: instance.__dict__[name]
+            for name in cls._phone_fields if name in instance.__dict__
+        }
+        return instance
+
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        if fields is not None:
+            fields = tuple(fields)
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        snapshot = getattr(self, '_loaded_phone', {}).copy()
+        refreshed = self._phone_fields if fields is None else self._phone_fields.intersection(fields)
+        for name in refreshed:
+            if name in self.__dict__:
+                snapshot[name] = self.__dict__[name]
+        self._loaded_phone = snapshot
+
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        if args:
+            force_insert, force_update, using, update_fields = self._parse_save_params(
+                *args, method_name='save', force_insert=force_insert,
+                force_update=force_update, using=using, update_fields=update_fields)
+        if update_fields is not None:
+            update_fields = frozenset(update_fields)
+
+        # A phone can be transferred while an older request is in flight.
+        # Unrelated full saves must not restore that request's stale phone.
+        snapshot = getattr(self, '_loaded_phone', {})
+        phone_changed = any(
+            name in self.__dict__ and (
+                name not in snapshot or self.__dict__[name] != snapshot[name])
+            for name in self._phone_fields
+        )
+        if not self._state.adding and update_fields is None and not phone_changed:
+            update_fields = {
+                field.attname for field in self._meta.concrete_fields
+                if not field.primary_key and field.attname in self.__dict__
+                and field.attname not in self._phone_fields
+            }
+
+        # Only phone writes should normalize phone values or load deferred fields.
+        writes_phone = update_fields is None or bool(self._phone_fields.intersection(update_fields))
+        if writes_phone:
             if self.phone_number:
                 self.phone_number = canonicalize_phone_digits(self.phone_number or '', self.phone_country or '')
                 # Accept either ISO or calling code; we have ISO here
@@ -211,9 +256,12 @@ class User(AbstractUser, SoftDeleteModel):
                 self.phone_key = normalize_phone(self.phone_number or '', self.phone_country or '')
             else:
                 self.phone_key = None
-        except Exception:
-            pass
-        super().save(*args, **kwargs)
+        super().save(force_insert=force_insert, force_update=force_update,
+                     using=using, update_fields=update_fields)
+        for name in self._phone_fields:
+            if name in self.__dict__ and (update_fields is None or name in update_fields):
+                snapshot[name] = self.__dict__[name]
+        self._loaded_phone = snapshot
 
     @property
     def phone_country_code(self):
@@ -550,6 +598,16 @@ class Account(SoftDeleteModel):
             ),
         ]
         
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.user_id:
+            # Serialize new owned contexts with whole-wallet reconciliation.
+            # A deferred PostgreSQL FK alone does not protect its inventory.
+            using = kwargs.get('using') or router.db_for_write(type(self), instance=self)
+            with transaction.atomic(using=using):
+                User.all_objects.using(using).select_for_update().get(pk=self.user_id)
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
+
     def get_ordering_key(self):
         """Get a key for custom ordering: personal accounts first, then business accounts by index"""
         # Personal accounts get priority (0), business accounts get lower priority (1)
@@ -605,7 +663,7 @@ class Account(SoftDeleteModel):
 
 
 class RetiredWalletAddress(models.Model):
-    """A wallet destination permanently retired by the self-heal flow.
+    """A former wallet destination retained as an ownership audit record.
 
     These rows are intentionally not soft-deletable: forgetting a retired
     destination would let a later raw-address send strand funds there.
@@ -663,10 +721,18 @@ class RetiredWalletAddress(models.Model):
     @classmethod
     def is_retired(cls, chain, address):
         normalized = cls.normalize_address(chain, address)
-        return bool(normalized) and cls.objects.filter(
+        records = cls.objects.filter(
             chain=chain,
             address=normalized,
-        ).exists()
+        )
+        # Reconciliation can recover an address previously owned by this same
+        # account. Keep its audit row, but do not reject sends to its now-active
+        # destination. A different account can never reactivate that address.
+        active_field = ('account__bsc_address__iexact' if chain == cls.CHAIN_BSC
+                        else 'account__algorand_address__iexact')
+        return bool(normalized) and records.exclude(**{
+            active_field: normalized, 'account__deleted_at__isnull': True,
+        }).exists()
 
     def save(self, *args, **kwargs):
         self.address = self.normalize_address(self.chain, self.address)
