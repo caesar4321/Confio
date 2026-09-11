@@ -1,3 +1,16 @@
+import { WalletRecoveryError } from './walletRecoveryErrors';
+
+export function canReplaceAfterRecoveryFailure(error: unknown, offered: boolean, hasAlgo: boolean, hasBsc: boolean): boolean {
+  return offered && hasAlgo && !hasBsc && error instanceof WalletRecoveryError
+    && (error.code === 'missing' || error.code === 'mismatch');
+}
+
+export function collisionRefusalMessage(hasLegacyValue: boolean): string {
+  return hasLegacyValue
+    ? 'Detectamos fondos en otra billetera anterior vinculada a tu inicio de sesión. Contáctanos para recuperarlos antes de reemplazarla. No desinstales Confío. Código: RECOVERY-LEGACY-VALUE.'
+    : 'No recibimos autorización para reemplazar tu billetera registrada. Actualiza Confío e inténtalo de nuevo. Si continúa, contáctanos. No desinstales la app. Código: RECOVERY-NO-OFFER.';
+}
+
 export type WalletReenrollmentDecision =
   | 'no_collision'
   | 'repair_collision'
