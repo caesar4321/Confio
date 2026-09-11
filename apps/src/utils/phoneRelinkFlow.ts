@@ -45,7 +45,15 @@ export function createPhoneRelinkFlow() {
         try {
           result = await deps.confirm(confirmation.token);
         } catch {
-          if (!deps.isActive() || !await deps.retry(confirmation) || !deps.isActive()) return null;
+          if (!deps.isActive()) return null;
+          const retrying = await deps.retry(confirmation);
+          if (!deps.isActive()) return null;
+          if (!retrying) {
+            // Keep the token (the OTP may already be consumed) but not the consent:
+            // after declining, the next attempt must be approved again.
+            if (pending) pending.approved = false;
+            return null;
+          }
           continue;
         }
         if (!deps.isActive()) return null;

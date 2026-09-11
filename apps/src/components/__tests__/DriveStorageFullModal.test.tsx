@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert, Linking } from 'react-native';
+import { Alert, Linking, ScrollView } from 'react-native';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -71,6 +71,17 @@ describe('DriveStorageFullModal', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     await press(tree, 'Cerrar');
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves the footer into the scrolling content when the window is too short', () => {
+    const { tree } = render();
+    const scrolledButtons = () => tree.root.findByType(ScrollView).findAll(
+      node => node.props.accessibilityLabel === 'Cerrar' && typeof node.props.onPress === 'function',
+    );
+    expect(scrolledButtons()).toHaveLength(0);
+    const [footer] = tree.root.findAll(node => node.props.testID === 'drive-storage-full-footer');
+    act(() => footer.props.onLayout({ nativeEvent: { layout: { height: 100000 } } }));
+    expect(scrolledButtons().length).toBeGreaterThan(0);
   });
 
   it('renders nothing while hidden', () => {

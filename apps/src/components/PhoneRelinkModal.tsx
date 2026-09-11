@@ -1,9 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet, Modal, ScrollView, useWindowDimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { AccessibilityInfo, View, Text, StyleSheet, Modal, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './common/Button';
 import { colors } from '../config/theme';
+import { useModalCardLayout } from '../hooks/useModalCardLayout';
 import type { PhoneRelinkPrompt } from '../hooks/usePhoneRelinkPrompt';
 
 type AccountSummary = { email?: string | null; username?: string | null };
@@ -17,6 +17,9 @@ interface PhoneRelinkModalProps {
     /** Always receives the id of the prompt the pressed button was rendered for. */
     onAnswer: (promptId: number, approved: boolean) => void;
 }
+
+const REPLACED_NOTICE = 'Las cuentas vinculadas a este número cambiaron. Revísalas antes de confirmar.';
+const RETRY_NOTICE = 'No pudimos confirmar el cambio. Revisa tu conexión e intenta de nuevo.';
 
 // Identifiers wrap instead of truncating: the user must be able to read every
 // character that tells two accounts apart before approving the move.
@@ -44,18 +47,56 @@ export const PhoneRelinkModal: React.FC<PhoneRelinkModalProps> = ({
     currentAccount,
     onAnswer,
 }) => {
-    const insets = useSafeAreaInsets();
-    const { height } = useWindowDimensions();
-    const verticalPadding = Math.max(insets.top, 16) + Math.max(insets.bottom, 16);
-    const modalMaxHeight = Math.max(0, height - verticalPadding);
+    const layout = useModalCardLayout();
+    const scrollRef = useRef<ScrollView>(null);
     const accounts = prompt?.confirmation.accounts ?? [];
     const plural = accounts.length > 1;
     const phase = prompt?.phase ?? 'ask';
     const confirming = phase === 'confirming';
+    const replaced = !!prompt?.replaced;
     const promptId = prompt?.id;
     const answer = (approved: boolean) => {
         if (promptId !== undefined) onAnswer(promptId, approved);
     };
+
+    // A new question can arrive while the modal is already presented: bring
+    // changed accounts back into view and tell screen-reader users what changed.
+    useEffect(() => {
+        if (promptId === undefined) return;
+        if (phase === 'ask' && replaced) {
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            AccessibilityInfo.announceForAccessibility(REPLACED_NOTICE);
+        } else if (phase === 'retry') {
+            AccessibilityInfo.announceForAccessibility(RETRY_NOTICE);
+        }
+    }, [promptId, phase, replaced]);
+
+    const footer = (
+        <View
+            testID="phone-relink-footer"
+            style={styles.footer}
+            onLayout={layout.onFooterLayout}
+        >
+            {phase === 'retry' && (
+                <View style={[styles.notice, styles.noticeError, styles.retryNotice]} accessibilityLiveRegion="polite">
+                    <Icon name="wifi-off" size={18} color={colors.error.text} />
+                    <Text style={[styles.noticeText, { color: colors.error.text }]}>{RETRY_NOTICE}</Text>
+                </View>
+            )}
+            <Button
+                title={phase === 'retry' ? 'Reintentar' : 'Confirmar cambio'}
+                onPress={() => answer(true)}
+                loading={confirming}
+            />
+            <Button
+                title="Cancelar"
+                variant="ghost"
+                onPress={() => answer(false)}
+                disabled={confirming}
+                style={styles.footerButton}
+            />
+        </View>
+    );
 
     return (
         <Modal
@@ -70,86 +111,63 @@ export const PhoneRelinkModal: React.FC<PhoneRelinkModalProps> = ({
             <View
                 style={[
                     styles.centeredView,
-                    {
-                        paddingTop: Math.max(insets.top, 16),
-                        paddingBottom: Math.max(insets.bottom, 16),
-                    },
+                    { paddingTop: layout.paddingTop, paddingBottom: layout.paddingBottom },
                 ]}
             >
-                <View style={[styles.modalView, { maxHeight: modalMaxHeight }]}>
+                <View style={[styles.modalView, { maxHeight: layout.maxHeight }]}>
                     <ScrollView
+                        ref={scrollRef}
                         style={styles.scrollView}
-                        contentContainerStyle={styles.modalContent}
                         bounces={false}
                         showsVerticalScrollIndicator
                         nestedScrollEnabled
                     >
-                        <View style={styles.iconContainer}>
-                            <Icon name="cellphone-link" size={40} color={colors.primaryDark} />
-                        </View>
+                        <View style={styles.modalContent}>
+                            <View style={styles.iconContainer}>
+                                <Icon name="cellphone-link" size={40} color={colors.primaryDark} />
+                            </View>
 
-                        <Text style={styles.modalTitle} accessibilityRole="header">
-                            ¿Mover este número a tu cuenta?
-                        </Text>
+                            <Text style={styles.modalTitle} accessibilityRole="header">
+                                ¿Mover este número a tu cuenta?
+                            </Text>
 
-                        <Text style={styles.modalText}>
-                            <Text style={styles.phone}>{phoneLabel}</Text>
-                            {plural ? ' ya está vinculado a otras cuentas.' : ' ya está vinculado a otra cuenta.'}
-                        </Text>
+                            <Text style={styles.modalText}>
+                                <Text style={styles.phone}>{phoneLabel}</Text>
+                                {plural ? ' ya está vinculado a otras cuentas.' : ' ya está vinculado a otra cuenta.'}
+                            </Text>
 
-                        {prompt?.replaced && (
-                            <View style={[styles.notice, styles.noticeWarning, styles.replacedNotice]}>
-                                <Icon name="alert-outline" size={18} color={colors.warning.text} />
-                                <Text style={[styles.noticeText, { color: colors.warning.text }]}>
-                                    Las cuentas vinculadas a este número cambiaron. Revísalas antes de confirmar.
+                            {replaced && (
+                                <View style={[styles.notice, styles.noticeWarning, styles.replacedNotice]}>
+                                    <Icon name="alert-outline" size={18} color={colors.warning.text} />
+                                    <Text style={[styles.noticeText, { color: colors.warning.text }]}>{REPLACED_NOTICE}</Text>
+                                </View>
+                            )}
+
+                            <Text style={styles.sectionLabel}>Ahora está en</Text>
+                            <View style={styles.accountList}>
+                                {accounts.map((account, index) => (
+                                    <AccountRow key={`${account.email}-${account.username}-${index}`} account={account} />
+                                ))}
+                            </View>
+
+                            <View style={styles.arrowChip}>
+                                <Icon name="arrow-down" size={18} color={colors.primaryDark} />
+                            </View>
+
+                            <Text style={styles.sectionLabel}>Pasará a</Text>
+                            <AccountRow account={currentAccount ?? null} highlighted />
+
+                            <View style={styles.infoContainer}>
+                                <Icon name="shield-check-outline" size={18} color={colors.primaryDark} />
+                                <Text style={styles.infoText}>
+                                    {`Los fondos y el historial se quedan en ${plural ? 'las cuentas anteriores' : 'la cuenta anterior'}. Solo cambia la cuenta a la que pertenece este número.`}
                                 </Text>
                             </View>
-                        )}
-
-                        <Text style={styles.sectionLabel}>Ahora está en</Text>
-                        <View style={styles.accountList}>
-                            {accounts.map((account, index) => (
-                                <AccountRow key={`${account.email}-${account.username}-${index}`} account={account} />
-                            ))}
                         </View>
-
-                        <View style={styles.arrowChip}>
-                            <Icon name="arrow-down" size={18} color={colors.primaryDark} />
-                        </View>
-
-                        <Text style={styles.sectionLabel}>Pasará a</Text>
-                        <AccountRow account={currentAccount ?? null} highlighted />
-
-                        <View style={styles.infoContainer}>
-                            <Icon name="shield-check-outline" size={18} color={colors.primaryDark} />
-                            <Text style={styles.infoText}>
-                                {`Los fondos y el historial se quedan en ${plural ? 'las cuentas anteriores' : 'la cuenta anterior'}. Solo cambia la cuenta a la que pertenece este número.`}
-                            </Text>
-                        </View>
+                        {layout.inlineFooter && footer}
                     </ScrollView>
 
-                    <View style={styles.footer}>
-                        {phase === 'retry' && (
-                            <View style={[styles.notice, styles.noticeError, styles.retryNotice]} accessibilityLiveRegion="polite">
-                                <Icon name="wifi-off" size={18} color={colors.error.text} />
-                                <Text style={[styles.noticeText, { color: colors.error.text }]}>
-                                    No pudimos confirmar el cambio. Revisa tu conexión e intenta de nuevo.
-                                </Text>
-                            </View>
-                        )}
-                        <Button
-                            title={phase === 'retry' ? 'Reintentar' : 'Confirmar cambio'}
-                            onPress={() => answer(true)}
-                            loading={confirming}
-                        />
-                        <Button
-                            title="Cancelar"
-                            variant="ghost"
-                            onPress={() => answer(false)}
-                            disabled={confirming}
-                            style={styles.footerButton}
-                        />
-                    </View>
+                    {!layout.inlineFooter && footer}
                 </View>
             </View>
         </Modal>

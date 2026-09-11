@@ -10,16 +10,27 @@ const setup = () => ({
   reset: jest.fn(),
 });
 
-test('transport cancellation preserves approval and retries the token without reusing the OTP', async () => {
+test('declining a transport retry keeps the token but requires renewed consent', async () => {
   const flow = createPhoneRelinkFlow();
   const deps = setup();
   deps.confirm.mockRejectedValueOnce(new Error('response lost'));
   expect(await flow.run(deps)).toBeNull();
+  expect(deps.retry).toHaveBeenCalledWith(preview);
   expect(await flow.run(deps)).toEqual({ success: true });
   expect(deps.verify).toHaveBeenCalledTimes(1);
-  expect(deps.ask).toHaveBeenCalledTimes(1);
+  expect(deps.ask.mock.calls).toEqual([[preview], [preview]]);
   expect(deps.confirm.mock.calls).toEqual([['proof'], ['proof']]);
   expect(deps.reset).not.toHaveBeenCalled();
+});
+
+test('accepting a transport retry resubmits the approved token without asking again', async () => {
+  const flow = createPhoneRelinkFlow();
+  const deps = setup();
+  deps.confirm.mockRejectedValueOnce(new Error('response lost'));
+  deps.retry.mockResolvedValueOnce(true);
+  expect(await flow.run(deps)).toEqual({ success: true });
+  expect(deps.ask).toHaveBeenCalledTimes(1);
+  expect(deps.confirm.mock.calls).toEqual([['proof'], ['proof']]);
 });
 
 test('retryable server failures retain proof, including a missing response payload', async () => {
@@ -78,6 +89,19 @@ test('initial cancellation and explicit abandonment clear pending proof', async 
   flow.clear();
   await flow.run(deps);
   expect(deps.verify).toHaveBeenCalledTimes(3);
+});
+
+test('declining renewed consent after a declined retry abandons the token', async () => {
+  const flow = createPhoneRelinkFlow();
+  const deps = setup();
+  deps.confirm.mockRejectedValueOnce(new Error('offline'));
+  await flow.run(deps);
+  deps.ask.mockResolvedValueOnce(false);
+  expect(await flow.run(deps)).toBeNull();
+  expect(deps.confirm).toHaveBeenCalledTimes(1);
+  expect(deps.reset).toHaveBeenCalledTimes(1);
+  await flow.run(deps);
+  expect(deps.verify).toHaveBeenCalledTimes(2);
 });
 
 test('unmounting while consent is open prevents confirmation', async () => {

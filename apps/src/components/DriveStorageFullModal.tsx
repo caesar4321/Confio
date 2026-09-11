@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, ScrollView, Linking, Alert, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Modal, ScrollView, Linking, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './common/Button';
 import { colors } from '../config/theme';
+import { useModalCardLayout } from '../hooks/useModalCardLayout';
 
 // Google's own storage manager (support.google.com/googleone/answer/6374270).
 export const GOOGLE_STORAGE_MANAGER_URL = 'https://one.google.com/storage/management';
@@ -21,9 +21,7 @@ const STEPS: { icon: string; text: string }[] = [
 ];
 
 export const DriveStorageFullModal: React.FC<DriveStorageFullModalProps> = ({ visible, onRetry, onClose }) => {
-    const insets = useSafeAreaInsets();
-    const { height } = useWindowDimensions();
-    const modalMaxHeight = Math.max(360, height - insets.top - insets.bottom - 32);
+    const layout = useModalCardLayout();
 
     const openStorageManager = async () => {
         try {
@@ -36,6 +34,19 @@ export const DriveStorageFullModal: React.FC<DriveStorageFullModalProps> = ({ vi
         }
     };
 
+    const footer = (
+        <View testID="drive-storage-full-footer" style={styles.footer} onLayout={layout.onFooterLayout}>
+            <Button title="Liberar espacio en Google" onPress={openStorageManager} />
+            <Button
+                title="Ya liberé espacio, reintentar"
+                variant="secondary"
+                onPress={onRetry}
+                style={styles.footerButton}
+            />
+            <Button title="Cerrar" variant="ghost" onPress={onClose} style={styles.footerButton} />
+        </View>
+    );
+
     return (
         <Modal
             animationType="fade"
@@ -47,61 +58,51 @@ export const DriveStorageFullModal: React.FC<DriveStorageFullModalProps> = ({ vi
             <View
                 style={[
                     styles.centeredView,
-                    {
-                        paddingTop: Math.max(insets.top, 16),
-                        paddingBottom: Math.max(insets.bottom, 16),
-                    },
+                    { paddingTop: layout.paddingTop, paddingBottom: layout.paddingBottom },
                 ]}
             >
-                <View style={[styles.modalView, { maxHeight: modalMaxHeight }]}>
+                <View style={[styles.modalView, { maxHeight: layout.maxHeight }]}>
                     <ScrollView
                         style={styles.scrollView}
-                        contentContainerStyle={styles.modalContent}
                         bounces={false}
                         showsVerticalScrollIndicator
                         nestedScrollEnabled
                     >
-                        <View style={styles.iconContainer}>
-                            <Icon name="cloud-alert" size={44} color={colors.warning.text} />
-                        </View>
+                        <View style={styles.modalContent}>
+                            <View style={styles.iconContainer}>
+                                <Icon name="cloud-alert" size={44} color={colors.warning.text} />
+                            </View>
 
-                        <Text style={styles.modalTitle} accessibilityRole="header">
-                            Tu almacenamiento de Google está lleno
-                        </Text>
-
-                        <Text style={styles.modalText}>
-                            Tu respaldo necesita muy poco espacio, pero tu cuenta de Google ya no tiene espacio disponible. Libera un poco y vuelve a intentarlo.
-                        </Text>
-
-                        <View style={styles.infoContainer}>
-                            <Icon name="information-outline" size={18} color={colors.primaryDark} />
-                            <Text style={styles.infoText}>
-                                Tu espacio de Google se comparte entre Gmail, Google Fotos, Google Drive y los respaldos de WhatsApp.
+                            <Text style={styles.modalTitle} accessibilityRole="header">
+                                Tu almacenamiento de Google está lleno
                             </Text>
-                        </View>
 
-                        <View style={styles.bulletPoints}>
-                            {STEPS.map(step => (
-                                <View key={step.icon} style={styles.bulletRow}>
-                                    <View style={styles.bulletChip}>
-                                        <Icon name={step.icon} size={18} color={colors.primaryDark} />
+                            <Text style={styles.modalText}>
+                                Tu respaldo necesita muy poco espacio, pero tu cuenta de Google ya no tiene espacio disponible. Libera un poco y vuelve a intentarlo.
+                            </Text>
+
+                            <View style={styles.infoContainer}>
+                                <Icon name="information-outline" size={18} color={colors.primaryDark} />
+                                <Text style={styles.infoText}>
+                                    Tu espacio de Google se comparte entre Gmail, Google Fotos, Google Drive y los respaldos de WhatsApp.
+                                </Text>
+                            </View>
+
+                            <View style={styles.bulletPoints}>
+                                {STEPS.map(step => (
+                                    <View key={step.icon} style={styles.bulletRow}>
+                                        <View style={styles.bulletChip}>
+                                            <Icon name={step.icon} size={18} color={colors.primaryDark} />
+                                        </View>
+                                        <Text style={styles.bulletText}>{step.text}</Text>
                                     </View>
-                                    <Text style={styles.bulletText}>{step.text}</Text>
-                                </View>
-                            ))}
+                                ))}
+                            </View>
                         </View>
+                        {layout.inlineFooter && footer}
                     </ScrollView>
 
-                    <View style={styles.footer}>
-                        <Button title="Liberar espacio en Google" onPress={openStorageManager} />
-                        <Button
-                            title="Ya liberé espacio, reintentar"
-                            variant="secondary"
-                            onPress={onRetry}
-                            style={styles.footerButton}
-                        />
-                        <Button title="Cerrar" variant="ghost" onPress={onClose} style={styles.footerButton} />
-                    </View>
+                    {!layout.inlineFooter && footer}
                 </View>
             </View>
         </Modal>
