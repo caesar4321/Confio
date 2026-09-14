@@ -222,7 +222,7 @@ class InfiniaProvider(PaymentAccountProvider):
         return verify_infinia_signature(
             raw_body,
             headers.get('X-Infinia-Signature', ''),
-            getattr(settings, 'INFINIA_SECRET_ID', ''),
+            getattr(settings, 'INFINIA_WEBHOOK_SIGNING_KEY', ''),
         )
 
     def normalize_webhook(self, raw_body, headers):

@@ -26,7 +26,13 @@ class JourneyTests(TestCase):
         self.crypto = self.instruction.financial_account
         self.crypto.provider_account_id = 'crypto'; self.crypto.save()
         self.local = FinancialAccount.objects.create(provider_profile=self.crypto.provider_profile,
-            provider_account_id='local', country='PER', asset='PEN', status='active', ownership_structure='provider_named')
+            provider_account_id='local', country='PER', asset='PEN', status='active', ownership_structure='provider_named',
+            payin_rail='BANK', payin_document_country='PE')
+        profile = self.local.provider_profile
+        profile.identity_snapshot = {'full_name': 'Holder', 'document_number': '123',
+            'document_type': 'DNI', 'document_issuing_country': 'PE'}
+        profile.save(update_fields=['identity_snapshot'])
+        AccountCapability.objects.create(financial_account=self.local, capability='receive_same_name', status='enabled')
         for account in (self.local, self.crypto):
             for capability in ('convert', 'send_third_party'):
                 AccountCapability.objects.create(financial_account=account, capability=capability, status='enabled')
@@ -37,6 +43,9 @@ class JourneyTests(TestCase):
         self.api = mock.Mock()
 
     def credit(self, account, amount='10', **kwargs):
+        if account.pk == self.local.pk and 'provider_data' not in kwargs:
+            kwargs['provider_data'] = {'third_party': {'type': 'FIAT', 'full_name': 'Holder',
+                'document_number': '123', 'document_type': 'DNI'}}
         return LedgerEntry.objects.create(provider='infinia', financial_account=account,
             provider_entry_id=str(uuid.uuid4()), direction='credit', asset=account.asset, amount=amount,
             occurred_at=timezone.now(), **kwargs)
@@ -49,6 +58,34 @@ class JourneyTests(TestCase):
         self.api.create_transfer_quote.return_value = dict(id='fx-quote', status='ACTIVE',
             source_account_id=source, target_account_id=target, source_amount=amount, target_amount=output,
             expire_at=(timezone.now()+timedelta(minutes=1)).isoformat())
+
+    def test_unidentified_deposit_cannot_create_journey(self):
+        with self.assertRaisesRegex(PaymentAccountError, 'Pay-in requires review'):
+            create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                request_id=uuid.uuid4(), minimum_fx_output='2', direction='to_wallet',
+                credit=self.credit(self.local, provider_data={}))
+        self.assertFalse(InfiniaJourney.objects.exists())
+
+    def test_revocation_stops_worker_before_quote(self):
+        j = self.inbound()
+        AccountCapability.objects.filter(financial_account=self.local, capability='receive_same_name').update(status='disabled')
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+        self.api.create_transfer_quote.assert_not_called()
+        self.submit.assert_not_called()
+
+    def test_revocation_stops_submission_after_quote(self):
+        from payment_accounts.services import submit_money_operation
+        j = self.inbound()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        AccountCapability.objects.filter(financial_account=self.local, capability='receive_same_name').update(status='disabled')
+        with mock.patch('payment_accounts.services.get_provider') as adapter:
+            with self.assertRaisesRegex(PaymentAccountError, 'Pay-in requires review'):
+                submit_money_operation(j.fx_operation)
+            adapter.assert_not_called()
 
     def settle_fx(self, j, account, amount='2.5'):
         j.refresh_from_db(); op=j.fx_operation

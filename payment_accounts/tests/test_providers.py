@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 from decimal import Decimal
 from unittest import mock
+import base64
+import hashlib
+import hmac
 
 from django.test import SimpleTestCase, override_settings
 
@@ -22,6 +25,23 @@ class StatusNormalizationTests(SimpleTestCase):
 
 
 class AdapterPayloadTests(SimpleTestCase):
+    @override_settings(INFINIA_SECRET_ID='api-user', INFINIA_WEBHOOK_SIGNING_KEY='signing-key')
+    def test_webhook_requires_dedicated_signing_key(self):
+        provider = InfiniaProvider(client=mock.Mock())
+        body = b'{"id":"test"}'
+        def signature(key):
+            return base64.b64encode(hmac.new(key, body, hashlib.sha256).digest()).decode()
+        self.assertTrue(provider.verify_webhook(body, {
+            'X-Infinia-Signature': signature(b'signing-key'),
+        }))
+        self.assertFalse(provider.verify_webhook(body, {
+            'X-Infinia-Signature': signature(b'api-user'),
+        }))
+        with override_settings(INFINIA_WEBHOOK_SIGNING_KEY=''):
+            self.assertFalse(provider.verify_webhook(body, {
+                'X-Infinia-Signature': signature(b'api-user'),
+            }))
+
     @mock.patch('payment_accounts.providers.infinia.build_infinia_self_declared_payload')
     @mock.patch('payment_accounts.providers.infinia.retrieve_didit_decision')
     def test_infinia_owner_uses_didit_self_declared_handoff(

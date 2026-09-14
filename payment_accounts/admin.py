@@ -1,4 +1,37 @@
 from django.contrib import admin
+from .models import ThirdPartyPayinSwitch, PayinAdmission
+
+
+@admin.register(ThirdPartyPayinSwitch)
+class ThirdPartyPayinSwitchAdmin(admin.ModelAdmin):
+    list_display = ('provider', 'country', 'rail', 'confio_account', 'enabled', 'updated_at')
+    list_filter = ('provider', 'country', 'rail', 'enabled')
+    raw_id_fields = ('confio_account',)
+    readonly_fields = ('updated_at',)
+
+
+@admin.register(PayinAdmission)
+class PayinAdmissionAdmin(admin.ModelAdmin):
+    list_display = ('entry', 'allowed', 'reason', 'country', 'rail', 'updated_at')
+    list_filter = ('allowed', 'country', 'rail', 'reason')
+    readonly_fields = tuple(field.name for field in PayinAdmission._meta.fields)
+    actions = ('reassess_deposits',)
+
+    @admin.action(description='Reassess deposits against current switches (does not move funds)', permissions=['change'])
+    def reassess_deposits(self, request, queryset):
+        from .payin_admission import assess
+        count = 0
+        for admission in queryset.select_related('entry__financial_account__provider_profile__identity_verification'):
+            assess(admission.entry)
+            self.log_change(request, admission, 'Reassessed pay-in admission; no funds moved.')
+            count += 1
+        self.message_user(request, f'Reassessed {count} deposits. No funds moved or journeys resumed.')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 from .models import (
     AccountCapability,

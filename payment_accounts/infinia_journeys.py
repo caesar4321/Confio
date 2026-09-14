@@ -86,6 +86,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
                 or credit.direction != 'credit' or credit.asset != local_account.asset or positive(credit.amount) <= 0
                 or (credit.provider_data.get('operation') or {}).get('type') not in {None, 'PAYIN', 'CREDIT'}):
             raise PaymentAccountError('An unspent local deposit credit is required')
+        from .payin_admission import require_admitted
+        require_admitted(credit)
     validate_accounts(owner, local_account, crypto_account, snapshot['country'])
     source, target = (crypto_account, local_account) if direction == 'to_bank' else (local_account, crypto_account)
     _require_capability(source, 'convert')
@@ -179,6 +181,12 @@ def advance_journey(journey_id, *, client=None):
             if op and has_refund(op):
                 _state(j, 'needs_review', failure='provider_refund_posted'); return j
         enabled()
+        if j.direction == 'to_wallet':
+            from .payin_admission import assess
+            admission = assess(j.funding_credit)
+            if admission and not admission.allowed:
+                _state(j, 'needs_review', failure=f'payin_{admission.reason}')
+                return j
         validate_accounts(j.confio_account, j.local_account, j.crypto_account, j.destination_snapshot['country'])
         if address(j.confio_account.bsc_address) != j.wallet_address:
             _state(j, 'needs_review', failure='wallet_changed'); return j

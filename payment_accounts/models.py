@@ -80,6 +80,8 @@ class FinancialAccount(models.Model):
     ownership_structure = models.CharField(max_length=30, choices=OWNERSHIP_CHOICES)
     country = models.CharField(max_length=3)
     asset = models.CharField(max_length=24)
+    payin_rail = models.CharField(max_length=50, blank=True, default='', help_text='Verified receiving rail, e.g. SPEI or PIX. Leave blank if ambiguous.')
+    payin_document_country = models.CharField(max_length=2, blank=True, default='', help_text='Verified jurisdiction of sender document numbers on this rail (ISO-2). Blank disables automatic same-owner matching.')
     status = models.CharField(
         max_length=20, choices=ResourceStatus.choices, default=ResourceStatus.PENDING
     )
@@ -111,6 +113,47 @@ class FinancialAccount(models.Model):
     @property
     def provider(self):
         return self.provider_profile.provider
+
+
+class ThirdPartyPayinSwitch(models.Model):
+    """All three scopes must explicitly allow; no user override of a country stop."""
+
+    provider = models.CharField(max_length=20, choices=Provider.choices)
+    country = models.CharField(max_length=2, help_text='Receiving country, ISO-2; not phone country.')
+    rail = models.CharField(max_length=50, blank=True, default='', help_text='Blank for country switch; otherwise verified rail code.')
+    confio_account = models.ForeignKey('users.Account', null=True, blank=True, on_delete=models.PROTECT)
+    enabled = models.BooleanField(default=False)
+    evidence = models.TextField(help_text='Approval reference, including required enhanced KYC/KYB review for user grants.')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from .providers.common import iso_alpha2
+        try:
+            self.country = iso_alpha2(self.country)
+        except ValueError as exc:
+            raise ValidationError({'country': str(exc)})
+        self.rail = self.rail.strip().upper()
+        if self.confio_account_id and not self.rail:
+            raise ValidationError('User switches require a country and rail.')
+        if self.enabled and not self.evidence.strip():
+            raise ValidationError('Enabling requires approval evidence.')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['provider', 'country', 'rail'], condition=Q(confio_account__isnull=True), name='payin_switch_global_uniq'),
+            models.UniqueConstraint(fields=['provider', 'country', 'rail', 'confio_account'], condition=Q(confio_account__isnull=False), name='payin_switch_owner_uniq'),
+            models.CheckConstraint(condition=Q(confio_account__isnull=True) | ~Q(rail=''), name='payin_switch_owner_rail'),
+        ]
+
+
+class PayinAdmission(models.Model):
+    entry = models.OneToOneField('LedgerEntry', on_delete=models.PROTECT, related_name='payin_admission')
+    allowed = models.BooleanField(default=False)
+    reason = models.CharField(max_length=80)
+    country = models.CharField(max_length=2, blank=True)
+    rail = models.CharField(max_length=50, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class FundingInstruction(models.Model):
