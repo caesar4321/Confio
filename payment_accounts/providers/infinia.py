@@ -159,9 +159,19 @@ class InfiniaProvider(PaymentAccountProvider):
         # adapter is deliberately fee-blind: it must never calculate or
         # describe a Confio platform fee. The on-chain cUSD perimeter charges
         # once when value crosses between USDT and Confio dollars.
+        from payment_accounts.infinia_journeys import provider_number
+        from payment_accounts.services import PaymentAccountError
+        try:
+            amount = provider_number(operation.source_amount)
+        except (PaymentAccountError, ArithmeticError, ValueError, TypeError) as exc:
+            raise ProviderCapabilityError('Payout amount cannot be represented exactly') from exc
+        if destination.get('type') == 'POLYGON':
+            # Preserve pre-direct-bridge journeys stored with the old flat form.
+            from payment_accounts.infinia_bridge import payout_destination
+            destination = payout_destination(destination['address'])
         payload = {
             'originId': operation.idempotency_key,
-            'amount': float(operation.source_amount),
+            'amount': amount,
             'sourceAccountId': operation.source_account.provider_account_id,
             'destinationAccount': destination,
         }

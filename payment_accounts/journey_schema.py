@@ -8,7 +8,9 @@ from .services import PaymentAccountError
 
 class InfiniaJourneyType(DjangoObjectType):
     bridge_id = graphene.UUID()
+    bridge_funding_mode = graphene.String()
     minimum_fx_output = graphene.String(required=True)
+    minimum_wallet_output = graphene.String()
     local_asset = graphene.String(required=True)
     crypto_account_id = graphene.UUID(required=True)
     payout_amount = graphene.String()
@@ -22,8 +24,14 @@ class InfiniaJourneyType(DjangoObjectType):
     def resolve_bridge_id(self, info):
         return self.bridge.internal_id if self.bridge_id else None
 
+    def resolve_bridge_funding_mode(self, info):
+        return self.bridge.funding_mode if self.bridge_id else None
+
     def resolve_minimum_fx_output(self, info):
         return str(self.minimum_fx_output)
+
+    def resolve_minimum_wallet_output(self, info):
+        return str(self.minimum_wallet_output) if self.minimum_wallet_output is not None else None
 
     def resolve_local_asset(self, info):
         return self.local_account.asset
@@ -51,6 +59,7 @@ class CreateInfiniaJourney(graphene.Mutation):
         local_account_id = graphene.UUID(required=True)
         crypto_account_id = graphene.UUID(required=True)
         minimum_fx_output = graphene.Decimal(required=True)
+        minimum_wallet_output = graphene.Decimal()
         bridge_id = graphene.UUID()
         credit_id = graphene.UUID()
         destination_id = graphene.UUID()

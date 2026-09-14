@@ -34,7 +34,9 @@ export const INFINIA_HISTORY = gql`
       stage
       failureCode
       bridgeId
+      bridgeFundingMode
       minimumFxOutput
+      minimumWalletOutput
       destinationSummary
       localAsset
       cryptoAccountId
@@ -60,6 +62,7 @@ const CREATE_JOURNEY = gql`
     $localAccountId: UUID!
     $cryptoAccountId: UUID!
     $minimumFxOutput: Decimal!
+    $minimumWalletOutput: Decimal
     $bridgeId: UUID
     $creditId: UUID
     $destinationId: UUID
@@ -70,6 +73,7 @@ const CREATE_JOURNEY = gql`
       localAccountId: $localAccountId
       cryptoAccountId: $cryptoAccountId
       minimumFxOutput: $minimumFxOutput
+      minimumWalletOutput: $minimumWalletOutput
       bridgeId: $bridgeId
       creditId: $creditId
       destinationId: $destinationId

@@ -61,6 +61,7 @@ export default function InfiniaPaymentScreen({
     [credit, setCredit] = useState('');
   const [amount, setAmount] = useState(''),
     [minimum, setMinimum] = useState('');
+  const [walletMinimum, setWalletMinimum] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const [review, setReview] = useState<BridgeTransfer | null>(null);
@@ -138,6 +139,9 @@ export default function InfiniaPaymentScreen({
         cryptoAccountId: crypto.internalId,
         ...(isCobre ? {copcoAccountId: copco?.internalId} : {}),
         minimumFxOutput: minimum.replace(',', '.'),
+        ...(!isCobre && direction === 'to_wallet'
+          ? {minimumWalletOutput: walletMinimum.replace(',', '.')}
+          : {}),
         bridgeId: review?.internalId,
         creditId: direction === 'to_wallet' ? credit : undefined,
         destinationId: direction === 'to_bank' ? destination : undefined,
@@ -319,9 +323,9 @@ export default function InfiniaPaymentScreen({
                     setCredit('');
                   })}
                 <Text>
-                  Se convertirá el depósito seleccionado y se enviará a tu
-                  billetera. Abre la app cuando tus dólares estén listos para
-                  confirmar el envío a Confío.
+                  {provider === 'infinia'
+                    ? 'Se convertirá el depósito seleccionado y se enviará USDT directamente a tu billetera en Confío. Puedes cerrar la app mientras se procesa.'
+                    : 'Se convertirá el depósito seleccionado y se enviará a tu billetera. Abre la app cuando tus dólares estén listos para confirmar el envío a Confío.'}
                 </Text>
               </>
             )}
@@ -341,6 +345,26 @@ export default function InfiniaPaymentScreen({
               corresponde a la conversión; los costos del proveedor pueden
               aplicarse al pago.
             </Text>
+            {!isCobre && direction === 'to_wallet' && (
+              <>
+                <TextInput
+                  style={styles.input}
+                  accessibilityLabel="Mínimo de USDT a recibir en tu billetera"
+                  placeholder="Mínimo de USDT a recibir en tu billetera"
+                  keyboardType="decimal-pad"
+                  value={walletMinimum}
+                  onChangeText={v => {
+                    reset();
+                    setWalletMinimum(v);
+                  }}
+                  editable={!busy}
+                />
+                <Text>
+                  El envío automático solo se realizará si recibirás al menos
+                  este monto de USDT después de los costos del envío.
+                </Text>
+              </>
+            )}
             {review && (
               <Text>
                 Envío: {bridgeAmount(review.amountUnits, 18)} dólares. Costo de
@@ -360,6 +384,7 @@ export default function InfiniaPaymentScreen({
                 (isCobre && !copco) ||
                 !local ||
                 !/^\d+([.,]\d+)?$/.test(minimum) ||
+                (!isCobre && direction === 'to_wallet' && !/^\d+([.,]\d+)?$/.test(walletMinimum)) ||
                 (direction === 'to_bank'
                   ? !instruction ||
                     !destination ||
@@ -380,7 +405,7 @@ export default function InfiniaPaymentScreen({
               'awaiting_credit',
               'awaiting_wallet_authorization',
               'bridging',
-            ].includes(j.stage) &&
+            ].includes(j.stage) && j.bridgeFundingMode !== 'infinia' &&
               button('Revisar envío pendiente', () => resume(j))}
           </View>
         ))}

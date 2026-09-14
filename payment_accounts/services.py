@@ -716,6 +716,18 @@ def submit_money_operation(operation):
             if operation.provider == 'infinia' and own_journey and own_journey.direction == 'to_wallet':
                 from .payin_admission import require_admitted
                 require_admitted(own_journey.funding_credit)
+                if operation.operation_type == 'payout' or own_journey.minimum_wallet_output is not None:
+                    from .infinia_bridge import validate_payout, preflight, InfiniaDepositExpired
+                    try:
+                        if operation.operation_type == 'payout':
+                            validate_payout(own_journey, operation)
+                        else:
+                            preflight(own_journey, Decimal(str(own_journey.fx_quote['target_amount'])))
+                    except PaymentAccountError as exc:
+                        from .infinia_journeys import _state
+                        reason = 'provider_deposit_delayed' if isinstance(exc, InfiniaDepositExpired) else 'provider_bridge_submission_invalid'
+                        _state(own_journey, 'needs_review', failure=reason)
+                        return operation
             account_filter = Q(local_account=operation.source_account) | Q(crypto_account=operation.source_account)
             if operation.provider == 'cobre':
                 account_filter |= Q(copco_account=operation.source_account)

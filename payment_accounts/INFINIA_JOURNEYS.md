@@ -49,25 +49,56 @@ Payout amounts are rounded down to two fiat decimal places; any fractional
 remainder remains in the user's provider account. No Confío fee is calculated
 inside provider legs: the existing on-chain dollar perimeter owns that fee.
 
-## Inbound: local deposit → wallet → Confío
+## Inbound: local deposit → NEXT deposit → BSC wallet
 
 1. The user selects an authenticated, unused deposit credit and authorizes its
-   conversion to USDC_POL with a minimum FX output. Each credit can fund one
-   journey only.
-2. After the matching conversion credit, withdraw to the JWT account's EVM
-   address, snapshotted at authorization. No client-supplied crypto address is
-   accepted.
-3. A payout success status is not wallet delivery. Require the corresponding
-   crypto movement hash and a finalized Polygon USDC receipt to the wallet.
-4. When the user opens the app, prepare a return bridge for the **actual received
-   amount**, attach it to the journey, and let the user review and sign once.
-5. Source submission and bridge delivery continue without the foreground app.
-   Finalized BSC USDT delivery completes this USDT-targeted journey. The existing
-   dollar conversion remains a subsequent wallet operation.
+   conversion to USDC_POL with a minimum FX output and a separate minimum net
+   BSC USDT receipt (`minimumWalletOutput`). Both are immutable on request retries.
+   Each credit can fund one journey only. Check bridge feature flags, an active
+   crypto instruction, and the quoted FX output against the bridge cap before
+   submitting FX; repeat these checks before subsequent submissions.
+2. After the matching conversion credit, prepare a deposit-based NEXT route for
+   that amount of native Polygon USDC, rounded down to six decimals. Persist the
+   bridge and Infinia payout in the same transaction. NEXT's BSC recipient and
+   Polygon refund address are the user's EVM address snapshotted at authorization.
+   The built minimum output must meet the user's wallet minimum before creating
+   the payout. An unacceptable minimum or unavailable prerequisite requires review;
+   the rejected quote/bridge rolls back without an orphan transfer.
+3. Submit the payout from the user's Infinia crypto account directly to the
+   generated deposit address. The v2 destination is `country=GLOBAL`,
+   `currency=USDC`, `destinationType={type: POLYGON, address: deposit}`. Infinia's
+   acceptance of this destination was confirmed by Julian on 2026-09-14.
+4. Bind the source transaction using the authenticated Polygon CRYPTO movement
+   for this exact payout and account. Verify the exact native USDC receipt at
+   the deposit address; the sender may be Infinia's hot wallet. An amount mismatch
+   requires manual review, never a top-up or replacement payout.
+5. Reconcile NEXT status and finalized BSC USDT receipts to the pinned user
+   wallet. On-chain delivery can complete the journey before the payout status
+   webhook arrives. The existing dollar conversion remains a subsequent operation.
 
-The app never signs on a webhook or on opening history. An inbound journey
-intentionally pauses for wallet authorization; the server does not hold user
-keys or invent an authorization for an unknown future amount.
+No user bridge signature, Polygon wallet balance, or Confío Polygon gas sponsor
+is required for this path. A wallet signing endpoint rejects provider-funded
+bridges. The app may close after the user authorizes conversion and payout.
+
+The [Infinia v2 payout schema](https://docs.infiniaweb.com/reference/v2_create_payout__post)
+was checked on 2026-09-14: it specifies `amount` but exposes no fee/net-amount quote
+or documented deduction formula. The same exact amount funds the payout and NEXT
+quote; absence of a fee field is **not** proof of zero provider fees. Actual
+on-chain funding is checked before recognizing bridge completion.
+
+Use the returned deposit deadline, not an assumed 30-second lifetime. Submission
+and retries stop when fewer than 60 seconds remain; an unresolved submitted
+payout keeps its original operation and deposit. Late authenticated transaction
+hashes remain reconcilable. Delayed-deposit review can clear after verified BSC
+delivery, without submitting more funds. Other review reasons, refunds and
+mismatched deposits require manual review; no automatic refund recovery is implemented.
+
+Existing payouts already addressed to the user's Polygon wallet keep their old
+delivery → review/sign → bridge flow. Migration 0012 defaults existing bridges
+to wallet funding, preserving their execution semantics. Migration 0013 leaves
+the wallet minimum null for pre-upgrade journeys; those retain their wallet payout
+and review/sign flow even if their payout has not yet been created. New inbound
+journeys require the separate wallet minimum; older clients must update.
 
 ## Recovery and accounting
 
@@ -100,7 +131,7 @@ provides bank selection, deposit selection, minimum-output authorization,
 review-before-signing and paginated journey history. Existing destinations and
 provider accounts must be provisioned first.
 
-Apply payment_accounts migrations **0008 and 0009** before enabling callers.
+Apply payment_accounts migrations through **0013** before enabling callers.
 Run Celery beat/worker; `payment_accounts.reconcile_infinia_journeys` runs every
 30 seconds. The custom admin shows immutable journey evidence and failure codes.
 

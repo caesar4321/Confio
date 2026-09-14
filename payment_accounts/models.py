@@ -354,6 +354,9 @@ class PaymentBridgeTransfer(models.Model):
     """A single authorized bridge, including durable source submission evidence."""
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     quote = models.OneToOneField(PaymentBridgeQuote, on_delete=models.PROTECT, related_name='transfer')
+    funding_mode = models.CharField(max_length=24, default='wallet', choices=[
+        ('wallet', 'Wallet signature'), ('infinia', 'Infinia payout'),
+    ])
     status = models.CharField(max_length=24, default='prepared', choices=[
         ('prepared', 'Awaiting authorization'), ('submitted', 'Source submitted'),
         ('bridging', 'Bridging'), ('delivered', 'Delivered on chain'),
@@ -655,6 +658,7 @@ class InfiniaJourney(models.Model):
     funding_credit = models.OneToOneField('LedgerEntry', on_delete=models.PROTECT, null=True, blank=True, related_name='funded_journey')
     bridge = models.OneToOneField(PaymentBridgeTransfer, on_delete=models.PROTECT, null=True, blank=True, related_name='infinia_journey')
     minimum_fx_output = models.DecimalField(max_digits=38, decimal_places=18)
+    minimum_wallet_output = models.DecimalField(max_digits=38, decimal_places=18, null=True, blank=True)
     destination_snapshot = models.JSONField(default=dict)
     wallet_address = models.CharField(max_length=42)
     wallet_arrival_units = models.CharField(max_length=78, blank=True)

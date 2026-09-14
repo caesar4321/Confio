@@ -41,6 +41,27 @@ class JourneyTests(TestCase):
         self.policies = mock.patch('payment_accounts.infinia_journeys.enforce_and_record').start()
         self.submit = mock.patch('payment_accounts.infinia_journeys.submit_money_operation', side_effect=lambda op: op).start()
         self.api = mock.Mock()
+        from types import SimpleNamespace
+        from payment_accounts.infinia_bridge import prepare_infinia_bridge
+        from .test_bridge_execution import build, binding, tokens
+        from payment_accounts import bridge_chain as chain
+        self.bridge_api, self.intents = mock.Mock(), mock.Mock()
+        def quote(source, destination, amount):
+            return [{'sourceTokenId': source, 'destinationTokenId': destination, 'amount': amount,
+                     'amountOut': '2490000000000000000', 'amountOutMin': '2470000000000000000', 'messenger': 'near-intents'}]
+        self.bridge_api.quote.side_effect = quote
+        def build_deposit(route, *, source_address, destination_address):
+            q = SimpleNamespace(source_token_id=route['sourceTokenId'], destination_token_id=route['destinationTokenId'],
+                                amount_units=route['amount'], source_address=source_address, destination_address=destination_address)
+            self.intents.status.return_value = binding(q)
+            self.intents.status.return_value['quoteResponse']['quote'].update(
+                amountOut='2490000000000000000', minAmountOut='2480000000000000000')
+            return dict(build(q), amountOut='2490000000000000000', amountOutMin='2480000000000000000')
+        self.bridge_api.build.side_effect = build_deposit
+        self.intents.tokens.return_value = tokens()
+        mock.patch.object(chain, 'require_chain').start()
+        mock.patch('payment_accounts.infinia_bridge.prepare_infinia_bridge', side_effect=lambda j, amount, **kw:
+                   prepare_infinia_bridge(j, amount, client=self.bridge_api, intents=self.intents)).start()
 
     def credit(self, account, amount='10', **kwargs):
         if account.pk == self.local.pk and 'provider_data' not in kwargs:
@@ -52,7 +73,8 @@ class JourneyTests(TestCase):
 
     def inbound(self):
         return create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
-            request_id=uuid.uuid4(), minimum_fx_output='2', direction='to_wallet', credit=self.credit(self.local))
+            request_id=uuid.uuid4(), minimum_fx_output='2', minimum_wallet_output='2.4',
+            direction='to_wallet', credit=self.credit(self.local))
 
     def fx_quote(self, source='local', target='crypto', amount='10', output='2.5'):
         self.api.create_transfer_quote.return_value = dict(id='fx-quote', status='ACTIVE',
@@ -105,7 +127,11 @@ class JourneyTests(TestCase):
         self.settle_fx(j,self.crypto)
         advance_journey(j.pk, client=self.api);j.refresh_from_db()
         self.assertEqual(j.stage,'paying_out')
-        self.assertEqual(j.payout_operation.external_destination['destination_account']['address'],self.owner.bsc_address)
+        from .test_bridge_execution import DEPOSIT
+        self.assertEqual(j.payout_operation.external_destination['destination_account'], {
+            'country': 'GLOBAL', 'currency': 'USDC', 'destinationType': {'type': 'POLYGON', 'address': DEPOSIT}})
+        self.assertEqual(j.bridge.funding_mode, 'infinia')
+        self.assertEqual(j.bridge.quote.destination_address, self.owner.bsc_address)
         self.assertEqual(j.payout_operation.source_amount,Decimal('2.5'))
         advance_journey(j.pk, client=self.api)
         self.assertEqual(MoneyOperation.objects.filter(money_flow=j.money_flow).count(),2)
@@ -152,7 +178,7 @@ class JourneyTests(TestCase):
     def test_user_request_is_idempotent_and_different_details_are_rejected(self):
         credit=self.credit(self.local);request=uuid.uuid4()
         args=dict(owner=self.owner,local_account=self.local,crypto_account=self.crypto,credit=credit,
-            request_id=request,minimum_fx_output='2',direction='to_wallet')
+            request_id=request,minimum_fx_output='2',minimum_wallet_output='2.4',direction='to_wallet')
         first=create_journey(**args);self.assertEqual(create_journey(**args).pk,first.pk)
         args['minimum_fx_output']='3'
         with self.assertRaises(PaymentAccountError):create_journey(**args)
@@ -162,7 +188,7 @@ class JourneyTests(TestCase):
         self.settle_fx(j,self.crypto);advance_journey(j.pk,client=self.api);j.refresh_from_db()
         op=j.payout_operation;op.status='succeeded';op.save()
         advance_journey(j.pk,client=self.api);j.refresh_from_db()
-        self.assertEqual(j.stage,'awaiting_wallet_delivery')
+        self.assertEqual(j.stage,'bridging')
         self.assertNotEqual(j.money_flow.status,'succeeded')
 
     def test_late_reversal_reopens_completed_parent(self):
@@ -185,7 +211,12 @@ class JourneyTests(TestCase):
         from payment_accounts import bridge_chain as chain
         from .test_bridge_execution import receipt
         j=self.inbound();self.fx_quote();advance_journey(j.pk,client=self.api)
-        self.settle_fx(j,self.crypto);advance_journey(j.pk,client=self.api);j.refresh_from_db()
+        self.settle_fx(j,self.crypto)
+        # Existing payouts retain their original wallet destination on upgrade.
+        from payment_accounts.infinia_journeys import _new_operation
+        j.refresh_from_db()
+        j.payout_operation = _new_operation(j, 'payout', self.crypto, None, Decimal('2.5'))
+        j.save(update_fields=['payout_operation'])
         op=j.payout_operation;op.status='succeeded';op.provider_operation_id='payout-id';op.save()
         LedgerEntry.objects.create(provider='infinia',financial_account=self.crypto,provider_entry_id='withdrawal',
             direction='debit',amount='2.5',asset='USDC_POL',occurred_at=timezone.now(),provider_data={
@@ -262,3 +293,333 @@ class JourneyTests(TestCase):
         self.credit(self.local,provider_data={'operation':{'type':'INTERNAL_TRANSFER_REFUND','operation_id':'late-id'}})
         apply_operation_result(op,ProviderResult('late-id','processing','PROCESSING',{}))
         j.refresh_from_db();self.assertEqual(j.stage,'needs_review')
+
+    def direct_payout(self):
+        j = self.inbound()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.crypto)
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        op = j.payout_operation
+        op.provider_operation_id, op.status = 'direct-payout', 'processing'
+        op.save()
+        return j
+
+    def payout_movement(self, j, *, operation_id='direct-payout', tx_hash=None):
+        from .test_bridge_execution import SOURCE_HASH
+        return LedgerEntry.objects.create(
+            provider='infinia', financial_account=j.crypto_account, provider_entry_id=str(uuid.uuid4()),
+            direction='debit', asset='USDC_POL', amount='2.5', occurred_at=timezone.now(),
+            provider_data={'operation': {'type': 'PAYOUT', 'operation_id': operation_id},
+                           'third_party': {'type': 'CRYPTO', 'crypto_network': 'POLYGON',
+                                           'transaction_hash': tx_hash or SOURCE_HASH}})
+
+    def test_direct_bridge_never_checks_wallet_balance_or_requests_signature(self):
+        from payment_accounts import bridge_chain as chain
+        from payment_accounts.bridge_execution import submit_bridge
+        from payment_accounts.allbridge_next import NextError
+        with mock.patch.object(chain, 'token_balance') as balance, mock.patch.object(chain, 'rpc') as rpc:
+            j = self.direct_payout()
+        balance.assert_not_called()
+        rpc.assert_not_called()
+        self.assertEqual(j.bridge.binding['quoteResponse']['quoteRequest']['refundTo'], j.wallet_address)
+        self.assertGreater(j.bridge.deadline, int(timezone.now().timestamp()) + 600)
+        with self.assertRaisesRegex(NextError, 'funded by the provider'):
+            submit_bridge(self.owner, j.bridge.internal_id, 'unused')
+
+    def test_direct_bridge_completes_from_chain_receipts_before_payout_status_webhook(self):
+        from payment_accounts import bridge_chain as chain
+        from .test_bridge_execution import SOURCE_HASH, DEPOSIT, receipt
+        j = self.direct_payout()
+        self.payout_movement(j)
+        self.intents.status.return_value = {
+            'quoteResponse': j.bridge.binding['quoteResponse'], 'status': 'SUCCESS',
+            'swapDetails': {'originChainTxHashes': [{'hash': SOURCE_HASH}],
+                            'destinationChainTxHashes': [{'hash': DEST_HASH}], 'amountOut': '2485000000000000000'}}
+        def final(network, tx_hash):
+            if network == 'POL' and tx_hash == SOURCE_HASH:
+                return receipt('POL:USDC', DEPOSIT, 2500000, sender='0x' + 'ab' * 20)
+            if network == 'BSC' and tx_hash == DEST_HASH:
+                return receipt('BSC:USDT', j.wallet_address, 2485000000000000000)
+            self.fail('Unexpected chain evidence lookup')
+        with mock.patch.object(chain, 'final_receipt', side_effect=final):
+            advance_journey(j.pk, intents=self.intents)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'completed')
+        self.assertEqual(j.money_flow.target_amount, Decimal('2.485'))
+        self.assertEqual(j.payout_operation.status, 'processing')
+        self.assertEqual(j.bridge.source_tx_hash, SOURCE_HASH)
+        self.assertFalse(j.bridge.signed_raw_tx)
+        # The proven parent settlement releases reservations even if the
+        # provider's status callback for its already-delivered payout is late.
+        second = self.inbound()
+        self.assertNotEqual(second.pk, j.pk)
+
+    def test_direct_bridge_rejects_wrong_or_nonexact_source_receipts(self):
+        from payment_accounts import bridge_chain as chain
+        from payment_accounts.bridge_execution import reconcile_bridge
+        from .test_bridge_execution import DEPOSIT, receipt
+        j = self.direct_payout()
+        self.payout_movement(j)
+        for recipient, amount in [(DEPOSIT, 2490000), (DEPOSIT, 2510000), (j.wallet_address, 2500000)]:
+            with self.subTest(recipient=recipient, amount=amount), mock.patch.object(
+                    chain, 'final_receipt', return_value=receipt('POL:USDC', recipient, amount)):
+                t = reconcile_bridge(j.bridge, intents=self.intents)
+            self.assertEqual(t.status, 'needs_review')
+            self.assertEqual(t.failure_code, 'source_transfer_mismatch')
+        self.assertEqual(MoneyOperation.objects.filter(money_flow=j.money_flow, operation_type='payout').count(), 1)
+
+    def test_unrelated_provider_movement_cannot_fund_direct_bridge(self):
+        from payment_accounts.infinia_bridge import bind_payout_hash
+        j = self.direct_payout()
+        self.payout_movement(j, operation_id='another-payout')
+        self.assertFalse(bind_payout_hash(j.bridge).source_tx_hash)
+
+    def test_ambiguous_provider_hashes_require_review(self):
+        from payment_accounts.infinia_bridge import bind_payout_hash
+        j = self.direct_payout()
+        self.payout_movement(j)
+        self.payout_movement(j, tx_hash=DEST_HASH)
+        t = bind_payout_hash(j.bridge)
+        self.assertEqual(t.failure_code, 'ambiguous_provider_payout_hash')
+        self.assertFalse(t.source_tx_hash)
+
+    def test_expired_provider_deposit_still_adopts_late_authenticated_hash(self):
+        from payment_accounts.infinia_bridge import bind_payout_hash
+        from .test_bridge_execution import SOURCE_HASH
+        j = self.direct_payout()
+        j.bridge.deadline = 1
+        j.bridge.save()
+        self.assertEqual(bind_payout_hash(j.bridge).status, 'needs_review')
+        self.payout_movement(j)
+        self.assertEqual(bind_payout_hash(j.bridge).source_tx_hash, SOURCE_HASH)
+
+    def test_expired_payout_is_not_submitted_or_retried(self):
+        from payment_accounts.services import submit_money_operation
+        j = self.direct_payout()
+        j.bridge.deadline = 1
+        j.bridge.save()
+        op = j.payout_operation
+        op.status = 'unknown'
+        op.save()
+        with mock.patch('payment_accounts.services.get_provider') as adapter:
+            submit_money_operation(op)
+        adapter.assert_not_called()
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+        self.assertEqual(j.payout_operation_id, op.pk)
+        self.assertEqual(j.failure_code, 'provider_deposit_delayed')
+
+    def test_direct_payout_terms_are_checked_before_submission(self):
+        from payment_accounts.services import submit_money_operation
+        j = self.direct_payout()
+        op = j.payout_operation
+        op.status = 'created'
+        op.external_destination = {'destination_account': {'address': self.owner.bsc_address}}
+        op.save()
+        with mock.patch('payment_accounts.services.get_provider') as adapter:
+            submit_money_operation(op)
+        adapter.assert_not_called()
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'provider_bridge_submission_invalid')
+
+    def test_direct_payout_submits_exact_amount_and_documented_destination(self):
+        from payment_accounts.services import submit_money_operation
+        from payment_accounts.providers.infinia import InfiniaProvider
+        j = self.direct_payout()
+        op = j.payout_operation
+        op.status, op.provider_operation_id = 'created', ''
+        op.save()
+        api = mock.Mock()
+        api.create_payout.return_value = {'id': 'accepted-payout', 'status': 'IN_PROGRESS'}
+        with mock.patch('payment_accounts.services.get_provider', return_value=InfiniaProvider(client=api)):
+            submit_money_operation(op)
+            submit_money_operation(op)
+        api.create_payout.assert_called_once()
+        payload = api.create_payout.call_args.args[0]
+        self.assertEqual(payload['amount'], 2.5)
+        self.assertEqual(payload['sourceAccountId'], 'crypto')
+        self.assertEqual(payload['originId'], op.idempotency_key)
+        self.assertEqual(payload['destinationAccount'], op.external_destination['destination_account'])
+
+    def test_wallet_change_blocks_direct_payout_retry(self):
+        from payment_accounts.services import submit_money_operation
+        j = self.direct_payout()
+        self.owner.bsc_address = '0x' + 'ab' * 20
+        self.owner.save(update_fields=['bsc_address'])
+        op = j.payout_operation
+        op.status = 'unknown'
+        op.save()
+        with mock.patch('payment_accounts.services.get_provider') as adapter:
+            submit_money_operation(op)
+        adapter.assert_not_called()
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+
+    def test_failed_deposit_preparation_does_not_create_payout_or_orphan_quote(self):
+        from payment_accounts.models import PaymentBridgeQuote
+        from payment_accounts.allbridge_next import NextError
+        j = self.inbound()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.crypto)
+        self.bridge_api.build.side_effect = NextError('unavailable')
+        with self.assertRaises(NextError):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertIsNone(j.payout_operation_id)
+        self.assertIsNone(j.bridge_id)
+        self.assertFalse(PaymentBridgeQuote.objects.exists())
+
+    def test_new_inbound_requires_explicit_wallet_minimum(self):
+        with self.assertRaisesRegex(PaymentAccountError, 'minimum BSC USDT'):
+            create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                request_id=uuid.uuid4(), minimum_fx_output='2', direction='to_wallet', credit=self.credit(self.local))
+        self.assertFalse(InfiniaJourney.objects.exists())
+
+    def test_wallet_minimum_cannot_change_on_request_retry(self):
+        j = self.inbound()
+        with self.assertRaisesRegex(PaymentAccountError, 'different journey details'):
+            create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                request_id=j.request_id, minimum_fx_output='2', minimum_wallet_output='2.3',
+                direction='to_wallet', credit=j.funding_credit)
+
+    def test_bridge_below_wallet_minimum_never_submits_payout(self):
+        from payment_accounts.models import PaymentBridgeQuote
+        j = self.inbound()
+        j.minimum_wallet_output = Decimal('2.49')
+        j.save()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.crypto)
+        self.submit.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'direct_bridge_outside_authorization')
+        self.assertIsNone(j.payout_operation_id)
+        self.assertFalse(PaymentBridgeQuote.objects.exists())
+        self.submit.assert_not_called()
+
+    def test_disabled_bridge_stops_fx_before_spending(self):
+        j = self.inbound()
+        self.fx_quote()
+        with self.settings(PAYMENT_BRIDGE_POLYGON_ENABLED=False):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'direct_bridge_unavailable')
+        self.assertIsNone(j.fx_operation_id)
+        self.submit.assert_not_called()
+
+    def test_fx_output_over_bridge_cap_stops_before_spending(self):
+        j = self.inbound()
+        self.fx_quote(output='101')
+        with self.settings(PAYMENT_BRIDGE_MAX_USDT='100'):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertIsNone(j.fx_operation_id)
+        self.assertEqual(j.failure_code, 'direct_bridge_unavailable')
+
+    def test_missing_instruction_stops_fx_before_spending(self):
+        j = self.inbound()
+        self.instruction.status = 'expired'
+        self.instruction.save()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertIsNone(j.fx_operation_id)
+        self.assertEqual(j.stage, 'needs_review')
+
+    def test_prerequisite_loss_after_fx_requires_review_without_orphan_bridge(self):
+        from payment_accounts.models import PaymentBridgeQuote
+        j = self.inbound()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.crypto)
+        with self.settings(PAYMENT_BRIDGE_POLYGON_ENABLED=False):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'direct_bridge_outside_authorization')
+        self.assertIsNone(j.payout_operation_id)
+        self.assertFalse(PaymentBridgeQuote.objects.exists())
+
+    def test_preflight_is_rechecked_on_persisted_fx_submission(self):
+        from payment_accounts.services import submit_money_operation
+        j = self.inbound()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        with self.settings(PAYMENT_BRIDGE_QUOTES_ENABLED=False), mock.patch('payment_accounts.services.get_provider') as adapter:
+            submit_money_operation(j.fx_operation)
+        adapter.assert_not_called()
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+
+    def test_preupgrade_journey_without_wallet_minimum_keeps_wallet_payout(self):
+        j = self.inbound()
+        j.minimum_wallet_output = None
+        j.save()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.crypto)
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertIsNone(j.bridge_id)
+        self.assertEqual(j.payout_operation.external_destination['destination_account']['address'], self.owner.bsc_address)
+        self.bridge_api.quote.assert_not_called()
+
+    def test_late_delivery_recovers_parent_without_resubmitting(self):
+        from .test_bridge_execution import SOURCE_HASH, DEPOSIT, receipt
+        from payment_accounts import bridge_chain as chain
+        from payment_accounts.tasks import reconcile_infinia_journeys
+        j = self.direct_payout()
+        j.bridge.deadline = 1
+        j.bridge.save()
+        advance_journey(j.pk, intents=self.intents)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'provider_deposit_delayed')
+        self.payout_movement(j)
+        self.intents.status.return_value = {
+            'quoteResponse': j.bridge.binding['quoteResponse'], 'status': 'SUCCESS',
+            'swapDetails': {'originChainTxHashes': [{'hash': SOURCE_HASH}],
+                           'destinationChainTxHashes': [{'hash': DEST_HASH}], 'amountOut': '2485000000000000000'}}
+        self.submit.reset_mock()
+        with mock.patch.object(chain, 'final_receipt', side_effect=lambda network, tx:
+                receipt('POL:USDC', DEPOSIT, 2500000) if network == 'POL' else
+                receipt('BSC:USDT', j.wallet_address, 2485000000000000000)), \
+                mock.patch('payment_accounts.bridge_execution.IntentsClient', return_value=self.intents):
+            reconcile_infinia_journeys()
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'completed')
+        self.assertEqual(j.money_flow.target_amount, Decimal('2.485'))
+        self.submit.assert_not_called()
+
+    def test_late_delivery_does_not_override_refund_or_other_review(self):
+        j = self.direct_payout()
+        j.stage, j.failure_code = 'needs_review', 'provider_deposit_delayed'
+        j.save()
+        op = j.payout_operation
+        op.status = 'reversed'
+        op.save()
+        with mock.patch('payment_accounts.bridge_execution.reconcile_bridge') as reconcile:
+            advance_journey(j.pk)
+        reconcile.assert_not_called()
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'provider_leg_requires_review')
+
+    def test_local_numeric_rejection_is_terminal_not_submitted(self):
+        from payment_accounts.models import MoneyFlow
+        from payment_accounts.services import submit_money_operation
+        from payment_accounts.providers.infinia import InfiniaProvider
+        flow = MoneyFlow.objects.create(confio_account=self.owner, kind='withdraw', source_asset='USDC_POL',
+                                       source_amount=Decimal('1.000000000000000001'))
+        op = MoneyOperation.objects.create(money_flow=flow, provider='infinia', operation_type='payout',
+            source_account=self.crypto, source_asset='USDC_POL', source_amount=flow.source_amount,
+            idempotency_key='precision-rejection', external_destination={'destination_account': {'country': 'GLOBAL'}})
+        api = mock.Mock()
+        with mock.patch('payment_accounts.services.get_provider', return_value=InfiniaProvider(client=api)):
+            with self.assertRaisesRegex(PaymentAccountError, 'represented exactly'):
+                submit_money_operation(op)
+        op.refresh_from_db()
+        self.assertEqual(op.status, 'failed')
+        api.create_payout.assert_not_called()
