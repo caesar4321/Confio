@@ -56,10 +56,11 @@ def validate_accounts(owner, local, crypto, destination_country):
 
 @transaction.atomic
 def create_journey(*, owner, local_account, crypto_account, request_id, minimum_fx_output,
-                   direction, bridge=None, credit=None, destination=None):
+                   direction, bridge=None, credit=None, destination=None, minimum_wallet_output=None):
     enabled()
     request_id = uuid.UUID(str(request_id))
     minimum = positive(minimum_fx_output)
+    wallet_minimum = positive(minimum_wallet_output) if minimum_wallet_output is not None else None
     owner = type(owner).objects.select_for_update().get(pk=owner.pk)
     from .models import FinancialAccount
     list(FinancialAccount.objects.select_for_update().filter(pk__in=[local_account.pk, crypto_account.pk]).order_by('pk'))
@@ -93,16 +94,21 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     _require_capability(source, 'convert')
     _require_capability(target, 'send_third_party')
     existing = InfiniaJourney.objects.filter(confio_account=owner, request_id=request_id).first()
-    expected = (direction, local_account.pk, crypto_account.pk, minimum, snapshot, wallet)
+    expected = (direction, local_account.pk, crypto_account.pk, minimum, snapshot, wallet, wallet_minimum)
     if existing:
         actual = (existing.direction, existing.local_account_id, existing.crypto_account_id,
-                  existing.minimum_fx_output, existing.destination_snapshot, existing.wallet_address)
+                  existing.minimum_fx_output, existing.destination_snapshot, existing.wallet_address, existing.minimum_wallet_output)
         if actual != expected or (direction == 'to_bank' and existing.bridge_id != bridge.pk) or (
                 direction == 'to_wallet' and existing.funding_credit_id != credit.pk):
             raise PaymentAccountError('Request id already used for different journey details')
         return existing
+    if direction == 'to_wallet' and wallet_minimum is None:
+        raise PaymentAccountError('A minimum BSC USDT receipt is required')
+    if direction == 'to_bank' and wallet_minimum is not None:
+        raise PaymentAccountError('A wallet minimum applies only to inbound payments')
     if MoneyOperation.objects.filter(provider='infinia', source_account__in=[local_account, crypto_account],
-            status__in=['created', 'submitted', 'processing', 'settling', 'unknown']).exists():
+            status__in=['created', 'submitted', 'processing', 'settling', 'unknown']).exclude(
+                money_flow__infinia_journey__stage='completed').exists():
         raise PaymentAccountError('An existing provider operation is still pending')
     # One provider journey per owner while unsettled; reserve the credit for
     # exactly one journey and avoid concurrent conversion/payout balance races.
@@ -118,7 +124,7 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     return InfiniaJourney.objects.create(money_flow=flow, confio_account=owner, request_id=request_id,
         direction=direction, local_account=local_account, crypto_account=crypto_account,
         bridge=bridge, funding_credit=credit, minimum_fx_output=minimum,
-        destination_snapshot=snapshot, wallet_address=wallet)
+        destination_snapshot=snapshot, wallet_address=wallet, minimum_wallet_output=wallet_minimum)
 
 
 def _state(j, stage, *, failure=''):
@@ -163,7 +169,7 @@ def _new_operation(j, leg, source, target, amount):
         provider_data={'quote_id': j.fx_quote['id']} if leg == 'fx' else {})
 
 
-def advance_journey(journey_id, *, client=None):
+def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None):
     """Persist each leg under a row lock, submit only after COMMIT.
 
     Provider retry/reconciliation owns unknown submissions under the original
@@ -175,7 +181,25 @@ def advance_journey(journey_id, *, client=None):
             'money_flow', 'confio_account', 'local_account__provider_profile',
             'crypto_account__provider_profile', 'funding_credit', 'bridge__quote',
             'fx_operation', 'payout_operation').get(pk=journey_id)
-        if j.stage in {'completed', 'failed', 'needs_review'}:
+        if j.stage in {'completed', 'failed'}:
+            return j
+        if j.stage == 'needs_review':
+            # Only a delayed deposit can recover automatically, using receipts
+            # alone. Never resume money-moving legs or override another review.
+            from .infinia_bridge import RECOVERABLE_DELAYS
+            if (j.failure_code not in RECOVERABLE_DELAYS or not j.bridge_id
+                    or j.bridge.funding_mode != 'infinia'):
+                return j
+            for op in (j.fx_operation, j.payout_operation):
+                if op and (has_refund(op) or op.status in {'failed', 'reversed', 'needs_review'}):
+                    _state(j, 'needs_review', failure='provider_leg_requires_review')
+                    return j
+            from .bridge_execution import reconcile_bridge
+            j.bridge = reconcile_bridge(j.bridge, intents=intents)
+            if j.bridge.status == 'delivered':
+                _complete_wallet(j)
+            elif j.bridge.failure_code and j.bridge.failure_code not in RECOVERABLE_DELAYS:
+                _state(j, 'needs_review', failure=j.bridge.failure_code)
             return j
         for op in (j.fx_operation, j.payout_operation):
             if op and has_refund(op):
@@ -223,6 +247,12 @@ def advance_journey(journey_id, *, client=None):
                 valid = False
             if not valid:
                 _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
+            if j.direction == 'to_wallet' and j.minimum_wallet_output is not None:
+                from .infinia_bridge import preflight, InfiniaBridgeReview
+                try:
+                    preflight(j, positive(quote['target_amount']))
+                except InfiniaBridgeReview:
+                    _state(j, 'needs_review', failure='direct_bridge_unavailable'); return j
             j.fx_quote = quote
             j.fx_operation = _new_operation(j, 'fx', source, target, amount)
             j.save(update_fields=['fx_quote', 'fx_operation', 'updated_at'])
@@ -242,12 +272,39 @@ def advance_journey(journey_id, *, client=None):
                 from decimal import ROUND_DOWN
                 payout_amount = proceeds.quantize(quantum, rounding=ROUND_DOWN)
                 positive(payout_amount)
+                direct = j.direction == 'to_wallet' and j.minimum_wallet_output is not None
+                if direct:
+                    from .infinia_bridge import prepare_infinia_bridge, payout_destination, InfiniaBridgeReview
+                    try:
+                        j.bridge = prepare_infinia_bridge(j, payout_amount, client=bridge_client, intents=intents)
+                    except InfiniaBridgeReview:
+                        _state(j, 'needs_review', failure='direct_bridge_outside_authorization'); return j
+                    j.save(update_fields=['bridge', 'updated_at'])
                 j.payout_operation = _new_operation(j, 'payout', target, None, payout_amount)
+                if direct:
+                    # Keep the original authorization snapshot stable for request
+                    # retries; only the persisted payout funds the generated address.
+                    j.payout_operation.external_destination = {
+                        'destination_account': payout_destination(j.bridge.deposit_address),
+                        'country': 'XXX',
+                    }
+                    j.payout_operation.save(update_fields=['external_destination', 'updated_at'])
                 j.save(update_fields=['payout_operation', 'updated_at'])
                 _state(j, 'paying_out')
                 operation = j.payout_operation
         elif j.payout_operation.status in {'failed', 'reversed', 'needs_review'}:
             _state(j, 'needs_review', failure='payout_' + j.payout_operation.status)
+        elif j.direction == 'to_wallet' and j.bridge_id and j.bridge.funding_mode == 'infinia':
+            from .bridge_execution import reconcile_bridge
+            j.bridge = reconcile_bridge(j.bridge, intents=intents)
+            if j.bridge.status == 'delivered':
+                _complete_wallet(j)
+            elif j.bridge.status in {'failed', 'expired', 'needs_review', 'refunded'}:
+                _state(j, 'needs_review', failure=j.bridge.failure_code or 'return_bridge_' + j.bridge.status)
+            else:
+                _state(j, 'bridging')
+                if j.payout_operation.status == 'created':
+                    operation = j.payout_operation
         elif j.payout_operation.status == 'succeeded':
             if j.direction == 'to_wallet' and j.bridge_id and j.bridge.status in {'failed', 'expired', 'needs_review', 'refunded'}:
                 _state(j, 'needs_review', failure='return_bridge_' + j.bridge.status)
@@ -275,6 +332,12 @@ def advance_journey(journey_id, *, client=None):
         # Never hold the journey transaction over a money-moving HTTP request.
         submit_money_operation(operation)
     return j
+
+
+def _complete_wallet(j):
+    j.money_flow.target_amount = Decimal(j.bridge.actual_out_units) / Decimal(10**18)
+    j.money_flow.save(update_fields=['target_amount', 'updated_at'])
+    _state(j, 'completed')
 
 
 @transaction.atomic

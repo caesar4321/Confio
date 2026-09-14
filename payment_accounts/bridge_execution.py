@@ -105,7 +105,7 @@ def funding_calls(owner, amount):
                    'fee_units': str(preview.fee_wei)}
 
 
-def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None):
+def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None, infinia_journey=None):
     client, intents = client or NextClient(), intents or IntentsClient()
     with transaction.atomic():
         # One wallet preparation at a time, so reservations cannot overlap.
@@ -114,6 +114,12 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None)
             'funding_instruction__financial_account__provider_profile',
         ).get(internal_id=quote_id, confio_account=owner)
         check_owner(q, owner)
+        if infinia_journey is not None:
+            if (infinia_journey.confio_account_id != owner.pk or infinia_journey.direction != 'to_wallet'
+                    or infinia_journey.payout_operation_id or infinia_journey.bridge_id
+                    or q.source_token_id != 'POL:USDC'
+                    or q.funding_instruction.financial_account_id != infinia_journey.crypto_account_id):
+                raise NextError('Invalid provider-funded bridge journey')
         execution_enabled(q.source_token_id)
         previous = PaymentBridgeTransfer.objects.filter(quote=q).first()
         if previous:
@@ -140,12 +146,13 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None)
             raise NextError('Bridge price changed; request a fresh quote')
         status = intents.status(deposit)
         now = int(time.time())
-        deadline = min(now + 600, validate_binding(status, intents.tokens(), q, deposit,
-                       minimum=str(minimum), now=now) - 30)
+        deposit_deadline = validate_binding(status, intents.tokens(), q, deposit,
+                                            minimum=str(minimum), now=now)
+        deadline = deposit_deadline if infinia_journey is not None else min(now + 600, deposit_deadline - 30)
         funding = {'wallet_usdt_units': '0', 'fee_units': '0', 'gross_redeem_units': '0'}
         if source_chain == 'BSC':
             prefix, funding = funding_calls(owner, int(q.amount_units))
-        else:
+        elif infinia_journey is None:
             prefix = []
             if chain.token_balance(q.source_token_id, q.source_address) < int(q.amount_units):
                 raise NextError('Polygon USDC has not arrived in the wallet yet')
@@ -153,10 +160,13 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None)
                  'data': '0x' + __import__('eth_utils').keccak(text='DOMAIN_SEPARATOR()')[:4].hex()}, 'latest'])
             if domain.lower() != '0x' + chain.authorization_domain().hex():
                 raise NextError('Unsupported USDC authorization domain')
+        else:
+            prefix = []
         if q.expires_at <= timezone.now():
             raise NextError('Quote expired during preparation; request a fresh quote')
         return PaymentBridgeTransfer.objects.create(
-            quote=q, deposit_address=deposit, amount_out_min=str(minimum),
+            quote=q, funding_mode='infinia' if infinia_journey is not None else 'wallet',
+            deposit_address=deposit, amount_out_min=str(minimum),
             amount_out=build['amountOut'], deadline=deadline, calls=prefix + [call],
             binding={'quoteResponse': status['quoteResponse'], 'funding': funding},
         )
@@ -186,6 +196,8 @@ def submit_bridge(owner, transfer_id, signature, *, nonce='0', authorization=Non
     t = PaymentBridgeTransfer.objects.select_related('quote__confio_account').get(
         internal_id=transfer_id, quote__confio_account=owner)
     check_owner(t.quote, owner)
+    if t.funding_mode != 'wallet':
+        raise NextError('This bridge is funded by the provider payout')
     if t.status != 'prepared' or t.source_tx_hash:
         return t
     if t.quote.source_token_id == 'BSC:USDT' and _adopt_bsc_batch(t):
@@ -237,6 +249,11 @@ def reconcile_bridge(t, *, intents=None):
     if t.status == 'delivered':
         reconcile_provider_credit(t)
         return t
+    if t.funding_mode == 'infinia' and not t.source_tx_hash:
+        from .infinia_bridge import bind_payout_hash
+        t = bind_payout_hash(t)
+        if not t.source_tx_hash:
+            return t
     if not t.source_tx_hash and q.source_token_id == 'BSC:USDT':
         _adopt_bsc_batch(t)
     if not t.source_tx_hash:
@@ -265,9 +282,12 @@ def reconcile_bridge(t, *, intents=None):
             except Exception:
                 pass
         return t
-    transferred = chain.received_units(source, q.source_token_id, t.deposit_address, q.source_address)
+    # The provider movement binds the source hash to the user's payout. Infinia
+    # may send from its hot wallet, which is distinct from the refund wallet.
+    sender = None if t.funding_mode == 'infinia' else q.source_address
+    transferred = chain.received_units(source, q.source_token_id, t.deposit_address, sender)
     if transferred != int(q.amount_units):
-        t.status = 'failed' if transferred == 0 else 'needs_review'
+        t.status = 'failed' if transferred == 0 and t.funding_mode == 'wallet' else 'needs_review'
         t.failure_code = 'source_transfer_mismatch'
     else:
         # Record the canonical on-chain perimeter fee even when the generic

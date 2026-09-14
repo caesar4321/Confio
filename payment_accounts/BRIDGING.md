@@ -2,7 +2,9 @@
 
 This integration executes BSC USDT → a verified provider's Polygon USDC address,
 and Polygon USDC already in the customer's wallet → that customer's BSC USDT
-wallet. The app presents dollar movements rather than a separate bridge tool.
+wallet. Infinia inbound journeys also fund a NEXT Polygon deposit directly from
+the user's provider account, with BSC USDT delivered to their wallet (see
+[Infinia journeys](INFINIA_JOURNEYS.md)). The app presents dollar movements rather than a separate bridge tool.
 The feature defaults off. It does not turn a bridge receipt into a fiat payout.
 
 ## Verified NEXT contract
@@ -26,6 +28,8 @@ Intents deposit address. Execution rejects other messengers and arbitrary
 calldata. This is intentionally stricter than the general NEXT quote client.
 No Core assumptions about relayer fees, approval requirements, or BNB-free
 transactions are carried over. Source gas is sponsored by Confío.
+For `funding_mode=infinia`, Infinia submits the source transfer and pays its gas;
+Confío binds that hash to the authenticated payout movement instead of signing.
 
 Sources:
 

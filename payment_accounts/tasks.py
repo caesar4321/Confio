@@ -96,7 +96,12 @@ def reconcile_operations():
 def reconcile_infinia_journeys():
     from .models import InfiniaJourney
     from .infinia_journeys import advance_journey
-    rows = InfiniaJourney.objects.exclude(stage__in=['completed', 'failed', 'needs_review']).order_by('updated_at')[:100]
+    from .infinia_bridge import RECOVERABLE_DELAYS
+    from django.db.models import Q
+    rows = InfiniaJourney.objects.filter(
+        ~Q(stage__in=['completed', 'failed', 'needs_review']) |
+        Q(stage='needs_review', failure_code__in=RECOVERABLE_DELAYS),
+    ).order_by('updated_at')[:100]
     count = 0
     for row in rows:
         try:
