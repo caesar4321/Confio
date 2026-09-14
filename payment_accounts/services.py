@@ -707,14 +707,29 @@ def submit_money_operation(operation):
                 raise PaymentAccountError('An active source account is required')
             if own_journey and own_journey.stage in {'completed', 'failed', 'needs_review'}:
                 raise PaymentAccountError('The payment journey does not allow further submissions')
+            if (operation.provider == 'infinia' and not own_journey
+                    and operation.source_account.ownership_structure != 'platform_liquidity'
+                    and not same_country(operation.source_account.country, 'XX')):
+                # A provider balance can precede the deposit webhook. Scanning
+                # an empty/partial local ledger is not admission evidence.
+                raise PaymentAccountError('Customer fiat spending requires an admitted payment journey')
+            if operation.provider == 'infinia' and own_journey and own_journey.direction == 'to_wallet':
+                from .payin_admission import require_admitted
+                require_admitted(own_journey.funding_credit)
             account_filter = Q(local_account=operation.source_account) | Q(crypto_account=operation.source_account)
             if operation.provider == 'cobre':
                 account_filter |= Q(copco_account=operation.source_account)
             if journey_model.objects.filter(account_filter).exclude(stage__in=['completed', 'failed']).exclude(money_flow_id=operation.money_flow_id).exists():
                 raise PaymentAccountError('Provider funds are reserved by an active journey')
         if operation.operation_type == 'payout':
+            if operation.provider == 'infinia':
+                from .payin_admission import require_source_admitted
+                require_source_admitted(operation.source_account)
             _require_capability(operation.source_account, 'crypto_payout' if operation.provider == 'cobre' and operation.source_account.asset == 'USD_STABLE' else 'send_third_party')
         elif operation.operation_type in {'internal_transfer', 'conversion'}:
+            if operation.provider == 'infinia':
+                from .payin_admission import require_source_admitted
+                require_source_admitted(operation.source_account)
             _require_capability(operation.source_account, 'convert')
         operation.status = 'submitted'
         operation.submitted_at = operation.submitted_at or timezone.now()

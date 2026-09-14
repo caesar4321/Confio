@@ -110,12 +110,22 @@ records.
 
 ## Configuration
 
+Production Infinia credentials are stored in AWS Secrets Manager in `eu-central-2`:
+`prod/infinia-secret-id`, `prod/infinia-secret-password`,
+and `prod/infinia-webhook-signing-key`. Explicit environment
+overrides take precedence. Sandbox credentials use the `sandbox/` prefix.
+`INFINIA_WEBHOOK_SIGNING_KEY` is independent of the API user; missing signing
+configuration rejects webhooks. Production `INFINIA_API_URL` defaults to
+`https://app2.infiniaweb.com/infinia_api`, as specified in Infinia's
+[official Postman collection](https://infiniaweb.github.io/readme_docs/infinia-api.postman_collection.json).
+
 Required settings are loaded from environment/Secrets Manager:
 
 - `COBRE_USER_ID`, `COBRE_SECRET`, `COBRE_WEBHOOK_SECRET`
 - `COBRE_PAYMENT_ACCOUNTS_ENABLED` (default `False`)
 - `COBRE_API_URL`, `COBRE_COLOMBIA_PROVIDER_ID`
 - `INFINIA_SECRET_ID`, `INFINIA_SECRET_PASSWORD`, optional `INFINIA_COMPANY_ID`
+- `INFINIA_WEBHOOK_SIGNING_KEY`
 - `INFINIA_API_URL`
 - `INFINIA_PAYMENT_ACCOUNTS_ENABLED` (default `False`)
 - `INFINIA_KYC_MODE=SELF_DECLARED`
@@ -136,3 +146,62 @@ The public Cobre schema confirms `DIE`, `CE`, `PPT`, `PA`, and `CC` as accepted
 holder ID enum values, but does not define which one Cobre has contracted for a
 Venezuelan cédula in this program. The initial mapping uses `DIE`; confirm that
 semantic mapping with Cobre before production activation.
+# Third-party pay-in admission (Infinia)
+
+Confío's controls are independent of Infinia's capabilities. All third-party
+receiving is **off by default** (no switch rows are seeded). In Django admin,
+create three enabled `ThirdPartyPayinSwitch` rows to permit a recipient:
+
+| Scope | Country | Rail | Confío account |
+| --- | --- | --- | --- |
+| Country | ISO-2 receiving country | blank | blank |
+| Rail | same country | verified rail code, e.g. `SPEI` | blank |
+| Recipient | same country | same rail | recipient account |
+
+All three must allow and Infinia's `receive_third_party` capability must be
+enabled. Approval evidence is required; user grants must reference completed
+enhanced KYC/KYB and compliance approval. This is an operator approval, not an
+automatic determination that a Didit session qualifies as enhanced KYC.
+Personal/business accounts are isolated. Country here is the receiving account's
+country, **not** phone country (which remains the home-country fee signal).
+
+Configure `FinancialAccount.payin_rail` only after verifying the issued rail.
+Do not assign a single rail to an account with ambiguous/multiple receiving
+rails: leave blank and hold deposits until event-level rail evidence is supported.
+`payin_document_country` must identify the verified jurisdiction of sender
+document numbers on that rail. It is deliberately blank by default. Never infer
+it from phone country or a depositor's nationality.
+
+Same-owner admission requires verified personal identity, exact normalized name,
+document number and document type, comparable document jurisdiction, and an
+enabled provider same-name capability. Names alone never authorize a deposit.
+Business representatives cannot be matched as business owners. Type aliases and
+truncated/missing identities require review; third-party grants do not bypass
+missing sender identity. Provider data must come from authenticated movements.
+
+`PayinAdmission` in admin records the latest decision per deposit without copying
+sender PII. Webhooks retain the accounting fact even when processing is held.
+Admission is rechecked at journey creation, worker advancement, and submission.
+Generic fiat balance spending is blocked while an unconsumed deposit fails
+admission. Completed journeys are excluded from that balance guard. Unknown
+submissions remain subject to normal reconciliation; revocation cannot undo a
+provider operation already submitted. These controls do not reject an external
+bank transfer or issue automatic refunds. Review/return and resumption of held
+journeys require an operator workflow; changing a switch does not automatically
+resume `needs_review` journeys.
+
+Internal-transfer and refund labels alone do not bypass admission. Exemption
+requires correlation to Confío's recorded provider operation and the correct
+same-owner destination (or refund source). Switches are read in one database
+snapshot. Name matching preserves word boundaries and rejects non-string
+identity values. Both controls are registered on the custom Confío admin site;
+the reassessment action updates decisions only and never moves funds.
+Customer fiat submissions must belong to a payment journey: a provider balance
+without a screened funding credit is not spend authorization. Standalone
+customer fiat operations are rejected, including when their ledger is empty
+because a webhook has not arrived. Platform-liquidity operations retain their
+separate path and remain subject to the source-deposit guard.
+
+Deploy migration `0011` before the code. No production switches or accounts are
+enabled by this migration. Cobre enforcement is unchanged; the switch model
+is provider-scoped for future adapters.

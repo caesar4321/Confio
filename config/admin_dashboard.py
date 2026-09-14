@@ -2014,6 +2014,8 @@ confio_admin_site.register(RampWebhookEvent, RampWebhookEventAdmin)
 
 # Persistent provider accounts and named/omnibus money flows
 from payment_accounts.admin import (
+    ThirdPartyPayinSwitchAdmin,
+    PayinAdmissionAdmin,
     PaymentBridgeQuoteAdmin,
     PaymentBridgeTransferAdmin,
     EligibilityPolicyAdmin,
@@ -2023,6 +2025,8 @@ from payment_accounts.admin import (
     ProviderProfileAdmin,
 )
 from payment_accounts.models import (
+    ThirdPartyPayinSwitch,
+    PayinAdmission,
     PaymentBridgeQuote,
     PaymentBridgeTransfer,
     AccountCapability,
@@ -2040,6 +2044,8 @@ from payment_accounts.models import (
 
 confio_admin_site.register(EligibilityPolicy, EligibilityPolicyAdmin)
 confio_admin_site.register(ProviderProfile, ProviderProfileAdmin)
+confio_admin_site.register(ThirdPartyPayinSwitch, ThirdPartyPayinSwitchAdmin)
+confio_admin_site.register(PayinAdmission, PayinAdmissionAdmin)
 confio_admin_site.register(FinancialAccount, FinancialAccountAdmin)
 confio_admin_site.register(MoneyFlow, MoneyFlowAdmin)
 confio_admin_site.register(PaymentBridgeQuote, PaymentBridgeQuoteAdmin)

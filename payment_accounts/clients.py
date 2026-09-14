@@ -330,10 +330,10 @@ def verify_cobre_signature(raw_body, timestamp, signature, secret):
     return hmac.compare_digest(digest, signature)
 
 
-def verify_infinia_signature(raw_body, signature, secret_id):
-    if not signature or not secret_id:
+def verify_infinia_signature(raw_body, signature, signing_key):
+    if not signature or not signing_key:
         return False
-    computed = hmac.new(secret_id.encode('utf-8'), raw_body, hashlib.sha256).digest()
+    computed = hmac.new(signing_key.encode('utf-8'), raw_body, hashlib.sha256).digest()
     try:
         provided = base64.b64decode(signature, validate=True)
     except (ValueError, TypeError):
