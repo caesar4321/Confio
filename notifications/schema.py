@@ -15,6 +15,7 @@ from .fcm_service import register_device_token, unregister_device_token, send_te
 
 class NotificationTypeEnum(graphene.Enum):
     """GraphQL enum for notification types"""
+    LOCAL_TRANSFER_UPDATED = 'LOCAL_TRANSFER_UPDATED'
     # Send transactions
     SEND_RECEIVED = 'SEND_RECEIVED'
     SEND_SENT = 'SEND_SENT'

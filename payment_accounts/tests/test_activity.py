@@ -43,6 +43,30 @@ class ActivityTests(TestCase):
         j.stage='completed'; j.save()
         self.assertEqual(sync_activity(j.pk).status, 'CONFIRMED')
 
+    @override_settings(CUSD_VAULT_ADDRESS='0x' + '42' * 20)
+    def test_bridge_redemption_is_owned_before_bridge_hash_is_adopted(self):
+        from blockchain.models import SponsoredBatch
+        from cusd_plus.tasks import _source_row_covers, _record_deposit_receipt
+        from send.models import SendTransaction
+        j, bridge = self.outgoing()
+        tx = '0x' + 'ab' * 32
+        batch = SponsoredBatch.objects.create(user=self.owner.user,
+            user_bsc_address=j.wallet_address, kind='payment_bridge',
+            client_request_id=f'bridge:{bridge.internal_id}', num_calls=1,
+            calls_json='[]', tx_hash=tx, status='signed', gas_limit=500000)
+        self.assertFalse(bridge.source_tx_hash)
+        self.assertTrue(_source_row_covers(tx, j.wallet_address))
+        self.assertFalse(_source_row_covers(tx, '0x' + '99' * 20))
+        self.assertFalse(_source_row_covers('0x' + 'cc' * 32, j.wallet_address))
+        _record_deposit_receipt(account=self.owner, is_business=False,
+            to_addr=j.wallet_address, from_addr='0x' + '42' * 20,
+            amount_usd=Decimal('1.982'), tx_ref=tx + ':0', tx_hash=tx,
+            source='external_deposit', conv=None)
+        self.assertFalse(SendTransaction.all_objects.filter(transaction_hash=tx).exists())
+        self.assertFalse(Notification.objects.filter(notification_type='SEND_FROM_EXTERNAL').exists())
+        batch.status='reverted'; batch.save()
+        self.assertFalse(_source_row_covers(tx, j.wallet_address))
+
     def incoming_arrived(self):
         j = self.inbound()
         bridge, _ = self.prepared()
@@ -124,6 +148,7 @@ class ActivityTests(TestCase):
         refunded_hash='0x'+'34'*32
         bridge.status='refunded'
         bridge.binding = dict(bridge.binding, settlement_evidence={
+            'status': 'refund', 'recipient': j.wallet_address,
             'transaction_hashes': [refunded_hash], 'token_id': 'BSC:USDT',
             'received_units': '1982000000000000000'})
         bridge.save(); j.refresh_from_db()
@@ -131,6 +156,79 @@ class ActivityTests(TestCase):
         self.assertEqual(InfiniaJourneyType.resolve_refund_amount(j, None), '1.982')
         self.assertTrue(arrival_owned(refunded_hash, j.wallet_address))
         self.assertEqual(sync_activity(j.pk).description, 'Envío reembolsado')
+
+    def test_partial_refund_is_not_an_external_deposit(self):
+        from cusd_plus.tasks import _record_deposit_receipt
+        j, bridge = self.outgoing()
+        tx = '0x' + '34' * 32
+        bridge.source_tx_hash='0x' + '12' * 32
+        bridge.status='needs_review'
+        bridge.binding = dict(bridge.binding, settlement_evidence={
+            'status': 'refund', 'recipient': j.wallet_address,
+            'transaction_hashes': [tx], 'token_id': 'BSC:USDT',
+            'received_units': '1947534000000000000'})
+        bridge.save()
+        j.stage='needs_review'; j.save()
+        notice = Notification.objects.create(user=self.owner.user, account=self.owner,
+            notification_type='SEND_FROM_EXTERNAL', title='Depósito recibido', message='USDT',
+            data={'tx_hash': tx, 'recipient_address': j.wallet_address})
+        sync_activity(j.pk)
+        notice.refresh_from_db()
+        self.assertEqual(notice.notification_type, 'LOCAL_TRANSFER_UPDATED')
+        self.assertEqual(notice.data['local_transfer_id'], str(j.internal_id))
+        self.assertEqual(display_stage(j), 'needs_review')
+        self.assertTrue(arrival_owned(tx, j.wallet_address))
+        self.assertFalse(arrival_owned(tx, '0x' + '99' * 20))
+        _record_deposit_receipt(account=self.owner, is_business=False,
+            to_addr=j.wallet_address, from_addr='0x' + '77' * 20,
+            amount_usd=Decimal('1.947534'), tx_ref=tx + ':0', tx_hash=tx,
+            source='external_deposit', conv=None)
+        self.assertFalse(Notification.objects.filter(notification_type='SEND_FROM_EXTERNAL').exists())
+
+    def test_deposit_push_waits_for_bridge_attribution(self):
+        from cusd_plus.tasks import _record_deposit_receipt, _push_deposit_after_bridge
+        from celery.exceptions import Retry
+        j, bridge = self.outgoing()
+        bridge.source_tx_hash='0x' + '12' * 32
+        bridge.status='submitted'; bridge.save()
+        tx='0x' + '34' * 32
+        with mock.patch('notifications.utils.send_push_notification') as push, \
+                mock.patch('cusd_plus.tasks._push_deposit_after_bridge.apply_async') as schedule, \
+                self.captureOnCommitCallbacks(execute=True):
+            _record_deposit_receipt(account=self.owner, is_business=False,
+                to_addr=j.wallet_address, from_addr='0x' + '77' * 20,
+                amount_usd=Decimal('1.947534'), tx_ref=tx + ':0', tx_hash=tx,
+                source='external_deposit', conv=None)
+        push.assert_not_called()
+        schedule.assert_called_once()
+        notice=Notification.objects.get(notification_type='SEND_FROM_EXTERNAL')
+        with mock.patch.object(_push_deposit_after_bridge, 'retry', side_effect=Retry()) as retry, \
+                mock.patch('notifications.fcm_service.send_push_notification') as push:
+            with self.assertRaises(Retry):
+                _push_deposit_after_bridge.run(notice.pk, [bridge.pk])
+            retry.assert_called_once()
+            push.assert_not_called()
+            bridge.status='needs_review'
+            bridge.binding=dict(bridge.binding, settlement_evidence={
+                'status': 'refund', 'recipient': j.wallet_address,
+                'token_id': 'BSC:USDT', 'transaction_hashes': [tx],
+                'received_units': '1947534000000000000'})
+            bridge.save()
+            _push_deposit_after_bridge.run(notice.pk, [bridge.pk])
+            push.assert_not_called()
+        notice.refresh_from_db()
+        self.assertEqual(notice.notification_type, 'LOCAL_TRANSFER_UPDATED')
+
+    def test_unrelated_deposit_push_released_after_bridge_resolves(self):
+        from cusd_plus.tasks import _push_deposit_after_bridge
+        j, bridge=self.outgoing()
+        bridge.status='delivered'; bridge.save()
+        notice=Notification.objects.create(user=self.owner.user, account=self.owner,
+            notification_type='SEND_FROM_EXTERNAL', title='Depósito recibido', message='USDT',
+            data={'tx_hash': '0x' + '99'*32, 'recipient_address': j.wallet_address})
+        with mock.patch('notifications.fcm_service.send_push_notification') as push:
+            _push_deposit_after_bridge.run(notice.pk, [bridge.pk])
+        push.assert_called_once()
 
     def test_backfill_dry_run_does_not_create_activity(self):
         from django.core.management import call_command

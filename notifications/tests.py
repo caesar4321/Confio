@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, SimpleTestCase
 from django.utils import timezone
 
 from config.admin_dashboard import get_fcm_reachability_metrics
@@ -11,6 +11,23 @@ from .models import FCMDeviceToken
 
 
 User = get_user_model()
+
+
+class NotificationEnumTests(SimpleTestCase):
+    def test_every_stored_notification_type_serializes(self):
+        import graphene
+        from .models import NotificationType as StoredType
+        from .schema import NotificationTypeEnum
+
+        class Query(graphene.ObjectType):
+            kind = graphene.Field(NotificationTypeEnum)
+
+        schema = graphene.Schema(query=Query)
+        for value in StoredType.values:
+            with self.subTest(value=value):
+                result = schema.execute('{ kind }', root_value={'kind': value})
+                self.assertIsNone(result.errors)
+                self.assertEqual(result.data['kind'], value)
 
 
 class FCMDeviceRegistrationTests(TestCase):

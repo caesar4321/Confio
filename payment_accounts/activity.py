@@ -72,7 +72,11 @@ def arrival_owned(tx_hash, wallet):
     return (InfiniaJourney.objects.filter(direction='to_wallet', wallet_address__iexact=wallet,
         bridge__destination_tx_hash__iexact=tx_hash, bridge__status='delivered').exists()
         or InfiniaJourney.objects.filter(direction='to_bank', wallet_address__iexact=wallet,
-            bridge__status='refunded', bridge__binding__settlement_evidence__transaction_hashes__contains=[tx_hash.lower()]).exists())
+            bridge__status__in=['refunded', 'needs_review'],
+            bridge__binding__settlement_evidence__status='refund',
+            bridge__binding__settlement_evidence__token_id='BSC:USDT',
+            bridge__binding__settlement_evidence__recipient__iexact=wallet,
+            bridge__binding__settlement_evidence__transaction_hashes__contains=[tx_hash.lower()]).exists())
 
 
 def _retarget_notice(notice, j, label):
@@ -143,7 +147,10 @@ def sync_activity(journey_id, *, notify=True):
         row.created_at = j.created_at
     tx_hash = bridge.destination_tx_hash if incoming and bridge else bridge.source_tx_hash if bridge else ''
     receipt_hashes = [tx_hash] if tx_hash else []
-    if stage == 'refunded':
+    # A verified partial refund remains needs_review, but is still a return
+    # belonging to this transfer, not an unrelated external deposit.
+    if bridge and not incoming and bridge.status in ['refunded', 'needs_review'] and (
+            bridge.binding.get('settlement_evidence', {}).get('status') == 'refund'):
         receipt_hashes += bridge.binding.get('settlement_evidence', {}).get('transaction_hashes', [])
     if receipt_hashes:
         receipts = SendTransaction.all_objects.filter(transaction_hash__in=receipt_hashes,

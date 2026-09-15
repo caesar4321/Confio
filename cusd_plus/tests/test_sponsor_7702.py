@@ -1357,7 +1357,7 @@ class StockHistoryTests(SimpleTestCase):
             batches.filter.return_value.exists.return_value = True
             self.assertTrue(_source_row_covers(self.TXH, USER))
             kwargs = batches.filter.call_args.kwargs
-            self.assertEqual(kwargs['kind__in'], ('stock_buy', 'stock_sell'))
+            self.assertEqual(kwargs['kind__in'], ('stock_buy', 'stock_sell', 'payment_bridge'))
             self.assertEqual(kwargs['user_bsc_address__iexact'], USER)
 
 

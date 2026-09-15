@@ -477,10 +477,12 @@ class DepositNotificationCopyTests(SimpleTestCase):
 
         with mock.patch('conversion.models.Conversion.objects') as conv_objs, \
              mock.patch('payment_accounts.activity.arrival_owned', return_value=False), \
+             mock.patch('payment_accounts.models.PaymentBridgeTransfer.objects') as bridges, \
              mock.patch('users.models.Account.objects') as acct_objs, \
              mock.patch('send.models.SendTransaction.all_objects') as sends, \
              mock.patch('notifications.utils.create_notification', side_effect=_capture):
             conv_objs.filter.return_value.exists.return_value = False
+            bridges.filter.return_value.exclude.return_value.exclude.return_value.values_list.return_value = []
             conv_objs.create.return_value = mock.Mock(internal_id='cid')
             # The receipt is the durable record for an ineligible holder; the
             # notification is suppressed without one (audit 2026-08-01).
