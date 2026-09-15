@@ -155,6 +155,30 @@ class InfiniaProvider(PaymentAccountProvider):
             # Preserve pre-direct-bridge journeys stored with the old flat form.
             from payment_accounts.infinia_bridge import payout_destination
             destination = payout_destination(destination['address'])
+        elif 'destinationType' not in destination:
+            # Stored recipients contain rail-specific fields. Payout v2 wraps
+            # those fields in a country/currency discriminated envelope.
+            # Construct the envelope at the boundary, without changing the
+            # owner's immutable destination snapshot or idempotency key.
+            country = (operation.external_destination or {}).get('country')
+            try:
+                code = iso_alpha2(country)
+            except ValueError as exc:
+                raise ProviderCapabilityError('Infinia payout destination country is missing or invalid') from exc
+            countries = {'AR': 'ARGENTINA', 'BO': 'BOLIVIA', 'BR': 'BRAZIL',
+                'CL': 'CHILE', 'CO': 'COLOMBIA', 'MX': 'MEXICO', 'PY': 'PARAGUAY',
+                'PE': 'PERU', 'GB': 'EUROPE', 'XX': 'GLOBAL'}
+            if destination.get('type') == 'ACCOUNT_EUROPE_SEPA':
+                provider_country = 'EUROPE'
+            else:
+                provider_country = countries.get(code)
+            if not provider_country:
+                raise ProviderCapabilityError('Unsupported Infinia payout country')
+            currency = str(operation.source_asset)
+            if provider_country == 'GLOBAL':
+                currency = currency.split('_')[0]
+            destination = {'country': provider_country, 'currency': currency,
+                           'destinationType': dict(destination)}
         payload = {
             'originId': operation.idempotency_key,
             'amount': amount,
