@@ -821,6 +821,9 @@ class AccountActivation(models.Model):
     chain_id = models.PositiveIntegerField(default=56)
     accepted_at = models.DateTimeField(null=True, blank=True)
     attempt = models.PositiveIntegerField(default=0)
+    opening_failures = models.PositiveIntegerField(default=0)
+    opening_error = models.CharField(max_length=40, blank=True, default='')
+    next_opening_retry_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

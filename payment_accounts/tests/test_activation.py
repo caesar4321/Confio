@@ -63,6 +63,125 @@ class ActivationTests(TestCase):
         self.assertFalse(AccountActivation.objects.exists())
         opening.assert_not_called(); pay.assert_not_called()
 
+    def test_provider_failure_is_persisted_and_prepare_reports_safe_error(self):
+        from payment_accounts.clients import ProviderAPIError
+        with mock.patch('payment_accounts.local_money.activate', side_effect=ProviderAPIError(
+                'secret provider payload', status_code=500, retryable=True)), \
+                mock.patch.object(activation, '_prepare_send') as pay:
+            with self.assertRaisesMessage(PaymentAccountError, 'Volveremos a intentarlo automáticamente') as failure:
+                self.prepare('10.00')
+        self.assertNotIn('secret', str(failure.exception))
+        row = AccountActivation.objects.get(confio_account=self.owner)
+        self.assertEqual(row.opening_failures, 1)
+        self.assertEqual(row.opening_error, 'provider_unavailable')
+        self.assertIsNotNone(row.next_opening_retry_at)
+        self.assertIsNone(row.payment_id)
+        pay.assert_not_called()
+
+    def test_polling_and_worker_share_exponential_backoff_and_request_identity(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from payment_accounts.clients import ProviderAPIError
+        row = self.row()
+        now = timezone.now()
+        with mock.patch('payment_accounts.activation.timezone.now') as clock, \
+                mock.patch('payment_accounts.local_money.activate', side_effect=ProviderAPIError(
+                    'unavailable', status_code=503, retryable=True)) as opening:
+            for count, delay in enumerate([30, 60, 120, 240, 480, 900, 900], 1):
+                clock.return_value = now
+                result = activation.reconcile(row.pk)
+                self.assertEqual(result.opening_failures, count)
+                self.assertEqual(result.next_opening_retry_at, now + timedelta(seconds=delay))
+                self.assertEqual(result.internal_id, row.internal_id)
+                self.assertEqual(result.attempt, 0)
+                clock.return_value = now + timedelta(seconds=delay - 1)
+                activation.reconcile(row.pk)
+                self.assertEqual(opening.call_count, count)
+                now += timedelta(seconds=delay)
+        self.assertEqual(AccountActivation.objects.count(), 1)
+
+    def test_permanent_failure_pauses_automatic_and_manual_retries(self):
+        from payment_accounts.clients import ProviderAPIError
+        row = self.row()
+        with mock.patch('payment_accounts.local_money.activate', side_effect=ProviderAPIError(
+                'invalid owner', status_code=400)) as opening:
+            result = activation.reconcile(row.pk)
+            activation.reconcile(row.pk)
+            with self.assertRaisesMessage(PaymentAccountError, 'Contacta a soporte'):
+                self.prepare()
+        self.assertEqual(opening.call_count, 1)
+        self.assertIsNone(result.next_opening_retry_at)
+        self.assertEqual(result.opening_error, 'opening_needs_review')
+
+    def test_rate_limit_schedules_retry_even_without_retryable_flag(self):
+        from payment_accounts.clients import ProviderAPIError
+        row = self.row()
+        with mock.patch('payment_accounts.local_money.activate', side_effect=ProviderAPIError(
+                'rate limit', status_code=429)):
+            result = activation.reconcile(row.pk)
+        self.assertIsNotNone(result.next_opening_retry_at)
+
+    def test_policy_blocks_and_missing_policy_do_not_retry(self):
+        from payment_accounts.eligibility import EligibilityDenied, EligibilityPolicyNotConfigured
+        row = self.row()
+        for failure in [EligibilityDenied(SimpleNamespace(decision='block', reason_code='country_disabled')),
+                        EligibilityPolicyNotConfigured('missing policy')]:
+            with self.subTest(failure=type(failure).__name__):
+                AccountActivation.objects.filter(pk=row.pk).update(opening_error='', opening_failures=0)
+                with mock.patch('payment_accounts.local_money.activate', side_effect=failure) as opening:
+                    result = activation.reconcile(row.pk)
+                    activation.reconcile(row.pk)
+                self.assertEqual(opening.call_count, 1)
+                self.assertEqual(result.opening_error, 'opening_needs_review')
+                self.assertIsNone(result.next_opening_retry_at)
+
+    def test_due_retry_clears_failure_after_recovery(self):
+        from django.utils import timezone
+        row = self.row()
+        row.opening_error = 'provider_unavailable'
+        row.opening_failures = 3
+        row.next_opening_retry_at = timezone.now()
+        row.save()
+        with mock.patch('payment_accounts.local_money.activate', side_effect=self.open_accounts) as opening:
+            result = activation.reconcile(row.pk)
+        opening.assert_called_once()
+        self.assertEqual(result.status, 'awaiting_payment')
+        self.assertEqual(result.opening_error, '')
+        self.assertEqual(result.opening_failures, 0)
+        self.assertIsNone(result.next_opening_retry_at)
+        self.assertIsNone(result.payment_id)
+
+    def test_webhook_readiness_bypasses_cooldown_without_provider_retry(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        row = self.row()
+        row.opening_error = 'provider_unavailable'
+        row.next_opening_retry_at = timezone.now() + timedelta(minutes=15)
+        row.save()
+        self.open_accounts()
+        with mock.patch('payment_accounts.local_money.activate') as opening:
+            result = activation.reconcile(row.pk)
+        opening.assert_not_called()
+        self.assertEqual(result.status, 'awaiting_payment')
+        self.assertEqual(result.opening_error, '')
+
+    def test_activation_mutation_returns_failure_during_cooldown(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from payment_accounts.local_money_schema import ActivateLocalMoney
+        row = self.row()
+        row.opening_error = 'provider_unavailable'
+        row.next_opening_retry_at = timezone.now() + timedelta(minutes=1)
+        row.save()
+        with mock.patch('payment_accounts.local_money_schema._owner', return_value=self.owner), \
+                mock.patch('payment_accounts.breb_location.require_for_country'), \
+                mock.patch('payment_accounts.local_money.activate') as opening:
+            result = ActivateLocalMoney.mutate(None, SimpleNamespace(context=SimpleNamespace(META={})), 'co_breb')
+        self.assertFalse(result.success)
+        self.assertIn('Volveremos a intentarlo', result.errors[0])
+        self.assertIsNone(result.status)
+        opening.assert_not_called()
+
     def test_wrong_fee_acceptance_rejected_without_provider_call(self):
         with self.assertRaises(PaymentAccountError): self.prepare('0')
         self.assertFalse(AccountActivation.objects.exists())
@@ -210,7 +329,9 @@ class ActivationTests(TestCase):
             ProviderProfile.objects.create(confio_account=self.owner,provider='infinia',owner_type='individual',provider_owner_id='persist-me')
             raise TimeoutError('lost response')
         with mock.patch('payment_accounts.local_money.activate',side_effect=timeout), mock.patch.object(activation,'_prepare_send') as pay:
-            row,payment=self.prepare('10')
+            with self.assertRaisesMessage(PaymentAccountError, 'Volveremos a intentarlo'):
+                self.prepare('10')
+        row = AccountActivation.objects.get()
         self.assertEqual(row.status,'provisioning'); pay.assert_not_called()
         self.assertTrue(ProviderProfile.objects.filter(provider_owner_id='persist-me').exists())
 
@@ -342,6 +463,29 @@ class ActivationTests(TestCase):
 
 @override_settings(CUSD_PLUS_7702_ENABLED=True,CUSD_VAULT_ADDRESS=TOKEN)
 class ConcurrentActivationTests(TransactionTestCase):
+    def test_simultaneous_app_and_worker_attempt_only_one_failed_request(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from django.db import connections
+        from payment_accounts.clients import ProviderAPIError
+        user = User.objects.create_user(username='parallel-retry', firebase_uid='parallel-retry')
+        owner = Account.objects.create(user=user, account_type='personal')
+        row = AccountActivation.objects.create(confio_account=owner, country='ARG', asset='ARS',
+                                               method_id='ar_cvu_receive')
+        barrier = Barrier(2)
+        def worker(_):
+            try:
+                barrier.wait(timeout=5)
+                return activation.reconcile(row.pk).opening_failures
+            finally:
+                connections.close_all()
+        with mock.patch('payment_accounts.local_money.activate', side_effect=ProviderAPIError(
+                'unavailable', status_code=500, retryable=True)) as opening, \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            counts = list(pool.map(worker, range(2)))
+        self.assertEqual(counts, [1, 1])
+        self.assertEqual(opening.call_count, 1)
+
     def test_simultaneous_countries_cannot_open_two_unpaid_accounts(self):
         from concurrent.futures import ThreadPoolExecutor
         from threading import Barrier

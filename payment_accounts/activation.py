@@ -6,9 +6,11 @@ Unknown provider/payment outcomes retain their original records for reconciliati
 import json
 import logging
 from decimal import Decimal
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 
 from .models import AccountActivation
 from .services import PaymentAccountError
@@ -179,7 +181,29 @@ def prepare(owner, identity, method_id, jwt_ctx, accepted_fee=None):
     if isinstance(row, tuple):
         return row  # Consent-only quote: no provider request or payment.
     row = reconcile(row.pk)  # Commit external provider results BEFORE preparing a payment.
+    require_opening_without_error(row)
     return _payment(owner, row.pk, jwt_ctx)
+
+
+def require_opening_without_error(row):
+    if not row.opening_error:
+        return
+    if row.next_opening_retry_at:
+        message = ('No pudimos completar la apertura con el proveedor. '
+                   'Volveremos a intentarlo automáticamente. Puedes salir y revisar más tarde.')
+    else:
+        message = ('No pudimos completar la apertura. '
+                   'Contacta a soporte para revisar la solicitud antes de volver a intentarlo.')
+    raise PaymentAccountError(f'{message} Referencia: {row.internal_id}')
+
+
+def _clear_opening_error(row):
+    row.opening_failures = 0
+    row.opening_error = ''
+    row.next_opening_retry_at = None
+
+
+OPENING_ERROR_FIELDS = ['opening_failures', 'opening_error', 'next_opening_retry_at']
 
 
 @transaction.atomic
@@ -211,7 +235,8 @@ def reconcile(activation_id):
     row = AccountActivation.objects.select_for_update(of=('self',)).select_related('payment','confio_account__user').get(pk=activation_id)
     if row.status == 'payment_pending' and row.payment_id and row.payment.status == 'CONFIRMED':
         row.status = 'active'
-        row.save(update_fields=['status', 'updated_at'])
+        _clear_opening_error(row)
+        row.save(update_fields=['status', 'updated_at', *OPENING_ERROR_FIELDS])
         return row
     if row.status not in OPEN_STATES:
         return row
@@ -228,7 +253,16 @@ def reconcile(activation_id):
             row.status = 'failed'
             row.save(update_fields=['status', 'updated_at'])
         return row
-    if row.status != 'provisioning' and opening_ready(row):
+    if opening_ready(row):
+        # A webhook may have finished provisioning during the retry delay.
+        if row.status == 'provisioning':
+            row.status = 'payment_pending' if row.payment_id else 'awaiting_payment'
+        _clear_opening_error(row)
+        row.save(update_fields=['status', 'updated_at', *OPENING_ERROR_FIELDS])
+        return row
+    if row.opening_error and (
+        row.next_opening_retry_at is None or row.next_opening_retry_at > timezone.now()
+    ):
         return row
     from .schema import _verified_identity
     try:
@@ -237,15 +271,30 @@ def reconcile(activation_id):
         identity = None
     try:
         status = local_money.activate(row.confio_account, identity, row.method_id)
-    except Exception:
+    except Exception as exc:
+        from .clients import ProviderAPIError, ComplianceHandoffError
+        from .eligibility import EligibilityDenied, EligibilityPolicyNotConfigured
         # Retain provider IDs after an ambiguous response; never recreate the request.
         logging.getLogger(__name__).exception('Activation opening remains pending: %s', row.internal_id)
+        retryable = not isinstance(exc, (
+            PaymentAccountError, ComplianceHandoffError, EligibilityDenied, EligibilityPolicyNotConfigured,
+        ))
+        if isinstance(exc, ProviderAPIError):
+            retryable = exc.retryable or exc.status_code == 429
+        row.opening_failures += 1
+        row.opening_error = 'provider_unavailable' if retryable else 'opening_needs_review'
+        # The activation lock serializes app and worker retries. Never reuse the
+        # payment attempt counter or change the provider's idempotency key.
+        delay = min(30 * 2 ** min(row.opening_failures - 1, 5), 900)
+        row.next_opening_retry_at = timezone.now() + timedelta(seconds=delay) if retryable else None
+        row.save(update_fields=[*OPENING_ERROR_FIELDS, 'updated_at'])
         return row
+    _clear_opening_error(row)
     if status == 'active' and opening_ready(row):
         row.status = 'payment_pending' if row.payment_id else 'awaiting_payment'
     elif status in terminal and not payment_can_execute:
         row.status = 'failed'
-    row.save(update_fields=['status', 'updated_at'])
+    row.save(update_fields=['status', 'updated_at', *OPENING_ERROR_FIELDS])
     return row
 
 
