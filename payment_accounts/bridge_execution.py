@@ -110,7 +110,7 @@ def funding_calls(owner, amount, *, max_spend=None):
 
 
 def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None, infinia_journey=None):
-    client, intents = client or NextClient(), intents or IntentsClient()
+    intents = intents or IntentsClient()
     with transaction.atomic():
         # One wallet preparation at a time, so reservations cannot overlap.
         owner = type(owner).objects.select_for_update().get(pk=owner.pk)
@@ -138,8 +138,10 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         if type(route_index) is not int or not 0 <= route_index < len(q.routes):
             raise NextError('Invalid bridge route')
         route = q.routes[route_index]
-        if route['messenger'] != 'near-intents':
+        if route['messenger'] not in {'near-intents', 'relay'}:
             raise NextError('This bridge messenger is not enabled for execution')
+        from .relay import RelayClient
+        client = client or (RelayClient() if route['messenger'] == 'relay' else NextClient())
         source_chain = q.source_token_id.split(':')[0]
         chain.require_chain(source_chain)
         build = client.build(route, source_address=q.source_address, destination_address=q.destination_address)
@@ -149,10 +151,19 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         accepted_min = bridge_route_minimum(route)
         if minimum < accepted_min:
             raise NextError('Bridge price changed; request a fresh quote')
-        status = intents.status(deposit)
         now = int(time.time())
-        deposit_deadline = validate_binding(status, intents.tokens(), q, deposit,
-                                            minimum=str(minimum), now=now)
+        if route['messenger'] == 'relay':
+            relay_binding = build['relay']
+            relay_status = client.status(relay_binding['request_id'])
+            if relay_status.get('status') != 'waiting' or relay_status.get('inTxHashes'):
+                raise NextError('Relay deposit is not unused')
+            deposit_deadline = relay_binding['deadline']
+            binding = relay_binding
+        else:
+            status = intents.status(deposit)
+            deposit_deadline = validate_binding(status, intents.tokens(), q, deposit,
+                                                minimum=str(minimum), now=now)
+            binding = {'quoteResponse': status['quoteResponse']}
         deadline = deposit_deadline if infinia_journey is not None else min(now + 600, deposit_deadline - 30)
         funding = {'wallet_usdt_units': '0', 'fee_units': '0', 'gross_redeem_units': '0'}
         if source_chain == 'BSC':
@@ -175,7 +186,7 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
             quote=q, funding_mode='infinia' if infinia_journey is not None else 'wallet',
             deposit_address=deposit, amount_out_min=str(minimum),
             amount_out=build['amountOut'], deadline=deadline, calls=prefix + [call],
-            binding={'quoteResponse': status['quoteResponse'], 'funding': funding},
+            binding=dict(binding, funding=funding),
         )
 
 
@@ -303,6 +314,10 @@ def reconcile_bridge(t, *, intents=None):
             from cusd_plus.tasks import _reconcile_cusd_fee_event
             _reconcile_cusd_fee_event(batch=t.batch, receipt=source)
         t.status, t.failure_code = 'bridging', ''
+        if t.binding.get('provider') == 'relay':
+            from .relay_settlement import reconcile_relay
+            reconcile_relay(t)
+            return _record_bridge_result(t)
         status = intents.status(t.deposit_address)
         if status.get('quoteResponse', {}).get('quoteRequest') != t.binding['quoteResponse']['quoteRequest']:
             raise NextError('Bridge status binding changed')
@@ -345,11 +360,11 @@ def _record_bridge_result(t):
         locked = PaymentBridgeTransfer.objects.select_for_update().get(pk=t.pk)
         if locked.status in {'delivered', 'failed', 'refunded'}:
             return locked
-        t.save(update_fields=['status', 'failure_code', 'actual_out_units', 'destination_tx_hash', 'updated_at'])
+        t.save(update_fields=['status', 'failure_code', 'actual_out_units', 'destination_tx_hash', 'binding', 'updated_at'])
         flow = q.money_flow
         # Outbound bridge delivery is not provider credit. Inbound completes
         # this USDT-targeted flow; the existing USDT -> cUSD conversion is separate.
-        flow.status = 'needs_review' if t.status == 'needs_review' else ('failed' if t.status == 'failed' else 'processing')
+        flow.status = 'needs_review' if t.status == 'needs_review' else ('failed' if t.status in {'failed', 'refunded'} else 'processing')
         if t.status == 'delivered' and q.destination_token_id == 'BSC:USDT':
             flow.status = 'succeeded'
         flow.metadata = dict(flow.metadata, stage=t.status)

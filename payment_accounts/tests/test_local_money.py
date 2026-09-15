@@ -385,18 +385,23 @@ class LocalMoneyTests(TestCase):
 
     def test_payout_quote_derives_the_minimum(self):
         local, crypto = self.pair()
+        from payment_accounts.models import FundingInstruction
+        FundingInstruction.objects.create(financial_account=crypto, kind='crypto_address', status='active',
+                                          display_value='0x' + '22' * 20)
         destination = PayoutDestination.objects.create(
             confio_account=self.owner, provider='infinia', kind='breb_key', country='COL', asset='COP',
             label='Llave', holder_name='Ana', details={'type': 'BREB_KEY', 'brebKey': '@ana'})
         self.fx('205300')
         with mock.patch('payment_accounts.bridge.net_funding_units', return_value='49550000000000000000') as net, \
-                mock.patch('payment_accounts.allbridge_next.NextClient') as bridge:
-            bridge.return_value.quote.return_value = [
+                mock.patch('payment_accounts.bridge_routing.quote_routes') as bridge, \
+                mock.patch('payment_accounts.bridge._require_provider_enabled'):
+            bridge.return_value = [
                 {'messenger': 'cctp', 'amountOut': '50000000'},
-                {'messenger': 'near-intents', 'amountOut': '49300000', 'amountOutMin': '49000000'}]
+                {'messenger': 'relay', 'amountOut': '49300000', 'amountOutMin': '49000000'}]
             quote = local_money.payout_quote(self.owner, destination, amount='50', client=self.client_api)
             net.assert_called_once_with(self.owner, 50 * 10**18)
-            bridge.return_value.quote.assert_called_once_with('BSC:USDT', 'POL:USDC', '49550000000000000000')
+            bridge.assert_called_once_with('BSC:USDT', 'POL:USDC', '49550000000000000000',
+                                           self.owner.bsc_address, '0x' + '22' * 20)
         self.assertEqual(quote['minimum_target'], Decimal('203247.00'))
         self.assertEqual(quote['rate'], Decimal('4106.0000'))
         payload = self.client_api.create_transfer_quote.call_args.args[0]
@@ -414,6 +419,9 @@ class LocalMoneyTests(TestCase):
 
     def test_fractional_bridge_output_is_floored_for_estimate_and_review(self):
         _, crypto = self.pair()
+        from payment_accounts.models import FundingInstruction
+        FundingInstruction.objects.create(financial_account=crypto, kind='crypto_address', status='active',
+                                          display_value='0x' + '22' * 20)
         destination = SimpleNamespace(country='COL', asset='COP')
         self.fx('7800')
         response = self.client_api.create_transfer_quote.return_value
@@ -423,8 +431,9 @@ class LocalMoneyTests(TestCase):
             return response
         self.client_api.create_transfer_quote.side_effect = strict_quote
         with mock.patch('payment_accounts.bridge.net_funding_units', return_value=str(2 * 10**18)), \
-                mock.patch('payment_accounts.allbridge_next.NextClient') as api:
-            api.return_value.quote.return_value = [{'messenger': 'near-intents',
+                mock.patch('payment_accounts.bridge_routing.quote_routes') as api, \
+                mock.patch('payment_accounts.bridge._require_provider_enabled'):
+            api.return_value = [{'messenger': 'relay',
                 'amountOut': '1960000', 'amountOutMin': '1958795'}]
             estimate = local_money.payout_quote(self.owner, destination, amount='2', client=self.client_api)
         bridge = SimpleNamespace(amount_out_min='1958795', quote=SimpleNamespace(
@@ -477,17 +486,23 @@ class LocalMoneyTests(TestCase):
     def test_deposit_over_the_bridge_cap_is_refused_before_a_journey(self):
         from payment_accounts.models import LedgerEntry
         from django.utils import timezone
+        self.owner.bsc_address = '0x' + '11' * 20
         local, _ = self.pair('MEX', 'MXN')
         credit = LedgerEntry.objects.create(
             provider='infinia', financial_account=local, provider_entry_id='e1', direction='credit', asset='MXN',
             amount='4250.008795', occurred_at=timezone.now(), provider_data={'operation': {'type': 'INTERNAL_TRANSFER'}})
-        with mock.patch('payment_accounts.payin_admission.is_external_fiat_credit', return_value=False):
+        with mock.patch('payment_accounts.payin_admission.is_external_fiat_credit', return_value=False), \
+                mock.patch('payment_accounts.bridge_routing.quote_routes', return_value=[{
+                    'messenger': 'relay', 'amountOut': str(209 * 10**18),
+                    'amountOutMin': str(208 * 10**18)}]) as bridge:
             self.fx('212.40')
             quote = local_money.deposit_quote(self.owner, credit, client=self.client_api)
             self.assertEqual(quote['source_amount'], Decimal('4250'))
             self.assertEqual(self.client_api.create_transfer_quote.call_args.args[0]['source_amount'], 4250.0)
             self.assertEqual(quote['minimum_fx_output'], Decimal('210.276000'))
-            self.assertEqual(quote['minimum_wallet_output'], Decimal('207.121860'))
+            self.assertEqual(quote['minimum_wallet_output'], Decimal('204.880000'))
+            bridge.assert_called_once_with('POL:USDC', 'BSC:USDT', '210276000',
+                                           self.owner.bsc_address, self.owner.bsc_address)
             with override_settings(PAYMENT_BRIDGE_MAX_USDT='200'):
                 with self.assertRaisesRegex(PaymentAccountError, 'máximo por conversión'):
                     local_money.deposit_quote(self.owner, credit, client=self.client_api)
@@ -504,6 +519,25 @@ class LocalMoneyTests(TestCase):
             self.assertFalse(exceeds_bridge_cap('250'))
         with override_settings(PAYMENT_BRIDGE_MAX_USDT='0'):
             self.assertTrue(exceeds_bridge_cap('1'))
+
+    def test_small_deposit_prices_real_bridge_cost_at_fx_lower_bound(self):
+        from payment_accounts.models import LedgerEntry
+        from django.utils import timezone
+        self.owner.bsc_address = '0x' + '11' * 20
+        local, _ = self.pair('MEX', 'MXN')
+        credit = LedgerEntry.objects.create(provider='infinia', financial_account=local,
+            provider_entry_id='small-relay', direction='credit', asset='MXN', amount='40',
+            occurred_at=timezone.now(), provider_data={'operation': {'type': 'INTERNAL_TRANSFER'}})
+        self.fx('2')
+        with mock.patch('payment_accounts.payin_admission.is_external_fiat_credit', return_value=False), \
+                mock.patch('payment_accounts.bridge_routing.quote_routes', return_value=[{
+                    'messenger': 'relay', 'amountOut': str(193 * 10**16),
+                    'amountOutMin': str(192 * 10**16)}]) as bridge:
+            quote = local_money.deposit_quote(self.owner, credit, client=self.client_api)
+        bridge.assert_called_once_with('POL:USDC', 'BSC:USDT', '1980000',
+                                       self.owner.bsc_address, self.owner.bsc_address)
+        self.assertEqual(quote['minimum_wallet_output'], Decimal('1.891200'))
+        self.assertLess(quote['minimum_wallet_output'], Decimal('1.92'))
 
     # ---- limits
 

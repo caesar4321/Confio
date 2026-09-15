@@ -1,4 +1,4 @@
-"""Provider-funded NEXT deposits. No user signature or sponsor transaction."""
+"""Provider-funded bridge deposits. No user signature or sponsor transaction."""
 import re
 import time
 import uuid
@@ -62,9 +62,9 @@ def prepare_infinia_bridge(journey, amount, *, client=None, intents=None):
         amount=amount, request_id=uuid.uuid5(journey.internal_id, 'direct-bridge'),
         direction='to_wallet', client=client,
     )
-    route_index = next((i for i, r in enumerate(quote.routes) if r['messenger'] == 'near-intents'), None)
+    route_index = next((i for i, r in enumerate(quote.routes) if r['messenger'] in {'near-intents', 'relay'}), None)
     if route_index is None:
-        raise InfiniaBridgeReview('No deposit-based NEXT route is available')
+        raise InfiniaBridgeReview('No deposit-based bridge route is available')
     transfer = prepare_bridge(journey.confio_account, quote.internal_id, route_index,
                               client=client, intents=intents, infinia_journey=journey)
     if int(transfer.amount_out_min) < int(to_units(journey.minimum_wallet_output, 'BSC:USDT')):

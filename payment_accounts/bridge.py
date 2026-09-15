@@ -1,4 +1,4 @@
-"""Owner-bound durable NEXT quotes. Quoting never moves money."""
+"""Owner-bound durable bridge quotes. Quoting never moves money."""
 from datetime import timedelta
 from decimal import Decimal
 import uuid
@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .allbridge_next import NextClient, NextError, address, to_units, uint
+from .allbridge_next import NextError, address, to_units, uint
 from .eligibility import context_from_identity, enforce_and_record
 from .models import FundingInstruction, MoneyFlow, PaymentBridgeQuote
 from .services import PaymentAccountError, _require_provider_enabled
@@ -30,7 +30,7 @@ def exceeds_bridge_cap(amount):
 
 
 def executable_bridge_routes(routes):
-    supported = [route for route in routes if route.get('messenger') == 'near-intents']
+    supported = [route for route in routes if route.get('messenger') in {'near-intents', 'relay'}]
     if not supported:
         raise NextError('No executable bridge route is available')
     return supported
@@ -167,7 +167,9 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
     expires = started + timedelta(seconds=60)
     if instruction.expires_at:
         expires = min(expires, instruction.expires_at)
-    routes = executable_bridge_routes((client or NextClient()).quote(source_token, destination_token, units))
+    from .bridge_routing import quote_routes
+    routes = executable_bridge_routes(quote_routes(source_token, destination_token, units,
+                                                   source, destination, client=client))
     if expires <= timezone.now():
         raise NextError('Bridge quote expired while pricing; try again')
     with transaction.atomic():

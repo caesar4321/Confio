@@ -711,12 +711,21 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
         # The typed amount is the user's total budget, not the USDC principal.
         # Price the post-redemption USDT through the same bridge used at review.
         from .bridge import net_funding_units, executable_bridge_routes, bridge_route_minimum, exceeds_bridge_cap
-        from .allbridge_next import NextClient, to_units
+        from .allbridge_next import to_units
+        from .bridge_routing import quote_routes
+        from .bridge import verified_destination
+        from .models import FundingInstruction
         total = _positive(amount, USDC_UNIT)
         if exceeds_bridge_cap(total):
             raise PaymentAccountError('Amount exceeds the configured bridge limit')
         units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
-        routes = executable_bridge_routes(NextClient().quote('BSC:USDT', 'POL:USDC', units))
+        instruction = FundingInstruction.objects.filter(financial_account=crypto,
+            kind='crypto_address', status='active').first()
+        if instruction is None:
+            raise PaymentAccountError('An active crypto funding instruction is required')
+        recipient = verified_destination(instruction, owner)
+        routes = executable_bridge_routes(quote_routes('BSC:USDT', 'POL:USDC', units,
+                                                       owner.bsc_address, recipient))
         route = routes[0]
         source = Decimal(bridge_route_minimum(route)) / Decimal(10 ** 6)
     source = fx_source_amount(source)
@@ -747,7 +756,16 @@ def deposit_quote(owner, credit, *, client=None):
         shown = f'{maximum:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
         raise PaymentAccountError(f'Este depósito supera el máximo por conversión (US${shown}).')
     fx_minimum = (target * (1 - _tolerance('LOCAL_MONEY_FX_TOLERANCE_BPS', 100))).quantize(USDC_UNIT, rounding=ROUND_DOWN)
-    wallet_minimum = (fx_minimum * (1 - _tolerance('LOCAL_MONEY_BRIDGE_TOLERANCE_BPS', 150))).quantize(
+    from .bridge import executable_bridge_routes, bridge_route_minimum
+    from .bridge_routing import quote_routes
+    from .allbridge_next import to_units, address
+    wallet = address(owner.bsc_address)
+    # Price deposit-address overhead at the lowest authorized FX proceeds.
+    # A percentage-only estimate misses fixed bridge costs on small deposits.
+    routes = executable_bridge_routes(quote_routes(
+        'POL:USDC', 'BSC:USDT', to_units(fx_minimum, 'POL:USDC'), wallet, wallet))
+    bridge_minimum = Decimal(bridge_route_minimum(routes[0])) / Decimal(10 ** 18)
+    wallet_minimum = (bridge_minimum * (1 - _tolerance('LOCAL_MONEY_BRIDGE_TOLERANCE_BPS', 150))).quantize(
         USDC_UNIT, rounding=ROUND_DOWN)
     return {'source_amount': source, 'asset': local.asset, 'target_amount': target,
             'minimum_fx_output': fx_minimum, 'minimum_wallet_output': wallet_minimum,

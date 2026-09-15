@@ -1,8 +1,44 @@
-# Implicit provider bridging with Allbridge NEXT
+# Implicit provider bridging with Relay (legacy NEXT retained)
+
+## Relay rollout — September 15, 2026
+
+New estimates and durable quotes use Relay `/quote/v2` deposit addresses in
+both directions. Existing NEXT quotes/transfers continue with NEXT/NEAR Intents;
+never change an in-flight transfer's provider or deposit address.
+
+`relay.py` validates canonical tokens, base-unit amounts, recipient, refund
+terms, protocol output, 0.5% slippage, and exactly one ERC20 transfer with zero
+native value. No router calldata, approvals, app fee, or arbitrary URLs are
+accepted. The deposit-address fee is included in the displayed quote. Confío's
+0.9% remains at cUSD mint/redeem; no second fee is added through Relay.
+
+Julian explicitly selected the API-trusted deposit-address model. Relay does
+not yet expose independent derivation of a deposit address from order terms.
+Also, `/quote/v2` ignores `strict`; EXACT_INPUT addresses can reprice on deposit.
+Do not claim that our local minimum is independently enforced on chain. We
+retain the reviewed minimum and hold any shortfall for review after checking
+finalized destination receipts. We cap local authorization at ten minutes.
+
+Relay's status locates transaction hashes; it cannot alone mark delivery or
+refund. Reconciliation checks source-hash inclusion, chain IDs, finalized
+receipts, exact token/recipient, and the reviewed minimum. Split provider
+deliveries and partial refunds require review. Full refunds require a receipt
+back to the source wallet. An API timeout never triggers a second deposit.
+Unresolved status lookups or destination receipts escalate to review one hour
+after the deposit deadline. Receive estimates price the actual reverse Relay
+route at the authorized FX lower bound, then apply the existing repricing
+cushion; fixed bridge costs are not approximated as a percentage.
+
+Sources: [quotes](https://docs.relay.link/references/api/get-quote-v2),
+[deposit addresses](https://docs.relay.link/features/deposit-addresses),
+[validation limitations](https://docs.relay.link/references/api/api_core_concepts/input-validation),
+[status](https://docs.relay.link/references/api/get-intents-status-v3).
+
+The NEXT-specific sections below document retained legacy execution.
 
 This integration executes BSC USDT → a verified provider's Polygon USDC address,
 and Polygon USDC already in the customer's wallet → that customer's BSC USDT
-wallet. Infinia inbound journeys also fund a NEXT Polygon deposit directly from
+wallet. Infinia inbound journeys also fund a bridge Polygon deposit directly from
 the user's provider account, with BSC USDT delivered to their wallet (see
 [Infinia journeys](INFINIA_JOURNEYS.md)). The app presents dollar movements rather than a separate bridge tool.
 The feature defaults off. It does not turn a bridge receipt into a fiat payout.
