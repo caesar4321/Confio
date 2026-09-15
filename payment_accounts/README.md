@@ -202,6 +202,13 @@ automatic determination that a Didit session qualifies as enhanced KYC.
 Personal/business accounts are isolated. Country here is the receiving account's
 country, **not** phone country (which remains the home-country fee signal).
 
+An operator may use rail `*` for an all-verified-rails rollout or recipient grant
+within one country, including before account issuance. An exact rail row takes
+precedence, including a disabled row or one without evidence. Country switches
+remain mandatory; a wildcard never authorizes a blank/ambiguous account rail,
+missing sender identity, or a missing provider capability. Recipient rollout
+authorization must not be described as proof of enhanced KYC or provider approval.
+
 Configure `FinancialAccount.payin_rail` only after verifying the issued rail.
 Do not assign a single rail to an account with ambiguous/multiple receiving
 rails: leave blank and hold deposits until event-level rail evidence is supported.

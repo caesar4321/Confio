@@ -150,7 +150,7 @@ export default function LocalSendScreen() {
     limitsQuery.refetch().catch(() => {}); // e.g. back from an approved limit increase
   };
   useFocusEffect(useCallback(() => { refreshOnFocus.current(); }, []));
-  const { savings, usdtBalanceUsd } = useSavingsPortfolio();
+  const { savings, cusdBalanceUsd } = useSavingsPortfolio();
   // Same self-declared address the Recarga/Retiro flows use. Many LATAM IDs
   // carry no address, so the account owner's address is the user's own.
   const { activeAccount } = useAccount();
@@ -223,7 +223,7 @@ export default function LocalSendScreen() {
   const amountNumber = AMOUNT_PATTERN.test(amount) ? Number(normalizedAmount) : 0;
   const available = limits?.known && limits.available != null ? Number(limits.available) : null;
   const perTransferMax = limits?.perTransferMax ? Number(limits.perTransferMax) : null;
-  const spendable = savings.balanceUsd + usdtBalanceUsd;
+  const spendable = savings.balanceUsd + cusdBalanceUsd;
 
   const amountError = !amount ? '' : !AMOUNT_PATTERN.test(amount) || amountNumber <= 0
     ? 'Ingresa un monto válido.'

@@ -79,26 +79,33 @@ def decision(entry):
     sender = payload.get('third_party')
     # Snapshot identifies the actual provisioned owner. Do not compare a business
     # bank sender against the personal identity of its representative.
-    if profile.owner_type == 'individual' and rail and sender_matches(
+    if profile.owner_type == 'individual' and rail not in {'', '*'} and sender_matches(
             sender, profile.identity_snapshot or {}, account.payin_document_country):
         permitted = AccountCapability.objects.filter(financial_account=account,
             capability='receive_same_name', status='enabled').exists()
         return permitted, 'same_owner' if permitted else 'provider_same_name_not_enabled', country, rail
-    if not rail:
+    if rail in {'', '*'}:
         return False, 'unverified_rail', country, rail
     # One SQL snapshot: independent EXISTS calls could combine approvals that
     # were never enabled simultaneously while an operator changes the rollout.
-    switches = set((row.rail, row.confio_account_id) for row in ThirdPartyPayinSwitch.objects.filter(
+    switches = {(row.rail, row.confio_account_id): row.enabled and bool(row.evidence.strip())
+        for row in ThirdPartyPayinSwitch.objects.filter(
         Q(confio_account__isnull=True) | Q(confio_account_id=profile.confio_account_id),
-        provider=profile.provider, country=country, enabled=True, rail__in=['', rail])
-        if row.evidence.strip())
+        provider=profile.provider, country=country, rail__in=['', '*', rail])}
+    # An explicit rail decision (including a stop) wins over an all-rails
+    # grant. Wildcards never fill in missing/ambiguous account rail evidence.
+    def allows(rail_code, owner):
+        exact = (rail_code, owner)
+        if exact in switches:
+            return switches[exact]
+        return bool(rail_code and switches.get(('*', owner), False))
     scopes = (
         ('country_not_enabled', ('', None)),
         ('rail_not_enabled', (rail, None)),
         ('user_not_enabled', (rail, profile.confio_account_id)),
     )
     for reason, filters in scopes:
-        if filters not in switches:
+        if not allows(*filters):
             return False, reason, country, rail
     # Missing/ambiguous sender evidence never becomes an implied match or a
     # blanket bypass, even for an approved third-party recipient.
