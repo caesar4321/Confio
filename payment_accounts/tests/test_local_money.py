@@ -385,6 +385,8 @@ class LocalMoneyTests(TestCase):
         payload = self.client_api.create_transfer_quote.call_args.args[0]
         self.assertEqual((payload['source_account_id'], payload['target_account_id'], payload['source_amount']),
                          ('crypto', 'local', 50.0))
+        self.assertNotIn('requested_lock_time', payload)
+        self.assertEqual(quote['expires_at'], '2026-09-14T12:00:00Z')
 
     def test_quote_requires_an_active_pair(self):
         destination = PayoutDestination.objects.create(
