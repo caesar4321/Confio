@@ -761,18 +761,18 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
     except Exception:  # noqa: BLE001
         logger.exception('payroll ownership check failed for %s', tx_hash)
     try:
-        # Stock trades have no separate domain row. SponsoredBatch is their
-        # durable receipt, so claim the router's USDT/cUSD+ settlement before
-        # the generic scanner can call it an external-wallet deposit.
+        # SponsoredBatch commits before broadcast. Bridge.source_tx_hash may
+        # still be empty when the scanner sees the batch's cUSD redemption;
+        # claim that internal leg before a misleading deposit push is sent.
         from blockchain.models import SponsoredBatch
         if SponsoredBatch.objects.filter(
                 tx_hash__iexact=tx_hash,
-                kind__in=('stock_buy', 'stock_sell'),
+                kind__in=('stock_buy', 'stock_sell', 'payment_bridge'),
                 user_bsc_address__iexact=r,
                 status__in=('signed', 'sent', 'confirmed')).exists():
             return True
     except Exception:  # noqa: BLE001
-        logger.exception('stock ownership check failed for %s', tx_hash)
+        logger.exception('sponsored settlement ownership check failed for %s', tx_hash)
     try:
         from payment_accounts.models import PaymentBridgeTransfer
         if PaymentBridgeTransfer.objects.filter(
@@ -1045,6 +1045,36 @@ def record_cusd_mint(*, user, business, actor_type, display_name,
 
 
 
+@shared_task(bind=True, max_retries=120, queue='push')
+def _push_deposit_after_bridge(self, notification_id, bridge_ids):
+    """Do not announce a possible bridge return before reconciliation catches up."""
+    from notifications.models import Notification
+    from notifications.fcm_service import send_push_notification
+    from payment_accounts.models import PaymentBridgeTransfer, InfiniaJourney
+    from payment_accounts.activity import arrival_owned, sync_activity
+    notice = Notification.objects.filter(pk=notification_id).first()
+    if not notice or notice.notification_type != 'SEND_FROM_EXTERNAL' or notice.push_sent:
+        return
+    wallet = notice.data.get('recipient_address', '')
+    if arrival_owned(notice.data.get('tx_hash', ''), wallet):
+        for pk in InfiniaJourney.objects.filter(bridge_id__in=bridge_ids).values_list('pk', flat=True):
+            sync_activity(pk, notify=False)
+        return
+    # Missing JSON keys are SQL NULL, not "not refund". Inspect the bindings
+    # explicitly so a not-yet-reconciled bridge cannot release the push early.
+    unresolved = any(binding.get('settlement_evidence', {}).get('status') != 'refund'
+        for binding in PaymentBridgeTransfer.objects.filter(pk__in=bridge_ids).exclude(
+            status__in=['delivered', 'refunded', 'failed']).values_list('binding', flat=True))
+    if unresolved:
+        if self.request.retries >= self.max_retries:
+            logger.warning('Deposit push %s withheld: bridge attribution still unresolved', notification_id)
+            return
+        raise self.retry(countdown=30)
+    notice.refresh_from_db()
+    if notice.notification_type == 'SEND_FROM_EXTERNAL' and not notice.push_sent:
+        send_push_notification(notice)
+
+
 def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                             amount_usd, tx_ref, tx_hash, source, conv):
     """The raw USDT receipt + deposit notification for an observed inflow.
@@ -1057,6 +1087,8 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
     from send.models import SendTransaction
     from payment_accounts.activity import arrival_owned
     if arrival_owned(tx_hash, to_addr):
+        return
+    if (from_addr or '').lower() in _system_addresses() and _source_row_covers(tx_hash, to_addr):
         return
 
     receipt = None
@@ -1139,7 +1171,14 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
             message = f'Recibiste ${amount_usd:.2f} (USDT). Se sumará automáticamente a tu ahorro.'
         else:
             message = f'Recibiste ${amount_usd:.2f} (USDT). Se convertirá automáticamente a Confío Dollar.'
-        notif_utils.create_notification(
+        from payment_accounts.models import PaymentBridgeTransfer
+        pending_bridges = list(PaymentBridgeTransfer.objects.filter(
+            quote__confio_account=account, quote__source_address__iexact=to_addr,
+            quote__source_token_id='BSC:USDT', funding_mode='wallet',
+        ).exclude(source_tx_hash='').exclude(status__in=['delivered', 'refunded', 'failed'])
+            .values_list('pk', flat=True))
+        notice = notif_utils.create_notification(
+            send_push=not pending_bridges,
             user=account.user,
             account=account,
             business=account.business if is_business else None,
@@ -1170,6 +1209,10 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                  'related_object_id': str(receipt.internal_id)} if receipt else {}
             ),
         )
+        if pending_bridges:
+            from django.db import transaction
+            transaction.on_commit(lambda: _push_deposit_after_bridge.apply_async(
+                args=[notice.pk, pending_bridges], countdown=30))
     except Exception:  # noqa: BLE001 — comms failure must not lose the deposit
         logger.exception('deposit notification failed for %s', tx_ref)
 
