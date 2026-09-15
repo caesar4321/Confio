@@ -86,8 +86,11 @@ def outside_venezuela(lat, lon, accuracy):
         return False
     radius = (accuracy + 50) / 111320
     for angle in range(0, 360, 30):
-        y = lat + radius * math.sin(math.radians(angle))
+        # Wrap across the antimeridian and clamp at the poles: a sample outside
+        # the lookup's range must not refuse a valid reading (e.g. Fiji).
+        y = max(-90.0, min(90.0, lat + radius * math.sin(math.radians(angle))))
         x = lon + radius * math.cos(math.radians(angle)) / max(math.cos(math.radians(lat)), 1e-6)
+        x = ((x + 180.0) % 360.0) - 180.0
         if _venezuelan(finder.timezone_at(lat=y, lng=x)):
             return False
     return True

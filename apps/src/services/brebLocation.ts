@@ -20,13 +20,15 @@ const VERIFY = gql`mutation VerifyBrebLocation($challenge: String!, $locationJso
  * sends the person to Settings; anything later is a plain retry). */
 export const BREB_PERMISSION_ERROR = 'BREB_LOCATION_PERMISSION';
 
-async function collectEvidence() {
+async function collectEvidence(requestPermission = false) {
   if (!brebLocationSupported()) {
     throw new Error('Actualiza Confío para usar Bre-B.');
   }
-  // The system permission comes first, before any key, server or attestation
-  // step: a server that cannot issue a challenge must never hide the prompt.
-  const permission = await requestBrebLocationPermission();
+  // Only the location screen's explicit action may open the system prompt.
+  // Automatic retries and applications must use an existing permission.
+  const permission = requestPermission
+    ? await requestBrebLocationPermission()
+    : await hasBrebLocationPermission() ? 'granted' : 'denied';
   if (permission !== 'granted') {
     const refused: Error & {code?: string} = new Error(permission === 'reduced'
       ? 'Activa la ubicación precisa para usar Bre-B.'
@@ -62,13 +64,23 @@ export async function applyCobreBreb(scope = ''): Promise<string> {
 export async function withBrebLocationRetry<T extends {success?: boolean; errors?: string[]}>(operation: () => Promise<T>): Promise<T> {
   const result = await operation();
   if (result?.success !== false || result.errors?.[0] !== 'Verifica tu ubicación para usar Bre-B.') return result;
-  const variables = await collectEvidence();
-  const {apolloClient} = await import('../apollo/client');
-  const response = await apolloClient.mutate({mutation: VERIFY, variables});
-  const verification = response.data?.verifyBrebLocation;
-  if (!verification?.success) throw new Error(verification?.error || 'No pudimos verificar tu ubicación.');
+  // The server no longer accepts the cached pass: forget it, so no screen trusts it.
+  passUntil = 0;
+  try {
+    const variables = await collectEvidence();
+    const {apolloClient} = await import('../apollo/client');
+    const response = await apolloClient.mutate({mutation: VERIFY, variables});
+    const verification = response.data?.verifyBrebLocation;
+    if (!verification?.success) throw new Error(verification?.error || 'No pudimos verificar tu ubicación.');
+  } catch (error: any) {
+    // The location step failed, not the operation: its message (and a refused
+    // permission's code) is kept, so a screen can offer the location screen.
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {brebLocation: true});
+  }
   return operation();
 }
+
+export {isBrebLocationFailure} from './brebLocationFailure';
 
 // ─── Bre-B screens (UI) ───
 // The server is the authority on the pass; this only avoids re-checking a
@@ -129,8 +141,8 @@ function rememberPass(scope: string, expiry: number) {
 }
 
 /** A Bre-B screen's explicit check (asks for permission when missing). */
-export async function verifyBrebLocation(scope = ''): Promise<number> {
-  const variables = await collectEvidence();
+export async function verifyBrebLocation(scope = '', requestPermission = true): Promise<number> {
+  const variables = await collectEvidence(requestPermission);
   const {apolloClient} = await import('../apollo/client');
   const response = await apolloClient.mutate({mutation: VERIFY, variables});
   const verification = response.data?.verifyBrebLocation;

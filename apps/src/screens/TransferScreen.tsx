@@ -946,15 +946,20 @@ export const TransferScreen = () => {
       // still use copy-on-tap here.
       receivableLocalAccounts.filter(account => account.provider !== 'infinia').flatMap(account =>
         account.fundingInstructions
-          .filter(instruction => instruction.status === 'active' && !!instruction.displayValue)
+          // A Bre-B key is listed without its value: it shows only on its own
+          // screen, after a current location check (the server may withhold it).
+          .filter(instruction => instruction.status === 'active'
+            && (instruction.kind === 'breb_key' || !!instruction.displayValue))
           .map(instruction => ({
             id: instruction.internalId,
             icon: 'download',
             flag: countryFlag(account.country),
-            title: instruction.displayValue,
-            subtitle: instruction.holderDisplayName
-              ? `A nombre de ${instruction.holderDisplayName} · toca para copiar`
-              : 'Toca para copiar',
+            title: instruction.kind === 'breb_key' ? 'Tu llave Bre-B' : instruction.displayValue,
+            subtitle: instruction.kind === 'breb_key'
+              ? 'Toca para verla'
+              : instruction.holderDisplayName
+                ? `A nombre de ${instruction.holderDisplayName} · toca para copiar`
+                : 'Toca para copiar',
             // A Bre-B key opens its own screen (it shows after a location
             // check); other keys still copy on tap.
             onPress: () => {

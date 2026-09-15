@@ -2,6 +2,8 @@ import base64
 import hashlib
 import json
 import time
+from decimal import Decimal
+from uuid import uuid4
 from types import SimpleNamespace
 from unittest.mock import patch
 from django.core import signing
@@ -433,3 +435,170 @@ class BrebRecordTests(SimpleTestCase):
             gate._record(SimpleNamespace(pk=34), {}, {}, False, 'ip_not_allowed')
             with self.assertRaises(RuntimeError):
                 gate._record(SimpleNamespace(pk=34), {}, self.evidence, True, strict=True)
+
+
+class BrebPerimeterEdgeTests(SimpleTestCase):
+    """Readings whose accuracy perimeter crosses the antimeridian or a pole."""
+    def test_antimeridian_readings_are_outside_venezuela(self):
+        for lon in (179.9999, -179.9999):
+            with self.subTest(lon=lon):
+                self.assertTrue(gate.outside_venezuela(-16.8, lon, 10))
+
+    def test_near_pole_reading_does_not_fail(self):
+        self.assertTrue(gate.outside_venezuela(89.9999, 0.0, 100))
+        self.assertTrue(gate.outside_venezuela(-89.9999, 0.0, 100))
+
+    def test_caracas_is_still_refused(self):
+        self.assertFalse(gate.outside_venezuela(10.48, -66.9, 10))
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+class BrebGenericMutationTests(SimpleTestCase):
+    """The generic payout/transfer mutations cannot move Bre-B money without a
+    current location pass from an allowed IP."""
+    def setUp(self):
+        cache.clear()
+        self.owner = SimpleNamespace(pk=34)
+
+    def account(self, provider='cobre', country='COL'):
+        return SimpleNamespace(internal_id=uuid4(), provider_profile=SimpleNamespace(provider=provider), country=country)
+
+    def payout(self, source, ip='CO', passed=False):
+        from payment_accounts import schema
+        with patch.object(schema, '_active_account', return_value=self.owner), \
+             patch.object(schema.FinancialAccount.objects, 'select_related') as accounts, \
+             patch.object(schema.PayoutDestination.objects, 'filter') as destinations, \
+             patch.object(schema, 'create_and_submit_payout', return_value=None) as submit, \
+             patch.object(gate, 'country_for_request', return_value=ip), \
+             patch.object(gate, 'configured', return_value=True):
+            accounts.return_value.filter.return_value.first.return_value = source
+            destinations.return_value.first.return_value = object()
+            if passed:
+                gate.grant_pass(self.owner)
+            result = schema.CreatePaymentPayout.mutate(
+                None, SimpleNamespace(context=SimpleNamespace(META={})), uuid4(), uuid4(), Decimal('1'), uuid4())
+        return result, submit
+
+    def test_cobre_payout_needs_a_pass(self):
+        result, submit = self.payout(self.account())
+        self.assertFalse(result.success)
+        # The exact refusal the app answers with one location check and retry.
+        self.assertEqual(result.errors, ['Verifica tu ubicación para usar Bre-B.'])
+        submit.assert_not_called()
+
+    def test_cobre_payout_refused_from_venezuela_even_with_a_pass(self):
+        result, submit = self.payout(self.account(), ip='VE', passed=True)
+        self.assertFalse(result.success)
+        submit.assert_not_called()
+
+    def test_cobre_payout_with_a_pass_from_an_allowed_ip(self):
+        result, submit = self.payout(self.account(), passed=True)
+        self.assertTrue(result.success)
+        submit.assert_called_once()
+
+    def test_colombian_account_of_any_provider_is_gated(self):
+        result, submit = self.payout(self.account(provider='infinia', country='COL'))
+        self.assertFalse(result.success)
+        submit.assert_not_called()
+
+    def test_other_countries_are_not_location_gated(self):
+        result, submit = self.payout(self.account(provider='infinia', country='MEX'))
+        self.assertTrue(result.success)
+        submit.assert_called_once()
+
+    def provision(self, country):
+        from payment_accounts import schema
+        with patch.object(schema, '_active_account', return_value=self.owner), \
+             patch.object(schema, '_verified_identity', return_value=object()), \
+             patch('payment_accounts.activation.require_paid'), \
+             patch.object(schema, 'provision_payment_account', return_value=(None, None)) as provision, \
+             patch.object(gate, 'country_for_request', return_value='CO'), \
+             patch.object(gate, 'configured', return_value=True), \
+             override_settings(INFINIA_KYC_MODE='SELF_DECLARED'):
+            result = schema.ProvisionPaymentAccount.mutate(
+                None, SimpleNamespace(context=SimpleNamespace(META={})), 'infinia', country, 'COP', True)
+        return result, provision
+
+    def test_opening_a_colombian_account_needs_a_pass(self):
+        result, provision = self.provision('COL')
+        self.assertEqual(result.errors, ['Verifica tu ubicación para usar Bre-B.'])
+        provision.assert_not_called()
+        result, provision = self.provision('MEX')
+        self.assertTrue(result.success)
+        provision.assert_called_once()
+
+    def test_a_colombian_receiving_instruction_needs_a_pass(self):
+        from payment_accounts import schema
+        with patch.object(schema, '_active_account', return_value=self.owner), \
+             patch.object(schema.FinancialAccount.objects, 'select_related') as accounts, \
+             patch.object(schema, 'create_funding_instruction') as create, \
+             patch.object(gate, 'country_for_request', return_value='CO'), \
+             patch.object(gate, 'configured', return_value=True):
+            accounts.return_value.filter.return_value.first.return_value = self.account(provider='infinia')
+            result = schema.CreateReceivingInstruction.mutate(
+                None, SimpleNamespace(context=SimpleNamespace(META={})), uuid4(), 'breb_key')
+        self.assertFalse(result.success)
+        create.assert_not_called()
+
+    def test_cobre_transfer_needs_a_pass(self):
+        from payment_accounts import schema
+        source, destination = self.account(), self.account()
+        with patch.object(schema, '_active_account', return_value=self.owner), \
+             patch.object(schema.FinancialAccount.objects, 'select_related') as accounts, \
+             patch.object(schema, 'create_and_submit_transfer', return_value=None) as submit, \
+             patch.object(gate, 'country_for_request', return_value='CO'), \
+             patch.object(gate, 'configured', return_value=True):
+            accounts.return_value.filter.return_value = [source, destination]
+            result = schema.CreatePaymentTransfer.mutate(
+                None, SimpleNamespace(context=SimpleNamespace(META={})),
+                source.internal_id, destination.internal_id, Decimal('1'), uuid4())
+        self.assertFalse(result.success)
+        submit.assert_not_called()
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+class BrebDestinationPollTests(SimpleTestCase):
+    """Polling a saved recipient's check reaches the provider, so a Colombian
+    recipient needs a current location pass from an allowed IP."""
+    def setUp(self):
+        cache.clear()
+        self.owner = SimpleNamespace(pk=34)
+
+    def poll(self, country='COL', ip='CO', passed=False):
+        from payment_accounts import local_money_schema as lms
+        row = SimpleNamespace(country=country)
+        info = SimpleNamespace(context=SimpleNamespace(META={}))
+        with patch.object(lms, '_owner', return_value=self.owner), \
+             patch.object(lms.PayoutDestination.objects, 'filter') as rows, \
+             patch.object(lms.local_money, 'refresh_destination', return_value=row) as refresh, \
+             patch.object(lms, '_destination', return_value='destination'), \
+             patch.object(gate, 'country_for_request', return_value=ip), \
+             patch.object(gate, 'configured', return_value=True):
+            rows.return_value.first.return_value = row
+            if passed:
+                gate.grant_pass(self.owner)
+            try:
+                result = lms.LocalMoneyQuery.resolve_local_destination(None, info, uuid4())
+            except Exception as exc:  # the GraphQL error the app sees
+                result = exc
+        return result, refresh
+
+    def test_colombian_recipient_needs_a_pass(self):
+        result, refresh = self.poll()
+        self.assertIsInstance(result, Exception)
+        refresh.assert_not_called()
+
+    def test_colombian_recipient_refused_from_venezuela(self):
+        result, refresh = self.poll(ip='VE', passed=True)
+        self.assertIsInstance(result, Exception)
+        refresh.assert_not_called()
+
+    def test_colombian_recipient_polls_with_a_pass(self):
+        result, refresh = self.poll(passed=True)
+        self.assertEqual(result, 'destination')
+        refresh.assert_called_once()
+
+    def test_other_countries_poll_without_a_pass(self):
+        result, refresh = self.poll(country='MEX')
+        self.assertEqual(result, 'destination')
+        refresh.assert_called_once()

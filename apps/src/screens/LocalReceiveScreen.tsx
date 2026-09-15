@@ -21,6 +21,7 @@ import { useApolloClient, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { countryFlag, countryName } from '../config/localRails';
+import { useBrebLocationPass } from '../components/breb/BrebLocationGate';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
@@ -85,6 +86,11 @@ function InfiniaLocalReceiveScreen() {
     variables: { methodId }, fetchPolicy: 'network-only', errorPolicy: 'all',
   });
   const account: LocalReceiveAccount | undefined = accountQuery.data?.localReceiveAccount;
+  // A Bre-B key shows only while this account's location pass lasts, also
+  // when the screen stays open past it (the server withholds it on reload).
+  const brebKeyScreen = methodId === 'co_breb_receive';
+  const passOk = useBrebLocationPass(brebKeyScreen);
+  const accountValue = account && (!brebKeyScreen || passOk) ? account.value : '';
   const [accountRetrying, setAccountRetrying] = useState(false);
   // The server withholds a Bre-B key without a recent location check; the
   // check screen renews it and the key loads on return.
@@ -218,7 +224,7 @@ function InfiniaLocalReceiveScreen() {
   }, [selectedId]);
 
   const shareMessage = account
-    ? [`${copy.label}: ${account.value}`, account.holderName ? `Titular: ${account.holderName}` : '',
+    ? [`${copy.label}: ${accountValue}`, account.holderName ? `Titular: ${account.holderName}` : '',
       account.institution ? `Banco: ${account.institution}` : ''].filter(Boolean).join('\n')
     : '';
 
@@ -326,7 +332,7 @@ function InfiniaLocalReceiveScreen() {
               <Text style={styles.primaryActionButtonText}>Verificar documento</Text>
             </TouchableOpacity>
           </View>
-        ) : account.status === 'active' && !account.value && methodId === 'co_breb_receive' ? (
+        ) : account.status === 'active' && !accountValue && brebKeyScreen ? (
           <View style={styles.emptyStateCard}>
             <View style={styles.emptyStateIconWrap}>
               <Icon name="map-pin" size={22} color={colors.primaryDark} />
@@ -408,12 +414,12 @@ function InfiniaLocalReceiveScreen() {
                 />
                 <View style={styles.inputCard}>
                   <Text style={styles.inputLabel}>{copy.label}</Text>
-                  <Text style={styles.detailValue} selectable>{account.value}</Text>
+                  <Text style={styles.detailValue} selectable>{accountValue}</Text>
                   {account.holderName ? <Text style={styles.detailMeta}>Titular: {account.holderName}</Text> : null}
                   {account.institution ? <Text style={styles.detailMeta}>Banco: {account.institution}</Text> : null}
                   <View style={styles.buttonRow}>
                     <TouchableOpacity style={styles.smallPrimary} onPress={() => {
-                      Clipboard.setString(account.value);
+                      Clipboard.setString(accountValue);
                       Alert.alert('Copiado', `${copy.label} se copió. Compártela con quien te va a pagar.`);
                     }}>
                       <Icon name="copy" size={16} color={colors.white} />

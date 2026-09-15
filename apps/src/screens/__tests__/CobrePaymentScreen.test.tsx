@@ -5,8 +5,9 @@ const mockPrepare = jest.fn(),
   mockCreate = jest.fn(),
   mockAuthorize = jest.fn();
 const mockRefetch = jest.fn().mockResolvedValue({});
+const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({goBack: jest.fn()}),
+  useNavigation: () => ({goBack: jest.fn(), navigate: (...a: any[]) => mockNavigate(...a)}),
 }));
 // The location gate has its own screen; this test is about the payment screen.
 jest.mock('../../components/breb/BrebLocationGate', () => ({BrebLocationGate: ({children}: any) => children}));
@@ -133,5 +134,56 @@ it('reviews first, persists the bank instruction, then signs once on confirmatio
   expect(mockCreate.mock.invocationCallOrder[0]).toBeLessThan(
     mockAuthorize.mock.invocationCallOrder[0],
   );
+  await act(async () => tree.unmount());
+});
+
+const labels = (tree: renderer.ReactTestRenderer) =>
+  tree.root.findAllByType(Text).map(node => String(node.props.children));
+
+it('opens in the direction its entry point asks for', async () => {
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = renderer.create(<Screen route={{params: {direction: 'to_wallet'}}} />);
+  });
+  expect(labels(tree)).toContain('Hacia Confío');
+  await act(async () => tree.unmount());
+  await act(async () => {
+    tree = renderer.create(<Screen />);
+  });
+  expect(labels(tree)).toContain('Hacia un banco');
+  await act(async () => tree.unmount());
+});
+
+it('a failed location check says why and offers the location screen, never signing', async () => {
+  mockPrepare.mockResolvedValue({internalId: 'bridge', amountUnits: '10', feeUnits: '0', amountOutMin: '9.9'});
+  mockCreate.mockRejectedValueOnce(
+    Object.assign(new Error('Permite la ubicación precisa para usar Bre-B.'), {brebLocation: true}),
+  );
+  mockAuthorize.mockClear();
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = renderer.create(<Screen />);
+  });
+  const press = async (text: string) => {
+    const button = tree.root
+      .findAllByType(TouchableOpacity)
+      .find(b => b.findAllByType(Text).some(t => String(t.props.children).includes(text)))!;
+    await act(async () => {
+      await button.props.onPress();
+    });
+  };
+  await press('COL · COP');
+  await press('Bank · Holder');
+  const inputs = tree.root.findAllByType(TextInput);
+  await act(async () => {
+    inputs[0].props.onChangeText('10');
+    inputs[1].props.onChangeText('30');
+  });
+  await press('Revisar pago');
+  await press('Confirmar conversión y pago');
+  expect(labels(tree)).toContain('Permite la ubicación precisa para usar Bre-B.');
+  expect(mockAuthorize).not.toHaveBeenCalled();
+  await press('Confirmar ubicación');
+  expect(mockNavigate).toHaveBeenCalledWith('BrebLocationCheck');
   await act(async () => tree.unmount());
 });

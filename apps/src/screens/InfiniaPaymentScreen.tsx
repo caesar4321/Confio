@@ -28,12 +28,15 @@ import {
   preparePaymentBridge,
 } from '../services/paymentBridge';
 import * as cobre from '../services/cobreJourney';
+import {isBrebLocationFailure} from '../services/brebLocationFailure';
 import {bridgeAmount} from './LocalAccountFundingScreen';
 
 export default function InfiniaPaymentScreen({
   provider = 'infinia',
+  route,
 }: {
   provider?: 'infinia' | 'cobre';
+  route?: {params?: {direction?: 'to_bank' | 'to_wallet'}};
 }) {
   const isCobre = provider === 'cobre';
   const enabledKey = isCobre
@@ -55,7 +58,10 @@ export default function InfiniaPaymentScreen({
     fetchPolicy: 'network-only',
     pollInterval: 5000,
   });
-  const [direction, setDirection] = useState('to_bank');
+  // An entry point can open one direction (e.g. "convert my pesos to dollars").
+  const [direction, setDirection] = useState(
+    route?.params?.direction === 'to_wallet' ? 'to_wallet' : 'to_bank',
+  );
   const [local, setLocal] = useState(''),
     [destination, setDestination] = useState(''),
     [credit, setCredit] = useState('');
@@ -64,6 +70,7 @@ export default function InfiniaPaymentScreen({
   const [walletMinimum, setWalletMinimum] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [locationBlocked, setLocationBlocked] = useState(false);
   const [review, setReview] = useState<BridgeTransfer | null>(null);
   const [returnJourney, setReturnJourney] = useState<any>(null);
   const working = useRef(false),
@@ -93,12 +100,20 @@ export default function InfiniaPaymentScreen({
     working.current = true;
     setBusy(true);
     setError('');
+    setLocationBlocked(false);
     try {
       await fn();
-    } catch {
-      setError(
-        'No pudimos confirmar el resultado. Actualiza el historial antes de volver a intentar.',
-      );
+    } catch (failure: any) {
+      if (isBrebLocationFailure(failure)) {
+        // The location check failed before anything was sent: say why and
+        // offer the location screen (it handles Settings and retries).
+        setError(failure?.message || 'Confirma tu ubicación para usar Bre-B.');
+        setLocationBlocked(true);
+      } else {
+        setError(
+          'No pudimos confirmar el resultado. Actualiza el historial antes de volver a intentar.',
+        );
+      }
     } finally {
       await history.refetch().catch(() => {});
       working.current = false;
@@ -201,6 +216,10 @@ export default function InfiniaPaymentScreen({
         )}
         {busy && <ActivityIndicator />}
         {!!error && <Text style={styles.error}>{error}</Text>}
+        {locationBlocked &&
+          button('Confirmar ubicación', () =>
+            (navigation as any).navigate('BrebLocationCheck'),
+          )}
         {returnJourney && review ? (
           <View style={styles.card}>
             <Text>
