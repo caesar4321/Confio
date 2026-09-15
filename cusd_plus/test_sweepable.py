@@ -53,10 +53,14 @@ def _sum(rows, field):
 
 
 class ReservedUsdtTests(SimpleTestCase):
-    def _reserved(self, sends=(), ramps=(), sagas=()):
+    def _reserved(self, sends=(), ramps=(), sagas=(), local_units=()):
         with mock.patch('send.models.SendTransaction.objects') as s_objs, \
              mock.patch('ramps.models.RampTransaction.objects') as r_objs, \
-             mock.patch('conversion.models.Conversion.objects') as c_objs:
+             mock.patch('conversion.models.Conversion.objects') as c_objs, \
+             mock.patch('payment_accounts.models.PaymentBridgeTransfer.objects') as bridges, \
+             mock.patch('payment_accounts.models.InfiniaJourney.objects') as journeys:
+            bridges.filter.return_value.filter.return_value.only.return_value.iterator.return_value = iter([])
+            journeys.filter.return_value.exclude.return_value.values_list.return_value = local_units
             s_objs.filter.return_value.exclude.return_value.only.return_value = _Rows(sends)
             # Everything except the sends is summed in the database: a capped
             # scan stopped reserving past the cap, so those reads are
@@ -71,6 +75,9 @@ class ReservedUsdtTests(SimpleTestCase):
 
     def test_nothing_committed_reserves_nothing(self):
         self.assertEqual(self._reserved(), 0)
+
+    def test_local_transfer_arrival_cannot_be_generically_swept(self):
+        self.assertEqual(self._reserved(local_units=['1982000000000000000']), 1982000000000000000)
 
     def test_a_prepared_usdt_send_is_reserved(self):
         self.assertEqual(self._reserved(sends=[_send('2.50')]), int(Decimal('2.5') * WAD))

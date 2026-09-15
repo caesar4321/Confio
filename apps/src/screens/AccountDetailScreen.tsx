@@ -121,6 +121,8 @@ interface Transaction {
   runId?: string;
   transactionHash?: string;
   rampDirection?: string;
+  localTransferId?: string;
+  localTransferPendingAmount?: boolean;
   rampProvider?: string;
   rampFiatAmount?: string;
   rampFiatCurrency?: string;
@@ -1000,6 +1002,8 @@ export const AccountDetailScreen = () => {
           senderBusiness: tx.senderBusiness,
           recipientBusiness: tx.counterpartyBusiness,
           rampDirection: tx.rampDirection,
+          localTransferId: tx.localTransferId,
+          localTransferPendingAmount: tx.localTransferPendingAmount,
           rampProvider: tx.rampProvider,
           rampFiatAmount: tx.rampFiatAmount,
           rampFiatCurrency: tx.rampFiatCurrency,
@@ -1354,6 +1358,8 @@ export const AccountDetailScreen = () => {
 
     // Create enhanced transaction title with contact name
     const getEnhancedTransactionTitle = () => {
+      if (transaction.localTransferId) return transaction.description || (transaction.type === 'sent'
+        ? 'Envío a banco o billetera' : 'Ingreso por cuenta local');
       let baseTitle = '';
       const stockTitle = transaction.description?.startsWith('Ondo Stocks: ')
         ? transaction.description.slice('Ondo Stocks: '.length)
@@ -1414,6 +1420,7 @@ export const AccountDetailScreen = () => {
     };
 
     const navigation = useNavigation();
+    const transferNavigation = useNavigation<AccountDetailScreenNavigationProp>();
     const senderBadgeInfo =
       badgeByPhone.get(transaction.fromPhone || '') ||
       badgeByPhone.get(normalizePhoneLookupKey(transaction.fromPhone));
@@ -1442,6 +1449,10 @@ export const AccountDetailScreen = () => {
       false;
 
     const handlePress = () => {
+      if (transaction.localTransferId) {
+        transferNavigation.navigate('LocalTransferStatus', { journeyId: transaction.localTransferId });
+        return;
+      }
       const detailAmount = (() => {
         if (transaction.type === 'conversion') return transaction.amount;
         if (transaction.type === 'ramp' && transaction.rampDirection === 'on_ramp'
@@ -1616,7 +1627,7 @@ export const AccountDetailScreen = () => {
       }
     };
 
-    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${formatTransactionAmount(transaction.amount)} ${formatTokenLabel(transaction.currency)}. ${formattedDate} ${formattedTime}.`;
+    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${transaction.localTransferPendingAmount ? 'Importe pendiente' : `${formatTransactionAmount(transaction.amount)} ${formatTokenLabel(transaction.currency)}`}. ${formattedDate} ${formattedTime}.`;
     const isCounterpartyTheSender =
       transaction.type === 'received' ||
       (transaction.type === 'payment' && transaction.amount.startsWith('+')) ||
@@ -1718,7 +1729,7 @@ export const AccountDetailScreen = () => {
             styles.transactionAmountText,
             transaction.amount.startsWith('-') ? styles.negativeAmount : styles.positiveAmount
           ]}>
-            {formatTransactionAmount(transaction.amount)} {formatTokenLabel(transaction.currency)}
+            {transaction.localTransferPendingAmount ? 'Pendiente' : `${formatTransactionAmount(transaction.amount)} ${formatTokenLabel(transaction.currency)}`}
           </Text>
           {/* Status only when it carries information — completed is the
               normal case and stays silent. */}

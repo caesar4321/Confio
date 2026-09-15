@@ -7,6 +7,7 @@ User = get_user_model()
 
 
 class NotificationType(models.TextChoices):
+    LOCAL_TRANSFER_UPDATED = 'LOCAL_TRANSFER_UPDATED', 'Local transfer updated'
     # Send transactions
     SEND_RECEIVED = 'SEND_RECEIVED', 'Send Received'
     SEND_SENT = 'SEND_SENT', 'Send Sent'

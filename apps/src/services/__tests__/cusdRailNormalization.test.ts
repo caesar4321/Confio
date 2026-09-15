@@ -102,6 +102,7 @@ describe('foreground eligibility reconciliation', () => {
         balanceUsd: 0,
         cusdBalanceWei: (10n * WAD).toString(),
       } } })
+      .mockResolvedValueOnce({ data: { localTransferMints: [] } })
       .mockResolvedValueOnce({ data: { cusdPlusConversionsInFlight: [] } });
     mockEthCall.mockImplementation(async (to: string, data: string) => {
       if (to === CUSD && data.startsWith('0xbalanceOf')) return `0x${(10n * WAD).toString(16)}`;
@@ -126,6 +127,7 @@ describe('foreground eligibility reconciliation', () => {
         balanceUsd: 10,
         cusdBalanceWei: '0',
       } } })
+      .mockResolvedValueOnce({ data: { localTransferMints: [] } })
       .mockResolvedValueOnce({ data: { cusdPlusConversionsInFlight: [] } });
     mockEthCall.mockImplementation(async (to: string, data: string) => {
       if (to === VAULT && data.startsWith('0xbalanceOf')) return `0x${(10n * WAD).toString(16)}`;

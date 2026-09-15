@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, StatusBar, Image, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import {localTransferRoute} from '../services/localTransferNavigation';
 import { colors } from '../config/theme';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -370,6 +371,11 @@ export const NotificationScreen = () => {
     let parsedData: any = notification.data;
     if (typeof parsedData === 'string') { try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; } }
     if (parsedData == null || typeof parsedData !== 'object') parsedData = {};
+    const localRoute = notifType === 'LOCAL_TRANSFER_UPDATED' ? localTransferRoute(parsedData.local_transfer_id) : null;
+    if (localRoute) {
+      navigation.navigate(localRoute.screen, localRoute.params);
+      return;
+    }
 
     if (notification.actionUrl) {
       // Parse deep link and navigate accordingly

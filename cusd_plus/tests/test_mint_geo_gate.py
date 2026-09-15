@@ -308,6 +308,16 @@ class SponsoredRailGateTests(SimpleTestCase):
         self.assertEqual(res.error, 'bad_intent_signature')
         close.assert_not_called()
 
+    def test_local_mint_refusal_never_closes_an_unrelated_saga(self):
+        calls = [_call(VAULT, _mint_data(amount=10**18))]
+        with mock.patch('cusd_plus.tasks.mark_saga_delivered_as_usdt') as close, \
+             mock.patch('blockchain.models.SponsoredBatch.objects') as batches:
+            batches.filter.return_value.order_by.return_value.first.return_value = None
+            res = self._mutate(calls, _user('VE', uid=272),
+                request_id='local-mint-f311c949-8876-4b53-b3f6-0d5faaf7a97a_a0')
+        self.assertEqual(res.error, 'mint_below_redeemable_minimum')
+        close.assert_not_called()
+
     def test_exact_replay_wins_over_a_new_policy_refusal(self):
         calls = [_call(VAULT, _mint_data(amount=2 * 10**18))]
         existing = SimpleNamespace(
@@ -466,6 +476,7 @@ class DepositNotificationCopyTests(SimpleTestCase):
             captured.update(kwargs)
 
         with mock.patch('conversion.models.Conversion.objects') as conv_objs, \
+             mock.patch('payment_accounts.activity.arrival_owned', return_value=False), \
              mock.patch('users.models.Account.objects') as acct_objs, \
              mock.patch('send.models.SendTransaction.all_objects') as sends, \
              mock.patch('notifications.utils.create_notification', side_effect=_capture):

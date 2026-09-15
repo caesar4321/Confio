@@ -95,6 +95,7 @@ def _external_deposit_conversion(row):
         created_at__lte=receipt.created_at + timedelta(days=14),
         is_deleted=False,
         ramp_transactions__isnull=True,
+        local_transfer_journey__isnull=True,
     )
     if receipt.recipient_business_id:
         query = query.filter(actor_business_id=receipt.recipient_business_id)
@@ -158,6 +159,7 @@ def _preload_external_deposit_conversions(rows):
         created_at__lte=latest + timedelta(days=14),
         is_deleted=False,
         ramp_transactions__isnull=True,
+        local_transfer_journey__isnull=True,
     ).filter(owner_filter).order_by('created_at'))
 
     for row, receipt, owner in candidates_by_row:
@@ -189,7 +191,16 @@ def _visible_unified():
     through here; writers keep using the plain manager so the sync path still
     sees deleted rows and cannot duplicate them.
     """
-    return UnifiedTransactionTable.objects.filter(deleted_at__isnull=True)
+    from django.db.models import Exists, OuterRef
+    from payment_accounts.models import PaymentBridgeTransfer
+    owned_exit = PaymentBridgeTransfer.objects.filter(
+        infinia_journey__direction='to_bank',
+        source_tx_hash__iexact=OuterRef('conversion__to_transaction_hash'),
+        quote__source_address__iexact=OuterRef('conversion__user_bsc_address'),
+    ).exclude(source_tx_hash='')
+    return UnifiedTransactionTable.objects.filter(deleted_at__isnull=True).exclude(
+        conversion__local_transfer_journey__isnull=False
+    ).annotate(_local_exit=Exists(owned_exit)).filter(_local_exit=False)
 from django.db.models import Q
 
 
@@ -250,6 +261,16 @@ class UnifiedTransactionType(DjangoObjectType):
     # P2P Trade ID for navigation
     p2p_trade_id = graphene.String(description="P2P Trade ID if this is an exchange transaction")
     ramp_direction = graphene.String(description="Ramp direction (on_ramp/off_ramp)")
+    local_transfer_id = graphene.String()
+    local_transfer_pending_amount = graphene.Boolean()
+
+    def resolve_local_transfer_id(self, info):
+        if self.local_money_flow_id:
+            return str(self.local_money_flow.infinia_journey.internal_id)
+        return None
+
+    def resolve_local_transfer_pending_amount(self, info):
+        return bool(self.local_money_flow_id and self.sender_type == 'external' and self.status != 'CONFIRMED')
     ramp_provider = graphene.String(description="Ramp provider display name")
     ramp_fiat_amount = graphene.String(description="Ramp fiat-side amount")
     ramp_fiat_currency = graphene.String(description="Ramp fiat-side currency")
@@ -314,6 +335,8 @@ class UnifiedTransactionType(DjangoObjectType):
 
     def resolve_direction(self, info):
         """Resolve transaction direction based on current user's address"""
+        if self.transaction_type == 'local_transfer':
+            return 'received' if self.sender_type == 'external' else 'sent'
         # Conversions are always "self" transactions
         if self.transaction_type == 'conversion':
             return 'conversion'
@@ -754,6 +777,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             )
         
         # Filter by token types if provided (case-insensitive to handle legacy rows)
+        queryset = queryset.select_related('local_money_flow__infinia_journey').filter(Q(local_money_flow__isnull=True) | Q(local_money_flow__confio_account=account))
         if token_types:
             from django.db.models.functions import Upper
             wanted = [t.upper() for t in token_types]
@@ -859,6 +883,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             )
         
         # Filter by token types if provided (case-insensitive)
+        queryset = queryset.filter(Q(local_money_flow__isnull=True) | Q(local_money_flow__confio_account=account))
         if token_types:
             from django.db.models.functions import Upper
             wanted = [t.upper() for t in token_types]
@@ -880,6 +905,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             ).filter(transaction_type_lower__in=wanted_types)
 
         queryset = queryset.select_related(
+            'local_money_flow__infinia_journey',
             'send_transaction',
             'payment_transaction',
             'conversion',

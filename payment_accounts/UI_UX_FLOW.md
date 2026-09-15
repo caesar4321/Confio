@@ -903,3 +903,33 @@ URLs to analytics.
 4. Add `Enviar a banco o billetera` and typed local payout destinations.
 5. Add capability-upgrade UX for Infinia third-party pay-in and enhanced KYC.
 6. Add new countries only through server-provided product descriptors.
+
+## Local-transfer wallet activity (2026-09-15)
+
+Each Infinia journey projects one `local_transfer` row into the unified wallet
+feed, linked through its provider-independent `MoneyFlow`. Taps and notifications
+open `LocalTransferStatus` with the journey UUID. Unsigned outgoing instructions
+are not wallet debits. Provider credit, FX, bridge delivery and final payout are
+child events, not additional wallet transactions.
+
+Incoming USDT delivery is not completed cUSD receipt. Foreground minting uses
+`local-mint-<journey UUID>_a0` / `_a1` signed sponsorship identities. The confirmed
+conversion supplies the net wallet amount and actual token. Pending arrivals
+are reserved against generic sweeps. Never infer this link from amount alone.
+Legacy incoming mints without this identity remain unlinked for review rather
+than being guessed. Existing outgoing entries and linked raw receipts are
+repairable without changing balances; raw audit records are preserved.
+
+Deploy backend migrations before the new app build. After migration, inspect
+`python manage.py backfill_local_transfer_activity --journey <UUID>` (dry run),
+then add `--apply` to rebuild that transfer, or omit `--journey` for all. Backfill
+does not submit payments, mint tokens or send historical push notifications.
+Actual refunds remain on the original transfer and identify the returned USDT;
+they never imply that the recipient's local payout completed.
+
+The periodic Infinia reconciler also repairs stale wallet projections, including
+terminal journeys. Local signed mints never consume legacy savings-saga rows.
+Receipts below the savings minimum finish in universal cUSD; they are not held
+waiting for a larger deposit. Completion pushes are sent only after the wallet
+projection commits. The status screen explains that incoming conversion resumes
+when the app is open.

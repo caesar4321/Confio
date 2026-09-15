@@ -308,6 +308,8 @@ def reconcile_bridge(t, *, intents=None):
         t.status = 'failed' if transferred == 0 and t.funding_mode == 'wallet' else 'needs_review'
         t.failure_code = 'source_transfer_mismatch'
     else:
+        from cusd_plus.tasks import repair_payment_bridge_deposit
+        repair_payment_bridge_deposit(t, source)
         # Record the canonical on-chain perimeter fee even when the generic
         # sponsored-batch worker has not yet processed the bridge's source.
         if t.batch_id:

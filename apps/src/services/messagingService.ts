@@ -1,6 +1,7 @@
 import { AuthorizationStatus, getAPNSToken, getInitialNotification, getMessaging, getToken, hasPermission, isDeviceRegisteredForRemoteMessages, onMessage, onNotificationOpenedApp, onTokenRefresh, registerDeviceForRemoteMessages, requestPermission } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidStyle, EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
+import {localTransferRoute} from './localTransferNavigation';
 import * as Keychain from 'react-native-keychain';
 import DeviceInfo from 'react-native-device-info';
 import { apolloClient } from '../apollo/client';
@@ -840,6 +841,11 @@ class MessagingService {
       }
 
       if (action_url) {
+        const local = localTransferRoute(action_url);
+        if (local) {
+          this.navigateInsideMain(local.screen, local.params);
+          return;
+        }
         // Parse deep link and navigate
         this.navigateToDeepLink(action_url, transactionData);
       } else if (related_type && related_id) {

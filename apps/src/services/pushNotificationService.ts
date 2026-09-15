@@ -1,5 +1,6 @@
 import { AuthorizationStatus, FirebaseMessagingTypes, getInitialNotification, getMessaging, getToken, hasPermission, onMessage, onNotificationOpenedApp, onTokenRefresh, requestPermission, setBackgroundMessageHandler, subscribeToTopic, unsubscribeFromTopic } from '@react-native-firebase/messaging';
 import notifee from '@notifee/react-native';
+import {localTransferRoute} from './localTransferNavigation';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import * as RootNavigation from '../navigation/RootNavigation';
@@ -246,6 +247,11 @@ export class PushNotificationService {
       
       // Parse action URL if it exists
       if (action_url) {
+        const local = localTransferRoute(action_url);
+        if (local) {
+          RootNavigation.navigate('Main', local);
+          return;
+        }
         const pendingAutoSwap =
           remoteMessage.data?.pending_auto_swap === 'true' ||
           remoteMessage.data?.pending_auto_swap === 'True' ||

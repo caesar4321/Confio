@@ -115,6 +115,67 @@ class RelaySettlementTests(SimpleTestCase):
         self.client = mock.Mock()
         self.client.status.return_value = self.status
 
+    def collection_fixture(self):
+        from .test_bridge_execution import receipt
+        self.transfer.deposit_address = DEPOSIT
+        self.transfer.funding_mode = 'wallet'
+        depository = '0x' + '77' * 20
+        self.transfer.binding['response'] = {'protocol': {'v2': {'paymentDetails': {
+            'chainId': 'bnb', 'currency': TOKENS['BSC:USDT'][0],
+            'amount': self.transfer.quote.amount_units, 'depository': depository}}}}
+        self.status['inTxHashes'] = [REQUEST]
+        funding = receipt('BSC:USDT', DEPOSIT, 2*10**18)
+        collection = receipt('BSC:USDT', depository, 2*10**18)
+        funding.update(blockNumber='0x10', transactionIndex='0x1')
+        collection.update(blockNumber='0x10', transactionIndex='0x2')
+        funding['logs'][0]['topics'][1] = '0x' + SENDER[2:].rjust(64, '0')
+        collection['logs'][0]['topics'][1] = '0x' + DEPOSIT[2:].rjust(64, '0')
+        return [funding, collection, receipt('POL:USDC', RECIPIENT, 1934823)]
+
+    def test_collection_hash_proves_deposit_delivery(self):
+        receipts = self.collection_fixture()
+        with mock.patch('payment_accounts.relay_settlement.chain.final_receipt', side_effect=receipts):
+            reconcile_relay(self.transfer, client=self.client)
+        self.assertEqual(self.transfer.status, 'delivered')
+        self.assertEqual(self.transfer.actual_out_units, '1934823')
+        self.assertEqual(self.transfer.binding['settlement_evidence']['origin_transaction_hashes'], [REQUEST])
+
+    def test_collection_rejects_unrelated_or_wrong_amount_receipts(self):
+        for kind in ('sender', 'recipient', 'token', 'amount', 'earlier', 'funding'):
+            with self.subTest(kind=kind):
+                receipts = self.collection_fixture()
+                log = receipts[1]['logs'][0]
+                if kind == 'sender':
+                    log['topics'][1] = '0x' + SENDER[2:].rjust(64, '0')
+                elif kind == 'recipient':
+                    log['topics'][2] = '0x' + SENDER[2:].rjust(64, '0')
+                elif kind == 'token':
+                    log['address'] = SENDER
+                elif kind == 'amount':
+                    log['data'] = '0x' + f'{1:064x}'
+                elif kind == 'earlier':
+                    receipts[1]['transactionIndex'] = '0x0'
+                else:
+                    receipts[0]['logs'][0]['data'] = '0x' + f'{1:064x}'
+                with mock.patch('payment_accounts.relay_settlement.chain.final_receipt', side_effect=receipts):
+                    with self.assertRaises(RelayError):
+                        reconcile_relay(self.transfer, client=self.client)
+
+    def test_collection_waits_for_finality(self):
+        receipts = self.collection_fixture()
+        with mock.patch('payment_accounts.relay_settlement.chain.final_receipt', side_effect=[receipts[0], None]):
+            reconcile_relay(self.transfer, client=self.client)
+        self.assertEqual(self.transfer.status, 'bridging')
+
+    def test_collection_binding_cannot_change_token_chain_amount_or_depository(self):
+        for key, value in [('chainId', 'polygon'), ('currency', SENDER), ('amount', '1'), ('depository', '0x'+'00'*20)]:
+            self.collection_fixture()
+            self.transfer.binding['response']['protocol']['v2']['paymentDetails'][key] = value
+            with mock.patch('payment_accounts.relay_settlement.chain.final_receipt') as rpc:
+                with self.assertRaises(RelayError):
+                    reconcile_relay(self.transfer, client=self.client)
+                rpc.assert_not_called()
+
     @mock.patch('payment_accounts.relay_settlement.chain.received_units', return_value=1950000)
     @mock.patch('payment_accounts.relay_settlement.chain.final_receipt', return_value={'finalized': True})
     def test_delivery_requires_receipt(self, receipt, units):
@@ -182,6 +243,60 @@ class RelayIntegrationTests(TestCase):
         self.relay = RelayClient(self.session)
         self.session.request.side_effect = lambda method, *args, **kwargs: mock.Mock(
             status_code=200, json=lambda: response() if method == 'POST' else {'status': 'waiting'})
+
+    @override_settings(CUSD_VAULT_ADDRESS=SENDER)
+    def test_bridge_redemption_is_owned_but_unrelated_deposits_are_not(self):
+        from cusd_plus.tasks import _source_row_covers, _system_addresses
+        from payment_accounts.models import PaymentBridgeTransfer
+        self.test_quote_and_prepare_use_relay_and_retry_never_requotes()
+        transfer = PaymentBridgeTransfer.objects.get(source_tx_hash=SOURCE_HASH)
+        self.assertIn(SENDER.lower(), _system_addresses())
+        self.assertTrue(_source_row_covers(SOURCE_HASH, transfer.quote.source_address))
+        self.assertFalse(_source_row_covers(SOURCE_HASH, DEPOSIT))
+        self.assertFalse(_source_row_covers(REQUEST, transfer.quote.source_address))
+        transfer.funding_mode = 'infinia'
+        transfer.save(update_fields=['funding_mode'])
+        self.assertFalse(_source_row_covers(SOURCE_HASH, transfer.quote.source_address))
+
+    @override_settings(CUSD_VAULT_ADDRESS=DEPOSIT)
+    def test_existing_false_deposit_is_corrected_idempotently_without_balance_changes(self):
+        from decimal import Decimal
+        from cusd_plus.tasks import repair_payment_bridge_deposit
+        from payment_accounts.models import PaymentBridgeTransfer
+        from send.models import SendTransaction
+        from notifications.models import Notification
+        from users.models_unified import UnifiedTransactionTable
+        from .test_bridge_execution import receipt
+        self.test_quote_and_prepare_use_relay_and_retry_never_requotes()
+        transfer = PaymentBridgeTransfer.objects.get(source_tx_hash=SOURCE_HASH)
+        row = SendTransaction.all_objects.create(transaction_hash=SOURCE_HASH,
+            sender_type='external', sender_address=DEPOSIT, recipient_address=SENDER,
+            recipient_user=self.owner.user, token_type='USDT', amount=Decimal('1.982'),
+            status='CONFIRMED')
+        notice = Notification.objects.create(user=self.owner.user,
+            notification_type='SEND_FROM_EXTERNAL', title='Depósito recibido', message='Original',
+            related_object_type='SendTransaction', related_object_id=str(row.internal_id),
+            data={'tx_hash': SOURCE_HASH, 'sender_address': DEPOSIT,
+                  'recipient_address': SENDER, 'pending_auto_mint': True})
+        # A real outside deposit with the same tx is not enough to repair it.
+        repair_payment_bridge_deposit(transfer, receipt('BSC:USDT', SENDER, 1982000000000000000, sender=RECIPIENT))
+        row.refresh_from_db()
+        self.assertIsNone(row.deleted_at)
+        valid = receipt('BSC:USDT', SENDER, 1982000000000000000, sender=DEPOSIT)
+        repair_payment_bridge_deposit(transfer, valid)
+        row.refresh_from_db(); notice.refresh_from_db()
+        self.assertIsNotNone(row.deleted_at)
+        self.assertEqual(row.amount, Decimal('1.982'))
+        self.assertFalse(UnifiedTransactionTable.objects.filter(send_transaction=row, deleted_at__isnull=True).exists())
+        self.assertEqual(notice.notification_type, 'CONVERSION_COMPLETED')
+        self.assertFalse(notice.data['pending_auto_mint'])
+        self.assertIsNone(notice.related_object_id)
+        self.assertEqual(notice.data['corrected_deposit_notice']['message'], 'Original')
+        stamp = row.deleted_at
+        repair_payment_bridge_deposit(transfer, valid)
+        row.refresh_from_db(); notice.refresh_from_db()
+        self.assertEqual(row.deleted_at, stamp)
+        self.assertEqual(notice.data['corrected_deposit_notice']['message'], 'Original')
 
     def test_quote_and_prepare_use_relay_and_retry_never_requotes(self):
         from payment_accounts.bridge import quote_provider_funding

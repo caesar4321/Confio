@@ -2868,6 +2868,8 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       # P2P Trade ID for navigation
       p2pTradeId
       rampDirection
+      localTransferId
+      localTransferPendingAmount
       rampProvider
     }
   }
@@ -3256,6 +3258,8 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       displayCounterparty
       displayDescription
       rampDirection
+      localTransferId
+      localTransferPendingAmount
       rampProvider
       rampFiatAmount
       rampFiatCurrency

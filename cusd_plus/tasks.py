@@ -364,6 +364,9 @@ def monitor_bridge_arrivals():
         key = ('0x' + log['topics'][2][-40:]).lower()
         sender = ('0x' + log['topics'][1][-40:]).lower()
         raw_units = int(log['data'], 16)
+        from payment_accounts.activity import arrival_owned
+        if arrival_owned(log['transactionHash'], key):
+            continue
         # An arrival is a DEPOSIT only if it came from outside Confío. This
         # pass filters on the RECIPIENT topic alone, so it used to record our
         # own outflows as inbound money: redeemToUsdt pays the cUSD+ vault's
@@ -678,6 +681,7 @@ def _system_addresses() -> set:
     recibido" on top of the real record.
     """
     names = (
+        'CUSD_VAULT_ADDRESS',
         'CUSD_PLUS_VAULT_ADDRESS',
         'BSC_PRESALE_VAULT_ADDRESS',
         'BSC_PAYROLL_VAULT_ADDRESS',
@@ -769,7 +773,68 @@ def _source_row_covers(tx_hash: str, recipient: str) -> bool:
             return True
     except Exception:  # noqa: BLE001
         logger.exception('stock ownership check failed for %s', tx_hash)
+    try:
+        from payment_accounts.models import PaymentBridgeTransfer
+        if PaymentBridgeTransfer.objects.filter(
+                source_tx_hash__iexact=tx_hash,
+                quote__source_address__iexact=r,
+                quote__source_token_id='BSC:USDT',
+                funding_mode='wallet').exists():
+            return True
+    except Exception:  # noqa: BLE001
+        logger.exception('payment bridge ownership check failed for %s', tx_hash)
     return False
+
+
+def repair_payment_bridge_deposit(transfer, receipt):
+    """Correct a scanner receipt for an on-chain internal cUSD redemption.
+
+    Called only after bridge funding is verified. Keep the source/mirror as
+    soft-deleted audit records, and correct (never resend) the old notification.
+    """
+    from django.db import transaction
+    from payment_accounts.bridge_chain import received_units
+    from send.models import SendTransaction
+    from users.models_unified import UnifiedTransactionTable
+    from notifications.models import Notification, NotificationType
+
+    q = transfer.quote
+    vault = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').lower()
+    if transfer.funding_mode != 'wallet' or q.source_token_id != 'BSC:USDT' or not vault:
+        return
+    units = received_units(receipt, 'BSC:USDT', q.source_address, sender=vault)
+    if not 0 < units <= int(q.amount_units):
+        return
+    amount = (Decimal(units) / Decimal(10**18)).quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+    with transaction.atomic():
+        rows = SendTransaction.all_objects.select_for_update().filter(
+            transaction_hash__iexact=transfer.source_tx_hash,
+            sender_type='external', sender_address__iexact=vault,
+            recipient_address__iexact=q.source_address, token_type='USDT', amount=amount)
+        ids = list(rows.values_list('pk', flat=True))
+        if not ids:
+            return
+        now = timezone.now()
+        UnifiedTransactionTable.objects.filter(send_transaction_id__in=ids,
+            deleted_at__isnull=True).update(deleted_at=now)
+        rows.filter(deleted_at__isnull=True).update(deleted_at=now)
+        for notice in Notification.objects.select_for_update().filter(
+                notification_type=NotificationType.SEND_FROM_EXTERNAL,
+                data__tx_hash=transfer.source_tx_hash,
+                data__recipient_address__iexact=q.source_address,
+                data__sender_address__iexact=vault):
+            notice.data = dict(notice.data, pending_auto_mint=False,
+                transaction_type='conversion', is_external_address=False,
+                payment_bridge_id=str(transfer.internal_id),
+                corrected_deposit_notice={'title': notice.title, 'message': notice.message,
+                    'related_object_type': notice.related_object_type,
+                    'related_object_id': notice.related_object_id, 'action_url': notice.action_url})
+            notice.notification_type = NotificationType.CONVERSION_COMPLETED
+            notice.title = 'Conversión para tu envío'
+            notice.message = 'Convertiste cUSD a USDT para financiar tu envío local. No es un depósito ni un reembolso.'
+            notice.related_object_type = notice.related_object_id = notice.action_url = None
+            notice.save(update_fields=['data', 'notification_type', 'title', 'message',
+                'related_object_type', 'related_object_id', 'action_url', 'updated_at'])
 
 
 def _registered_bsc_addresses() -> dict:
@@ -845,7 +910,7 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
 
 
 def record_savings_mint(*, user, business, actor_type, display_name,
-                        amount_wei, tx_hash, bsc_address):
+                        amount_wei, tx_hash, bsc_address, request_id=None):
     """History row for a mint the relay ALLOWED and broadcast.
 
     Written after the geo gate passed and the transaction went out, so the row
@@ -854,6 +919,7 @@ def record_savings_mint(*, user, business, actor_type, display_name,
     """
     from decimal import Decimal, ROUND_DOWN
     from conversion.models import Conversion
+    from payment_accounts.activity import local_mint_journey_id
 
     try:
         if Conversion.objects.filter(
@@ -867,7 +933,7 @@ def record_savings_mint(*, user, business, actor_type, display_name,
         # bridge completion two conversions and two feed entries — the hash
         # check above cannot catch it because the client writes that hash
         # AFTER we run (audit 2026-08-01).
-        if Conversion.objects.filter(
+        if not local_mint_journey_id(request_id) and Conversion.objects.filter(
             conversion_type='to_savings',
             user_bsc_address__iexact=bsc_address or '',
             status__in=Conversion.IN_FLIGHT_STATUSES,
@@ -989,6 +1055,9 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
     because conversion-row dedupe cannot fire on a cursor rewind.
     """
     from send.models import SendTransaction
+    from payment_accounts.activity import arrival_owned
+    if arrival_owned(tx_hash, to_addr):
+        return
 
     receipt = None
     receipt_existed = False
@@ -1229,6 +1298,7 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
     """Upsert exact entry/exit fee ledger data from finalized chain logs."""
     from conversion.models import Conversion
     from users.models import Account
+    from payment_accounts.activity import local_mint_journey_id
 
     events = _cusd_fee_events(receipt)
     if not events:
@@ -1282,7 +1352,7 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
                 # Recover a foreground mint whose best-effort history write
                 # was lost after broadcast. For cUSD+ first claim the oldest
                 # matching arrived saga; for direct cUSD create the event row.
-                if event['conversion_type'] == 'to_savings':
+                if event['conversion_type'] == 'to_savings' and not local_mint_journey_id(getattr(batch, 'client_request_id', None)):
                     actor_filter = (
                         {'actor_business': account.business}
                         if account.account_type == 'business'

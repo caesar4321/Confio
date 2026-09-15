@@ -24,7 +24,6 @@ import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
 import { LOCAL_MONEY_METHODS, type LocalMethod } from '../services/localMoney';
-import { BRIDGE_AVAILABILITY } from '../services/paymentBridge';
 import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
 import { useRampCountry } from '../hooks/useRampCountry';
 import {
@@ -763,29 +762,11 @@ export const TransferScreen = () => {
   });
   // A tab stays mounted: re-read the rails on every focus, so a document
   // verified elsewhere (Verificación, AdditionalDocument) shows up at once.
-  // Recovery, not a routing choice: someone with an unfinished bridge, Cobre or
-  // Infinia transfer must always have a way back to it (LocalAccountFunding
-  // is the only entry to those screens).
-  const { data: bridgeAvailability, refetch: refetchBridgeAvailability } = useQuery(BRIDGE_AVAILABILITY, {
-    fetchPolicy: 'cache-and-network', errorPolicy: 'all',
-  });
-  const recoveryOptions = bridgeAvailability?.paymentBridgeAvailability?.hasHistory ? [{
-    id: 'local-account-funding',
-    icon: 'clock',
-    title: 'Envíos y conversiones anteriores',
-    subtitle: 'Revisa o termina los que quedaron pendientes',
-    onPress: () => {
-      setShowLocalSendSelection(false);
-      setShowLocalReceiveSelection(false);
-      navigation.navigate('LocalAccountFunding');
-    },
-  }] : [];
   useFocusEffect(
     useCallback(() => {
       refetchSendMethods().catch(() => {});
       refetchReceiveMethods().catch(() => {});
-      refetchBridgeAvailability().catch(() => {});
-    }, [refetchSendMethods, refetchReceiveMethods, refetchBridgeAvailability]),
+    }, [refetchSendMethods, refetchReceiveMethods]),
   );
   const [showLocalSendSelection, setShowLocalSendSelection] = useState(false);
   const [showLocalReceiveSelection, setShowLocalReceiveSelection] = useState(false);
@@ -1876,7 +1857,6 @@ export const TransferScreen = () => {
           onClose={() => setShowLocalSendSelection(false)}
           options={[
             ...liveSendMethods.map(methodToOption),
-            ...recoveryOptions,
             // A country served by a real rail must not also show as a probe.
             ...localSendRails
               .filter(rail => !liveSendMethods.some(method => method.country === rail.country))
@@ -1890,7 +1870,6 @@ export const TransferScreen = () => {
           options={[
             ...activeLocalReceiveOptions,
             ...liveReceiveMethods.map(methodToOption),
-            ...recoveryOptions,
             ...localReceiveRails
               // A corridor the user already has an active account for would
               // otherwise appear twice: once as their real key, once as a
