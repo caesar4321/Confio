@@ -153,7 +153,8 @@ class AdapterPayloadTests(SimpleTestCase):
             idempotency_key='idem',
             source_amount=Decimal('100.00'),
             source_account=SimpleNamespace(provider_account_id='account_1'),
-            external_destination={'destination_account': {'country': 'CO'}},
+            external_destination={'destination_account': {'country': 'COLOMBIA',
+                'currency': 'COP', 'destinationType': {'type': 'BREB_KEY', 'brebKey': 'key'}}},
         )
 
         result = InfiniaProvider(client=client).create_payout(operation)
@@ -163,9 +164,54 @@ class AdapterPayloadTests(SimpleTestCase):
             'originId': 'idem',
             'amount': 100.0,
             'sourceAccountId': 'account_1',
-            'destinationAccount': {'country': 'CO'},
+            'destinationAccount': {'country': 'COLOMBIA', 'currency': 'COP',
+                                   'destinationType': {'type': 'BREB_KEY', 'brebKey': 'key'}},
         })
         self.assertEqual(result.status, 'processing')
+
+    def test_infinia_wraps_flat_clabe_without_changing_original_instruction(self):
+        from copy import deepcopy
+        client = mock.Mock()
+        client.create_payout.return_value = {'id': 'po_1', 'status': 'IN_PROGRESS'}
+        snapshot = {'country': 'MEX', 'destination_account': {
+            'type': 'CLABE', 'clabe': '123456789012345678', 'reference': 'Confio'}}
+        before = deepcopy(snapshot)
+        op = SimpleNamespace(idempotency_key='original-key', source_amount=Decimal('33.03'),
+            source_asset='MXN', source_account=SimpleNamespace(provider_account_id='account_1'),
+            external_destination=snapshot)
+        InfiniaProvider(client=client).create_payout(op)
+        payload = client.create_payout.call_args.args[0]
+        self.assertEqual(payload['destinationAccount'], {'country': 'MEXICO', 'currency': 'MXN',
+            'destinationType': before['destination_account']})
+        self.assertEqual(payload['originId'], 'original-key')
+        self.assertEqual(payload['amount'], 33.03)
+        self.assertEqual(snapshot, before)
+
+    def test_infinia_wraps_supported_flat_country_rails(self):
+        for country, asset, kind, expected in [('COL', 'COP', 'BREB_KEY', 'COLOMBIA'),
+                ('ARG', 'ARS', 'ALIAS', 'ARGENTINA'), ('BRA', 'BRL', 'CHAVE PIX', 'BRAZIL'),
+                ('BOL', 'BOB', 'ACH', 'BOLIVIA'), ('PER', 'PEN', 'ACCOUNT_PERU', 'PERU'),
+                ('CHL', 'CLP', 'ACCOUNT_CHILE', 'CHILE'), ('PRY', 'PYG', 'ACCOUNT_PARAGUAY', 'PARAGUAY'),
+                ('GBR', 'GBP', 'ACCOUNT_UNITED_KINGDOM_CHAPS_FPS', 'EUROPE'),
+                ('LUX', 'EUR', 'ACCOUNT_EUROPE_SEPA', 'EUROPE')]:
+            with self.subTest(country=country):
+                client = mock.Mock(); client.create_payout.return_value = {'id': 'p', 'status': 'IN_PROGRESS'}
+                op = SimpleNamespace(idempotency_key='key', source_amount=Decimal('5'), source_asset=asset,
+                    source_account=SimpleNamespace(provider_account_id='a'),
+                    external_destination={'country': country, 'destination_account': {'type': kind}})
+                InfiniaProvider(client=client).create_payout(op)
+                self.assertEqual(client.create_payout.call_args.args[0]['destinationAccount'],
+                    {'country': expected, 'currency': asset, 'destinationType': {'type': kind}})
+
+    def test_infinia_flat_destination_missing_country_fails_before_request(self):
+        from payment_accounts.providers.base import ProviderCapabilityError
+        client = mock.Mock()
+        op = SimpleNamespace(idempotency_key='key', source_amount=Decimal('5'), source_asset='MXN',
+            source_account=SimpleNamespace(provider_account_id='a'),
+            external_destination={'destination_account': {'type': 'CLABE'}})
+        with self.assertRaises(ProviderCapabilityError):
+            InfiniaProvider(client=client).create_payout(op)
+        client.create_payout.assert_not_called()
 
     def test_infinia_completed_transfer_remains_settling_until_credit(self):
         client = mock.Mock()
