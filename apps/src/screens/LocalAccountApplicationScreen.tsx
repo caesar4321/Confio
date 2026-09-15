@@ -364,7 +364,7 @@ function Application({ methodId }: { methodId: string }) {
     ? [
       ['repeat', `${copy.item}, siempre la misma`, 'Compártela las veces que quieras.'],
       ['zap', `Te pagan por ${rail}`, 'Desde cualquier banco o billetera, normalmente en minutos.'],
-      ['dollar-sign', 'Tú decides cuándo convertir', `Tus ${currency} esperan hasta que los pases a dólares.`],
+      ['dollar-sign', 'De pagos locales a dólares', 'Cuando llegue un depósito, confirma la conversión para recibir dólares en tu saldo.'],
     ]
     : [
       ['send', `Envía por ${rail}`, `A cualquier banco o billetera de ${place}.`],
