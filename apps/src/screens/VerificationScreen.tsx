@@ -34,6 +34,7 @@ const MY_IDENTITY_DOCUMENTS = gql`
       documentType
       issuingCountry
       status
+      rejectedReason
       isAdditional
       verifiedAt
       localCountries
@@ -48,6 +49,7 @@ type IdentityDocument = {
   documentType: string;
   issuingCountry: string;
   status: string;
+  rejectedReason?: string | null;
   isAdditional: boolean;
   verifiedAt: string | null;
   localCountries: string[];
@@ -183,6 +185,9 @@ const VerificationScreen = () => {
   const effectiveStatus = isBusinessAccount
     ? (businessStatus !== 'unverified' ? businessStatus : anyStatus)
     : (personalStatus !== 'unverified' ? personalStatus : anyStatus);
+  const effectiveDetail = isBusinessAccount
+    ? (businessStatus !== 'unverified' ? bizKycData?.businessKycStatus?.statusDetail : anyKycData?.myKycStatus?.statusDetail)
+    : (personalStatus !== 'unverified' ? personalKycData?.myPersonalKycStatus?.statusDetail : anyKycData?.myKycStatus?.statusDetail);
   const isBusy = isLaunchingDidit || isRefreshing;
   const isInitialLoading = meLoading || personalLoading || anyLoading || businessLoading
     || (!isBusinessAccount && documentsQuery.loading && !documents);
@@ -359,7 +364,9 @@ const VerificationScreen = () => {
           </>
         ) : (
           <>
-            <Text style={styles.note}>No pudimos verificar este documento. Revisa que las fotos se lean bien e inténtalo de nuevo.</Text>
+            <Text style={styles.note}>
+              {doc.rejectedReason || 'No pudimos verificar este documento. Inténtalo de nuevo o contacta a soporte si el problema continúa.'}
+            </Text>
             <TouchableOpacity onPress={retry} disabled={isBusy} accessibilityRole="button" style={styles.inlineAction}>
               <Icon name="refresh-cw" size={15} color={colors.primaryDark} />
               <Text style={styles.inlineActionText}>Intentar de nuevo</Text>
@@ -439,6 +446,8 @@ const VerificationScreen = () => {
       <Text style={styles.note}>
         {effectiveStatus === 'verified'
           ? 'Tu negocio está verificado.'
+          : effectiveStatus === 'rejected'
+            ? effectiveDetail || 'No pudimos verificar tu negocio. Contacta a soporte si necesitas ayuda antes de volver a intentarlo.'
           : 'Verifica tu negocio para habilitar recargas, retiros y pagos a empleados.'}
       </Text>
       {effectiveStatus !== 'verified' ? (
@@ -466,6 +475,9 @@ const VerificationScreen = () => {
         </View>
         <StatusPill status={effectiveStatus} />
       </View>
+      {effectiveStatus === 'rejected' ? (
+        <Text style={styles.note}>{effectiveDetail || 'No pudimos verificar tu identidad. Inténtalo de nuevo o contacta a soporte.'}</Text>
+      ) : null}
       {effectiveStatus !== 'verified' ? (
         <Button
           title={effectiveStatus === 'pending' ? 'Enviar otra verificación' : 'Verificar con Didit'}

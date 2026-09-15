@@ -60,6 +60,19 @@ class AdditionalDocumentTests(TestCase):
         self.user = User.objects.create_user(username='two-documents', firebase_uid='two-documents')
         self.owner = Account.objects.create(user=self.user, account_type='personal')
 
+    def test_document_list_returns_rejection_reason_only_for_own_rejected_documents(self):
+        from security.schema import SecurityQuery
+        reason = 'El documento no coincide con tu identidad verificada.'
+        rejected = document(self.user, 'REJECTED', status='rejected', rejected_reason=reason)
+        other = User.objects.create_user(username='other-document-owner', firebase_uid='other-document-owner')
+        document(other, 'OTHER-REJECTED', status='rejected', rejected_reason='Private reason')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.user))
+        rows = SecurityQuery.resolve_my_identity_documents(None, info)
+        self.assertEqual([(r.id, r.rejected_reason) for r in rows], [(str(rejected.pk), reason)])
+        IdentityVerification.all_documents.filter(pk=rejected.pk).update(status='verified')
+        rows = SecurityQuery.resolve_my_identity_documents(None, info)
+        self.assertIsNone(rows[0].rejected_reason)
+
     def test_additional_documents_are_invisible_to_existing_readers(self):
         from ramps.schema import _get_latest_personal_verification
         primary = document(self.user, 'V-1', verified_at=timezone.now() - timedelta(days=30))
