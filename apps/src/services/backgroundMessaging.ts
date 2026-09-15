@@ -1,11 +1,11 @@
-import messaging from '@react-native-firebase/messaging';
+import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import notificationDedup from './notificationDeduplication';
 import { savePendingNotificationOpen } from './notificationOpenStore';
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 
 // Register background handler
-messaging().setBackgroundMessageHandler(async remoteMessage => {
+setBackgroundMessageHandler(getMessaging(), async remoteMessage => {
   // Check for duplicates using global deduplication
   const messageId = remoteMessage.data?.message_id;
   const notificationId = remoteMessage.data?.notification_id;

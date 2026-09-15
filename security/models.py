@@ -2,7 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
-from users.models import SoftDeleteModel
+from users.models import SoftDeleteManager, SoftDeleteModel
 from django.db.models import Q
 from django.db import transaction
 from django.db.models.signals import post_save
@@ -33,8 +33,34 @@ def normalize_brazilian_cpf(value: object) -> str | None:
     return cpf
 
 
+class PrimaryIdentityManager(SoftDeleteManager):
+    """The person's primary (phone-country, rail-enforced) documents only.
+
+    Additional documents — a passport verified for a local-money rail — must
+    never surface through the ~55 existing readers of IdentityVerification,
+    Koywe's "latest verified identity" among them. Making exclusion the
+    DEFAULT is what keeps that true for every current and future call site;
+    the few readers that want every document ask `all_documents` explicitly.
+    """
+
+    def get_queryset(self):
+        return super().get_queryset().filter(is_additional_document=False)
+
+    def with_deleted(self):
+        return super().with_deleted().filter(is_additional_document=False)
+
+    def only_deleted(self):
+        return super().only_deleted().filter(is_additional_document=False)
+
+
 class IdentityVerification(SoftDeleteModel):
     """Model for storing KYC/AML verification documents and information"""
+
+    # Declared first, so it is the default manager (and the one reverse
+    # relations such as user.security_verifications use).
+    objects = PrimaryIdentityManager()
+    all_documents = SoftDeleteManager()
+    all_objects = models.Manager()
     
     VERIFICATION_STATUS_CHOICES = [
         ('pending', 'Pendiente'),
@@ -180,6 +206,16 @@ class IdentityVerification(SoftDeleteModel):
         help_text="S3 URL to payout ownership proof (integrated with ID verification)"
     )
     
+    is_additional_document = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=(
+            "A second identity document of the same person (e.g. a passport for a "
+            "local-money rail). Hidden from the default manager: every existing KYC "
+            "reader, Koywe included, keeps seeing only the primary document."
+        ),
+    )
+
     # Verification Details
     status = models.CharField(
         max_length=20,
@@ -327,7 +363,9 @@ def flag_duplicate_personal_identity_verifications(sender, instance: 'IdentityVe
         if not instance.document_number_normalized or not instance.document_issuing_country or instance.document_issuing_country == 'UNK':
             return
 
-        duplicate_qs = IdentityVerification.objects.filter(
+        # all_documents: the default manager hides additional documents, and a
+        # passport verified as an extra document is still that person's identity.
+        duplicate_qs = IdentityVerification.all_documents.filter(
             status='verified',
             document_number_normalized=instance.document_number_normalized,
             document_issuing_country=instance.document_issuing_country,
@@ -350,7 +388,7 @@ def flag_duplicate_personal_identity_verifications(sender, instance: 'IdentityVe
             'related_devices': context['related_devices'],
         }
 
-        IdentityVerification.objects.filter(pk=instance.pk).update(
+        IdentityVerification.all_documents.filter(pk=instance.pk).update(
             risk_factors=risk_factors,
             updated_at=timezone.now(),
         )
@@ -806,6 +844,11 @@ class IPDeviceUser(models.Model):
     total_sessions = models.IntegerField(
         default=1,
         help_text="Total sessions from this combination"
+    )
+    daily_sessions = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Sessions per UTC day (YYYY-MM-DD -> count), last 120 days: residence counts recent sessions"
     )
     
     # Location info at time of association

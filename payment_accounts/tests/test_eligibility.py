@@ -230,16 +230,20 @@ class SeededProviderEligibilityTests(TestCase):
         self.assertEqual(result.decision, 'block')
         self.assertEqual(result.reason_code, 'cobre_destination_country_not_supported')
 
-    def test_seeded_cobre_policy_allows_other_colombia_residents(self):
-        result = evaluate_active_policy(
-            provider='cobre',
-            scope='account_opening',
-            context=EligibilityContext(
-                nationality='COL', residence_country='COL', account_country='COL'
-            ),
-        )
-        self.assertTrue(result.allowed)
-        self.assertEqual(result.reason_code, 'cobre_colombia_resident')
+    def test_seeded_cobre_policy_allows_anyone_outside_venezuela(self):
+        # Bre-B is for anyone, anywhere, except residents of Venezuela (v2).
+        for nationality, residence in (('COL', 'COL'), ('VEN', 'ESP'), ('KOR', 'PRY')):
+            for scope in ('account_opening', 'funding_instruction'):
+                with self.subTest(nationality=nationality, residence=residence, scope=scope):
+                    result = evaluate_active_policy(
+                        provider='cobre',
+                        scope=scope,
+                        context=EligibilityContext(
+                            nationality=nationality, residence_country=residence, account_country='COL'
+                        ),
+                    )
+                    self.assertTrue(result.allowed)
+                    self.assertEqual(result.reason_code, 'cobre_breb_outside_venezuela')
 
     def test_seeded_infinia_policy_allows_non_venezuelan(self):
         result = evaluate_active_policy(

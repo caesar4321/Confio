@@ -213,6 +213,20 @@ def _destination_details(value):
     return convert(value)
 
 
+def _breb_key_hidden(instruction, info):
+    """A Bre-B key is shown only after a recent location check from an allowed
+    IP, like every other Bre-B operation."""
+    if instruction.kind != 'breb_key':
+        return False
+    from .breb_location import require_location_pass
+    try:
+        require_location_pass(instruction.financial_account.provider_profile.confio_account,
+                              getattr(info.context, 'META', {}))
+    except PaymentAccountError:
+        return True
+    return False
+
+
 class FundingInstructionType(DjangoObjectType):
     class Meta:
         model = FundingInstruction
@@ -220,6 +234,18 @@ class FundingInstructionType(DjangoObjectType):
             'internal_id', 'kind', 'status', 'reusable', 'expires_at',
             'display_value', 'holder_display_name', 'ownership_evidence_available',
         )
+
+    def resolve_display_value(self, info):
+        from .activation import usable
+        if not usable(self.financial_account) or _breb_key_hidden(self, info):
+            return ''
+        return self.display_value
+
+    def resolve_holder_display_name(self, info):
+        from .activation import usable
+        if not usable(self.financial_account) or _breb_key_hidden(self, info):
+            return ''
+        return self.holder_display_name
 
 
 class AccountCapabilityType(DjangoObjectType):
@@ -238,6 +264,10 @@ class FinancialAccountType(DjangoObjectType):
         )
 
     provider = graphene.String(required=True)
+
+    def resolve_funding_instructions(self, info):
+        from .activation import usable
+        return self.funding_instructions.all() if usable(self) else self.funding_instructions.none()
 
     def resolve_provider(self, info):
         return self.provider_profile.provider
@@ -498,6 +528,9 @@ class ProvisionPaymentAccount(graphene.Mutation):
                 )
             account = _active_account(info, permission='manage_bank_accounts', owner_only=True)
             identity = _verified_identity(account)
+            if provider == 'infinia':
+                from .activation import require_paid
+                require_paid(account, country.strip().upper(), asset.strip().upper())
             profile, financial_account = provision_payment_account(
                 confio_account=account,
                 provider=provider,
@@ -654,7 +687,10 @@ from .journey_schema import JourneyQuery, JourneyMutation
 from .cobre_journey_schema import CobreJourneyQuery, CobreJourneyMutation
 
 
-class Query(JourneyQuery, CobreJourneyQuery, graphene.ObjectType):
+from payment_accounts.local_money_schema import LocalMoneyMutation, LocalMoneyQuery  # noqa: E402
+
+
+class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, graphene.ObjectType):
     payment_bridge = graphene.Field(PaymentBridgeTransferType, internal_id=graphene.UUID(required=True))
 
     def resolve_payment_bridge(self, info, internal_id):
@@ -689,6 +725,9 @@ class Query(JourneyQuery, CobreJourneyQuery, graphene.ObjectType):
             financial_account__status='active', financial_account__provider_profile__status='active', status='active',
         ).select_related('financial_account__provider_profile'):
             from .services import _require_provider_enabled
+            from .activation import usable
+            if not usable(row.financial_account):
+                continue
             try:
                 _require_provider_enabled(row.financial_account.provider)
             except PaymentAccountError:
@@ -725,11 +764,10 @@ class Query(JourneyQuery, CobreJourneyQuery, graphene.ObjectType):
 
     def resolve_my_payment_accounts(self, info):
         account = _active_account(info, permission='view_balance')
-        return FinancialAccount.objects.filter(
+        from .activation import visible_accounts
+        return visible_accounts(FinancialAccount.objects.filter(
             provider_profile__confio_account=account
-        ).select_related('provider_profile').prefetch_related(
-            'funding_instructions', 'capabilities'
-        )
+        )).select_related('provider_profile').prefetch_related('funding_instructions', 'capabilities')
 
     def resolve_my_money_flows(self, info, limit=50):
         account = _active_account(info, permission='view_transactions')
@@ -768,7 +806,10 @@ class Query(JourneyQuery, CobreJourneyQuery, graphene.ObjectType):
         )
 
 
-class Mutation(JourneyMutation, CobreJourneyMutation, graphene.ObjectType):
+from .breb_location_schema import BrebLocationMutation
+
+
+class Mutation(JourneyMutation, CobreJourneyMutation, LocalMoneyMutation, BrebLocationMutation, graphene.ObjectType):
     prepare_payment_bridge = PreparePaymentBridge.Field()
     submit_payment_bridge = SubmitPaymentBridge.Field()
     quote_payment_bridge = QuotePaymentBridge.Field()

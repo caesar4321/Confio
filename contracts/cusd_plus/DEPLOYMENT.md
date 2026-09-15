@@ -1,5 +1,36 @@
 # cUSD+ deployment record — BSC mainnet
 
+## AccountActivationCollector — deployed 2026-09-15
+
+| Field | Value |
+| --- | --- |
+| **Collector** | **`0x45f302BC7a81b74631Af2341f367D5Cddb754471`** |
+| Immutable cUSD token | `0x6101cC370635cF2c7f2725EaB010aC407A8d543F` |
+| Immutable treasury | `0xF29A418744E793973BF4eEc676F8a30B2793b623` (3-of-5 Safe) |
+| Deployment transaction | `0x3d9d7af2284558655ba25c1d608586ea0cc6047d625a60527c0c7c9a60d90edf` |
+| Block | `122055001` |
+| Deployer | `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (existing KMS sponsor, nonce 530) |
+| Deployment gas | 211,876 at 0.06 gwei; 0.00001271256 BNB |
+| Compiler | Solidity 0.8.26, optimizer enabled, 200 runs |
+| Runtime | 706 bytes; keccak256 `0x7df04e0405a5abea8a12485efbdd713d0b531b45da58c4f4f9e8afa492bfdc34` |
+
+The collector receives earned account-opening fees as ordinary cUSD transfers.
+Anyone can call `sweep()`, which sends its complete cUSD balance only to the fixed
+treasury. There is no owner, signing key, refund, upgrade, or arbitrary withdrawal.
+
+Preflight simulated the creation transaction on BSC mainnet. After deployment,
+the receipt, both immutable getters, and every byte of runtime code were verified
+against the compiled artifact with its immutable values populated. All four
+contract tests passed, including 512 fixed-destination fuzz cases.
+
+BscScan source verification passed:
+[verified collector source](https://bscscan.com/address/0x45f302BC7a81b74631Af2341f367D5Cddb754471#code).
+Public transaction and verification
+evidence: [deployment JSON](../../docs/analysis/infinia-activation-collector-deployment-2026-09-15.json).
+`INFINIA_ACTIVATION_COLLECTOR_ADDRESS` is recorded in the local `.env.mainnet`.
+This contract deployment does not deploy the backend/mobile activation flow,
+apply its database migration, or restart production services.
+
 ## Coordinated cUSD fee-perimeter release (90 bps) — deployed 2026-08-31
 
 This release keeps the existing cUSD+ proxy and introduces a new UUPS cUSD

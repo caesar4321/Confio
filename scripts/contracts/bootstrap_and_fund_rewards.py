@@ -17,13 +17,13 @@ Environment variables (use .env.mainnet for mainnet):
 
 Usage:
     # Bootstrap and fund with 7.4M CONFIO
-    aws-vault exec Julian -- ./myvenv/bin/python scripts/bootstrap_and_fund_rewards.py 7400000
+    env AWS_PROFILE=Julian ./myvenv/bin/python scripts/bootstrap_and_fund_rewards.py 7400000
 
     # Bootstrap and fund with auto-confirmation
-    aws-vault exec Julian -- ./myvenv/bin/python scripts/bootstrap_and_fund_rewards.py 7400000 --yes
+    env AWS_PROFILE=Julian ./myvenv/bin/python scripts/bootstrap_and_fund_rewards.py 7400000 --yes
 
     # Just bootstrap (no funding)
-    aws-vault exec Julian -- ./myvenv/bin/python scripts/bootstrap_and_fund_rewards.py --bootstrap-only
+    env AWS_PROFILE=Julian ./myvenv/bin/python scripts/bootstrap_and_fund_rewards.py --bootstrap-only
 """
 
 import base64

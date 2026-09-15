@@ -53,9 +53,9 @@ class BaseProviderClient:
             )
         return payload
 
-    def _request(self, method, url, *, action, **kwargs):
+    def _request(self, method, url, *, action, timeout=None, **kwargs):
         try:
-            response = self.session.request(method, url, timeout=self.timeout, **kwargs)
+            response = self.session.request(method, url, timeout=timeout or self.timeout, **kwargs)
         except requests.RequestException as exc:
             raise ProviderAPIError(
                 f'{action}: network error',
@@ -213,7 +213,7 @@ class InfiniaClient(BaseProviderClient):
     def is_configured(self):
         return bool(self.secret_id and self.secret_password)
 
-    def request(self, method, path, *, payload=None, params=None):
+    def request(self, method, path, *, payload=None, params=None, timeout=None):
         if not self.is_configured:
             raise ProviderConfigurationError('Infinia credentials are not configured')
         headers = {}
@@ -227,6 +227,7 @@ class InfiniaClient(BaseProviderClient):
             params=params,
             headers=headers,
             auth=(self.secret_id, self.secret_password),
+            timeout=timeout,
         )
         if (
             isinstance(parsed, dict)
@@ -282,6 +283,10 @@ class InfiniaClient(BaseProviderClient):
     def get_owner(self, owner_id):
         return self.request('GET', f'/v1/accounts/owners/{owner_id}/')
 
+    def update_owner(self, owner_id, payload):
+        # Documents are added or replaced; a replaced one is kept as superseded.
+        return self.request('PATCH', f'/v1/accounts/owners/{owner_id}/', payload=payload)
+
     def create_account(self, payload):
         return self.request('POST', '/v1/accounts/', payload=payload)
 
@@ -305,6 +310,20 @@ class InfiniaClient(BaseProviderClient):
 
     def create_internal_transfer(self, payload):
         return self.request('POST', '/v1/accounts/internal-transfer/', payload=payload)
+
+    def get_account_limits(self, account_id):
+        return self.request('GET', f'/v1/accounts/{account_id}/limits/')
+
+    # Recipient lookups sit behind the user's "who am I paying" check. A slow
+    # answer is worth less than a fast "could not confirm", which already falls
+    # back to an explicit confirmation, so they get a shorter timeout.
+    def create_bank_account_validation(self, payload):
+        return self.request('POST', '/v1/bank-account-validation/', payload=payload,
+                            timeout=getattr(settings, 'LOCAL_MONEY_VALIDATION_TIMEOUT_SECONDS', 8))
+
+    def get_bank_account_validation(self, validation_id):
+        return self.request('GET', f'/v1/bank-account-validation/{validation_id}/',
+                            timeout=getattr(settings, 'LOCAL_MONEY_VALIDATION_TIMEOUT_SECONDS', 8))
 
     def find_operation(self, operation_type, idempotency_key):
         if operation_type == 'payout':

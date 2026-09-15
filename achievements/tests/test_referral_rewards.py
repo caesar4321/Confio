@@ -10,6 +10,7 @@ from django.utils import timezone
 from achievements.models import ReferralRewardEvent, UserReferral
 from achievements.referral_security import (
     DUPLICATE_REFEREE_REWARD_ERROR,
+    get_duplicate_referee_reward_error,
     get_referrer_claim_verification_error,
 )
 from achievements.signals import sync_pending_reward_events
@@ -447,6 +448,47 @@ class ReferralRewardServiceTests(TestCase):
         self.assertEqual(event.reward_status, "failed")
         self.assertEqual(event.error, DUPLICATE_REFEREE_REWARD_ERROR)
         mock_service.assert_not_called()
+
+    def test_duplicate_found_through_an_older_document(self):
+        # A newer passport (different name spelling, other country) must not
+        # hide an older national ID that another account already verified.
+        duplicate_user = get_user_model().objects.create_user(
+            username="older-doc-referred",
+            email="older-doc@example.com",
+            password="password",
+            firebase_uid="older-doc-uid",
+        )
+        _, dup_addr = account.generate_account()
+        Account.objects.create(
+            user=duplicate_user, account_type="personal", account_index=0, algorand_address=dup_addr,
+        )
+        later_referral = UserReferral.objects.create(
+            referred_user=duplicate_user, referrer_identifier="@referrer", referrer_user=self.referrer,
+        )
+        common = dict(
+            verified_nationality="COL", verified_address="Main street", verified_city="Bogota",
+            verified_state="Cundinamarca", verified_country="COL", status="verified", risk_factors={},
+        )
+        IdentityVerification.objects.create(
+            user=self.referred, verified_first_name="Ana", verified_last_name="Perez",
+            verified_date_of_birth=timezone.now().date().replace(year=1990),
+            document_type="national_id", document_number="12345678", document_issuing_country="COL",
+            verified_at=timezone.now() - timezone.timedelta(days=60), **common,
+        )
+        IdentityVerification.objects.create(
+            user=duplicate_user, verified_first_name="Ana", verified_last_name="Perez",
+            verified_date_of_birth=timezone.now().date().replace(year=1990),
+            document_type="national_id", document_number="12345678", document_issuing_country="COL",
+            verified_at=timezone.now() - timezone.timedelta(days=30), **common,
+        )
+        IdentityVerification.all_documents.create(
+            user=duplicate_user, verified_first_name="Ana Maria", verified_last_name="Perez Gomez",
+            verified_date_of_birth=timezone.now().date().replace(year=1991),
+            document_type="passport", document_number="PX998877", document_issuing_country="ESP",
+            is_additional_document=True, verified_at=timezone.now(), **common,
+        )
+
+        self.assertEqual(get_duplicate_referee_reward_error(later_referral), DUPLICATE_REFEREE_REWARD_ERROR)
 
     def test_referrer_claim_waits_for_referee_verification(self):
         error = get_referrer_claim_verification_error(self.referral)

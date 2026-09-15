@@ -23,6 +23,7 @@ import { ContactSyncProgress } from '../components/common/ContactSyncProgress';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
+import { LOCAL_MONEY_METHODS, type LocalMethod } from '../services/localMoney';
 import { BRIDGE_AVAILABILITY } from '../services/paymentBridge';
 import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
 import { useRampCountry } from '../hooks/useRampCountry';
@@ -750,11 +751,42 @@ export const TransferScreen = () => {
   // "billetera" here means a fintech wallet (the LATAM meaning); a blockchain
   // destination is always "dirección", never "wallet".
   // ---------------------------------------------------------------------
-  const { data: bridgeAvailability } = useQuery(BRIDGE_AVAILABILITY, { fetchPolicy: 'network-only' });
-  const bridgeOptions = (bridgeAvailability?.paymentBridgeAvailability?.hasHistory || bridgeAvailability?.paymentBridgeAvailability?.toProvider || bridgeAvailability?.paymentBridgeAvailability?.toWallet) ? [{
-    id: 'local-account-funding', icon: 'repeat', title: 'Dólares y cuenta local', subtitle: 'Mover dólares y consultar envíos',
-    onPress: () => { setShowLocalSendSelection(false); setShowLocalReceiveSelection(false); navigation.navigate('LocalAccountFunding'); },
+  // Server-evaluated rails: feature flags + verified KYC + eligibility policy.
+  // Fails soft — an older server or a network error leaves the demand probes,
+  // never an error banner on the Transferir tab. (The bridge plumbing row that
+  // used to sit here exposed an implementation leg as a user choice.)
+  const { data: sendMethodsData, refetch: refetchSendMethods } = useQuery(LOCAL_MONEY_METHODS, {
+    variables: { direction: 'send' }, fetchPolicy: 'cache-and-network', errorPolicy: 'all',
+  });
+  const { data: receiveMethodsData, refetch: refetchReceiveMethods } = useQuery(LOCAL_MONEY_METHODS, {
+    variables: { direction: 'receive' }, fetchPolicy: 'cache-and-network', errorPolicy: 'all',
+  });
+  // A tab stays mounted: re-read the rails on every focus, so a document
+  // verified elsewhere (Verificación, AdditionalDocument) shows up at once.
+  // Recovery, not a routing choice: someone with an unfinished bridge, Cobre or
+  // Infinia transfer must always have a way back to it (LocalAccountFunding
+  // is the only entry to those screens).
+  const { data: bridgeAvailability, refetch: refetchBridgeAvailability } = useQuery(BRIDGE_AVAILABILITY, {
+    fetchPolicy: 'cache-and-network', errorPolicy: 'all',
+  });
+  const recoveryOptions = bridgeAvailability?.paymentBridgeAvailability?.hasHistory ? [{
+    id: 'local-account-funding',
+    icon: 'clock',
+    title: 'Envíos y conversiones anteriores',
+    subtitle: 'Revisa o termina los que quedaron pendientes',
+    onPress: () => {
+      setShowLocalSendSelection(false);
+      setShowLocalReceiveSelection(false);
+      navigation.navigate('LocalAccountFunding');
+    },
   }] : [];
+  useFocusEffect(
+    useCallback(() => {
+      refetchSendMethods().catch(() => {});
+      refetchReceiveMethods().catch(() => {});
+      refetchBridgeAvailability().catch(() => {});
+    }, [refetchSendMethods, refetchReceiveMethods, refetchBridgeAvailability]),
+  );
   const [showLocalSendSelection, setShowLocalSendSelection] = useState(false);
   const [showLocalReceiveSelection, setShowLocalReceiveSelection] = useState(false);
   // Phone country is an ORDERING hint only — it puts the user's own rail
@@ -774,6 +806,62 @@ export const TransferScreen = () => {
     () => getReceiveRails(phoneCountryHint),
     [phoneCountryHint],
   );
+
+  // A usable rail is live, or one identity check away. Same ordering rule as
+  // the probes: phone country hoists, it never decides.
+  const usableMethods = useCallback((data: any): LocalMethod[] => {
+    const rows = ((data?.localMoneyMethods || []) as LocalMethod[]).filter(
+      method => method.status === 'live' || method.status === 'needs_verification'
+        || method.status === 'needs_document',
+    );
+    const mine = toIso2(phoneCountryHint);
+    return [...rows.filter(m => m.country === mine), ...rows.filter(m => m.country !== mine)];
+  }, [phoneCountryHint]);
+  // One slot per country. A QR rail is an input mode of the country's main
+  // rail (Argentina: CVU/CBU typed or QR scanned on the same screen).
+  const liveSendMethods = useMemo(() => {
+    const rows = usableMethods(sendMethodsData);
+    const isQr = (m: LocalMethod) => m.id.endsWith('_qr');
+    return rows
+      .filter(m => !(isQr(m) && rows.some(o => o.country === m.country && !isQr(o))))
+      .map(m => (!isQr(m) && rows.some(q => q.country === m.country && isQr(q) && q.status === 'live')
+        ? { ...m, title: `${m.title.replace(' o ', ', ')} o QR` }
+        : m));
+  }, [usableMethods, sendMethodsData]);
+  const liveReceiveMethods = useMemo(() => usableMethods(receiveMethodsData), [usableMethods, receiveMethodsData]);
+
+  const methodToOption = useCallback((method: LocalMethod) => ({
+    id: method.id,
+    icon: method.direction === 'send' ? 'send' : 'download',
+    flag: countryFlag(method.country),
+    title: method.title,
+    subtitle: method.subtitle,
+    note: method.status === 'needs_verification'
+      ? 'Verifica tu identidad para usarlo'
+      : method.status === 'needs_document'
+        ? (method.documentTypes?.length === 1 && method.documentTypes[0] === 'P'
+          ? 'Verifica tu pasaporte para usarlo'
+          : 'Verifica otro documento para usarlo')
+        : undefined,
+    onPress: () => {
+      setShowLocalSendSelection(false);
+      setShowLocalReceiveSelection(false);
+      if (method.status === 'needs_verification') {
+        navigation.navigate('Verification');
+        return;
+      }
+      if (method.status === 'needs_document') {
+        // A second document for this rail; the primary verification stays.
+        navigation.navigate('AdditionalDocument', {
+          idCountry: method.documentCountry,
+          documentTypes: method.documentTypes,
+          reason: `Para ${method.title} en ${countryName(method.country)} necesitamos un documento distinto al que ya verificaste.`,
+        });
+        return;
+      }
+      navigation.navigate(method.direction === 'send' ? 'LocalSend' : 'LocalReceive', { methodId: method.id });
+    },
+  }), [navigation]);
 
   // Same two-stage demand probe the crypto receive sheet uses: a bare tap is
   // curiosity, the confirmation is the real signal. Every corridor is a probe
@@ -853,7 +941,10 @@ export const TransferScreen = () => {
   // today — which is exactly why the probes below it have to carry the sheet.
   const activeLocalReceiveOptions = useMemo(
     () =>
-      receivableLocalAccounts.flatMap(account =>
+      // Infinia accounts open their own receive screen (details, deposits,
+      // conversion) through the server rail rows; only other providers' keys
+      // still use copy-on-tap here.
+      receivableLocalAccounts.filter(account => account.provider !== 'infinia').flatMap(account =>
         account.fundingInstructions
           .filter(instruction => instruction.status === 'active' && !!instruction.displayValue)
           .map(instruction => ({
@@ -864,14 +955,19 @@ export const TransferScreen = () => {
             subtitle: instruction.holderDisplayName
               ? `A nombre de ${instruction.holderDisplayName} · toca para copiar`
               : 'Toca para copiar',
-            onPress: () =>
-              handleCopyLocalKey(
-                instruction.displayValue,
-                instruction.kind === 'breb_key' ? 'llave Bre-B' : 'cuenta',
-              ),
+            // A Bre-B key opens its own screen (it shows after a location
+            // check); other keys still copy on tap.
+            onPress: () => {
+              if (instruction.kind === 'breb_key') {
+                setShowLocalReceiveSelection(false);
+                navigation.navigate('LocalReceive', { methodId: 'cobre_co_breb_receive' });
+                return;
+              }
+              handleCopyLocalKey(instruction.displayValue, 'cuenta');
+            },
           })),
       ),
-    [receivableLocalAccounts, handleCopyLocalKey],
+    [receivableLocalAccounts, handleCopyLocalKey, navigation],
   );
 
   const handleSendTokenSelection = (tokenType: 'cusd' | 'confio' | 'usdc') => {
@@ -1773,15 +1869,23 @@ export const TransferScreen = () => {
           visible={showLocalSendSelection}
           title="¿A dónde quieres enviar?"
           onClose={() => setShowLocalSendSelection(false)}
-          options={[...bridgeOptions, ...localSendRails.map(rail => railToOption(rail, 'send'))]}
+          options={[
+            ...liveSendMethods.map(methodToOption),
+            ...recoveryOptions,
+            // A country served by a real rail must not also show as a probe.
+            ...localSendRails
+              .filter(rail => !liveSendMethods.some(method => method.country === rail.country))
+              .map(rail => railToOption(rail, 'send')),
+          ]}
         />
         <RouteSheet
           visible={showLocalReceiveSelection}
           title="¿Dónde quieres recibir?"
           onClose={() => setShowLocalReceiveSelection(false)}
           options={[
-            ...bridgeOptions,
             ...activeLocalReceiveOptions,
+            ...liveReceiveMethods.map(methodToOption),
+            ...recoveryOptions,
             ...localReceiveRails
               // A corridor the user already has an active account for would
               // otherwise appear twice: once as their real key, once as a
@@ -1790,7 +1894,8 @@ export const TransferScreen = () => {
                 rail =>
                   !receivableLocalAccounts.some(
                     account => toIso2(account.country) === rail.country,
-                  ),
+                  )
+                  && !liveReceiveMethods.some(method => method.country === rail.country),
               )
               .map(rail => railToOption(rail, 'receive')),
           ]}

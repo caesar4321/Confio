@@ -3063,13 +3063,21 @@ class DiditSessionInfo(graphene.ObjectType):
 
 
 class CreateDiditVerificationSession(graphene.Mutation):
+    class Arguments:
+        # Omitted = the primary, phone-country verification (unchanged).
+        # 'additional_document' = a second document for a rail the primary
+        # one does not satisfy; it never replaces the primary document.
+        purpose = graphene.String(required=False)
+        id_country = graphene.String(required=False)
+        document_types = graphene.List(graphene.String, required=False)
+
     success = graphene.Boolean()
     error = graphene.String()
     session = graphene.Field(DiditSessionInfo)
     verification = graphene.Field(IdentityVerificationType)
 
     @classmethod
-    def mutate(cls, root, info):
+    def mutate(cls, root, info, purpose=None, id_country=None, document_types=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return CreateDiditVerificationSession(success=False, error="Authentication required", session=None, verification=None)
@@ -3088,11 +3096,21 @@ class CreateDiditVerificationSession(graphene.Mutation):
                         'Only the business owner can start business verification'
                     )
 
+            document_request = None
+            if purpose == 'additional_document':
+                if account_type != 'personal':
+                    raise DiditAPIError('Solo una cuenta personal puede agregar otro documento.')
+                from security.didit import normalize_document_request
+                document_request = normalize_document_request(id_country, document_types)
+            elif purpose not in (None, '', 'primary'):
+                raise DiditAPIError('Unsupported verification purpose')
+
             session_data = create_didit_session(
                 user=user,
                 account_type=account_type,
                 business_id=business_id,
                 callback_url=build_didit_callback_url(info.context),
+                document_request=document_request,
             )
             return CreateDiditVerificationSession(
                 success=True,
@@ -4873,7 +4891,8 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 		user_address = get_primary_algorand_address(user)
 		if not user_address:
 			return PrepareReferralRewardClaim(success=False, error="Necesitas asociar tu billetera Algorand para desbloquear $CONFIO.")
-		if not user.is_identity_verified:
+		# Rewards accept any verified document, including one from another country.
+		if not user.has_verified_identity_document:
 			return PrepareReferralRewardClaim(
 				success=False,
 				error="Necesitas completar tu verificación de identidad para reclamar $CONFIO ganado por recompensas o referidos.",
@@ -5133,7 +5152,7 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		if _reward_claims_locked():
 			return SubmitReferralRewardClaim(success=False, error=REWARD_CLAIMS_LOCKED_MESSAGE)
 
-		if not user.is_identity_verified:
+		if not user.has_verified_identity_document:
 			return SubmitReferralRewardClaim(
 				success=False,
 				error="Necesitas completar tu verificación de identidad para reclamar $CONFIO ganado por recompensas o referidos.",

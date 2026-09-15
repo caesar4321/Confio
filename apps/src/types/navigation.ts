@@ -41,6 +41,13 @@ export type MainStackParamList = {
   InfiniaPayment: undefined;
   CobrePayment: undefined;
   LocalAccountFunding: undefined;
+  LocalSend: { methodId: string };
+  LocalReceive: { methodId: string };
+  LocalTransferStatus: { journeyId?: string } | undefined;
+  LocalLimitIncrease: undefined;
+  AdditionalDocument: { idCountry?: string; documentTypes?: string[]; reason?: string } | undefined;
+  LocalAccountApplication: { methodId: string };
+  BrebLocationCheck: undefined;
   PayoutMethods: undefined;
   RampAddress: undefined;
   ConfioAddress: undefined;

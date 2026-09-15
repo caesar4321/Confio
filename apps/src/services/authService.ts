@@ -12,7 +12,7 @@ import { persistSignInSession } from './signInSessionStorage';
 import { canReplaceAfterRecoveryFailure, collisionRefusalMessage } from './walletReenrollmentDecision';
 import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
-import auth from '@react-native-firebase/auth';
+import { getAuth, GoogleAuthProvider, AppleAuthProvider, signInWithCredential, getIdToken, signOut } from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 // Using Web3Auth mutations from mutations.ts
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
@@ -445,7 +445,7 @@ export class AccountDeactivatedError extends Error {
 
 export class AuthService {
   private static instance: AuthService;
-  private auth = auth();
+  private auth = getAuth();
   private firebaseIsInitialized = false;
   private apolloClient: ApolloClient<any> | null = null;
   private token: string | null = null;
@@ -1153,9 +1153,9 @@ export class AuthService {
       // 3) Sign in with Firebase using the Google credential
       onProgress?.('Autenticando tu cuenta...');
       console.log('Creating Firebase credential...');
-      const firebaseCred = auth.GoogleAuthProvider.credential(idToken);
+      const firebaseCred = GoogleAuthProvider.credential(idToken);
       console.log('Signing in with Firebase...');
-      const { user } = await this.auth.signInWithCredential(firebaseCred);
+      const { user } = await signInWithCredential(this.auth, firebaseCred);
       console.log('Firebase sign-in response:', user ? 'User received' : 'No user');
       perfLog('Firebase sign-in complete');
 
@@ -1164,7 +1164,7 @@ export class AuthService {
       }
 
       console.log('Getting Firebase ID token...');
-      const firebaseToken = await user.getIdToken();
+      const firebaseToken = await getIdToken(user);
       console.log('Firebase token received');
 
       // 4) Collect device fingerprint
@@ -1850,9 +1850,9 @@ export class AuthService {
       onProgress?.('Verificando tu identidad con Apple...');
 
       // Sign in with Firebase
-      const appleCredential = auth.AppleAuthProvider.credential(appleAuthResponse.identityToken, appleAuthResponse.nonce);
-      const userCredential = await this.auth.signInWithCredential(appleCredential);
-      const firebaseToken = await userCredential.user.getIdToken();
+      const appleCredential = AppleAuthProvider.credential(appleAuthResponse.identityToken, appleAuthResponse.nonce);
+      const userCredential = await signInWithCredential(this.auth, appleCredential);
+      const firebaseToken = await getIdToken(userCredential.user);
 
       console.log('Firebase sign-in successful');
 
@@ -2303,7 +2303,7 @@ export class AuthService {
         console.error('No authenticated Firebase user; skipping derivation');
         return '';
       }
-      const firebaseIdToken = await currentUser.getIdToken();
+      const firebaseIdToken = await getIdToken(currentUser);
 
       // Get OAuth subject from keychain
       const { oauthStorage } = await import('./oauthStorageService');
@@ -2501,7 +2501,7 @@ export class AuthService {
       // 1. Sign out from Firebase (if there's a current user)
       const currentUser = this.auth.currentUser;
       if (currentUser) {
-        await this.auth.signOut();
+        await signOut(this.auth);
         console.log('Firebase sign out complete');
       } else {
         console.log('No Firebase user to sign out');

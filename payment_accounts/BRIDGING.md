@@ -112,7 +112,9 @@ Apply `payment_accounts` migrations 0005–0007 **before** deploying callers of
 PAYMENT_BRIDGE_QUOTES_ENABLED=False
 PAYMENT_BRIDGE_BSC_ENABLED=False
 PAYMENT_BRIDGE_POLYGON_ENABLED=False
-PAYMENT_BRIDGE_MAX_USDT=100
+# Empty = no per-transfer cap (NEXT prices every size at the same rate).
+# Set a positive amount only as an emergency brake.
+PAYMENT_BRIDGE_MAX_USDT=
 PAYMENT_BRIDGE_VERIFIED_INSTRUCTIONS={}
 PAYMENT_BRIDGE_POLYGON_RPC_URL=https://polygon-bor-rpc.publicnode.com
 PAYMENT_BRIDGE_POLYGON_MAX_GAS_PRICE_WEI=500000000000

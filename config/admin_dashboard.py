@@ -2191,3 +2191,15 @@ confio_admin_site.register(InfiniaJourney, InfiniaJourneyAdmin)
 from payment_accounts.models import CobreJourney
 from payment_accounts.admin import CobreJourneyAdmin
 confio_admin_site.register(CobreJourney, CobreJourneyAdmin)
+
+from payment_accounts.models import LimitIncreaseRequest
+from payment_accounts.admin import LimitIncreaseRequestAdmin
+confio_admin_site.register(LimitIncreaseRequest, LimitIncreaseRequestAdmin)
+
+from payment_accounts.models import AccountActivation
+from payment_accounts.admin import AccountActivationAdmin
+confio_admin_site.register(AccountActivation, AccountActivationAdmin)
+
+from payment_accounts.models import BrebLocationCheck
+from payment_accounts.admin import BrebLocationCheckAdmin
+confio_admin_site.register(BrebLocationCheck, BrebLocationCheckAdmin)

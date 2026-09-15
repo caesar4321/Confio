@@ -32,8 +32,8 @@ def preflight(journey, amount):
         raise InfiniaBridgeReview(str(exc)) from exc
     if not getattr(settings, 'PAYMENT_BRIDGE_QUOTES_ENABLED', False):
         raise InfiniaBridgeReview('Payment bridge quotes are not enabled')
-    maximum = Decimal(str(getattr(settings, 'PAYMENT_BRIDGE_MAX_USDT', '100')))
-    if not maximum.is_finite() or maximum <= 0 or Decimal(amount) > maximum:
+    from .bridge import exceeds_bridge_cap
+    if exceeds_bridge_cap(amount):
         raise InfiniaBridgeReview('Amount exceeds the configured bridge limit')
     instructions = FundingInstruction.objects.filter(
         financial_account=journey.crypto_account, kind='crypto_address', status='active',

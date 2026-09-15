@@ -149,6 +149,15 @@ def _validate_infinia_destination(*, kind, country, details):
             raise PaymentAccountError('Destination bankCode must be numeric') from exc
 
 
+def _declared_address_country(identity):
+    # A company's domicile is its own verified (KYB) country, the address Infinia
+    # receives, never its representative's personal ramp address.
+    if (identity.risk_factors or {}).get('account_type') == 'business':
+        return str(identity.verified_country or '').upper()
+    from ramps.schema import _build_effective_ramp_address_snapshot
+    return str(_build_effective_ramp_address_snapshot(identity.user).address_country or '').upper()
+
+
 def identity_snapshot(identity):
     return {
         'full_name': f'{identity.verified_first_name} {identity.verified_last_name}'.strip(),
@@ -157,6 +166,9 @@ def identity_snapshot(identity):
         'date_of_birth': identity.verified_date_of_birth.isoformat(),
         'nationality': identity.verified_nationality.upper(),
         'residence_country': identity.verified_country.upper(),
+        # Domicile as the user declared it (the Koywe ramp address; country from
+        # the phone). Didit's country is the document's, not where they live.
+        'address_country': _declared_address_country(identity),
         'address': identity.verified_address,
         'city': identity.verified_city,
         'state': identity.verified_state,
@@ -243,7 +255,12 @@ def _infinia_capabilities(account):
         'payout_qr': 'send_qr',
     }
     identity = account.provider_profile.identity_snapshot or {}
-    is_national = same_country(identity.get('nationality'), account.country)
+    # Infinia's National/Foreign is DOMICILE, not nationality (Integration
+    # Model: "domiciled in the account's country"). A Venezuelan living in
+    # Colombia is National for a COP account. The declared address country wins;
+    # Didit's country is only a fallback for snapshots taken before it existed.
+    is_national = same_country(
+        identity.get('address_country') or identity.get('residence_country'), account.country)
     is_business = account.provider_profile.owner_type == 'business'
     documented_defaults = {
         'payin_same_name': 'enabled' if is_national else 'not_applicable',
@@ -372,10 +389,14 @@ def provision_payment_account(
     kyc_mode='',
     owner_payload=None,
     compliance_consent=False,
+    location_permit=None,
 ):
     provider = provider.strip().lower()
     country = country.strip().upper()
     asset = asset.strip().upper()
+    if provider == 'cobre' and country in {'CO', 'COL'} and asset == 'COP':
+        from .breb_location import require_permit
+        require_permit(location_permit, confio_account)
     if provider not in PROVIDER_ACCOUNT_SHAPES:
         raise PaymentAccountError('Unsupported provider')
     _require_provider_enabled(provider)
@@ -404,6 +425,9 @@ def provision_payment_account(
         scope='account_opening',
         context=context,
     )
+    if provider == 'infinia':
+        from .activation import require_opening_intent
+        require_opening_intent(confio_account, country, asset)
     profile, _ = ProviderProfile.objects.get_or_create(
         confio_account=confio_account,
         provider=provider,
@@ -465,8 +489,13 @@ def provision_payment_account(
     return profile, account
 
 
-def create_funding_instruction(*, financial_account, kind, **kwargs):
+def create_funding_instruction(*, financial_account, kind, location_permit=None, **kwargs):
+    if financial_account.provider == 'cobre' and kind == 'breb_key':
+        from .breb_location import require_permit
+        require_permit(location_permit, financial_account.provider_profile.confio_account)
     _require_provider_enabled(financial_account.provider)
+    from .activation import require_usable
+    require_usable(financial_account)
     if financial_account.status != 'active':
         raise PaymentAccountError('Financial account is not active')
     if kind not in dict(FundingInstruction.KIND_CHOICES):
@@ -556,7 +585,9 @@ def create_payout_destination(
     _require_provider_enabled(provider)
     if provider == 'cobre' and (kind != 'breb_key' or country != 'COL' or asset != 'COP'):
         raise PaymentAccountError('Cobre currently supports only Colombia Bre-B destinations')
-    if kind == 'breb_key' and not details.get('key_value'):
+    # Cobre stores the key as key_value; Infinia's BREB_KEY payload uses brebKey,
+    # which _validate_infinia_destination requires below.
+    if provider == 'cobre' and kind == 'breb_key' and not details.get('key_value'):
         raise PaymentAccountError('Bre-B key value is required')
     if provider == 'infinia':
         _validate_infinia_destination(
@@ -618,6 +649,10 @@ def create_money_operation(
             )
         if destination_account.provider != provider:
             raise PaymentAccountError('Destination account provider mismatch')
+    from .activation import require_usable
+    for account in (source_account, destination_account):
+        if account is not None:
+            require_usable(account)
     idempotency_key = (
         str(uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -695,6 +730,10 @@ def submit_money_operation(operation):
             return operation
         if not operation.source_account or operation.source_account.status != 'active':
             raise PaymentAccountError('An active source account is required')
+        from .activation import require_usable
+        for account in (operation.source_account, operation.destination_account):
+            if account is not None:
+                require_usable(account)
         if operation.provider in {'infinia', 'cobre'}:
             from .models import InfiniaJourney, CobreJourney
             journey_model = InfiniaJourney if operation.provider == 'infinia' else CobreJourney

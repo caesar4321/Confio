@@ -13,3 +13,8 @@ const { NativeModules } = require('react-native');
 NativeModules.RNGetRandomValues = {
   getRandomBase64: (byteLength) => randomBytes(byteLength).toString('base64'),
 };
+
+// @react-native-clipboard/clipboard is a TurboModule: without its mock, any
+// screen that imports it (LocalSendScreen's "Pegar") fails to load in Jest.
+jest.mock('@react-native-clipboard/clipboard', () =>
+  require('@react-native-clipboard/clipboard/jest/clipboard-mock.js'));

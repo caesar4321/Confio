@@ -5,6 +5,7 @@ VENV_PATH = ./myvenv
 PYTHON = $(VENV_PATH)/bin/python
 PIP = $(VENV_PATH)/bin/pip
 CONFIO_ENV ?= testnet
+AWS_PROFILE ?= Julian
 PROJECT_ROOT := /Users/julian/Confio
 
 # Collect static files
@@ -15,7 +16,7 @@ collectstatic:
 # Run development server with Django Channels (ASGI)
 runserver:
 	@echo "Starting runserver with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p 8000 config.asgi:application'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p 8000 config.asgi:application'
 
 # Run Daphne with HTTP/2 + TLS (dev)
 # Requires: pip install "twisted[tls,http2]" service-identity
@@ -32,17 +33,17 @@ runserver-h2:
 # Run Django development server with ASGI support (alternative)
 runserver-dev:
 	@echo "Starting runserver-dev with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) DEBUG=True DJANGO_SETTINGS_MODULE=config.settings $(PYTHON) -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) DEBUG=True DJANGO_SETTINGS_MODULE=config.settings $(PYTHON) -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload'
 
 # Run standard Django server (WSGI) - for comparison/fallback
 runserver-wsgi:
 	@echo "Starting runserver-wsgi with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) manage.py runserver 0.0.0.0:8000'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) manage.py runserver 0.0.0.0:8000'
 
 # Run migrations
 migrate:
 	@echo "Starting migrate with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py migrate'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py migrate'
 
 # Run migrations and mark existing tables as applied (no data loss)
 migrate-fake-initial:
@@ -74,12 +75,12 @@ migrate-reset-history:
 # Create new migrations
 makemigrations:
 	@echo "Starting makemigrations with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py makemigrations'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py makemigrations'
 
 # Merge conflicting migrations
 makemigrations-merge:
 	@echo "Starting makemigrations --merge with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py makemigrations --merge --noinput'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py makemigrations --merge --noinput'
 
 # Remove all migration files (keep __init__.py) and regenerate 0001s
 reset-migrations:
@@ -120,12 +121,12 @@ run:
 # Celery worker
 celery-worker:
 	@echo "Starting celery worker with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(VENV_PATH)/bin/celery -A config worker -l debug -P solo -c 1'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(VENV_PATH)/bin/celery -A config worker -l debug -P solo -c 1'
 
 # Celery beat (scheduler)
 celery-beat:
 	@echo "Starting celery beat with CONFIO_ENV=$(CONFIO_ENV)"
-	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(VENV_PATH)/bin/celery -A config beat -l info'
+	env AWS_PROFILE=$(AWS_PROFILE) /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(VENV_PATH)/bin/celery -A config beat -l info'
 
 # Strict deploy targets
 deploy-cusd:

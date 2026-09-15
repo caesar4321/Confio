@@ -32,6 +32,7 @@ class MainApplication : Application(), ReactApplication {
           return PackageList(this).packages.apply {
             // Manual: local in-app package (not an npm module)
             add(MediaPickerPackage())
+            add(BrebLocationPackage())
             // Manual: Didit SDK (custom maven repo; excluded from autolinking)
             add(SdkReactNativePackage())
           }

@@ -101,11 +101,11 @@ const ATTACH_BRIDGE = gql`
 `;
 export async function createCobreJourney(variables: Record<string, unknown>) {
   const {apolloClient} = await import('../apollo/client');
-  const response = await apolloClient.mutate({
-    mutation: CREATE_JOURNEY,
-    variables,
+  const {withBrebLocationRetry} = await import('./brebLocation');
+  const result = await withBrebLocationRetry(async () => {
+    const response = await apolloClient.mutate({mutation: CREATE_JOURNEY, variables});
+    return response.data?.createCobreJourney;
   });
-  const result = response.data?.createCobreJourney;
   if (!result?.success)
     throw new Error(result?.errors?.[0] || 'No se pudo preparar el pago');
   return result.journey;

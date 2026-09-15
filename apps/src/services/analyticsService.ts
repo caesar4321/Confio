@@ -1,4 +1,4 @@
-import analytics from '@react-native-firebase/analytics';
+import { getAnalytics, logEvent, logScreenView, setUserProperty } from '@react-native-firebase/analytics';
 import { Platform } from 'react-native';
 import { apolloClient } from '../apollo/client';
 import { TRACK_FUNNEL_EVENT } from '../apollo/mutations';
@@ -43,7 +43,7 @@ export const AnalyticsService = {
         );
         try {
             if (__DEV__) {            }
-            await analytics().logEvent(safeName, params);
+            await logEvent(getAnalytics(), safeName, params);
         } catch (error) {
             recordCrashError(error);
         }
@@ -67,7 +67,7 @@ export const AnalyticsService = {
         );
         try {
             if (__DEV__) {            }
-            await analytics().setUserProperty(safeName, safeValue);
+            await setUserProperty(getAnalytics(), safeName, safeValue);
         } catch (error) {
             recordCrashError(error);
         }
@@ -78,7 +78,7 @@ export const AnalyticsService = {
      */
     logScreenView: async (screenName: string, screenClass: string) => {
         try {
-            await analytics().logScreenView({
+            await logScreenView(getAnalytics(), {
                 screen_name: screenName,
                 screen_class: screenClass,
             });
@@ -90,7 +90,7 @@ export const AnalyticsService = {
 
     logBackupAttempt: async (provider: 'google_drive' | 'icloud') => {
         try {
-            await analytics().logEvent('backup_attempt', {
+            await logEvent(getAnalytics(), 'backup_attempt', {
                 provider,
                 timestamp: new Date().toISOString(),
             });
@@ -100,14 +100,14 @@ export const AnalyticsService = {
 
     logBackupSuccess: async (provider: 'google_drive' | 'icloud', deviceName?: string) => {
         try {
-            await analytics().logEvent('backup_success', {
+            await logEvent(getAnalytics(), 'backup_success', {
                 provider,
                 device_name: deviceName || 'unknown',
                 timestamp: new Date().toISOString(),
             });
 
             // Update User User Property
-            await analytics().setUserProperty('has_cloud_backup', 'true');
+            await setUserProperty(getAnalytics(), 'has_cloud_backup', 'true');
 
         } catch (e) {
         }
@@ -115,7 +115,7 @@ export const AnalyticsService = {
 
     logBackupFailed: async (provider: 'google_drive' | 'icloud', error: string) => {
         try {
-            await analytics().logEvent('backup_failed', {
+            await logEvent(getAnalytics(), 'backup_failed', {
                 provider,
                 error_message: error.substring(0, 100), // Truncate for safety
                 timestamp: new Date().toISOString(),
@@ -155,9 +155,9 @@ export const AnalyticsService = {
             })}`
         );
         try {
-            await analytics().logEvent(safeEventName, platformParams);
+            await logEvent(getAnalytics(), safeEventName, platformParams);
             if (safeEventName === 'referral_whatsapp_share_tapped' || safeEventName === 'whatsapp_share_tapped') {
-                await analytics().logEvent('share', {
+                await logEvent(getAnalytics(), 'share', {
                     method: options?.channel || params?.channel || 'whatsapp',
                     content_type: safeEventName === 'whatsapp_share_tapped' ? 'send_invite' : 'referral_link',
                     item_id: safeItemId,

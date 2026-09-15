@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
@@ -675,6 +676,71 @@ class InfiniaJourney(models.Model):
         indexes = [models.Index(fields=['stage', 'updated_at'], name='infinia_journey_stage_idx')]
 
 
+class LimitIncreaseRequest(models.Model):
+    """Enhanced due diligence to raise a provider's monthly limit.
+
+    The documents live in one Didit session (proof of address + source-of-funds
+    uploads, face-matched to the KYC). Ops reviews and forwards the evidence;
+    the new limit arrives through the provider's /limits/ endpoint and is never
+    set from this row.
+    """
+    STATUS_CHOICES = [
+        ('started', 'Verification started'),
+        ('submitted', 'Submitted'),
+        ('in_review', 'In review'),
+        ('forwarded', 'Forwarded to provider'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('needs_more_info', 'Needs more information'),
+    ]
+    INCOME_CHOICES = [
+        ('employed', 'Employed'),
+        ('self_employed', 'Self-employed'),
+        ('not_employed', 'Not employed'),
+        ('business', 'Business'),
+    ]
+    SOURCE_CHOICES = [
+        ('salary', 'Salary'),
+        ('business_income', 'Business income'),
+        ('savings', 'Savings'),
+        ('investments', 'Investments'),
+        ('family_support', 'Family support'),
+        ('other', 'Other'),
+    ]
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    confio_account = models.ForeignKey(
+        'users.Account', on_delete=models.PROTECT, related_name='limit_increase_requests'
+    )
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.INFINIA)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='started')
+    income_type = models.CharField(max_length=20, choices=INCOME_CHOICES)
+    occupation = models.CharField(max_length=120, blank=True, default='')
+    expected_monthly_usd = models.DecimalField(max_digits=20, decimal_places=2)
+    source_of_funds = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    didit_session_id = models.CharField(max_length=80, unique=True, null=True, blank=True)
+    didit_status = models.CharField(max_length=30, blank=True, default='')
+    evidence = models.JSONField(default=dict, blank=True, help_text='Didit decision facts; never presigned media URLs.')
+    provider_documents = models.JSONField(default=dict, blank=True, help_text='Provider document IDs after forwarding.')
+    forwarded_at = models.DateTimeField(null=True, blank=True)
+    reviewer_note = models.TextField(blank=True, default='', help_text='Internal only.')
+    user_message = models.CharField(max_length=255, blank=True, default='', help_text='Shown to the user in the app.')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['confio_account'],
+                condition=Q(status__in=['started', 'submitted', 'in_review', 'forwarded']),
+                name='limit_increase_one_open_uniq',
+            )
+        ]
+        indexes = [models.Index(fields=['status', 'created_at'], name='limit_increase_status_idx')]
+
+
 class CobreJourney(models.Model):
     """Owner-authorized provider legs; a child success never completes the journey."""
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
@@ -704,3 +770,60 @@ class CobreJourney(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['confio_account', 'request_id'], name='cobre_journey_request_uniq')]
         indexes = [models.Index(fields=['stage', 'updated_at'], name='cobre_journey_stage_idx')]
+
+
+class BrebAppAttestKey(models.Model):
+    key_id = models.CharField(max_length=44, primary_key=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    public_key = models.TextField()
+    receipt = models.BinaryField()
+    counter = models.PositiveBigIntegerField(default=0)
+    revoked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class BrebLocationCheck(models.Model):
+    """Compliance record of every Bre-B location verification: when, from which
+    IP/country, the device reading and the result. Never the device tokens."""
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    platform = models.CharField(max_length=8, blank=True)
+    passed = models.BooleanField()
+    reason = models.CharField(max_length=160, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    ip_country = models.CharField(max_length=2, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    accuracy_m = models.FloatField(null=True, blank=True)
+    reading_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['confio_account', '-created_at'])]
+
+
+class AccountActivation(models.Model):
+    """One opening entitlement per owner/country/currency, shared by all rails."""
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT)
+    country = models.CharField(max_length=3)
+    asset = models.CharField(max_length=12)
+    method_id = models.CharField(max_length=40)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default='10.00')
+    status = models.CharField(max_length=24, default='provisioning', choices=[
+        ('provisioning', 'Opening account'), ('awaiting_payment', 'Account ready, payment due'),
+        ('payment_pending', 'Payment pending'), ('active', 'Active'),
+        ('legacy', 'Existing account'), ('failed', 'Opening failed'),
+    ])
+    payment = models.OneToOneField('send.SendTransaction', null=True, blank=True,
+                                  on_delete=models.PROTECT, related_name='account_activation')
+    collector_address = models.CharField(max_length=42, blank=True, default='')
+    settlement_token_address = models.CharField(max_length=42, blank=True, default='')
+    chain_id = models.PositiveIntegerField(default=56)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    attempt = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['confio_account', 'country', 'asset'],
+                                               name='activation_owner_country_asset_uniq')]

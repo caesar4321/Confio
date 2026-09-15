@@ -497,14 +497,27 @@ def track_user_device(user, device_fingerprint_data: Dict, request=None):
                         'first_seen': timezone.now(),
                         'last_seen': timezone.now(),
                         'total_sessions': 1,
+                        'daily_sessions': {timezone.now().date().isoformat(): 1},
                         'auth_method': 'google'  # Default, could be passed as parameter
                     }
                 )
                 
                 if not idu_created:
-                    ip_device_user.last_seen = timezone.now()
-                    ip_device_user.total_sessions += 1
-                    ip_device_user.save(update_fields=['last_seen', 'total_sessions'])
+                    from datetime import timedelta
+                    from django.db import transaction
+                    # Locked and re-read: concurrent sessions each count.
+                    with transaction.atomic():
+                        ip_device_user = IPDeviceUser.objects.select_for_update().get(pk=ip_device_user.pk)
+                        ip_device_user.last_seen = timezone.now()
+                        ip_device_user.total_sessions += 1
+                        # Sessions per day (last 120 days): residence counts
+                        # recent sessions, never a pair's lifetime history.
+                        today = timezone.now().date()
+                        keep = (today - timedelta(days=120)).isoformat()
+                        daily = {day: n for day, n in (ip_device_user.daily_sessions or {}).items() if day >= keep}
+                        daily[today.isoformat()] = int(daily.get(today.isoformat()) or 0) + 1
+                        ip_device_user.daily_sessions = daily
+                        ip_device_user.save(update_fields=['last_seen', 'total_sessions', 'daily_sessions'])
                 
                 # Update IP total users count after creating the association
                 if idu_created:

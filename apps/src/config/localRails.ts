@@ -58,18 +58,21 @@ const SEND_RAILS: LocalRail[] = [
     subtitle: 'Mercado Pago, Ualá, Naranja X y bancos',
     status: 'probe',
   },
+  // Ids keep their historical `_qr` suffix (funnel history hangs off them),
+  // but the copy promises only what a payout can do: Infinia's Create Payout
+  // schema has Peru bank accounts and Bolivia ACH only — no Yape/QR payout.
   {
     id: 'send_pe_qr',
     country: 'PE',
-    title: 'QR o cuenta',
-    subtitle: 'Yape, Plin y bancos',
+    title: 'Cuenta bancaria',
+    subtitle: 'Transferencia a bancos en Perú',
     status: 'probe',
   },
   {
     id: 'send_bo_qr',
     country: 'BO',
-    title: 'QR simple o cuenta',
-    subtitle: 'QR interoperable y bancos',
+    title: 'Cuenta bancaria',
+    subtitle: 'Transferencia ACH a bancos en Bolivia',
     status: 'probe',
   },
   {

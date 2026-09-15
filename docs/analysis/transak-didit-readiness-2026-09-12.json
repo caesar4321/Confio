@@ -1,0 +1,215 @@
+{
+  "scope": "Latest verified Didit record per user; one sample per recorded residence country. Presence checks only; no media fetched, KYC submitted, or orders created. Field presence does not establish Transak acceptance.",
+  "countries": [
+    {
+      "residence_country": "ARG",
+      "verified_customers": 82,
+      "sample_document_country": "ARG",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": true,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "BOL",
+      "verified_customers": 10,
+      "sample_document_country": "BOL",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "BRA",
+      "verified_customers": 10,
+      "sample_document_country": "BRA",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "CHL",
+      "verified_customers": 9,
+      "sample_document_country": "CHL",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "COL",
+      "verified_customers": 18,
+      "sample_document_country": "COL",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "ECU",
+      "verified_customers": 3,
+      "sample_document_country": "ECU",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "GTM",
+      "verified_customers": 3,
+      "sample_document_country": "GTM",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "HND",
+      "verified_customers": 3,
+      "sample_document_country": "HND",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "MEX",
+      "verified_customers": 18,
+      "sample_document_country": "MEX",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": true,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "NIC",
+      "verified_customers": 1,
+      "sample_document_country": "NIC",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "PER",
+      "verified_customers": 17,
+      "sample_document_country": "PER",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": true,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "PRY",
+      "verified_customers": 3,
+      "sample_document_country": "PRY",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "UNK",
+      "verified_customers": 1,
+      "sample_document_country": "ESP",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": true,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "USA",
+      "verified_customers": 1,
+      "sample_document_country": "USA",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": true,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    },
+    {
+      "residence_country": "VEN",
+      "verified_customers": 66,
+      "sample_document_country": "VEN",
+      "sample_presence_checks": {
+        "identity_present": true,
+        "address_present": false,
+        "document_number_present": true,
+        "front_reference_present": false,
+        "back_reference_present": false,
+        "selfie_reference_present": false,
+        "not_known_expired": true
+      }
+    }
+  ]
+}

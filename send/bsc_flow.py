@@ -228,7 +228,8 @@ def _lock_internal_recipient_account(recipient_user, recipient_business):
 def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                      recipient_phone=None, recipient_address=None,
                      memo: str = '', idempotency_key: str = '',
-                     token: str = '', fee_capable_client: bool = False) -> dict:
+                     token: str = '', fee_capable_client: bool = False,
+                     activation_id=None) -> dict:
     """Build and store the send. `jwt_ctx` is the validated JWT business
     context (send_funds already enforced by the mutation). `token` empty =
     dollar-value send (shapes A–C); 'CUSD_PLUS'/'CONFIO' = the explicit
@@ -298,6 +299,19 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         if recipient_user is not None:
             _notify_recipient_needs_app(recipient_user, user)
         return {'success': False, 'error': 'recipient_no_bsc_address'}
+
+    # Server-only activation intent: collect cUSD at the snapshotted treasury
+    # without treating it as an external USDT exit. Never exposed on generic GraphQL sends.
+    activation_payment = None
+    if activation_id is not None:
+        from payment_accounts.models import AccountActivation
+        activation_payment = AccountActivation.objects.filter(
+            internal_id=activation_id, confio_account=sender_account,
+            amount=amount_usd, status__in=['awaiting_payment', 'payment_pending'],
+            collector_address__iexact=recipient_addr,
+        ).first()
+        if not activation_payment or token:
+            return {'success': False, 'error': 'invalid_activation_payment'}
 
     requested = (token or '').upper()
 
@@ -386,7 +400,36 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
             return {'success': False, 'error': 'balance_unavailable'}
 
-        if shares_value_wei + MAX_SEND_DUST_WEI >= amount_wei:
+        if activation_payment is not None:
+            # Deliver exactly the fixed cUSD fee. Unwrap into the user's own
+            # wallet first; any rounding surplus stays with the user.
+            calls = []
+            shortfall = max(0, amount_wei - cusd_raw)
+            if shortfall:
+                redeem_target = max(shortfall, cp_vault.ONDO_MIN_REDEEM_WEI)
+                shares = -(-redeem_target * WAD // pps_wad)
+                for _ in range(8):
+                    if cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) >= redeem_target:
+                        break
+                    shares += 1
+                if shares > shares_raw or cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) < redeem_target:
+                    if shortfall < cp_vault.ONDO_MIN_REDEEM_WEI and cusd_raw + shares_value_wei >= amount_wei:
+                        return {'success': False, 'error': 'activation_conversion_minimum'}
+                    return {'success': False, 'error': 'insufficient_balance'}
+                calls.append({
+                    'to': vault_addr, 'value': '0',
+                    'data': '0x' + SEL_UNWRAP_TO_CUSD + _uint_word(shares)
+                            + _uint_word(redeem_target) + _addr_word(sender_addr),
+                })
+                mixed_meta = {'shares': str(shares), 'unwrap_min': str(redeem_target)}
+            calls.append({
+                'to': cusd_addr, 'value': '0',
+                'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
+            })
+            kind = 'send_mixed_cusd' if shortfall else 'send_cusd'
+            token_type = 'CUSD'
+            token_addr, units, min_out = cusd_addr, amount_wei, None
+        elif shares_value_wei + MAX_SEND_DUST_WEI >= amount_wei:
             # Value → shares at the live price; floor favors the sender's
             # remaining balance (never over-burn).
             shares = (amount_wei * WAD) // pps_wad
@@ -670,7 +713,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         else:
             return {'success': False, 'error': 'insufficient_balance'}
 
-    recipient_display = ''
+    recipient_display = 'Confío · Apertura de cuenta' if activation_payment is not None else ''
     recipient_phone_val = ''
     if recipient_business is not None:
         recipient_display = recipient_business.name
@@ -713,6 +756,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             idempotency_key=idempotency_key or None,
             bsc_calls_json=json.dumps({
                 'calls': calls, 'kind': kind,
+                'activation_id': str(activation_id) if activation_id is not None else None,
                 # Canonical intent for the submit-side byte-exact rebuild.
                 'token': token_addr, 'recipient': recipient_addr,
                 'units': str(units),
@@ -769,6 +813,22 @@ def _validate_send_batch(calls: list, send_tx, meta: dict) -> None:
     cusd = _cusd_address()
     confio = _confio_token_address()
     kind = meta.get('kind')
+    if meta.get('activation_id'):
+        from payment_accounts.activation import require_payment_ready
+        from payment_accounts.models import AccountActivation
+        from payment_accounts.services import PaymentAccountError
+        activation = AccountActivation.objects.filter(
+            internal_id=meta['activation_id'], payment_id=send_tx.pk, status='payment_pending',
+            amount=send_tx.amount, collector_address__iexact=send_tx.recipient_address,
+        ).first()
+        if (kind not in {'send_cusd', 'send_mixed_cusd'}
+                or int(meta.get('units', 0)) != int(send_tx.amount * WAD) or not activation):
+            raise PolicyError('invalid_activation_payment')
+        try:
+            require_payment_ready(activation)
+        except PaymentAccountError as exc:
+            raise PolicyError('invalid_activation_payment') from exc
+
     expected_counts = {
         'send_wrap_cusd': 2,
         'send_mixed_wrap_cusd': 3,

@@ -88,7 +88,8 @@ class LoggingGraphQLView(GraphQLView):
             try:
                 body = json.loads(request.body)
                 query = body.get('query', '')
-                membership_claim = 'claimInstitutionMembership' in query
+                membership_claim = any(field in query for field in (
+                    'claimInstitutionMembership', 'applyCobreBreb', 'brebLocationChallenge', 'verifyBrebLocation'))
                 if _should_log_graphql_request_details():
                     logger.info("GraphQL Query: %s", '[membership claim redacted]' if membership_claim else query)
                     logger.info("GraphQL Variables: %s", '[redacted]' if membership_claim else body.get('variables', {}))

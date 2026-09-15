@@ -130,10 +130,155 @@ class InfiniaJourneyAdmin(admin.ModelAdmin):
 from .models import CobreJourney
 
 
+from django import forms
+from django.contrib import messages
+from django.core import signing
+from django.db import transaction
+from django.utils import timezone
+from .models import LimitIncreaseRequest
+
+
+_SHOWN_STATUS_SALT = 'limit-increase-admin-shown-status'
+
+
+class LimitIncreaseRequestAdminForm(forms.ModelForm):
+    # The status the reviewer actually saw, signed when the page was rendered.
+    # The instance a POST re-reads already carries any change made meanwhile,
+    # so neither it nor form.initial can tell what the reviewer decided on.
+    loaded_status = forms.CharField(widget=forms.HiddenInput, required=False)
+
+    class Meta:
+        model = LimitIncreaseRequest
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk and not self.is_bound:
+            self.fields['loaded_status'].initial = signing.dumps(self.instance.status, salt=_SHOWN_STATUS_SALT)
+
+    def shown_status(self):
+        try:
+            return signing.loads(self.data.get('loaded_status') or '', salt=_SHOWN_STATUS_SALT)
+        except signing.BadSignature:
+            return None
+
+    def clean(self):
+        data = super().clean()
+        if self.instance.pk:
+            shown = self.shown_status()
+            if shown is None:
+                raise forms.ValidationError('Recarga la página e inténtalo de nuevo.')
+            # A status the reviewer changed, on a request that moved since they
+            # saw it (a sync or a forward), is refused rather than applied.
+            current = LimitIncreaseRequest.objects.filter(pk=self.instance.pk).values_list('status', flat=True).first()
+            if data.get('status') not in (None, shown) and current != shown:
+                raise forms.ValidationError(
+                    f'Esta solicitud cambió mientras la revisabas (ahora: {current}). Recarga la página.')
+        return data
+
+
+class LimitIncreaseRequestAdmin(admin.ModelAdmin):
+    """EDD review. The documents live in the Didit session (review them in the
+    Didit console, where the questionnaire routes for manual review). Approving
+    here does not raise any limit: "Forward" uploads the proof of address and
+    source of funds to the Infinia owner; its account manager raises the limit,
+    which then appears in the provider's /limits/ response."""
+    list_display = ('internal_id', 'confio_account', 'status', 'didit_status', 'income_type',
+                    'expected_monthly_usd', 'submitted_at')
+    list_filter = ('status', 'didit_status', 'income_type', 'provider')
+    raw_id_fields = ('confio_account',)
+    readonly_fields = ('internal_id', 'confio_account', 'provider', 'income_type', 'occupation',
+                       'expected_monthly_usd', 'source_of_funds', 'didit_session_id', 'didit_status',
+                       'provider_documents', 'forwarded_at', 'submitted_at', 'reviewed_at', 'created_at', 'updated_at')
+    fields = readonly_fields[:10] + ('status', 'user_message', 'reviewer_note') + readonly_fields[10:] + (
+        'loaded_status',)
+    actions = ('forward_to_provider',)
+    form = LimitIncreaseRequestAdminForm
+    REVIEWER_FIELDS = ('status', 'user_message', 'reviewer_note')
+
+    @admin.action(description='Forward EDD documents to the provider (uploads to the account owner)',
+                  permissions=['change'])
+    def forward_to_provider(self, request, queryset):
+        from .edd import forward_to_provider
+        for row in queryset:
+            try:
+                forward_to_provider(row)
+                self.log_change(request, row, 'Forwarded EDD documents to the provider owner.')
+                self.message_user(request, f'{row.internal_id}: forwarded.')
+            except Exception as exc:  # noqa: BLE001 — surfaced to the reviewer per row
+                self.message_user(request, f'{row.internal_id}: {exc}', level='error')
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            return super().save_model(request, obj, form, change)
+        # The status counts as edited only if it differs from what the reviewer
+        # SAW; the browser re-posts the displayed value even when untouched.
+        shown = form.shown_status() if hasattr(form, 'shown_status') else form.initial.get('status')
+        status_edited = obj.status != shown
+        changed = [field for field in ('user_message', 'reviewer_note') if field in form.changed_data]
+        if status_edited:
+            changed.append('status')
+        if not changed:
+            return None
+        # Only what the reviewer changed is written, on a freshly locked row: a
+        # sync or a forward committed after the page loaded is never undone.
+        with transaction.atomic():
+            current = LimitIncreaseRequest.objects.select_for_update().get(pk=obj.pk)
+            if status_edited and current.status != shown:
+                self.message_user(request, 'La solicitud cambió mientras la revisabas; no se guardó. Recarga la página.',
+                                  level=messages.ERROR)
+                return None
+            for field in changed:
+                setattr(current, field, getattr(obj, field))
+            update = [*changed, 'updated_at']
+            if status_edited and current.status != 'submitted':
+                current.reviewed_at = timezone.now()
+                update.append('reviewed_at')
+            current.save(update_fields=update)
+        return None
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 class CobreJourneyAdmin(admin.ModelAdmin):
     list_display = ('internal_id', 'direction', 'stage', 'failure_code', 'updated_at')
     list_filter = ('direction', 'stage')
     readonly_fields = tuple(field.name for field in CobreJourney._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+from .models import AccountActivation
+
+
+class AccountActivationAdmin(admin.ModelAdmin):
+    list_display = ('internal_id', 'confio_account', 'country', 'asset', 'amount', 'status', 'updated_at')
+    list_filter = ('status', 'country', 'asset')
+    readonly_fields = tuple(field.name for field in AccountActivation._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+from .models import BrebLocationCheck
+
+
+class BrebLocationCheckAdmin(admin.ModelAdmin):
+    """Compliance evidence: read-only, never added or deleted from the admin."""
+    list_display = ('created_at', 'confio_account', 'passed', 'platform', 'ip_country', 'accuracy_m', 'reason')
+    list_filter = ('passed', 'platform', 'ip_country')
+    readonly_fields = tuple(field.name for field in BrebLocationCheck._meta.fields)
 
     def has_add_permission(self, request):
         return False

@@ -130,6 +130,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isNavigationReady, setIsNavigationReady] = useState(false);
+  const [pendingAuthRoute, setPendingAuthRoute] = useState<{
+    screen: keyof AuthStackParamList;
+    params?: AuthStackParamList[keyof AuthStackParamList];
+  } | null>(null);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [accountContextTick, setAccountContextTick] = useState(0);
@@ -150,19 +154,35 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const perfLog = (_label: string, _startTime: number, _extra?: Record<string, any>) => {};
 
   const resetAuthStack = (screen: keyof AuthStackParamList, params?: AuthStackParamList[keyof AuthStackParamList]) => {
-    if (!isNavigationReady || !navigationRef.current) return;
+    setPendingAuthRoute({ screen, params });
+  };
+
+  // Startup callbacks capture the initial navigation-ready state. Apply auth
+  // routes after React mounts the Auth stack instead of dropping those resets
+  // or sending them to Main while the authentication state is changing.
+  useEffect(() => {
+    if (!pendingAuthRoute || isAuthenticated || isLoading || !isNavigationReady || !navigationRef.current) return;
     navigationRef.current.reset({
       index: 0,
       routes: [
         {
           name: 'Auth',
           params: {
-            screen,
-            params,
+            screen: pendingAuthRoute.screen,
+            params: pendingAuthRoute.params,
           },
         },
       ],
     });
+    setPendingAuthRoute(null);
+  }, [pendingAuthRoute, isAuthenticated, isLoading, isNavigationReady, navigationRef]);
+
+  const requirePhoneVerification = () => {
+    console.warn('[AuthContext] Phone link missing; routing existing session to PhoneVerification');
+    resetAuthReady();
+    setIsAuthenticated(false);
+    setProfileData(null);
+    resetAuthStack('PhoneVerification');
   };
 
   const waitForAppToBeActive = async (timeoutMs = 4000): Promise<boolean> => {
@@ -327,20 +347,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
           // If phone verification was lost on server but user is authenticated, require re-verification
           if (!serverPhoneVerified && isAuthenticated) {
-            setIsAuthenticated(false);
-            if (isNavigationReady && navigationRef.current) {
-              navigationRef.current.reset({
-                index: 0,
-                routes: [
-                  {
-                    name: 'Auth',
-                    params: {
-                      screen: 'Login',
-                    },
-                  },
-                ],
-              });
-            }
+            requirePhoneVerification();
             return; // Exit early to prevent setting profile data
           }
         }
@@ -1079,6 +1086,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             lastBiometricSuccessRef.current = Date.now();
 
             let requiresBackupCompletion = false;
+            let requiresPhoneVerification = false;
             let banned403 = false;
             try {
               const meStart = Date.now();
@@ -1096,6 +1104,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 currentAccountType: 'personal'
               } : null);
               requiresBackupCompletion = !!me?.requiresBackupCompletion;
+              // A missing/failed profile is not evidence of a missing phone.
+              requiresPhoneVerification = !!me && !(me.phoneNumber && me.phoneCountry);
             } catch (profileErr) {
               // A 403 here is the security middleware's ban/lockout — the
               // error link marks the flag in parallel, but that write races
@@ -1161,6 +1171,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               setProfileData(null);
               explainSessionEnded();
               navigateToScreen('Auth');
+              return;
+            }
+
+            if (requiresPhoneVerification) {
+              requirePhoneVerification();
               return;
             }
 

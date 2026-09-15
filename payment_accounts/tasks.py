@@ -129,3 +129,17 @@ def reconcile_cobre_journeys():
         finally:
             CobreJourney.objects.filter(pk=row.pk).update(updated_at=timezone.now())
     return count
+
+
+@shared_task(name='payment_accounts.reconcile_activations')
+def reconcile_activations():
+    from .models import AccountActivation
+    from .activation import reconcile
+    rows = AccountActivation.objects.filter(status__in=['provisioning', 'awaiting_payment', 'payment_pending']).order_by('updated_at')[:100]
+    for row in rows:
+        try:
+            reconcile(row.pk)
+        except Exception:
+            logger.exception('Account activation reconciliation failed: %s', row.internal_id)
+        finally:
+            AccountActivation.objects.filter(pk=row.pk).update(updated_at=timezone.now())

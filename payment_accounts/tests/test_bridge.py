@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from payment_accounts.allbridge_next import NextError
 from payment_accounts.bridge import quote_provider_funding
-from payment_accounts.models import FinancialAccount, FundingInstruction, MoneyFlow, PaymentBridgeQuote, ProviderProfile
+from payment_accounts.models import AccountActivation, FinancialAccount, FundingInstruction, MoneyFlow, PaymentBridgeQuote, ProviderProfile
 from payment_accounts.services import PaymentAccountError
 from security.models import IdentityVerification
 from users.models import User, Account
@@ -19,6 +19,8 @@ class BridgeQuoteTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='bridge-user', firebase_uid='bridge-user')
         self.owner = Account.objects.create(user=self.user, account_type='personal', bsc_address=SOURCE)
+        # Existing paid local account enables the shared crypto settlement account.
+        AccountActivation.objects.create(confio_account=self.owner, country='PER', asset='PEN', status='legacy')
         identity = IdentityVerification.objects.create(
             user=self.user, status='verified', verified_date_of_birth='1990-01-01',
         )
@@ -95,7 +97,8 @@ class BridgeQuoteTests(TestCase):
         with self.assertRaisesRegex(PaymentAccountError, 'changed'):
             self.quote()
 
-    def test_oversize_quote_does_not_call_next(self):
+    @override_settings(PAYMENT_BRIDGE_MAX_USDT='100')  # no cap by default; this is the emergency brake
+    def test_braked_oversize_quote_does_not_call_next(self):
         with self.assertRaisesRegex(PaymentAccountError, 'limit'):
             self.quote(amount='101')
         self.client.quote.assert_not_called()

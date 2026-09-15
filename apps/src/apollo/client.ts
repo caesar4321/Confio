@@ -215,7 +215,8 @@ const requestLifetimeLink = new ApolloLink((operation, forward) =>
 );
 
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
-  const isMembershipClaim = operation.operationName === 'ClaimInstitutionMembership';
+  // Sensitive location evidence must never enter error/telemetry logs.
+  const isMembershipClaim = ['ClaimInstitutionMembership', 'ApplyCobreBreb', 'BrebLocationChallenge', 'VerifyBrebLocation'].includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {
@@ -489,6 +490,10 @@ export const apolloClient = new ApolloClient({
       // section fail-closed hidden.
       Query: {
         fields: {
+          // Multiple consumers query different subsets of this id-less singleton.
+          cusdPlusConvertParams: {
+            merge: true,
+          },
           cusdPlusSummary: {
             merge: true,
           },

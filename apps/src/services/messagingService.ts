@@ -1,4 +1,4 @@
-import messaging from '@react-native-firebase/messaging';
+import { AuthorizationStatus, getAPNSToken, getInitialNotification, getMessaging, getToken, hasPermission, isDeviceRegisteredForRemoteMessages, onMessage, onNotificationOpenedApp, onTokenRefresh, registerDeviceForRemoteMessages, requestPermission } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidStyle, EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
 import * as Keychain from 'react-native-keychain';
@@ -86,10 +86,10 @@ class MessagingService {
       );
 
       // Check current permission status
-      const authStatus = await messaging().hasPermission();
+      const authStatus = await hasPermission(getMessaging());
       const enabled =
-        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+        authStatus === AuthorizationStatus.AUTHORIZED ||
+        authStatus === AuthorizationStatus.PROVISIONAL;
 
       if (!enabled) {
         console.log('[MessagingService] Notification permission not granted, skipping initialization');
@@ -248,20 +248,20 @@ class MessagingService {
       }
 
       // For iOS, we need to register for remote notifications first
-      if (Platform.OS === 'ios') {
-        await messaging().registerDeviceForRemoteMessages();
+      if (Platform.OS === 'ios' && !isDeviceRegisteredForRemoteMessages(getMessaging())) {
+        await registerDeviceForRemoteMessages(getMessaging());
       }
 
       // Get APNs token for iOS (required for Firebase to work)
       if (Platform.OS === 'ios') {
-        const apnsToken = await messaging().getAPNSToken();
+        const apnsToken = await getAPNSToken(getMessaging());
         if (!apnsToken) {
           console.log('Failed to get APNs token - notifications may not work');
         }
       }
 
       // Get current token from Firebase
-      const currentToken = await messaging().getToken();
+      const currentToken = await getToken(getMessaging());
 
       // Register changed tokens and honor explicit server re-registration.
       // The latter repairs a missing server row even when Firebase kept the
@@ -370,10 +370,10 @@ class MessagingService {
       console.log('[MessagingService] Ensuring token is registered for current user...');
 
       // Check if we have permission
-      const authStatus = await messaging().hasPermission();
+      const authStatus = await hasPermission(getMessaging());
       const enabled =
-        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+        authStatus === AuthorizationStatus.AUTHORIZED ||
+        authStatus === AuthorizationStatus.PROVISIONAL;
 
       if (!enabled) {
         console.log('[MessagingService] No notification permission, skipping token registration');
@@ -386,7 +386,7 @@ class MessagingService {
       }
 
       // Get current FCM token from Firebase
-      const currentToken = await messaging().getToken();
+      const currentToken = await getToken(getMessaging());
       if (!currentToken) {
         console.log('[MessagingService] No FCM token available');
         return false;
@@ -435,7 +435,7 @@ class MessagingService {
     this.messageHandlersSetup = true;
 
     // Handle messages when app is in foreground
-    const unsubscribeOnMessage = messaging().onMessage(async remoteMessage => {
+    const unsubscribeOnMessage = onMessage(getMessaging(), async remoteMessage => {
       const timestamp = new Date().toISOString();
       const messageId = remoteMessage.data?.message_id;
       const notificationId = remoteMessage.data?.notification_id;
@@ -490,7 +490,7 @@ class MessagingService {
     this.unsubscribeHandlers.push(unsubscribeOnMessage);
 
     // Handle notification opened from background state
-    const unsubscribeOnNotificationOpened = messaging().onNotificationOpenedApp(remoteMessage => {
+    const unsubscribeOnNotificationOpened = onNotificationOpenedApp(getMessaging(), remoteMessage => {
       console.log('[MessagingService] ===== NOTIFICATION OPENED FROM BACKGROUND =====');
       console.log('[MessagingService] Remote message:', JSON.stringify(remoteMessage, null, 2));
       this.handleNotificationOpen(remoteMessage);
@@ -498,8 +498,7 @@ class MessagingService {
     this.unsubscribeHandlers.push(unsubscribeOnNotificationOpened);
 
     // Check if app was opened from a notification (killed state)
-    messaging()
-      .getInitialNotification()
+    getInitialNotification(getMessaging())
       .then(remoteMessage => {
         if (remoteMessage) {
           console.log('App opened from notification (killed state):', remoteMessage);
@@ -516,7 +515,7 @@ class MessagingService {
       });
 
     // Handle token refresh
-    const unsubscribeOnTokenRefresh = messaging().onTokenRefresh(async token => {
+    const unsubscribeOnTokenRefresh = onTokenRefresh(getMessaging(), async token => {
       console.log('FCM token refreshed:', token);
       const safeToken = typeof token === 'string' ? token : String(token ?? '');
       logBreadcrumb(
@@ -1148,18 +1147,18 @@ class MessagingService {
 
   // Check if notifications are enabled
   async areNotificationsEnabled(): Promise<boolean> {
-    const authStatus = await messaging().hasPermission();
-    return authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-      authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+    const authStatus = await hasPermission(getMessaging());
+    return authStatus === AuthorizationStatus.AUTHORIZED ||
+      authStatus === AuthorizationStatus.PROVISIONAL;
   }
 
   // Request notification permissions
   async requestPermissions(): Promise<boolean> {
     try {
-      const authStatus = await messaging().requestPermission();
+      const authStatus = await requestPermission(getMessaging());
       const enabled =
-        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+        authStatus === AuthorizationStatus.AUTHORIZED ||
+        authStatus === AuthorizationStatus.PROVISIONAL;
 
       if (enabled) {
         // Re-initialize to register token

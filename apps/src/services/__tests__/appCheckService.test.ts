@@ -8,13 +8,13 @@ jest.mock('@env', () => ({
     FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS: '',
 }), { virtual: true });
 
+jest.mock('@react-native-firebase/app', () => ({ getApp: () => ({ name: '[DEFAULT]' }) }));
 jest.mock('@react-native-firebase/app-check', () => ({
-    __esModule: true,
-    default: () => ({
-        getToken: mockGetToken,
-        initializeAppCheck: mockInitializeAppCheck,
-        newReactNativeFirebaseAppCheckProvider: () => ({ configure: mockConfigure }),
-    }),
+    initializeAppCheck: (...args: unknown[]) => mockInitializeAppCheck(...args),
+    getToken: (_instance: unknown, ...args: unknown[]) => mockGetToken(...args),
+    ReactNativeFirebaseAppCheckProvider: class {
+        configure = mockConfigure;
+    },
 }));
 
 import { AppCheckService } from '../appCheckService';
@@ -27,7 +27,7 @@ describe('AppCheckService', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        mockInitializeAppCheck.mockResolvedValue(undefined);
+        mockInitializeAppCheck.mockResolvedValue({ app: { name: '[DEFAULT]' } });
     });
 
     it('makes one auth-only retry after a cached transient startup failure', async () => {
@@ -88,7 +88,7 @@ describe('AppCheckService token fetch semantics', () => {
         mockGetToken.mockReset();
         mockConfigure.mockReset();
         mockInitializeAppCheck.mockReset();
-        mockInitializeAppCheck.mockResolvedValue(undefined);
+        mockInitializeAppCheck.mockResolvedValue({ app: { name: '[DEFAULT]' } });
     });
 
     function deferred<T>() {
