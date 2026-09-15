@@ -11,7 +11,11 @@ from payment_accounts.models import AccountActivation, FinancialAccount, Funding
 from payment_accounts.services import PaymentAccountError
 from security.models import IdentityVerification
 from users.models import User, Account
-from .test_allbridge_next import SOURCE, DESTINATION, route
+from .test_allbridge_next import SOURCE, DESTINATION, route as raw_route
+
+
+def route(*args, **kwargs):
+    return dict(raw_route(*args, **kwargs), messenger='near-intents')
 
 
 @override_settings(PAYMENT_BRIDGE_QUOTES_ENABLED=True, INFINIA_PAYMENT_ACCOUNTS_ENABLED=True)
@@ -42,6 +46,8 @@ class BridgeQuoteTests(TestCase):
         self.addCleanup(self.config.disable)
         self.eligibility = mock.patch('payment_accounts.bridge.enforce_and_record').start()
         self.addCleanup(mock.patch.stopall)
+        self.net_funding = mock.patch('payment_accounts.bridge.net_funding_units',
+                                      side_effect=lambda owner, units: str(units)).start()
         self.client = mock.Mock()
         self.client.quote.return_value = [route()]
         self.request_id = uuid.uuid4()
@@ -66,6 +72,35 @@ class BridgeQuoteTests(TestCase):
         self.assertEqual(self.quote().pk, first.pk)
         self.assertEqual(MoneyFlow.objects.count(), 1)
         self.client.quote.assert_called_once()
+
+    def test_gross_spend_quotes_only_net_and_retry_does_not_reprice_the_fee(self):
+        self.net_funding.side_effect = None
+        self.net_funding.return_value = '49550000000000000000'
+        first = self.quote(amount='50')
+        self.assertEqual(first.amount_units, '49550000000000000000')
+        self.assertEqual(first.money_flow.source_amount, 50)
+        self.assertEqual(first.money_flow.metadata['gross_spend_units'], '50000000000000000000')
+        self.client.quote.assert_called_once_with('BSC:USDT', 'POL:USDC', '49550000000000000000')
+        self.net_funding.side_effect = AssertionError('retry must not reprice the fee')
+        self.assertEqual(self.quote(amount='50').pk, first.pk)
+
+    def test_pre_inclusive_quote_retry_preserves_its_original_amount(self):
+        first = self.quote(amount='50')
+        first.money_flow.metadata.pop('gross_spend_units')
+        first.money_flow.save(update_fields=['metadata'])
+        self.net_funding.side_effect = AssertionError('legacy retry must not reprice')
+        self.assertEqual(self.quote(amount='50').pk, first.pk)
+
+    def test_unexecutable_routes_cannot_be_the_default(self):
+        self.client.quote.return_value = [raw_route(), route()]
+        q = self.quote()
+        self.assertEqual([r['messenger'] for r in q.routes], ['near-intents'])
+
+    def test_only_unexecutable_routes_leave_no_orphan_flow(self):
+        self.client.quote.return_value = [raw_route()]
+        with self.assertRaisesRegex(NextError, 'No executable'):
+            self.quote()
+        self.assertFalse(MoneyFlow.objects.exists())
 
     def test_reusing_id_for_different_amount_fails(self):
         self.quote()

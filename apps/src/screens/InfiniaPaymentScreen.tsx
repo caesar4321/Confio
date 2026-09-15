@@ -115,7 +115,14 @@ export default function InfiniaPaymentScreen({
         );
       }
     } finally {
-      await history.refetch().catch(() => {});
+      // Refreshed before releasing, but bounded: a stalled history must never
+      // keep the screen busy (and its recovery actions disabled).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        history.refetch().catch(() => {}),
+        new Promise(resolve => { timer = setTimeout(resolve, 10000); }),
+      ]);
+      if (timer) clearTimeout(timer);
       working.current = false;
       setBusy(false);
     }

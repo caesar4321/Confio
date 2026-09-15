@@ -17,7 +17,8 @@ jest.mock('react-native', () => ({
     RESULTS: {GRANTED: 'granted', NEVER_ASK_AGAIN: 'never_ask_again'}, requestMultiple: (...args: any[]) => mockRequestMultiple(...args)},
 }));
 import {applyCobreBreb, withBrebLocationRetry, verifyBrebLocation, brebLocationPassValid, BREB_PERMISSION_ERROR,
-  requestBrebLocationPermission, brebLocationPassRemainingMs, isBrebLocationFailure} from '../brebLocation';
+  requestBrebLocationPermission, brebLocationPassRemainingMs, isBrebLocationFailure,
+  onBrebLocationPassChange} from '../brebLocation';
 import {Platform} from 'react-native';
 
 beforeEach(() => {jest.resetAllMocks(); mockCheckPermission.mockResolvedValue(true); Platform.OS = 'android'; Object.defineProperty(Platform, 'Version', {value: '17', configurable: true});});
@@ -112,7 +113,8 @@ test('explicit expired-pass refusal verifies then retries once', async () => {
   mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
   mockMutate.mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge', cloudProjectNumber: '123456789'}}})
     .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: 123}}});
-  expect(await withBrebLocationRetry(operation)).toEqual(denied);
+  // Refused again after the new check: a location failure to recover from, never a third attempt.
+  expect(isBrebLocationFailure(await withBrebLocationRetry(operation).catch(e => e))).toBe(true);
   expect(operation).toHaveBeenCalledTimes(2);
   expect(mockAttest).toHaveBeenCalledTimes(1);
 });
@@ -141,6 +143,65 @@ test('an explicit refusal forgets the cached pass', async () => {
   const operation = jest.fn().mockResolvedValue({success: false, errors: ['Verifica tu ubicación para usar Bre-B.']});
   await expect(withBrebLocationRetry(operation)).rejects.toThrow('ubicación precisa');
   expect(brebLocationPassValid('cached-scope')).toBe(false);
+});
+test('a stalled location request is bounded and releases the caller', async () => {
+  jest.useFakeTimers();
+  try {
+    mockRequestMultiple.mockResolvedValue({fine: 'granted'}); // the explicit check asks, and is allowed
+    mockMutate.mockReturnValue(new Promise(() => {})); // the challenge never answers
+    const pending = verifyBrebLocation('stall-scope').catch(error => error);
+    await jest.advanceTimersByTimeAsync(20001);
+    expect((await pending).message).toContain('tardó demasiado');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+test('screens hear every pass change: granted and forgotten', async () => {
+  const listener = jest.fn();
+  const stop = onBrebLocationPassChange(listener);
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
+  mockMutate.mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge', cloudProjectNumber: '123456789'}}})
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}});
+  await verifyBrebLocation('heard-scope');
+  expect(listener).toHaveBeenCalledTimes(1);
+  mockCheckPermission.mockResolvedValue(false);
+  await withBrebLocationRetry(async () => ({success: false, errors: ['Verifica tu ubicación para usar Bre-B.']})).catch(() => {});
+  expect(listener).toHaveBeenCalledTimes(2);
+  stop();
+});
+test('a successful automatic check restores that account\'s pass', async () => {
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
+  mockMutate.mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge', cloudProjectNumber: '123456789'}}})
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}})
+    .mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge-2', cloudProjectNumber: '123456789'}}})
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}});
+  await verifyBrebLocation('restore-scope');
+  const listener = jest.fn();
+  const stop = onBrebLocationPassChange(listener);
+  const operation = jest.fn()
+    .mockResolvedValueOnce({success: false, errors: ['Verifica tu ubicación para usar Bre-B.']})
+    .mockResolvedValueOnce({success: true});
+  expect(await withBrebLocationRetry(operation)).toEqual({success: true});
+  expect(brebLocationPassValid('restore-scope')).toBe(true);
+  expect(listener).toHaveBeenCalledTimes(2); // forgotten, then restored
+  stop();
+});
+test('a second refusal after a new check forgets the pass and asks for recovery', async () => {
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
+  mockMutate.mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge', cloudProjectNumber: '123456789'}}})
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}})
+    .mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge-2', cloudProjectNumber: '123456789'}}})
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}});
+  await verifyBrebLocation('twice-scope');
+  const refused = {success: false, errors: ['Verifica tu ubicación para usar Bre-B.']};
+  const operation = jest.fn().mockResolvedValue(refused);
+  const error: any = await withBrebLocationRetry(operation).catch(e => e);
+  expect(isBrebLocationFailure(error)).toBe(true);
+  expect(operation).toHaveBeenCalledTimes(2); // never a third automatic attempt
+  expect(brebLocationPassValid('twice-scope')).toBe(false);
 });
 test('ambiguous network failure and other refusals never retry', async () => {
   const operation = jest.fn().mockRejectedValue(new Error('timeout'));

@@ -63,9 +63,11 @@ class BridgeExecutionTests(TestCase):
         self.client.build.return_value = build(q)
         intents = mock.Mock()
         intents.status.return_value, intents.tokens.return_value = binding(q), tokens()
-        with mock.patch.object(chain, 'require_chain'), mock.patch('payment_accounts.bridge_execution.funding_calls', return_value=([], {})), \
+        with mock.patch.object(chain, 'require_chain'), mock.patch('payment_accounts.bridge_execution.funding_calls', return_value=([], {})) as funding, \
              mock.patch.object(chain, 'token_balance', return_value=10**25), mock.patch.object(chain, 'rpc', return_value='0x'+chain.authorization_domain().hex()):
             t = prepare_bridge(self.owner, q.internal_id, client=self.client, intents=intents)
+            if direction == 'to_provider':
+                self.assertEqual(funding.call_args.kwargs['max_spend'], int(q.money_flow.metadata['gross_spend_units']))
         return t, intents
 
     def test_prepared_transfer_recovers_after_pricing_quote_expiry(self):
@@ -221,6 +223,48 @@ class BindingTests(SimpleTestCase):
         calls, fees = funding_calls(SimpleNamespace(user=object(), bsc_address=SOURCE), 2*10**18)
         self.assertEqual(calls, [])
         self.assertEqual(fees['wallet_usdt_units'], str(2*10**18))
+
+    def test_fifty_total_redeems_fifty_and_bridges_net_without_extra_debit(self):
+        from eth_abi import decode
+        from cusd_plus.cusd_vault import ConversionPreview
+        from payment_accounts.bridge import net_funding_units
+        owner = SimpleNamespace(user=object(), bsc_address=SOURCE)
+        gross = 50 * 10**18
+        def preview(value):
+            fee = (value * 90 + 9999) // 10000  # CusdVault uses rounding up.
+            return ConversionPreview(gross_wei=value, net_wei=value-fee, fee_wei=fee, fee_bps=90)
+        with mock.patch.object(chain, 'token_balance', return_value=0), \
+                mock.patch('cusd_plus.vault.reserved_usdt_wei', return_value=0), \
+                mock.patch('cusd_plus.cusd_vault.require_operational'), \
+                mock.patch('cusd_plus.cusd_vault.current_fee_bps', return_value=90), \
+                mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=preview), \
+                mock.patch('cusd_plus.cusd_vault.vault_address', return_value='0x'+'66'*20), \
+                mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=gross):
+            net = int(net_funding_units(owner, gross))
+            self.assertEqual(net, 4955 * 10**16)
+            calls, funding = funding_calls(owner, net, max_spend=gross)
+            debit, minimum, _ = decode(['uint256', 'uint256', 'address'], bytes.fromhex(calls[0]['data'][10:]))
+            self.assertEqual((debit, minimum), (gross, net))
+            self.assertEqual(funding['fee_units'], str(45 * 10**16))
+            with self.assertRaisesRegex(NextError, 'within your total'):
+                funding_calls(owner, gross, max_spend=gross)
+
+    def test_existing_usdt_is_not_charged_again_and_mixed_funding_is_net_of_fee(self):
+        from cusd_plus.cusd_vault import ConversionPreview
+        from payment_accounts.bridge import net_funding_units
+        owner = SimpleNamespace(user=object(), bsc_address=SOURCE)
+        def preview(value):
+            fee = (value * 90 + 9999) // 10000
+            return ConversionPreview(gross_wei=value, net_wei=value-fee, fee_wei=fee, fee_bps=90)
+        with mock.patch.object(chain, 'token_balance', return_value=50*10**18) as balance, \
+                mock.patch('cusd_plus.vault.reserved_usdt_wei', return_value=0), \
+                mock.patch('cusd_plus.cusd_vault.require_operational'), \
+                mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=preview) as fee:
+            self.assertEqual(net_funding_units(owner, 50*10**18), str(50*10**18))
+            fee.assert_not_called()
+            balance.return_value = 10*10**18
+            self.assertEqual(net_funding_units(owner, 50*10**18), str(4964*10**16))
+            fee.assert_called_once_with(40*10**18)
 
 
 @override_settings(PAYMENT_BRIDGE_QUOTES_ENABLED=True, PAYMENT_BRIDGE_BSC_ENABLED=True,

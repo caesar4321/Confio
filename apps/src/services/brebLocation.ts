@@ -20,6 +20,20 @@ const VERIFY = gql`mutation VerifyBrebLocation($challenge: String!, $locationJso
  * sends the person to Settings; anything later is a plain retry). */
 export const BREB_PERMISSION_ERROR = 'BREB_LOCATION_PERMISSION';
 
+// Every location request has a deadline: a stalled one must release the
+// screen with a retryable error, never keep it loading. A late answer is ignored.
+const REQUEST_TIMEOUT_MS = 20000;
+const APPLY_TIMEOUT_MS = 45000;
+function withinTime<T>(promise: Promise<T>, ms = REQUEST_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('La verificación tardó demasiado. Intenta de nuevo.')), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 async function collectEvidence(requestPermission = false) {
   if (!brebLocationSupported()) {
     throw new Error('Actualiza Confío para usar Bre-B.');
@@ -38,7 +52,7 @@ async function collectEvidence(requestPermission = false) {
   }
   const {apolloClient} = await import('../apollo/client');
   const keyId = Platform.OS === 'ios' ? await NativeModules.BrebAppleLocation.keyId() : '';
-  const response = await apolloClient.mutate({mutation: CHALLENGE, variables: {platform: Platform.OS, keyId}});
+  const response = await withinTime(apolloClient.mutate({mutation: CHALLENGE, variables: {platform: Platform.OS, keyId}}));
   const challenge = response.data?.brebLocationChallenge;
   if (!challenge?.success || !challenge.challenge) throw new Error(challenge?.error || 'No pudimos iniciar la verificación.');
   if (Platform.OS === 'android' && !/^[1-9][0-9]{0,18}$/.test(challenge.cloudProjectNumber || '')) throw new Error('La verificación del dispositivo aún no está disponible.');
@@ -51,7 +65,7 @@ async function collectEvidence(requestPermission = false) {
 export async function applyCobreBreb(scope = ''): Promise<string> {
   const variables = await collectEvidence();
   const {apolloClient} = await import('../apollo/client');
-  const result = await apolloClient.mutate({mutation: APPLY, variables});
+  const result = await withinTime(apolloClient.mutate({mutation: APPLY, variables}), APPLY_TIMEOUT_MS);
   const application = result.data?.applyCobreBreb;
   if (!application?.success || !application.value) throw new Error(application?.error || 'Tu llave aún no está disponible.');
   // The application's reading is also a location pass; the key shows while it lasts.
@@ -65,19 +79,33 @@ export async function withBrebLocationRetry<T extends {success?: boolean; errors
   const result = await operation();
   if (result?.success !== false || result.errors?.[0] !== 'Verifica tu ubicación para usar Bre-B.') return result;
   // The server no longer accepts the cached pass: forget it, so no screen trusts it.
+  const scope = passScope; // whose pass this was, to restore after a new check
   passUntil = 0;
+  notifyPass();
   try {
     const variables = await collectEvidence();
     const {apolloClient} = await import('../apollo/client');
-    const response = await apolloClient.mutate({mutation: VERIFY, variables});
+    const response = await withinTime(apolloClient.mutate({mutation: VERIFY, variables}));
     const verification = response.data?.verifyBrebLocation;
     if (!verification?.success) throw new Error(verification?.error || 'No pudimos verificar tu ubicación.');
+    // The new check is that account's pass again, unless another check (e.g.
+    // after switching accounts) replaced it meanwhile.
+    if (passScope === scope) rememberPass(scope, Number(verification.validUntil));
   } catch (error: any) {
     // The location step failed, not the operation: its message (and a refused
     // permission's code) is kept, so a screen can offer the location screen.
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {brebLocation: true});
   }
-  return operation();
+  const retried = await operation();
+  if (retried?.success === false && retried.errors?.[0] === 'Verifica tu ubicación para usar Bre-B.') {
+    // Refused again right after a new check (e.g. the network or IP changed):
+    // that pass is not accepted either. Forget it and hand the screen a
+    // location failure to recover from, never another automatic retry.
+    passUntil = 0;
+    notifyPass();
+    throw Object.assign(new Error('Verifica tu ubicación para usar Bre-B.'), {brebLocation: true});
+  }
+  return retried;
 }
 
 export {isBrebLocationFailure} from './brebLocationFailure';
@@ -137,14 +165,27 @@ function rememberPass(scope: string, expiry: number) {
   if (scope && Number.isFinite(expiry) && expiry * 1000 > Date.now()) {
     passScope = scope;
     passUntil = expiry;
+    notifyPass();
   }
+}
+
+const passListeners = new Set<() => void>();
+/** Screens that show a key follow every change of the pass (granted, renewed, forgotten). */
+export function onBrebLocationPassChange(listener: () => void): () => void {
+  passListeners.add(listener);
+  return () => { passListeners.delete(listener); };
+}
+function notifyPass() {
+  passListeners.forEach(listener => {
+    try { listener(); } catch { /* one screen's failure never blocks another */ }
+  });
 }
 
 /** A Bre-B screen's explicit check (asks for permission when missing). */
 export async function verifyBrebLocation(scope = '', requestPermission = true): Promise<number> {
   const variables = await collectEvidence(requestPermission);
   const {apolloClient} = await import('../apollo/client');
-  const response = await apolloClient.mutate({mutation: VERIFY, variables});
+  const response = await withinTime(apolloClient.mutate({mutation: VERIFY, variables}));
   const verification = response.data?.verifyBrebLocation;
   const expiry = Number(verification?.validUntil);
   if (!verification?.success || !Number.isFinite(expiry) || expiry * 1000 <= Date.now()) {
@@ -152,5 +193,6 @@ export async function verifyBrebLocation(scope = '', requestPermission = true): 
   }
   passScope = scope;
   passUntil = expiry;
+  notifyPass();
   return passUntil;
 }

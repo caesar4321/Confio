@@ -3,6 +3,7 @@ import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 
 let mockDeadline = 0;
+const mockPassListeners = new Set<() => void>();
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('@react-navigation/native', () => ({useFocusEffect: () => {}, useNavigation: () => ({})}));
 jest.mock('../../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {id: 'personal_0'}})}));
@@ -20,6 +21,10 @@ jest.mock('../../../services/brebLocation', () => ({
   verifyBrebLocation: jest.fn(),
   brebLocationPassValid: () => Date.now() < mockDeadline,
   brebLocationPassRemainingMs: () => Math.max(0, mockDeadline - Date.now()),
+  onBrebLocationPassChange: (listener: () => void) => {
+    mockPassListeners.add(listener);
+    return () => { mockPassListeners.delete(listener); };
+  },
 }));
 import {useBrebLocationPass} from '../BrebLocationGate';
 
@@ -44,6 +49,18 @@ it('follows a renewed pass to its new expiry', async () => {
     if (tree) await act(async () => { tree!.unmount(); });
     jest.useRealTimers();
   }
+});
+
+it('hides at once when the pass is forgotten elsewhere', async () => {
+  mockDeadline = Date.now() + 60000;
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Probe />); });
+  expect(shown(tree)).toBe('shown');
+  mockDeadline = 0; // e.g. an operation got the explicit refusal
+  await act(async () => { mockPassListeners.forEach(listener => listener()); });
+  expect(shown(tree)).toBe('hidden');
+  await act(async () => { tree.unmount(); });
+  expect(mockPassListeners.size).toBe(0);
 });
 
 it('never reports a pass when disabled', async () => {

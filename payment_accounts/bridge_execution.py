@@ -56,7 +56,7 @@ def _word(value):
     return f'{value:064x}'
 
 
-def funding_calls(owner, amount):
+def funding_calls(owner, amount, *, max_spend=None):
     """Redeem only the missing USDT, charging the existing perimeter once."""
     from cusd_plus import vault, cusd_vault
     from cusd_plus.sponsor_7702 import SEL_CUSD_REDEEM, SEL_UNWRAP_TO_CUSD
@@ -64,6 +64,8 @@ def funding_calls(owner, amount):
     wallet_usdt = max(0, chain.token_balance('BSC:USDT', owner.bsc_address)
                       - vault.reserved_usdt_wei(owner.user, owner.bsc_address))
     wallet_used = min(wallet_usdt, amount)
+    if max_spend is not None and wallet_used > max_spend:
+        raise NextError('Funding exceeds the reviewed total; request a fresh quote')
     missing = amount - wallet_used
     if not missing:
         return [], {'wallet_usdt_units': str(wallet_used), 'gross_redeem_units': '0', 'fee_units': '0'}
@@ -72,6 +74,8 @@ def funding_calls(owner, amount):
     if not 0 <= bps <= 90:
         raise NextError('Unexpected conversion fee')
     gross = (missing * 10000 + (10000 - bps) - 1) // (10000 - bps)
+    if max_spend is not None and wallet_used + gross > max_spend:
+        raise NextError('Conversion fee changed; request a fresh quote within your total')
     preview = cusd_vault.preview_redeem_wei(gross)
     if preview.net_wei < missing:
         raise NextError('Conversion output is insufficient')
@@ -141,7 +145,8 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         build = client.build(route, source_address=q.source_address, destination_address=q.destination_address)
         deposit, call = deposit_call(build, q.source_token_id, q.amount_units)
         minimum = uint(build['amountOutMin'], positive=True)
-        accepted_min = uint(route.get('amountOutMin', str(uint(route['amountOut']) * 99 // 100)), positive=True)
+        from .bridge import bridge_route_minimum
+        accepted_min = bridge_route_minimum(route)
         if minimum < accepted_min:
             raise NextError('Bridge price changed; request a fresh quote')
         status = intents.status(deposit)
@@ -151,7 +156,9 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         deadline = deposit_deadline if infinia_journey is not None else min(now + 600, deposit_deadline - 30)
         funding = {'wallet_usdt_units': '0', 'fee_units': '0', 'gross_redeem_units': '0'}
         if source_chain == 'BSC':
-            prefix, funding = funding_calls(owner, int(q.amount_units))
+            budget = q.money_flow.metadata.get('gross_spend_units')
+            prefix, funding = funding_calls(owner, int(q.amount_units),
+                                            max_spend=int(budget) if budget is not None else None)
         elif infinia_journey is None:
             prefix = []
             if chain.token_balance(q.source_token_id, q.source_address) < int(q.amount_units):

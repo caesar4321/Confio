@@ -1,5 +1,5 @@
 import { bytesToHex } from '@noble/hashes/utils';
-import { BridgeTransfer, bridgeRequestId, journeyReturnBridgeRequestId, polygonAuthorizationDigest, authorizePaymentBridge } from '../paymentBridge';
+import { BridgeTransfer, bridgeRequestId, journeyReturnBridgeRequestId, polygonAuthorizationDigest, authorizePaymentBridge, preparePaymentBridge } from '../paymentBridge';
 
 const mockMutate = jest.fn();
 const mockWallet = jest.fn();
@@ -16,6 +16,20 @@ const transfer = (): BridgeTransfer => ({
 });
 
 beforeEach(() => { jest.clearAllMocks(); });
+it('permits a fresh request after an explicit pre-transfer budget rejection', async () => {
+  mockMutate.mockResolvedValueOnce({data: {quotePaymentBridge: {success: true, quote: {internalId: 'quote'}}}})
+    .mockResolvedValueOnce({data: {preparePaymentBridge: {success: false,
+      errors: ['Conversion fee changed; request a fresh quote within your total']}}});
+  await expect(preparePaymentBridge('instruction', '50', 'to_provider', 'request'))
+    .rejects.toMatchObject({quoteRefreshRequired: true});
+});
+it('does not allow replacing a request after an uncertain preparation result', async () => {
+  const timeout = new Error('Network timeout');
+  mockMutate.mockResolvedValueOnce({data: {quotePaymentBridge: {success: true, quote: {internalId: 'quote'}}}})
+    .mockRejectedValueOnce(timeout);
+  await expect(preparePaymentBridge('instruction', '50', 'to_provider', 'request')).rejects.toBe(timeout);
+  expect(timeout).not.toHaveProperty('quoteRefreshRequired');
+});
 it('matches the independently encoded Python EIP-3009 digest', () => {
   expect(bytesToHex(polygonAuthorizationDigest(transfer()))).toBe('0d887782902b68ed55499706dbd35f1ea0e3918577673aa978f9c8def745eb00');
 });

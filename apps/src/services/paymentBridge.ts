@@ -85,14 +85,30 @@ export function polygonAuthorizationDigest(t: BridgeTransfer): Uint8Array {
   return keccak_256(hexToBytes('1901' + domain + message));
 }
 
+function preparationError(message: string): Error {
+  // Only these explicit server rejections occur before a transfer is saved.
+  // Transport errors must keep the original request for idempotent recovery.
+  const refreshable = new Set([
+    'Bridge quote expired; request a new quote with a new request id',
+    'Bridge quote expired while pricing; try again',
+    'Bridge quote expired while saving; try again',
+    'Quote expired; request a fresh quote',
+    'Quote expired during preparation; request a fresh quote',
+    'Bridge price changed; request a fresh quote',
+    'Funding exceeds the reviewed total; request a fresh quote',
+    'Conversion fee changed; request a fresh quote within your total',
+  ]);
+  return Object.assign(new Error(message), {quoteRefreshRequired: refreshable.has(message)});
+}
+
 export async function preparePaymentBridge(instruction: string, amount: string, direction: string, request: string): Promise<BridgeTransfer> {
   const { apolloClient } = await import('../apollo/client');
   const quoted = await apolloClient.mutate({ mutation: QUOTE, variables: { instruction, amount, direction, request } });
   const q = quoted.data?.quotePaymentBridge;
-  if (!q?.success) throw new Error(q?.errors?.[0] || 'No se pudo calcular el envío');
+  if (!q?.success) throw preparationError(q?.errors?.[0] || 'No se pudo calcular el envío');
   const prepared = await apolloClient.mutate({ mutation: PREPARE, variables: { quote: q.quote.internalId } });
   const p = prepared.data?.preparePaymentBridge;
-  if (!p?.success) throw new Error(p?.errors?.[0] || 'No se pudo preparar el envío');
+  if (!p?.success) throw preparationError(p?.errors?.[0] || 'No se pudo preparar el envío');
   return p.transfer;
 }
 
