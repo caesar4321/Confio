@@ -258,14 +258,29 @@ def verify(owner, meta, challenge_token, location_json, integrity_token):
         package = getattr(settings, 'BREB_PLAY_PACKAGE_NAME', 'com.Confio.Confio')
         request_hash = base64.urlsafe_b64encode(hashlib.sha256((challenge_token+'.'+location_json).encode()).digest()).decode().rstrip('=')
         app = verdict['appIntegrity']
-        if (request.get('requestHash') != request_hash or request['requestPackageName'] != package
-                or not -5000 <= time.time()*1000-int(request['timestampMillis']) <= 120000
-                or app.get('appRecognitionVerdict') != 'PLAY_RECOGNIZED'
-                or app.get('packageName') != package
-                or not set(app.get('certificateSha256Digest', [])) & set(settings.BREB_PLAY_CERTIFICATE_DIGESTS)
-                or 'MEETS_DEVICE_INTEGRITY' not in verdict.get('deviceIntegrity', {}).get('deviceRecognitionVerdict', [])):
+        # The authenticated account owner, never a submitted username, selects
+        # this explicit test exception. UNEVALUATED is still refused.
+        sideload_exception = (
+            app.get('appRecognitionVerdict') == 'UNRECOGNIZED_VERSION'
+            and str(getattr(owner, 'user_id', None)) in
+            getattr(settings, 'BREB_ANDROID_SIDELOAD_TEST_USER_IDS', [])
+        )
+        checks = {
+            'request_hash': request.get('requestHash') == request_hash,
+            'request_package': request['requestPackageName'] == package,
+            'request_freshness': -5000 <= time.time()*1000-int(request['timestampMillis']) <= 120000,
+            'app_recognition': app.get('appRecognitionVerdict') == 'PLAY_RECOGNIZED' or sideload_exception,
+            'app_package': app.get('packageName') == package,
+            'certificate': bool(set(app.get('certificateSha256Digest', [])) & set(settings.BREB_PLAY_CERTIFICATE_DIGESTS)),
+            'device_integrity': 'MEETS_DEVICE_INTEGRITY' in verdict.get('deviceIntegrity', {}).get('deviceRecognitionVerdict', []),
+        }
+        failed = [name for name, passed in checks.items() if not passed]
+        if failed:
+            # Fixed check names only, never tokens, fingerprints or location.
+            logger.warning('breb_android_integrity_refused checks=%s', ','.join(failed))
             raise ValueError()
-        _record(owner, meta, evidence, True, strict=True)
+        _record(owner, meta, evidence, True, strict=True,
+                reason='android_sideload_test_exception' if sideload_exception else '')
         return ApplicationPermit(owner.pk, time.time()+120)
     except LocationError:
         _record(owner, meta, evidence, False, 'integrity_unavailable')

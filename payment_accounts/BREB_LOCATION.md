@@ -71,6 +71,18 @@ This does not block incoming employer payments or existing account read access.
 - Release the native builds and validate on physical Play-installed Android
   and TestFlight/App Store iOS devices before enabling the respective gates.
 
+## Android sideload testing exception
+
+`BREB_ANDROID_SIDELOAD_TEST_USER_IDS` is an empty-by-default, comma-separated
+allowlist of stable user IDs. For those authenticated account owners only,
+Android accepts `UNRECOGNIZED_VERSION` as well as `PLAY_RECOGNIZED`. It still
+requires a Google-decoded token, matching package and configured signing
+certificate, device integrity, request binding/freshness, replay protection,
+and all location/IP checks. `UNEVALUATED` remains refused. iOS is unchanged.
+Successful exception uses are recorded with reason
+`android_sideload_test_exception`. Clear the setting when store testing is
+available. Usernames and client-supplied flags never grant this exception.
+
 ## iOS request-bound App Attest
 
 Firebase App Check is unchanged. Bre-B uses a separate DCAppAttestService key
