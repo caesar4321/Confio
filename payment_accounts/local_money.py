@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 
 from django.conf import settings
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .clients import InfiniaClient, ProviderAPIError
@@ -56,7 +56,7 @@ METHODS = {m.id: m for m in (
            kind='bank_account', destination_type='CBU', field='cbu'),
     Method('ar_qr', 'send', 'ARG', 'AR', 'ARS', 'QR', 'QR interoperable de comercios y billeteras',
            kind='qr', destination_type='QR_CODE', field='qrCode'),
-    Method('br_pix_receive', 'receive', 'BRA', 'BR', 'BRL', 'Chave Pix', 'Tu propia chave Pix para recibir reales',
+    Method('br_pix_receive', 'receive', 'BRA', 'BR', 'BRL', 'Pix', 'Recibe reales con tus datos Pix',
            instruction_kind='pix_key'),
     Method('co_breb_receive', 'receive', 'COL', 'CO', 'COP', 'Llave Bre-B', 'Tu propia llave para recibir pesos',
            instruction_kind='breb_key'),
@@ -386,6 +386,17 @@ def activate(owner, identity, method_id):
     return pair_status(local, crypto)
 
 
+def receive_instruction_kinds(method):
+    return ('pix_key', 'qr') if method.id == 'br_pix_receive' else (method.instruction_kind,)
+
+
+def receive_instructions(account, method):
+    return account.funding_instructions.filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+        kind__in=receive_instruction_kinds(method), status='active',
+    ).exclude(display_value='').order_by('-updated_at', '-pk')
+
+
 def receive_account(owner, method_id):
     method = get_method(method_id, 'receive')
     local, crypto = accounts_for(owner, method.country, method.asset)
@@ -395,11 +406,11 @@ def receive_account(owner, method_id):
     if not local or not usable(local):
         local, crypto = None, None
     if local:
-        instruction = local.funding_instructions.filter(
-            kind=method.instruction_kind, status='active').exclude(display_value='').order_by('created_at').first()
+        instruction = receive_instructions(local, method).first()
         capabilities = {row.capability: row.status for row in local.capabilities.all()}
     return {
         'method': method, 'status': public_status, 'local': local, 'crypto': crypto,
+        'instruction_kind': instruction.kind if instruction else method.instruction_kind,
         'value': instruction.display_value if instruction else '',
         'holder_name': instruction.holder_display_name if instruction else '',
         'institution': str(((instruction.instruction_data or {}) if instruction else {}).get('bank_name') or ''),
@@ -688,6 +699,7 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
     The minimum is the owner's authorization for the journey's fresh FX quote;
     it is server-derived so the user never has to type one.
     """
+    from .infinia_journeys import fx_source_amount
     local, crypto = _active_pair(owner, destination.country, destination.asset)
     if bridge is not None:
         if (bridge.quote.confio_account_id != owner.pk
@@ -707,6 +719,7 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
         routes = executable_bridge_routes(NextClient().quote('BSC:USDT', 'POL:USDC', units))
         route = routes[0]
         source = Decimal(bridge_route_minimum(route)) / Decimal(10 ** 6)
+    source = fx_source_amount(source)
     target, expires = _quote(client or InfiniaClient(), crypto, local, source)
     minimum = (target * (1 - _tolerance('LOCAL_MONEY_FX_TOLERANCE_BPS', 100))).quantize(FIAT_CENT, rounding=ROUND_DOWN)
     return {'source_amount': source, 'target_amount': target, 'minimum_target': minimum,
@@ -724,7 +737,8 @@ def deposit_quote(owner, credit, *, client=None):
     if is_external_fiat_credit(credit) and not decision(credit)[0]:
         raise PaymentAccountError('Este depósito está en revisión.')
     _, crypto = _active_pair(owner, local.country, local.asset)
-    source = Decimal(str(credit.amount))
+    from .infinia_journeys import fx_source_amount
+    source = fx_source_amount(credit.amount)
     target, expires = _quote(client or InfiniaClient(), local, crypto, source)
     from .bridge import bridge_cap, exceeds_bridge_cap
     if exceeds_bridge_cap(target):

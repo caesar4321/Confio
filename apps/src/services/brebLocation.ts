@@ -63,13 +63,14 @@ async function collectEvidence(requestPermission = false) {
 }
 
 export async function applyCobreBreb(scope = ''): Promise<string> {
+  const request = ++passRequests;
   const variables = await collectEvidence();
   const {apolloClient} = await import('../apollo/client');
   const result = await withinTime(apolloClient.mutate({mutation: APPLY, variables}), APPLY_TIMEOUT_MS);
   const application = result.data?.applyCobreBreb;
   if (!application?.success || !application.value) throw new Error(application?.error || 'Tu llave aún no está disponible.');
   // The application's reading is also a location pass; the key shows while it lasts.
-  rememberPass(scope, Number(application.validUntil));
+  rememberPass(scope, Number(application.validUntil), request);
   return application.value;
 }
 
@@ -80,8 +81,8 @@ export async function withBrebLocationRetry<T extends {success?: boolean; errors
   if (result?.success !== false || result.errors?.[0] !== 'Verifica tu ubicación para usar Bre-B.') return result;
   // The server no longer accepts the cached pass: forget it, so no screen trusts it.
   const scope = passScope; // whose pass this was, to restore after a new check
-  passUntil = 0;
-  notifyPass();
+  forgetPass();
+  const request = ++passRequests;
   try {
     const variables = await collectEvidence();
     const {apolloClient} = await import('../apollo/client');
@@ -90,7 +91,7 @@ export async function withBrebLocationRetry<T extends {success?: boolean; errors
     if (!verification?.success) throw new Error(verification?.error || 'No pudimos verificar tu ubicación.');
     // The new check is that account's pass again, unless another check (e.g.
     // after switching accounts) replaced it meanwhile.
-    if (passScope === scope) rememberPass(scope, Number(verification.validUntil));
+    if (passScope === scope) rememberPass(scope, Number(verification.validUntil), request);
   } catch (error: any) {
     // The location step failed, not the operation: its message (and a refused
     // permission's code) is kept, so a screen can offer the location screen.
@@ -101,8 +102,7 @@ export async function withBrebLocationRetry<T extends {success?: boolean; errors
     // Refused again right after a new check (e.g. the network or IP changed):
     // that pass is not accepted either. Forget it and hand the screen a
     // location failure to recover from, never another automatic retry.
-    passUntil = 0;
-    notifyPass();
+    forgetPass();
     throw Object.assign(new Error('Verifica tu ubicación para usar Bre-B.'), {brebLocation: true});
   }
   return retried;
@@ -115,6 +115,10 @@ export {isBrebLocationFailure} from './brebLocationFailure';
 // screen that was verified moments ago.
 let passUntil = 0;
 let passScope = '';
+// Answers arrive out of order (a slow check for one account, a quick one for
+// the next): only the newest request that answered may store the pass.
+let passRequests = 0;
+let passGeneration = 0;
 
 export const brebLocationSupported = (): boolean => Platform.OS === 'android' ? Boolean(NativeModules.BrebLocation)
   : Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 15 && Boolean(NativeModules.BrebAppleLocation);
@@ -161,8 +165,17 @@ export const brebLocationPassValid = (scope: string): boolean => Boolean(scope) 
 export const brebLocationPassRemainingMs = (scope: string): number =>
   brebLocationPassValid(scope) ? passUntil * 1000 - Date.now() - 30000 : 0;
 
-function rememberPass(scope: string, expiry: number) {
-  if (scope && Number.isFinite(expiry) && expiry * 1000 > Date.now()) {
+/** A refused pass: forgotten, and no answer to a check started before the
+ * refusal can bring it back (the generation moves past every such request). */
+function forgetPass() {
+  passUntil = 0;
+  passGeneration = ++passRequests;
+  notifyPass();
+}
+
+function rememberPass(scope: string, expiry: number, request: number) {
+  if (scope && Number.isFinite(expiry) && expiry * 1000 > Date.now() && request >= passGeneration) {
+    passGeneration = request;
     passScope = scope;
     passUntil = expiry;
     notifyPass();
@@ -183,6 +196,7 @@ function notifyPass() {
 
 /** A Bre-B screen's explicit check (asks for permission when missing). */
 export async function verifyBrebLocation(scope = '', requestPermission = true): Promise<number> {
+  const request = ++passRequests;
   const variables = await collectEvidence(requestPermission);
   const {apolloClient} = await import('../apollo/client');
   const response = await withinTime(apolloClient.mutate({mutation: VERIFY, variables}));
@@ -191,8 +205,13 @@ export async function verifyBrebLocation(scope = '', requestPermission = true): 
   if (!verification?.success || !Number.isFinite(expiry) || expiry * 1000 <= Date.now()) {
     throw new Error(verification?.error || 'No pudimos verificar tu ubicación.');
   }
-  passScope = scope;
-  passUntil = expiry;
-  notifyPass();
-  return passUntil;
+  // A late answer for a check another account started earlier never
+  // replaces a newer pass (e.g. after switching accounts).
+  if (request >= passGeneration) {
+    passGeneration = request;
+    passScope = scope;
+    passUntil = expiry;
+    notifyPass();
+  }
+  return expiry;
 }

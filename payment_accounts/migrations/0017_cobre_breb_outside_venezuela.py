@@ -14,7 +14,13 @@ def outside_venezuela(apps, schema_editor):
     Policy = apps.get_model('payment_accounts', 'EligibilityPolicy')
     Rule = apps.get_model('payment_accounts', 'EligibilityRule')
     for scope in SCOPES:
-        Policy.objects.filter(provider='cobre', scope=scope, is_active=True).update(is_active=False)
+        # One active policy per provider/scope: deactivate the others first.
+        Policy.objects.filter(provider='cobre', scope=scope, is_active=True).exclude(version=2).update(is_active=False)
+        kept = Policy.objects.filter(provider='cobre', scope=scope, version=2).first()
+        if kept:
+            # Re-applied after a rollback: v2 was kept (decisions reference it).
+            Policy.objects.filter(pk=kept.pk).update(is_active=True)
+            continue
         policy = Policy.objects.create(
             provider='cobre', scope=scope, version=2, is_active=True,
             default_decision='allow', default_reason_code='cobre_breb_outside_venezuela',
@@ -34,7 +40,9 @@ def outside_venezuela(apps, schema_editor):
 def colombia_only(apps, schema_editor):
     Policy = apps.get_model('payment_accounts', 'EligibilityPolicy')
     for scope in SCOPES:
-        Policy.objects.filter(provider='cobre', scope=scope, version=2).delete()
+        # v2 stays as evidence (eligibility decisions reference it, PROTECT);
+        # it is only deactivated, before v1 becomes the active policy again.
+        Policy.objects.filter(provider='cobre', scope=scope, version=2).update(is_active=False)
         Policy.objects.filter(provider='cobre', scope=scope, version=1).update(is_active=True)
 
 

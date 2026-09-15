@@ -1,7 +1,7 @@
 """Durable Infinia conversion/payout orchestration using authenticated ledger facts."""
 import uuid
 from datetime import timezone as dt_timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 from django.conf import settings
 from django.db import transaction
@@ -34,6 +34,17 @@ def provider_number(value):
     if Decimal(str(result)) != value:
         raise PaymentAccountError('Amount exceeds provider numeric precision')
     return result
+
+
+FX_SOURCE_QUANTUM = Decimal('0.01')
+
+
+def fx_source_amount(value):
+    """Infinia FX sources accept cents, including USDC. Never round up funds."""
+    amount = positive(value).quantize(FX_SOURCE_QUANTUM, rounding=ROUND_DOWN)
+    if amount <= 0:
+        raise PaymentAccountError('El monto disponible para convertir debe ser al menos 0.01.')
+    return amount
 
 
 def validate_accounts(owner, local, crypto, destination_country):
@@ -236,7 +247,11 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             j.save(update_fields=['funding_credit', 'updated_at'])
         if not j.fx_operation_id:
             _require_capability(source, 'convert')
-            amount = j.funding_credit.amount
+            credit_amount = positive(j.funding_credit.amount)
+            if credit_amount < FX_SOURCE_QUANTUM:
+                _state(j, 'needs_review', failure='fx_source_below_precision')
+                return j
+            amount = fx_source_amount(credit_amount)
             # Always request a fresh quote with the provider's default expiry;
             # explicit durations require separate LONGER_QUOTE_TIME terms.
             # Quotes don't move money; a crash before saving may obtain another
@@ -265,6 +280,15 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                     _state(j, 'needs_review', failure='direct_bridge_unavailable'); return j
             j.fx_quote = quote
             j.fx_operation = _new_operation(j, 'fx', source, target, amount)
+            # The original credit stays intact. This unconverted fraction is
+            # still the user's money in their source account, NOT a fee or a
+            # new credit. Persist attribution with the operation atomically;
+            # retries reuse that operation and cannot count it twice.
+            j.money_flow.metadata = dict(j.money_flow.metadata, fx_source_remainder={
+                'amount': str(credit_amount - amount), 'asset': source.asset,
+                'financial_account_id': str(source.internal_id),
+                'funding_credit_id': str(j.funding_credit_id),
+            })
             j.save(update_fields=['fx_quote', 'fx_operation', 'updated_at'])
             _state(j, 'converting')
             operation = j.fx_operation

@@ -125,16 +125,16 @@ def _definitively_failed(payment):
 def opening_ready(row):
     from django.db.models import Q
     from django.utils import timezone
-    from .local_money import accounts_for, pair_status, METHODS
+    from .local_money import accounts_for, pair_status, METHODS, receive_instructions
     local, crypto = accounts_for(row.confio_account, row.country, row.asset)
     if pair_status(local, crypto) != 'active':
         return False
     if local.provider_profile.status != 'active' or crypto.provider_profile.status != 'active':
         return False
-    kinds = {m.instruction_kind for m in METHODS.values()
-             if m.country == row.country and m.asset == row.asset and m.direction == 'receive'}
+    receive_methods = [m for m in METHODS.values()
+                       if m.country == row.country and m.asset == row.asset and m.direction == 'receive']
     unexpired = Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
-    return (local.funding_instructions.filter(unexpired, kind__in=kinds, status='active').exclude(display_value='').exists()
+    return (any(receive_instructions(local, method).exists() for method in receive_methods)
             and crypto.funding_instructions.filter(unexpired, kind='crypto_address', status='active').exclude(display_value='').exists())
 
 

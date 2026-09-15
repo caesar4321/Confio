@@ -43,7 +43,7 @@ const RECEIVE_COPY: Record<string, { title: string; item: string }> = {
   co_breb_receive: { title: 'Solicita tu llave Bre-B', item: 'Tu propia llave Bre-B' },
   cobre_co_breb_receive: { title: 'Solicita tu llave Bre-B', item: 'Tu propia llave Bre-B' },
   mx_clabe_receive: { title: 'Solicita tu CLABE', item: 'Tu propia CLABE' },
-  br_pix_receive: { title: 'Solicita tu chave Pix', item: 'Tu propia chave Pix' },
+  br_pix_receive: { title: 'Solicita tu cuenta Pix', item: 'Tus datos Pix para recibir' },
   ar_cvu_receive: { title: 'Solicita tu CVU', item: 'Tu propio CVU' },
 };
 
@@ -248,6 +248,7 @@ function Application({ methodId }: { methodId: string }) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         if (!alive.current) return;
       }
+      setError('La apertura está tardando más de lo habitual. Puedes salir y tocar Revisar la apertura para continuar.');
     } catch (failure: any) {
       if (alive.current) setError(failure?.message || 'No pudimos abrir tu cuenta. Intenta de nuevo.');
     } finally {

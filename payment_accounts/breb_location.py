@@ -22,6 +22,14 @@ class LocationError(ValueError):
     pass
 
 
+class _Refused(ValueError):
+    """A named check refused the reading. Its fixed code (never data) is the
+    compliance record's reason, so refusals stay distinguishable."""
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
 def ip_allowed(meta):
     # Same trusted Cloudflare/origin boundary as the existing geo checks.
     # Unknown geography is not evidence of an allowed location.
@@ -221,33 +229,33 @@ def verify(owner, meta, challenge_token, location_json, integrity_token):
         raise LocationError('No podemos habilitar Bre-B desde tu ubicación actual.')
     try:
         if len(challenge_token) > 2048:
-            raise ValueError()
+            raise _Refused('challenge_too_long')
         claim = signing.loads(challenge_token, salt='breb-application', max_age=180)
         platform = claim.get('platform', 'android')
         if platform not in ('android', 'ios') or not configured(platform):
-            raise ValueError()
+            raise _Refused('platform_unavailable')
         if claim['owner'] != owner.pk or len(location_json) > 2048 or len(integrity_token) > 30000:
-            raise ValueError()
+            raise _Refused('challenge_owner_or_size')
         location = json.loads(location_json)
         lat, lon, accuracy = (location[k] for k in ('latitude', 'longitude', 'accuracy'))
         timestamp = location['timestamp']
         if any(type(v) not in (int, float) or not math.isfinite(v) for v in (lat, lon, accuracy, timestamp)):
-            raise ValueError()
+            raise _Refused('reading_invalid')
         # _submitted already retained the bounded reading. Never overwrite it
         # with unvalidated values: an overflowing timestamp can lose the whole
         # refusal record when converted to a database datetime.
         if not (-90 < lat < 90 and -180 <= lon <= 180 and 0 < accuracy <= 100):
-            raise ValueError()
+            raise _Refused('reading_out_of_range')
         if location.get('mocked') is not False or not -5000 <= time.time()*1000-timestamp <= 120000:
-            raise ValueError()
+            raise _Refused('reading_mocked_or_stale')
         if not outside_venezuela(lat, lon, accuracy):
-            raise ValueError()
+            raise _Refused('in_venezuela')
         key = hashlib.sha256(challenge_token.encode()).hexdigest()
         # Reserve before Google, including failed decodes. A signed challenge
         # must not be an unlimited quota-spending credential. Redis add is
         # atomic across workers; failure requires a fresh challenge.
         if not cache.add(f'breb-location-used:{key}', True, timeout=240):
-            raise ValueError()
+            raise _Refused('challenge_reused')
         if platform == 'ios':
             from . import apple_attest
             apple_attest.verify(owner, integrity_token, hashlib.sha256((challenge_token+'.'+location_json).encode()).digest())
@@ -278,7 +286,7 @@ def verify(owner, meta, challenge_token, location_json, integrity_token):
         if failed:
             # Fixed check names only, never tokens, fingerprints or location.
             logger.warning('breb_android_integrity_refused checks=%s', ','.join(failed))
-            raise ValueError()
+            raise _Refused('android:' + ','.join(failed))
         _record(owner, meta, evidence, True, strict=True,
                 reason='android_sideload_test_exception' if sideload_exception else '')
         return ApplicationPermit(owner.pk, time.time()+120)
@@ -294,5 +302,7 @@ def verify(owner, meta, challenge_token, location_json, integrity_token):
         where = f"{frame.tb_frame.f_code.co_filename.rsplit('/', 1)[-1]}:{frame.tb_lineno}"
         detail = str(exc)[:80] if where.startswith('apple_attest.py') else ''
         logger.warning('breb_location_verify_failed error=%s at=%s %s', type(exc).__name__, where, detail)
-        _record(owner, meta, evidence, False, f'{type(exc).__name__} at {where} {detail}'.strip())
+        # A named check keeps its code; anything else, its type and line.
+        reason = exc.code if isinstance(exc, _Refused) else f'{type(exc).__name__} at {where} {detail}'.strip()
+        _record(owner, meta, evidence, False, reason)
         raise LocationError('No pudimos verificar tu ubicación y dispositivo. Activa la ubicación precisa y vuelve a intentarlo.') from exc

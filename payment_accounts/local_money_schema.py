@@ -212,7 +212,7 @@ class LocalMoneyQuery(graphene.ObjectType):
             method_id=method.id, status=view['status'],
             local_account_id=view['local'].internal_id if view['local'] else None,
             crypto_account_id=view['crypto'].internal_id if view['crypto'] else None,
-            country=method.iso2, asset=method.asset, instruction_kind=method.instruction_kind,
+            country=method.iso2, asset=method.asset, instruction_kind=view['instruction_kind'],
             value=value, holder_name=holder_name, institution=view['institution'],
             receive_same_name=view['receive_same_name'], receive_third_party=view['receive_third_party'])
 

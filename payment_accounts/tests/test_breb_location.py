@@ -71,6 +71,23 @@ class BrebLocationTests(SimpleTestCase):
 
     @patch.object(gate, 'country_for_request', return_value='CO')
     @patch.object(gate, 'decode_token')
+    def test_each_refusal_records_its_check(self, decode, country):
+        for section, key, value, code in [
+                ('requestDetails', 'requestHash', 'wrong', 'android:request_hash'),
+                ('appIntegrity', 'certificateSha256Digest', ['debug'], 'android:certificate'),
+                ('deviceIntegrity', 'deviceRecognitionVerdict', ['MEETS_BASIC_INTEGRITY'], 'android:device_integrity')]:
+            cache.clear()
+            verdict = self.verdict(); verdict[section][key] = value; decode.return_value = verdict
+            with self.subTest(code=code):
+                with self.assertRaises(gate.LocationError): self.verify()
+                self.assertEqual(self.record.call_args.args[4], code)
+        cache.clear()
+        data = json.loads(self.location); data.update(latitude=10.48, longitude=-66.9)  # Caracas
+        with self.assertRaises(gate.LocationError): self.verify(json.dumps(data))
+        self.assertEqual(self.record.call_args.args[4], 'in_venezuela')
+
+    @patch.object(gate, 'country_for_request', return_value='CO')
+    @patch.object(gate, 'decode_token')
     def test_no_pass_without_its_record(self, decode, country):
         decode.return_value = self.verdict()
         def record(*args, strict=False, **kwargs):
@@ -330,7 +347,7 @@ class BrebLocationTests(SimpleTestCase):
         method = schema.local_money.Method('co_breb_receive', 'receive', 'COL', 'CO', 'COP', 'Bre-B', 'Key',
                                            instruction_kind='breb_key')
         view = dict(method=method, status='active', local=None, crypto=None, value='@ana', holder_name='Ana',
-                    institution='', receive_same_name='', receive_third_party='')
+                    institution='', receive_same_name='', receive_third_party='', instruction_kind='breb_key')
         info = SimpleNamespace(context=SimpleNamespace(META={'HTTP_CF_IPCOUNTRY': 'CO'}))
         with patch.object(schema, '_owner', return_value=self.owner), \
                 patch.object(schema.local_money, 'receive_account', return_value=view):

@@ -8,12 +8,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { NavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
+import { CompositeNavigationProp, NavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
 import { gql, useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Header } from '../navigation/Header';
-import { RootStackParamList } from '../types/navigation';
+import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_KYC_STATUS, GET_MY_PERSONAL_KYC_STATUS } from '../apollo/queries';
 import { CREATE_DIDIT_VERIFICATION_SESSION, SYNC_DIDIT_VERIFICATION_SESSION } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
@@ -149,7 +149,7 @@ function capabilities(doc: IdentityDocument, phoneCountryName: string, rampBlock
 }
 
 const VerificationScreen = () => {
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<CompositeNavigationProp<NavigationProp<MainStackParamList>, NavigationProp<RootStackParamList>>>();
   const { activeAccount } = useAccount();
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
   const { countryCode: phoneCountry, isBlocked: rampBlocked } = useRampCountry();
@@ -522,6 +522,29 @@ const VerificationScreen = () => {
             {howItWorks}
           </>
         )}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Pagos locales</Text>
+          <TouchableOpacity
+            style={styles.optionCard}
+            onPress={() => navigation.navigate('LocalLimitIncrease')}
+            accessibilityRole="button"
+          >
+            <View style={styles.documentIcon}>
+              <Icon name="trending-up" size={18} color={colors.primaryDark} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.optionTitle}>Aumentar mi límite de pagos locales</Text>
+              <Text style={styles.optionBody}>
+                {isBusinessAccount
+                  ? 'El límite de pagos locales es de US$10,000 al mes. Para superar ese monto, solicita una revisión con soporte.'
+                  : 'El límite de pagos locales es de US$10,000 al mes. Para superar ese monto, completa una verificación del origen de tus fondos y solicita un límite mayor.'}
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+          <Text style={styles.hint}>Este límite mensual solo aplica a pagos locales. No aplica a Recargar ni Retirar.</Text>
+        </View>
 
         {isInitialLoading ? (
           <View style={styles.loadingBlock}>
