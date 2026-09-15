@@ -74,6 +74,35 @@ class AdmissionTests(TestCase):
         AccountCapability.objects.filter(capability='receive_third_party').update(status='pending')
         self.assertEqual(assess(self.entry).reason, 'provider_third_party_not_enabled')
 
+    def test_wildcard_grants_keep_exact_stops_and_other_gates(self):
+        self.grants()
+        ThirdPartyPayinSwitch.objects.filter(rail='BANK').update(rail='*')
+        self.assertTrue(assess(self.entry).allowed)
+        for owner, reason in ((None, 'rail_not_enabled'), (self.owner, 'user_not_enabled')):
+            stop = ThirdPartyPayinSwitch.objects.create(provider='infinia', country='PE',
+                rail='BANK', confio_account=owner, enabled=False, evidence='Explicit stop')
+            self.assertEqual(assess(self.entry).reason, reason)
+            stop.enabled, stop.evidence = True, ''
+            stop.save()
+            self.assertEqual(assess(self.entry).reason, reason)
+            stop.delete()
+        ThirdPartyPayinSwitch.objects.filter(rail='').update(enabled=False)
+        self.assertEqual(assess(self.entry).reason, 'country_not_enabled')
+        ThirdPartyPayinSwitch.objects.filter(rail='').update(enabled=True)
+        AccountCapability.objects.filter(capability='receive_third_party').update(status='pending')
+        self.assertEqual(assess(self.entry).reason, 'provider_third_party_not_enabled')
+        for rail in ('', '*'):
+            self.account.payin_rail = rail
+            self.assertEqual(assess(self.entry).reason, 'unverified_rail')
+
+    def test_wildcard_grants_do_not_cross_recipients_or_countries(self):
+        self.grants()
+        ThirdPartyPayinSwitch.objects.filter(rail='BANK').update(rail='*')
+        ThirdPartyPayinSwitch.objects.filter(confio_account=self.owner).delete()
+        self.assertEqual(assess(self.entry).reason, 'user_not_enabled')
+        self.account.country = 'COL'
+        self.assertEqual(assess(self.entry).reason, 'country_not_enabled')
+
     def test_same_owner_does_not_need_third_party_grants(self):
         self.entry.provider_data['third_party'].update(full_name='Owner', document_number='123')
         self.assertEqual(assess(self.entry).reason, 'same_owner')

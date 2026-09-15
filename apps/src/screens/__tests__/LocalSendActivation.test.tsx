@@ -20,7 +20,7 @@ jest.mock('@react-navigation/native', () => ({useNavigation: () => ({navigate: m
 jest.mock('../../components/breb/BrebLocationGate', () => ({BrebLocationGate: ({children}: any) => children}));
 jest.mock('../../apollo/queries', () => ({GET_MY_RAMP_ADDRESS: 'address'}));
 jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {type: 'personal'}})}));
-jest.mock('../../hooks/useSavingsPortfolio', () => ({useSavingsPortfolio: () => ({savings: {balanceUsd: 20}, usdtBalanceUsd: 0})}));
+jest.mock('../../hooks/useSavingsPortfolio', () => ({useSavingsPortfolio: () => ({savings: {balanceUsd: 20}, cusdBalanceUsd: 30, usdtBalanceUsd: 100})}));
 jest.mock('../../components/PaymentQrScannerModal', () => ({PaymentQrScannerModal: 'Scanner'}));
 jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'ActionBar'}));
 jest.mock('../../components/ramps/RampHero', () => ({RampHero: 'Hero'}));
@@ -41,6 +41,18 @@ import Screen from '../LocalSendScreen';
 beforeEach(() => {
   jest.clearAllMocks(); mockAccountStatus = 'none';
   mockRecheck.mockImplementation(async (id: string) => ({id, holderName: 'Ana', label: 'Llave', verification: 'verified'}));
+});
+
+it('shows cUSD plus savings as spendable, excluding raw USDT', async () => {
+  mockAccountStatus = 'active';
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const saved = tree.root.findAllByType(TouchableOpacity).find(node =>
+    node.findAllByType(Text).some(text => text.props.children === 'Ana'))!;
+  await act(async () => {saved.props.onPress();});
+  const labels = tree.root.findAllByType(Text).map(node => ([] as any[]).concat(node.props.children).join(''));
+  expect(labels.filter(label => label.startsWith('Saldo disponible:'))).toEqual(['Saldo disponible: US$50,00']);
+  await act(async () => tree.unmount());
 });
 
 it('a failed saved-recipient request cannot become an unverified-holder override', async () => {
