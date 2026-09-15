@@ -58,7 +58,12 @@ class CobreJourneyTests(TestCase):
             request_id=uuid.uuid4(),minimum_fx_output='2' if direction=='to_wallet' else '30000',direction=direction)
         if direction=='to_wallet':args['credit']=self.credit(self.local,'10000','breb_credit')
         else:
-            bridge,_=self.prepared();bridge.status='delivered';bridge.destination_tx_hash=DEST_HASH;bridge.save()
+            # Exercise continuation of a historically approved, delivered bridge.
+            # New generic USD_STABLE instructions cannot establish Polygon USDC.
+            with mock.patch('payment_accounts.bridge.verified_destination', return_value=self.instruction.display_value), \
+                 mock.patch('payment_accounts.bridge_execution.verified_destination', return_value=self.instruction.display_value):
+                bridge,_=self.prepared()
+            bridge.status='delivered';bridge.destination_tx_hash=DEST_HASH;bridge.save()
             e=self.credit(self.crypto,'10','global_credit',tracking_key=DEST_HASH,chain='polygon',token='usdc',
                 beneficiary_wallet_address=bridge.quote.destination_address)
             reconcile_provider_credit(bridge);bridge.refresh_from_db();self.assertEqual(bridge.provider_credit_id,e.pk)

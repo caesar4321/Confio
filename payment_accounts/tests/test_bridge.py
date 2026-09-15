@@ -39,11 +39,6 @@ class BridgeQuoteTests(TestCase):
         self.instruction = FundingInstruction.objects.create(
             financial_account=account, kind='crypto_address', status='active', display_value=DESTINATION,
         )
-        self.config = self.settings(PAYMENT_BRIDGE_VERIFIED_INSTRUCTIONS={
-            str(self.instruction.internal_id): {'address': DESTINATION, 'token_id': 'POL:USDC'},
-        })
-        self.config.enable()
-        self.addCleanup(self.config.disable)
         self.eligibility = mock.patch('payment_accounts.bridge.enforce_and_record').start()
         self.addCleanup(mock.patch.stopall)
         self.net_funding = mock.patch('payment_accounts.bridge.net_funding_units',
@@ -120,17 +115,26 @@ class BridgeQuoteTests(TestCase):
             self.quote(confio_account=other)
         self.client.quote.assert_not_called()
 
-    @override_settings(PAYMENT_BRIDGE_VERIFIED_INSTRUCTIONS={})
-    def test_unconfirmed_provider_address_fails_closed(self):
-        with self.assertRaisesRegex(PaymentAccountError, 'not verified'):
-            self.quote()
+    @mock.patch('payment_accounts.activation.require_usable')
+    def test_wrong_or_ambiguous_asset_fails_closed(self, usable):
+        for asset in ('USDC', 'USDT_BSC', 'USD_STABLE', 'COP'):
+            with self.subTest(asset=asset):
+                FinancialAccount.objects.filter(pk=self.instruction.financial_account_id).update(asset=asset)
+                with self.assertRaisesRegex(PaymentAccountError, 'Polygon USDC funding account'):
+                    self.quote()
         self.client.quote.assert_not_called()
 
-    def test_address_rotation_requires_reverification(self):
+    def test_address_rotation_invalidates_existing_quote(self):
+        self.quote()
         self.instruction.display_value = SOURCE
         self.instruction.save()
-        with self.assertRaisesRegex(PaymentAccountError, 'changed'):
+        with self.assertRaisesRegex(PaymentAccountError, 'different bridge details'):
             self.quote()
+
+    def test_new_quote_uses_current_provider_address_without_allowlist(self):
+        self.instruction.display_value = SOURCE
+        self.instruction.save()
+        self.assertEqual(self.quote().destination_address, SOURCE)
 
     @override_settings(PAYMENT_BRIDGE_MAX_USDT='100')  # no cap by default; this is the emergency brake
     def test_braked_oversize_quote_does_not_call_next(self):

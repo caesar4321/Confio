@@ -98,9 +98,10 @@ Before enabling the feature, operators must register and verify:
 2. Approved `convert` capabilities for COP, COPco and USD_STABLE,
    `send_third_party` for COP and `crypto_payout` for USD_STABLE. Stable capabilities
    are never inferred from the existence of a Bre-B account.
-3. A verified active Polygon USDC funding instruction on USD_STABLE, attested in
-   `PAYMENT_BRIDGE_VERIFIED_INSTRUCTIONS`. Confirm bridge-origin deposit acceptance
-   with Cobre for the contracted program.
+3. Explicit native Polygon USDC funding support. Generic USD_STABLE balances
+   currently fail the bridge's canonical `USDC_POL` asset check. Cobre needs
+   provider-specific network validation before this path can be enabled;
+   Infinia's bridge-origin acceptance does not establish Cobre acceptance.
 4. For outbound payments, an active owned Bre-B `PayoutDestination` with its
    provisioned `provider_destination_id`.
 5. For inbound payments, an active owned `crypto_wallet` destination, asset
