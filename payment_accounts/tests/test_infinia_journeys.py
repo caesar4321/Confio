@@ -147,6 +147,32 @@ class JourneyTests(TestCase):
         self.assertEqual(j.payout_operation_id, payout_id)
         self.assertEqual(j.money_flow.operations.filter(operation_type='payout').count(), 1)
 
+    def test_verified_fiat_conversion_voucher_is_not_an_external_payin(self):
+        from payment_accounts.payin_admission import is_external_fiat_credit, require_source_admitted
+        op, entry = self.voucher_conversion()
+        op.source_account = self.crypto; op.destination_account = self.local
+        op.provider_data.update(source_account_id='crypto', target_account_id='local')
+        op.save()
+        entry.financial_account = self.local; entry.asset = self.local.asset; entry.save()
+        self.assertFalse(is_external_fiat_credit(entry))
+        require_source_admitted(self.local)
+        # Matching voucher alone must not bypass sender checks.
+        op.provider_data['destination_amount'] = '3'; op.save()
+        self.assertTrue(is_external_fiat_credit(entry))
+        self.credit(self.local, amount='2.5', provider_data={'operation': {
+            'type': 'INTERNAL_TRANSFER', 'operation_id': op.provider_operation_id}})
+        # A different, directly linked credit cannot exempt this voucher entry.
+        self.assertTrue(is_external_fiat_credit(entry))
+
+    def test_voucher_from_other_owners_flow_remains_external_payin(self):
+        from payment_accounts.payin_admission import is_external_fiat_credit
+        op, entry = self.voucher_conversion()
+        op.source_account = self.crypto; op.destination_account = self.local
+        op.provider_data.update(source_account_id='crypto', target_account_id='local')
+        op.money_flow = None; op.save()
+        entry.financial_account = self.local; entry.asset = self.local.asset; entry.save()
+        self.assertTrue(is_external_fiat_credit(entry))
+
     def test_revocation_stops_worker_before_quote(self):
         j = self.inbound()
         AccountCapability.objects.filter(financial_account=self.local, capability='receive_same_name').update(status='disabled')

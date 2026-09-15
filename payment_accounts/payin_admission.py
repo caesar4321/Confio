@@ -47,6 +47,21 @@ def is_external_fiat_credit(entry):
     operation = payload.get('operation') or {}
     kind = operation.get('type') if isinstance(operation, dict) else None
     operation_id = operation.get('operation_id') if isinstance(operation, dict) else None
+    # Fiat conversion proceeds may use vouchers instead of operation_id. Reuse
+    # the full settlement proof; a voucher string alone is not an exemption.
+    third_party = payload.get('third_party') or {}
+    voucher = third_party.get('voucher_id') if isinstance(third_party, dict) else None
+    if not operation and isinstance(voucher, str) and voucher.strip():
+        from .infinia_journeys import _credit_for_operation
+        owner_id = entry.financial_account.provider_profile.confio_account_id
+        candidates = MoneyOperation.objects.filter(provider='infinia',
+            operation_type__in=['conversion', 'internal_transfer'],
+            destination_account=entry.financial_account,
+            money_flow__confio_account_id=owner_id,
+            source_account__provider_profile__confio_account_id=owner_id,
+            provider_data__voucher_ids__contains=[voucher])
+        if any(_credit_for_operation(op, entry.financial_account, voucher_entry=entry) > 0 for op in candidates):
+            return False
     if kind not in {'INTERNAL_TRANSFER', 'CREDIT', 'PAYOUT_REFUND', 'INTERNAL_TRANSFER_REFUND'} or not operation_id:
         return True
     # A provider label is not ownership evidence: another user's internal

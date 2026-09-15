@@ -158,7 +158,7 @@ def _state(j, stage, *, failure=''):
     flow.save(update_fields=['status', 'metadata', 'completed_at', 'updated_at'])
 
 
-def _credit_for_operation(operation, account):
+def _credit_for_operation(operation, account, *, voucher_entry=None):
     # COMPLETED means sent. Require actual destination movement(s), related by
     # the provider operation ID, not by amount. Refunds/fees are not proceeds.
     if not operation.provider_operation_id:
@@ -167,7 +167,7 @@ def _credit_for_operation(operation, account):
         direction='credit', asset=account.asset, amount__gt=0,
         provider_data__operation__operation_id=operation.provider_operation_id)
     accepted = [e for e in entries if (e.provider_data.get('operation') or {}).get('type') in {'INTERNAL_TRANSFER', 'CREDIT'}]
-    if accepted:
+    if accepted and voucher_entry is None:
         return sum((e.amount for e in accepted), Decimal(0))
     # Some fiat legs arrive as bank credits with no operation_id. Infinia's
     # completed transfer supplies voucher_ids, which bind those exact credits.
@@ -197,6 +197,7 @@ def _credit_for_operation(operation, account):
         direction='credit', asset=account.asset, amount__gt=0,
         provider_data__third_party__voucher_id__in=vouchers).select_related('operation'))
     if (len(candidates) != len(vouchers)
+            or (voucher_entry is not None and voucher_entry.pk not in {e.pk for e in candidates})
             or {e.provider_data['third_party']['voucher_id'] for e in candidates} != set(vouchers)
             or any(e.provider_data.get('operation') for e in candidates)
             or any(e.operation_id and e.operation_id != operation.pk
