@@ -237,12 +237,13 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
         if not j.fx_operation_id:
             _require_capability(source, 'convert')
             amount = j.funding_credit.amount
-            # Always request a fresh locked quote. Quotes don't move money; a
-            # crash before saving may obtain another quote without a second debit.
+            # Always request a fresh quote with the provider's default expiry;
+            # explicit durations require separate LONGER_QUOTE_TIME terms.
+            # Quotes don't move money; a crash before saving may obtain another
+            # quote without a second debit. Validate the returned expiry below.
             quote = (client or InfiniaClient()).create_transfer_quote({
                 'external_id': str(j.internal_id), 'source_account_id': source.provider_account_id,
-                'target_account_id': target.provider_account_id, 'source_amount': provider_number(amount),
-                'requested_lock_time': 60})
+                'target_account_id': target.provider_account_id, 'source_amount': provider_number(amount)})
             try:
                 expires = parse_datetime(str(quote.get('expire_at', '')))
                 if expires and timezone.is_naive(expires):

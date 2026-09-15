@@ -659,7 +659,9 @@ def _quote(client, source, target, amount):
         # journey's idempotency space.
         'external_id': f'confio-estimate-{uuid.uuid4()}',
         'source_account_id': source.provider_account_id, 'target_account_id': target.provider_account_id,
-        'source_amount': provider_number(amount), 'requested_lock_time': 30,
+        # Use the provider's default expiry. An explicit lock duration requires
+        # separately configured LONGER_QUOTE_TIME commercial terms.
+        'source_amount': provider_number(amount),
     })
     try:
         target_amount = Decimal(str(response['target_amount']))

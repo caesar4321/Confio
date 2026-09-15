@@ -176,6 +176,29 @@ class JourneyTests(TestCase):
         self.assertEqual(j.stage,'needs_review');self.assertIsNone(j.fx_operation_id)
         self.submit.assert_not_called()
 
+    def test_default_quote_lock_is_used_and_short_provider_expiry_is_preserved(self):
+        j = self.inbound()
+        self.fx_quote()
+        expires = (timezone.now() + timedelta(seconds=15)).isoformat()
+        self.api.create_transfer_quote.return_value['expire_at'] = expires
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertNotIn('requested_lock_time', self.api.create_transfer_quote.call_args.args[0])
+        self.assertEqual(j.fx_quote['expire_at'], expires)
+        self.assertEqual(j.stage, 'converting')
+        self.submit.assert_called_once()
+
+    def test_expired_fx_quote_cannot_move_money(self):
+        j = self.inbound()
+        self.fx_quote()
+        self.api.create_transfer_quote.return_value['expire_at'] = (
+            timezone.now() - timedelta(seconds=1)).isoformat()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'fx_quote_outside_authorization')
+        self.assertIsNone(j.fx_operation_id)
+        self.submit.assert_not_called()
+
     def test_quote_for_wrong_accounts_is_rejected(self):
         j=self.inbound();self.fx_quote(source='unowned')
         advance_journey(j.pk,client=self.api);j.refresh_from_db()
