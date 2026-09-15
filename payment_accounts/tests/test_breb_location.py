@@ -110,6 +110,74 @@ class BrebLocationTests(SimpleTestCase):
             verdict = self.verdict(); verdict[section][key] = value; decode.return_value = verdict
             with self.subTest(key=key), self.assertRaises(gate.LocationError): self.verify()
 
+    @override_settings(BREB_ANDROID_SIDELOAD_TEST_USER_IDS=['101', '202'])
+    @patch.object(gate, 'country_for_request', return_value='CO')
+    @patch.object(gate, 'decode_token')
+    def test_sideload_exception_only_for_configured_owner_ids(self, decode, country):
+        for user_id, allowed in [(101, True), (202, True), (303, False), (None, False)]:
+            cache.clear()
+            self.owner.user_id = user_id
+            # Names must never grant access or transfer the exception.
+            self.owner.username = 'julianm'
+            verdict = self.verdict()
+            verdict['appIntegrity']['appRecognitionVerdict'] = 'UNRECOGNIZED_VERSION'
+            decode.return_value = verdict
+            with self.subTest(user_id=user_id):
+                if allowed:
+                    gate.require_permit(self.verify(), self.owner)
+                    self.assertEqual(self.record.call_args.kwargs['reason'], 'android_sideload_test_exception')
+                    self.assertTrue(self.record.call_args.kwargs['strict'])
+                    with self.assertRaises(gate.LocationError): self.verify()  # still single use
+                else:
+                    with self.assertRaises(gate.LocationError): self.verify()
+
+    @override_settings(BREB_ANDROID_SIDELOAD_TEST_USER_IDS=[])
+    @patch.object(gate, 'country_for_request', return_value='CO')
+    @patch.object(gate, 'decode_token')
+    def test_sideload_exception_is_off_by_default(self, decode, country):
+        self.owner.user_id = 101
+        verdict = self.verdict()
+        verdict['appIntegrity']['appRecognitionVerdict'] = 'UNRECOGNIZED_VERSION'
+        decode.return_value = verdict
+        with self.assertRaises(gate.LocationError): self.verify()
+
+    @override_settings(BREB_ANDROID_SIDELOAD_TEST_USER_IDS=['101'])
+    @patch.object(gate, 'country_for_request', return_value='CO')
+    @patch.object(gate, 'decode_token')
+    def test_sideload_exception_keeps_integrity_checks(self, decode, country):
+        self.owner.user_id = 101
+        for section, key, value in [
+            ('requestDetails', 'requestHash', 'wrong'),
+            ('requestDetails', 'requestPackageName', 'other.package'),
+            ('requestDetails', 'timestampMillis', (time.time() - 300) * 1000),
+            ('appIntegrity', 'packageName', 'other.package'),
+            ('appIntegrity', 'certificateSha256Digest', ['debug']),
+            ('appIntegrity', 'appRecognitionVerdict', 'UNEVALUATED'),
+            ('deviceIntegrity', 'deviceRecognitionVerdict', ['MEETS_BASIC_INTEGRITY']),
+        ]:
+            cache.clear()
+            verdict = self.verdict()
+            verdict['appIntegrity']['appRecognitionVerdict'] = 'UNRECOGNIZED_VERSION'
+            verdict[section][key] = value
+            decode.return_value = verdict
+            with self.subTest(key=key), self.assertRaises(gate.LocationError): self.verify()
+
+    @override_settings(BREB_ANDROID_SIDELOAD_TEST_USER_IDS=['101'])
+    @patch.object(gate, 'country_for_request', return_value='CO')
+    @patch.object(gate, 'decode_token')
+    def test_sideload_exception_keeps_location_and_google_checks(self, decode, country):
+        self.owner.user_id = 101
+        for changes in [{'mocked': True}, {'accuracy': 1000}, {'latitude': 10.48, 'longitude': -66.9},
+                        {'timestamp': (time.time() - 300) * 1000}]:
+            data = json.loads(self.location); data.update(changes)
+            with self.subTest(changes=changes), self.assertRaises(gate.LocationError): self.verify(json.dumps(data))
+        decode.assert_not_called()
+        with patch.object(gate, 'ip_allowed', return_value=False), self.assertRaises(gate.LocationError):
+            self.verify()
+        decode.assert_not_called()
+        decode.side_effect = gate.LocationError(gate.UNAVAILABLE)
+        with self.assertRaises(gate.LocationError): self.verify()
+
     @patch.object(gate, 'country_for_request', return_value='CO')
     @patch.object(gate, 'decode_token')
     def test_classic_nonce_cannot_replace_standard_request_hash(self, decode, country):
