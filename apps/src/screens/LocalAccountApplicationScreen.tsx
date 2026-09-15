@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, SafeAreaView, ScrollView, Share, StatusBar, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, usePreventRemove, useRoute } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
 
 import { GET_MY_RAMP_ADDRESS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 import { countryFlag, countryName } from '../config/localRails';
 import { useBrebLocationScope } from '../components/breb/BrebLocationGate';
 import { RampActionBar } from '../components/ramps/RampActionBar';
@@ -128,12 +129,15 @@ function Application({ methodId }: { methodId: string }) {
   const [feeError, setFeeError] = useState(false);
   const [feeAttempt, setFeeAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [returnToAccount, setReturnToAccount] = useState(false);
+  const openingInFlight = useRef(false);
   const [error, setError] = useState('');
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; };
   }, []);
+  usePreventRemove(busy, () => {});
 
   // A document verified or an address completed elsewhere shows up on return.
   const refresh = useRef(() => {});
@@ -166,7 +170,17 @@ function Application({ methodId }: { methodId: string }) {
     let cancelled = false;
     setFeeError(false);
     quoteLocalActivation(methodId)
-      .then(amount => { if (!cancelled) setFee({ amount }); })
+      .then(amount => {
+        if (cancelled) return;
+        if (amount === null) {
+          // The opening already started (another device or session): show its
+          // real state, and offer a retry if the list still says otherwise.
+          methodsQuery.refetch().catch(() => undefined);
+          setFeeError(true);
+          return;
+        }
+        setFee({ amount });
+      })
       .catch(() => { if (!cancelled) setFeeError(true); });
     return () => { cancelled = true; };
   }, [canQuote, fee, feeAttempt, methodId]);
@@ -175,6 +189,13 @@ function Application({ methodId }: { methodId: string }) {
     if (navigation.canGoBack()) navigation.goBack();
     else navigation.replace(direction === 'receive' ? 'LocalReceive' : 'LocalSend', { methodId });
   };
+  // Navigate only after the render that releases native-stack removal.
+  useEffect(() => {
+    if (returnToAccount && !busy) {
+      setReturnToAccount(false);
+      goToAccount();
+    }
+  }, [returnToAccount, busy, navigation, direction, methodId]);
 
   // Opening: the buttons on this screen are the consent and the payment
   // approval, so the confirmation alerts are replaced by what it shows.
@@ -192,7 +213,8 @@ function Application({ methodId }: { methodId: string }) {
     return false;
   };
   const runOpening = async (payNow: boolean) => {
-    if (busy) return;
+    if (openingInFlight.current) return;
+    openingInFlight.current = true;
     setBusy(true);
     setError('');
     const prompts = {
@@ -205,12 +227,15 @@ function Application({ methodId }: { methodId: string }) {
         const next = await activateLocalMoney(methodId);
         if (!alive.current) return;
         if (next === 'active') {
-          await methodsQuery.refetch().catch(() => undefined);
-          if (alive.current) goToAccount();
+          // Read-only refreshes must not hold a completed payment behind the
+          // modal. The destination screen also refreshes when it gains focus.
+          void Promise.allSettled([methodsQuery.refetch(), refetchAccounts()]);
+          openingInFlight.current = false;
+          if (alive.current) setReturnToAccount(true);
           return;
         }
         if (next === 'awaiting_payment') {
-          if (!payNow || !await payLocalActivation(methodId, prompts)) return;
+          if (!payNow || !await payLocalActivation(methodId, prompts) || !alive.current) return;
           continue;
         }
         if (next !== 'provisioning') throw new Error('No pudimos abrir tu cuenta. Escríbenos a soporte.');
@@ -220,13 +245,15 @@ function Application({ methodId }: { methodId: string }) {
     } catch (failure: any) {
       if (alive.current) setError(failure?.message || 'No pudimos abrir tu cuenta. Intenta de nuevo.');
     } finally {
-      await methodsQuery.refetch().catch(() => undefined);
+      openingInFlight.current = false;
       if (alive.current) setBusy(false);
+      void methodsQuery.refetch().catch(() => undefined);
     }
   };
 
   const applyCobre = async () => {
-    if (busy) return;
+    if (openingInFlight.current) return;
+    openingInFlight.current = true;
     setBusy(true);
     setError('');
     try {
@@ -238,6 +265,7 @@ function Application({ methodId }: { methodId: string }) {
     } catch (failure: any) {
       if (alive.current) setError(failure?.message || 'Tu llave aún no está disponible. Vuelve a intentarlo.');
     } finally {
+      openingInFlight.current = false;
       if (alive.current) setBusy(false);
     }
   };
@@ -317,7 +345,7 @@ function Application({ methodId }: { methodId: string }) {
           </RampReveal>
           <RampActionBar
             primaryLabel="Convertir mis pesos a dólares"
-            onPrimaryPress={() => navigation.navigate('CobrePayment')}
+            onPrimaryPress={() => navigation.navigate('CobrePayment', { direction: 'to_wallet' })}
             primaryIconName="repeat"
           />
         </ScrollView>
@@ -489,9 +517,12 @@ function Application({ methodId }: { methodId: string }) {
                     <View style={styles.emptyQuote}>
                       <ActivityIndicator color={colors.primary} />
                       <Text style={styles.emptyText}>
-                        Estamos abriendo tu cuenta. Normalmente tarda unos minutos; puedes salir y volver.
+                        {busy ? 'Estamos abriendo tu cuenta. Mantén la aplicación abierta mientras terminamos.'
+                          : 'La apertura sigue en proceso. Toca Revisar la apertura para consultar su estado.'}
                       </Text>
                     </View>
+                  ) : status === 'active' ? (
+                    <Text style={styles.emptyText}>Tu cuenta está activa. La apertura ya está pagada.</Text>
                   ) : broken ? (
                     <Text style={styles.errorText}>No pudimos abrir tu cuenta. Escríbenos a soporte y lo revisamos.</Text>
                   ) : costRows.length ? (
@@ -520,6 +551,7 @@ function Application({ methodId }: { methodId: string }) {
           primaryIconName={action.icon}
         />
       </ScrollView>
+      <LoadingOverlay visible={busy} message={isCobre ? 'Solicitando tu llave Bre-B…' : 'Preparando y activando tu cuenta…'} />
     </SafeAreaView>
   );
 }

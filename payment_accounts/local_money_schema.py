@@ -226,7 +226,17 @@ class LocalMoneyQuery(graphene.ObjectType):
     def resolve_local_destination(self, info, id):
         owner = _owner(info, 'send_funds')
         row = PayoutDestination.objects.filter(internal_id=id, confio_account=owner, provider='infinia').first()
-        return _destination(local_money.refresh_destination(row)) if row else None
+        if not row:
+            return None
+        # Polling a pending check asks the provider (and restarts an old one),
+        # so a Colombian (Bre-B) recipient needs a current location pass from an
+        # allowed IP, like resolving and rechecking it.
+        from . import breb_location
+        try:
+            breb_location.require_for_country(owner, row.country, info.context.META)
+        except PaymentAccountError as exc:
+            raise _query_error(exc)
+        return _destination(local_money.refresh_destination(row))
 
     def resolve_local_payout_quote(self, info, destination_id, amount=None, bridge_id=None):
         owner = _owner(info, 'send_funds')

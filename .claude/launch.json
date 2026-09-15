@@ -8,6 +8,14 @@
       "port": 8000
     },
     {
+      "name": "django-local-money",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["INFINIA_PAYMENT_ACCOUNTS_ENABLED=True", "INFINIA_JOURNEYS_ENABLED=True",
+        "BREB_LOCATION_ENABLED=True", "BREB_IOS_APP_ATTEST_ENABLED=True", "BREB_IOS_APP_ID=XFJB7SA87Q.com.Confio.Confio",
+        "USE_REDIS_CACHE=True", "BREB_DEV_IP_COUNTRY=CO", "make", "runserver"],
+      "port": 8000
+    },
+    {
       "name": "web-landing",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-s", "web/build", "-l", "4173"],

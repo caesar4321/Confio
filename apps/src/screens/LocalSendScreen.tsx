@@ -14,6 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { isBrebLocationFailure } from '../services/brebLocation';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
 
@@ -179,12 +180,17 @@ export default function LocalSendScreen() {
     (row: any) => row.kind === 'crypto_address' && row.status === 'active',
   );
   const pairReady = Boolean(crypto && local && cryptoInstruction);
+  const openingRequired = !pairReady && ['none', 'awaiting_payment', 'provisioning'].includes(method?.accountStatus || '');
+  const accountStopped = !pairReady && ['rejected', 'failed', 'closed', 'suspended'].includes(method?.accountStatus || '');
+  const refreshAccounts = () => Promise.allSettled([methodsQuery.refetch(), accountsQuery.refetch()]);
 
   const [value, setValue] = useState('');
   const [destination, setDestination] = useState<LocalDestination | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
   const [retryRecipient, setRetryRecipient] = useState<LocalDestination | null>(null);
+  // A Bre-B location check failed (e.g. permission denied): offer the location screen.
+  const [locationBlocked, setLocationBlocked] = useState(false);
   const [confirmedUnverified, setConfirmedUnverified] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [amount, setAmount] = useState('');
@@ -197,6 +203,7 @@ export default function LocalSendScreen() {
   const [finalQuote, setFinalQuote] = useState<LocalPayoutQuote | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [flowError, setFlowError] = useState('');
+  const [flowLocationBlocked, setFlowLocationBlocked] = useState(false);
   const requestId = useRef<string | null>(null);
   const submittingRef = useRef(false); // readable after an await, unlike state
   // The review is bound to the exact amount and recipient it was prepared for.
@@ -217,6 +224,7 @@ export default function LocalSendScreen() {
     setFinalQuote(null);
     setStep('form');
     setFlowError('');
+    setFlowLocationBlocked(false);
   }, []);
 
   const normalizedAmount = amount.replace(',', '.');
@@ -257,6 +265,7 @@ export default function LocalSendScreen() {
   // confirmation, the prepared review and any lookup in flight no longer apply.
   const startNewRecipient = () => {
     setRetryRecipient(null);
+    setLocationBlocked(false);
     lookup.current += 1;
     resetReview();
     setResolving(false);
@@ -291,6 +300,7 @@ export default function LocalSendScreen() {
     if (!input) return;
     const run = ++lookup.current;
     setRetryRecipient(null);
+    setLocationBlocked(false);
     resetReview();
     setResolving(true);
     setResolveError('');
@@ -303,6 +313,7 @@ export default function LocalSendScreen() {
     } catch (error: any) {
       if (isCurrent(run)) {
         setResolveError(error?.message || 'No pudimos revisar esos datos.');
+        setLocationBlocked(isBrebLocationFailure(error));
         setResolving(false);
       }
       return;
@@ -373,6 +384,7 @@ export default function LocalSendScreen() {
     const snapshot = { amount: normalizedAmount, destinationId: destination.id };
     setStep('preparing');
     setFlowError('');
+    setFlowLocationBlocked(false);
     try {
       requestId.current ||= bridgeRequestId();
       const prepared = await preparePaymentBridge(cryptoInstruction.internalId, snapshot.amount, 'to_provider',
@@ -414,6 +426,7 @@ export default function LocalSendScreen() {
     setSubmitting(true); // locks the button while authentication is pending
     submittingRef.current = true;
     setFlowError('');
+    setFlowLocationBlocked(false);
     let journeyId: string | null = null;
     let requested = false; // the journey request left the device
     let keepLocked = false;
@@ -455,7 +468,15 @@ export default function LocalSendScreen() {
         if (mounted.current) setUnsettled({ journeyId: journey.internalId });
       }
     } catch (error: any) {
-      if (journeyId || (requested && error?.networkError)) {
+      if (!journeyId && isBrebLocationFailure(error)) {
+        // The server refused before creating anything (no current location
+        // pass) and the location check then failed: nothing was sent, so the
+        // form stays usable and the location screen is offered.
+        if (mounted.current) {
+          setFlowError(error?.message || 'Confirma tu ubicación para usar Bre-B.');
+          setFlowLocationBlocked(true);
+        }
+      } else if (journeyId || (requested && error?.networkError)) {
         // The server may have taken it even though no answer arrived. The form
         // stays locked: checking the status is the only way forward, so this
         // can never turn into a second send.
@@ -477,6 +498,7 @@ export default function LocalSendScreen() {
     if (locked) return; // the reviewed send is being signed
     const run = ++lookup.current; // a lookup still in flight must not replace this choice
     setRetryRecipient(null);
+    setLocationBlocked(false);
     setResolving(false);
     resetReview();
     setValue('');
@@ -491,12 +513,18 @@ export default function LocalSendScreen() {
         setDestination(fresh);
         return followUntilSettled(run, fresh);
       })
-      .catch(() => {
+      .catch((error: any) => {
         if (!isCurrent(run)) return;
         // A failed request says nothing about the holder. Never turn a
         // transport/auth/schema error into permission to override verification.
         setDestination(null);
-        setResolveError('No pudimos actualizar la verificación de este destinatario. Intenta de nuevo.');
+        if (isBrebLocationFailure(error)) {
+          // Say why, and offer the location screen (it handles Settings and retries).
+          setResolveError(error?.message || 'Confirma tu ubicación para usar Bre-B.');
+          setLocationBlocked(true);
+        } else {
+          setResolveError('No pudimos actualizar la verificación de este destinatario. Intenta de nuevo.');
+        }
         setRetryRecipient(row);
       });
   };
@@ -725,6 +753,11 @@ export default function LocalSendScreen() {
                   )}
                   <Text style={styles.helperText}>{copy.helper}</Text>
                   {resolveError ? <Text style={styles.errorText}>{resolveError}</Text> : null}
+                  {locationBlocked ? (
+                    <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('BrebLocationCheck')}>
+                      <Text style={styles.addButtonText}>Confirmar ubicación</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {retryRecipient ? (
                     <TouchableOpacity accessibilityRole="button" disabled={locked} onPress={() => pickSaved(retryRecipient)}>
                       <Text style={styles.addButtonText}>Intentar de nuevo</Text>
@@ -800,8 +833,17 @@ export default function LocalSendScreen() {
                   ) : null}
                   {method?.accountStatus === 'none' ? (
                     <Text style={styles.emptyText}>Primero abre tu cuenta en {currency}. Te mostramos el costo antes de confirmar.</Text>
+                  ) : !pairReady ? (
+                    <Text style={styles.emptyText}>
+                      {method?.accountStatus === 'awaiting_payment' ? 'Completa el pago de apertura para usar tu cuenta.'
+                        : method?.accountStatus === 'provisioning' ? 'Tu cuenta sigue en proceso de apertura. Puedes revisar su estado abajo.'
+                        : accountStopped ? 'Tu cuenta no está disponible para enviar. Escríbenos a soporte para revisarla.'
+                        : method?.accountStatus === 'active'
+                          ? 'Tu apertura está pagada. Actualiza los datos de tu cuenta para continuar; no tienes que pagar otra vez.'
+                          : 'No pudimos confirmar el estado de tu cuenta. Actualiza sus datos para continuar.'}
+                    </Text>
                   ) : null}
-                  {quoteLoading ? (
+                  {!pairReady ? null : quoteLoading ? (
                     <ActivityIndicator color={colors.primary} />
                   ) : quoteError ? (
                     <View style={styles.emptyQuote}>
@@ -844,6 +886,12 @@ export default function LocalSendScreen() {
 
             {flowError ? (
               <Text style={[styles.errorText, { marginHorizontal: 22, marginTop: -8, marginBottom: 12 }]}>{flowError}</Text>
+            ) : null}
+            {flowError && flowLocationBlocked ? (
+              <TouchableOpacity accessibilityRole="button" style={{ marginHorizontal: 22, marginBottom: 12 }}
+                onPress={() => navigation.navigate('BrebLocationCheck')}>
+                <Text style={styles.addButtonText}>Confirmar ubicación</Text>
+              </TouchableOpacity>
             ) : null}
 
             {/* ─── Action ─── */}
@@ -907,9 +955,12 @@ export default function LocalSendScreen() {
                 <RampActionBar
                   primaryLabel={!pairReady && method?.accountStatus === 'none' ? 'Solicitar cuenta'
                     : !pairReady && method?.accountStatus === 'awaiting_payment' ? 'Completar apertura'
-                    : !pairReady && method?.accountStatus === 'provisioning' ? 'Revisar apertura' : 'Continuar'}
-                  onPrimaryPress={!pairReady && ['none', 'awaiting_payment', 'provisioning'].includes(method?.accountStatus || '') ? ensureAccounts : handleContinue}
-                  primaryDisabled={!pairReady && ['none', 'awaiting_payment', 'provisioning'].includes(method?.accountStatus || '') ? !recipientReady : !canContinue}
+                    : !pairReady && method?.accountStatus === 'provisioning' ? 'Revisar apertura'
+                    : accountStopped ? 'Escribir a soporte' : !pairReady ? 'Actualizar cuenta' : 'Continuar'}
+                  onPrimaryPress={openingRequired ? ensureAccounts : accountStopped
+                    ? () => navigation.navigate('HomeMessages', { initialChannelId: 'soporte' })
+                    : !pairReady ? refreshAccounts : handleContinue}
+                  primaryDisabled={pairReady ? !canContinue : false}
                   primaryLoading={step === 'preparing'}
                   primaryIconName="chevron-right"
                 />

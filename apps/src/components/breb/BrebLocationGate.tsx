@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, SafeAreaView, ScrollView, StatusBar, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -13,6 +13,7 @@ import { RampStepHeader } from '../ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../ramps/rampFlowStyles';
 import {
   BREB_PERMISSION_ERROR,
+  brebLocationPassRemainingMs,
   brebLocationPassValid,
   brebLocationSupported,
   hasBrebLocationPermission,
@@ -37,29 +38,65 @@ export function useBrebLocationScope(): string {
 }
 
 /**
+ * Whether this user/account has a current Bre-B location pass, for screens
+ * that show a key: refreshed on focus and followed to its expiry (re-armed
+ * from the current deadline, so a renewed pass is followed too).
+ */
+export function useBrebLocationPass(enabled = true): boolean {
+  const scope = useBrebLocationScope();
+  const [ok, setOk] = useState(() => enabled && brebLocationPassValid(scope));
+  useFocusEffect(useCallback(() => {
+    if (enabled) setOk(brebLocationPassValid(scope));
+  }, [enabled, scope]));
+  useEffect(() => {
+    if (!enabled) return undefined;
+    setOk(brebLocationPassValid(scope));
+    let timer: ReturnType<typeof setTimeout>;
+    const check = () => {
+      const valid = brebLocationPassValid(scope);
+      setOk(valid);
+      if (valid) timer = setTimeout(check, Math.max(brebLocationPassRemainingMs(scope), 0) + 1000);
+    };
+    timer = setTimeout(check, Math.max(brebLocationPassRemainingMs(scope), 0) + 1000);
+    return () => clearTimeout(timer);
+  }, [enabled, scope, ok]);
+  return enabled && ok;
+}
+
+/**
  * Bre-B is usable from anywhere except Venezuela. This is the location step of
  * a Bre-B application (and of renewing a lapsed check before showing a key):
  * the permission screen the first time, a silent check afterwards, and a
  * recent pass skips it. The server refuses every Bre-B operation without one.
  */
-export function BrebLocationGate({ enabled = true, children }: { enabled?: boolean; children: React.ReactNode }) {
+export function BrebLocationGate({ enabled = true, force = false, children }: {
+  enabled?: boolean;
+  /** Always verify again (a recovery entry point): never trust the cached pass. */
+  force?: boolean;
+  children: React.ReactNode;
+}) {
   const scope = useBrebLocationScope();
-  return <ScopedBrebLocationGate key={scope} scope={scope} enabled={enabled}>{children}</ScopedBrebLocationGate>;
+  return <ScopedBrebLocationGate key={scope} scope={scope} enabled={enabled} force={force}>{children}</ScopedBrebLocationGate>;
 }
 
-function ScopedBrebLocationGate({scope, enabled, children}: {scope: string; enabled: boolean; children: React.ReactNode}) {
+function ScopedBrebLocationGate({scope, enabled, force, children}: {
+  scope: string; enabled: boolean; force: boolean; children: React.ReactNode;
+}) {
   const navigation = useNavigation<any>();
-  const [state, setState] = useState<GateState>(() => (!enabled || brebLocationPassValid(scope) ? 'ok' : 'checking'));
+  // A forced check skips the cached pass: the server may no longer accept it
+  // (another network or IP), which is exactly why the person is here.
+  const [state, setState] = useState<GateState>(() => (
+    !enabled || (!force && brebLocationPassValid(scope)) ? 'ok' : 'checking'));
   const [message, setMessage] = useState('');
   const running = useRef(false);
   const focused = useRef(false);
 
-  const verify = useCallback(async () => {
-    if (running.current) return;
+  const verify = useCallback(async (requestPermission = false) => {
+    if (running.current || !focused.current) return;
     running.current = true;
     setState('checking');
     try {
-      await verifyBrebLocation(scope);
+      await verifyBrebLocation(scope, requestPermission);
       if (focused.current) setState('ok');
     } catch (error: any) {
       if (!focused.current) return;
@@ -75,7 +112,7 @@ function ScopedBrebLocationGate({scope, enabled, children}: {scope: string; enab
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
-      if (!enabled || brebLocationPassValid(scope)) {
+      if (!enabled || (!force && brebLocationPassValid(scope))) {
         setState('ok');
       } else if (!brebLocationSupported()) {
         setState('unsupported');
@@ -88,7 +125,7 @@ function ScopedBrebLocationGate({scope, enabled, children}: {scope: string; enab
           .catch(() => { if (focused.current) setState('intro'); });
       }
       return () => { focused.current = false; };
-    }, [enabled, verify, scope]),
+    }, [enabled, force, verify, scope]),
   );
 
   if (state === 'ok') return <>{children}</>;
@@ -167,7 +204,7 @@ function ScopedBrebLocationGate({scope, enabled, children}: {scope: string; enab
         {state === 'intro' || problem ? (
           <RampActionBar
             primaryLabel={state === 'intro' ? 'Permitir ubicación y continuar' : 'Intentar de nuevo'}
-            onPrimaryPress={verify}
+            onPrimaryPress={() => verify(true)}
             primaryIconName="map-pin"
             secondaryLabel={state === 'denied' ? 'Abrir Ajustes' : 'Ahora no'}
             onSecondaryPress={state === 'denied' ? () => { Linking.openSettings().catch(() => {}); } : () => navigation.goBack()}

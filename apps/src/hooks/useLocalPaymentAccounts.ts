@@ -59,13 +59,16 @@ export const useLocalPaymentAccounts = () => {
   // "Usable right now" is stricter than `status === 'active'`: an account can
   // be open while its Bre-B key is still PROCESSING at the provider, and a
   // key with no `displayValue` is nothing the user can share or be paid at.
+  // An active Bre-B key still counts while the server withholds its value
+  // (it shows only with a current location pass): its row reveals it.
   const receivable = useMemo(
     () =>
       accounts.filter(
         account =>
           account.status === 'active' &&
           account.fundingInstructions.some(
-            instruction => instruction.status === 'active' && !!instruction.displayValue,
+            instruction => instruction.status === 'active'
+              && (instruction.kind === 'breb_key' || !!instruction.displayValue),
           ),
       ),
     [accounts],

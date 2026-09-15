@@ -497,11 +497,16 @@ const PREPARE_LOCAL_ACTIVATION = gql`
   }
 `;
 
+// Bound provider-opening requests, not wallet signing or human approval.
+// A timeout is an unknown outcome: the server retains the same opening and
+// payment IDs, and a late response must never reach a payment prompt.
+const ACTIVATION_REQUEST_TIMEOUT_MS = 60000;
+
 /** The opening fee before any commitment (a consent-only quote: nothing is
  * created or charged). null when the account is already being opened. */
 export async function quoteLocalActivation(methodId: string): Promise<string | null> {
   const result = await runMutation(PREPARE_LOCAL_ACTIVATION, {methodId}, 'prepareLocalActivation',
-    'No pudimos consultar el costo de apertura.');
+    'No pudimos consultar el costo de apertura.', ACTIVATION_REQUEST_TIMEOUT_MS);
   return result.status === 'consent_required' ? String(result.amount) : null;
 }
 
@@ -514,7 +519,7 @@ export interface ActivationPrompts {
 
 export async function payLocalActivation(methodId: string, prompts: ActivationPrompts = {}): Promise<boolean> {
   let result = await runMutation(PREPARE_LOCAL_ACTIVATION, {methodId}, 'prepareLocalActivation',
-    'No pudimos preparar la activación.');
+    'No pudimos preparar la activación.', ACTIVATION_REQUEST_TIMEOUT_MS);
   if (result.status === 'consent_required') {
     const accepted = prompts.confirmFee ? await prompts.confirmFee(String(result.amount)) : await new Promise<boolean>(resolve => Alert.alert(
       'Solicitar cuenta local',
@@ -525,7 +530,7 @@ export async function payLocalActivation(methodId: string, prompts: ActivationPr
     ));
     if (!accepted) return false;
     result = await runMutation(PREPARE_LOCAL_ACTIVATION, {methodId, acceptedFee: result.amount},
-      'prepareLocalActivation', 'No pudimos solicitar la cuenta.');
+      'prepareLocalActivation', 'No pudimos solicitar la cuenta.', ACTIVATION_REQUEST_TIMEOUT_MS);
   }
   if (result.status === 'failed') {
     throw new Error('No pudimos abrir esta cuenta. No se realizó ningún cobro.');
@@ -548,7 +553,7 @@ export async function payLocalActivation(methodId: string, prompts: ActivationPr
 
 export async function activateLocalMoney(methodId: string): Promise<LocalPairStatus> {
   const result = await runMutation(ACTIVATE_LOCAL_MONEY, {methodId}, 'activateLocalMoney',
-    'No pudimos preparar tu cuenta local. Intenta de nuevo.');
+    'No pudimos preparar tu cuenta local. Intenta de nuevo.', ACTIVATION_REQUEST_TIMEOUT_MS);
   return result.status as LocalPairStatus;
 }
 

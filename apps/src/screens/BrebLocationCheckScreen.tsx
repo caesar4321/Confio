@@ -7,11 +7,13 @@ import { colors } from '../config/theme';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 
 // The Bre-B location step, opened from the application's requirements (or to
-// renew a lapsed check before showing a key): the permission screen the first
-// time, then straight back to where the person came from.
+// renew a check before showing a key or retrying an operation): the permission
+// screen the first time, then straight back to where the person came from.
+// Always a fresh check: the reason to come here is that the server did not
+// accept the cached one.
 export default function BrebLocationCheckScreen() {
   return (
-    <BrebLocationGate>
+    <BrebLocationGate force>
       <Confirmed />
     </BrebLocationGate>
   );

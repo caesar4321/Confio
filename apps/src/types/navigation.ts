@@ -38,8 +38,8 @@ export type MainStackParamList = {
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
   Memberships: { provider?: string; token?: string; obligationId?: string } | undefined;
-  InfiniaPayment: undefined;
-  CobrePayment: undefined;
+  InfiniaPayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
+  CobrePayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
   LocalAccountFunding: undefined;
   LocalSend: { methodId: string };
   LocalReceive: { methodId: string };

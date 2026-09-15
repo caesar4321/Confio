@@ -1,9 +1,14 @@
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {Text} from 'react-native';
+import {Modal, Text, TouchableOpacity} from 'react-native';
 
 const mockPay = jest.fn();
 const mockApply = jest.fn();
+const mockActivate = jest.fn();
+const mockQuote = jest.fn();
+const mockGoBack = jest.fn();
+const mockAccountRefetch = jest.fn().mockResolvedValue({});
+let mockRemovalPrevented = false;
 let mockPassDeadline: number | null = null;
 let mockScope = 'user:account:1';
 let mockMethod: any;
@@ -18,7 +23,8 @@ jest.mock('@apollo/client', () => ({useQuery: (query: string) => ({
   refetch: jest.fn().mockResolvedValue({}),
 })}));
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({navigate: jest.fn(), goBack: jest.fn(), canGoBack: () => true, replace: jest.fn()}),
+  useNavigation: () => ({navigate: jest.fn(), goBack: mockGoBack, canGoBack: () => true, replace: jest.fn()}),
+  usePreventRemove: (prevent: boolean) => {mockRemovalPrevented = prevent;},
   useRoute: () => ({params: {methodId: mockMethod.id}}),
   useFocusEffect: () => {},
 }));
@@ -26,7 +32,7 @@ jest.mock('../../apollo/queries', () => ({GET_MY_RAMP_ADDRESS: 'address'}));
 jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {type: 'personal'}})}));
 jest.mock('../../components/breb/BrebLocationGate', () => ({useBrebLocationScope: () => mockScope}));
 jest.mock('../../hooks/useLocalPaymentAccounts', () => ({
-  useLocalPaymentAccounts: () => ({accounts: mockAccounts, refetch: jest.fn().mockResolvedValue({})}),
+  useLocalPaymentAccounts: () => ({accounts: mockAccounts, refetch: mockAccountRefetch}),
 }));
 jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'ActionBar'}));
 jest.mock('../../components/ramps/RampHero', () => ({RampHero: 'Hero'}));
@@ -40,8 +46,8 @@ jest.mock('../../services/brebLocation', () => ({
 jest.mock('../../services/localMoney', () => ({
   LOCAL_MONEY_METHODS: 'methods',
   currencyName: () => 'pesos',
-  activateLocalMoney: jest.fn(),
-  quoteLocalActivation: jest.fn().mockResolvedValue('10'),
+  activateLocalMoney: (...args: any[]) => mockActivate(...args),
+  quoteLocalActivation: (...args: any[]) => mockQuote(...args),
   payLocalActivation: (...args: any[]) => mockPay(...args),
 }));
 import Screen from '../LocalAccountApplicationScreen';
@@ -53,10 +59,77 @@ const bar = (tree: renderer.ReactTestRenderer) => tree.root.findByType('ActionBa
 beforeEach(() => {
   jest.clearAllMocks();
   mockAccounts = [];
+  mockQuote.mockResolvedValue('10');
   mockPassValid = true;
   mockPassDeadline = null;
   mockScope = 'user:account:1';
   mockMethod = {id: 'co_breb', country: 'CO', asset: 'COP', status: 'live', accountStatus: 'none'};
+});
+
+it('blocks the screen with the shared progress modal while opening and clears it on failure', async () => {
+  mockMethod = {id: 'mx_clabe', country: 'MX', asset: 'MXN', status: 'live', accountStatus: 'none'};
+  let fail!: (error: Error) => void;
+  mockPay.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+  let tree!: renderer.ReactTestRenderer;
+  let opening!: Promise<void>;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  await act(async () => {opening = bar(tree).props.onPrimaryPress();});
+  expect(tree.root.findByType(Modal).props.visible).toBe(true);
+  expect(texts(tree)).toContain('Por favor no cierres la aplicación');
+  await act(async () => {fail(new Error('Intenta de nuevo')); await opening;});
+  expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  expect(texts(tree)).toContain('Intenta de nuevo');
+  expect(bar(tree).props.primaryDisabled).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+it('shows paid activation as complete instead of spinning in the cost section', async () => {
+  mockMethod = {id: 'mx_clabe', country: 'MX', asset: 'MXN', status: 'live', accountStatus: 'active'};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(texts(tree)).toContain('Tu cuenta está activa. La apertura ya está pagada.');
+  expect(bar(tree).props.primaryLabel).toBe('Ir a mi cuenta');
+  expect(mockPay).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+it('does not trap a completed opening behind a stalled account refresh', async () => {
+  mockMethod = {id: 'mx_clabe', country: 'MX', asset: 'MXN', status: 'live', accountStatus: 'awaiting_payment'};
+  mockPay.mockResolvedValueOnce(true);
+  mockActivate.mockResolvedValueOnce('active');
+  let release!: () => void;
+  mockAccountRefetch.mockImplementationOnce(() => new Promise<void>(resolve => {release = resolve;}));
+  let tree!: renderer.ReactTestRenderer;
+  let opening!: Promise<void>;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  await act(async () => {opening = bar(tree).props.onPrimaryPress();});
+  try {
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  } finally {
+    await act(async () => {release(); await opening; tree.unmount();});
+  }
+});
+
+it('prevents duplicate opening and back navigation while busy, then refreshes accounts before returning', async () => {
+  mockMethod = {id: 'mx_clabe', country: 'MX', asset: 'MXN', status: 'live', accountStatus: 'awaiting_payment'};
+  let finish!: (paid: boolean) => void;
+  mockPay.mockImplementationOnce(() => new Promise<boolean>(resolve => {finish = resolve;}));
+  mockActivate.mockResolvedValueOnce('active');
+  let tree!: renderer.ReactTestRenderer;
+  let opening!: Promise<void>;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const press = bar(tree).props.onPrimaryPress;
+  await act(async () => {opening = press(); await press();});
+  expect(mockPay).toHaveBeenCalledTimes(1);
+  expect(mockRemovalPrevented).toBe(true);
+  expect(mockGoBack).not.toHaveBeenCalled();
+  await act(async () => {finish(true); await opening;});
+  expect(mockAccountRefetch).toHaveBeenCalledTimes(1);
+  expect(mockGoBack).toHaveBeenCalledTimes(1);
+  expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  expect(mockRemovalPrevented).toBe(false);
+  await act(async () => tree.unmount());
 });
 
 it('does not carry an issued key into another account context', async () => {
@@ -129,6 +202,38 @@ it('a departed application cannot approve a late fee request', async () => {
   await act(async () => { tree.update(<Screen />); });
   expect(await captured.confirmFee('10')).toBe(false);
   await act(async () => { finish(false); await opening; });
+  await act(async () => { tree.unmount(); });
+});
+
+it('a departed application stops after its second payment', async () => {
+  mockMethod = {...mockMethod, accountStatus: 'awaiting_payment'};
+  let finish!: (value: boolean) => void;
+  mockPay.mockResolvedValueOnce(true)
+    .mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  mockActivate.mockResolvedValue('awaiting_payment');
+  let tree!: renderer.ReactTestRenderer;
+  let opening!: Promise<void>;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  await act(async () => { opening = bar(tree).props.onPrimaryPress(); });
+  expect(mockActivate).toHaveBeenCalledTimes(1);
+  mockScope = 'user:another-account:2';
+  await act(async () => { tree.update(<Screen />); });
+  await act(async () => { finish(true); await opening; });
+  // The second payment finished after the user left: no further opening step.
+  expect(mockActivate).toHaveBeenCalledTimes(1);
+  await act(async () => { tree.unmount(); });
+});
+
+it('an opening already started elsewhere offers a retry instead of hanging', async () => {
+  mockQuote.mockResolvedValueOnce(null);
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  expect(texts(tree).join('\n')).toContain('Intentar de nuevo');
+  expect(bar(tree).props.primaryDisabled).toBe(true);
+  const retry = tree.root.findAllByType(TouchableOpacity).find(node =>
+    node.findAllByType(Text).some(text => ([] as any[]).concat(text.props.children).join('').includes('Intentar de nuevo')))!;
+  await act(async () => { retry.props.onPress(); });
+  expect(bar(tree).props.primaryLabel).toBe('Aceptar y solicitar · US$10');
   await act(async () => { tree.unmount(); });
 });
 

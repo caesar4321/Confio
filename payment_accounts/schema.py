@@ -230,6 +230,9 @@ def _breb_key_hidden(instruction, info):
 class FundingInstructionType(DjangoObjectType):
     class Meta:
         model = FundingInstruction
+        # Mobile consumers use the stored lowercase values, not Graphene's
+        # automatically generated uppercase choice enums.
+        convert_choices_to_enum = False
         fields = (
             'internal_id', 'kind', 'status', 'reusable', 'expires_at',
             'display_value', 'holder_display_name', 'ownership_evidence_available',
@@ -251,12 +254,14 @@ class FundingInstructionType(DjangoObjectType):
 class AccountCapabilityType(DjangoObjectType):
     class Meta:
         model = AccountCapability
+        convert_choices_to_enum = False
         fields = ('capability', 'status', 'reason', 'evaluated_at')
 
 
 class FinancialAccountType(DjangoObjectType):
     class Meta:
         model = FinancialAccount
+        convert_choices_to_enum = False
         fields = (
             'internal_id', 'ownership_structure', 'country', 'asset', 'status',
             'provider_status', 'available_balance', 'current_balance',
@@ -527,6 +532,10 @@ class ProvisionPaymentAccount(graphene.Mutation):
                     'Consent to share Didit compliance data with Infinia is required'
                 )
             account = _active_account(info, permission='manage_bank_accounts', owner_only=True)
+            # Opening a Colombian (Bre-B) account needs a current location pass
+            # from an allowed IP, like the local-money activation does.
+            from .breb_location import require_for_country
+            require_for_country(account, country, getattr(info.context, 'META', {}))
             identity = _verified_identity(account)
             if provider == 'infinia':
                 from .activation import require_paid
@@ -569,6 +578,7 @@ class CreateReceivingInstruction(graphene.Mutation):
             ).first()
             if not financial_account:
                 raise PaymentAccountError('Financial account not found')
+            _require_breb_location(info, account, financial_account)
             create_funding_instruction(financial_account=financial_account, kind=kind)
             return cls(success=True, account=financial_account, errors=[])
         except Exception as exc:
@@ -607,6 +617,19 @@ class CreatePayoutDestination(graphene.Mutation):
             return cls(success=False, destination=None, errors=[_public_error(exc)])
 
 
+def _require_breb_location(info, owner, *accounts):
+    """Generic mutations move Bre-B money too: a Cobre account (Colombia's
+    Bre-B provider) or any Colombian account needs a current location pass
+    from an allowed IP, like journeys, activation and keys."""
+    from .breb_location import require_for_country, require_location_pass
+    meta = getattr(info.context, 'META', {})
+    for row in accounts:
+        if row.provider_profile.provider == 'cobre':
+            require_location_pass(owner, meta)
+        else:
+            require_for_country(owner, row.country, meta)
+
+
 class CreatePaymentPayout(graphene.Mutation):
     class Arguments:
         financial_account_id = graphene.UUID(required=True)
@@ -632,6 +655,7 @@ class CreatePaymentPayout(graphene.Mutation):
             ).first()
             if not source or not destination:
                 raise PaymentAccountError('Source account or destination not found')
+            _require_breb_location(info, account, source)
             operation = create_and_submit_payout(
                 confio_account=account,
                 source_account=source,
@@ -671,6 +695,7 @@ class CreatePaymentTransfer(graphene.Mutation):
             destination = by_id.get(destination_account_id)
             if not source or not destination:
                 raise PaymentAccountError('Source account or destination account not found')
+            _require_breb_location(info, account, source, destination)
             operation = create_and_submit_transfer(
                 confio_account=account,
                 source_account=source,

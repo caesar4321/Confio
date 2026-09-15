@@ -1,6 +1,7 @@
 const mockMutate = jest.fn();
 const mockAttest = jest.fn();
 const mockRequestMultiple = jest.fn();
+const mockCheckPermission = jest.fn();
 const mockAppleKey = jest.fn();
 const mockAppleAttest = jest.fn();
 const mockAppleRequest = jest.fn();
@@ -12,14 +13,16 @@ jest.mock('react-native', () => ({
       requestPermission: () => mockAppleRequest()},
   },
   PermissionsAndroid: {PERMISSIONS: {ACCESS_FINE_LOCATION: 'fine', ACCESS_COARSE_LOCATION: 'coarse'},
+    check: (...args: any[]) => mockCheckPermission(...args),
     RESULTS: {GRANTED: 'granted', NEVER_ASK_AGAIN: 'never_ask_again'}, requestMultiple: (...args: any[]) => mockRequestMultiple(...args)},
 }));
 import {applyCobreBreb, withBrebLocationRetry, verifyBrebLocation, brebLocationPassValid, BREB_PERMISSION_ERROR,
-  requestBrebLocationPermission, brebLocationPassRemainingMs} from '../brebLocation';
+  requestBrebLocationPermission, brebLocationPassRemainingMs, isBrebLocationFailure} from '../brebLocation';
 import {Platform} from 'react-native';
 
-beforeEach(() => {jest.resetAllMocks(); Platform.OS = 'android'; Object.defineProperty(Platform, 'Version', {value: '17', configurable: true});});
+beforeEach(() => {jest.resetAllMocks(); mockCheckPermission.mockResolvedValue(true); Platform.OS = 'android'; Object.defineProperty(Platform, 'Version', {value: '17', configurable: true});});
 test('denied precision never requests challenge', async () => {
+  mockCheckPermission.mockResolvedValue(false);
   mockRequestMultiple.mockResolvedValue({fine: 'denied'});
   await expect(applyCobreBreb()).rejects.toThrow('ubicación precisa');
   expect(mockMutate).not.toHaveBeenCalled();
@@ -70,6 +73,7 @@ test('Android maps the system answers (approximate only, never ask again)', asyn
   mockRequestMultiple.mockResolvedValueOnce({fine: 'never_ask_again', coarse: 'never_ask_again'});
   expect(await requestBrebLocationPermission()).toBe('blocked');
   mockRequestMultiple.mockResolvedValueOnce({fine: 'denied', coarse: 'denied'});
+  mockCheckPermission.mockResolvedValue(false);
   const error: any = await applyCobreBreb().catch(e => e);
   expect(error.code).toBe(BREB_PERMISSION_ERROR);
   expect(mockMutate).not.toHaveBeenCalled();
@@ -113,6 +117,31 @@ test('explicit expired-pass refusal verifies then retries once', async () => {
   expect(mockAttest).toHaveBeenCalledTimes(1);
 });
 
+test('a failed location step is marked as one, keeping its message and code', async () => {
+  mockCheckPermission.mockResolvedValue(false);
+  const operation = jest.fn().mockResolvedValue({success: false, errors: ['Verifica tu ubicación para usar Bre-B.']});
+  mockRequestMultiple.mockResolvedValue({fine: 'never_ask_again', coarse: 'never_ask_again'});
+  const error: any = await withBrebLocationRetry(operation).catch(e => e);
+  expect(isBrebLocationFailure(error)).toBe(true);
+  expect(error.code).toBe(BREB_PERMISSION_ERROR);
+  expect(operation).toHaveBeenCalledTimes(1);
+  // An operation's own failure is not a location failure.
+  const own: any = await withBrebLocationRetry(async () => { throw new Error('timeout'); }).catch(e => e);
+  expect(isBrebLocationFailure(own)).toBe(false);
+});
+test('an explicit refusal forgets the cached pass', async () => {
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
+  mockMutate.mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge', cloudProjectNumber: '123456789'}}})
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}});
+  await verifyBrebLocation('cached-scope');
+  expect(brebLocationPassValid('cached-scope')).toBe(true);
+  // An automatic retry never prompts: it uses the permission that already exists.
+  mockCheckPermission.mockResolvedValue(false);
+  const operation = jest.fn().mockResolvedValue({success: false, errors: ['Verifica tu ubicación para usar Bre-B.']});
+  await expect(withBrebLocationRetry(operation)).rejects.toThrow('ubicación precisa');
+  expect(brebLocationPassValid('cached-scope')).toBe(false);
+});
 test('ambiguous network failure and other refusals never retry', async () => {
   const operation = jest.fn().mockRejectedValue(new Error('timeout'));
   await expect(withBrebLocationRetry(operation)).rejects.toThrow('timeout');
@@ -150,4 +179,35 @@ test('expired verification response cannot open the screen', async () => {
     .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: 1}}});
   await expect(verifyBrebLocation('expired')).rejects.toThrow('verificar');
   expect(brebLocationPassValid('expired')).toBe(false);
+});
+
+test.each([false, true])('automatic retry never prompts (permission already granted: %s)', async allowed => {
+  mockCheckPermission.mockResolvedValue(allowed);
+  const operation = jest.fn().mockResolvedValue({success: false, errors: ['Verifica tu ubicación para usar Bre-B.']});
+  mockMutate.mockRejectedValue(new Error('server unavailable'));
+  const error = await withBrebLocationRetry(operation).catch(e => e);
+  expect(isBrebLocationFailure(error)).toBe(true);
+  expect(mockRequestMultiple).not.toHaveBeenCalled();
+  expect(operation).toHaveBeenCalledTimes(1);
+  if (!allowed) expect(mockMutate).not.toHaveBeenCalled();
+});
+test('application requires existing permission without prompting', async () => {
+  mockCheckPermission.mockResolvedValue(false);
+  await expect(applyCobreBreb()).rejects.toThrow('ubicación precisa');
+  expect(mockRequestMultiple).not.toHaveBeenCalled();
+  expect(mockMutate).not.toHaveBeenCalled();
+});
+test('silent screen check cannot prompt if permission was revoked after focus', async () => {
+  mockCheckPermission.mockResolvedValue(false);
+  await expect(verifyBrebLocation('scope', false)).rejects.toThrow('ubicación precisa');
+  expect(mockRequestMultiple).not.toHaveBeenCalled();
+  expect(mockMutate).not.toHaveBeenCalled();
+});
+test('Android location screen explicitly requests permission before contacting the server', async () => {
+  mockCheckPermission.mockResolvedValue(false);
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockMutate.mockRejectedValue(new Error('La verificación de ubicación aún no está disponible.'));
+  await expect(verifyBrebLocation('scope', true)).rejects.toThrow('aún no está disponible');
+  expect(mockRequestMultiple).toHaveBeenCalledTimes(1);
+  expect(mockRequestMultiple.mock.invocationCallOrder[0]).toBeLessThan(mockMutate.mock.invocationCallOrder[0]);
 });

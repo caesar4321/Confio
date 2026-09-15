@@ -246,6 +246,42 @@ class ActivationTests(TestCase):
         from payment_accounts.bridge import verified_destination
         with self.assertRaises(PaymentAccountError): verified_destination(crypto.funding_instructions.first(),self.owner)
 
+    def test_paid_account_graphql_values_match_mobile_account_contract(self):
+        import graphene
+        from payment_accounts.schema import FinancialAccountType
+        from payment_accounts.models import AccountCapability
+        self.row('active')
+        self.open_accounts()
+        local, crypto = local_money.accounts_for(self.owner, 'COL', 'COP')
+        AccountCapability.objects.create(financial_account=crypto,
+                                         capability='send_third_party', status='enabled')
+        owner = self.owner
+
+        class Query(graphene.ObjectType):
+            my_payment_accounts = graphene.List(FinancialAccountType)
+
+            def resolve_my_payment_accounts(root, info):
+                return activation.visible_accounts(FinancialAccount.objects.filter(
+                    provider_profile__confio_account=owner)).order_by('asset')
+
+        schema = graphene.Schema(query=Query)
+        result = schema.execute('''{ myPaymentAccounts {
+            provider asset status ownershipStructure
+            fundingInstructions { kind status }
+            capabilities { capability status }
+        } }''')
+        self.assertIsNone(result.errors)
+        rows = result.data['myPaymentAccounts']
+        self.assertEqual([row['status'] for row in rows], ['active', 'active'])
+        self.assertEqual([row['ownershipStructure'] for row in rows], ['provider_named'] * 2)
+        self.assertEqual(rows[1]['fundingInstructions'], [{'kind': 'crypto_address', 'status': 'active'}])
+        self.assertEqual(rows[1]['capabilities'], [{'capability': 'send_third_party', 'status': 'enabled'}])
+        # Serialization must not loosen payment gating.
+        AccountActivation.objects.filter(confio_account=owner).update(status='awaiting_payment')
+        result = schema.execute('{ myPaymentAccounts { status } }')
+        self.assertIsNone(result.errors)
+        self.assertEqual(result.data['myPaymentAccounts'], [])
+
     def test_provisioning_requires_consent_but_internal_account_has_no_separate_fee(self):
         with self.assertRaises(PaymentAccountError): activation.require_opening_intent(self.owner,'XXX','USDC_POL')
         self.row()
