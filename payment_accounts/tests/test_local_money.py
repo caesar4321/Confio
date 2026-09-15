@@ -379,12 +379,19 @@ class LocalMoneyTests(TestCase):
             confio_account=self.owner, provider='infinia', kind='breb_key', country='COL', asset='COP',
             label='Llave', holder_name='Ana', details={'type': 'BREB_KEY', 'brebKey': '@ana'})
         self.fx('205300')
-        quote = local_money.payout_quote(self.owner, destination, amount='50', client=self.client_api)
+        with mock.patch('payment_accounts.bridge.net_funding_units', return_value='49550000000000000000') as net, \
+                mock.patch('payment_accounts.allbridge_next.NextClient') as bridge:
+            bridge.return_value.quote.return_value = [
+                {'messenger': 'cctp', 'amountOut': '50000000'},
+                {'messenger': 'near-intents', 'amountOut': '49300000', 'amountOutMin': '49000000'}]
+            quote = local_money.payout_quote(self.owner, destination, amount='50', client=self.client_api)
+            net.assert_called_once_with(self.owner, 50 * 10**18)
+            bridge.return_value.quote.assert_called_once_with('BSC:USDT', 'POL:USDC', '49550000000000000000')
         self.assertEqual(quote['minimum_target'], Decimal('203247.00'))
         self.assertEqual(quote['rate'], Decimal('4106.0000'))
         payload = self.client_api.create_transfer_quote.call_args.args[0]
         self.assertEqual((payload['source_account_id'], payload['target_account_id'], payload['source_amount']),
-                         ('crypto', 'local', 50.0))
+                         ('crypto', 'local', 49.0))
         self.assertNotIn('requested_lock_time', payload)
         self.assertEqual(quote['expires_at'], '2026-09-14T12:00:00Z')
 
@@ -394,6 +401,32 @@ class LocalMoneyTests(TestCase):
             label='Llave', holder_name='Ana', details={})
         with self.assertRaisesRegex(PaymentAccountError, 'no está activa'):
             local_money.payout_quote(self.owner, destination, amount='50', client=self.client_api)
+
+    @override_settings(PAYMENT_BRIDGE_MAX_USDT='10')
+    def test_estimate_respects_the_same_spend_cap_as_preparation(self):
+        self.pair()
+        destination = SimpleNamespace(country='COL', asset='COP')
+        with mock.patch('payment_accounts.bridge.net_funding_units') as funding:
+            with self.assertRaisesRegex(PaymentAccountError, 'bridge limit'):
+                local_money.payout_quote(self.owner, destination, amount='11', client=self.client_api)
+            funding.assert_not_called()
+            self.client_api.create_transfer_quote.assert_not_called()
+
+    def test_review_uses_total_budget_for_rate_and_rejects_reverse_bridge(self):
+        _, crypto = self.pair()
+        destination = SimpleNamespace(country='COL', asset='COP')
+        bridge = SimpleNamespace(amount_out_min='49000000', quote=SimpleNamespace(
+            confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
+            funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
+            money_flow=SimpleNamespace(source_amount=Decimal('50'))))
+        self.fx('980')
+        result = local_money.payout_quote(self.owner, destination, bridge=bridge, client=self.client_api)
+        self.assertEqual(result['rate'], Decimal('19.6000'))
+        self.assertEqual(result['source_amount'], Decimal('49'))
+        bridge.quote.source_token_id = 'POL:USDC'
+        with self.assertRaisesRegex(PaymentAccountError, 'no corresponde'):
+            local_money.payout_quote(self.owner, destination, bridge=bridge, client=self.client_api)
+        self.client_api.create_transfer_quote.assert_called_once()
 
     @override_settings(PAYMENT_BRIDGE_MAX_USDT='1000')
     def test_deposit_over_the_bridge_cap_is_refused_before_a_journey(self):

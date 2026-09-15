@@ -691,15 +691,27 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
     local, crypto = _active_pair(owner, destination.country, destination.asset)
     if bridge is not None:
         if (bridge.quote.confio_account_id != owner.pk
+                or bridge.quote.source_token_id != 'BSC:USDT'
                 or bridge.quote.funding_instruction.financial_account_id != crypto.pk):
             raise PaymentAccountError('Este envío no corresponde a tu cuenta.')
         source = (Decimal(int(bridge.amount_out_min)) / Decimal(10 ** 6)).quantize(USDC_UNIT, rounding=ROUND_DOWN)
     else:
-        source = _positive(amount, USDC_UNIT)
+        # The typed amount is the user's total budget, not the USDC principal.
+        # Price the post-redemption USDT through the same bridge used at review.
+        from .bridge import net_funding_units, executable_bridge_routes, bridge_route_minimum, exceeds_bridge_cap
+        from .allbridge_next import NextClient, to_units
+        total = _positive(amount, USDC_UNIT)
+        if exceeds_bridge_cap(total):
+            raise PaymentAccountError('Amount exceeds the configured bridge limit')
+        units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
+        routes = executable_bridge_routes(NextClient().quote('BSC:USDT', 'POL:USDC', units))
+        route = routes[0]
+        source = Decimal(bridge_route_minimum(route)) / Decimal(10 ** 6)
     target, expires = _quote(client or InfiniaClient(), crypto, local, source)
     minimum = (target * (1 - _tolerance('LOCAL_MONEY_FX_TOLERANCE_BPS', 100))).quantize(FIAT_CENT, rounding=ROUND_DOWN)
     return {'source_amount': source, 'target_amount': target, 'minimum_target': minimum,
-            'rate': (target / source).quantize(Decimal('0.0001')), 'asset': local.asset, 'expires_at': expires}
+            'rate': (target / (bridge.quote.money_flow.source_amount if bridge is not None else total)).quantize(
+                Decimal('0.0001')), 'asset': local.asset, 'expires_at': expires}
 
 
 def deposit_quote(owner, credit, *, client=None):

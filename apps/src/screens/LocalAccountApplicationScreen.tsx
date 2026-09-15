@@ -17,7 +17,9 @@ import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
 import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
-import { applyCobreBreb, brebLocationPassRemainingMs, brebLocationPassValid } from '../services/brebLocation';
+import {
+  applyCobreBreb, brebLocationPassRemainingMs, brebLocationPassValid, onBrebLocationPassChange,
+} from '../services/brebLocation';
 import {
   activateLocalMoney,
   currencyName,
@@ -148,6 +150,10 @@ function Application({ methodId }: { methodId: string }) {
     setLocationOk(brebLocationPassValid(locationScope));
   };
   useFocusEffect(useCallback(() => { refresh.current(); }, []));
+  // A pass granted, renewed or forgotten anywhere (e.g. a refused conversion)
+  // shows or hides the key at once.
+  useEffect(() => onBrebLocationPassChange(() => setLocationOk(brebLocationPassValid(locationScope))),
+    [locationScope]);
   // The pass lapsing hides the key again, even with the screen open.
   useEffect(() => {
     if (!locationOk) return undefined;
@@ -420,10 +426,14 @@ function Application({ methodId }: { methodId: string }) {
 
   const unavailable = method?.status === 'unavailable';
   const broken = ['rejected', 'failed', 'suspended', 'closed'].includes(status);
+  // The list could not load (e.g. offline on first open): a retry, never "not available".
+  const loadFailed = !method && !methodsQuery.loading && Boolean(methodsQuery.error);
   const opening = status === 'provisioning' || (busy && !isCobre);
 
   let action: { label: string; onPress: () => void; disabled?: boolean; icon?: string };
-  if (unavailable || broken) {
+  if (loadFailed) {
+    action = { label: 'Intentar de nuevo', onPress: () => { methodsQuery.refetch().catch(() => {}); }, icon: 'refresh-cw' };
+  } else if (unavailable || broken) {
     action = { label: 'Escribir a soporte', onPress: () => navigation.navigate('HomeMessages', { initialChannelId: 'soporte' }) };
   } else if (isCobre) {
     action = { label: 'Solicitar mi llave Bre-B', onPress: applyCobre, disabled: !ready || busy, icon: 'key' };
@@ -455,6 +465,14 @@ function Application({ methodId }: { methodId: string }) {
           <View style={styles.loadingCard}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.loadingText}>Cargando…</Text>
+          </View>
+        ) : loadFailed ? (
+          <View style={styles.emptyStateCard}>
+            <View style={styles.emptyStateIconWrap}>
+              <Icon name="wifi-off" size={22} color={colors.primaryDark} />
+            </View>
+            <Text style={styles.emptyStateTitle}>No pudimos cargar esta cuenta</Text>
+            <Text style={styles.emptyStateText}>Revisa tu conexión e intenta de nuevo.</Text>
           </View>
         ) : !method || unavailable ? (
           <View style={styles.emptyStateCard}>

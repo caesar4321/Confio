@@ -187,3 +187,50 @@ it('a failed location check says why and offers the location screen, never signi
   expect(mockNavigate).toHaveBeenCalledWith('BrebLocationCheck');
   await act(async () => tree.unmount());
 });
+
+it('a stalled history refresh never keeps the screen busy after a location failure', async () => {
+  jest.useFakeTimers({doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask']});
+  let tree: renderer.ReactTestRenderer | undefined;
+  try {
+    mockPrepare.mockResolvedValue({internalId: 'bridge', amountUnits: '10', feeUnits: '0', amountOutMin: '9.9'});
+    mockCreate.mockRejectedValueOnce(
+      Object.assign(new Error('La verificación tardó demasiado. Intenta de nuevo.'), {brebLocation: true}),
+    );
+    await act(async () => {
+      tree = renderer.create(<Screen />);
+    });
+    const find = (text: string) => tree!.root
+      .findAllByType(TouchableOpacity)
+      .find(b => b.findAllByType(Text).some(t => String(t.props.children).includes(text)))!;
+    const press = async (text: string) => {
+      await act(async () => {
+        await find(text).props.onPress();
+      });
+    };
+    await press('COL · COP');
+    await press('Bank · Holder');
+    const inputs = tree!.root.findAllByType(TextInput);
+    await act(async () => {
+      inputs[0].props.onChangeText('10');
+      inputs[1].props.onChangeText('30');
+    });
+    await press('Revisar pago');
+    mockRefetch.mockReturnValue(new Promise(() => {})); // the history never answers
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = find('Confirmar conversión y pago').props.onPress();
+    });
+    expect(find('Confirmar ubicación').props.disabled).toBe(true);
+    await act(async () => {
+      jest.advanceTimersByTime(10001);
+    });
+    await act(async () => {
+      await pending;
+    });
+    expect(find('Confirmar ubicación').props.disabled).toBe(false);
+  } finally {
+    mockRefetch.mockResolvedValue({});
+    if (tree) await act(async () => tree!.unmount());
+    jest.useRealTimers();
+  }
+});

@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .allbridge_next import NextClient, NextError, address, to_units
+from .allbridge_next import NextClient, NextError, address, to_units, uint
 from .eligibility import context_from_identity, enforce_and_record
 from .models import FundingInstruction, MoneyFlow, PaymentBridgeQuote
 from .services import PaymentAccountError, _require_provider_enabled
@@ -27,6 +27,40 @@ def bridge_cap():
 def exceeds_bridge_cap(amount):
     cap = bridge_cap()
     return cap is not None and (not cap.is_finite() or cap <= 0 or Decimal(str(amount)) > cap)
+
+
+def executable_bridge_routes(routes):
+    supported = [route for route in routes if route.get('messenger') == 'near-intents']
+    if not supported:
+        raise NextError('No executable bridge route is available')
+    return supported
+
+
+def bridge_route_minimum(route):
+    return uint(route.get('amountOutMin', str(uint(route['amountOut'], positive=True) * 99 // 100)),
+                positive=True)
+
+
+def net_funding_units(owner, gross_units):
+    """USDT bridge input within a total USD spend, using the cUSD perimeter.
+
+    Existing wallet USDT has already crossed that perimeter. Only the cUSD
+    portion needs a redemption fee, just as Koywe prices its net provider leg.
+    """
+    from . import bridge_chain as chain
+    from cusd_plus import cusd_vault, vault
+    wallet = max(0, chain.token_balance('BSC:USDT', owner.bsc_address)
+                 - vault.reserved_usdt_wei(owner.user, owner.bsc_address))
+    wallet_used = min(wallet, gross_units)
+    redeem = gross_units - wallet_used
+    if not redeem:
+        return str(gross_units)
+    cusd_vault.require_operational()
+    preview = cusd_vault.preview_redeem_wei(redeem)
+    if (not 0 <= preview.fee_bps <= 90 or preview.net_wei <= 0
+            or preview.net_wei + preview.fee_wei != redeem or preview.fee_wei < 0):
+        raise NextError('Invalid conversion fee preview')
+    return str(wallet_used + preview.net_wei)
 
 
 def verified_destination(instruction, confio_account):
@@ -72,7 +106,8 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
     source_token, destination_token = (
         ('BSC:USDT', 'POL:USDC') if direction == 'to_provider' else ('POL:USDC', 'BSC:USDT')
     )
-    units = to_units(amount, source_token)
+    gross_units = to_units(amount, source_token)
+    units = gross_units
     # An optional brake on the source leg, not a promise of an exact provider credit.
     if exceeds_bridge_cap(amount):
         raise PaymentAccountError('Amount exceeds the configured bridge limit')
@@ -102,9 +137,12 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
         ).first()
         if not row:
             return None
-        if (row.funding_instruction_id, row.amount_units, row.source_address, row.destination_address,
+        # Compare the user's original amount, not a freshly priced net amount.
+        # This also keeps pre-inclusive prepared transfers recoverable unchanged.
+        original_units = row.money_flow.metadata.get('gross_spend_units', row.amount_units)
+        if (row.funding_instruction_id, original_units, row.source_address, row.destination_address,
                 row.source_token_id) != (
-            instruction.pk, units, source, destination, source_token,
+            instruction.pk, gross_units, source, destination, source_token,
         ):
             raise PaymentAccountError('Request id was already used for different bridge details')
         # A lost prepare response must recover the same transfer, whose
@@ -128,12 +166,14 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
     previous = existing()
     if previous:
         return previous
+    if direction == 'to_provider':
+        units = net_funding_units(confio_account, int(gross_units))
     # Timestamp before pricing; API latency must not extend the quote's lifetime.
     started = timezone.now()
     expires = started + timedelta(seconds=60)
     if instruction.expires_at:
         expires = min(expires, instruction.expires_at)
-    routes = (client or NextClient()).quote(source_token, destination_token, units)
+    routes = executable_bridge_routes((client or NextClient()).quote(source_token, destination_token, units))
     if expires <= timezone.now():
         raise NextError('Bridge quote expired while pricing; try again')
     with transaction.atomic():
@@ -156,7 +196,8 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
             confio_account=confio_account, kind='withdraw' if direction == 'to_provider' else 'fund', status='created',
             source_asset='USDT_BSC' if direction == 'to_provider' else 'USDC_POL', source_amount=Decimal(str(amount)),
             target_asset='USDC_POL' if direction == 'to_provider' else 'USDT_BSC',
-            metadata={'purpose': 'provider_bridge_funding', 'stage': 'quoted'},
+            metadata={'purpose': 'provider_bridge_funding', 'stage': 'quoted',
+                      **({'gross_spend_units': gross_units} if direction == 'to_provider' else {})},
         )
         return PaymentBridgeQuote.objects.create(
             confio_account=confio_account, request_id=request_id, money_flow=flow,

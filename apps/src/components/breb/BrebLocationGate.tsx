@@ -15,6 +15,7 @@ import {
   BREB_PERMISSION_ERROR,
   brebLocationPassRemainingMs,
   brebLocationPassValid,
+  onBrebLocationPassChange,
   brebLocationSupported,
   hasBrebLocationPermission,
   verifyBrebLocation,
@@ -48,6 +49,12 @@ export function useBrebLocationPass(enabled = true): boolean {
   useFocusEffect(useCallback(() => {
     if (enabled) setOk(brebLocationPassValid(scope));
   }, [enabled, scope]));
+  // A pass granted, renewed or forgotten anywhere (e.g. a refused operation)
+  // shows or hides the key at once.
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return onBrebLocationPassChange(() => setOk(brebLocationPassValid(scope)));
+  }, [enabled, scope]);
   useEffect(() => {
     if (!enabled) return undefined;
     setOk(brebLocationPassValid(scope));

@@ -53,3 +53,18 @@ it('does not verify when the permission check resolves after leaving the screen'
   await act(async () => resolve(true));
   expect(verify).not.toHaveBeenCalled();
 });
+
+it('a forced check verifies again despite a cached pass', async () => {
+  mockDeadline = Date.now() + 60000; // a cached pass the server may no longer accept
+  check.mockResolvedValue(true);
+  verify.mockResolvedValue(Date.now() / 1000 + 900);
+  await act(async () => {tree = renderer.create(<BrebLocationGate force><Text>ready</Text></BrebLocationGate>);});
+  expect(verify).toHaveBeenCalledWith('7:personal_0:1', false);
+});
+
+it('an unforced gate trusts a cached pass', async () => {
+  mockDeadline = Date.now() + 60000;
+  await act(async () => {tree = renderer.create(<BrebLocationGate><Text>ready</Text></BrebLocationGate>);});
+  expect(verify).not.toHaveBeenCalled();
+  expect(tree.root.findByType(Text).props.children).toBe('ready');
+});

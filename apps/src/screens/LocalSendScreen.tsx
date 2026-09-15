@@ -382,6 +382,7 @@ export default function LocalSendScreen() {
     // A response for an older form (edited meanwhile) is dropped, never shown or signed.
     const run = ++prepareRun.current;
     const snapshot = { amount: normalizedAmount, destinationId: destination.id };
+    let bridgePrepared = false;
     setStep('preparing');
     setFlowError('');
     setFlowLocationBlocked(false);
@@ -389,6 +390,7 @@ export default function LocalSendScreen() {
       requestId.current ||= bridgeRequestId();
       const prepared = await preparePaymentBridge(cryptoInstruction.internalId, snapshot.amount, 'to_provider',
         requestId.current);
+      bridgePrepared = true;
       if (run !== prepareRun.current) return;
       const priced = await fetchPayoutQuote(snapshot.destinationId, { bridgeId: prepared.internalId });
       if (run !== prepareRun.current) return;
@@ -398,6 +400,7 @@ export default function LocalSendScreen() {
       setStep('review');
     } catch (error: any) {
       if (run !== prepareRun.current) return;
+      if (!bridgePrepared && error?.quoteRefreshRequired === true) requestId.current = null;
       setFlowError(error?.message || 'No pudimos preparar el envío. Intenta de nuevo.');
       setStep('form');
     }
@@ -854,7 +857,7 @@ export default function LocalSendScreen() {
                     <>
                       <Text style={styles.quoteEyebrow}>Estimado que recibe</Text>
                       <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
-                      <Text style={styles.quoteRate}>{`1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · todo incluido`}</Text>
+                      <Text style={styles.quoteRate}>{`1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · estimado neto de conversión`}</Text>
                       <View style={styles.quoteDivider} />
                       <View style={styles.quoteRow}>
                         <Text style={styles.quoteLabel}>Envías</Text>
@@ -917,7 +920,7 @@ export default function LocalSendScreen() {
                   {BigInt(bridge.feeUnits || '0') > 0n ? (
                     <View style={styles.reviewRow}>
                       <Icon name="repeat" size={16} color={colors.textSecondary} />
-                      <Text style={styles.reviewLabel}>Costo del envío</Text>
+                      <Text style={styles.reviewLabel}>Comisión de Confío (incluida)</Text>
                       <Text style={styles.reviewValue}>{formatRampMoney(bridgeAmount(bridge.feeUnits, 18), USD_UNIT)}</Text>
                     </View>
                   ) : null}

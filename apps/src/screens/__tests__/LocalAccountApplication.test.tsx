@@ -10,17 +10,21 @@ const mockGoBack = jest.fn();
 const mockAccountRefetch = jest.fn().mockResolvedValue({});
 let mockRemovalPrevented = false;
 let mockPassDeadline: number | null = null;
+const mockPassListeners = new Set<() => void>();
 let mockScope = 'user:account:1';
 let mockMethod: any;
 let mockAccounts: any[] = [];
 let mockPassValid = true;
+let mockMethodsError: any = null;
+const mockMethodsRefetch = jest.fn().mockResolvedValue({});
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('@react-native-clipboard/clipboard', () => ({setString: jest.fn()}));
 jest.mock('@apollo/client', () => ({useQuery: (query: string) => ({
-  data: query === 'methods' ? {localMoneyMethods: [mockMethod]}
+  data: query === 'methods' ? (mockMethodsError ? undefined : {localMoneyMethods: [mockMethod]})
     : query === 'address' ? {myRampAddress: {isComplete: true}} : {},
+  error: query === 'methods' ? mockMethodsError : undefined,
   loading: false,
-  refetch: jest.fn().mockResolvedValue({}),
+  refetch: query === 'methods' ? mockMethodsRefetch : jest.fn().mockResolvedValue({}),
 })}));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({navigate: jest.fn(), goBack: mockGoBack, canGoBack: () => true, replace: jest.fn()}),
@@ -42,6 +46,10 @@ jest.mock('../../services/brebLocation', () => ({
   applyCobreBreb: (...args: any[]) => mockApply(...args),
   brebLocationPassValid: () => mockPassValid && (mockPassDeadline === null || Date.now() < mockPassDeadline),
   brebLocationPassRemainingMs: () => mockPassDeadline === null ? 60000 : Math.max(0, mockPassDeadline - Date.now()),
+  onBrebLocationPassChange: (listener: () => void) => {
+    mockPassListeners.add(listener);
+    return () => { mockPassListeners.delete(listener); };
+  },
 }));
 jest.mock('../../services/localMoney', () => ({
   LOCAL_MONEY_METHODS: 'methods',
@@ -59,6 +67,7 @@ const bar = (tree: renderer.ReactTestRenderer) => tree.root.findByType('ActionBa
 beforeEach(() => {
   jest.clearAllMocks();
   mockAccounts = [];
+  mockMethodsError = null;
   mockQuote.mockResolvedValue('10');
   mockPassValid = true;
   mockPassDeadline = null;
@@ -255,6 +264,18 @@ it('a ready account shows what it costs before paying, then pays only that', asy
   await act(async () => { tree.unmount(); });
 });
 
+it('a pass forgotten elsewhere hides the key at once', async () => {
+  mockMethod = {id: 'cobre_co_breb_receive', country: 'CO', asset: 'COP', status: 'live', accountStatus: 'none'};
+  mockAccounts = [{provider: 'cobre', fundingInstructions: [{kind: 'breb_key', status: 'active', displayValue: '@ana'}]}];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  expect(texts(tree)).toContain('@ana');
+  mockPassValid = false; // e.g. a conversion got the explicit refusal
+  await act(async () => { mockPassListeners.forEach(listener => listener()); });
+  expect(texts(tree)).not.toContain('@ana');
+  await act(async () => { tree.unmount(); });
+});
+
 it('a Bre-B key shows only while the location pass lasts', async () => {
   mockMethod = {id: 'cobre_co_breb_receive', country: 'CO', asset: 'COP', status: 'live', accountStatus: 'none'};
   mockAccounts = [{provider: 'cobre', fundingInstructions: [{kind: 'breb_key', status: 'active', displayValue: '@ana'}]}];
@@ -267,5 +288,19 @@ it('a Bre-B key shows only while the location pass lasts', async () => {
   mockPassValid = true;
   await act(async () => { tree = renderer.create(<Screen />); });
   expect(texts(tree)).toContain('@ana');
+  await act(async () => { tree.unmount(); });
+});
+
+it('a failed load offers a retry instead of a dead end', async () => {
+  mockMethodsError = new Error('Network request failed');
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  expect(texts(tree)).toContain('No pudimos cargar esta cuenta');
+  expect(texts(tree)).not.toContain('No disponible por ahora');
+  const action = bar(tree);
+  expect(action.props.primaryLabel).toBe('Intentar de nuevo');
+  expect(action.props.primaryDisabled).toBeFalsy();
+  await act(async () => { action.props.onPrimaryPress(); });
+  expect(mockMethodsRefetch).toHaveBeenCalled();
   await act(async () => { tree.unmount(); });
 });
