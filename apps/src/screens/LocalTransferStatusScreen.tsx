@@ -34,9 +34,9 @@ import {
 type Nav = NativeStackNavigationProp<MainStackParamList, 'LocalTransferStatus'>;
 type Route = RouteProp<MainStackParamList, 'LocalTransferStatus'>;
 
-const TERMINAL = new Set(['completed', 'failed', 'needs_review']);
+const TERMINAL = new Set(['completed', 'failed', 'needs_review', 'refunded']);
 // Stages that never change again: polling stops only for these.
-const FINAL = new Set(['completed', 'failed']);
+const FINAL = new Set(['completed', 'failed', 'refunded']);
 const title = (j: LocalJourney) => (j.direction === 'to_bank' ? j.destinationSummary : 'Hacia tu Confío Dollar');
 
 function Timeline({ journey }: { journey: LocalJourney }) {
@@ -109,6 +109,7 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
   const failed = !journey && (Boolean(query.error) || !query.loading);
   const heading = failed ? 'No pudimos cargarla' : !journey ? 'Consultando…'
     : journey.stage === 'completed' ? '¡Listo!'
+      : journey.stage === 'refunded' ? 'Fondos devueltos'
       : journey.stage === 'needs_review' ? 'Lo estamos revisando'
         : journey.stage === 'failed' ? 'No se completó'
           : 'En proceso';
@@ -144,15 +145,17 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
             <View style={styles.section}>
               <RampStepHeader number={1} title="Estado" accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight} titleColor={colors.dark} />
-              {journey.stage === 'needs_review' || journey.stage === 'failed' ? (
+              {journey.stage === 'needs_review' || journey.stage === 'failed' || journey.stage === 'refunded' ? (
                 <View style={styles.warningCard}>
                   <Icon name="alert-triangle" size={18} color={colors.warning.icon} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.warningTitle}>
-                      {journey.stage === 'failed' ? 'La transferencia no se completó' : 'Estamos revisando la transferencia'}
+                      {journey.stage === 'refunded' ? 'Fondos devueltos' : journey.stage === 'failed' ? 'La transferencia no se completó' : 'Estamos revisando la transferencia'}
                     </Text>
                     <Text style={styles.warningText}>
-                      No la repitas. Si se movieron fondos, los estamos revisando y te escribiremos.
+                      {journey.stage === 'refunded'
+                        ? `El puente devolvió ${journey.refundAmount ?? ''} USDT a tu billetera. El pago local no se completó.`
+                        : 'No la repitas. Si se movieron fondos, los estamos revisando y te escribiremos.'}
                     </Text>
                     <TouchableOpacity onPress={() => navigation.navigate('HomeMessages', { initialChannelId: 'soporte' })}>
                       <Text style={styles.warningLink}>Escríbenos a soporte</Text>
@@ -213,7 +216,7 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
                       <Text style={styles.reviewValue}>{journey.destinationSummary}</Text>
                     </View>
                     <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>{journey.payoutAmount ? 'Enviado' : 'Recibe al menos'}</Text>
+                      <Text style={styles.reviewLabel}>{journey.payoutAmount ? (journey.stage === 'completed' ? 'Enviado' : 'Importe a enviar') : 'Recibe al menos'}</Text>
                       <Text style={styles.reviewValueHighlight}>
                         {formatRampMoney(journey.payoutAmount || journey.minimumFxOutput, journey.localAsset)}
                       </Text>
@@ -221,9 +224,9 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
                   </>
                 ) : (
                   <View style={styles.reviewRow}>
-                    <Text style={styles.reviewLabel}>Recibes al menos</Text>
+                    <Text style={styles.reviewLabel}>{journey.walletReceivedAmount ? 'Recibiste, después de conversión' : 'Ingreso a tu Confío Dollar'}</Text>
                     <Text style={styles.reviewValueHighlight}>
-                      {formatRampMoney(journey.minimumWalletOutput || journey.minimumFxOutput, 'US$')}
+                      {journey.walletReceivedAmount ? formatRampMoney(journey.walletReceivedAmount, 'US$') : 'Pendiente'}
                     </Text>
                   </View>
                 )}
@@ -232,7 +235,9 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
               {!TERMINAL.has(journey.stage) && !unsigned && !fundingUnknown ? (
                 <View style={[styles.settlementNotice, { marginTop: 12 }]}>
                   <Icon name="clock" size={13} color={colors.textSecondary} />
-                  <Text style={styles.settlementNoticeText}>Puedes cerrar la app. Te avisaremos cuando termine.</Text>
+                  <Text style={styles.settlementNoticeText}>{journey.direction === 'to_wallet'
+                    ? 'La conversión a Confío Dollar se completa con la app abierta. Si la cierras, se retomará cuando vuelvas.'
+                    : 'Puedes cerrar la app. Te avisaremos cuando termine.'}</Text>
                 </View>
               ) : null}
             </View>

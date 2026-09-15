@@ -128,6 +128,7 @@ export function infiniaStage(stage: string): string {
     (
       {
         awaiting_credit: 'Esperando acreditación',
+        awaiting_wallet_conversion: 'Convirtiendo a tu Confío Dollar',
         converting: 'Convirtiendo moneda',
         paying_out: 'Enviando pago',
         awaiting_wallet_delivery: 'Esperando tus dólares',
@@ -135,6 +136,7 @@ export function infiniaStage(stage: string): string {
         bridging: 'Envío a Confío en proceso',
         completed: 'Completado',
         failed: 'No completado',
+        refunded: 'Fondos devueltos',
         needs_review: 'Estamos revisando el pago. No lo repitas.',
       } as Record<string, string>
     )[stage] || 'Consultando estado'

@@ -30,6 +30,12 @@ const IN_FLIGHT = gql`
   }
 `;
 
+const LOCAL_MINTS = gql`
+  query LocalTransferMints {
+    localTransferMints { internalId walletMintUnits walletMintRequestId }
+  }
+`;
+
 // Courtesy-skip source: the server enforces the mint geo-gate (phone + IP)
 // on both relay rails regardless — this just avoids pointless signed
 // attempts (and their error noise) for users the gate will refuse.
@@ -126,18 +132,37 @@ export const resumeSavingsMints = async (
       cusdPlusBalanceUsd = Number(elig?.cusdPlusSummary?.balanceUsd ?? 0);
       cusdBalanceWei = BigInt(elig?.cusdPlusSummary?.cusdBalanceWei ?? '0');
     } catch {}
-    const mintArrivedUsdt = async (amountWei: bigint): Promise<{ mintTx: string }> => {
-      if (savingsEnabled === false) {
+    const mintArrivedUsdt = async (amountWei: bigint, requestId?: string): Promise<{ mintTx: string }> => {
+      // A dedicated local arrival cannot aggregate with a later deposit.
+      // Below the savings floor, finish in universal cUSD instead of retrying
+      // an impossible standalone cUSD+ mint forever.
+      if (savingsEnabled === false || (requestId && amountWei < INTERNAL_CUSD_MIN_WRAP_WEI)) {
         if (!cusdAddress) throw new Error('cUSD vault not configured');
-        return mintUsdtToCusd({ cusdAddress, usdtWei: amountWei });
+        return mintUsdtToCusd({ cusdAddress, usdtWei: amountWei, requestId });
       }
       if (!vaultAddress) throw new Error('cUSD+ vault not configured');
       return subscribeUsdtToSavings({
         vaultAddress,
         cusdAddress,
         usdtWei: amountWei,
+        requestId,
       });
     };
+    // Local pay-ins own an exact mint, with a durable signed request identity.
+    // Never combine these dollars with an unrelated external-deposit sweep.
+    // A query failure aborts this pass so unclassified local funds stay put.
+    const { data: localData } = await apolloClient.query({ query: LOCAL_MINTS, fetchPolicy: 'network-only' });
+    const localMints = localData?.localTransferMints || [];
+    for (const local of localMints) {
+      const amount = BigInt(local.walletMintUnits || '0');
+      if (amount <= 0n) continue;
+      if (!announced) { announced = true; setMinting(true); }
+      try {
+        await mintArrivedUsdt(amount, local.walletMintRequestId || `local-mint-${local.internalId}`);
+      } catch (e) {
+        console.warn('[savingsLegC] local transfer mint pending', local.internalId, e);
+      }
+    }
     const { data } = await apolloClient.query({
       query: IN_FLIGHT,
       fetchPolicy: 'network-only',

@@ -1538,11 +1538,12 @@ class SponsorBscBatch(graphene.Mutation):
             # calldata policy and the wallet's intent signature prove this is
             # the holder's request. Nothing is broadcast on this path.
             if mint_refusal_error is not None:
+                from payment_accounts.activity import local_mint_journey_id
                 # Only subscribeAndMint consumes raw USDT belonging to an
                 # arrived savings saga. wrapCusd is an internal cUSD→cUSD+
                 # normalization; refusing it must never close an unrelated
                 # raw-USDT arrival row for the same holder.
-                if mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT:
+                if mint_call['data'][2:10] == _SEL_SUBSCRIBE_AND_MINT and not local_mint_journey_id(request_id):
                     from .tasks import mark_saga_delivered_as_usdt
                     mark_saga_delivered_as_usdt(
                         user_addr, mint_refusal_amount,
@@ -1615,6 +1616,7 @@ class SponsorBscBatch(graphene.Mutation):
                     display_name=getattr(acct, 'display_name', '') if acct else '',
                     amount_wei=int(mint_call['data'][10:74], 16),
                     tx_hash=tx_hash, bsc_address=user_addr,
+                    request_id=request_id,
                 )
             elif kind == 'mint_cusd':
                 # Universal cUSD issuance is not part of the Ondo mint gate,

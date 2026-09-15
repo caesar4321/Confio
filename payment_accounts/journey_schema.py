@@ -7,6 +7,29 @@ from .services import PaymentAccountError
 
 
 class InfiniaJourneyType(DjangoObjectType):
+    stage = graphene.String(required=True)
+    wallet_mint_units = graphene.String()
+    wallet_mint_request_id = graphene.String()
+
+    def resolve_wallet_mint_request_id(self, info):
+        from .activity import mint_request_id
+        return mint_request_id(self)
+    refund_amount = graphene.String()
+    wallet_received_amount = graphene.String()
+
+    def resolve_wallet_received_amount(self, info):
+        if self.direction == 'to_wallet' and self.wallet_conversion_id and self.wallet_conversion.status == 'COMPLETED':
+            c = self.wallet_conversion
+            return str(c.net_amount_exact if c.net_amount_exact is not None else c.to_amount)
+        return None
+
+    def resolve_refund_amount(self, info):
+        from decimal import Decimal
+        if self.direction == 'to_bank' and self.bridge_id and self.bridge.status == 'refunded':
+            evidence = self.bridge.binding.get('settlement_evidence', {})
+            if evidence.get('token_id') == 'BSC:USDT':
+                return str(Decimal(evidence['received_units']) / Decimal(10**18))
+        return None
     bridge_id = graphene.UUID()
     bridge_funding_mode = graphene.String()
     bridge_status = graphene.String()
@@ -16,6 +39,13 @@ class InfiniaJourneyType(DjangoObjectType):
     crypto_account_id = graphene.UUID(required=True)
     payout_amount = graphene.String()
     destination_summary = graphene.String(required=True)
+
+    def resolve_stage(self, info):
+        from .activity import display_stage
+        return display_stage(self)
+
+    def resolve_wallet_mint_units(self, info):
+        return self.bridge.actual_out_units if self.direction == 'to_wallet' and self.bridge_id and self.bridge.status == 'delivered' else None
 
     class Meta:
         model = InfiniaJourney
@@ -139,6 +169,14 @@ class AttachInfiniaReturnBridge(graphene.Mutation):
 
 
 class JourneyQuery(graphene.ObjectType):
+    local_transfer_mints = graphene.List(graphene.NonNull(InfiniaJourneyType), required=True)
+
+    def resolve_local_transfer_mints(self, info):
+        from .schema import _active_account
+        from django.db.models import Q
+        owner = _active_account(info, permission='send_funds', owner_only=True)
+        return InfiniaJourney.objects.filter(confio_account=owner, direction='to_wallet',
+            bridge__status='delivered').filter(Q(wallet_conversion__isnull=True) | Q(wallet_conversion__status='FAILED')).select_related('bridge', 'wallet_conversion', 'confio_account__user').order_by('created_at')[:50]
     my_infinia_journeys = graphene.List(graphene.NonNull(InfiniaJourneyType), required=True,
         offset=graphene.Int(default_value=0), limit=graphene.Int(default_value=20))
     infinia_journey_deposits = graphene.List(graphene.NonNull(InfiniaDepositType), required=True,
@@ -150,7 +188,7 @@ class JourneyQuery(graphene.ObjectType):
         from .schema import _active_account
         owner = _active_account(info, permission='view_transactions')
         return InfiniaJourney.objects.filter(confio_account=owner, internal_id=internal_id).select_related(
-            'bridge', 'local_account', 'crypto_account', 'payout_operation').first()
+            'bridge', 'local_account', 'crypto_account', 'payout_operation', 'wallet_conversion').first()
 
     def resolve_infinia_journeys_enabled(self, info):
         from .schema import _active_account
@@ -161,7 +199,7 @@ class JourneyQuery(graphene.ObjectType):
     def resolve_my_infinia_journeys(self, info, offset=0, limit=20):
         from .schema import _active_account
         owner = _active_account(info, permission='view_transactions')
-        return InfiniaJourney.objects.filter(confio_account=owner).select_related('bridge', 'local_account', 'crypto_account', 'payout_operation').order_by('-created_at')[max(0,offset):max(0,offset)+max(1,min(limit,100))]
+        return InfiniaJourney.objects.filter(confio_account=owner).select_related('bridge', 'local_account', 'crypto_account', 'payout_operation', 'wallet_conversion').order_by('-created_at')[max(0,offset):max(0,offset)+max(1,min(limit,100))]
 
     def resolve_infinia_journey_deposits(self, info, account_id, offset=0):
         from .schema import _active_account

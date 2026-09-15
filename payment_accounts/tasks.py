@@ -111,6 +111,10 @@ def reconcile_infinia_journeys():
             logger.exception('Infinia journey reconciliation failed: %s', row.internal_id)
         finally:
             InfiniaJourney.objects.filter(pk=row.pk).update(updated_at=timezone.now())
+    # Terminal journeys no longer advance, but their wallet projection can
+    # still need repair after a missed callback or a later mint confirmation.
+    from .activity import refresh_stale_activity
+    refresh_stale_activity()
     return count
 
 

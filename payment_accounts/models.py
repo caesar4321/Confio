@@ -664,6 +664,8 @@ class InfiniaJourney(models.Model):
     wallet_address = models.CharField(max_length=42)
     wallet_arrival_units = models.CharField(max_length=78, blank=True)
     wallet_arrival_tx_hash = models.CharField(max_length=66, blank=True)
+    wallet_conversion = models.OneToOneField('conversion.Conversion', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='local_transfer_journey')
     fx_quote = models.JSONField(default=dict)
     fx_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
     payout_operation = models.OneToOneField(MoneyOperation, on_delete=models.PROTECT, null=True, blank=True, related_name='+')

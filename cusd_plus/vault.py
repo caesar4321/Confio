@@ -284,6 +284,15 @@ def reserved_usdt_wei(user, bsc_address: str) -> int:
     for bridge in bridge_reservations.only('binding').iterator():
         total += Decimal(bridge.binding.get('funding', {}).get('wallet_usdt_units', '0')) / Decimal(10**18)
 
+    # Local arrivals must be minted separately with their signed journey ID.
+    # This also protects the linkage from older clients' generic sweeps.
+    from payment_accounts.models import InfiniaJourney
+    arrivals = InfiniaJourney.objects.filter(confio_account__user_id=user.id,
+        direction='to_wallet', wallet_address__iexact=addr, bridge__status='delivered'
+    ).exclude(wallet_conversion__status='COMPLETED')
+    for units in arrivals.values_list('bridge__actual_out_units', flat=True):
+        total += Decimal(units or '0') / Decimal(10**18)
+
     # Presale no longer spends raw USDT. Its atomic batch uses cUSD/cUSD+ and
     # pays the universal perimeter fee, so a prepared buy reserves no arrival
     # USDT and cannot block foreground auto-conversion.

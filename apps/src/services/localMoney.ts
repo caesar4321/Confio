@@ -104,6 +104,8 @@ export interface LocalDeposit {
 }
 
 export interface LocalJourney {
+  refundAmount?: string | null;
+  walletReceivedAmount?: string | null;
   internalId: string;
   direction: 'to_bank' | 'to_wallet';
   stage: string;
@@ -265,6 +267,8 @@ export const LOCAL_JOURNEY = gql`
       internalId
       direction
       stage
+      refundAmount
+      walletReceivedAmount
       failureCode
       destinationSummary
       localAsset

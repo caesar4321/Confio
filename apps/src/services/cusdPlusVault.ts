@@ -56,6 +56,7 @@ const IM_MIN_TARGET_WEI = (105n * 10n ** 18n) / 100n;
 export const INTERNAL_CUSD_MIN_WRAP_WEI = IM_MIN_REDEEM_WEI + 10n ** 12n;
 
 export interface SubscribeParams {
+  requestId?: string;
   /** cUSD+ vault proxy address (from server config). */
   vaultAddress: string;
   /** Universal cUSD vault used to quote the entry fee before Ondo subscribe. */
@@ -75,6 +76,7 @@ export interface SubscribeResult {
 }
 
 export interface MintCusdParams {
+  requestId?: string;
   /** Universal cUSD UUPS proxy address (from server config). */
   cusdAddress: string;
   /** Gross USDT entering the Confío dollar perimeter. */
@@ -160,6 +162,7 @@ export const subscribeUsdtToSavings = async (
     { to: vaultAddress, valueWei: 0n, data: mintData },
   ];
   const rec = await executeSponsoredBatch({
+    requestId: params.requestId,
     wallet,
     calls,
     delegateAddress: sponsored.delegateAddress,
@@ -206,6 +209,7 @@ export const mintUsdtToCusd = async (params: MintCusdParams): Promise<SubscribeR
     { to: cusdAddress, valueWei: 0n, data: mintData },
   ];
   const rec = await executeSponsoredBatch({
+    requestId: params.requestId,
     wallet,
     calls,
     delegateAddress: sponsored.delegateAddress,

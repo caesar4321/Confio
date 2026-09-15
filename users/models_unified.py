@@ -68,6 +68,7 @@ class UnifiedTransactionTable(models.Model):
         ('reward', 'Reward'),
         ('presale', 'Presale Purchase'),
         ('ramp', 'Ramp'),
+        ('local_transfer', 'Local transfer'),
         ('humanitarian', 'Humanitarian Aid'),
     ]
     
@@ -109,6 +110,9 @@ class UnifiedTransactionTable(models.Model):
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES, db_index=True)
     
     # Foreign keys to source tables (only one will be set)
+    local_money_flow = models.OneToOneField(
+        'payment_accounts.MoneyFlow', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='unified_transaction')
     send_transaction = models.OneToOneField(
         'send.SendTransaction',
         null=True,
@@ -460,6 +464,8 @@ class UnifiedTransactionTable(models.Model):
             return self.referral_reward_event.internal_id
         if self.transaction_type == 'presale' and self.presale_purchase:
             return self.presale_purchase.internal_id
+        if self.transaction_type == 'local_transfer' and self.local_money_flow_id:
+            return self.local_money_flow.internal_id
         if self.transaction_type == 'ramp' and self.ramp_transaction:
             return self.ramp_transaction.internal_id
         if self.transaction_type == 'humanitarian' and self.humanitarian_donation:
