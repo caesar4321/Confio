@@ -10,6 +10,7 @@ const linking: LinkingOptions<RootStackParamList> = {
                     VerifyTransaction: 'verify/:hash',
                     PaymentConfirmation: 'pay/:invoiceId',
                     Memberships: 'memberships',
+                    Verification: 'verification',
                 },
             },
             Auth: {

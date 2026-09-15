@@ -1,6 +1,8 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,7 +16,7 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Header } from '../navigation/Header';
 import { MainStackParamList, RootStackParamList } from '../types/navigation';
-import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_KYC_STATUS, GET_MY_PERSONAL_KYC_STATUS } from '../apollo/queries';
+import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_PERSONAL_KYC_STATUS } from '../apollo/queries';
 import { CREATE_DIDIT_VERIFICATION_SESSION, SYNC_DIDIT_VERIFICATION_SESSION } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { useRampCountry } from '../hooks/useRampCountry';
@@ -94,7 +96,7 @@ function documentLabel(doc: IdentityDocument): string {
 
 function normalizeStatus(value?: string | null): NormalizedStatus {
   const normalized = (value || '').trim().toLowerCase();
-  if (['pending', 'submitted', 'in_review', 'review required', 'in progress'].includes(normalized)) return 'pending';
+  if (['pending', 'submitted', 'in_review', 'in review', 'review required', 'in progress', 'awaiting user', 'resubmission requested', 'resubmission required', 'resub_requested', 'resubmitted', 'awaiting_user'].includes(normalized)) return 'pending';
   if (['verified', 'approved', 'completed', 'success'].includes(normalized)) return 'verified';
   if (['rejected', 'declined', 'failed', 'denied'].includes(normalized)) return 'rejected';
   return 'unverified';
@@ -157,7 +159,6 @@ const VerificationScreen = () => {
 
   const { data: meData, refetch: refetchMe, loading: meLoading } = useQuery(GET_ME, { fetchPolicy: 'network-only' });
   const { data: personalKycData, refetch: refetchPersonalKyc, loading: personalLoading } = useQuery(GET_MY_PERSONAL_KYC_STATUS, { fetchPolicy: 'network-only' });
-  const { data: anyKycData, refetch: refetchAnyKyc, loading: anyLoading } = useQuery(GET_MY_KYC_STATUS, { fetchPolicy: 'network-only' });
   const { data: bizKycData, refetch: refetchBizKyc, loading: businessLoading } = useQuery(
     GET_BUSINESS_KYC_STATUS,
     {
@@ -169,6 +170,7 @@ const VerificationScreen = () => {
   const documentsQuery = useQuery(MY_IDENTITY_DOCUMENTS, {
     skip: isBusinessAccount, fetchPolicy: 'network-only', errorPolicy: 'all',
   });
+  const refetchDocuments = documentsQuery.refetch;
   const documents: IdentityDocument[] | null = documentsQuery.data?.myIdentityDocuments || null;
 
   const [createDiditSession] = useMutation(CREATE_DIDIT_VERIFICATION_SESSION);
@@ -180,16 +182,15 @@ const VerificationScreen = () => {
   const dismissBanner = React.useCallback(() => setBanner(null), []);
 
   const personalStatus = normalizeStatus(personalKycData?.myPersonalKycStatus?.status || meData?.me?.verificationStatus);
-  const anyStatus = normalizeStatus(anyKycData?.myKycStatus?.status);
   const businessStatus = normalizeStatus(bizKycData?.businessKycStatus?.status);
   const effectiveStatus = isBusinessAccount
-    ? (businessStatus !== 'unverified' ? businessStatus : anyStatus)
-    : (personalStatus !== 'unverified' ? personalStatus : anyStatus);
+    ? businessStatus
+    : personalStatus;
   const effectiveDetail = isBusinessAccount
-    ? (businessStatus !== 'unverified' ? bizKycData?.businessKycStatus?.statusDetail : anyKycData?.myKycStatus?.statusDetail)
-    : (personalStatus !== 'unverified' ? personalKycData?.myPersonalKycStatus?.statusDetail : anyKycData?.myKycStatus?.statusDetail);
+    ? bizKycData?.businessKycStatus?.statusDetail
+    : personalKycData?.myPersonalKycStatus?.statusDetail;
   const isBusy = isLaunchingDidit || isRefreshing;
-  const isInitialLoading = meLoading || personalLoading || anyLoading || businessLoading
+  const isInitialLoading = meLoading || personalLoading || businessLoading
     || (!isBusinessAccount && documentsQuery.loading && !documents);
 
   const refreshStatuses = React.useCallback(async () => {
@@ -198,14 +199,13 @@ const VerificationScreen = () => {
       await Promise.all([
         refetchMe(),
         refetchPersonalKyc(),
-        refetchAnyKyc(),
         isBusinessAccount && refetchBizKyc ? refetchBizKyc() : Promise.resolve(),
-        isBusinessAccount ? Promise.resolve() : documentsQuery.refetch().catch(() => undefined),
+        isBusinessAccount ? Promise.resolve() : refetchDocuments().catch(() => undefined),
       ]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [isBusinessAccount, refetchAnyKyc, refetchBizKyc, refetchMe, refetchPersonalKyc, documentsQuery]);
+  }, [isBusinessAccount, refetchBizKyc, refetchMe, refetchPersonalKyc, refetchDocuments]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -226,7 +226,7 @@ const VerificationScreen = () => {
       const analyticsParams = { method: 'didit', provider: 'didit', verification_status: 'verified', session_id: sessionId };
       void AnalyticsService.logEvent('generate_lead', analyticsParams);
       void AnalyticsService.logEvent('didit_verified', analyticsParams);
-      setBanner({ variant: 'success', message: detail || 'Tu identidad quedó verificada correctamente.' });
+      setBanner({ variant: 'success', message: detail || (isBusinessAccount ? 'Tu negocio quedó verificado correctamente.' : 'Tu identidad quedó verificada correctamente.') });
     } else if (normalized === 'pending') {
       setBanner({ variant: 'info', message: detail || 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.' });
     } else if (normalized === 'rejected') {
@@ -234,19 +234,36 @@ const VerificationScreen = () => {
     } else {
       setBanner({ variant: 'info', message: detail || 'La sesión se creó, pero Didit todavía no devolvió un resultado final.' });
     }
-  }, [refreshStatuses, syncDiditSession]);
+  }, [isBusinessAccount, refreshStatuses, syncDiditSession]);
 
-  // Also used while a verification is in review: a new session replaces a
-  // mistaken one (same as before this screen was redesigned).
+  React.useEffect(() => {
+    const listener = AppState.addEventListener('change', state => {
+      if (state === 'active' && isBusinessAccount) refreshStatuses().catch(() => {});
+    });
+    return () => listener.remove();
+  }, [isBusinessAccount, refreshStatuses]);
+
+  // Business verification resumes its pending hosted session; personal
+  // verification starts a new native session.
   const handleStartDidit = React.useCallback(async () => {
     setIsLaunchingDidit(true);
     try {
       const { data } = await createDiditSession();
       const result = data?.createDiditVerificationSession;
-      if (!result?.success || !result?.session?.sessionToken) {
+      if (!result?.success || !result?.session?.sessionId) {
         throw new Error(result?.error || 'No se pudo crear la sesión de Didit.');
       }
       const createdSessionId = result.session.sessionId;
+      if (isBusinessAccount) {
+        const url = result.session.sessionUrl;
+        if (typeof url !== 'string' || !/^https:\/\/verify\.didit\.me\/(?:[a-z]{2}\/)?session\/[A-Za-z0-9_-]+\/?(?:[?#].*)?$/.test(url)) {
+          throw new Error('No se recibió un enlace seguro para verificar tu negocio.');
+        }
+        await Linking.openURL(url);
+        setBanner({ variant: 'info', message: 'Completa los datos del negocio, sus documentos y las verificaciones de sus representantes en Didit. Al volver, actualiza esta pantalla para ver el resultado.' });
+        await refreshStatuses();
+        return;
+      }
       const sdkResult = await startDiditVerification(result.session.sessionToken);
       if (sdkResult?.type === 'cancelled') {
         setBanner({ variant: 'warning', message: 'Cancelaste la verificación antes de terminarla.' });
@@ -265,7 +282,7 @@ const VerificationScreen = () => {
     } finally {
       setIsLaunchingDidit(false);
     }
-  }, [createDiditSession, syncSessionAndRefresh]);
+  }, [createDiditSession, isBusinessAccount, refreshStatuses, syncSessionAndRefresh]);
 
   const openOtherDocument = () => (navigation as any).navigate('AdditionalDocument', { idCountry: '', documentTypes: ['P', 'ID'] });
 
@@ -439,7 +456,7 @@ const VerificationScreen = () => {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.documentTitle}>{activeAccount?.business?.name || 'Tu negocio'}</Text>
-          <Text style={styles.documentSubtitle}>Verificación del negocio</Text>
+          <Text style={styles.documentSubtitle}>Verificación del negocio (KYB)</Text>
         </View>
         <StatusPill status={effectiveStatus} />
       </View>
@@ -448,11 +465,13 @@ const VerificationScreen = () => {
           ? 'Tu negocio está verificado.'
           : effectiveStatus === 'rejected'
             ? effectiveDetail || 'No pudimos verificar tu negocio. Contacta a soporte si necesitas ayuda antes de volver a intentarlo.'
-          : 'Verifica tu negocio para habilitar recargas, retiros y pagos a empleados.'}
+          : effectiveStatus === 'pending'
+            ? effectiveDetail || 'Continúa la verificación de tu negocio o espera el resultado de la revisión.'
+            : 'Completa los datos de la empresa, sus documentos y la verificación de sus representantes y propietarios.'}
       </Text>
       {effectiveStatus !== 'verified' ? (
         <Button
-          title={effectiveStatus === 'pending' ? 'Enviar otra verificación' : 'Verificar con Didit'}
+          title={effectiveStatus === 'pending' ? 'Continuar verificación del negocio' : 'Verificar mi negocio'}
           onPress={handleStartDidit}
           loading={isLaunchingDidit}
           disabled={isBusy}
@@ -537,8 +556,8 @@ const VerificationScreen = () => {
               <Text style={styles.optionTitle}>Aumentar mi límite de pagos locales</Text>
               <Text style={styles.optionBody}>
                 {isBusinessAccount
-                  ? 'El límite de pagos locales es de US$10,000 al mes. Para superar ese monto, solicita una revisión con soporte.'
-                  : 'El límite de pagos locales es de US$10,000 al mes. Para superar ese monto, completa una verificación del origen de tus fondos y solicita un límite mayor.'}
+                  ? 'El límite inicial de pagos locales para empresas es de US$100,000 al mes. Para superar ese monto, solicita una revisión con soporte.'
+                  : 'El límite inicial de pagos locales es de US$10,000 al mes. Para superar ese monto, completa una verificación del origen de tus fondos y solicita un límite mayor.'}
               </Text>
             </View>
             <Icon name="chevron-right" size={20} color={colors.textSecondary} />

@@ -307,3 +307,11 @@ test('Android location screen explicitly requests permission before contacting t
   expect(mockRequestMultiple).toHaveBeenCalledTimes(1);
   expect(mockRequestMultiple.mock.invocationCallOrder[0]).toBeLessThan(mockMutate.mock.invocationCallOrder[0]);
 });
+
+test('permission revoked between the JavaScript check and native location opens permission recovery', async () => {
+  mockMutate.mockResolvedValueOnce({data: {brebLocationChallenge: {success: true, challenge: 'challenge', cloudProjectNumber: '123456789'}}});
+  mockAttest.mockRejectedValue(Object.assign(new Error('Activa la ubicación precisa'), {code: 'LOCATION_PERMISSION'}));
+  const error: any = await verifyBrebLocation('revoked-in-native', false).catch(e => e);
+  expect(error.code).toBe(BREB_PERMISSION_ERROR);
+  expect(mockMutate).toHaveBeenCalledTimes(1);
+});

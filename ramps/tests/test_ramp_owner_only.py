@@ -112,6 +112,24 @@ class CreateRampOrderGuardTests(SimpleTestCase):
         # Refused before the account (and any provider call) is touched.
         acct.assert_not_called()
 
+    def test_business_owner_cannot_use_personal_koywe_profile(self):
+        for direction in ('ON_RAMP', 'OFF_RAMP'):
+            with self.subTest(direction=direction), \
+                 mock.patch.object(ramps_schema, '_employee_ramp_denial', return_value=None), \
+                 mock.patch.object(ramps_schema, '_resolve_ramp_country_code', return_value='PE'), \
+                 mock.patch.object(ramps_schema, '_get_ramp_account_for_user',
+                                   return_value=SimpleNamespace(account_type='business', business_id=42)), \
+                 mock.patch.object(ramps_schema, 'KoyweClient') as provider, \
+                 mock.patch.object(ramps_schema, '_get_koywe_contact_profile') as profile:
+                result = ramps_schema.CreateRampOrder().mutate(
+                    self._authenticated_info(), direction=direction,
+                    amount='10', payment_method_code='BANK_TRANSFER',
+                )
+                self.assertFalse(result.success)
+                self.assertIn('Koywe para negocios', result.error)
+                provider.assert_not_called()
+                profile.assert_not_called()
+
 
 class GuardarianProxyGuardTests(SimpleTestCase):
     """The REST proxy must enforce the SAME rule as the GraphQL mutations.

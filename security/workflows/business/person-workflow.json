@@ -1,0 +1,1169 @@
+{
+  "workflow_label": "Confio KYB - Owners and representatives",
+  "status": "draft",
+  "is_default": false,
+  "is_desktop_allowed": true,
+  "features": [
+    {
+      "feature": "OCR",
+      "config": {
+        "documents_allowed": {
+          "AFG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "AGO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "AIA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ALA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ALB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "AND": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ARE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ARG": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "ARM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ATG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "AUS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "AUT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "AZE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BDI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BEL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BEN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BFA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BGD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BGR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BHR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BHS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BIH": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BLR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BLZ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BMU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BOL": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "BRA": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "BRB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BRN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BTN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "BWA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CAF": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CAN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CHE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CHL": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "CHN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CIV": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CMR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "COD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "COG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "COL": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "COM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CPV": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CRI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CUB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CYM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CYP": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "CZE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "DEU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "DJI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "DMA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "DNK": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "DOM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "DZA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ECU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "EGY": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ERI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ESH": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ESP": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "EST": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ETH": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "FIN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "FJI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "FRA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "FRO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "FSM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GAB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GBR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GEO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GGY": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GHA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GIB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GIN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GMB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GNB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GNQ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GRC": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GRD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GTM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "GUY": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "HKG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "HND": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "HRV": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "HTI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "HUN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "IDN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "IMN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "IND": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "IRL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "IRN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "IRQ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ISL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ISR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ITA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "JAM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "JEY": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "JOR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "JPN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KAZ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KEN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KGZ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KHM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KIR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KNA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KOR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "KWT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LAO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LBN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LBR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LBY": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LCA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LIE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LKA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LPR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LSO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LTU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LUX": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "LVA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MAC": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MAR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MCO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MDA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MDG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MDV": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MEX": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "MHL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MKD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MLI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MLT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MMR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MNE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MNG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MOZ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MRT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MSR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MUS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MWI": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "MYS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NAM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NER": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NGA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NIC": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NLD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NOR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NPL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NRU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "NZL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "OMN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PAK": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PAN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PER": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "PHL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PLW": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PNG": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "POL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PRK": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PRT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "PRY": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "PSE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "QAT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "RKS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ROU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "RSL": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "RUS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "RWA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SAU": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SDN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SEN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SGP": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SHN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SLB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SLE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SLV": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SMR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SOM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SRB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SSD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "STP": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SUR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SVK": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SVN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SWE": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SWZ": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SYC": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "SYR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TCA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TCD": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TGO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "THA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TJK": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TKM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TLS": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TON": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TTO": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TUN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TUR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TUV": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TWN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "TZA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "UGA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "UKR": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "URY": {
+            "P": {
+              "enabled": 1
+            },
+            "ID": {
+              "enabled": 1,
+              "sides": 2
+            }
+          },
+          "USA": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "UZB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "VAT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "VCT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "VEN": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "VGB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "VNM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "VUT": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "WSM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "XOM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "YEM": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ZAF": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ZMB": {
+            "P": {
+              "enabled": 1
+            }
+          },
+          "ZWE": {
+            "P": {
+              "enabled": 1
+            }
+          }
+        },
+        "duplicated_user_action": "REVIEW",
+        "expected_details_mismatch_action": "REVIEW"
+      }
+    },
+    {
+      "feature": "LIVENESS",
+      "config": {
+        "face_liveness_method": "PASSIVE"
+      }
+    },
+    {
+      "feature": "FACE_MATCH"
+    },
+    {
+      "feature": "AML",
+      "config": {
+        "aml_score_approve_threshold": 0,
+        "aml_score_review_threshold": 100
+      }
+    },
+    {
+      "feature": "EMAIL_VERIFICATION"
+    },
+    {
+      "feature": "PHONE_VERIFICATION"
+    },
+    {
+      "feature": "PROOF_OF_ADDRESS",
+      "config": {
+        "poa_name_or_address_mismatch_action": "REVIEW",
+        "poa_document_authenticity_action": "REVIEW"
+      }
+    },
+    {
+      "feature": "QUESTIONNAIRE",
+      "config": {
+        "questionnaire_uuid": "$person_questionnaire",
+        "review_questionnaire_manually": true
+      }
+    }
+  ]
+}

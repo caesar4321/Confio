@@ -5,12 +5,10 @@ prefilled from the economic activity they already declared for Recarga/
 Retiro). Didit then collects and screens the documents in ONE session:
 proof of address (name/address/age/tampering checks against the verified
 name and the declared address) and a questionnaire with the source-of-funds
-uploads, routed to manual review. No liveness or face match: the person
-already passed KYC and the session is opened from their authenticated app,
-so repeating identity checks would only double the cost. Nobody verifies
-that income is real automatically, so ops reviews and forwards; nothing here
-raises a limit — the provider's /limits/ endpoint reports the new figure
-after its account manager approves.
+uploads. Completed submissions are automatically attached to the Infinia owner,
+including sessions awaiting review: Infinia makes the EDD decision. No Confio
+review or local limit increase is required. Incomplete or declined sessions
+are never forwarded; failed handoffs are retried by the background reconciler.
 """
 from decimal import Decimal, InvalidOperation
 
@@ -21,13 +19,13 @@ from django.utils import timezone
 from .models import LimitIncreaseRequest, ProviderProfile
 from .services import PaymentAccountError
 
-OPEN_STATUSES = ('started', 'submitted', 'in_review', 'forwarded')
+OPEN_STATUSES = ('started', 'submitted', 'in_review')
 INCOME_TYPES = ('employed', 'self_employed', 'not_employed')
 SOURCES = ('salary', 'business_income', 'savings', 'investments', 'family_support', 'other')
 # Didit questionnaire 585211e7-b673-4cbb-a7a3-4857343dce95 element ids.
 QUESTIONNAIRE_FILES = ('income_proof', 'bank_statements')
 _DIDIT_TO_STATUS = {
-    'approved': 'submitted',     # automated checks passed; ops still reviews income
+    'approved': 'submitted',     # ready for automatic provider handoff
     'in review': 'in_review',
     'declined': 'rejected',
     'abandoned': 'started',
@@ -116,11 +114,12 @@ def start(owner, *, income_type, occupation, expected_monthly_usd, source_of_fun
             raise PaymentAccountError('Ya tienes una solicitud en revisión.') from exc
 
     from security.didit import DiditAPIError, DiditConfigurationError, create_didit_workflow_session
-    # Same vendor_data as the KYC: Didit returns the unfinished session for
-    # the same user and workflow, so resuming never starts a second paid one.
+    # A stable per-request reference resumes this request, while a later
+    # evidence update gets a fresh session even if the old one awaits review.
     try:
         session = create_didit_workflow_session(
             user=owner.user, workflow_id=workflow_id, expected_details=expected_details,
+            session_reference=str(row.internal_id),
             metadata={'purpose': 'edd', 'request': str(row.internal_id)}, callback_url=callback_url, language='es',
         )
     except (DiditAPIError, DiditConfigurationError) as exc:
@@ -137,7 +136,7 @@ def start(owner, *, income_type, occupation, expected_monthly_usd, source_of_fun
         # may still hold: this request continues it. Never take it from an open one.
         LimitIncreaseRequest.objects.select_for_update().filter(
             confio_account=owner, didit_session_id=session['session_id'],
-        ).exclude(pk=row.pk).exclude(status__in=OPEN_STATUSES).update(didit_session_id=None)
+        ).exclude(pk=row.pk).exclude(status__in=(*OPEN_STATUSES, 'forwarded')).update(didit_session_id=None)
         row.didit_session_id = session['session_id']
         try:
             row.save(update_fields=['didit_session_id', 'updated_at'])
@@ -172,7 +171,7 @@ def _edd_evidence(decision):
     return strip(_without_transient_didit_media(decision))
 
 
-def sync_edd_session(session_id, *, expected_user=None):
+def sync_edd_session(session_id, *, expected_user=None, enqueue=True):
     from django.db import transaction
     from security.didit import retrieve_didit_decision
     # One sync per request at a time, from asking Didit to saving: the row is
@@ -194,7 +193,7 @@ def sync_edd_session(session_id, *, expected_user=None):
         row.didit_status = didit_status[:30]
         # Presigned media URLs are short-lived credentials; keep only the facts.
         row.evidence = _edd_evidence(decision)
-        # Never walk a request back once ops has taken it further.
+        # Never walk a request back after it has been forwarded or closed.
         if mapped and row.status in ('started', 'submitted', 'in_review'):
             row.status = mapped
             if mapped in ('submitted', 'in_review') and row.submitted_at is None:
@@ -202,7 +201,14 @@ def sync_edd_session(session_id, *, expected_user=None):
             if mapped == 'rejected' and not row.user_message:
                 row.user_message = 'No pudimos validar tus documentos. Revisa que se lean bien y vuelve a intentarlo.'
         row.save(update_fields=['didit_status', 'evidence', 'status', 'submitted_at', 'user_message', 'updated_at'])
+    if enqueue and row.status in ('submitted', 'in_review'):
+        transaction.on_commit(lambda: _enqueue_handoff(row.pk), robust=True)
     return row
+
+
+def _enqueue_handoff(request_id):
+    from .tasks import forward_edd
+    forward_edd.delay(request_id)
 
 
 def _questionnaire_files(decision, element_id):
@@ -228,7 +234,7 @@ def _proof_of_address_file(decision):
 
 
 def forward_to_provider(row, *, client=None):
-    """Ops action: upload the reviewed EDD documents to the provider owner.
+    """Automatically attach completed EDD evidence to the provider owner.
 
     Reads a FRESH decision (media URLs expire), uploads the proof of address and
     every source-of-funds file (one PDF: the owner keeps one document per type) to the Infinia account owner, and marks the
@@ -238,8 +244,11 @@ def forward_to_provider(row, *, client=None):
     from .compliance import ComplianceHandoffError, _upload_bundle, _upload_document
     from security.didit import retrieve_didit_decision
 
+    row.refresh_from_db()
+    if row.status == 'forwarded':
+        return row
     if row.status not in ('submitted', 'in_review'):
-        raise PaymentAccountError('Only reviewed requests can be forwarded')
+        raise PaymentAccountError('Only submitted requests can be forwarded')
     profile = ProviderProfile.objects.filter(
         confio_account=row.confio_account, provider=row.provider, status='active').first()
     if not profile or not profile.provider_owner_id:
@@ -247,9 +256,12 @@ def forward_to_provider(row, *, client=None):
     decision = retrieve_didit_decision(session_id=row.didit_session_id, expected_user=row.confio_account.user)
     if str(decision.get('status') or '').strip().lower() == 'declined':
         raise PaymentAccountError('Didit rechazó esta sesión: no se puede reenviar al proveedor.')
+    if str(decision.get('status') or '').strip().lower() not in ('approved', 'in review'):
+        raise PaymentAccountError('The EDD session is not submitted yet')
     proof_of_address = _proof_of_address_file(decision)
-    funds = [url for element in QUESTIONNAIRE_FILES for url in _questionnaire_files(decision, element)]
-    if not proof_of_address or not funds:
+    file_groups = [_questionnaire_files(decision, element) for element in QUESTIONNAIRE_FILES]
+    funds = [url for group in file_groups for url in group]
+    if not proof_of_address or not all(file_groups):
         raise ComplianceHandoffError('The Didit EDD session is missing proof of address or source-of-funds files')
     client = client or InfiniaClient()
     # Uploading alone attaches nothing; linking them to the owner is the act.
@@ -259,12 +271,17 @@ def forward_to_provider(row, *, client=None):
         # A reviewer may have rejected the request during the calls above: the
         # link to the owner happens only for a request that is still eligible.
         row = LimitIncreaseRequest.objects.select_for_update().get(pk=row.pk)
+        if row.status == 'forwarded':
+            return row
         if row.status not in ('submitted', 'in_review'):
             raise PaymentAccountError('La solicitud cambió mientras se enviaba; revísala de nuevo.')
-        client.update_owner(profile.provider_owner_id, {'individual': {
+        individual = {
             'proof_of_address_document_id': address_id,
             'source_of_funds_document_id': funds_id,
-        }})
+        }
+        if profile.kyc_mode == 'SELF_DECLARED':
+            individual['expected_monthly_volume_usd'] = float(row.expected_monthly_usd)
+        client.update_owner(profile.provider_owner_id, {'individual': individual})
         row.provider_documents = {
             'proof_of_address_document_id': address_id,
             'source_of_funds_document_id': funds_id,

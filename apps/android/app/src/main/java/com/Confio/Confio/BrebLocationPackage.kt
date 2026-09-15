@@ -79,15 +79,22 @@ class BrebLocationModule(private val context: ReactApplicationContext) : ReactCo
         }
         listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                if (!received.compareAndSet(false, true) || done.get()) return
-                manager.removeUpdates(this)
+                if (received.get() || done.get()) return
                 val mocked = if (Build.VERSION.SDK_INT >= 31) location.isMock else location.isFromMockProvider
                 val ageMs = (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1000000
-                if (mocked || !location.hasAccuracy() || location.accuracy <= 0 || location.accuracy > 100 || ageMs < 0 || ageMs > 120000) {
+                if (mocked) {
+                    manager.removeUpdates(this)
                     handler.removeCallbacks(timeout)
                     if (done.compareAndSet(false, true)) promise.reject("LOCATION_UNTRUSTED", "Necesitamos una ubicación precisa y sin simulación.")
                     return
                 }
+                // GPS often starts with a coarse or old fix. Keep waiting within
+                // the original deadline instead of making the user retry.
+                if (!location.hasAccuracy() || !location.accuracy.isFinite() ||
+                    location.accuracy <= 0 || location.accuracy > 100 || ageMs < 0 || ageMs > 120000 ||
+                    !location.latitude.isFinite() || !location.longitude.isFinite()) return
+                if (!received.compareAndSet(false, true)) return
+                manager.removeUpdates(this)
                 val payload = JSONObject().put("latitude", location.latitude).put("longitude", location.longitude)
                     .put("accuracy", location.accuracy.toDouble()).put("timestamp", location.time).put("mocked", mocked).toString()
                 val digest = MessageDigest.getInstance("SHA-256").digest((challenge + "." + payload).toByteArray(Charsets.UTF_8))
@@ -111,20 +118,31 @@ class BrebLocationModule(private val context: ReactApplicationContext) : ReactCo
                 }
             }
             override fun onProviderEnabled(provider: String) {}
-            override fun onProviderDisabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {
+                if (provider == LocationManager.GPS_PROVIDER && !received.get() && done.compareAndSet(false, true)) {
+                    manager.removeUpdates(this)
+                    handler.removeCallbacks(timeout)
+                    promise.reject("LOCATION_DISABLED", "Activa la ubicación del dispositivo.")
+                }
+            }
             @Deprecated("Legacy callback")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         }
         handler.post {
             try {
                 if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    promise.reject("LOCATION_DISABLED", "Activa la ubicación del dispositivo.")
+                    if (done.compareAndSet(false, true)) promise.reject("LOCATION_DISABLED", "Activa la ubicación del dispositivo.")
                 } else {
                     handler.postDelayed(timeout, 60000)
-                    manager.requestSingleUpdate(LocationManager.GPS_PROVIDER, listener, Looper.getMainLooper())
+                    manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper())
                 }
+            } catch (_: SecurityException) {
+                handler.removeCallbacks(timeout)
+                manager.removeUpdates(listener)
+                if (done.compareAndSet(false, true)) promise.reject("LOCATION_PERMISSION", "Activa la ubicación precisa para solicitar Bre-B.")
             } catch (_: Exception) {
                 handler.removeCallbacks(timeout)
+                manager.removeUpdates(listener)
                 if (done.compareAndSet(false, true)) promise.reject("LOCATION_FAILED", "No pudimos obtener tu ubicación.")
             }
         }

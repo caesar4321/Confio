@@ -682,7 +682,7 @@ class LimitIncreaseRequest(models.Model):
     """Enhanced due diligence to raise a provider's monthly limit.
 
     The documents live in one Didit session (proof of address + source-of-funds
-    uploads, face-matched to the KYC). Ops reviews and forwards the evidence;
+    uploads). Completed submissions are automatically forwarded to Infinia;
     the new limit arrives through the provider's /limits/ endpoint and is never
     set from this row.
     """
@@ -736,7 +736,7 @@ class LimitIncreaseRequest(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['confio_account'],
-                condition=Q(status__in=['started', 'submitted', 'in_review', 'forwarded']),
+                condition=Q(status__in=['started', 'submitted', 'in_review']),
                 name='limit_increase_one_open_uniq',
             )
         ]

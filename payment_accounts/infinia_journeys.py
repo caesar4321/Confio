@@ -129,13 +129,6 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         raise PaymentAccountError('An existing local payment is still pending')
     if credit and InfiniaJourney.objects.filter(funding_credit=credit).exists():
         raise PaymentAccountError('Deposit already used by a journey')
-    if direction == 'to_bank':
-        # Under the owner lock and after the one-unsettled-journey check: no
-        # other send can start or finish between this check and the journey
-        # below. A send that clears the bridge and then hits the provider's
-        # monthly limit strands funds at the provider. Retries returned above.
-        from .local_money import require_allowance
-        require_allowance(owner, crypto_account, bridge.quote.money_flow.source_amount)
     flow = MoneyFlow.objects.create(confio_account=owner, kind='withdraw' if direction == 'to_bank' else 'fund',
         source_asset='USDT_BSC' if direction == 'to_bank' else local_account.asset,
         source_amount=bridge.quote.money_flow.source_amount if bridge else credit.amount,

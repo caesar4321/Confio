@@ -56,10 +56,19 @@ async function collectEvidence(requestPermission = false) {
   const challenge = response.data?.brebLocationChallenge;
   if (!challenge?.success || !challenge.challenge) throw new Error(challenge?.error || 'No pudimos iniciar la verificación.');
   if (Platform.OS === 'android' && !/^[1-9][0-9]{0,18}$/.test(challenge.cloudProjectNumber || '')) throw new Error('La verificación del dispositivo aún no está disponible.');
-  const evidence = Platform.OS === 'ios'
-    ? await NativeModules.BrebAppleLocation.attest(challenge.challenge, challenge.keyRegistered === true)
-    : await NativeModules.BrebLocation.attest(challenge.challenge, challenge.cloudProjectNumber);
-  return {challenge: challenge.challenge, locationJson: evidence.locationJson, integrityToken: evidence.integrityToken};
+  try {
+    const evidence = Platform.OS === 'ios'
+      ? await NativeModules.BrebAppleLocation.attest(challenge.challenge, challenge.keyRegistered === true)
+      : await NativeModules.BrebLocation.attest(challenge.challenge, challenge.cloudProjectNumber);
+    return {challenge: challenge.challenge, locationJson: evidence.locationJson, integrityToken: evidence.integrityToken};
+  } catch (error: any) {
+    // Android checks again natively: permission can be revoked while the
+    // challenge is in flight. Keep the same recovery as a JS permission refusal.
+    if (error?.code === 'LOCATION_PERMISSION') {
+      throw Object.assign(new Error(error.message), {code: BREB_PERMISSION_ERROR});
+    }
+    throw error;
+  }
 }
 
 export async function applyCobreBreb(scope = ''): Promise<string> {

@@ -274,11 +274,15 @@ class IdentityVerification(SoftDeleteModel):
 
     @property
     def status_detail(self) -> str:
+        is_business = (self.risk_factors or {}).get('account_type') == 'business'
         if self.status == 'verified':
-            return 'Tu identidad quedó verificada correctamente.'
+            return 'Tu negocio quedó verificado correctamente.' if is_business else 'Tu identidad quedó verificada correctamente.'
         if self.status == 'rejected':
             return self.rejected_reason or 'La verificación fue rechazada. Puedes intentar nuevamente.'
         if self.status == 'pending':
+            raw_status = str(((self.risk_factors or {}).get('didit') or {}).get('raw_status') or '').lower()
+            if is_business and raw_status in {'awaiting user', 'awaiting_user', 'resub_requested', 'resubmission requested'}:
+                return 'Se necesita información adicional. Continúa la verificación de tu negocio en Didit.'
             return 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.'
         if self.status == 'expired':
             return 'La verificación expiró. Inicia una nueva sesión para continuar.'
@@ -291,10 +295,11 @@ class IdentityVerification(SoftDeleteModel):
         self.verified_at = timezone.now()
         self.save()
         
-        # Sync verified name with user profile
-        self.user.first_name = self.verified_first_name
-        self.user.last_name = self.verified_last_name
-        self.user.save(update_fields=['first_name', 'last_name'])
+        # A company name must never replace its owner's personal identity.
+        if (self.risk_factors or {}).get('account_type') != 'business':
+            self.user.first_name = self.verified_first_name
+            self.user.last_name = self.verified_last_name
+            self.user.save(update_fields=['first_name', 'last_name'])
     
     def reject_verification(self, rejected_by, reason):
         """Reject the verification"""
@@ -437,79 +442,14 @@ def flag_duplicate_personal_identity_verifications(sender, instance: 'IdentityVe
 
 @receiver(post_save, sender=IdentityVerification)
 def ensure_personal_verified_on_save(sender, instance: 'IdentityVerification', created, **kwargs):
-    """Ensure personal verified record exists whenever a verification is saved as verified.
-    Covers approvals done via admin edit (not using approve_verification) or other flows.
-    Also sync verified first/last name back to the user to match approve_verification behavior.
-    """
-    try:
-        if instance.status != 'verified':
-            return
-        # Sync verified name with user profile (idempotent)
-        try:
-            user = instance.user
-            if user.first_name != instance.verified_first_name or user.last_name != instance.verified_last_name:
-                user.first_name = instance.verified_first_name
-                user.last_name = instance.verified_last_name
-                user.save(update_fields=['first_name', 'last_name'])
-        except Exception:
-            pass
-
-        # If this saved record is already personal, nothing to do
-        if (instance.risk_factors or {}).get('account_type') != 'business':
-            return
-        # If there's already a personal (non-business) verified record, nothing to do
-        has_personal_verified = IdentityVerification.objects.filter(
-            user=instance.user,
-            status='verified'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
-        if has_personal_verified:
-            return
-
-        # Create a personal-context verified record to back personal status
-        # Do this after the outer transaction commits and idempotently to avoid duplicates
-        from django.db import transaction
-        def create_personal_clone():
-            try:
-                IdentityVerification.objects.get_or_create(
-                    user=instance.user,
-                    status='verified',
-                    document_number=instance.document_number,
-                    # Personal context explicitly stored as empty dict
-                    risk_factors={},
-                    defaults={
-                        'verified_first_name': instance.verified_first_name,
-                        'verified_last_name': instance.verified_last_name,
-                        'verified_date_of_birth': instance.verified_date_of_birth,
-                        'verified_nationality': instance.verified_nationality,
-                        'verified_address': instance.verified_address,
-                        'verified_address_neighborhood': instance.verified_address_neighborhood,
-                        'verified_city': instance.verified_city,
-                        'verified_state': instance.verified_state,
-                        'verified_country': instance.verified_country,
-                        'verified_postal_code': instance.verified_postal_code,
-                        'document_type': instance.document_type,
-                        'document_issuing_country': instance.document_issuing_country,
-                        'document_expiry_date': instance.document_expiry_date,
-                        'document_front_url': instance.document_front_url,
-                        'document_back_url': instance.document_back_url,
-                        'selfie_url': instance.selfie_url,
-                        'payout_method_label': instance.payout_method_label,
-                        'payout_proof_url': instance.payout_proof_url,
-                        'verified_by': instance.verified_by,
-                        'verified_at': instance.verified_at or timezone.now(),
-                    }
-                )
-            except Exception:
-                # Never break save due to this helper
-                pass
-        try:
-            transaction.on_commit(create_personal_clone)
-        except Exception:
-            # Fallback: attempt immediate creation if on_commit unavailable
-            create_personal_clone()
-    except Exception:
-        # Never break save due to this helper
-        pass
+    """Sync a verified person's name; business approvals never grant personal KYC."""
+    if instance.status != 'verified' or not _is_personal_context(instance):
+        return
+    user = instance.user
+    if user.first_name != instance.verified_first_name or user.last_name != instance.verified_last_name:
+        user.first_name = instance.verified_first_name
+        user.last_name = instance.verified_last_name
+        user.save(update_fields=['first_name', 'last_name'])
 
 
 class SuspiciousActivity(SoftDeleteModel):

@@ -1,0 +1,328 @@
+{
+  "workflow_label": "Confio KYB - Koywe and Infinia",
+  "status": "draft",
+  "is_default": false,
+  "is_desktop_allowed": true,
+  "features": [
+    {
+      "feature": "KYB_REGISTRY",
+      "config": {
+        "kyb_registry_countries_config": {
+          "AR": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "BO": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "BR": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "CL": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "CO": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "MX": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "PE": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "PY": {
+            "enabled": true,
+            "tier": "basic"
+          },
+          "UY": {
+            "enabled": true,
+            "tier": "basic"
+          }
+        },
+        "kyb_manual_company_action": "REVIEW",
+        "kyb_registry_fields_config": {
+          "registration_number": {
+            "enabled": true,
+            "required": true
+          },
+          "incorporation_date": {
+            "enabled": true,
+            "required": true
+          },
+          "legal_address": {
+            "enabled": true,
+            "required": true
+          },
+          "tax_number": {
+            "enabled": true,
+            "required": true
+          },
+          "company_type": {
+            "enabled": true,
+            "required": true
+          },
+          "nature_of_business": {
+            "enabled": true,
+            "required": true
+          },
+          "email": {
+            "enabled": true,
+            "required": true
+          },
+          "phone": {
+            "enabled": true,
+            "required": true
+          }
+        }
+      }
+    },
+    {
+      "feature": "AML",
+      "config": {
+        "kyb_score_approve_threshold": 0,
+        "kyb_score_review_threshold": 100
+      }
+    },
+    {
+      "feature": "KYB_KEY_PEOPLE",
+      "config": {
+        "kyb_ubo_ownership_threshold": 0,
+        "kyb_shareholder_ownership_threshold": 0,
+        "kyb_require_ubo_kyc": true,
+        "kyb_ubo_verification_workflow": "$person_workflow",
+        "kyb_require_officer_kyc": true,
+        "kyb_officer_verification_workflow": "$person_workflow",
+        "kyb_wait_for_all_ubos": true,
+        "kyb_reject_if_ubo_rejected": true,
+        "kyb_require_corporate_ubo_kyb": false,
+        "kyb_reuse_verified_individuals": false,
+        "kyb_notify_parties_by_email": false,
+        "kyb_key_people_prefill_from_registry": true,
+        "kyb_key_people_document_mismatch_action": "REVIEW",
+        "kyb_role_config": [
+          {
+            "role": "ubo",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "shareholder",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "beneficiary",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "settlor",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "protector",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "investor",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "director",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "non_executive_director",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "chairman",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "secretary",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "representative",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "authorized_signatory",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "trustee",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "company_officer",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "founder",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "legal_advisor",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          },
+          {
+            "role": "other",
+            "enabled": true,
+            "require_kyc": true,
+            "verification_workflow": "$person_workflow",
+            "allow_skip": false
+          }
+        ],
+        "kyb_shareholder_verification_workflow": "$person_workflow",
+        "kyb_key_people_ownership_required": true
+      }
+    },
+    {
+      "feature": "KYB_DOCUMENTS",
+      "config": {
+        "kyb_required_document_groups": [
+          "LEGAL_PRESENCE",
+          "COMPANY_DETAILS",
+          "OWNERSHIP_STRUCTURE",
+          "REPRESENTATIVES_AUTHORIZATION"
+        ],
+        "kyb_document_tampering_action": "REVIEW",
+        "kyb_document_critical_mismatch_action": "REVIEW",
+        "kyb_document_non_critical_mismatch_action": "REVIEW",
+        "kyb_document_age_action": "REVIEW",
+        "kyb_document_subtype_config": {
+          "UNKNOWN": {
+            "enabled": false,
+            "max_age_days": null
+          },
+          "ANNUAL_RETURN": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "TRUST_AGREEMENT": {
+            "enabled": false,
+            "max_age_days": null
+          },
+          "REGISTRY_EXCERPT": {
+            "enabled": false,
+            "max_age_days": null
+          },
+          "DIRECTOR_REGISTRY": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "POWER_OF_ATTORNEY": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "SHAREHOLDER_REGISTRY": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "CONFIRMATION_STATEMENT": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "ARTICLES_OF_ASSOCIATION": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "STATEMENT_OF_INFORMATION": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "CERTIFICATE_OF_INCUMBENCY": {
+            "enabled": false,
+            "max_age_days": null
+          },
+          "MEMORANDUM_OF_ASSOCIATION": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "CERTIFICATE_OF_GOOD_STANDING": {
+            "enabled": false,
+            "max_age_days": null
+          },
+          "CERTIFICATE_OF_INCORPORATION": {
+            "enabled": true,
+            "max_age_days": null
+          },
+          "BUSINESS_LICENSE": {
+            "enabled": false,
+            "max_age_days": null
+          },
+          "TAX_REGISTRATION": {
+            "enabled": false,
+            "max_age_days": null
+          }
+        }
+      }
+    },
+    {
+      "feature": "EMAIL_VERIFICATION"
+    },
+    {
+      "feature": "PHONE_VERIFICATION"
+    },
+    {
+      "feature": "QUESTIONNAIRE",
+      "config": {
+        "questionnaire_uuid": "$business_questionnaire",
+        "review_questionnaire_manually": true
+      }
+    }
+  ]
+}

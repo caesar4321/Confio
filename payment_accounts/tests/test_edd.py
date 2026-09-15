@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from django.conf import settings
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from payment_accounts import edd
@@ -28,8 +28,9 @@ class EddTests(TestCase):
         self.addCleanup(mock.patch.stopall)
         mock.patch('ramps.schema._build_effective_ramp_address_snapshot', return_value=ADDRESS).start()
         self.complete = mock.patch('ramps.schema._is_ramp_address_complete', return_value=True).start()
-        self.session = mock.patch('security.didit.create_didit_workflow_session',
-                                  return_value={'session_id': 'edd-1', 'session_token': 'token'}).start()
+        self.session_patch = mock.patch('security.didit.create_didit_workflow_session',
+                                        return_value={'session_id': 'edd-1', 'session_token': 'token'})
+        self.session = self.session_patch.start()
 
     def start(self, **overrides):
         args = dict(income_type='employed', occupation='Contadora', expected_monthly_usd='25000',
@@ -338,3 +339,157 @@ class EddTests(TestCase):
         self.assertEqual(response.status_code, 200)
         sync_edd.assert_called_once_with('edd-1')
         sync_identity.assert_not_called()
+
+
+    def test_submission_dispatches_after_commit_without_confio_review(self):
+        self.start()
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=self.files_decision()), \
+                mock.patch('payment_accounts.tasks.forward_edd.delay') as dispatch:
+            with self.captureOnCommitCallbacks(execute=True):
+                row = edd.sync_edd_session('edd-1')
+                dispatch.assert_not_called()
+            dispatch.assert_called_once_with(row.pk)
+
+    def test_pending_didit_review_is_automatically_forwarded(self):
+        row = self.submitted_with_owner('automatic')
+        from payment_accounts.tasks import forward_edd
+        with mock.patch('security.didit.retrieve_didit_decision',
+                        return_value={**self.files_decision(), 'status': 'In Review'}), \
+                mock.patch('payment_accounts.compliance._upload_document', return_value=('address', {})), \
+                mock.patch('payment_accounts.compliance._upload_bundle', return_value=('funds', {})), \
+                mock.patch('payment_accounts.clients.InfiniaClient') as client:
+            self.assertEqual(forward_edd.run(row.pk), 'forwarded')
+            self.assertEqual(forward_edd.run(row.pk), 'forwarded')
+        client.return_value.update_owner.assert_called_once()
+
+    def test_missing_bank_statements_are_not_forwarded(self):
+        row = self.submitted_with_owner('incomplete')
+        decision = self.files_decision()
+        decision['questionnaire_responses'][0]['sections'][0]['items'].pop()
+        from payment_accounts.clients import ComplianceHandoffError
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=decision):
+            with self.assertRaises(ComplianceHandoffError):
+                edd.forward_to_provider(row, client=mock.Mock())
+
+    def test_reconciler_recovers_failed_dispatch_and_link(self):
+        row = self.submitted_with_owner('retry')
+        from payment_accounts.tasks import reconcile_edd
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=self.files_decision()), \
+                mock.patch('payment_accounts.compliance._upload_document', return_value=('address', {})), \
+                mock.patch('payment_accounts.compliance._upload_bundle', return_value=('funds', {})), \
+                mock.patch('payment_accounts.clients.InfiniaClient') as client, \
+                mock.patch('payment_accounts.tasks.forward_edd.delay') as dispatch:
+            client.return_value.update_owner.side_effect = RuntimeError('offline')
+            self.assertEqual(reconcile_edd(), 0)
+            row.refresh_from_db()
+            self.assertEqual(row.status, 'submitted')
+            client.return_value.update_owner.side_effect = None
+            self.assertEqual(reconcile_edd(), 1)
+            self.assertEqual(reconcile_edd(), 0)
+            dispatch.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(row.status, 'forwarded')
+
+
+    def test_self_declared_owner_receives_requested_monthly_volume(self):
+        row = self.submitted_with_owner('volume')
+        ProviderProfile.objects.filter(confio_account=self.owner).update(kyc_mode='SELF_DECLARED')
+        client = mock.Mock()
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=self.files_decision()), \
+                mock.patch('payment_accounts.compliance._upload_document', return_value=('address', {})), \
+                mock.patch('payment_accounts.compliance._upload_bundle', return_value=('funds', {})):
+            edd.forward_to_provider(row, client=client)
+        self.assertEqual(client.update_owner.call_args.args[1]['individual']['expected_monthly_volume_usd'], 25000)
+
+
+    def test_forwarded_request_allows_fresh_evidence_without_manual_closure(self):
+        first, _ = self.start()
+        first.status = 'forwarded'
+        first.save(update_fields=['status'])
+        self.session.return_value = {'session_id': 'edd-2', 'session_token': 'new'}
+        second, _ = self.start()
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(self.session.call_args.kwargs['session_reference'], str(second.internal_id))
+        first.refresh_from_db()
+        self.assertEqual(first.didit_session_id, 'edd-1')
+
+    def test_new_request_never_takes_evidence_from_a_forwarded_request(self):
+        first, _ = self.start()
+        first.status = 'forwarded'
+        first.save(update_fields=['status'])
+        with self.assertRaises(PaymentAccountError):
+            self.start()  # Provider erroneously returns the earlier session.
+        first.refresh_from_db()
+        self.assertEqual(first.didit_session_id, 'edd-1')
+
+    def test_edd_session_reference_is_stable_and_different_per_request(self):
+        # Exercise the real helper after releasing this test's session mock.
+        self.session_patch.stop()
+        from security.didit import create_didit_workflow_session
+        with mock.patch('security.didit._start_session', return_value={}) as create:
+            for ref in ('request-a', 'request-a', 'request-b'):
+                create_didit_workflow_session(user=self.user, workflow_id='edd', session_reference=ref)
+        vendors = [json.loads(call.args[0]['vendor_data']) for call in create.call_args_list]
+        self.assertEqual(vendors[0], vendors[1])
+        self.assertNotEqual(vendors[0], vendors[2])
+        self.assertEqual(str(vendors[0]['user_id']), str(self.user.pk))
+
+    def test_task_errors_do_not_expose_signed_document_urls(self):
+        import traceback
+        from payment_accounts.tasks import forward_edd
+        row = self.submitted_with_owner('private')
+        signed = 'https://media.example/document?signature=private-token'
+        def fail(_row):
+            try:
+                raise RuntimeError(signed)
+            except RuntimeError as exc:
+                raise PaymentAccountError('Download failed') from exc
+        with mock.patch('payment_accounts.edd.forward_to_provider', side_effect=fail), \
+                mock.patch.object(forward_edd, 'retry', side_effect=lambda **kwargs: (_ for _ in ()).throw(kwargs['exc'])):
+            try:
+                forward_edd.run(row.pk)
+            except PaymentAccountError:
+                output = traceback.format_exc()
+            else:
+                self.fail('Expected upload failure')
+        self.assertNotIn(signed, output)
+        self.assertIn('retry pending', output)
+
+    def test_reconcile_errors_do_not_log_signed_document_urls(self):
+        from payment_accounts.tasks import reconcile_edd
+        self.submitted_with_owner('private-logs')
+        with mock.patch('payment_accounts.edd.sync_edd_session', side_effect=RuntimeError('https://media/?signature=secret')), \
+                self.assertLogs('payment_accounts.tasks', level='WARNING') as logs:
+            reconcile_edd()
+        self.assertNotIn('signature', str(logs.output))
+
+
+class EddHandoffMigrationTests(TransactionTestCase):
+    def test_migration_allows_completed_history_but_only_one_pending_request(self):
+        import importlib
+        from django.apps import apps
+        from django.db import connection, models, IntegrityError, transaction
+        from django.db.migrations.state import ProjectState
+        current = next(c for c in LimitIncreaseRequest._meta.constraints if c.name == 'limit_increase_one_open_uniq')
+        old = models.UniqueConstraint(fields=('confio_account',),
+            condition=models.Q(status__in=['started', 'submitted', 'in_review', 'forwarded']),
+            name=current.name)
+        with connection.schema_editor() as editor:
+            editor.remove_constraint(LimitIncreaseRequest, current)
+            editor.add_constraint(LimitIncreaseRequest, old)
+        state = ProjectState.from_apps(apps)
+        state.models['payment_accounts', 'limitincreaserequest'].options['constraints'] = [old]
+        migration = importlib.import_module('payment_accounts.migrations.0022_edd_forwarded_terminal').Migration
+        with connection.schema_editor() as editor:
+            for operation in migration.operations:
+                before = state.clone()
+                operation.state_forwards('payment_accounts', state)
+                operation.database_forwards('payment_accounts', editor, before, state)
+        user = User.objects.create_user(username='edd-migration', firebase_uid='edd-migration')
+        owner = Account.objects.create(user=user, account_type='personal')
+        args = dict(confio_account=owner, expected_monthly_usd='25000', income_type='employed', source_of_funds='salary')
+        LimitIncreaseRequest.objects.create(**args, status='forwarded')
+        LimitIncreaseRequest.objects.create(**args, status='forwarded')
+        LimitIncreaseRequest.objects.create(**args, status='started')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            LimitIncreaseRequest.objects.create(**args, status='submitted')
