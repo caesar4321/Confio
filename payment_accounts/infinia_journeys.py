@@ -167,7 +167,43 @@ def _credit_for_operation(operation, account):
         direction='credit', asset=account.asset, amount__gt=0,
         provider_data__operation__operation_id=operation.provider_operation_id)
     accepted = [e for e in entries if (e.provider_data.get('operation') or {}).get('type') in {'INTERNAL_TRANSFER', 'CREDIT'}]
-    return sum((e.amount for e in accepted), Decimal(0))
+    if accepted:
+        return sum((e.amount for e in accepted), Decimal(0))
+    # Some fiat legs arrive as bank credits with no operation_id. Infinia's
+    # completed transfer supplies voucher_ids, which bind those exact credits.
+    # Never infer this relationship from amounts/descriptions or mutate the
+    # original webhook evidence to manufacture an operation_id.
+    data = operation.provider_data or {}
+    vouchers = data.get('voucher_ids')
+    if (operation.operation_type not in {'conversion', 'internal_transfer'}
+            or operation.status not in {'settling', 'succeeded'}
+            or data.get('status') != 'COMPLETED' or data.get('compliance_hold') is not False
+            or str(data.get('id')) != operation.provider_operation_id
+            or str(data.get('idempotency_key')) != operation.idempotency_key
+            or not operation.source_account_id or operation.destination_account_id != account.pk
+            or str(data.get('source_account_id')) != operation.source_account.provider_account_id
+            or str(data.get('target_account_id')) != account.provider_account_id
+            or not isinstance(vouchers, list) or not vouchers
+            or any(not isinstance(v, str) or not v.strip() for v in vouchers)
+            or len(set(vouchers)) != len(vouchers)):
+        return Decimal(0)
+    try:
+        if positive(data.get('source_amount')) != operation.source_amount:
+            return Decimal(0)
+        expected = positive(data.get('destination_amount'))
+    except (ValueError, TypeError, ArithmeticError, PaymentAccountError):
+        return Decimal(0)
+    candidates = list(LedgerEntry.objects.filter(financial_account=account, provider='infinia',
+        direction='credit', asset=account.asset, amount__gt=0,
+        provider_data__third_party__voucher_id__in=vouchers).select_related('operation'))
+    if (len(candidates) != len(vouchers)
+            or {e.provider_data['third_party']['voucher_id'] for e in candidates} != set(vouchers)
+            or any(e.provider_data.get('operation') for e in candidates)
+            or any(e.operation_id and e.operation_id != operation.pk
+                   and e.operation.operation_type not in {'deposit', 'payin'} for e in candidates)):
+        return Decimal(0)
+    total = sum((e.amount for e in candidates), Decimal(0))
+    return total if total == expected else Decimal(0)
 
 
 def has_refund(operation):

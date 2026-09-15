@@ -89,6 +89,64 @@ class JourneyTests(TestCase):
                 credit=self.credit(self.local, provider_data={}))
         self.assertFalse(InfiniaJourney.objects.exists())
 
+    def voucher_conversion(self):
+        j = self.inbound(); self.fx_quote()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        op = j.fx_operation
+        op.provider_operation_id = 'voucher-transfer'
+        op.status = 'settling'
+        op.provider_data = dict(id=op.provider_operation_id, status='COMPLETED',
+            compliance_hold=False, idempotency_key=op.idempotency_key,
+            source_account_id='local', target_account_id='crypto', source_amount='10',
+            destination_amount='2.5', voucher_ids=['voucher-one'])
+        op.save()
+        entry = self.credit(self.crypto, amount='2.5', provider_data={
+            'operation': None, 'third_party': {'voucher_id': 'voucher-one'}})
+        return op, entry
+
+    def test_completed_conversion_voucher_binds_credit_without_rewriting_evidence(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.voucher_conversion()
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal('2.5'))
+        entry.refresh_from_db()
+        self.assertIsNone(entry.provider_data['operation'])
+        self.assertIsNone(entry.operation_id)
+
+    def test_voucher_binding_requires_exact_completed_transfer_identity(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.voucher_conversion()
+        valid = dict(op.provider_data)
+        for field, value in [('id', 'other'), ('idempotency_key', 'other'),
+                ('source_account_id', 'other'), ('target_account_id', 'other'),
+                ('source_amount', '11'), ('destination_amount', '3'), ('status', 'PENDING'),
+                ('compliance_hold', True), ('voucher_ids', []),
+                ('voucher_ids', ['voucher-one', 'voucher-one']), ('voucher_ids', ['other'])]:
+            with self.subTest(field=field, value=value):
+                op.provider_data = dict(valid, **{field: value})
+                self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+
+    def test_duplicate_or_conflicting_voucher_credit_is_not_spendable(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.voucher_conversion()
+        duplicate = self.credit(self.crypto, amount='2.5', provider_data=entry.provider_data)
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+        duplicate.delete()
+        entry.provider_data['operation'] = {'type': 'INTERNAL_TRANSFER', 'operation_id': 'other'}
+        entry.save()
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+
+    def test_voucher_credit_advances_existing_journey_once(self):
+        op, entry = self.voucher_conversion()
+        j = op.money_flow.infinia_journey
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'paying_out')
+        payout_id = j.payout_operation_id
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.payout_operation_id, payout_id)
+        self.assertEqual(j.money_flow.operations.filter(operation_type='payout').count(), 1)
+
     def test_revocation_stops_worker_before_quote(self):
         j = self.inbound()
         AccountCapability.objects.filter(financial_account=self.local, capability='receive_same_name').update(status='disabled')
