@@ -541,6 +541,26 @@ class LocalMoneyTests(TestCase):
 
     # ---- limits
 
+    def test_explicit_null_limit_defers_to_infinia(self):
+        local, crypto = self.pair()
+        self.client_api.get_account_limits.return_value = {'monthly': {
+            'used': 0, 'limit': None, 'remaining': None, 'resets_at': '2026-10-01T00:00:00'}}
+        self.journey(local, crypto, '800')
+        local_money.require_allowance(self.owner, crypto, '10', client=self.client_api)
+        view = local_money.limits(self.owner, client=self.client_api)
+        self.assertFalse(view['known'])
+        self.assertTrue(view['has_account'])
+        self.assertIsNone(view['limit'])
+        self.assertIsNone(view['available'])
+        self.assertFalse(view['near_limit'])
+
+    def test_zero_numeric_limit_blocks(self):
+        _, crypto = self.pair()
+        self.client_api.get_account_limits.return_value = {'monthly': {
+            'used': 0, 'limit': 0, 'remaining': 0}}
+        with self.assertRaisesRegex(PaymentAccountError, 'supera tu límite'):
+            local_money.require_allowance(self.owner, crypto, '0.01', client=self.client_api)
+
     def journey(self, local, crypto, amount, stage='awaiting_credit'):
         flow = MoneyFlow.objects.create(confio_account=self.owner, kind='withdraw', source_asset='USDT_BSC',
                                         source_amount=amount, target_asset='COP')
@@ -550,7 +570,10 @@ class LocalMoneyTests(TestCase):
 
     def test_unknown_limit_fails_closed(self):
         _, crypto = self.pair()
-        for response in ({'monthly': {'used': 10, 'resets_at': 'x'}}, {}):
+        for response in ({'monthly': {'used': 10, 'resets_at': 'x'}}, {},
+                         {'monthly': {'used': 0, 'limit': 'invalid'}},
+                         {'monthly': {'used': 0, 'limit': 'NaN'}},
+                         {'monthly': {'used': 'invalid', 'limit': None, 'remaining': None}}):
             self.client_api.get_account_limits.return_value = response
             with self.assertRaisesRegex(PaymentAccountError, 'No pudimos confirmar'):
                 local_money.require_allowance(self.owner, crypto, '10', client=self.client_api)
