@@ -115,26 +115,17 @@ PAYMENT_BRIDGE_POLYGON_ENABLED=False
 # Empty = no per-transfer cap (NEXT prices every size at the same rate).
 # Set a positive amount only as an emergency brake.
 PAYMENT_BRIDGE_MAX_USDT=
-PAYMENT_BRIDGE_VERIFIED_INSTRUCTIONS={}
 PAYMENT_BRIDGE_POLYGON_RPC_URL=https://polygon-bor-rpc.publicnode.com
 PAYMENT_BRIDGE_POLYGON_MAX_GAS_PRICE_WEI=500000000000
 ```
 
 Existing provider flags and verified identity/eligibility must also be enabled.
-For outbound, configure only a provider-confirmed, active reusable native
-Polygon USDC instruction that accepts bridge-originated funds:
-
-```json
-{
-  "<funding-instruction-UUID>": {
-    "token_id": "POL:USDC",
-    "address": "<provider-issued Polygon address>"
-  }
-}
-```
-
-The mapping attests to the exact instruction and address. Address rotation
-requires reverification. Provider webhook metadata cannot enable execution.
+Outbound requires an owned, active reusable crypto instruction on a canonical
+`USDC_POL` account. Infinia acknowledged the Allbridge-origin settlement flow
+in the September 5, 2026 conversation supplied by Julian. No per-instruction
+operator allowlist is required. Quotes bind the current provider-issued address;
+rotation invalidates existing quotes at execution. Generic `USDC` or
+`USD_STABLE` balances cannot establish the required network.
 
 BSC also requires `CUSD_PLUS_7702_ENABLED` and uses the existing 7702 sponsor; Polygon uses the same configured KMS signer
 on chain 137, funded separately with native POL. Reserve that signer's Polygon

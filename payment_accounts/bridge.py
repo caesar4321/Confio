@@ -78,18 +78,12 @@ def verified_destination(instruction, confio_account):
         raise PaymentAccountError('An active reusable crypto funding instruction is required')
     if instruction.expires_at and instruction.expires_at <= timezone.now():
         raise PaymentAccountError('Funding instruction has expired')
-    # Operator-confirmed contract acceptance, bound to the exact instruction AND
-    # address. Never infer chain from USDC symbol or treat webhook metadata as
-    # permission to fund a provider from a bridge contract.
-    verified = getattr(settings, 'PAYMENT_BRIDGE_VERIFIED_INSTRUCTIONS', {}).get(
-        str(instruction.internal_id), {}
-    )
-    if not isinstance(verified, dict) or verified.get('token_id') != 'POL:USDC':
-        raise PaymentAccountError('Polygon USDC bridge settlement is not verified for this instruction')
-    destination = address(instruction.display_value)
-    if address(verified.get('address')) != destination:
-        raise PaymentAccountError('Provider funding address changed; settlement must be reverified')
-    return destination
+    # Infinia acknowledged this bridge-origin settlement flow. Validate the
+    # canonical account asset, not an operator allowlist or webhook metadata.
+    # Generic stablecoin balances (e.g. Cobre USD_STABLE) do not prove a network.
+    if account.asset != 'USDC_POL':
+        raise PaymentAccountError('A Polygon USDC funding account is required')
+    return address(instruction.display_value)
 
 
 def quote_provider_funding(*, confio_account, funding_instruction_id, amount, request_id, client=None,
