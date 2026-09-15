@@ -96,6 +96,13 @@ function InfiniaLocalReceiveScreen() {
   // when the screen stays open past it (the server withholds it on reload).
   const brebKeyScreen = methodId === 'co_breb_receive';
   const passOk = useBrebLocationPass(brebKeyScreen);
+  // A verification may finish after this screen has already regained focus.
+  // Reload the server-withheld key when that pass arrives, without another tab change.
+  const accountRefetch = useRef(accountQuery.refetch);
+  accountRefetch.current = accountQuery.refetch;
+  useEffect(() => {
+    if (brebKeyScreen && passOk) accountRefetch.current().catch(() => {});
+  }, [brebKeyScreen, passOk]);
   const accountValue = account && (!brebKeyScreen || passOk) ? account.value : '';
   const [accountRetrying, setAccountRetrying] = useState(false);
   // The server withholds a Bre-B key without a recent location check; the

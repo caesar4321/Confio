@@ -4,6 +4,8 @@ import {Share, Text, TouchableOpacity} from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 
 let mockAccount: any;
+let mockMethodId = 'br_pix_receive';
+let mockPassOk = true;
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockApollo = {query: jest.fn().mockResolvedValue({data: {infiniaJourneyDeposits: []}})};
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
@@ -11,13 +13,13 @@ jest.mock('react-native-qrcode-svg', () => 'QRCode');
 jest.mock('@react-native-clipboard/clipboard', () => ({setString: jest.fn()}));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({navigate: jest.fn(), goBack: jest.fn()}),
-  useRoute: () => ({params: {methodId: 'br_pix_receive'}}), useFocusEffect: () => {},
+  useRoute: () => ({params: {methodId: mockMethodId}}), useFocusEffect: () => {},
 }));
 jest.mock('@apollo/client', () => ({useApolloClient: () => mockApollo, useQuery: (query: string) => ({
   data: query === 'account' ? {localReceiveAccount: mockAccount} : {}, refetch: mockRefetch,
 })}));
 jest.mock('../LocalAccountApplicationScreen', () => 'Application');
-jest.mock('../../components/breb/BrebLocationGate', () => ({useBrebLocationPass: () => true}));
+jest.mock('../../components/breb/BrebLocationGate', () => ({useBrebLocationPass: () => mockPassOk}));
 jest.mock('../../components/ramps/RampActionBar', () => ({RampActionBar: 'ActionBar'}));
 jest.mock('../../components/ramps/RampHero', () => ({RampHero: 'Hero'}));
 jest.mock('../../components/ramps/RampReveal', () => ({RampReveal: ({children}: any) => children}));
@@ -31,6 +33,8 @@ import Screen from '../LocalReceiveScreen';
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockMethodId = 'br_pix_receive';
+  mockPassOk = true;
   mockAccount = {status: 'active', country: 'BR', asset: 'BRL', localAccountId: 'brl',
     instructionKind: 'qr', value: 'pix-copy-paste', holderName: 'Ana', institution: 'Bank', receiveThirdParty: 'enabled'};
 });
@@ -69,4 +73,20 @@ it('withholds receiving controls for an unpaid opening', async () => {
   expect(tree.root.findAllByType('QRCode' as any)).toHaveLength(0);
   expect(tree.root.findAllByType(Text).some(t => t.props.children === 'Copiar')).toBe(false);
   await act(async () => tree.unmount());
+});
+
+it('reloads the withheld Bre-B key when verification completes without another focus event', async () => {
+  mockMethodId = 'co_breb_receive';
+  mockPassOk = false;
+  mockAccount = {...mockAccount, country: 'CO', asset: 'COP', value: ''};
+  let tree!: renderer.ReactTestRenderer;
+  try {
+    await act(async () => {tree = renderer.create(<Screen />);});
+    mockRefetch.mockClear();
+    mockPassOk = true;
+    await act(async () => {tree.update(<Screen />);});
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+  }
 });

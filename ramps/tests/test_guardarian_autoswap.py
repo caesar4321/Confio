@@ -19,6 +19,10 @@ from users.models import Account, User
 
 class GuardarianAutoSwapReconciliationTests(TestCase):
     def setUp(self):
+        # Reconciliation is deterministic and must not query a live chain.
+        balance = patch('blockchain.auto_swap_state._fetch_onchain_usdc_micro', return_value=None)
+        balance.start()
+        self.addCleanup(balance.stop)
         self.user = User.objects.create_user(
             username='ramp-user',
             email='ramp@example.com',
@@ -161,19 +165,14 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
     def test_guardarian_sync_uses_completed_deposit_pending_autoswap(self, *_):
         deposit = self._create_deposit(amount=Decimal('70.927202'))
         conversion = self._create_conversion(amount=Decimal('70.927202'))
-        PendingAutoSwap.objects.create(
-            account=self.account,
-            actor_user=self.user,
-            actor_type='user',
-            actor_address=self.account.algorand_address,
-            asset_type='USDC',
-            amount_micro=70927202,
-            amount_decimal=Decimal('70.927202'),
-            status='COMPLETED',
-            usdc_deposit=deposit,
-            conversion=conversion,
-            completed_at=timezone.now(),
-        )
+        # Deposit persistence already creates the unique pending swap.
+        pending = PendingAutoSwap.objects.get(usdc_deposit=deposit)
+        pending.status = 'COMPLETED'
+        pending.conversion = conversion
+        pending.completed_at = timezone.now()
+        pending.save(update_fields=['status', 'conversion', 'completed_at', 'updated_at'])
+        # Match a later provider sync, which reloads the deposit and its links.
+        deposit.refresh_from_db()
 
         self._create_guardarian_transaction('5455572678', deposit, Decimal('70.927201'))
 

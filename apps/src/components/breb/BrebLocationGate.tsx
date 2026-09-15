@@ -96,6 +96,8 @@ function ScopedBrebLocationGate({scope, enabled, force, children}: {
     !enabled || (!force && brebLocationPassValid(scope)) ? 'ok' : 'checking'));
   const [message, setMessage] = useState('');
   const running = useRef(false);
+  // Force one fresh check per visit, including a result received while blurred.
+  const verifiedThisVisit = useRef(false);
   const focused = useRef(false);
 
   const verify = useCallback(async (requestPermission = false) => {
@@ -104,6 +106,7 @@ function ScopedBrebLocationGate({scope, enabled, force, children}: {
     setState('checking');
     try {
       await verifyBrebLocation(scope, requestPermission);
+      verifiedThisVisit.current = true;
       if (focused.current) setState('ok');
     } catch (error: any) {
       if (!focused.current) return;
@@ -119,19 +122,21 @@ function ScopedBrebLocationGate({scope, enabled, force, children}: {
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
-      if (!enabled || (!force && brebLocationPassValid(scope))) {
+      // Permission answers belong to this focus interval, not a later visit.
+      let active = true;
+      if (!enabled || ((!force || verifiedThisVisit.current) && brebLocationPassValid(scope))) {
         setState('ok');
       } else if (!brebLocationSupported()) {
         setState('unsupported');
       } else {
         hasBrebLocationPermission()
           .then(allowed => {
-            if (!focused.current) return;
+            if (!active) return;
             if (allowed) verify(); else setState('intro');
           })
-          .catch(() => { if (focused.current) setState('intro'); });
+          .catch(() => { if (active) setState('intro'); });
       }
-      return () => { focused.current = false; };
+      return () => { active = false; focused.current = false; };
     }, [enabled, force, verify, scope]),
   );
 

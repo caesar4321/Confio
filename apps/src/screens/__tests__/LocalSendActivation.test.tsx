@@ -9,12 +9,14 @@ const mockPrepareBridge = jest.fn();
 let mockBridgeSequence = 0;
 let mockAccountStatus = 'none';
 let mockAccounts: any[] = [];
+let mockLimits: any = undefined;
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('@apollo/client', () => ({useQuery: (query: string) => ({
   data: query === 'methods' ? {localMoneyMethods: [{id: 'co_breb', country: 'CO', asset: 'COP', status: 'live', accountStatus: mockAccountStatus}]}
     : query === 'saved' ? {localSavedDestinations: [{id: 'recipient', holderName: 'Ana', label: 'Llave', verification: 'verified'}]}
     : query === 'address' ? {myRampAddress: {isComplete: true}}
-    : query === 'accounts' ? {myPaymentAccounts: mockAccounts} : {},
+    : query === 'accounts' ? {myPaymentAccounts: mockAccounts}
+    : query === 'limits' ? {localMoneyLimits: mockLimits} : {},
   refetch: mockRefetch,
 })}));
 // useFocusEffect is a no-op here: the refresh-on-return is not what this test checks.
@@ -49,7 +51,7 @@ import Screen from '../LocalSendScreen';
 beforeEach(() => {
   jest.clearAllMocks(); mockAccountStatus = 'none';
   mockPrepareBridge.mockReset(); mockBridgeSequence = 0;
-  mockAccounts = [];
+  mockAccounts = []; mockLimits = undefined;
   mockRecheck.mockImplementation(async (id: string) => ({id, holderName: 'Ana', label: 'Llave', verification: 'verified'}));
 });
 
@@ -192,4 +194,27 @@ it.each(['none', 'awaiting_payment', 'provisioning'])('can manage a %s opening w
   } finally {
     await act(async () => tree.unmount());
   }
+});
+
+
+it('allows continuing above the monthly allowance while offering EDD', async () => {
+  mockAccountStatus = 'active';
+  mockLimits = {known: true, available: '0', limit: '10000', used: '10000', nearLimit: true};
+  mockAccounts = [
+    {provider: 'infinia', asset: 'COP', status: 'active'},
+    {provider: 'infinia', asset: 'USDC_POL', status: 'active',
+      fundingInstructions: [{kind: 'crypto_address', status: 'active'}]},
+  ];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const saved = tree.root.findAllByType(TouchableOpacity).find(node =>
+    node.findAllByType(Text).some(text => text.props.children === 'Ana'))!;
+  await act(async () => {await saved.props.onPress();});
+  await act(async () => {tree.root.findAllByType(TextInput).find(node => node.props.placeholder === '0')!.props.onChangeText('5');});
+  expect(tree.root.findByType('ActionBar' as any).props.primaryDisabled).toBe(false);
+  const edd = tree.root.findAllByType(TouchableOpacity).find(node =>
+    node.findAllByType(Text).some(text => text.props.children === 'Aumentar mi límite mensual'))!;
+  await act(async () => {edd.props.onPress();});
+  expect(mockNavigate).toHaveBeenCalledWith('LocalLimitIncrease');
+  await act(async () => tree.unmount());
 });

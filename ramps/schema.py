@@ -987,6 +987,15 @@ class CreateRampOrder(graphene.Mutation):
         if not current_account:
             return RampOrderType(success=False, error='No active account available for ramp operations')
 
+        # This adapter provisions a personal Koywe profile, scoped by user/email.
+        # Never fund a business wallet using the owner's personal KYC. Business
+        # KYB collection is independent of provider approval and company support.
+        if getattr(current_account, 'account_type', None) == 'business':
+            return RampOrderType(
+                success=False,
+                error='Las recargas y retiros con Koywe para negocios aún no están disponibles. Puedes completar la verificación de tu negocio.',
+            )
+
         # cUSD+ savings rail (Koywe 'USDT BSC' delivered to the account's own
         # BSC address). The address is client-derived and registered at
         # sign-in (UpdateAccountBscAddress) — the server cannot derive it.

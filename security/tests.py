@@ -12,6 +12,9 @@ from security.didit import (
     classify_brazilian_cpf_database_validation,
     _enforce_brazilian_cpf_database_validation,
     _extract_verification_payload,
+    _without_transient_didit_media,
+    _validated_didit_session_url,
+    retrieve_didit_decision,
     create_didit_session,
     is_authoritative_brazilian_cpf_backfill,
     sync_didit_session,
@@ -59,6 +62,71 @@ class IdentityVerificationSchemaContractTests(SimpleTestCase):
 
 
 class DiditPayloadExtractionTests(SimpleTestCase):
+    @override_settings(
+        DIDIT_BUSINESS_WORKFLOW_ID='',
+        DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY={'AR': 'personal-workflow'},
+    )
+    @patch('security.didit.requests.request')
+    def test_business_session_never_falls_back_to_personal_workflow(self, mock_request):
+        user = SimpleNamespace(id=1, phone_country='AR')
+        with self.assertRaisesRegex(DiditConfigurationError, 'negocio'):
+            create_didit_session(user=user, account_type='business', business_id='42')
+        mock_request.assert_not_called()
+
+    def test_hosted_kyb_link_requires_didit_session_https(self):
+        self.assertEqual(_validated_didit_session_url('https://verify.didit.me/session/abc'),
+                         'https://verify.didit.me/session/abc')
+        for url in ('http://verify.didit.me/session/abc', 'https://verify.didit.me.evil.com/session/abc',
+                    'https://evil@verify.didit.me/session/abc', 'https://verify.didit.me/u/generic',
+                    'https://verify.didit.me:444/session/abc'):
+            with self.subTest(url=url), self.assertRaises(DiditAPIError):
+                _validated_didit_session_url(url)
+
+    def test_business_status_detail_names_the_business(self):
+        verification = IdentityVerification(status='verified', risk_factors={'account_type': 'business'})
+        self.assertEqual(verification.status_detail, 'Tu negocio quedó verificado correctamente.')
+
+    def test_manual_business_approval_preserves_owner_name(self):
+        owner = User(first_name='Ana', last_name='Perez')
+        verification = IdentityVerification(user=owner, verified_first_name='Company SA',
+                                            verified_last_name='Business', risk_factors={'account_type': 'business'})
+        with patch.object(verification, 'save'), patch.object(owner, 'save') as save_owner:
+            verification.approve_verification(owner)
+        self.assertEqual((owner.first_name, owner.last_name), ('Ana', 'Perez'))
+        save_owner.assert_not_called()
+
+    def test_signed_questionnaire_and_kyb_media_are_not_persisted(self):
+        cleaned = _without_transient_didit_media({
+            'questionnaire_responses': [{'answer': {'files': [
+                'https://signed.example/secret', {'url': 'https://signed.example/secret2'},
+            ]}, 'status': 'Approved'}],
+            'document_verifications': [{'document_file': 'secret', 'url': 'secret', 'name': 'certificate'}],
+        })
+        self.assertNotIn('secret', str(cleaned))
+        self.assertEqual(cleaned['questionnaire_responses'][0]['status'], 'Approved')
+        self.assertEqual(cleaned['document_verifications'][0]['name'], 'certificate')
+
+    @patch('security.didit._didit_request')
+    def test_decision_requires_exact_active_business(self, request):
+        request.return_value = {'vendor_data': {'user_id': 1, 'account_type': 'business', 'business_id': '42'},
+                                'session_kind': 'business', 'status': 'Approved'}
+        with self.assertRaisesRegex(DiditAPIError, 'active business'):
+            retrieve_didit_decision(session_id='s', expected_user=SimpleNamespace(id=1),
+                                    expected_account_type='business', expected_business_id='43')
+        with self.assertRaisesRegex(DiditAPIError, 'active account type'):
+            retrieve_didit_decision(session_id='s', expected_user=SimpleNamespace(id=1),
+                                    expected_account_type='personal')
+
+    @patch('security.didit._didit_request')
+    def test_personal_decision_cannot_verify_business_even_with_business_vendor_data(self, request):
+        request.return_value = {'vendor_data': {'user_id': 1, 'account_type': 'business', 'business_id': '42'},
+                                'session_kind': 'individual', 'status': 'Approved'}
+        with self.assertRaisesRegex(DiditAPIError, 'personal verification'):
+            retrieve_didit_decision(session_id='s', expected_user=SimpleNamespace(id=1))
+        request.return_value.pop('session_kind')
+        with self.assertRaisesRegex(DiditAPIError, 'missing its business session kind'):
+            retrieve_didit_decision(session_id='s', expected_user=SimpleNamespace(id=1))
+
     def test_recognizes_standalone_cpf_backfill_webhook(self):
         self.assertTrue(_is_standalone_cpf_backfill_webhook({
             'vendor_data': 'confio-cpf-backfill-543',
@@ -389,6 +457,22 @@ class DiditIntegrationTests(TestCase):
         response.json.return_value = payload
         return response
 
+    def test_saved_business_approval_never_grants_owner_personal_kyc(self):
+        from security.didit import ensure_pending_didit_verification
+        verification = ensure_pending_didit_verification(
+            user=self.user, session_id='business-approved', account_type='business', business_id='42',
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            verification.verified_first_name = 'Company SA'
+            verification.verified_last_name = 'Business'
+            verification.document_number = 'COMPANY-TAX-123'
+            verification.status = 'verified'
+            verification.save()
+        self.user.refresh_from_db()
+        self.assertEqual((self.user.first_name, self.user.last_name), ('Ana', 'Perez'))
+        self.assertEqual(self.user.verification_status, 'unverified')
+        self.assertEqual(IdentityVerification.all_documents.filter(user=self.user).count(), 1)
+
     def test_business_kyc_query_does_not_expose_another_users_verification(self):
         other = User.objects.create_user(
             username='other-business-owner',
@@ -443,6 +527,7 @@ class DiditIntegrationTests(TestCase):
         mock_request.return_value = self._mock_response({
             'session_id': 'sess_123',
             'session_token': 'token_abc',
+            'url': 'https://verify.didit.me/session/sess_123',
             'status': 'In progress',
         })
 
@@ -466,6 +551,57 @@ class DiditIntegrationTests(TestCase):
             kwargs['json']['vendor_data'],
             f'{{"user_id":{self.user.id},"account_type":"business","business_id":"42"}}',
         )
+
+    @patch('security.didit.requests.request')
+    def test_business_resumes_its_pending_session_without_creating_another(self, request):
+        from security.didit import ensure_pending_didit_verification
+        ensure_pending_didit_verification(user=self.user, session_id='same-business-session',
+                                          account_type='business', business_id='42')
+        request.return_value = self._mock_response({
+            'session_id': 'same-business-session', 'session_kind': 'business',
+            'status': 'RESUB_REQUESTED', 'workflow_id': 'workflow-business',
+            'session_url': 'https://verify.didit.me/session/same-business-session',
+            'vendor_data': {'user_id': self.user.id, 'account_type': 'business', 'business_id': '42'},
+        })
+        result = create_didit_session(user=self.user, account_type='business', business_id='42')
+        self.assertEqual(result['session_id'], 'same-business-session')
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[0], 'GET')
+
+    @patch('security.didit.requests.request')
+    def test_business_can_replace_legacy_personal_workflow_without_reusing_it(self, request):
+        from security.didit import ensure_pending_didit_verification
+        ensure_pending_didit_verification(user=self.user, session_id='legacy-personal',
+                                          account_type='business', business_id='42')
+        request.side_effect = [self._mock_response({
+            'session_id': 'legacy-personal', 'session_kind': 'user', 'status': 'In Progress',
+            'workflow_id': 'old-personal-workflow',
+            'vendor_data': {'user_id': self.user.id, 'account_type': 'business', 'business_id': '42'},
+        }), self._mock_response({
+            'session_id': 'new-business', 'session_token': 'business-token',
+            'url': 'https://verify.didit.me/session/business-token', 'status': 'Not Started',
+        })]
+        result = create_didit_session(user=self.user, account_type='business', business_id='42')
+        self.assertEqual(result['session_id'], 'new-business')
+        self.assertEqual([call.args[0] for call in request.call_args_list], ['GET', 'POST'])
+        self.assertEqual(request.call_args.kwargs['json']['workflow_id'], 'workflow-business')
+
+    @patch('security.didit.requests.request')
+    def test_business_resume_never_skips_a_wrong_owner_binding(self, request):
+        from security.didit import ensure_pending_didit_verification
+        ensure_pending_didit_verification(user=self.user, session_id='legacy-personal',
+                                          account_type='business', business_id='42')
+        for binding in ({'user_id': self.user.id, 'account_type': 'business', 'business_id': '43'},
+                        {'user_id': self.user.id + 1, 'account_type': 'business', 'business_id': '42'}):
+            with self.subTest(binding=binding):
+                request.reset_mock()
+                request.return_value = self._mock_response({
+                    'session_kind': 'user', 'workflow_id': 'old-personal-workflow',
+                    'vendor_data': binding,
+                })
+                with self.assertRaises(DiditAPIError):
+                    create_didit_session(user=self.user, account_type='business', business_id='42')
+                self.assertEqual(request.call_count, 1)
 
     @patch('security.didit.requests.request')
     def test_business_session_requires_business_id_before_network(self, mock_request):

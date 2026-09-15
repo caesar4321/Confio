@@ -3056,6 +3056,7 @@ class SubmitIdentityVerification(graphene.Mutation):
 
 
 class DiditSessionInfo(graphene.ObjectType):
+    session_url = graphene.String()
     session_id = graphene.String()
     session_token = graphene.String()
     status = graphene.String()
@@ -3109,7 +3110,7 @@ class CreateDiditVerificationSession(graphene.Mutation):
                 user=user,
                 account_type=account_type,
                 business_id=business_id,
-                callback_url=build_didit_callback_url(info.context),
+                callback_url='confio://verification' if account_type == 'business' else build_didit_callback_url(info.context),
                 document_request=document_request,
             )
             return CreateDiditVerificationSession(
@@ -3118,6 +3119,7 @@ class CreateDiditVerificationSession(graphene.Mutation):
                 session=DiditSessionInfo(
                     session_id=session_data['session_id'],
                     session_token=session_data['session_token'],
+                    session_url=session_data.get('session_url'),
                     status=session_data['status'],
                     vendor_data=session_data['vendor_data'],
                 ),
@@ -3148,7 +3150,16 @@ class SyncDiditVerificationSession(graphene.Mutation):
             return SyncDiditVerificationSession(success=False, error="Authentication required", verification=None, verification_status=None)
 
         try:
-            verification, _ = sync_didit_session(session_id=session_id, expected_user=user)
+            from users.jwt_context import get_jwt_business_context_with_validation, is_business_employee
+            account_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+            account_type = account_ctx.get('account_type') or 'personal'
+            business_id = account_ctx.get('business_id')
+            if account_type == 'business' and (not business_id or is_business_employee(user, business_id)):
+                raise DiditAPIError('Only the business owner can sync business verification')
+            verification, _ = sync_didit_session(
+                session_id=session_id, expected_user=user,
+                expected_account_type=account_type, expected_business_id=business_id,
+            )
             return SyncDiditVerificationSession(
                 success=True,
                 error=None,

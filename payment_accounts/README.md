@@ -276,16 +276,40 @@ owner address and National/Foreign domicile use the self-declared ramp address
 (the same one Koywe uses), because many LATAM IDs print no address.
 
 **EDD** (monthly volume above the provider default). The app asks income type,
-occupation (prefilled from the declared economic activity), expected volume and
-source; one Didit session (`DIDIT_EDD_WORKFLOW_ID`) collects proof of address
-(checked against the verified name and declared address) and the
-source-of-funds uploads (questionnaire `585211e7-…`, manual review). No
-liveness or face match: the person already passed KYC. The webhook routes EDD
-sessions to `payment_accounts.edd`, never to `IdentityVerification`. Ops
-reviews in the Didit console, then uses the admin action **Forward EDD
-documents to the provider**, which uploads the proof of address and first
-source-of-funds file to the Infinia owner (`PATCH /owners/`). The provider's
-account manager raises the limit; `/limits/` reflects it.
+occupation, expected monthly volume and funding source. One Didit session
+collects proof of address and source-of-funds evidence. The webhook routes EDD
+sessions to `payment_accounts.edd`, never to `IdentityVerification`.
+
+Submitted sessions (`Approved` or `In Review`) are automatically dispatched to
+`payment_accounts.forward_edd` after commit. There is no Confío manual-review
+gate: complete evidence awaiting Didit review can be sent to Infinia for its
+own decision. Incomplete, declined, or unfinished sessions are not forwarded.
+The handoff uploads proof of address and bundles **all** income-proof and bank
+statement files into one source-of-funds PDF, then links both document IDs with
+`PATCH /v1/accounts/owners/{owner_id}/`. SELF_DECLARED owners also receive
+`expected_monthly_volume_usd`; occupation and income/source categories remain
+local because the owner update schema has no matching fields.
+
+Dispatch retries use Celery backoff; `payment_accounts.reconcile_edd` runs every
+five minutes to recover missed webhooks, queue failures, and owners activated
+later. A successful handoff becomes `forwarded`, never locally `approved`.
+Repeated completed jobs do not relink documents. `forwarded` is a completed
+handoff, not a provider approval: users may send new evidence without staff
+closing the earlier request. Each request has a distinct Didit vendor reference,
+so updating evidence cannot resume an earlier session awaiting review. Apply
+migration `0022_edd_forwarded_terminal` before deploying worker and beat.
+A rollback to the previous uniqueness rule requires resolving multiple forwarded
+requests per owner first. Task logs omit underlying HTTP exception chains because
+they can contain temporary document credentials.
+
+The [owner update API](https://docs.infiniaweb.com/reference/v1_5_update_account_owner)
+supports these document links. The published
+[limit increase process](https://docs.infiniaweb.com/docs/transaction-limits)
+still specifies an account-manager request; uploading evidence alone is not
+documented to initiate that review. Confirm that routing with Infinia.
+Monthly limits are informational in Confío; Infinia enforces them on execution.
+Provider rejection after bridging can leave funds at Infinia for recovery;
+this change does not add automatic refunds.
 
 Deploy `security` migration `0011` and `payment_accounts` migration `0014`
 (after the direct-bridge migrations `0012`–`0013`).

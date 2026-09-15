@@ -822,11 +822,10 @@ def _dollar_account(owner):
 
 
 def limits(owner, *, client=None):
-    """The binding monthly limit is the shared dollar account's.
+    """Display the shared dollar account's monthly usage as guidance only.
 
-    Every corridor, in both directions, passes through the one USDC_POL
-    account, so its counter caps all countries together. Local-account
-    counters are not used for blocking until the sandbox confirms their units.
+    Infinia enforces limits when processing transactions. This snapshot never
+    blocks a send, even when the limit is exhausted or unavailable.
     """
     from .bridge import bridge_cap
     per_transfer = bridge_cap()  # None: no per-transfer cap
@@ -835,31 +834,16 @@ def limits(owner, *, client=None):
              'used': None, 'available': None, 'resets_at': '', 'near_limit': False}
     if not crypto:
         return empty
+    # Count before the provider snapshot so a send completed during the HTTP
+    # request does not disappear from both counters in the displayed allowance.
+    in_flight = in_flight_usd(owner)
     row = account_limits(crypto, client or InfiniaClient())
     if row is None or row['limit'] is None:
         return empty
-    available = max(row['remaining'] - in_flight_usd(owner), Decimal(0))
+    available = max(row['remaining'] - in_flight, Decimal(0))
     return {'known': True, 'has_account': True, 'per_transfer_max': per_transfer, 'limit': row['limit'],
             'used': max(row['limit'] - available, Decimal(0)), 'available': available,
             'resets_at': row['resets_at'], 'near_limit': available < row['limit'] * Decimal('0.2')}
-
-
-def require_allowance(owner, crypto, amount, *, client=None, exclude_request_id=None):
-    """Pre-check numeric provider limits; fail closed on failed/malformed lookups.
-
-    An explicit null cap defers enforcement to Infinia, not a local guessed cap.
-    """
-    # Local count first, then the provider's snapshot: a send that completes in
-    # between is counted twice (stricter), never zero times.
-    in_flight = in_flight_usd(owner, exclude_request_id)
-    row = account_limits(crypto, client or InfiniaClient())
-    if row is None:
-        raise PaymentAccountError('No pudimos confirmar tu límite mensual. Intenta de nuevo en unos minutos.')
-    if row['limit'] is None:
-        return
-    available = row['remaining'] - in_flight
-    if Decimal(str(amount)) > available:
-        raise PaymentAccountError('Este envío supera tu límite mensual disponible.')
 
 
 # ------------------------------------------------------------------------ EDD

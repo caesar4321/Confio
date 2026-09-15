@@ -1,0 +1,42 @@
+{
+  "business_questionnaire": {
+    "id": "4290ba59-8631-45c6-9afb-54e1bc586858",
+    "version_uuid": "4290ba59-8631-45c6-9afb-54e1bc586858",
+    "workflow_id": null,
+    "status": "published",
+    "version": 1,
+    "label": "Confio KYB - Business evidence and activity"
+  },
+  "person_questionnaire": {
+    "id": "d3ad7c27-3561-4db0-9fba-cfd3a3361c01",
+    "version_uuid": "d3ad7c27-3561-4db0-9fba-cfd3a3361c01",
+    "workflow_id": null,
+    "status": "published",
+    "version": 1,
+    "label": "Confio KYB - Owner and representative details"
+  },
+  "person_workflow": {
+    "id": "f3c80006-d551-4fab-9317-46ce9a5236dc",
+    "version_uuid": "f3c80006-d551-4fab-9317-46ce9a5236dc",
+    "workflow_id": "f3c80006-d551-4fab-9317-46ce9a5236dc",
+    "status": "published",
+    "version": 1,
+    "label": "Confio KYB - Owners and representatives",
+    "features": "OCR + LIVENESS + FACE_MATCH + AML + EMAIL_VERIFICATION + PHONE_VERIFICATION + PROOF_OF_ADDRESS + QUESTIONNAIRE",
+    "workflow_type": null,
+    "workflow_url": "https://verify.didit.me/u/88gABtVRT6uTF0bOmlI23A",
+    "manual_review": true
+  },
+  "business_workflow": {
+    "id": "8513abf3-95b2-4740-8dda-2d629d0c5d77",
+    "version_uuid": "82a958c2-32b6-43db-b5a4-eafb14aa2113",
+    "workflow_id": "8513abf3-95b2-4740-8dda-2d629d0c5d77",
+    "status": "published",
+    "version": 3,
+    "label": "Confio KYB - Koywe and Infinia",
+    "features": "KYB_REGISTRY + AML + KYB_KEY_PEOPLE + KYB_DOCUMENTS + EMAIL_VERIFICATION + PHONE_VERIFICATION + QUESTIONNAIRE",
+    "workflow_type": "kyb",
+    "workflow_url": "https://verify.didit.me/u/hROr85WyR0CN2i1inQxddw",
+    "manual_review": true
+  }
+}

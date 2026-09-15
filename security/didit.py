@@ -6,6 +6,7 @@ import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
@@ -279,6 +280,8 @@ _DIDIT_TRANSIENT_MEDIA_KEYS = {
     'portrait_image', 'front_image', 'back_image', 'full_front_image',
     'full_back_image', 'front_video', 'back_video', 'reference_image',
     'video_url', 'file_url', 'session_url', 'kyc_session_url',
+    'url', 'document_file', 'files', 'extra_files',
+    'front_image_camera_front', 'back_image_camera_front',
 }
 
 
@@ -476,12 +479,15 @@ def is_authoritative_brazilian_cpf_backfill(evidence: Any, *, cpf: str) -> bool:
 
 
 def _workflow_id_for_account(account_type: str, phone_country: str | None = None) -> str:
-    business_workflow = getattr(settings, 'DIDIT_BUSINESS_WORKFLOW_ID', '') or ''
+    if account_type == 'business':
+        business_workflow = (getattr(settings, 'DIDIT_BUSINESS_WORKFLOW_ID', '') or '').strip()
+        if not business_workflow:
+            raise DiditConfigurationError('La verificación de tu negocio no está disponible por ahora. Contacta a soporte.')
+        return business_workflow
+
     workflow_map = getattr(settings, 'DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY', {}) or {}
     normalized_phone_country = str(phone_country or '').strip().upper()
-    workflow_id = business_workflow if account_type == 'business' and business_workflow else ''
-    if not workflow_id and normalized_phone_country:
-        workflow_id = str(workflow_map.get(normalized_phone_country, '') or '')
+    workflow_id = str(workflow_map.get(normalized_phone_country, '') or '')
     if not workflow_id:
         if normalized_phone_country:
             raise DiditConfigurationError(
@@ -527,6 +533,20 @@ def _personal_vendor_data(user) -> dict[str, Any]:
     return {'user_id': user.id, 'account_type': 'personal'}
 
 
+def _validated_didit_session_url(value: Any) -> str:
+    url = str(value or '').strip()
+    try:
+        parsed = urlsplit(url)
+        valid = (parsed.scheme == 'https' and parsed.hostname == 'verify.didit.me'
+                 and not parsed.username and not parsed.password and parsed.port in (None, 443)
+                 and re.fullmatch(r'/(?:[a-z]{2}/)?session/[A-Za-z0-9_-]+/?', parsed.path))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise DiditAPIError('Didit no devolvió un enlace de verificación seguro.')
+    return url
+
+
 def _start_session(payload: dict[str, Any]) -> dict[str, Any]:
     response = _didit_request('POST', '/v3/session/', payload=payload)
     session_id = _first_non_empty(response.get('session_id'), response.get('id'))
@@ -536,6 +556,7 @@ def _start_session(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         'session_id': str(session_id),
         'session_token': str(session_token),
+        'session_url': response.get('url'),
         'status': str(response.get('status') or 'pending'),
         'raw': response,
     }
@@ -589,7 +610,36 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
     if callback_url:
         payload['callback'] = callback_url
 
+    if account_type == 'business':
+        # Resume this company's unfinished KYB, including requested corrections.
+        # Fetch the fresh hosted link; bearer URLs are never stored in audit JSON.
+        pending = IdentityVerification.objects.filter(
+            user=user, status='pending', risk_factors__provider='didit',
+            risk_factors__account_type='business', risk_factors__business_id=str(business_id),
+        ).order_by('-created_at').first()
+        previous_id = ((pending.risk_factors or {}).get('didit') or {}).get('session_id') if pending else None
+        if previous_id:
+            decision = _didit_request('GET', f'/v3/session/{previous_id}/decision/')
+            # Old releases could bind a personal workflow to a business. Verify
+            # ownership before skipping that legacy session; never hide an API
+            # failure or a session belonging to another user/business.
+            _resolve_user_from_payload(decision, expected_user=user)
+            previous_binding = _safe_json_loads(decision.get('vendor_data'))
+            if (previous_binding.get('account_type') != 'business'
+                    or str(previous_binding.get('business_id') or '') != str(business_id)):
+                raise DiditAPIError('Didit KYB session does not match the active business')
+            if (decision.get('session_kind') == 'business'
+                    and decision.get('workflow_id') == payload['workflow_id']
+                    and _map_didit_status(decision) == 'pending'
+                    and str(decision.get('status') or '').lower() not in {'expired', 'abandoned'}):
+                return {'session_id': previous_id, 'session_token': None,
+                        'session_url': _validated_didit_session_url(decision.get('session_url')),
+                        'status': decision.get('status'), 'vendor_data': vendor_data}
     session = _start_session(payload)
+    if account_type == 'business':
+        session['session_url'] = _validated_didit_session_url(session.get('session_url'))
+        ensure_pending_didit_verification(user=user, session_id=session['session_id'],
+                                          account_type='business', business_id=business_id)
     if document_request is not None:
         # Record the role now: the decision webhook must never mistake this
         # document for the primary one, whatever Didit echoes back.
@@ -602,14 +652,19 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
 
 def create_didit_workflow_session(*, user, workflow_id: str, expected_details: dict[str, Any] | None = None,
                                   metadata: dict[str, Any] | None = None, callback_url: str | None = None,
-                                  language: str | None = None) -> dict[str, Any]:
-    """A personal session on an explicit workflow (EDD), grouped with the KYC."""
+                                  language: str | None = None,
+                                  session_reference: str | None = None) -> dict[str, Any]:
+    """A personal session on an explicit workflow, optionally bound to a request."""
     if not workflow_id:
         raise DiditConfigurationError('Didit workflow is not configured')
     payload: dict[str, Any] = {
         'workflow_id': workflow_id,
         'vendor_data': json.dumps(_personal_vendor_data(user), separators=(',', ':')),
     }
+    if session_reference:
+        vendor = _personal_vendor_data(user)
+        vendor['edd_request_id'] = session_reference
+        payload['vendor_data'] = json.dumps(vendor, separators=(',', ':'))
     if expected_details:
         payload['expected_details'] = expected_details
     if metadata:
@@ -724,14 +779,9 @@ def ensure_pending_didit_verification(*, user, session_id: str, account_type: st
 def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
     if response_payload.get('session_kind') == 'business':
         registry_checks = response_payload.get('registry_checks') or []
-        registry = next(
-            (
-                item for item in registry_checks
-                if isinstance(item, dict)
-                and str(item.get('status') or '').strip().lower() == 'approved'
-            ),
-            registry_checks[0] if registry_checks else {},
-        )
+        # Use the canonical first registry result consistently with provider
+        # handoff; never select an older approved company from later checks.
+        registry = registry_checks[0] if registry_checks and isinstance(registry_checks[0], dict) else {}
         company = registry.get('company') or {}
         addresses = company.get('addresses') or []
         address = addresses[0] if addresses and isinstance(addresses[0], dict) else {}
@@ -952,6 +1002,16 @@ def retrieve_didit_decision(
         raise DiditAPIError('Didit session does not match the active account type')
     if expected_business_id and business_id != str(expected_business_id):
         raise DiditAPIError('Didit KYB session does not match the active business')
+    session_kind = str(response_payload.get('session_kind') or '').lower()
+    if account_type == 'business':
+        if not business_id:
+            raise DiditAPIError('Didit KYB session is missing its business binding')
+        if session_kind and session_kind != 'business':
+            raise DiditAPIError('A personal verification cannot verify a business')
+        if _map_didit_status(response_payload) == 'verified' and session_kind != 'business':
+            raise DiditAPIError('Approved KYB decision is missing its business session kind')
+    elif session_kind == 'business':
+        raise DiditAPIError('A business verification cannot verify a personal account')
     return response_payload
 
 
@@ -1118,7 +1178,7 @@ def _session_lock_id(session_id: str) -> int:
     return int.from_bytes(digest[:8], 'big', signed=True)
 
 
-def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[IdentityVerification, dict[str, Any]]:
+def sync_didit_session(*, session_id: str, expected_user=None, expected_account_type=None, expected_business_id=None) -> tuple[IdentityVerification, dict[str, Any]]:
     from django.db import connection, transaction
     # One sync per Didit session at a time, from asking Didit to saving: a later
     # sync always reads Didit's later answer, and a slower one can never land
@@ -1126,10 +1186,12 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute('SELECT pg_advisory_xact_lock(%s)', [_session_lock_id(session_id)])
-        return _sync_didit_session(session_id=session_id, expected_user=expected_user)
+        return _sync_didit_session(session_id=session_id, expected_user=expected_user,
+                                   expected_account_type=expected_account_type,
+                                   expected_business_id=expected_business_id)
 
 
-def _sync_didit_session(*, session_id: str, expected_user=None) -> tuple[IdentityVerification, dict[str, Any]]:
+def _sync_didit_session(*, session_id: str, expected_user=None, expected_account_type=None, expected_business_id=None) -> tuple[IdentityVerification, dict[str, Any]]:
     # An EDD session (proof of address, source of funds) is not an identity
     # document. Refuse it here, whichever path delivers it (webhook or the
     # app's sync mutation), so it can never create or overwrite a verification.
@@ -1139,6 +1201,8 @@ def _sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identit
     response_payload = retrieve_didit_decision(
         session_id=session_id,
         expected_user=expected_user,
+        expected_account_type=expected_account_type,
+        expected_business_id=expected_business_id,
     )
     user = _resolve_user_from_payload(response_payload, expected_user=expected_user)
     if user is None:

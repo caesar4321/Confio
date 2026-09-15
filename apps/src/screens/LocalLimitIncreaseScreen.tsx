@@ -55,8 +55,8 @@ const SOURCES = [
   { id: 'family_support', label: 'Apoyo familiar' },
   { id: 'other', label: 'Otro' },
 ];
-const IN_REVIEW = ['submitted', 'in_review', 'forwarded'];
-const STATUS_STEPS = ['Documentos enviados', 'En revisión', 'Con el procesador de pagos', 'Resultado'];
+const IN_REVIEW = ['submitted', 'in_review'];
+const STATUS_STEPS = ['Documentos recibidos', 'Preparando envío automático', 'Documentos enviados al procesador'];
 
 export default function LocalLimitIncreaseScreen() {
   const navigation = useNavigation<Nav>();
@@ -111,9 +111,10 @@ export default function LocalLimitIncreaseScreen() {
     return () => requestQuery.stopPolling();
   }, [reviewing]); // eslint-disable-line react-hooks/exhaustive-deps
   const approved = latest?.status === 'approved';
+  const forwarded = latest?.status === 'forwarded';
   useEffect(() => {
-    if (approved) limitsQuery.refetch().catch(() => {});
-  }, [approved]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (approved || forwarded) limitsQuery.refetch().catch(() => {});
+  }, [approved, forwarded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (!complete || submitting) return;
@@ -146,7 +147,7 @@ export default function LocalLimitIncreaseScreen() {
   };
 
   const statusIndex = useMemo(() => (latest ? Math.max(0, IN_REVIEW.indexOf(latest.status)) : 0), [latest]);
-  const showStatus = latest && !startNew && (IN_REVIEW.includes(latest.status) || latest.status === 'approved');
+  const showStatus = latest && !startNew && (IN_REVIEW.includes(latest.status) || approved || forwarded);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -195,13 +196,15 @@ export default function LocalLimitIncreaseScreen() {
         ) : showStatus ? (
           <RampReveal delay={80}>
             <View style={styles.section}>
-              <RampStepHeader number={1} title={latest.status === 'approved' ? 'Solicitud aprobada' : 'Tu solicitud'}
+              <RampStepHeader number={1} title={approved ? 'Solicitud aprobada' : forwarded ? 'Documentos enviados' : 'Tu solicitud'}
                 accentColor={colors.primaryDark} accentBackground={colors.primaryLight} titleColor={colors.dark} />
               <View style={styles.inputCard}>
-                {latest.status === 'approved' ? (
+                {approved ? (
                   <Text style={styles.bannerText}>
-                    {latest.userMessage || 'Aprobamos tu solicitud. Tu nuevo límite ya aparece en tus transferencias.'}
+                    {latest.userMessage || 'Tu solicitud fue aprobada. Consulta tu límite actualizado en tus transferencias.'}
                   </Text>
+                ) : forwarded ? (
+                  <Text style={styles.bannerText}>Tus documentos ya están adjuntos a tu cuenta de pagos locales. El procesador determina si corresponde aumentar tu límite.</Text>
                 ) : STATUS_STEPS.map((label, index) => {
                   const isDone = index < statusIndex + 1;
                   const isActive = index === statusIndex + 1;
@@ -225,12 +228,12 @@ export default function LocalLimitIncreaseScreen() {
               <View style={[styles.disclaimerPill, { marginTop: 14 }]}>
                 <Icon name="info" size={12} color={colors.primaryDark} />
                 <Text style={styles.quoteNote}>
-                  Tu cuenta sigue funcionando con tu límite actual mientras revisamos. Te avisaremos del resultado.
+                  Enviamos tus documentos automáticamente al procesador de pagos. El procesador evalúa tu solicitud y aplica los límites al recibir tus transacciones.
                 </Text>
               </View>
-              {latest.status === 'approved' ? (
+              {approved || forwarded ? (
                 <TouchableOpacity style={{ alignSelf: 'center', marginTop: 14 }} onPress={() => setStartNewFrom(latest?.id ?? '')}>
-                  <Text style={styles.historyPillText}>Pedir un límite mayor</Text>
+                  <Text style={styles.historyPillText}>{forwarded ? 'Enviar nuevos documentos' : 'Pedir un límite mayor'}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>

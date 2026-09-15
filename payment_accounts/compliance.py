@@ -17,6 +17,54 @@ from payment_accounts.clients import ComplianceHandoffError
 MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 SUPPORTED_CONTENT_TYPES = {'image/jpeg', 'image/png', 'application/pdf'}
 
+# These IDs identify the reviewed questionnaire *versions*, not their titles.
+# Updating a workflow preserves its ID, but publishing a questionnaire version
+# requires explicitly reviewing and updating this mapping.
+BUSINESS_WORKFLOW_ID = '8513abf3-95b2-4740-8dda-2d629d0c5d77'
+PERSON_WORKFLOW_ID = 'f3c80006-d551-4fab-9317-46ce9a5236dc'
+BUSINESS_QUESTIONNAIRE_ID = '4290ba59-8631-45c6-9afb-54e1bc586858'
+PERSON_QUESTIONNAIRE_ID = 'd3ad7c27-3561-4db0-9fba-cfd3a3361c01'
+
+
+def _reviewed_answers(decision, questionnaire_id, workflow_id):
+    responses = decision.get('questionnaire_responses') or []
+    matches = [r for r in responses if isinstance(r, dict)
+               and r.get('questionnaire_id') == questionnaire_id]
+    if not matches:
+        if decision.get('workflow_id') == workflow_id or responses:
+            raise ComplianceHandoffError('The required reviewed KYB questionnaire is missing')
+        return {}
+    if (len(matches) != 1 or str(decision.get('status') or '').lower() != 'approved'
+            or str(matches[0].get('status') or '').lower() != 'approved'):
+        raise ComplianceHandoffError('The KYB questionnaire must be individually approved')
+    answers = {}
+    for section in matches[0].get('sections') or []:
+        for item in section.get('items') or []:
+            key = item.get('value')
+            if not key:
+                continue
+            if key in answers:
+                raise ComplianceHandoffError('Ambiguous duplicate KYB questionnaire answer')
+            answers[key] = item.get('answer') if isinstance(item.get('answer'), dict) else {}
+    if not answers:
+        raise ComplianceHandoffError('The reviewed KYB questionnaire contains no answers')
+    return answers
+
+
+def _answer_files(answers, key):
+    files = answers.get(key, {}).get('files') or []
+    if not isinstance(files, list):
+        raise ComplianceHandoffError('Invalid KYB evidence file list')
+    urls = [item.get('url') if isinstance(item, dict) else item for item in files]
+    if any(not isinstance(url, str) or not url.strip() for url in urls):
+        raise ComplianceHandoffError('Invalid KYB evidence file URL')
+    return urls
+
+
+def _questionnaire_address(answers, prefix):
+    return _address(**{field: answers.get(f'{prefix}_{field}', {}).get('value')
+                      for field in ('line_1', 'city', 'state', 'postal_code', 'country')})
+
 
 def iso_alpha2(value):
     normalized = str(value or '').strip().upper()
@@ -75,6 +123,15 @@ def _address(*, line_1, city, state, postal_code, country):
             f'Didit verification is missing Infinia address fields: {", ".join(missing)}'
         )
     return values
+
+
+def _verified_contact(decision):
+    email = _approved_first(decision.get('email_verifications'))
+    phone = _approved_first(decision.get('phone_verifications'))
+    if any(str(item.get('status') or '').lower() != 'approved' for item in (email, phone)):
+        raise ComplianceHandoffError('Approved email and phone verifications are required for KYB')
+    return (_required(email.get('email'), 'verified email address'),
+            _required(phone.get('full_number'), 'verified phone number'))
 
 
 def _contact(decision, user):
@@ -172,6 +229,31 @@ def _normalized_roles(party):
     if role:
         roles.add(role)
     return roles
+
+
+def didit_ubo_parties(decision):
+    """UBOs from both authoritative Key People buckets, with deletion safeguards.
+
+    Registry-derived people do not appear in submitted.parties (source=USER).
+    Use their detailed Key People linkage, not the company's simplified URLs.
+    """
+    result = []
+    for check in decision.get('key_people_checks') or []:
+        registry = check.get('registry') or {}
+        candidates = [*(registry.get('officers') or []),
+                      *((check.get('submitted') or {}).get('parties') or [])]
+        for party in registry.get('beneficial_owners') or []:
+            candidates.append({**party, 'roles': [*_normalized_roles(party), 'ubo']})
+        for party in candidates:
+            if 'ubo' not in _normalized_roles(party):
+                continue
+            if party.get('is_skipped') or party.get('kyc_session_deleted'):
+                raise ComplianceHandoffError('Skipped or deleted UBO KYC cannot be transferred to Infinia')
+            if party.get('entity_type') not in (None, '', 'person'):
+                raise ComplianceHandoffError('Infinia requires every UBO to be a natural person')
+            _required(party.get('kyc_session_id'), 'UBO Didit KYC session ID')
+            result.append(party)
+    return result
 
 
 def _upload_document(client, *, document_type, front_url, back_url=None):
@@ -315,7 +397,12 @@ def _individual_identifiers(identity, id_check):
 
 
 def _volume_fields(decision):
-    value = decision.get('expected_monthly_volume_usd')
+    answers = (_reviewed_answers(decision, BUSINESS_QUESTIONNAIRE_ID, BUSINESS_WORKFLOW_ID)
+               if decision.get('session_kind') == 'business' else {})
+    value = (answers.get('expected_monthly_volume_usd', {}).get('value')
+             if answers else decision.get('expected_monthly_volume_usd'))
+    if answers:
+        _required(value, 'expected monthly USD volume')
     if value is None:
         return {}
     try:
@@ -346,9 +433,20 @@ def _individual_payload(*, decision, identity, user, client, declared_address=No
     if any(str(check.get('status') or '').strip().lower() != 'approved' for check in (id_check, liveness)):
         raise ComplianceHandoffError('Approved Didit identity and liveness checks are required')
     document_type = _document_type(id_check.get('document_type') or identity.document_type)
+    answers = (_reviewed_answers(decision, PERSON_QUESTIONNAIRE_ID, PERSON_WORKFLOW_ID)
+               if user is None else {})
+    if answers and iso_alpha2(identity.document_issuing_country) == 'AR' and identity.document_type != 'passport':
+        # The reviewed answer is only supplementary evidence when an official
+        # tax document was attached. Bare self-declared CUIL is never enough.
+        cuil = answers.get('additional_tax_id', {}).get('value')
+        if cuil and _answer_files(answers, 'tax_id_evidence'):
+            previous = id_check.get('additional_tax_id')
+            if previous and re.sub(r'[\s-]', '', str(previous)) != re.sub(r'[\s-]', '', str(cuil)):
+                raise ComplianceHandoffError('Conflicting Argentine CUIL evidence')
+            id_check = {**id_check, 'additional_tax_id': cuil}
     identifiers = _individual_identifiers(identity, id_check)
     volume = _volume_fields(decision)
-    email, phone = _contact(decision, user)
+    email, phone = _verified_contact(decision) if answers else _contact(decision, user)
     if declared_address is not None:
         # The account owner: many LATAM cédulas/DNIs carry no address, so use
         # the same self-declared ramp address Koywe uses (country from the
@@ -366,6 +464,12 @@ def _individual_payload(*, decision, identity, user, client, declared_address=No
             )
         except (ComplianceHandoffError, ValueError) as exc:
             raise ComplianceHandoffError('Completa tu dirección para abrir tu cuenta local.') from exc
+    elif answers:
+        poa = _approved_first(decision.get('poa_verifications'))
+        if str(poa.get('status') or '').lower() != 'approved':
+            raise ComplianceHandoffError('An approved proof of address is required for the UBO')
+        _required(poa.get('document_file'), 'UBO proof of address document')
+        address = _questionnaire_address(answers, 'residential_address')
     else:
         # A UBO is a different person: only their own verified data, never
         # the account owner's declared address.
@@ -411,13 +515,22 @@ def _individual_payload(*, decision, identity, user, client, declared_address=No
         'financial_statements': ('SOURCE_OF_FUNDS', 'source_of_funds_document_id'),
         'proof_of_address': ('PROOF_OF_ADDRESS', 'proof_of_address_document_id'),
     })
+    if answers:
+        poa_id, poa_audit = _upload_document(client, document_type='PROOF_OF_ADDRESS',
+                                            front_url=poa['document_file'])
+        documents['proof_of_address_document_id'] = poa_id
+        audits.append(poa_audit)
+        tax_urls = _answer_files(answers, 'tax_id_evidence')
+        if tax_urls:
+            tax_id, tax_audit = _upload_bundle(client, document_type='TAX_REGISTRATION', urls=tax_urls)
+            documents['other_documents'] = [tax_id]
+            audits.append(tax_audit)
     payload.update(documents)
     return payload, [identity_audit, selfie_audit, *audits]
 
 
 BUSINESS_DOCUMENT_MAP = {
     'certificate_of_incorporation': ('CERTIFICATE_OF_INCORPORATION', 'incorporation_document_id'),
-    'legal_presence': ('CERTIFICATE_OF_INCORPORATION', 'incorporation_document_id'),
     'source_of_funds': ('SOURCE_OF_FUNDS', 'source_of_funds_document_id'),
     'financial_statements': ('SOURCE_OF_FUNDS', 'source_of_funds_document_id'),
     'proof_of_address': ('PROOF_OF_ADDRESS', 'proof_of_address_document_id'),
@@ -455,7 +568,20 @@ def _supporting_documents(decision, client, mapping):
 
 
 def _business_documents(decision, client):
-    fields, audits = _supporting_documents(decision, client, BUSINESS_DOCUMENT_MAP)
+    answers = _reviewed_answers(decision, BUSINESS_QUESTIONNAIRE_ID, BUSINESS_WORKFLOW_ID)
+    extra_items = []
+    for element, kind in (
+        ('source_of_funds_document', 'source_of_funds'),
+        ('proof_of_address_document', 'proof_of_address'),
+        ('tax_registration_document', 'tax_registration'),
+    ):
+        urls = _answer_files(answers, element)
+        if answers:
+            _required(urls, element)
+        extra_items.extend({'status': 'Approved', 'document_type': kind, 'file_url': url} for url in urls)
+    combined = {**decision, 'document_verifications': [
+        *(decision.get('document_verifications') or []), {'items': extra_items}]}
+    fields, audits = _supporting_documents(combined, client, BUSINESS_DOCUMENT_MAP)
     required = {
         'incorporation_document_id',
         'source_of_funds_document_id',
@@ -470,7 +596,8 @@ def _business_documents(decision, client):
 
 
 def _company(decision):
-    registry = _approved_first(decision.get('registry_checks'))
+    # Match the first registry result used by security.didit's identity normalizer.
+    registry = _first(decision.get('registry_checks'))
     if str(registry.get('status') or '').strip().lower() != 'approved':
         raise ComplianceHandoffError('An approved business registry check is required')
     return _required(registry.get('company'), 'approved business registry result')
@@ -480,9 +607,10 @@ def _organization_payload(*, decision, identity, user, client, child_decisions):
     if decision.get('session_kind') != 'business':
         raise ComplianceHandoffError('A business Infinia owner requires a Didit KYB session')
     company = _company(decision)
-    email, phone = _contact(decision, user)
+    answers = _reviewed_answers(decision, BUSINESS_QUESTIONNAIRE_ID, BUSINESS_WORKFLOW_ID)
+    email, phone = _verified_contact(decision) if answers else _contact(decision, None)
     address_data = _first(company.get('addresses'))
-    address = _address(
+    address = _questionnaire_address(answers, 'company_address') if answers else _address(
         line_1=address_data.get('address') or address_data.get('line_1') or company.get('registered_address'),
         city=address_data.get('city'),
         state=address_data.get('state') or address_data.get('region'),
@@ -494,18 +622,16 @@ def _organization_payload(*, decision, identity, user, client, child_decisions):
     tax_id = _required(company.get('tax_number'), 'company tax ID (registration number is not a substitute)')
     tax_country = iso_alpha2(_required(company.get('country_code'), 'company country'))
     volume = _volume_fields(decision)
-    document_fields, audits = _business_documents(decision, client)
-    parties = []
     for check in decision.get('key_people_checks') or []:
-        parties.extend(((check.get('submitted') or {}).get('parties') or []))
+        if answers and str(check.get('status') or '').lower() != 'approved':
+            raise ComplianceHandoffError('An approved key people check is required')
+    parties = didit_ubo_parties(decision)
+    if not parties:
+        raise ComplianceHandoffError('Natural-person UBO disclosure is required before Infinia onboarding')
+    document_fields, audits = _business_documents(decision, client)
     ubos = []
     seen = set()
     for party in parties:
-        roles = _normalized_roles(party)
-        if 'ubo' not in roles:
-            continue
-        if party.get('entity_type') not in (None, '', 'person'):
-            raise ComplianceHandoffError('Infinia requires every UBO to be a natural person')
         child_id = str(_required(party.get('kyc_session_id'), 'UBO Didit KYC session ID'))
         if child_id in seen:
             continue

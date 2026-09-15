@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from django.conf import settings
 
 from payment_accounts.clients import InfiniaClient, first_item, verify_infinia_signature
-from payment_accounts.compliance import build_infinia_self_declared_payload
+from payment_accounts.compliance import build_infinia_self_declared_payload, didit_ubo_parties
 from security.didit import (
     retrieve_didit_decision,
     retrieve_linked_didit_decision,
@@ -49,31 +49,17 @@ class InfiniaProvider(PaymentAccountProvider):
         )
         child_decisions = {}
         if profile.owner_type == 'business':
-            for check in decision.get('key_people_checks') or []:
-                parties = ((check.get('submitted') or {}).get('parties') or [])
-                for party in parties:
-                    raw_roles = party.get('roles') or []
-                    if isinstance(raw_roles, str):
-                        raw_roles = [raw_roles]
-                    roles = set()
-                    for item in raw_roles:
-                        item_role = item.get('role') if isinstance(item, dict) else item
-                        normalized = str(item_role or '').strip().lower()
-                        if normalized:
-                            roles.add(normalized)
-                    role = str(party.get('role') or '').strip().lower()
-                    if role:
-                        roles.add(role)
-                    child_id = str(party.get('kyc_session_id') or '')
-                    if 'ubo' not in roles or not child_id or child_id in child_decisions:
-                        continue
-                    child = retrieve_linked_didit_decision(session_id=child_id)
-                    if str(child.get('status') or '').strip().lower() != 'approved':
-                        raise ProviderCapabilityError('Every UBO must complete Didit KYC')
-                    child['_identity'] = SimpleNamespace(
-                        **verification_values_from_didit_decision(child)
-                    )
-                    child_decisions[child_id] = child
+            for party in didit_ubo_parties(decision):
+                child_id = str(party['kyc_session_id'])
+                if child_id in child_decisions:
+                    continue
+                child = retrieve_linked_didit_decision(session_id=child_id)
+                if str(child.get('status') or '').strip().lower() != 'approved':
+                    raise ProviderCapabilityError('Every UBO must complete Didit KYC')
+                child['_identity'] = SimpleNamespace(
+                    **verification_values_from_didit_decision(child)
+                )
+                child_decisions[child_id] = child
         payload, audit_documents = build_infinia_self_declared_payload(
             profile=profile,
             client=self.client,

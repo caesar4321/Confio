@@ -1,0 +1,121 @@
+{
+  "title": "Confio KYB - Owner and representative details",
+  "languages": [
+    "en",
+    "es"
+  ],
+  "default_language": "es",
+  "status": "draft",
+  "is_active": true,
+  "form_elements": [
+    {
+      "id": "residential_address_line_1",
+      "element_type": "short_text",
+      "label": {
+        "en": "Residential street address",
+        "es": "Dirección de residencia (calle y número)"
+      },
+      "is_required": true
+    },
+    {
+      "id": "residential_address_city",
+      "element_type": "short_text",
+      "label": {
+        "en": "City",
+        "es": "Ciudad"
+      },
+      "is_required": true
+    },
+    {
+      "id": "residential_address_state",
+      "element_type": "short_text",
+      "label": {
+        "en": "State or region",
+        "es": "Estado o departamento"
+      },
+      "is_required": true
+    },
+    {
+      "id": "residential_address_postal_code",
+      "element_type": "short_text",
+      "label": {
+        "en": "Postal code",
+        "es": "Código postal"
+      },
+      "is_required": true
+    },
+    {
+      "id": "residential_address_country",
+      "element_type": "country",
+      "label": {
+        "en": "Country of residence",
+        "es": "País de residencia"
+      },
+      "is_required": true
+    },
+    {
+      "id": "tax_id_country",
+      "element_type": "country",
+      "label": {
+        "en": "Country that issued your personal tax or national identity number",
+        "es": "País que emitió tu número tributario o de identidad personal"
+      },
+      "is_required": true
+    },
+    {
+      "id": "tax_id",
+      "element_type": "short_text",
+      "label": {
+        "en": "Personal tax or national ID number: CPF (BR), CURP (MX), RUN/RUT (CL), DNI (AR/PE), or cédula (CO/BO).",
+        "es": "Número tributario o de identidad personal: CPF (BR), CURP (MX), RUN/RUT (CL), DNI (AR/PE) o cédula (CO/BO)."
+      },
+      "is_required": true
+    },
+    {
+      "id": "additional_tax_id",
+      "element_type": "short_text",
+      "label": {
+        "en": "Argentina: enter your CUIL (required for Argentine owners). Otherwise leave blank.",
+        "es": "Argentina: ingresa tu CUIL (obligatorio para titulares argentinos). En otros países, deja el campo vacío."
+      },
+      "is_required": false
+    },
+    {
+      "id": "occupation",
+      "element_type": "short_text",
+      "label": {
+        "en": "Occupation or profession",
+        "es": "Actividad o profesión"
+      },
+      "is_required": true
+    },
+    {
+      "id": "pep_declaration",
+      "element_type": "long_text",
+      "label": {
+        "en": "Declare any politically exposed person status or related-party relationship; otherwise write None.",
+        "es": "Declara si eres una persona políticamente expuesta o tienes una relación cercana con una; de lo contrario, escribe Ninguno."
+      },
+      "is_required": true
+    },
+    {
+      "id": "tax_id_evidence",
+      "element_type": "file_upload",
+      "label": {
+        "en": "If your tax ID or Argentine CUIL is not shown on your identity document, upload official tax-ID evidence (PDF/JPEG/PNG, up to 10 MB).",
+        "es": "Si tu número tributario o CUIL argentino no aparece en tu documento de identidad, sube un comprobante oficial (PDF/JPEG/PNG, hasta 10 MB)."
+      },
+      "is_required": false,
+      "max_files": 1
+    },
+    {
+      "id": "truthful_details",
+      "element_type": "consent",
+      "label": {
+        "en": "I confirm these are my own contact details, address and identity information.",
+        "es": "Confirmo que los datos de contacto, domicilio e identidad proporcionados son míos."
+      },
+      "is_required": true
+    }
+  ]
+}

@@ -452,6 +452,7 @@ export const CREATE_DIDIT_VERIFICATION_SESSION = gql`
       session {
         sessionId
         sessionToken
+        sessionUrl
         status
       }
       verification {

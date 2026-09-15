@@ -1,0 +1,172 @@
+{
+  "title": "Confio KYB - Business evidence and activity",
+  "languages": [
+    "en",
+    "es"
+  ],
+  "default_language": "es",
+  "status": "draft",
+  "is_active": true,
+  "form_elements": [
+    {
+      "id": "business_activity",
+      "element_type": "long_text",
+      "label": {
+        "en": "Describe your products, services, customers and operating countries.",
+        "es": "Describe tus productos, servicios, clientes y países donde operas."
+      },
+      "is_required": true
+    },
+    {
+      "id": "expected_monthly_volume_usd",
+      "element_type": "number",
+      "label": {
+        "en": "Expected monthly payment volume in USD",
+        "es": "Volumen mensual esperado de pagos en USD"
+      },
+      "is_required": true,
+      "validation": {
+        "min": 0,
+        "max": 1000000000000
+      }
+    },
+    {
+      "id": "source_of_funds",
+      "element_type": "long_text",
+      "label": {
+        "en": "Explain the source of company funds and how the attached evidence supports it.",
+        "es": "Explica el origen de los fondos del negocio y cómo lo demuestran los documentos adjuntos."
+      },
+      "is_required": true
+    },
+    {
+      "id": "source_of_funds_document",
+      "element_type": "file_upload",
+      "label": {
+        "en": "Upload audited financial statements, company bank statements or tax returns (PDF/JPEG/PNG, up to 10 MB each).",
+        "es": "Sube estados financieros auditados, estados de cuenta bancarios del negocio o declaraciones tributarias (PDF/JPEG/PNG, hasta 10 MB por archivo)."
+      },
+      "is_required": true,
+      "max_files": 3
+    },
+    {
+      "id": "proof_of_address_document",
+      "element_type": "file_upload",
+      "label": {
+        "en": "Upload a company utility bill, bank statement, corporate tax notice or lease showing the operating address (PDF/JPEG/PNG, up to 10 MB each).",
+        "es": "Sube un recibo de servicios, estado de cuenta, notificación tributaria o contrato de alquiler del negocio que muestre su dirección (PDF/JPEG/PNG, hasta 10 MB por archivo)."
+      },
+      "is_required": true,
+      "max_files": 3
+    },
+    {
+      "id": "tax_registration_document",
+      "element_type": "file_upload",
+      "label": {
+        "en": "Upload the company tax registration certificate. Use the company tax ID, not an owner’s personal ID (PDF/JPEG/PNG, up to 10 MB).",
+        "es": "Sube el certificado de registro tributario del negocio. Usa el número tributario de la empresa, no el documento personal de un propietario (PDF/JPEG/PNG, hasta 10 MB)."
+      },
+      "is_required": true,
+      "max_files": 1
+    },
+    {
+      "id": "company_address_line_1",
+      "element_type": "short_text",
+      "label": {
+        "en": "Company operating street address",
+        "es": "Dirección del negocio (calle y número)"
+      },
+      "is_required": true
+    },
+    {
+      "id": "company_address_city",
+      "element_type": "short_text",
+      "label": {
+        "en": "Company city",
+        "es": "Ciudad del negocio"
+      },
+      "is_required": true
+    },
+    {
+      "id": "company_address_state",
+      "element_type": "short_text",
+      "label": {
+        "en": "Company state or region",
+        "es": "Estado o departamento del negocio"
+      },
+      "is_required": true
+    },
+    {
+      "id": "company_address_postal_code",
+      "element_type": "short_text",
+      "label": {
+        "en": "Company postal code",
+        "es": "Código postal del negocio"
+      },
+      "is_required": true
+    },
+    {
+      "id": "company_address_country",
+      "element_type": "country",
+      "label": {
+        "en": "Company address country",
+        "es": "País de la dirección del negocio"
+      },
+      "is_required": true
+    },
+    {
+      "id": "ownership_and_control",
+      "element_type": "long_text",
+      "label": {
+        "en": "Describe the complete ownership chain to natural persons, their ownership/voting percentages, and anyone controlling the company without shares. Explain if there is no natural-person owner.",
+        "es": "Describe la cadena completa de propiedad hasta las personas físicas, sus porcentajes de propiedad y voto, y quién controla la empresa sin tener acciones. Explica si no existe un propietario persona física."
+      },
+      "is_required": true
+    },
+    {
+      "id": "representative_authority",
+      "element_type": "long_text",
+      "label": {
+        "en": "Identify who is applying and explain their authority to represent the company.",
+        "es": "Indica quién solicita la verificación y su facultad para representar a la empresa."
+      },
+      "is_required": true
+    },
+    {
+      "id": "pep_relationships",
+      "element_type": "long_text",
+      "label": {
+        "en": "Identify any owners, controllers or representatives who are politically exposed persons, relatives or close associates; otherwise write None.",
+        "es": "Indica si algún propietario, controlador o representante es una persona políticamente expuesta, familiar o colaborador cercano; de lo contrario, escribe Ninguno."
+      },
+      "is_required": true
+    },
+    {
+      "id": "regulated_activity",
+      "element_type": "long_text",
+      "label": {
+        "en": "List any regulated activities and licenses, or write Not applicable.",
+        "es": "Indica las actividades reguladas y licencias del negocio, o escribe No aplica."
+      },
+      "is_required": true
+    },
+    {
+      "id": "bank_account_ownership",
+      "element_type": "consent",
+      "label": {
+        "en": "I confirm that bank accounts used for company deposits and withdrawals belong to this legal entity.",
+        "es": "Confirmo que las cuentas bancarias utilizadas para recargas y retiros del negocio pertenecen a esta entidad legal."
+      },
+      "is_required": true
+    },
+    {
+      "id": "complete_disclosure",
+      "element_type": "consent",
+      "label": {
+        "en": "I am authorized to submit this information and confirm that all owners and controllers have been disclosed accurately.",
+        "es": "Estoy autorizado para presentar esta información y confirmo que se han declarado correctamente todos los propietarios y controladores."
+      },
+      "is_required": true
+    }
+  ]
+}

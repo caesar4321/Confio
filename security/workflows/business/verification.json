@@ -1,0 +1,20 @@
+{
+  "checked_at": "2026-09-15",
+  "checks": [
+    "business_questionnaire: 17 saved field types, labels and required flags matched",
+    "person_questionnaire: 12 saved field types, labels and required flags matched",
+    "business_workflow: published, non-default, manual questionnaire review",
+    "person_workflow: published, non-default, manual questionnaire review",
+    "Hosted KYB entry: Verifica tu empresa; six expected applicant steps; no submission",
+    "Business v3: require_kyc on all collected roles, no applicant skip, no person reuse",
+    "Business v3: uppercase document groups, every group satisfiable, incorporation cannot be substituted",
+    "Enabled production webhook: status.updated and data.updated"
+  ],
+  "saved_graph_sha256": {
+    "business_questionnaire": "f0829ff5da443d2b01a1876a23a5a6bbace35dc569d98d31c40f2cc898184723",
+    "person_questionnaire": "c0707f76d3f743afeb5188e549440d4c138f3c171f9b17de4c0ac74cc67c99a5",
+    "business_workflow": "27c69281bc0c884835b38b6486cb2b10ce108c5bbb46b973baff837fc92d5504",
+    "person_workflow": "2ffe95af89dcaebc2e4b323c72f36e6180e0a82953586feea58d3f667e5f26bc"
+  },
+  "hash_encoding": "SHA-256 of UTF-8 json.dumps(graph, sort_keys=True, separators=(comma,colon))"
+}

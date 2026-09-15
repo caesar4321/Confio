@@ -147,3 +147,43 @@ def reconcile_activations():
             logger.exception('Account activation reconciliation failed: %s', row.internal_id)
         finally:
             AccountActivation.objects.filter(pk=row.pk).update(updated_at=timezone.now())
+
+
+@shared_task(name='payment_accounts.forward_edd', autoretry_for=(Exception,),
+             retry_backoff=True, retry_kwargs={'max_retries': 5})
+def forward_edd(request_id):
+    from .edd import forward_to_provider
+    from .models import LimitIncreaseRequest
+    row = LimitIncreaseRequest.objects.get(pk=request_id)
+    if row.status not in ('submitted', 'in_review'):
+        return row.status
+    try:
+        return forward_to_provider(row).status
+    except Exception:
+        # HTTP exception chains can contain presigned evidence credentials.
+        # Celery logs the raised exception on retries and final failure.
+        from .services import PaymentAccountError
+        raise PaymentAccountError('Automatic EDD handoff failed; retry pending') from None
+
+
+@shared_task(name='payment_accounts.reconcile_edd')
+def reconcile_edd():
+    """Recover missed dispatches and retry handoffs, including owners opened later."""
+    from .edd import forward_to_provider, sync_edd_session
+    from .models import LimitIncreaseRequest
+    rows = LimitIncreaseRequest.objects.filter(
+        status__in=['started', 'submitted', 'in_review'],
+        didit_session_id__isnull=False,
+    ).order_by('updated_at')[:100]
+    forwarded = 0
+    for row in rows:
+        try:
+            # Polling also recovers a missed Didit webhook. Dispatch directly here.
+            row = sync_edd_session(row.didit_session_id, enqueue=False)
+            if row.status in ('submitted', 'in_review'):
+                forwarded += forward_to_provider(row).status == 'forwarded'
+        except Exception:
+            logger.warning('EDD handoff pending: %s', row.internal_id)
+        finally:
+            LimitIncreaseRequest.objects.filter(pk=row.pk).update(updated_at=timezone.now())
+    return forwarded

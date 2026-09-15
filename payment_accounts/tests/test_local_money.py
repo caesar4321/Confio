@@ -546,7 +546,6 @@ class LocalMoneyTests(TestCase):
         self.client_api.get_account_limits.return_value = {'monthly': {
             'used': 0, 'limit': None, 'remaining': None, 'resets_at': '2026-10-01T00:00:00'}}
         self.journey(local, crypto, '800')
-        local_money.require_allowance(self.owner, crypto, '10', client=self.client_api)
         view = local_money.limits(self.owner, client=self.client_api)
         self.assertFalse(view['known'])
         self.assertTrue(view['has_account'])
@@ -554,12 +553,11 @@ class LocalMoneyTests(TestCase):
         self.assertIsNone(view['available'])
         self.assertFalse(view['near_limit'])
 
-    def test_zero_numeric_limit_blocks(self):
+    def test_zero_numeric_limit_is_displayed(self):
         _, crypto = self.pair()
         self.client_api.get_account_limits.return_value = {'monthly': {
             'used': 0, 'limit': 0, 'remaining': 0}}
-        with self.assertRaisesRegex(PaymentAccountError, 'supera tu límite'):
-            local_money.require_allowance(self.owner, crypto, '0.01', client=self.client_api)
+        self.assertEqual(local_money.limits(self.owner, client=self.client_api)['available'], Decimal('0'))
 
     def journey(self, local, crypto, amount, stage='awaiting_credit'):
         flow = MoneyFlow.objects.create(confio_account=self.owner, kind='withdraw', source_asset='USDT_BSC',
@@ -568,18 +566,15 @@ class LocalMoneyTests(TestCase):
             money_flow=flow, confio_account=self.owner, request_id=uuid.uuid4(), direction='to_bank',
             stage=stage, local_account=local, crypto_account=crypto, minimum_fx_output='1', wallet_address='0x0')
 
-    def test_unknown_limit_fails_closed(self):
-        _, crypto = self.pair()
+    def test_unknown_limit_is_informational(self):
+        self.pair()
         for response in ({'monthly': {'used': 10, 'resets_at': 'x'}}, {},
                          {'monthly': {'used': 0, 'limit': 'invalid'}},
-                         {'monthly': {'used': 0, 'limit': 'NaN'}},
-                         {'monthly': {'used': 'invalid', 'limit': None, 'remaining': None}}):
+                         {'monthly': {'used': 0, 'limit': 'NaN'}}):
             self.client_api.get_account_limits.return_value = response
-            with self.assertRaisesRegex(PaymentAccountError, 'No pudimos confirmar'):
-                local_money.require_allowance(self.owner, crypto, '10', client=self.client_api)
+            self.assertFalse(local_money.limits(self.owner, client=self.client_api)['known'])
         self.client_api.get_account_limits.side_effect = ProviderAPIError('down')
-        with self.assertRaisesRegex(PaymentAccountError, 'No pudimos confirmar'):
-            local_money.require_allowance(self.owner, crypto, '10', client=self.client_api)
+        self.assertFalse(local_money.limits(self.owner, client=self.client_api)['known'])
 
     def test_in_flight_sends_reduce_the_allowance(self):
         local, crypto = self.pair()
@@ -587,9 +582,6 @@ class LocalMoneyTests(TestCase):
             'used': 9000, 'limit': 10000, 'remaining': 1000, 'resets_at': '2026-10-01T00:00:00Z'}}
         self.journey(local, crypto, '800')
         self.journey(local, crypto, '5000', stage='completed')
-        local_money.require_allowance(self.owner, crypto, '200', client=self.client_api)
-        with self.assertRaisesRegex(PaymentAccountError, 'supera tu límite'):
-            local_money.require_allowance(self.owner, crypto, '200.01', client=self.client_api)
         view = local_money.limits(self.owner, client=self.client_api)
         self.assertEqual((view['available'], view['used'], view['near_limit']),
                          (Decimal('200'), Decimal('9800'), True))
@@ -605,8 +597,7 @@ class LocalMoneyTests(TestCase):
             return {'monthly': {'used': 9000, 'limit': 10000, 'remaining': 1000, 'resets_at': '2026-10-01T00:00:00Z'}}
 
         self.client_api.get_account_limits.side_effect = snapshot_then_complete
-        with self.assertRaisesRegex(PaymentAccountError, 'supera tu límite'):
-            local_money.require_allowance(self.owner, crypto, '200.01', client=self.client_api)
+        self.assertEqual(local_money.limits(self.owner, client=self.client_api)['available'], Decimal('200'))
 
     # ---- capabilities
 

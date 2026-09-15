@@ -178,11 +178,9 @@ class LimitIncreaseRequestAdminForm(forms.ModelForm):
 
 
 class LimitIncreaseRequestAdmin(admin.ModelAdmin):
-    """EDD review. The documents live in the Didit session (review them in the
-    Didit console, where the questionnaire routes for manual review). Approving
-    here does not raise any limit: "Forward" uploads the proof of address and
-    source of funds to the Infinia owner; its account manager raises the limit,
-    which then appears in the provider's /limits/ response."""
+    """EDD handoff diagnostics and recovery. Submissions are sent automatically;
+    the action below can retry a pending handoff. Infinia decides the limit.
+    """
     list_display = ('internal_id', 'confio_account', 'status', 'didit_status', 'income_type',
                     'expected_monthly_usd', 'submitted_at')
     list_filter = ('status', 'didit_status', 'income_type', 'provider')

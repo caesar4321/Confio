@@ -14,6 +14,14 @@ from payment_accounts.compliance import (
     _volume_fields,
     _individual_payload,
     _company,
+    didit_ubo_parties,
+    _business_documents,
+    _reviewed_answers,
+    _questionnaire_address,
+    BUSINESS_WORKFLOW_ID,
+    PERSON_WORKFLOW_ID,
+    BUSINESS_QUESTIONNAIRE_ID,
+    PERSON_QUESTIONNAIRE_ID,
 )
 
 
@@ -389,13 +397,166 @@ class InfiniaComplianceHandoffTests(SimpleTestCase):
                 },
             }],
             'document_verifications': [{'items': []}],
-            'key_people_checks': [],
+            'key_people_checks': [{'submitted': {'parties': [
+                {'role': 'ubo', 'kyc_session_id': 'ubo'}]}}],
         }
 
         with self.assertRaisesRegex(ComplianceHandoffError, 'incorporation_document_id'):
             build_infinia_self_declared_payload(
                 profile=self.profile('business'), client=self.client, decision=decision
             )
+
+    def questionnaire(self, *, person=False, values=None, files=None):
+        return {
+            'questionnaire_id': PERSON_QUESTIONNAIRE_ID if person else BUSINESS_QUESTIONNAIRE_ID,
+            'status': 'Approved',
+            'sections': [{'items': [
+                *[{'value': key, 'answer': {'value': value}} for key, value in (values or {}).items()],
+                *[{'value': key, 'answer': {'files': value}} for key, value in (files or {}).items()],
+            ]}],
+        }
+
+    @mock.patch('payment_accounts.compliance.fetch_didit_evidence', side_effect=evidence)
+    def test_business_questionnaire_evidence_maps_all_three_uploads(self, fetch):
+        decision = {
+            'workflow_id': BUSINESS_WORKFLOW_ID, 'session_kind': 'business', 'status': 'Approved',
+            'document_verifications': [{'items': [{'status': 'Approved',
+                'document_subtype': 'certificate_of_incorporation',
+                'file_url': 'https://media.didit.test/incorporation.pdf'}]}],
+            'questionnaire_responses': [self.questionnaire(
+                values={'expected_monthly_volume_usd': '1234.50', 'company_address_line_1': 'Calle 1',
+                        'company_address_city': 'Bogota', 'company_address_state': 'Cundinamarca',
+                        'company_address_postal_code': '110111', 'company_address_country': 'CO'},
+                files={key: [f'https://media.didit.test/{key}.pdf'] for key in (
+                    'source_of_funds_document', 'proof_of_address_document', 'tax_registration_document')})],
+        }
+        fields, audits = _business_documents(decision, self.client)
+        self.assertEqual(set(fields), {'incorporation_document_id', 'source_of_funds_document_id',
+                                      'proof_of_address_document_id', 'tax_registration_document_id'})
+        self.assertEqual(len(audits), 4)
+        self.assertEqual(fetch.call_count, 4)
+        self.assertNotIn('https://', str(audits))
+        self.assertEqual(_volume_fields(decision), {'expected_monthly_volume_usd': 1234.5})
+        answers = _reviewed_answers(decision, BUSINESS_QUESTIONNAIRE_ID, BUSINESS_WORKFLOW_ID)
+        self.assertEqual(_questionnaire_address(answers, 'company_address')['city'], 'Bogota')
+
+    def test_questionnaire_must_match_exact_id_and_feature_approval(self):
+        from copy import deepcopy
+        original = {'status': 'Approved', 'workflow_id': BUSINESS_WORKFLOW_ID,
+                    'questionnaire_responses': [self.questionnaire(values={'expected_monthly_volume_usd': 1})]}
+        variants = []
+        for key, value in [('questionnaire_id', 'unrelated-form'), ('status', 'In Review')]:
+            decision = deepcopy(original)
+            decision['questionnaire_responses'][0][key] = value
+            variants.append(decision)
+        variants.extend([{**original, 'questionnaire_responses': []},
+                         {**original, 'status': 'In Review'},
+                         {**original, 'questionnaire_responses': original['questionnaire_responses'] * 2}])
+        for decision in variants:
+            with self.subTest(decision=decision), self.assertRaises(ComplianceHandoffError):
+                _business_documents(decision, self.client)
+        self.client.initiate_owner_document.assert_not_called()
+
+    def test_reviewed_questionnaire_rejects_bad_volume_and_duplicate_answers(self):
+        for amount in ('NaN', 'Infinity', '-1', 'abc', ''):
+            decision = {'session_kind': 'business', 'status': 'Approved',
+                        'questionnaire_responses': [self.questionnaire(values={'expected_monthly_volume_usd': amount})]}
+            with self.subTest(amount=amount), self.assertRaises(ComplianceHandoffError):
+                _volume_fields(decision)
+        form = self.questionnaire(values={'company_address_city': 'Bogota'})
+        form['sections'][0]['items'] *= 2
+        with self.assertRaisesRegex(ComplianceHandoffError, 'duplicate'):
+            _reviewed_answers({'status': 'Approved', 'questionnaire_responses': [form]},
+                              BUSINESS_QUESTIONNAIRE_ID, BUSINESS_WORKFLOW_ID)
+
+    @mock.patch('payment_accounts.compliance.fetch_didit_evidence', side_effect=evidence)
+    def test_ubo_reviewed_address_and_cuil_require_approved_poa_and_official_tax_evidence(self, fetch):
+        self.identity.document_issuing_country = 'ARG'
+        self.identity.document_number = '12345678'
+        self.identity.verified_city = 'Unknown City'
+        form = self.questionnaire(person=True, values={
+            'residential_address_line_1': 'Calle 2', 'residential_address_city': 'Salta',
+            'residential_address_state': 'Salta', 'residential_address_postal_code': 'A4400',
+            'residential_address_country': 'AR', 'additional_tax_id': '20-12345678-6',
+        }, files={'tax_id_evidence': ['https://media.didit.test/tax.pdf']})
+        decision = {
+            'session_kind': 'user', 'status': 'Approved', 'workflow_id': PERSON_WORKFLOW_ID,
+            'questionnaire_responses': [form],
+            'id_verifications': [{'status': 'Approved', 'document_type': 'Identity Card',
+                                  'front_image': 'https://media.didit.test/id.jpg'}],
+            'liveness_checks': [{'status': 'Approved', 'reference_image': 'https://media.didit.test/selfie.jpg'}],
+            'poa_verifications': [{'status': 'Approved', 'document_file': 'https://media.didit.test/poa.pdf'}],
+            'email_verifications': [{'status': 'Approved', 'email': 'ubo@example.com'}],
+            'phone_verifications': [{'status': 'Approved', 'full_number': '+541123456789'}],
+        }
+        payload, audits = _individual_payload(decision=decision, identity=self.identity, user=None, client=self.client)
+        self.assertEqual(payload['address']['city'], 'Salta')
+        self.assertEqual(payload['additional_tax_id'], '20123456786')
+        self.assertEqual(payload['email'], 'ubo@example.com')
+        self.assertEqual(payload['other_documents'], ['doc_4'])
+        self.assertEqual(len(audits), 4)
+        for status in ('In Review', 'Declined'):
+            decision['poa_verifications'][0]['status'] = status
+            with self.subTest(status=status), self.assertRaisesRegex(ComplianceHandoffError, 'proof of address'):
+                _individual_payload(decision=decision, identity=self.identity, user=None, client=self.client)
+        decision['poa_verifications'][0]['status'] = 'Approved'
+        form['sections'][0]['items'] = [i for i in form['sections'][0]['items'] if i['value'] != 'tax_id_evidence']
+        with self.assertRaisesRegex(ComplianceHandoffError, 'verified Argentine CUIL'):
+            _individual_payload(decision=decision, identity=self.identity, user=None, client=self.client)
+
+    def test_registry_cannot_skip_the_first_normalized_result(self):
+        with self.assertRaisesRegex(ComplianceHandoffError, 'approved business registry'):
+            _company({'registry_checks': [{'status': 'Declined'},
+                                          {'status': 'Approved', 'company': {'company_name': 'Other'}}]})
+
+    @mock.patch('payment_accounts.compliance._business_documents', return_value=({}, []))
+    @mock.patch('payment_accounts.compliance._individual_payload', return_value=({'first_name': 'Ana'}, []))
+    def test_current_business_workflow_uses_reviewed_fields_and_requires_approved_people(self, individual, documents):
+        decision = {
+            'session_kind': 'business', 'status': 'Approved', 'workflow_id': BUSINESS_WORKFLOW_ID,
+            'registry_checks': [{'status': 'Approved', 'company': {
+                'company_name': 'Acme', 'country_code': 'COL', 'incorporation_date': '2020-01-02',
+                'tax_number': '901234567', 'addresses': []}}],
+            'questionnaire_responses': [self.questionnaire(values={
+                'company_address_line_1': 'Calle 1', 'company_address_city': 'Bogota',
+                'company_address_state': 'Cundinamarca', 'company_address_postal_code': '110111',
+                'company_address_country': 'CO', 'expected_monthly_volume_usd': '1000'})],
+            'email_verifications': [{'status': 'Approved', 'email': 'company@example.com'}],
+            'phone_verifications': [{'status': 'Approved', 'full_number': '+573001234567'}],
+            'key_people_checks': [{'status': 'Approved', 'submitted': {'parties': [
+                {'entity_type': 'person', 'role': 'ubo', 'kyc_session_id': 'ubo'}]},
+                'ubo_kyc_summary': {'total': 1}}],
+        }
+        payload, _ = build_infinia_self_declared_payload(
+            profile=self.profile('business'), client=self.client, decision=decision,
+            child_decisions={'ubo': {'_identity': self.identity}})
+        self.assertEqual(payload['organization']['email'], 'company@example.com')
+        self.assertEqual(payload['organization']['address']['city'], 'Bogota')
+        self.assertEqual(payload['organization']['expected_monthly_volume_usd'], 1000)
+        decision['key_people_checks'][0]['status'] = 'In Review'
+        with self.assertRaisesRegex(ComplianceHandoffError, 'approved key people'):
+            build_infinia_self_declared_payload(profile=self.profile('business'), client=self.client, decision=decision)
+        decision['key_people_checks'] = []
+        with self.assertRaisesRegex(ComplianceHandoffError, 'UBO disclosure'):
+            build_infinia_self_declared_payload(profile=self.profile('business'), client=self.client, decision=decision)
+        decision['phone_verifications'][0]['status'] = 'Declined'
+        with self.assertRaisesRegex(ComplianceHandoffError, 'email and phone'):
+            build_infinia_self_declared_payload(profile=self.profile('business'), client=self.client, decision=decision)
+
+    def test_ubo_collection_includes_registry_and_rejects_skipped_or_deleted_sessions(self):
+        decision = {'key_people_checks': [{
+            'registry': {'beneficial_owners': [{'uuid': 'a', 'kyc_session_id': 'registry-ubo'}],
+                         'officers': [{'roles': ['director'], 'kyc_session_id': 'director'}]},
+            'submitted': {'parties': [{'role': 'ubo', 'kyc_session_id': 'manual-ubo'}]},
+        }]}
+        self.assertEqual([p['kyc_session_id'] for p in didit_ubo_parties(decision)],
+                         ['manual-ubo', 'registry-ubo'])
+        party = decision['key_people_checks'][0]['registry']['beneficial_owners'][0]
+        for key in ('is_skipped', 'kyc_session_deleted'):
+            party[key] = True
+            with self.subTest(key=key), self.assertRaisesRegex(ComplianceHandoffError, 'Skipped or deleted'):
+                didit_ubo_parties(decision)
+            party.pop(key)
 
 
 class DiditEvidenceDownloadTests(SimpleTestCase):

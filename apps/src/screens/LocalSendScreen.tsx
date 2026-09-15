@@ -237,9 +237,7 @@ export default function LocalSendScreen() {
     ? 'Ingresa un monto válido.'
     : perTransferMax && amountNumber > perTransferMax
       ? `El máximo por envío es ${formatRampMoney(perTransferMax, USD_UNIT)}.`
-      : available != null && amountNumber > available
-        ? 'Supera tu límite mensual disponible.'
-        : '';
+      : '';
   const overMonthlyLimit = available != null && amountNumber > available;
 
   // Opening the local account has its own screen (requirements, the server's

@@ -84,6 +84,38 @@ class AdapterPayloadTests(SimpleTestCase):
             expected_business_id=None,
         )
 
+    @mock.patch('payment_accounts.providers.infinia.verification_values_from_didit_decision', return_value={})
+    @mock.patch('payment_accounts.providers.infinia.retrieve_linked_didit_decision', return_value={'status': 'Approved'})
+    @mock.patch('payment_accounts.providers.infinia.build_infinia_self_declared_payload', return_value=({}, []))
+    @mock.patch('payment_accounts.providers.infinia.retrieve_didit_decision')
+    def test_business_fetches_registry_and_submitted_ubo_sessions_once(self, retrieve, build, linked, normalize):
+        from payment_accounts.clients import ComplianceHandoffError
+        registry_ubo = {'roles': ['ubo'], 'entity_type': 'person', 'kyc_session_id': 'registry-ubo'}
+        retrieve.return_value = {'status': 'Approved', 'key_people_checks': [{
+            'registry': {'beneficial_owners': [registry_ubo]},
+            'submitted': {'parties': [dict(registry_ubo), {'role': 'ubo', 'kyc_session_id': 'manual-ubo'}]},
+        }]}
+        client = mock.Mock()
+        client.find_owner.return_value = []
+        client.create_owner.return_value = {'id': 'owner', 'status': 'COMPLETED'}
+        profile = SimpleNamespace(
+            internal_id='profile', owner_type='business', kyc_mode='SELF_DECLARED',
+            provider_data={'compliance_consent': {'granted': True}},
+            identity_verification=SimpleNamespace(risk_factors={'didit': {'session_id': 'parent'}}),
+            confio_account=SimpleNamespace(user=SimpleNamespace(id=7), business_id=1))
+        InfiniaProvider(client=client).provision_profile(profile)
+        self.assertEqual(linked.call_args_list, [mock.call(session_id='registry-ubo'), mock.call(session_id='manual-ubo')])
+        self.assertEqual(set(build.call_args.kwargs['child_decisions']), {'registry-ubo', 'manual-ubo'})
+        for key in ('is_skipped', 'kyc_session_deleted'):
+            linked.reset_mock()
+            client.create_owner.reset_mock()
+            registry_ubo[key] = True
+            with self.subTest(key=key), self.assertRaises(ComplianceHandoffError):
+                InfiniaProvider(client=client).provision_profile(profile)
+            linked.assert_not_called()
+            client.create_owner.assert_not_called()
+            registry_ubo.pop(key)
+
     def test_infinia_owner_recovers_by_idempotency_before_reuploading_documents(self):
         client = mock.Mock()
         client.find_owner.return_value = [{'id': 'owner_1', 'status': 'COMPLETED'}]

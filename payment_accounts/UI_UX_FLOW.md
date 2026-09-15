@@ -84,28 +84,22 @@ code landed. For Infinia corridors this section overrides the older text below.
 
 ### Monthly limit
 
-The app never hard-codes `US$10.000`, same rule as fees and rates. Infinia is
-the source of truth: [`GET /v1/accounts/{account_id}/limits/`](https://docs.infiniaweb.com/reference/v1_5_get_account_limits_.md)
-returns `monthly.used`, `limit`, `remaining` and `resets_at`. Only `used` and
-`resets_at` are required in its schema, so a response without `limit` or
-`remaining` fails closed. There is no limits webhook: read it when quoting. The
-provider adapter does not call this endpoint yet.
+Infinia is the source of truth:
+[`GET /v1/accounts/{account_id}/limits/`](https://docs.infiniaweb.com/reference/v1_5_get_account_limits_.md)
+provides the usage snapshot displayed in the app. Missing or malformed data hides
+the numeric allowance; it never blocks a payment. The Verification screen explains
+the default personal limit and offers EDD before the user reaches it.
 
-**The binding account is the shared USDC_POL transit account.** Every send, to
-any country, is bridged into the user's single Infinia USDC_POL account before
-conversion, and every inbound journey withdraws from it. Each country account has
-its own US$10,000, but they all sit behind that one US$10,000. Allowance for a
-send = the lower `remaining` of the USDC_POL account and the destination fiat
-account, minus journeys still in flight.
+The shared USDC_POL account's remaining amount, minus in-flight sends, is shown
+as guidance. Neither the send screen nor journey creation enforces that monthly
+snapshot. Infinia accepts or rejects transactions using its current limits.
+Per-transfer bridge caps, balances, eligibility and concurrent-journey guards
+continue to apply. A provider rejection after bridging may require recovery of
+funds held at Infinia; no automatic refund is implied.
 
-Enforcement:
-
-- Check that allowance **before preparing the outbound bridge**, never at
-  payout. A send that clears the bridge and then hits Infinia's limit strands the
-  funds at the provider and moves the journey to `needs_review` — the one state
-  the journey design exists to avoid. An unreadable limit fails closed.
-- Subtract in-flight journeys yourself. Infinia's `used` only moves when its
-  movements post, so a journey still bridging is invisible to it.
+EDD documents are automatically linked to the Infinia owner after submission,
+including submissions awaiting review. No Confío operator approval is needed.
+See README for API mapping, retries, and the provider review-routing limitation.
 
 Still unknown. Measure these in the sandbox by reading `/limits/` on both
 accounts before and after one journey in each direction, rather than asking:
