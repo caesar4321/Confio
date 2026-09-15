@@ -26,6 +26,38 @@ from security.schema import SecurityQuery
 User = get_user_model()
 
 
+class IdentityVerificationSchemaContractTests(SimpleTestCase):
+    def test_additional_document_sync_matches_mobile_request(self):
+        import re
+        from pathlib import Path
+        from django.conf import settings
+        from graphql import parse, validate
+        from config.schema import schema
+
+        source = (Path(settings.BASE_DIR) / 'apps/src/services/localMoney.ts').read_text()
+        query = re.search(r'const SYNC_ADDITIONAL_DOCUMENT = gql`([^`]+)`', source).group(1)
+        self.assertEqual(validate(schema.graphql_schema, parse(query)), [])
+        screen = (Path(settings.BASE_DIR) / 'apps/src/screens/VerificationScreen.tsx').read_text()
+        documents = re.search(r'const MY_IDENTITY_DOCUMENTS = gql`([^`]+)`', screen).group(1)
+        self.assertEqual(validate(schema.graphql_schema, parse(documents)), [])
+
+    def test_rejection_reason_is_nullable_and_returned(self):
+        import graphene
+        from security.schema import IdentityVerificationType
+
+        class Query(graphene.ObjectType):
+            verification = graphene.Field(IdentityVerificationType)
+
+            def resolve_verification(root, info):
+                return IdentityVerification(rejected_reason=root)
+
+        schema = graphene.Schema(query=Query)
+        for reason in (None, 'El documento no coincide con tu identidad.'):
+            result = schema.execute('{ verification { rejectedReason } }', root_value=reason)
+            self.assertIsNone(result.errors)
+            self.assertEqual(result.data['verification']['rejectedReason'], reason)
+
+
 class DiditPayloadExtractionTests(SimpleTestCase):
     def test_recognizes_standalone_cpf_backfill_webhook(self):
         self.assertTrue(_is_standalone_cpf_backfill_webhook({

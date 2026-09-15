@@ -26,7 +26,7 @@ class IdentityVerificationType(DjangoObjectType):
     class Meta:
         model = IdentityVerification
         fields = ('id', 'status', 'verified_at', 'verified_first_name', 
-                 'verified_last_name', 'document_type', 'created_at')
+                 'verified_last_name', 'document_type', 'created_at', 'rejected_reason')
 
     def resolve_verified_at(self, info):
         try:
@@ -270,6 +270,7 @@ class IdentityDocumentType(graphene.ObjectType):
     document_type = graphene.String(required=True)
     issuing_country = graphene.String(required=True)  # ISO-2, '' while unknown
     status = graphene.String(required=True)
+    rejected_reason = graphene.String()
     is_additional = graphene.Boolean(required=True)
     verified_at = graphene.DateTime()
     # ISO-2 countries whose local account this document can open: the same
@@ -384,6 +385,7 @@ class SecurityQuery(graphene.ObjectType):
         return [IdentityDocumentType(
             id=str(row.pk), document_type=row.document_type or '', issuing_country=_iso2(row.document_issuing_country),
             status=row.status, is_additional=bool(row.is_additional_document), verified_at=row.verified_at,
+            rejected_reason=row.rejected_reason if row.status == 'rejected' else None,
             local_countries=_local_countries(row),
         ) for row in documents]
 
