@@ -293,7 +293,7 @@ class ActivateLocalMoney(graphene.Mutation):
             # A passport-only person has no primary document; the rail picks
             # the verified document this country accepts.
             from .models import AccountActivation
-            from .activation import reconcile
+            from .activation import reconcile, require_opening_without_error
             method = local_money.get_method(method_id)
             from . import breb_location
             breb_location.require_for_country(owner, method.country, info.context.META)
@@ -304,6 +304,7 @@ class ActivateLocalMoney(graphene.Mutation):
                 status = local_money.activate(owner, _identity(owner, required=False), method_id)
             else:
                 row = reconcile(row.pk)
+                require_opening_without_error(row)
                 status = row.status
                 if status == 'payment_pending':
                     status = 'provisioning'
