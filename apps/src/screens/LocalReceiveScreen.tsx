@@ -288,7 +288,7 @@ function InfiniaLocalReceiveScreen() {
     ? 'Puedes recibir de cualquier persona o empresa.'
     : account?.receiveSameName === 'enabled'
       ? 'Por ahora recibe solo desde cuentas a tu nombre.'
-      : 'Estamos habilitando los depósitos en esta cuenta.';
+      : 'Los depósitos aún no están disponibles en esta cuenta. Contacta a soporte antes de recibir un pago.';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -298,7 +298,7 @@ function InfiniaLocalReceiveScreen() {
           <RampHero
             eyebrow="Recibir"
             title={copy.hero}
-            subtitle={`Recibe ${currency} por ${copy.rail} y conviértelos a dólares cuando quieras.`}
+            subtitle={`Recibe ${currency} por ${copy.rail} y confirma la conversión para acreditarlos en tu saldo en dólares.`}
             onBack={() => navigation.goBack()}
             compact={isCompact}
           />
@@ -374,7 +374,7 @@ function InfiniaLocalReceiveScreen() {
                     {[
                       ['repeat', 'Siempre la misma', 'Compártela las veces que quieras.'],
                       ['zap', `Llega por ${copy.rail}`, 'Desde cualquier banco o billetera, normalmente en minutos.'],
-                      ['dollar-sign', 'Tú decides cuándo convertir', `Tus ${currency} esperan hasta que los pases a dólares.`],
+                      ['dollar-sign', 'De pagos locales a dólares', 'Cuando llegue un depósito, confirma la conversión para recibir dólares en tu saldo.'],
                     ].map(([icon, title, body]) => (
                       <View key={title} style={[styles.reviewRow, { alignItems: 'center' }]}>
                         <View style={styles.methodIcon}>
