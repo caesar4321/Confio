@@ -177,7 +177,7 @@ class FundingInstruction(models.Model):
     )
     reusable = models.BooleanField(default=True)
     expires_at = models.DateTimeField(null=True, blank=True)
-    display_value = models.CharField(max_length=255, blank=True, default='')
+    display_value = models.TextField(blank=True, default='')
     holder_display_name = models.CharField(max_length=255, blank=True, default='')
     ownership_evidence_available = models.BooleanField(default=False)
     instruction_data = models.JSONField(default=dict, blank=True)

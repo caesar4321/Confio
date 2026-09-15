@@ -264,3 +264,40 @@ class SeededProviderEligibilityTests(TestCase):
             ),
         )
         self.assertEqual(result.decision, 'block')
+
+
+class CobreBrebMigrationTests(TestCase):
+    """0017 rolls back and re-applies even after decisions reference policy v2."""
+
+    def test_rollback_and_reapply_keep_decisions(self):
+        import importlib
+        from algosdk import account as algo_account
+        from django.apps import apps
+        from django.contrib.auth import get_user_model
+        from payment_accounts.models import EligibilityDecision, EligibilityPolicy as Policy
+        from users.models import Account
+        migration = importlib.import_module('payment_accounts.migrations.0017_cobre_breb_outside_venezuela')
+        if not Policy.objects.filter(provider='cobre', scope='account_opening', version=2).exists():
+            migration.outside_venezuela(apps, None)  # a kept test database may lack the seeded rows
+        v2 = Policy.objects.get(provider='cobre', scope='account_opening', version=2)
+        user = get_user_model().objects.create_user(
+            username='breb-migration', email='breb-migration@example.com', password='password',
+            firebase_uid='breb-migration-uid')
+        _, address = algo_account.generate_account()
+        owner = Account.objects.create(user=user, account_type='personal', account_index=0, algorand_address=address)
+        EligibilityDecision.objects.create(
+            confio_account=owner, policy=v2, decision='allow', reason_code='cobre_breb_outside_venezuela',
+            policy_version=2, context={})
+
+        migration.colombia_only(apps, None)  # used to raise ProtectedError
+        v2.refresh_from_db()
+        self.assertFalse(v2.is_active)
+        v1 = Policy.objects.filter(provider='cobre', scope='account_opening', version=1).first()
+        if v1:
+            self.assertTrue(v1.is_active)
+
+        migration.outside_venezuela(apps, None)
+        self.assertEqual(Policy.objects.filter(provider='cobre', scope='account_opening', version=2).count(), 1)
+        v2.refresh_from_db()
+        self.assertTrue(v2.is_active)
+        self.assertEqual(Policy.objects.filter(provider='cobre', scope='account_opening', is_active=True).count(), 1)

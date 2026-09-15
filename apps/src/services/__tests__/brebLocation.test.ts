@@ -203,6 +203,41 @@ test('a second refusal after a new check forgets the pass and asks for recovery'
   expect(operation).toHaveBeenCalledTimes(2); // never a third automatic attempt
   expect(brebLocationPassValid('twice-scope')).toBe(false);
 });
+test('a late answer for another account never replaces a newer pass', async () => {
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
+  const challenge = (id: string) => ({data: {brebLocationChallenge: {success: true, challenge: id, cloudProjectNumber: '123456789'}}});
+  const verified = () => ({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}});
+  let answerA!: (value: any) => void;
+  mockMutate
+    .mockReturnValueOnce(new Promise(resolve => { answerA = resolve; })) // A's challenge is slow
+    .mockResolvedValueOnce(challenge('b')).mockResolvedValueOnce(verified()) // B, answered at once
+    .mockResolvedValueOnce(verified()); // A's verification, answered last
+  const first = verifyBrebLocation('user:A:1');
+  await verifyBrebLocation('user:B:2');
+  expect(brebLocationPassValid('user:B:2')).toBe(true);
+  answerA(challenge('a'));
+  await first;
+  expect(brebLocationPassValid('user:B:2')).toBe(true);
+  expect(brebLocationPassValid('user:A:1')).toBe(false);
+});
+test('an answer started before a refusal cannot restore the refused pass', async () => {
+  mockRequestMultiple.mockResolvedValue({fine: 'granted'});
+  mockAttest.mockResolvedValue({locationJson: '{}', integrityToken: 'signed'});
+  let answerLate!: (value: any) => void;
+  mockMutate
+    .mockReturnValueOnce(new Promise(resolve => { answerLate = resolve; })) // a slow check's challenge
+    .mockResolvedValueOnce({data: {verifyBrebLocation: {success: true, validUntil: Date.now()/1000 + 900}}});
+  const late = verifyBrebLocation('late-scope');
+  await Promise.resolve();
+  // Meanwhile an operation is refused and its automatic recovery fails.
+  mockCheckPermission.mockResolvedValue(false);
+  const refused = {success: false, errors: ['Verifica tu ubicación para usar Bre-B.']};
+  await withBrebLocationRetry(async () => refused).catch(() => {});
+  answerLate({data: {brebLocationChallenge: {success: true, challenge: 'late', cloudProjectNumber: '123456789'}}});
+  await late;
+  expect(brebLocationPassValid('late-scope')).toBe(false);
+});
 test('ambiguous network failure and other refusals never retry', async () => {
   const operation = jest.fn().mockRejectedValue(new Error('timeout'));
   await expect(withBrebLocationRetry(operation)).rejects.toThrow('timeout');

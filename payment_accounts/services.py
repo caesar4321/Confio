@@ -326,24 +326,43 @@ def sync_capabilities(account):
         _infinia_capabilities(account)
 
 
+@transaction.atomic
 def sync_embedded_funding_instructions(account):
     if account.provider != 'infinia':
         return
+    # Serialize replacement so another reader never sees partially updated rails.
+    FinancialAccount.objects.select_for_update().get(pk=account.pk)
     raw = (account.provider_data or {}).get('latest') or {}
     instructions = raw.get('funding_instructions') or []
+    if account.country == 'BRA' and account.asset == 'BRL':
+        # The account snapshot is authoritative. A QR/key removed by the provider
+        # must not remain available for receiving or unlock an opening payment.
+        account.funding_instructions.filter(kind__in=['pix_key', 'qr'], status__in=['pending', 'active']).update(
+            status='closed', updated_at=timezone.now())
     if isinstance(instructions, dict):
         instructions = [instructions]
     for item in instructions:
         if not isinstance(item, dict):
             continue
+        def text_value(value):
+            return value.strip() if isinstance(value, str) else ''
+
+        pix_rail = item.get('pix_key_brl')
+        br_rail = item.get('br_code_brl')
+        pix_key = text_value(item.get('pix_key')) or text_value(
+            pix_rail.get('pix_key') if isinstance(pix_rail, dict) else pix_rail)
+        qr_code = (text_value(item.get('qr_code')) or text_value(item.get('br_code'))
+                   or text_value(br_rail.get('br_code') if isinstance(br_rail, dict) else None))
         raw_kind = str(item.get('type') or '').lower()
+        if raw_kind == 'qr' and not qr_code:
+            qr_code = text_value(item.get('value')) or text_value(item.get('address'))
         if raw_kind == 'crypto' or item.get('crypto_address'):
             kind = 'crypto_address'
         elif item.get('breb_key'):
             kind = 'breb_key'
-        elif item.get('pix_key') or item.get('pix_key_brl'):
+        elif pix_key:
             kind = 'pix_key'
-        elif raw_kind == 'qr' or item.get('qr_code'):
+        elif raw_kind == 'qr' or qr_code:
             kind = 'qr'
         else:
             kind = 'bank_details'
@@ -359,7 +378,7 @@ def sync_embedded_funding_instructions(account):
                 'kind': kind,
                 'status': 'active',
                 'reusable': True,
-                'display_value': str(
+                'display_value': (pix_key if kind == 'pix_key' else qr_code if kind == 'qr' else str(
                     item.get('account_number')
                     or item.get('breb_key')
                     or item.get('crypto_address')
@@ -368,7 +387,7 @@ def sync_embedded_funding_instructions(account):
                     or item.get('address')
                     or item.get('value')
                     or ''
-                ),
+                )),
                 'holder_display_name': account.provider_profile.identity_snapshot.get(
                     'full_name', ''
                 ),

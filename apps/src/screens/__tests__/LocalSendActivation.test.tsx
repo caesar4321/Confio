@@ -5,6 +5,8 @@ import {Text, TextInput, TouchableOpacity} from 'react-native';
 const mockNavigate = jest.fn();
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockRecheck = jest.fn();
+const mockPrepareBridge = jest.fn();
+let mockBridgeSequence = 0;
 let mockAccountStatus = 'none';
 let mockAccounts: any[] = [];
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
@@ -31,7 +33,10 @@ jest.mock('../../components/ramps/RampReveal', () => ({RampReveal: 'Reveal'}));
 jest.mock('../../components/ramps/RampStepHeader', () => ({RampStepHeader: 'Step'}));
 jest.mock('../../utils/rampFlow', () => ({requestRampCriticalAuth: jest.fn()}));
 jest.mock('../../services/infiniaJourney', () => ({createInfiniaJourney: jest.fn()}));
-jest.mock('../../services/paymentBridge', () => ({}));
+jest.mock('../../services/paymentBridge', () => ({
+  preparePaymentBridge: (...args: any[]) => mockPrepareBridge(...args),
+  bridgeRequestId: () => `request-${++mockBridgeSequence}`,
+}));
 jest.mock('../LocalAccountFundingScreen', () => ({bridgeAmount: jest.fn()}));
 jest.mock('../../services/localMoney', () => ({
   LOCAL_MONEY_METHODS: 'methods', LOCAL_MONEY_ACCOUNTS: 'accounts', LOCAL_MONEY_LIMITS: 'limits', LOCAL_SAVED_DESTINATIONS: 'saved',
@@ -43,8 +48,32 @@ import Screen from '../LocalSendScreen';
 
 beforeEach(() => {
   jest.clearAllMocks(); mockAccountStatus = 'none';
+  mockPrepareBridge.mockReset(); mockBridgeSequence = 0;
   mockAccounts = [];
   mockRecheck.mockImplementation(async (id: string) => ({id, holderName: 'Ana', label: 'Llave', verification: 'verified'}));
+});
+
+it('replaces a rejected fee quote but retains the request after network uncertainty', async () => {
+  mockAccountStatus = 'active';
+  mockAccounts = [
+    {provider: 'infinia', asset: 'COP', status: 'active'},
+    {provider: 'infinia', asset: 'USDC_POL', status: 'active', fundingInstructions: [
+      {internalId: 'instruction', kind: 'crypto_address', status: 'active'}]},
+  ];
+  mockPrepareBridge.mockRejectedValueOnce(Object.assign(new Error('Fee changed'), {quoteRefreshRequired: true}))
+    .mockRejectedValue(new Error('Network timeout'));
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const saved = tree.root.findAllByType(TouchableOpacity).find(node =>
+    node.findAllByType(Text).some(text => text.props.children === 'Ana'))!;
+  await act(async () => {await saved.props.onPress();});
+  await act(async () => {tree.root.findAllByType(TextInput).find(node => node.props.placeholder === '0')!.props.onChangeText('50');});
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await act(async () => {await tree.root.findByType('ActionBar' as any).props.onPrimaryPress();});
+  }
+  expect(mockPrepareBridge.mock.calls.map(call => call[3])).toEqual(['request-1', 'request-2', 'request-2']);
+  expect(mockPrepareBridge.mock.calls.every(call => call[1] === '50')).toBe(true);
+  await act(async () => tree.unmount());
 });
 
 it('shows cUSD plus savings as spendable, excluding raw USDT', async () => {

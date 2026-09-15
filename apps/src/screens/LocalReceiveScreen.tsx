@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import Clipboard from '@react-native-clipboard/clipboard';
+import QRCode from 'react-native-qrcode-svg';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useApolloClient, useQuery } from '@apollo/client';
@@ -53,7 +54,7 @@ type Route = RouteProp<MainStackParamList, 'LocalReceive'>;
 // copy rule on RECEIVE_RAILS in config/localRails.ts.
 const COPY: Record<string, { hero: string; label: string; rail: string }> = {
   co_breb_receive: { hero: 'Tu propia llave Bre-B', label: 'Tu llave Bre-B', rail: 'Bre-B' },
-  br_pix_receive: { hero: 'Tu propia chave Pix', label: 'Tu chave Pix', rail: 'Pix' },
+  br_pix_receive: { hero: 'Tu cuenta Pix', label: 'Tus datos Pix', rail: 'Pix' },
   mx_clabe_receive: { hero: 'Tu propia CLABE', label: 'Tu CLABE', rail: 'SPEI' },
   ar_cvu_receive: { hero: 'Tu propio CVU', label: 'Tu CVU', rail: 'transferencia' },
 };
@@ -80,12 +81,17 @@ function InfiniaLocalReceiveScreen() {
   const { methodId } = useRoute<Route>().params;
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
-  const copy = COPY[methodId] || COPY.mx_clabe_receive;
 
   const accountQuery = useQuery(LOCAL_RECEIVE_ACCOUNT, {
     variables: { methodId }, fetchPolicy: 'network-only', errorPolicy: 'all',
   });
   const account: LocalReceiveAccount | undefined = accountQuery.data?.localReceiveAccount;
+  const isPixQr = methodId === 'br_pix_receive' && account?.instructionKind === 'qr';
+  const copy = isPixQr
+    ? { hero: 'Tu código Pix', label: 'Tu código Pix Copia e Cola', rail: 'Pix' }
+    : methodId === 'br_pix_receive' && account?.instructionKind === 'pix_key' && account?.value
+      ? { hero: 'Tu propia chave Pix', label: 'Tu chave Pix', rail: 'Pix' }
+    : COPY[methodId] || COPY.mx_clabe_receive;
   // A Bre-B key shows only while this account's location pass lasts, also
   // when the screen stays open past it (the server withholds it on reload).
   const brebKeyScreen = methodId === 'co_breb_receive';
@@ -414,13 +420,22 @@ function InfiniaLocalReceiveScreen() {
                 />
                 <View style={styles.inputCard}>
                   <Text style={styles.inputLabel}>{copy.label}</Text>
+                  {isPixQr ? (
+                    <View style={{ alignItems: 'center', padding: 16, backgroundColor: '#fff' }}>
+                      <QRCode value={accountValue} size={Math.min(220, width - 112)} />
+                      <Text style={[styles.detailMeta, { marginTop: 12 }]}>
+                        Escanea este QR o pega el código en Pix Copia e Cola en tu banco o billetera.
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.detailValue} selectable>{accountValue}</Text>
                   {account.holderName ? <Text style={styles.detailMeta}>Titular: {account.holderName}</Text> : null}
                   {account.institution ? <Text style={styles.detailMeta}>Banco: {account.institution}</Text> : null}
                   <View style={styles.buttonRow}>
                     <TouchableOpacity style={styles.smallPrimary} onPress={() => {
                       Clipboard.setString(accountValue);
-                      Alert.alert('Copiado', `${copy.label} se copió. Compártela con quien te va a pagar.`);
+                      Alert.alert('Copiado', isPixQr ? 'Tu código Pix se copió. Pégalo en Pix Copia e Cola.'
+                        : `${copy.label} se copió. Compártela con quien te va a pagar.`);
                     }}>
                       <Icon name="copy" size={16} color={colors.white} />
                       <Text style={styles.smallPrimaryText}>Copiar</Text>

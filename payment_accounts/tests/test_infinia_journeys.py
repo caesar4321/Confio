@@ -158,7 +158,7 @@ class JourneyTests(TestCase):
 
     def test_outbound_correlates_infinia_credit_to_bridge_then_pays_local_account(self):
         t,_=self.prepared(); t.status='delivered';t.destination_tx_hash=DEST_HASH;t.save()
-        entry=self.credit(self.crypto, provider_data={'third_party':{'type':'CRYPTO','crypto_network':'POLYGON','transaction_hash':DEST_HASH}})
+        entry=self.credit(self.crypto, amount='10.008795', provider_data={'third_party':{'type':'CRYPTO','crypto_network':'POLYGON','transaction_hash':DEST_HASH}})
         reconcile_provider_credit(t);t.refresh_from_db();self.assertEqual(t.provider_credit_id,entry.pk)
         j=create_journey(owner=self.owner,local_account=self.local,crypto_account=self.crypto, request_id=uuid.uuid4(),
             direction='to_bank',bridge=t,destination=self.dest,minimum_fx_output='30')
@@ -169,11 +169,83 @@ class JourneyTests(TestCase):
         op=j.payout_operation;op.status='succeeded';op.target_amount=Decimal('38.5');op.save()
         advance_journey(j.pk,client=self.api);j.refresh_from_db();j.money_flow.refresh_from_db()
         self.assertEqual(j.stage,'completed');self.assertEqual(j.money_flow.target_amount,Decimal('38.5'))
+        self.assertEqual(j.fx_operation.source_amount, Decimal('10'))
+        self.assertEqual(j.money_flow.metadata['fx_source_remainder'], {
+            'amount': '0.008795000000000000', 'asset': 'USDC_POL',
+            'financial_account_id': str(self.crypto.internal_id), 'funding_credit_id': str(entry.pk)})
 
     def test_quote_below_authorized_minimum_cannot_move_money(self):
         j=self.inbound();self.fx_quote(output='1.9')
         advance_journey(j.pk,client=self.api);j.refresh_from_db()
         self.assertEqual(j.stage,'needs_review');self.assertIsNone(j.fx_operation_id)
+        self.submit.assert_not_called()
+
+    def test_fx_rounding_preserves_owned_remainder_and_retry_operation(self):
+        j = self.inbound()
+        j.funding_credit.amount = Decimal('10.008795')
+        j.funding_credit.save(update_fields=['amount'])
+        self.fx_quote(amount='10.00')
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db(); j.money_flow.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+        self.assertEqual(self.api.create_transfer_quote.call_args.args[0]['source_amount'], 10.0)
+        self.assertEqual(j.fx_operation.source_amount, Decimal('10'))
+        remainder = j.money_flow.metadata['fx_source_remainder']
+        self.assertEqual(remainder, {'amount': '0.008795000000000000', 'asset': 'PEN',
+            'financial_account_id': str(self.local.internal_id),
+            'funding_credit_id': str(j.funding_credit_id)})
+        self.assertEqual(j.funding_credit.amount, Decimal('10.008795'))
+        operation_id = j.fx_operation_id
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db(); j.money_flow.refresh_from_db()
+        self.assertEqual(j.fx_operation_id, operation_id)
+        self.assertEqual(j.money_flow.metadata['fx_source_remainder'], remainder)
+        self.api.create_transfer_quote.assert_called_once()
+
+    def test_subcent_credit_is_held_without_quote_or_conversion(self):
+        j = self.inbound()
+        j.funding_credit.amount = Decimal('0.009999')
+        j.funding_credit.save(update_fields=['amount'])
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'fx_source_below_precision'))
+        self.assertIsNone(j.fx_operation_id)
+        self.api.create_transfer_quote.assert_not_called()
+        self.submit.assert_not_called()
+
+    def test_fractional_credit_submission_timeout_keeps_operation_and_remainder(self):
+        from payment_accounts.clients import ProviderAPIError
+        j = self.inbound()
+        j.funding_credit.amount = Decimal('10.008795')
+        j.funding_credit.save(update_fields=['amount'])
+        self.fx_quote(amount='10.00')
+        self.submit.side_effect = ProviderAPIError('timeout', retryable=True)
+        with self.assertRaises(ProviderAPIError):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db(); j.money_flow.refresh_from_db()
+        operation_id = j.fx_operation_id
+        remainder = j.money_flow.metadata['fx_source_remainder']
+        self.assertIsNotNone(operation_id)
+        self.assertEqual(j.fx_operation.source_amount, Decimal('10'))
+        self.submit.side_effect = lambda op: op
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db(); j.money_flow.refresh_from_db()
+        self.assertEqual(j.fx_operation_id, operation_id)
+        self.assertEqual(j.money_flow.metadata['fx_source_remainder'], remainder)
+        self.assertEqual(MoneyOperation.objects.filter(money_flow=j.money_flow).count(), 1)
+        self.api.create_transfer_quote.assert_called_once()
+
+    def test_provider_cannot_quote_the_unrounded_credit_instead(self):
+        j = self.inbound()
+        j.funding_credit.amount = Decimal('10.008795')
+        j.funding_credit.save(update_fields=['amount'])
+        self.fx_quote(amount='10.008795')
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db(); j.money_flow.refresh_from_db()
+        self.assertEqual(self.api.create_transfer_quote.call_args.args[0]['source_amount'], 10.0)
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'fx_quote_outside_authorization'))
+        self.assertIsNone(j.fx_operation_id)
+        self.assertNotIn('fx_source_remainder', j.money_flow.metadata)
         self.submit.assert_not_called()
 
     def test_default_quote_lock_is_used_and_short_provider_expiry_is_preserved(self):

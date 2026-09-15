@@ -28,6 +28,16 @@ def qr(*fields):
 
 
 class IdentifierTests(SimpleTestCase):
+    def test_fx_precision_never_rounds_up_or_allows_a_zero_conversion(self):
+        from payment_accounts.infinia_journeys import fx_source_amount
+        for raw, expected in [('1.958795', '1.95'), ('1.999999', '1.99'), ('1.95', '1.95'),
+                              ('0.01', '0.01'), ('999999999.999999', '999999999.99')]:
+            with self.subTest(raw=raw):
+                self.assertEqual(fx_source_amount(raw), Decimal(expected))
+        for raw in ('0.009999', '0', '-1', 'NaN', 'Infinity'):
+            with self.subTest(raw=raw), self.assertRaises(PaymentAccountError):
+                fx_source_amount(raw)
+
     def test_crc_matches_ccitt_false_check_value(self):
         self.assertEqual(local_money.emv_crc('123456789'), '29B1')
 
@@ -402,6 +412,41 @@ class LocalMoneyTests(TestCase):
         with self.assertRaisesRegex(PaymentAccountError, 'no está activa'):
             local_money.payout_quote(self.owner, destination, amount='50', client=self.client_api)
 
+    def test_fractional_bridge_output_is_floored_for_estimate_and_review(self):
+        _, crypto = self.pair()
+        destination = SimpleNamespace(country='COL', asset='COP')
+        self.fx('7800')
+        response = self.client_api.create_transfer_quote.return_value
+        def strict_quote(payload):
+            value = Decimal(str(payload['source_amount']))
+            self.assertEqual(value, value.quantize(Decimal('.01')))
+            return response
+        self.client_api.create_transfer_quote.side_effect = strict_quote
+        with mock.patch('payment_accounts.bridge.net_funding_units', return_value=str(2 * 10**18)), \
+                mock.patch('payment_accounts.allbridge_next.NextClient') as api:
+            api.return_value.quote.return_value = [{'messenger': 'near-intents',
+                'amountOut': '1960000', 'amountOutMin': '1958795'}]
+            estimate = local_money.payout_quote(self.owner, destination, amount='2', client=self.client_api)
+        bridge = SimpleNamespace(amount_out_min='1958795', quote=SimpleNamespace(
+            confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
+            funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
+            money_flow=SimpleNamespace(source_amount=Decimal('2'))))
+        review = local_money.payout_quote(self.owner, destination, bridge=bridge, client=self.client_api)
+        for result in (estimate, review):
+            self.assertEqual(result['source_amount'], Decimal('1.95'))
+            self.assertEqual(result['rate'], Decimal('3900'))
+
+    def test_subcent_bridge_output_does_not_request_a_zero_quote(self):
+        _, crypto = self.pair()
+        bridge = SimpleNamespace(amount_out_min='9999', quote=SimpleNamespace(
+            confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
+            funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
+            money_flow=SimpleNamespace(source_amount=Decimal('0.02'))))
+        with self.assertRaisesRegex(PaymentAccountError, '0.01'):
+            local_money.payout_quote(self.owner, SimpleNamespace(country='COL', asset='COP'),
+                                    bridge=bridge, client=self.client_api)
+        self.client_api.create_transfer_quote.assert_not_called()
+
     @override_settings(PAYMENT_BRIDGE_MAX_USDT='10')
     def test_estimate_respects_the_same_spend_cap_as_preparation(self):
         self.pair()
@@ -435,10 +480,12 @@ class LocalMoneyTests(TestCase):
         local, _ = self.pair('MEX', 'MXN')
         credit = LedgerEntry.objects.create(
             provider='infinia', financial_account=local, provider_entry_id='e1', direction='credit', asset='MXN',
-            amount='4250', occurred_at=timezone.now(), provider_data={'operation': {'type': 'INTERNAL_TRANSFER'}})
+            amount='4250.008795', occurred_at=timezone.now(), provider_data={'operation': {'type': 'INTERNAL_TRANSFER'}})
         with mock.patch('payment_accounts.payin_admission.is_external_fiat_credit', return_value=False):
             self.fx('212.40')
             quote = local_money.deposit_quote(self.owner, credit, client=self.client_api)
+            self.assertEqual(quote['source_amount'], Decimal('4250'))
+            self.assertEqual(self.client_api.create_transfer_quote.call_args.args[0]['source_amount'], 4250.0)
             self.assertEqual(quote['minimum_fx_output'], Decimal('210.276000'))
             self.assertEqual(quote['minimum_wallet_output'], Decimal('207.121860'))
             with override_settings(PAYMENT_BRIDGE_MAX_USDT='200'):

@@ -75,6 +75,31 @@ beforeEach(() => {
   mockMethod = {id: 'co_breb', country: 'CO', asset: 'COP', status: 'live', accountStatus: 'none'};
 });
 
+it('explains an opening that is still pending after polling and allows another status check', async () => {
+  jest.useFakeTimers({doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask']});
+  mockMethod = {id: 'br_pix', country: 'BR', asset: 'BRL', status: 'live', accountStatus: 'provisioning'};
+  mockPay.mockResolvedValue(true);
+  mockActivate.mockResolvedValue('provisioning');
+  let tree!: renderer.ReactTestRenderer;
+  let opening!: Promise<void>;
+  try {
+    await act(async () => {tree = renderer.create(<Screen />);});
+    await act(async () => {opening = bar(tree).props.onPrimaryPress();});
+    for (let i = 0; i < 10; i += 1) {
+      await act(async () => {jest.advanceTimersByTime(5000);});
+    }
+    await act(async () => {await opening;});
+    expect(mockActivate).toHaveBeenCalledTimes(10);
+    expect(texts(tree)).toContain('La apertura está tardando más de lo habitual. Puedes salir y tocar Revisar la apertura para continuar.');
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    expect(bar(tree).props.primaryDisabled).toBe(false);
+    expect(mockRemovalPrevented).toBe(false);
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    jest.useRealTimers();
+  }
+});
+
 it('blocks the screen with the shared progress modal while opening and clears it on failure', async () => {
   mockMethod = {id: 'mx_clabe', country: 'MX', asset: 'MXN', status: 'live', accountStatus: 'none'};
   let fail!: (error: Error) => void;
