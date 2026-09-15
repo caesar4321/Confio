@@ -101,8 +101,13 @@
 	<string>Confio uses Face ID or Touch ID to unlock the app and confirm transactions.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Confío will send you important notifications about your transactions, received payments, and security alerts.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>BrebLocation</key>
+		<string>Bre-B necesita tu ubicación precisa para confirmar que está disponible donde estás.</string>
+	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Confío requires your location for enhanced account security and optional camera features.</string>
+	<string>Confío usa tu ubicación precisa para verificar que puedes activar y usar Bre-B desde tu ubicación actual. No rastreamos tu ubicación en segundo plano.</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string>A0000002471001</string>

@@ -389,6 +389,18 @@ class User(AbstractUser, SoftDeleteModel):
         return 'unverified'
 
     @property
+    def has_verified_identity_document(self):
+        """Any verified personal identity document, primary OR additional: a
+        passport or ID from another country counts. Rewards use this; Recargar
+        and Retirar keep `is_identity_verified`, which reads only the primary
+        (phone-country) document their providers require."""
+        from security.models import IdentityVerification
+        return IdentityVerification.all_documents.filter(
+            user=self,
+            status='verified'
+        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+
+    @property
     def is_identity_verified(self):
         """Check if user has any verified identity records (personal context only)
         Excludes business-context verifications so personal accounts are not

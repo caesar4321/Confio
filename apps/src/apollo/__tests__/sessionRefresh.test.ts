@@ -217,3 +217,21 @@ describe('session refresh through the Apollo client', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
+
+
+describe('conversion parameter cache', () => {
+  it('preserves previously fetched fields when another consumer fetches a subset', () => {
+    const full = gql`query ConvertConfig { cusdPlusConvertParams { __typename bscSendEnabled vaultAddress } }`;
+    const subset = gql`query SendConfig { cusdPlusConvertParams { __typename bscSendEnabled } }`;
+    apolloClient.cache.restore({});
+    apolloClient.cache.writeQuery({ query: full, data: {
+      cusdPlusConvertParams: { __typename: 'CusdPlusConvertParamsType', bscSendEnabled: false, vaultAddress: 'vault' },
+    } });
+    apolloClient.cache.writeQuery({ query: subset, data: {
+      cusdPlusConvertParams: { __typename: 'CusdPlusConvertParamsType', bscSendEnabled: true },
+    } });
+    expect(apolloClient.cache.readQuery({ query: full })).toEqual({
+      cusdPlusConvertParams: { __typename: 'CusdPlusConvertParamsType', bscSendEnabled: true, vaultAddress: 'vault' },
+    });
+  });
+});

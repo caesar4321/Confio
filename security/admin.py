@@ -26,8 +26,15 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
     list_display_links = ('verified_name',)
     list_filter = (
         'status', 'document_type', 'document_issuing_country',
-        'risk_score', 'created_at'
+        'is_additional_document', 'risk_score', 'created_at'
     )
+
+    def get_queryset(self, request):
+        # The model's default manager hides additional documents from app
+        # code; reviewers must still see every document a person submitted.
+        queryset = IdentityVerification.all_documents.get_queryset()
+        ordering = self.get_ordering(request)
+        return queryset.order_by(*ordering) if ordering else queryset
     search_fields = (
         'user__username', 'user__email',
         'verified_first_name', 'verified_last_name',

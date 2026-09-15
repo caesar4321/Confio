@@ -500,7 +500,50 @@ def build_didit_callback_url(request=None) -> str | None:
     return None
 
 
-def create_didit_session(*, user, account_type: str = 'personal', business_id: str | None = None, callback_url: str | None = None) -> dict[str, Any]:
+ADDITIONAL_DOCUMENT_TYPES = frozenset({'P', 'ID', 'DL'})
+_DOCUMENT_TYPE_CODES = {'passport': 'P', 'national_id': 'ID', 'drivers_license': 'DL'}
+
+
+def normalize_document_request(id_country: Any = None, document_types: Any = None) -> dict[str, Any]:
+    """Validate what a rail asks for: an ISO3 issuing country (or any) and Didit type codes."""
+    from security.geo import to_iso3
+    import pycountry
+
+    raw = str(id_country or '').strip().upper()
+    country = ''
+    if raw:
+        country = to_iso3(raw) if len(raw) == 2 else (raw if pycountry.countries.get(alpha_3=raw) else '')
+        if not country:
+            raise DiditConfigurationError('País del documento no válido.')
+    types = sorted({str(value).strip().upper() for value in (document_types or []) if str(value).strip()})
+    if any(value not in ADDITIONAL_DOCUMENT_TYPES for value in types):
+        raise DiditConfigurationError('Tipo de documento no válido.')
+    return {'id_country': country, 'document_types': types}
+
+
+def _personal_vendor_data(user) -> dict[str, Any]:
+    # Byte-identical to the KYC session's vendor_data: Didit groups sessions by
+    # it, which is how Face Match finds the face the user already verified.
+    return {'user_id': user.id, 'account_type': 'personal'}
+
+
+def _start_session(payload: dict[str, Any]) -> dict[str, Any]:
+    response = _didit_request('POST', '/v3/session/', payload=payload)
+    session_id = _first_non_empty(response.get('session_id'), response.get('id'))
+    session_token = response.get('session_token')
+    if not session_id or not session_token:
+        raise DiditAPIError('Didit session response did not include session_id/session_token')
+    return {
+        'session_id': str(session_id),
+        'session_token': str(session_token),
+        'status': str(response.get('status') or 'pending'),
+        'raw': response,
+    }
+
+
+def create_didit_session(*, user, account_type: str = 'personal', business_id: str | None = None,
+                         callback_url: str | None = None,
+                         document_request: dict[str, Any] | None = None) -> dict[str, Any]:
     account_type = str(account_type or '').strip().lower()
     if account_type not in {'personal', 'business'}:
         raise DiditConfigurationError('Unsupported Didit account context')
@@ -516,38 +559,80 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
     if business_id:
         vendor_data['business_id'] = str(business_id)
 
-    payload: dict[str, Any] = {
-        'workflow_id': _workflow_id_for_account(account_type, phone_country=phone_country),
-        'vendor_data': json.dumps(vendor_data, separators=(',', ':')),
-    }
+    if document_request is not None:
+        # A second document of the same person, for a rail its primary
+        # document does not satisfy. One workflow for every country: the
+        # session carries the country/types and the workflow DECLINES a
+        # mismatch. Never replaces the primary (see PrimaryIdentityManager).
+        if account_type != 'personal':
+            raise DiditConfigurationError('Solo una cuenta personal puede agregar otro documento.')
+        workflow_id = getattr(settings, 'DIDIT_ADDITIONAL_DOCUMENT_WORKFLOW_ID', '') or ''
+        if not workflow_id:
+            raise DiditConfigurationError('La verificación de otro documento no está disponible por ahora.')
+        payload: dict[str, Any] = {
+            'workflow_id': workflow_id,
+            'vendor_data': json.dumps(vendor_data, separators=(',', ':')),
+            'metadata': {'purpose': 'additional_document'},
+        }
+        expected = {}
+        if document_request.get('id_country'):
+            expected['id_country'] = document_request['id_country']
+        if document_request.get('document_types'):
+            expected['expected_document_types'] = list(document_request['document_types'])
+        if expected:
+            payload['expected_details'] = expected
+    else:
+        payload = {
+            'workflow_id': _workflow_id_for_account(account_type, phone_country=phone_country),
+            'vendor_data': json.dumps(vendor_data, separators=(',', ':')),
+        }
     if callback_url:
         payload['callback'] = callback_url
 
-    response = _didit_request('POST', '/v3/session/', payload=payload)
-    session_id = _first_non_empty(response.get('session_id'), response.get('id'))
-    session_token = response.get('session_token')
-    if not session_id or not session_token:
-        raise DiditAPIError('Didit session response did not include session_id/session_token')
+    session = _start_session(payload)
+    if document_request is not None:
+        # Record the role now: the decision webhook must never mistake this
+        # document for the primary one, whatever Didit echoes back.
+        ensure_pending_didit_verification(
+            user=user, session_id=session['session_id'], account_type='personal',
+            document_request=document_request,
+        )
+    return {**session, 'vendor_data': vendor_data}
 
-    return {
-        'session_id': str(session_id),
-        'session_token': str(session_token),
-        'status': str(response.get('status') or 'pending'),
-        'vendor_data': vendor_data,
-        'raw': response,
+
+def create_didit_workflow_session(*, user, workflow_id: str, expected_details: dict[str, Any] | None = None,
+                                  metadata: dict[str, Any] | None = None, callback_url: str | None = None,
+                                  language: str | None = None) -> dict[str, Any]:
+    """A personal session on an explicit workflow (EDD), grouped with the KYC."""
+    if not workflow_id:
+        raise DiditConfigurationError('Didit workflow is not configured')
+    payload: dict[str, Any] = {
+        'workflow_id': workflow_id,
+        'vendor_data': json.dumps(_personal_vendor_data(user), separators=(',', ':')),
     }
+    if expected_details:
+        payload['expected_details'] = expected_details
+    if metadata:
+        payload['metadata'] = metadata
+    if callback_url:
+        payload['callback'] = callback_url
+    if language:
+        payload['language'] = language
+    return _start_session(payload)
 
 
 def _find_existing_verification(*, user, session_id: str) -> IdentityVerification | None:
+    # Every document: an additional-document session must find its own row.
     return (
-        IdentityVerification.objects
+        IdentityVerification.all_documents
         .filter(user=user, risk_factors__didit__session_id=session_id)
         .order_by('-created_at')
         .first()
     )
 
 
-def _placeholder_defaults(*, user, session_id: str, account_type: str, business_id: str | None) -> dict[str, Any]:
+def _placeholder_defaults(*, user, session_id: str, account_type: str, business_id: str | None,
+                          document_request: dict[str, Any] | None = None) -> dict[str, Any]:
     risk_factors: dict[str, Any] = {
         'provider': 'didit',
         'didit': {
@@ -559,6 +644,9 @@ def _placeholder_defaults(*, user, session_id: str, account_type: str, business_
         risk_factors['account_type'] = 'business'
     if business_id:
         risk_factors['business_id'] = str(business_id)
+    if document_request:
+        # What the rail asked for; checked again on the decision.
+        risk_factors['document_request'] = dict(document_request)
 
     return {
         'verified_first_name': user.first_name or 'Pending',
@@ -575,36 +663,62 @@ def _placeholder_defaults(*, user, session_id: str, account_type: str, business_
         'document_issuing_country': 'UNK',
         'status': 'pending',
         'risk_factors': risk_factors,
+        'is_additional_document': bool(document_request),
     }
 
 
-def ensure_pending_didit_verification(*, user, session_id: str, account_type: str = 'personal', business_id: str | None = None) -> IdentityVerification:
-    existing = _find_existing_verification(user=user, session_id=session_id)
-    if existing:
+def ensure_pending_didit_verification(*, user, session_id: str, account_type: str = 'personal', business_id: str | None = None,
+                                      document_request: dict[str, Any] | None = None,
+                                      request_is_default: bool = False) -> IdentityVerification:
+    from django.db import transaction
+    with transaction.atomic():
+        # One per-user lock (the one the sync holds) around the lookup AND the
+        # creation: a registration and a webhook can never both create a row for
+        # one session, and a decision committed meanwhile is never reverted.
+        type(user).objects.select_for_update().filter(pk=user.pk).first()
+        existing = _find_existing_verification(user=user, session_id=session_id)
+        if existing is None:
+            return IdentityVerification.objects.create(
+                user=user,
+                **_placeholder_defaults(
+                    user=user,
+                    session_id=session_id,
+                    account_type=account_type,
+                    business_id=business_id,
+                    document_request=document_request,
+                ),
+            )
+        existing = IdentityVerification.all_documents.select_for_update().get(pk=existing.pk)
+        completed = existing.status in ('verified', 'rejected')
         risk_factors = dict(existing.risk_factors or {})
-        didit_risk = dict(risk_factors.get('didit') or {})
-        didit_risk.update({'session_id': session_id, 'status': 'pending'})
-        risk_factors['provider'] = 'didit'
-        risk_factors['didit'] = didit_risk
+        if not completed:
+            didit_risk = dict(risk_factors.get('didit') or {})
+            didit_risk.update({'session_id': session_id, 'status': 'pending'})
+            risk_factors['provider'] = 'didit'
+            risk_factors['didit'] = didit_risk
         if account_type == 'business':
             risk_factors['account_type'] = 'business'
         if business_id:
             risk_factors['business_id'] = str(business_id)
+        # A webhook's default never replaces a request already recorded; the
+        # rail's own request (registration) always does.
+        if document_request and not (request_is_default and risk_factors.get('document_request')):
+            # The rail's request is authoritative (a webhook that came first only
+            # knew the default): always record it. A not-yet-decided row becomes
+            # additional; a verified extra document must still meet it.
+            risk_factors['document_request'] = dict(document_request)
+            if not existing.is_additional_document and not completed:
+                existing.is_additional_document = True
+            if existing.status == 'verified' and existing.is_additional_document:
+                unmet = _unmet_request(existing.document_issuing_country, existing.document_type, document_request)
+                if unmet:
+                    existing.status, existing.rejected_reason = 'rejected', unmet
         existing.risk_factors = risk_factors
-        if existing.status not in ('verified', 'rejected'):
+        if not completed:
             existing.status = 'pending'
-        existing.save(update_fields=['risk_factors', 'status', 'updated_at'])
+        existing.save(update_fields=['risk_factors', 'status', 'is_additional_document', 'rejected_reason',
+                                     'updated_at'])
         return existing
-
-    return IdentityVerification.objects.create(
-        user=user,
-        **_placeholder_defaults(
-            user=user,
-            session_id=session_id,
-            account_type=account_type,
-            business_id=business_id,
-        ),
-    )
 
 
 def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
@@ -895,7 +1009,133 @@ def _notify_verification_status_change(
     )
 
 
+def _name_tokens(value: Any) -> set[str]:
+    import unicodedata
+    text = unicodedata.normalize('NFKD', str(value or ''))
+    # Any script's letters (Иван, 민) and one-letter names (Min O) are names too.
+    # Accents go; every other mark (a Devanagari vowel sign) stays INSIDE its
+    # word, never splits it: राम and राज are two names, not a shared र.
+    text = ''.join(char for char in text if not unicodedata.combining(char)).casefold()
+    tokens, word = set(), []
+    for char in text + ' ':
+        if char.isalpha() or (word and unicodedata.category(char).startswith('M')):
+            word.append(char)
+        elif word:
+            tokens.add(''.join(word))
+            word = []
+    return tokens
+
+
+def _same_person(primary: IdentityVerification, extracted: dict[str, Any]) -> bool:
+    """Same date of birth and overlapping given names AND surnames.
+
+    Token overlap, not equality: a passport and a cédula of the same person
+    often differ in how many given names or surnames they print.
+    """
+    if primary.verified_date_of_birth != extracted.get('verified_date_of_birth'):
+        return False
+    return bool(
+        _name_tokens(primary.verified_first_name) & _name_tokens(extracted.get('verified_first_name'))
+        and _name_tokens(primary.verified_last_name) & _name_tokens(extracted.get('verified_last_name'))
+    )
+
+
+def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any]) -> tuple[str, str]:
+    """('verified', '') when this document is the same person as the user's other
+    verified personal documents (or is the first one), else ('rejected', why).
+
+    Applies to every personal document, primary or extra, whichever came first:
+    an account belongs to one person. The anchor is the primary verification,
+    else the earliest other verified personal document (all_documents, because
+    the default manager hides extra ones). Null-safe: excluding a JSON key value
+    also drops rows missing the key.
+    """
+    from django.db.models import Q
+    anchor = (
+        IdentityVerification.all_documents.filter(user=verification.user, status='verified')
+        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        .exclude(pk=verification.pk)
+        # The personal copy a company verification creates (security.models
+        # ensure_personal_verified_on_save: empty risk_factors, the company's
+        # document number) describes the company, not the person.
+        .exclude(risk_factors={}, document_number__in=IdentityVerification.all_documents.filter(
+            user=verification.user, risk_factors__account_type='business').values('document_number'))
+        .order_by('is_additional_document', 'verified_at', 'created_at').first()
+    )
+    if anchor is None:
+        return 'verified', ''
+    if not _same_person(anchor, extracted):
+        return 'rejected', 'El documento no coincide con tu identidad verificada.'
+    return 'verified', ''
+
+
+def _unmet_request(issuing_country: Any, document_type: Any, request: dict[str, Any] | None) -> str:
+    """Why a document does not meet what the rail asked for ('' when it does)."""
+    request = request or {}
+    wanted_country = str(request.get('id_country') or '')
+    if wanted_country and issuing_country != wanted_country:
+        return 'El documento no es del país que pide este medio.'
+    wanted_types = set(request.get('document_types') or [])
+    if wanted_types and _DOCUMENT_TYPE_CODES.get(document_type) not in wanted_types:
+        return 'Ese tipo de documento no sirve para este medio.'
+    return ''
+
+
+def _review_additional_document(verification: IdentityVerification, extracted: dict[str, Any],
+                                decision: dict[str, Any]) -> tuple[str, str]:
+    """(status, rejection reason) for an extra document Didit approved.
+
+    Didit's own session already proved the document is genuine and that its
+    portrait matches the live selfie. Requiring the SAME identity as the
+    primary document (date of birth and names) then binds both documents to
+    one person, so no second, paid face comparison is needed. Also checks the
+    document is what the rail asked for.
+    """
+    request = (verification.risk_factors or {}).get('document_request') or {}
+    unmet = _unmet_request(extracted.get('document_issuing_country'), extracted.get('document_type'), request)
+    if unmet:
+        return 'rejected', unmet
+    return _bind_to_person(verification, extracted)
+
+
+_DEFAULT_ADDITIONAL_REQUEST = {'id_country': '', 'document_types': ['ID', 'P']}
+
+
+def didit_session_purpose(payload: dict[str, Any]) -> str:
+    """'edd', 'additional' or 'identity', from the workflow Didit actually ran.
+    Our own placeholder alone is not enough: a webhook can arrive before it exists."""
+    workflow = str((payload or {}).get('workflow_id') or '').strip()
+    if workflow and workflow == str(getattr(settings, 'DIDIT_EDD_WORKFLOW_ID', '') or ''):
+        return 'edd'
+    if workflow and workflow == str(getattr(settings, 'DIDIT_ADDITIONAL_DOCUMENT_WORKFLOW_ID', '') or ''):
+        return 'additional'
+    return 'identity'
+
+
+def _session_lock_id(session_id: str) -> int:
+    import hashlib
+    digest = hashlib.sha256(f'didit-session:{session_id}'.encode()).digest()
+    return int.from_bytes(digest[:8], 'big', signed=True)
+
+
 def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[IdentityVerification, dict[str, Any]]:
+    from django.db import connection, transaction
+    # One sync per Didit session at a time, from asking Didit to saving: a later
+    # sync always reads Didit's later answer, and a slower one can never land
+    # after it (Didit's answers carry no revision to order them by).
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(%s)', [_session_lock_id(session_id)])
+        return _sync_didit_session(session_id=session_id, expected_user=expected_user)
+
+
+def _sync_didit_session(*, session_id: str, expected_user=None) -> tuple[IdentityVerification, dict[str, Any]]:
+    # An EDD session (proof of address, source of funds) is not an identity
+    # document. Refuse it here, whichever path delivers it (webhook or the
+    # app's sync mutation), so it can never create or overwrite a verification.
+    from payment_accounts.edd import is_edd_session
+    if is_edd_session(session_id):
+        raise DiditAPIError('Esta sesión no es una verificación de identidad.')
     response_payload = retrieve_didit_decision(
         session_id=session_id,
         expected_user=expected_user,
@@ -908,13 +1148,20 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     account_type = str(vendor_data.get('account_type') or 'personal')
     business_id = vendor_data.get('business_id')
 
+    purpose = didit_session_purpose(response_payload)
+    if purpose == 'edd':
+        raise DiditAPIError('Esta sesión no es una verificación de identidad.')
     verification = _find_existing_verification(user=user, session_id=session_id)
     if verification is None:
+        # A webhook that beats our own registration still files an extra
+        # document as an extra document, never as the primary one.
         verification = ensure_pending_didit_verification(
             user=user,
             session_id=session_id,
             account_type=account_type,
             business_id=business_id,
+            document_request=dict(_DEFAULT_ADDITIONAL_REQUEST) if purpose == 'additional' else None,
+            request_is_default=True,
         )
 
     extracted = _extract_verification_payload(response_payload)
@@ -956,19 +1203,45 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
         extracted=extracted,
         risk_factors=risk_factors,
     )
-    verification.status = status
-    if status == 'verified' and verification.verified_at is None:
-        verification.verified_at = timezone.now()
-    if status != 'rejected':
-        verification.rejected_reason = None
-    verification.save()
-    _notify_verification_status_change(
-        verification=verification,
-        account_type=account_type,
-        business_id=business_id,
-        previous_status=previous_status,
-        new_status=status,
-    )
+    review_reason = ''
+    from django.db import transaction
+    # One per-user lock for everything that records a Didit result: extra
+    # documents of different people can never both pass, and a registration
+    # that ran meanwhile keeps what it recorded (the rail's request, the flag).
+    with transaction.atomic():
+        type(user).objects.select_for_update().filter(pk=user.pk).first()
+        current = IdentityVerification.all_documents.filter(pk=verification.pk).values(
+            'is_additional_document', 'risk_factors').first() or {}
+        if current.get('is_additional_document'):
+            verification.is_additional_document = True
+        request_now = (current.get('risk_factors') or {}).get('document_request')
+        if request_now:
+            # The database's request is authoritative: a registration may have
+            # replaced the webhook's default with the rail's exact requirement.
+            verification.risk_factors = {**(verification.risk_factors or {}), 'document_request': request_now}
+        if verification.is_additional_document and status == 'verified':
+            status, review_reason = _review_additional_document(verification, extracted, response_payload)
+        elif status == 'verified' and (verification.risk_factors or {}).get('account_type') != 'business':
+            # A primary verified after an extra document must be the same person too.
+            status, review_reason = _bind_to_person(verification, extracted)
+        verification.status = status
+        if status == 'verified' and verification.verified_at is None:
+            verification.verified_at = timezone.now()
+        if status != 'rejected':
+            verification.rejected_reason = None
+        elif review_reason:
+            verification.rejected_reason = review_reason
+        verification.save()
+    if not verification.is_additional_document:
+        # An extra document is not "your account was verified"; the flow that
+        # asked for it reads the result itself.
+        _notify_verification_status_change(
+            verification=verification,
+            account_type=account_type,
+            business_id=business_id,
+            previous_status=previous_status,
+            new_status=status,
+        )
 
     return verification, response_payload
 

@@ -2,6 +2,8 @@ import hashlib
 import ipaddress
 import mimetypes
 import socket
+import re
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -53,7 +55,7 @@ def _approved_first(items):
 
 
 def _required(value, label):
-    if value in (None, '', [], {}):
+    if value in (None, '', [], {}) or (isinstance(value, str) and not value.strip()):
         raise ComplianceHandoffError(f'Didit did not provide required {label}')
     return value
 
@@ -66,7 +68,8 @@ def _address(*, line_1, city, state, postal_code, country):
         'postal_code': postal_code,
         'country': iso_alpha2(country),
     }
-    missing = [name for name, value in values.items() if not value]
+    missing = [name for name, value in values.items() if not isinstance(value, str) or not value.strip()
+               or value in {'Verified by Didit', 'Unknown City', 'Unknown State'}]
     if missing:
         raise ComplianceHandoffError(
             f'Didit verification is missing Infinia address fields: {", ".join(missing)}'
@@ -76,9 +79,9 @@ def _address(*, line_1, city, state, postal_code, country):
 
 def _contact(decision, user):
     contact = decision.get('contact_details') or {}
-    email = contact.get('email') or user.email
+    email = contact.get('email') or (user.email if user else None)
     phone = contact.get('phone')
-    if not phone and user.phone_number and user.phone_country_code:
+    if not phone and user and user.phone_number and user.phone_country_code:
         phone = f'{user.phone_country_code}{user.phone_number}'
     return (
         _required(email, 'email address'),
@@ -198,26 +201,191 @@ def _upload_document(client, *, document_type, front_url, back_url=None):
     }
 
 
+def _combined_pdf(files):
+    """One PDF with every page of every file (an image becomes one page)."""
+    from io import BytesIO
+
+    from PIL import Image
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    try:
+        for item in files:
+            source = BytesIO(item.content)
+            if item.content_type != 'application/pdf':
+                source = BytesIO()
+                Image.open(BytesIO(item.content)).convert('RGB').save(source, 'PDF')
+                source.seek(0)
+            for page in PdfReader(source).pages:
+                writer.add_page(page)
+        output = BytesIO()
+        writer.write(output)
+    except Exception as exc:
+        raise ComplianceHandoffError('Unable to combine the Didit evidence into one document') from exc
+    return output.getvalue()
+
+
+def _upload_bundle(client, *, document_type, urls):
+    """Every file as ONE provider document: Infinia keeps a single document per type."""
+    if len(urls) == 1:
+        return _upload_document(client, document_type=document_type, front_url=urls[0])
+    files = [fetch_didit_evidence(url, session=client.session) for url in urls]
+    content = _combined_pdf(files)
+    if len(content) > MAX_EVIDENCE_BYTES:
+        raise ComplianceHandoffError('Didit evidence exceeds Infinia 10 MB limit')
+    initiated = client.initiate_owner_document(document_type=document_type, double_sided=False)
+    document_id = str(_required(initiated.get('id'), 'Infinia document ID'))
+    client.upload_owner_document(
+        _required(initiated.get('upload_front_url'), 'Infinia front upload URL'),
+        content,
+        content_type='application/pdf',
+    )
+    return document_id, {
+        'document_type': document_type,
+        'document_id': document_id,
+        'front_sha256': hashlib.sha256(content).hexdigest(),
+        'source_sha256': [item.sha256 for item in files],
+    }
+
+
 def _document_type(value):
     normalized = str(value or '').strip().lower().replace(' ', '_')
-    if 'passport' in normalized:
-        return 'PASSPORT'
-    if 'driver' in normalized or 'driving' in normalized:
-        return 'DRIVERS_LICENSE'
-    return 'NATIONAL_ID'
+    types = {
+        'passport': 'PASSPORT',
+        'drivers_license': 'DRIVERS_LICENSE',
+        'driver_license': 'DRIVERS_LICENSE',
+        "driver's_license": 'DRIVERS_LICENSE',
+        'driving_license': 'DRIVERS_LICENSE',
+        'national_id': 'NATIONAL_ID',
+        'id': 'NATIONAL_ID',
+        'identity_card': 'NATIONAL_ID',
+        'national_identity_card': 'NATIONAL_ID',
+        'id_card': 'NATIONAL_ID',
+    }
+    if normalized not in types:
+        raise ComplianceHandoffError('Unsupported Infinia identity document type')
+    return types[normalized]
 
 
-def _individual_payload(*, decision, identity, user, client):
+def _individual_identifiers(identity, id_check):
+    # Koywe consumes this same verified IdentityVerification value. Didit's
+    # shared normalizer selects CPF (BR), CURP (MX), RUN (CL) and personal
+    # number (CO), not the OCR card serial. Never replace it with raw OCR.
+    from security.models import normalize_brazilian_cpf
+    country = iso_alpha2(identity.document_issuing_country)
+    number = _required(identity.document_number, 'verified identity/tax identifier')
+    number = str(number).strip().upper()
+    _required(number, 'verified identity/tax identifier')
+    result = {'tax_id_country': country}
+    if country == 'BR' and identity.document_type != 'passport':
+        # A Brazilian passport carries a passport number, not a CPF.
+        if (getattr(identity, 'brazilian_cpf_database_validation_present', False)
+                and not getattr(identity, 'brazilian_cpf_database_validation_valid', False)):
+            raise ComplianceHandoffError('Brazilian CPF database verification did not match')
+        number = normalize_brazilian_cpf(number)
+        _required(number, 'valid Brazilian CPF')
+    elif country == 'MX' and identity.document_type != 'passport':
+        if not re.fullmatch(r'[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d', number):
+            raise ComplianceHandoffError('A verified Mexican CURP is required, not the card serial')
+    elif country == 'CL' and identity.document_type != 'passport':
+        compact = re.sub(r'[.\s-]', '', number)
+        if not re.fullmatch(r'\d{7,8}[0-9K]', compact):
+            raise ComplianceHandoffError('A verified Chilean RUN/RUT is required')
+        number = f'{compact[:-1]}-{compact[-1]}'
+    elif country == 'AR' and identity.document_type != 'passport':
+        # Like MX/CL: a passport carries no DNI, so the DNI/CUIL pair is only
+        # required for the national ID.
+        # CUIL must be supplied separately; it cannot be inferred from DNI.
+        extra = id_check.get('extra_fields') or {}
+        if not isinstance(extra, dict):
+            raise ComplianceHandoffError('Invalid Argentine identifier evidence')
+        candidates = {re.sub(r'[\s-]', '', str(v)) for v in (
+            id_check.get('additional_tax_id'), extra.get('additional_tax_id'), extra.get('cuil'),
+        ) if v not in (None, '')}
+        if len(candidates) != 1:
+            raise ComplianceHandoffError('A unique verified Argentine CUIL is required')
+        cuil = candidates.pop()
+        if not re.fullmatch(r'\d{7,8}', number) or not re.fullmatch(r'\d{11}', cuil):
+            raise ComplianceHandoffError('Verified Argentine DNI and CUIL are required')
+        check = (11 - sum(int(n) * w for n, w in zip(cuil[:10], [5,4,3,2,7,6,5,4,3,2])) % 11) % 11
+        if check > 9 or check != int(cuil[-1]) or cuil[2:10] != number.zfill(8):
+            raise ComplianceHandoffError('Argentine CUIL does not validate against DNI')
+        result['additional_tax_id'] = cuil
+    result['tax_id'] = number
+    return result
+
+
+def _volume_fields(decision):
+    value = decision.get('expected_monthly_volume_usd')
+    if value is None:
+        return {}
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ComplianceHandoffError('Invalid expected monthly USD volume') from exc
+    if not amount.is_finite() or amount < 0 or amount > Decimal('1e15'):
+        raise ComplianceHandoffError('Invalid expected monthly USD volume')
+    return {'expected_monthly_volume_usd': float(amount)}
+
+
+def _declared_address(user):
+    """The account owner's self-declared ramp address — the one Koywe uses."""
+    from ramps.schema import _build_effective_ramp_address_snapshot
+    return _build_effective_ramp_address_snapshot(user)
+
+
+def _individual_payload(*, decision, identity, user, client, declared_address=None):
+    if str(decision.get('status') or '').strip().lower() != 'approved':
+        raise ComplianceHandoffError('Approved Didit KYC is required for each individual, including UBOs')
     if decision.get('session_kind') not in (None, '', 'user'):
         raise ComplianceHandoffError('A personal Infinia owner requires a Didit KYC session')
-    id_check = _approved_first(decision.get('id_verifications'))
+    # security.didit normalizes the FIRST ID check. Never combine that identity
+    # with another check's images or supplementary identifiers.
+    checks = decision.get('id_verifications') or []
+    id_check = checks[0] if isinstance(checks, list) and checks and isinstance(checks[0], dict) else {}
     liveness = _approved_first(decision.get('liveness_checks'))
+    if any(str(check.get('status') or '').strip().lower() != 'approved' for check in (id_check, liveness)):
+        raise ComplianceHandoffError('Approved Didit identity and liveness checks are required')
+    document_type = _document_type(id_check.get('document_type') or identity.document_type)
+    identifiers = _individual_identifiers(identity, id_check)
+    volume = _volume_fields(decision)
+    email, phone = _contact(decision, user)
+    if declared_address is not None:
+        # The account owner: many LATAM cédulas/DNIs carry no address, so use
+        # the same self-declared ramp address Koywe uses (country from the
+        # phone). Proof of address is an EDD document, not an opening one.
+        declared = declared_address
+        line_1 = ', '.join(part for part in (
+            (declared.address_street or '').strip(), (declared.address_neighborhood or '').strip()) if part)
+        try:
+            address = _address(
+                line_1=line_1,
+                city=declared.address_city,
+                state=declared.address_state,
+                postal_code=declared.address_zip_code,
+                country=declared.address_country,
+            )
+        except (ComplianceHandoffError, ValueError) as exc:
+            raise ComplianceHandoffError('Completa tu dirección para abrir tu cuenta local.') from exc
+    else:
+        # A UBO is a different person: only their own verified data, never
+        # the account owner's declared address.
+        address = _address(
+            line_1=identity.verified_address,
+            city=identity.verified_city,
+            state=identity.verified_state,
+            postal_code=identity.verified_postal_code,
+            country=identity.verified_country,
+        )
+    _required(identity.verified_first_name, 'first name')
+    _required(identity.verified_last_name, 'last name')
+    dob = _required(identity.verified_date_of_birth, 'date of birth').isoformat()
     front_url = id_check.get('full_front_image') or id_check.get('front_image')
     back_url = id_check.get('full_back_image') or id_check.get('back_image')
     selfie_url = liveness.get('reference_image')
+    _required(selfie_url, 'liveness reference image')
     identity_document_id, identity_audit = _upload_document(
         client,
-        document_type=_document_type(id_check.get('document_type') or identity.document_type),
+        document_type=document_type,
         front_url=_required(front_url, 'identity document image'),
         back_url=back_url,
     )
@@ -226,26 +394,25 @@ def _individual_payload(*, decision, identity, user, client):
         document_type='SELFIE',
         front_url=_required(selfie_url, 'liveness reference image'),
     )
-    email, phone = _contact(decision, user)
     payload = {
         'first_name': identity.verified_first_name,
         'last_name': identity.verified_last_name,
-        'date_of_birth': identity.verified_date_of_birth.isoformat(),
-        'tax_id': identity.document_number,
-        'tax_id_country': iso_alpha2(identity.document_issuing_country),
+        'date_of_birth': dob,
+        **identifiers,
+        **volume,
         'email': email,
         'phone_number': phone,
-        'address': _address(
-            line_1=identity.verified_address,
-            city=identity.verified_city,
-            state=identity.verified_state,
-            postal_code=identity.verified_postal_code,
-            country=identity.verified_country,
-        ),
+        'address': address,
         'identity_document_id': identity_document_id,
         'selfie_document_id': selfie_document_id,
     }
-    return payload, [identity_audit, selfie_audit]
+    documents, audits = _supporting_documents(decision, client, {
+        'source_of_funds': ('SOURCE_OF_FUNDS', 'source_of_funds_document_id'),
+        'financial_statements': ('SOURCE_OF_FUNDS', 'source_of_funds_document_id'),
+        'proof_of_address': ('PROOF_OF_ADDRESS', 'proof_of_address_document_id'),
+    })
+    payload.update(documents)
+    return payload, [identity_audit, selfie_audit, *audits]
 
 
 BUSINESS_DOCUMENT_MAP = {
@@ -260,32 +427,35 @@ BUSINESS_DOCUMENT_MAP = {
 }
 
 
-def _business_documents(decision, client):
-    fields = {}
-    audits = []
+def _supporting_documents(decision, client, mapping):
+    # Every approved file, grouped by the owner field it fills: Infinia keeps
+    # one document per field, so several files for one field go as one PDF.
+    groups = {}
     for check in decision.get('document_verifications') or []:
         for item in check.get('items') or []:
             if str(item.get('status') or '').strip().lower() != 'approved':
                 continue
-            raw_type = str(
-                item.get('document_subtype')
-                or item.get('document_type')
-                or item.get('document_group')
-                or ''
-            ).strip().lower()
-            mapping = next(
-                (value for key, value in BUSINESS_DOCUMENT_MAP.items() if key in raw_type),
+            matched = next(
+                (mapping[value] for field in ('document_subtype', 'document_type', 'document_group')
+                 if (value := str(item.get(field) or '').strip().lower()) in mapping),
                 None,
             )
-            if not mapping or mapping[1] in fields or not item.get('file_url'):
+            if not matched:
                 continue
-            document_id, audit = _upload_document(
-                client,
-                document_type=mapping[0],
-                front_url=item['file_url'],
-            )
-            fields[mapping[1]] = document_id
-            audits.append(audit)
+            document_type, owner_field = matched
+            groups.setdefault(owner_field, (document_type, []))[1].append(
+                _required(item.get('file_url'), 'supporting document file URL'))
+    fields = {}
+    audits = []
+    for owner_field, (document_type, urls) in groups.items():
+        document_id, audit = _upload_bundle(client, document_type=document_type, urls=urls)
+        fields[owner_field] = document_id
+        audits.append(audit)
+    return fields, audits
+
+
+def _business_documents(decision, client):
+    fields, audits = _supporting_documents(decision, client, BUSINESS_DOCUMENT_MAP)
     required = {
         'incorporation_document_id',
         'source_of_funds_document_id',
@@ -301,6 +471,8 @@ def _business_documents(decision, client):
 
 def _company(decision):
     registry = _approved_first(decision.get('registry_checks'))
+    if str(registry.get('status') or '').strip().lower() != 'approved':
+        raise ComplianceHandoffError('An approved business registry check is required')
     return _required(registry.get('company'), 'approved business registry result')
 
 
@@ -317,6 +489,11 @@ def _organization_payload(*, decision, identity, user, client, child_decisions):
         postal_code=address_data.get('postal_code'),
         country=address_data.get('country_code') or company.get('country_code'),
     )
+    name = _required(company.get('company_name'), 'company name')
+    incorporated = _required(company.get('incorporation_date'), 'incorporation date')
+    tax_id = _required(company.get('tax_number'), 'company tax ID (registration number is not a substitute)')
+    tax_country = iso_alpha2(_required(company.get('country_code'), 'company country'))
+    volume = _volume_fields(decision)
     document_fields, audits = _business_documents(decision, client)
     parties = []
     for check in decision.get('key_people_checks') or []:
@@ -340,7 +517,7 @@ def _organization_payload(*, decision, identity, user, client, child_decisions):
         ubo, ubo_audits = _individual_payload(
             decision=child,
             identity=child_identity,
-            user=user,
+            user=None,  # A UBO's contact cannot fall back to the account owner.
             client=client,
         )
         ubos.append(ubo)
@@ -349,14 +526,15 @@ def _organization_payload(*, decision, identity, user, client, child_decisions):
     if int(summary.get('total') or 0) and len(ubos) != int(summary.get('total')):
         raise ComplianceHandoffError('All Didit UBO KYC sessions must be approved and transferable')
     payload = {
-        'name': _required(company.get('company_name'), 'company name'),
-        'date_of_incorporation': _required(company.get('incorporation_date'), 'incorporation date'),
-        'tax_id': _required(company.get('tax_number') or company.get('registration_number'), 'company tax ID'),
-        'tax_id_country': iso_alpha2(_required(company.get('country_code'), 'company country')),
+        'name': name,
+        'date_of_incorporation': incorporated,
+        'tax_id': tax_id,
+        'tax_id_country': tax_country,
         'email': email,
         'phone_number': phone,
         'address': address,
         'ultimate_beneficial_owners': ubos,
+        **volume,
         **document_fields,
     }
     return payload, audits
@@ -385,6 +563,7 @@ def build_infinia_self_declared_payload(*, profile, client, decision, child_deci
             identity=identity,
             user=profile.confio_account.user,
             client=client,
+            declared_address=_declared_address(profile.confio_account.user),
         )
         typed = {'individual': details}
     return {

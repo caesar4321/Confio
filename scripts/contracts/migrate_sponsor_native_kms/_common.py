@@ -1,6 +1,6 @@
 """Shared helpers for the sponsor native-KMS migration scripts.
 
-All scripts in this directory must be invoked under ``aws-vault exec Julian`` so
+All scripts in this directory use the standard AWS profile via ``AWS_PROFILE=Julian`` so
 the AWS SDK can call both the legacy SSM/KMS path (for the old sponsor) and the
 native KMS sign path (for the new sponsor). They never accept addresses or key
 material as parameters: addresses come from the KMS keys themselves.

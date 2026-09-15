@@ -31,6 +31,8 @@ django-graphql-jwt
 py-algorand-sdk==2.7.0
 pyteal==0.27.0
 cryptography>=41.0.0
+cbor2==5.9.0
+pyOpenSSL>=25.1.0
 django-otp==1.6.3
 django-two-factor-auth==1.18.1
 django-cors-headers==4.3.1
@@ -38,6 +40,10 @@ qrcode==8.2
 pycountry==26.2.16
 git+https://github.com/tinymanorg/tinyman-py-sdk.git@v2.1.1#egg=tinyman-py-sdk
 Pillow
+# One PDF from several EDD evidence files (payment_accounts/compliance.py _combined_pdf)
+pypdf==6.14.2
+# Bre-B location gate: which country a GPS reading is in (payment_accounts/breb_location.py)
+timezonefinder==8.2.0
 # BSC sponsor hot wallet (native KMS secp256k1 signing, blockchain/evm_kms_signer.py)
 eth-account>=0.11,<0.14
 eth-hash[pycryptodome]

@@ -129,8 +129,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.3.1',
-    'last_updated': '2026-08-04',
+    'version': '1.4.0',
+    'last_updated': '2026-09-15',
     'is_legally_binding': True,
     'sections': [
         {
@@ -159,6 +159,7 @@ PRIVACY = {
                     'Versiones de software y hardware',
                     'Dirección IP',
                     'Ubicación',
+                    'Ubicación precisa del dispositivo al verificar Bre-B (coordenadas, precisión y hora de la lectura), solo en ese momento y con su permiso',
                     'ID del dispositivo',
                     'Huella del dispositivo, user agent, sesiones, última actividad y registros de seguridad',
                     'Configuración de notificaciones y tokens de notificaciones push',
@@ -195,6 +196,7 @@ PRIVACY = {
                 'Verificar su identidad y prevenir fraudes',
                 'Cumplir con requisitos de KYC/AML',
                 'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP',
+                'Confirmar que Bre-B está disponible en su ubicación al solicitarlo y al usarlo, mediante la ubicación precisa del dispositivo en ese momento, la verificación de integridad de la app (Apple o Google) y el país de su dirección IP',
                 'Detectar abuso, proteger cuentas, evaluar integridad del dispositivo y monitorear riesgos de seguridad'
             ]
         },
@@ -207,7 +209,8 @@ PRIVACY = {
                 'Con proveedores de servicios de verificación KYC y cumplimiento regulatorio',
                 'Con proveedores de recargas, retiros, pagos, transferencias y conversión de activos cuando sea necesario para ejecutar una operación solicitada por usted',
                 'Con proveedores de infraestructura, almacenamiento, autenticación, notificaciones push y seguridad que actúan como encargados del tratamiento',
-                'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario'
+                'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario',
+                'Con proveedores de pago, bancos o autoridades que lo requieran, los registros de verificación de ubicación de Bre-B como evidencia de cumplimiento'
             ]
         },
         {
@@ -238,7 +241,8 @@ PRIVACY = {
             'content': [
                 'Conservamos datos personales, transaccionales, de seguridad y de soporte durante el tiempo necesario para prestar el servicio, proteger la plataforma y cumplir con obligaciones legales o regulatorias',
                 'Los datos KYC/AML y los registros vinculados a transacciones pueden conservarse por el tiempo requerido por la regulación aplicable, incluyendo al menos 5 años después de la última transacción cuando corresponda',
-                'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales'
+                'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales',
+                'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano'
             ]
         },
         {

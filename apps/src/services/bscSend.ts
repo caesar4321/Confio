@@ -94,6 +94,7 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
   invalid_recipient_address: 'La dirección no es válida.',
   self_send_not_allowed: 'Esa dirección es tuya — elige otro destinatario.',
   insufficient_balance: 'Saldo insuficiente.',
+  invalid_activation_payment: 'La cuenta aún no está lista para el pago. Vuelve a revisar la apertura.',
   conversion_pending:
     'Estamos terminando de convertir tu depósito. Inténtalo de nuevo en un momento.',
   client_update_required: 'Actualiza Confío para enviar este saldo.',
@@ -108,14 +109,6 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
 
 export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResult> => {
   const { apolloClient } = await import('../apollo/client');
-  const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
-
-  const sponsored = await fetchSponsored7702Params();
-  if (!sponsored.enabled || !sponsored.delegateAddress) {
-    throw new Error('sponsored_rail_unavailable');
-  }
-  const wallet = await getActiveEvmWallet();
-
   const { data } = await apolloClient.mutate({
     mutation: PREPARE,
     variables: {
@@ -130,6 +123,20 @@ export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResul
   });
   const prep = data?.prepareBscSend;
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
+
+  return submitPreparedBscSend(prep);
+};
+
+/** Sign an existing server-bound send; activation payments share this path. */
+export const submitPreparedBscSend = async (prep: any): Promise<BscSendResult> => {
+  const { apolloClient } = await import('../apollo/client');
+  const { getActiveEvmWallet } = await import('./secureDeterministicWallet');
+
+  const sponsored = await fetchSponsored7702Params();
+  if (!sponsored.enabled || !sponsored.delegateAddress) {
+    throw new Error('sponsored_rail_unavailable');
+  }
+  const wallet = await getActiveEvmWallet();
 
   const calls: BatchCall[] = (prep.calls || []).map((c: any) => ({
     to: c.to,

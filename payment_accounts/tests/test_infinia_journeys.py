@@ -39,6 +39,7 @@ class JourneyTests(TestCase):
         self.dest = PayoutDestination.objects.create(confio_account=self.owner, provider='infinia', kind='bank_account',
             country='PER', asset='PEN', label='Bank', holder_name='Holder', details={'type':'ACCOUNT_PERU','accountNumber':'123'})
         self.policies = mock.patch('payment_accounts.infinia_journeys.enforce_and_record').start()
+        self.allowance = mock.patch('payment_accounts.local_money.require_allowance').start()
         self.submit = mock.patch('payment_accounts.infinia_journeys.submit_money_operation', side_effect=lambda op: op).start()
         self.api = mock.Mock()
         from types import SimpleNamespace
@@ -135,6 +136,25 @@ class JourneyTests(TestCase):
         self.assertEqual(j.payout_operation.source_amount,Decimal('2.5'))
         advance_journey(j.pk, client=self.api)
         self.assertEqual(MoneyOperation.objects.filter(money_flow=j.money_flow).count(),2)
+
+    def test_bank_send_checks_the_allowance_under_the_owner_lock(self):
+        t,_=self.prepared(); t.status='delivered';t.destination_tx_hash=DEST_HASH;t.save()
+        entry=self.credit(self.crypto, provider_data={'third_party':{'type':'CRYPTO','crypto_network':'POLYGON','transaction_hash':DEST_HASH}})
+        reconcile_provider_credit(t)
+        args=dict(owner=self.owner,local_account=self.local,crypto_account=self.crypto, request_id=uuid.uuid4(),
+                  direction='to_bank',bridge=t,destination=self.dest,minimum_fx_output='30')
+        self.allowance.side_effect = PaymentAccountError('Este envío supera tu límite mensual disponible.')
+        with self.assertRaisesRegex(PaymentAccountError, 'supera tu límite'):
+            create_journey(**args)
+        self.assertFalse(InfiniaJourney.objects.exists())
+        self.allowance.side_effect = None
+        first = create_journey(**args)
+        owner, crypto, amount = self.allowance.call_args.args
+        self.assertEqual((owner.pk, crypto.pk, amount), (self.owner.pk, self.crypto.pk, t.quote.money_flow.source_amount))
+        # A retry of the same request returns the journey without re-checking.
+        self.allowance.side_effect = PaymentAccountError('Este envío supera tu límite mensual disponible.')
+        self.assertEqual(create_journey(**args).pk, first.pk)
+        self.assertTrue(entry.pk)
 
     def test_outbound_correlates_infinia_credit_to_bridge_then_pays_local_account(self):
         t,_=self.prepared(); t.status='delivered';t.destination_tx_hash=DEST_HASH;t.save()

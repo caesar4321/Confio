@@ -11,7 +11,8 @@
 
 import { Platform } from 'react-native';
 import { appCheckDiagnosticCode } from '../utils/appCheckDiagnostics';
-import appCheck from '@react-native-firebase/app-check';
+import { getApp } from '@react-native-firebase/app';
+import { initializeAppCheck, getToken, ReactNativeFirebaseAppCheckProvider, FirebaseAppCheckTypes } from '@react-native-firebase/app-check';
 import {
     ALLOW_APP_CHECK_DEBUG,
     FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID,
@@ -21,6 +22,7 @@ import {
 
 export class AppCheckService {
     private isInitialized = false;
+    private appCheckInstance: FirebaseAppCheckTypes.Module | null = null;
     private initPromise: Promise<void> | null = null;
     private tokenPromise: Promise<string | null> | null = null;
     private lastToken: string | null = null;
@@ -69,7 +71,7 @@ export class AppCheckService {
         this.initPromise = (async () => {
             try {
                 // Use the new modular API for App Check initialization
-                const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
+                const rnfbProvider = new ReactNativeFirebaseAppCheckProvider();
                 const useDebugProvider = await this.shouldUseDebugProvider();
                 const providerName = useDebugProvider ? 'debug' : Platform.OS === 'android' ? 'playIntegrity' : 'appAttest';
 
@@ -93,7 +95,7 @@ export class AppCheckService {
                     },
                 });
 
-                await appCheck().initializeAppCheck({
+                this.appCheckInstance = await initializeAppCheck(getApp(), {
                     provider: rnfbProvider,
                     isTokenAutoRefreshEnabled: false,
                 });
@@ -189,8 +191,12 @@ export class AppCheckService {
                 await this.initialize();
             }
 
+            if (!this.appCheckInstance) {
+                return null;
+            }
+
             this.lastFetchAttemptAt = Date.now();
-            const { token } = await this.withTimeout(appCheck().getToken(forceRefresh));
+            const { token } = await this.withTimeout(getToken(this.appCheckInstance, forceRefresh));
             if (token) {
                 this.lastToken = token;
                 this.lastTokenAt = Date.now();

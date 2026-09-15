@@ -3,7 +3,7 @@ import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar, StyleSheet, View, ActivityIndicator, Text } from 'react-native';
-import analytics from '@react-native-firebase/analytics';
+import { getAnalytics, logScreenView } from '@react-native-firebase/analytics';
 import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import apolloClient from './apollo/client';
@@ -136,8 +136,7 @@ const AppContent: React.FC = () => {
             if (initialRoute?.name) {
               previousScreenRef.current = initialRoute.name;
               logBreadcrumb(`screen_view | ${initialRoute.name}`);
-              analytics()
-                .logScreenView({
+              logScreenView(getAnalytics(), {
                   screen_name: initialRoute.name,
                   screen_class: initialRoute.name,
                 })
@@ -150,8 +149,7 @@ const AppContent: React.FC = () => {
             if (name && name !== previousScreenRef.current) {
               previousScreenRef.current = name;
               logBreadcrumb(`screen_view | ${name}`);
-              analytics()
-                .logScreenView({ screen_name: name, screen_class: name })
+              logScreenView(getAnalytics(), { screen_name: name, screen_class: name })
                 .catch(() => {});
             }
           }}

@@ -1,4 +1,4 @@
-import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import { AuthorizationStatus, FirebaseMessagingTypes, getInitialNotification, getMessaging, getToken, hasPermission, onMessage, onNotificationOpenedApp, onTokenRefresh, requestPermission, setBackgroundMessageHandler, subscribeToTopic, unsubscribeFromTopic } from '@react-native-firebase/messaging';
 import notifee from '@notifee/react-native';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Keychain from 'react-native-keychain';
@@ -495,19 +495,19 @@ export class PushNotificationService {
       console.log('[PushNotificationService] Cleared any stale pending switches');
       
       // Register background handler
-      messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+      setBackgroundMessageHandler(getMessaging(), async (remoteMessage) => {
         console.log('Message handled in the background!', remoteMessage);
         // Handle background message
       });
 
       // Handle foreground messages
-      const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+      const unsubscribe = onMessage(getMessaging(), async (remoteMessage) => {
         console.log('A new FCM message arrived!', remoteMessage);
         // Handle foreground message - you might want to show a local notification here
       });
 
       // Handle notification opened app
-      messaging().onNotificationOpenedApp((remoteMessage) => {
+      onNotificationOpenedApp(getMessaging(), (remoteMessage) => {
         console.log('Notification caused app to open from background state:', remoteMessage.notification);
         // For background state, the app is already initialized so we can navigate
         // But we should still check if navigation is ready
@@ -517,7 +517,7 @@ export class PushNotificationService {
       });
 
       // Check whether an initial notification is available
-      const initialNotification = await messaging().getInitialNotification();
+      const initialNotification = await getInitialNotification(getMessaging());
       if (initialNotification) {
         console.log('Notification caused app to open from quit state:', initialNotification.notification);
         // Store the notification to be processed after app is fully initialized
@@ -588,10 +588,10 @@ export class PushNotificationService {
       }
 
       // Request permission from Firebase
-      const authStatus = await messaging().requestPermission();
+      const authStatus = await requestPermission(getMessaging());
       const enabled =
-        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+        authStatus === AuthorizationStatus.AUTHORIZED ||
+        authStatus === AuthorizationStatus.PROVISIONAL;
 
       if (enabled) {
         console.log('Authorization status:', authStatus);
@@ -618,9 +618,9 @@ export class PushNotificationService {
    */
   async hasPermission(): Promise<boolean> {
     try {
-      const authStatus = await messaging().hasPermission();
-      return authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-             authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+      const authStatus = await hasPermission(getMessaging());
+      return authStatus === AuthorizationStatus.AUTHORIZED ||
+             authStatus === AuthorizationStatus.PROVISIONAL;
     } catch (error) {
       console.error('Failed to check notification permission:', error);
       return false;
@@ -636,11 +636,11 @@ export class PushNotificationService {
         return false;
       }
       
-      const authStatus = await messaging().hasPermission();
+      const authStatus = await hasPermission(getMessaging());
       const storedStatus = await this.getStoredPermissionStatus();
       
       // On iOS, if permission was denied, user must go to settings
-      return authStatus === messaging.AuthorizationStatus.DENIED && storedStatus === 'denied';
+      return authStatus === AuthorizationStatus.DENIED && storedStatus === 'denied';
     } catch (error) {
       console.error('Failed to check if needs settings:', error);
       return false;
@@ -652,7 +652,7 @@ export class PushNotificationService {
    */
   async getAndSaveFCMToken(): Promise<string | null> {
     try {
-      const token = await messaging().getToken();
+      const token = await getToken(getMessaging());
       if (token) {
         await Keychain.setInternetCredentials(
           NOTIFICATION_TOKEN_KEY,
@@ -752,7 +752,7 @@ export class PushNotificationService {
    */
   async subscribeToTopic(topic: string): Promise<void> {
     try {
-      await messaging().subscribeToTopic(topic);
+      await subscribeToTopic(getMessaging(), topic);
       console.log(`Subscribed to topic: ${topic}`);
     } catch (error) {
       console.error(`Failed to subscribe to topic ${topic}:`, error);
@@ -764,7 +764,7 @@ export class PushNotificationService {
    */
   async unsubscribeFromTopic(topic: string): Promise<void> {
     try {
-      await messaging().unsubscribeFromTopic(topic);
+      await unsubscribeFromTopic(getMessaging(), topic);
       console.log(`Unsubscribed from topic: ${topic}`);
     } catch (error) {
       console.error(`Failed to unsubscribe from topic ${topic}:`, error);
@@ -775,7 +775,7 @@ export class PushNotificationService {
    * Handle token refresh
    */
   setupTokenRefreshListener(): () => void {
-    const unsubscribe = messaging().onTokenRefresh(async (token) => {
+    const unsubscribe = onTokenRefresh(getMessaging(), async (token) => {
       console.log('FCM Token refreshed:', token);
       await Keychain.setInternetCredentials(
         NOTIFICATION_TOKEN_KEY,

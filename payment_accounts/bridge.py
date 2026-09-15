@@ -13,8 +13,26 @@ from .models import FundingInstruction, MoneyFlow, PaymentBridgeQuote
 from .services import PaymentAccountError, _require_provider_enabled
 
 
+def bridge_cap():
+    """Optional emergency brake on one bridge transfer, or None (the default).
+
+    NEXT quotes every size at the same rate (2026-09-14: 0.998768 USDC per
+    USDT from 10 to 100,000), so there is no size risk to cap. A configured
+    value that is not a positive number still refuses every transfer.
+    """
+    raw = str(getattr(settings, 'PAYMENT_BRIDGE_MAX_USDT', '') or '').strip()
+    return Decimal(raw) if raw else None
+
+
+def exceeds_bridge_cap(amount):
+    cap = bridge_cap()
+    return cap is not None and (not cap.is_finite() or cap <= 0 or Decimal(str(amount)) > cap)
+
+
 def verified_destination(instruction, confio_account):
     account = instruction.financial_account
+    from .activation import require_usable
+    require_usable(account)
     if account.provider_profile.confio_account_id != confio_account.pk:
         raise PaymentAccountError('Funding instruction does not belong to the active account')
     if account.provider not in {'cobre', 'infinia'}:
@@ -55,9 +73,8 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
         ('BSC:USDT', 'POL:USDC') if direction == 'to_provider' else ('POL:USDC', 'BSC:USDT')
     )
     units = to_units(amount, source_token)
-    # This is a cap on the source leg, not a promise of an exact provider credit.
-    maximum = Decimal(str(getattr(settings, 'PAYMENT_BRIDGE_MAX_USDT', '100')))
-    if not maximum.is_finite() or maximum <= 0 or Decimal(str(amount)) > maximum:
+    # An optional brake on the source leg, not a promise of an exact provider credit.
+    if exceeds_bridge_cap(amount):
         raise PaymentAccountError('Amount exceeds the configured bridge limit')
     instruction = FundingInstruction.objects.select_related(
         'financial_account__provider_profile__identity_verification'

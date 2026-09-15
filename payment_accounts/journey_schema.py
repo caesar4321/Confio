@@ -9,6 +9,7 @@ from .services import PaymentAccountError
 class InfiniaJourneyType(DjangoObjectType):
     bridge_id = graphene.UUID()
     bridge_funding_mode = graphene.String()
+    bridge_status = graphene.String()
     minimum_fx_output = graphene.String(required=True)
     minimum_wallet_output = graphene.String()
     local_asset = graphene.String(required=True)
@@ -45,11 +46,35 @@ class InfiniaJourneyType(DjangoObjectType):
     def resolve_payout_amount(self, info):
         return str(self.payout_operation.source_amount) if self.payout_operation_id else None
 
+    def resolve_bridge_status(self, info):
+        # 'prepared' means the owner still has to sign it: the send is not funded yet.
+        return self.bridge.status if self.bridge_id else None
+
 
 class InfiniaDepositType(DjangoObjectType):
+    held = graphene.Boolean(required=True)
+    held_reason = graphene.String(required=True)
+
     class Meta:
         model = LedgerEntry
         fields = ('internal_id', 'asset', 'amount', 'occurred_at')
+
+    # Graphene passes the LedgerEntry as `self`, so the helper lives at module level.
+    def resolve_held(self, info):
+        return bool(deposit_admission(self)[1])
+
+    def resolve_held_reason(self, info):
+        return deposit_admission(self)[1]
+
+
+def deposit_admission(entry):
+    """(allowed, reason) for one credit. Read-only: the admin action and
+    journey creation own persistence."""
+    from .payin_admission import decision, is_external_fiat_credit
+    if not is_external_fiat_credit(entry):
+        return True, ''
+    allowed, reason, _, _ = decision(entry)
+    return allowed, '' if allowed else reason
 
 
 class CreateInfiniaJourney(graphene.Mutation):
@@ -78,6 +103,14 @@ class CreateInfiniaJourney(graphene.Mutation):
             bridge = PaymentBridgeTransfer.objects.get(internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None
             credit = LedgerEntry.objects.get(internal_id=credit_id, financial_account__provider_profile__confio_account=owner) if credit_id else None
             destination = PayoutDestination.objects.get(internal_id=destination_id, confio_account=owner) if destination_id else None
+            from .breb_location import require_for_country
+            require_for_country(owner, local.country, info.context.META)
+            is_new_send = kwargs.get('direction') == 'to_bank' and not InfiniaJourney.objects.filter(
+                confio_account=owner, request_id=kwargs.get('request_id')).exists()
+            if is_new_send and destination is not None:
+                from .local_money import require_current_destination
+                require_current_destination(destination)
+            # The monthly allowance is checked inside create_journey, under the owner lock.
             row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
                                  bridge=bridge, credit=credit, destination=destination, **kwargs)
             return cls(success=True, errors=[], journey=row)
@@ -111,6 +144,13 @@ class JourneyQuery(graphene.ObjectType):
     infinia_journey_deposits = graphene.List(graphene.NonNull(InfiniaDepositType), required=True,
         account_id=graphene.UUID(required=True), offset=graphene.Int(default_value=0))
     infinia_journeys_enabled = graphene.Boolean(required=True)
+    infinia_journey = graphene.Field(InfiniaJourneyType, internal_id=graphene.UUID(required=True))
+
+    def resolve_infinia_journey(self, info, internal_id):
+        from .schema import _active_account
+        owner = _active_account(info, permission='view_transactions')
+        return InfiniaJourney.objects.filter(confio_account=owner, internal_id=internal_id).select_related(
+            'bridge', 'local_account', 'crypto_account', 'payout_operation').first()
 
     def resolve_infinia_journeys_enabled(self, info):
         from .schema import _active_account
@@ -126,9 +166,12 @@ class JourneyQuery(graphene.ObjectType):
     def resolve_infinia_journey_deposits(self, info, account_id, offset=0):
         from .schema import _active_account
         owner = _active_account(info, permission='view_transactions')
+        from .activation import visible_accounts
+        allowed = visible_accounts(FinancialAccount.objects.filter(provider_profile__confio_account=owner))
         from django.db.models import Q
         return LedgerEntry.objects.filter(
             Q(provider_data__operation__type__isnull=True) | Q(provider_data__operation__type__in=['PAYIN', 'CREDIT']),
+            financial_account__in=allowed,
             provider='infinia', direction='credit', amount__gt=0,
             financial_account__internal_id=account_id, financial_account__provider_profile__confio_account=owner,
             funded_journey__isnull=True).order_by('-occurred_at')[max(0,offset):max(0,offset)+20]

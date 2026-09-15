@@ -126,10 +126,20 @@ def context_from_identity(
     account_country='',
     destination_country='',
 ):
-    """Build policy input only from verified identity fields, never phone/IP guesses."""
+    """Build policy input from verified identity fields; residence from observed IPs.
+
+    Nationality and document come from the verified document. Residence does
+    not: a document says who you are, not where you live (a Venezuelan cédula
+    held by someone living in Colombia). Product decision 2026-09-14 — the
+    residence signal is the majority IP country of the user's recent sessions
+    (security.geo.residence_country_for), falling back to the verified
+    document's country only when there is no usable IP evidence.
+    """
+    from security.geo import residence_country_for
+    residence = residence_country_for(getattr(identity_verification, 'user', None))
     return EligibilityContext(
         nationality=identity_verification.verified_nationality,
-        residence_country=identity_verification.verified_country,
+        residence_country=residence or identity_verification.verified_country,
         account_country=account_country,
         document_type=identity_verification.document_type,
         document_issuing_country=identity_verification.document_issuing_country,

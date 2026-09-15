@@ -264,11 +264,51 @@ class CheckKYCStatus(graphene.Mutation):
         )
 
 
+class IdentityDocumentType(graphene.ObjectType):
+    """One personal identity document, primary or additional, on equal footing."""
+    id = graphene.ID(required=True)
+    document_type = graphene.String(required=True)
+    issuing_country = graphene.String(required=True)  # ISO-2, '' while unknown
+    status = graphene.String(required=True)
+    is_additional = graphene.Boolean(required=True)
+    verified_at = graphene.DateTime()
+    # ISO-2 countries whose local account this document can open: the same
+    # rule the rails use (payment_accounts.local_money.accepts_identity), plus
+    # Colombia's Bre-B when Cobre takes the document type.
+    local_countries = graphene.List(graphene.NonNull(graphene.String), required=True)
+
+
+def _iso2(code):
+    code = (code or '').strip().upper()
+    if len(code) == 2:
+        return code
+    if len(code) != 3 or code == 'UNK':
+        return ''
+    import pycountry
+    match = pycountry.countries.get(alpha_3=code)
+    return match.alpha_2 if match else ''
+
+
+def _local_countries(row):
+    if row.status != 'verified':
+        return []
+    from django.conf import settings
+    from payment_accounts.local_money import LOCAL_ACCOUNT_COUNTRIES, accepts_identity
+    countries = {_iso2(country) for country in LOCAL_ACCOUNT_COUNTRIES if accepts_identity(row, country)}
+    cobre_types = getattr(settings, 'COBRE_DOCUMENT_TYPE_MAP', {}) or {}
+    if getattr(settings, 'COBRE_PAYMENT_ACCOUNTS_ENABLED', False) and (
+            f'{row.document_issuing_country}:{row.document_type}' in cobre_types
+            or f'*:{row.document_type}' in cobre_types):
+        countries.add('CO')
+    return sorted(country for country in countries if country)
+
+
 class SecurityQuery(graphene.ObjectType):
     my_devices = graphene.List(UserDeviceType)
     my_kyc_status = graphene.Field(IdentityVerificationType)
     my_personal_kyc_status = graphene.Field(IdentityVerificationType)
     my_personal_verified_kyc = graphene.Field(IdentityVerificationType)
+    my_identity_documents = graphene.List(graphene.NonNull(IdentityDocumentType), required=True)
     business_kyc_status = graphene.Field(IdentityVerificationType, business_id=graphene.ID(required=True))
     
     def resolve_my_devices(self, info):
@@ -319,6 +359,33 @@ class SecurityQuery(graphene.ObjectType):
             status='verified',
             risk_factors__account_type__isnull=True
         ).order_by('-verified_at', '-updated_at', '-created_at').first()
+
+    def resolve_my_identity_documents(self, info):
+        """Every personal document (additional ones included, which the default
+        manager hides): verified ones, plus an attempt still in review or
+        rejected when it is newer than the last verified document of its kind."""
+        user = info.context.user
+        if not user.is_authenticated:
+            return []
+        from django.db.models import Q
+        rows = list(
+            IdentityVerification.all_documents.filter(user=user)
+            .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+            .order_by('is_additional_document', '-verified_at', '-created_at')
+        )
+        documents = [row for row in rows if row.status == 'verified']
+        for additional in (False, True):
+            kind = [row for row in rows if row.is_additional_document == additional]
+            latest = max(kind, key=lambda row: row.created_at, default=None)
+            newest_verified = max((row.created_at for row in kind if row.status == 'verified'), default=None)
+            if latest and latest.status in ('pending', 'rejected') and (
+                    newest_verified is None or latest.created_at > newest_verified):
+                documents.append(latest)
+        return [IdentityDocumentType(
+            id=str(row.pk), document_type=row.document_type or '', issuing_country=_iso2(row.document_issuing_country),
+            status=row.status, is_additional=bool(row.is_additional_document), verified_at=row.verified_at,
+            local_countries=_local_countries(row),
+        ) for row in documents]
 
 
 class RequestIntegrityNonce(graphene.Mutation):

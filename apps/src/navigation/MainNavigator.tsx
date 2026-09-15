@@ -36,6 +36,13 @@ import RampInstructionsScreen from '../screens/RampInstructionsScreen';
 import InfiniaPaymentScreen from '../screens/InfiniaPaymentScreen';
 import CobrePaymentScreen from '../screens/CobrePaymentScreen';
 import LocalAccountFundingScreen from '../screens/LocalAccountFundingScreen';
+import LocalSendScreen from '../screens/LocalSendScreen';
+import LocalReceiveScreen from '../screens/LocalReceiveScreen';
+import LocalTransferStatusScreen from '../screens/LocalTransferStatusScreen';
+import LocalLimitIncreaseScreen from '../screens/LocalLimitIncreaseScreen';
+import AdditionalDocumentScreen from '../screens/AdditionalDocumentScreen';
+import LocalAccountApplicationScreen from '../screens/LocalAccountApplicationScreen';
+import BrebLocationCheckScreen from '../screens/BrebLocationCheckScreen';
 import RampHistoryScreen from '../screens/RampHistoryScreen';
 
 // ... existing imports ...
@@ -277,6 +284,13 @@ export const MainNavigator = () => {
         <Stack.Screen name="InfiniaPayment" component={InfiniaPaymentScreen} options={{ headerShown: false }} />
         <Stack.Screen name="CobrePayment" component={CobrePaymentScreen} options={{ headerShown: false }} />
         <Stack.Screen name="LocalAccountFunding" component={LocalAccountFundingScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="LocalSend" component={LocalSendScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="LocalReceive" component={LocalReceiveScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="LocalTransferStatus" component={LocalTransferStatusScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="LocalLimitIncrease" component={LocalLimitIncreaseScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AdditionalDocument" component={AdditionalDocumentScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="LocalAccountApplication" component={LocalAccountApplicationScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="BrebLocationCheck" component={BrebLocationCheckScreen} options={{ headerShown: false }} />
         <Stack.Screen
           name="WithdrawSavings"
           component={WithdrawSavingsScreen}

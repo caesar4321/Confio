@@ -1,5 +1,6 @@
 const mockMessagingInstance = {
   hasPermission: jest.fn(),
+  isDeviceRegisteredForRemoteMessages: true,
   registerDeviceForRemoteMessages: jest.fn(),
   getAPNSToken: jest.fn(),
   getToken: jest.fn(),
@@ -23,6 +24,18 @@ jest.mock('@react-native-firebase/messaging', () => {
   return {
     __esModule: true,
     default: messaging,
+    getMessaging: messaging,
+    AuthorizationStatus: messaging.AuthorizationStatus,
+    isDeviceRegisteredForRemoteMessages: () => mockMessagingInstance.isDeviceRegisteredForRemoteMessages,
+    hasPermission: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.hasPermission as jest.Mock)(...args),
+    registerDeviceForRemoteMessages: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.registerDeviceForRemoteMessages as jest.Mock)(...args),
+    getAPNSToken: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.getAPNSToken as jest.Mock)(...args),
+    getToken: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.getToken as jest.Mock)(...args),
+    onMessage: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.onMessage as jest.Mock)(...args),
+    onNotificationOpenedApp: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.onNotificationOpenedApp as jest.Mock)(...args),
+    getInitialNotification: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.getInitialNotification as jest.Mock)(...args),
+    onTokenRefresh: (_instance: unknown, ...args: unknown[]) => (mockMessagingInstance.onTokenRefresh as jest.Mock)(...args),
+
   };
 });
 
@@ -72,6 +85,7 @@ jest.mock('../crashLog', () => ({
 }));
 
 import messagingService from '../messagingService';
+import { Platform } from 'react-native';
 
 describe('MessagingService FCM registration', () => {
   beforeEach(() => {
@@ -91,6 +105,20 @@ describe('MessagingService FCM registration', () => {
     (messagingService as any).messageHandlersSetup = true;
     (messagingService as any).channelCreated = true;
     (messagingService as any).registrationInFlight = null;
+  });
+
+  it.each([true, false])('registers with APNs only if needed (already registered: %s)', async registered => {
+    const previousOS = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    mockMessagingInstance.isDeviceRegisteredForRemoteMessages = registered;
+    mockMessagingInstance.getAPNSToken.mockResolvedValue('apns-token');
+    try {
+      await expect(messagingService.getFCMToken(true)).resolves.toBe('same-fcm-token');
+      expect(mockMessagingInstance.registerDeviceForRemoteMessages).toHaveBeenCalledTimes(registered ? 0 : 1);
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: previousOS });
+      mockMessagingInstance.isDeviceRegisteredForRemoteMessages = true;
+    }
   });
 
   it('re-registers an unchanged token when forced', async () => {

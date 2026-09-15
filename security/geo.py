@@ -125,6 +125,61 @@ def country_for_request(meta: Mapping | None) -> str | None:
         extract_client_ip_from_meta(meta), meta.get('HTTP_CF_IPCOUNTRY'))
 
 
+def to_iso3(code) -> str | None:
+    """ISO alpha-2 → alpha-3 (eligibility rules and Didit use alpha-3)."""
+    country = normalize_country(code)
+    if not country:
+        return None
+    import pycountry
+    match = pycountry.countries.get(alpha_2=country)
+    return match.alpha_3 if match else None
+
+
+def residence_country_for(user, *, days: int = 90) -> str | None:
+    """Where the user appears to live, from the IPs they actually use (ISO3).
+
+    Product decision (2026-09-14): residence for eligibility is established
+    by IP, not by the document — a Venezuelan migrant verified with a
+    Venezuelan cédula still lives in Colombia. The signal is the MAJORITY
+    country over recent sessions, ignoring VPN/Tor/datacenter exits, so one
+    trip or one tunnel does not relocate anyone. No clear majority, or no
+    usable evidence, returns None and the caller keeps its own fallback.
+    """
+    if not getattr(user, 'pk', None):
+        return None
+    from datetime import timedelta
+    from django.utils import timezone
+    from security.models import IPDeviceUser
+
+    since = timezone.now() - timedelta(days=days)
+    rows = (
+        IPDeviceUser.objects.filter(user=user, last_seen__gte=since)
+        .exclude(ip_address__is_vpn=True).exclude(ip_address__is_tor=True)
+        .exclude(ip_address__is_datacenter=True)
+        .exclude(ip_address__country_code__isnull=True).exclude(ip_address__country_code='')
+        .values_list('ip_address__country_code', 'total_sessions', 'daily_sessions')
+    )
+    # Weigh real sessions inside the window, not IP/device pairs: a hundred
+    # sessions at home outweigh two hotel devices on a trip, and one visit to an
+    # old home IP counts as one visit, not its lifetime history. A pair recorded
+    # before daily counts existed weighs its total until it is seen again.
+    start = since.date().isoformat()
+    weights: dict[str, int] = {}
+    for country, total_sessions, daily in rows:
+        if daily:
+            sessions = sum(int(count or 0) for day, count in daily.items() if day >= start)
+        else:
+            sessions = max(total_sessions or 0, 1)
+        if sessions > 0:
+            weights[country] = weights.get(country, 0) + sessions
+    if not weights:
+        return None
+    country, top = max(weights.items(), key=lambda item: item[1])
+    if top * 2 <= sum(weights.values()):
+        return None
+    return to_iso3(country)
+
+
 # ── Policy ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)

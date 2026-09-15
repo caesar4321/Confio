@@ -8,6 +8,8 @@ const mockRefetch = jest.fn().mockResolvedValue({});
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({goBack: jest.fn()}),
 }));
+// The location gate has its own screen; this test is about the payment screen.
+jest.mock('../../components/breb/BrebLocationGate', () => ({BrebLocationGate: ({children}: any) => children}));
 jest.mock('react-native-safe-area-context', () => ({
   SafeAreaView: 'SafeAreaView',
 }));

@@ -15,3 +15,49 @@ index 18667648..017c290e 100644
  - (void)removeFromSuperview
  {
    [super removeFromSuperview];
+diff --git a/node_modules/react-native-screens/src/components/ScreenStackHeaderConfig.tsx b/node_modules/react-native-screens/src/components/ScreenStackHeaderConfig.tsx
+--- a/node_modules/react-native-screens/src/components/ScreenStackHeaderConfig.tsx
++++ b/node_modules/react-native-screens/src/components/ScreenStackHeaderConfig.tsx
+@@ -32,3 +32,4 @@
+     style={styles.headerConfig}
+-    pointerEvents="box-none"
++    // UIKit header config implements its own hit testing; UIView rejects box-none.
++    pointerEvents={Platform.OS === 'ios' ? undefined : 'box-none'}
+   />
+diff --git a/node_modules/react-native-screens/lib/module/components/ScreenStackHeaderConfig.js b/node_modules/react-native-screens/lib/module/components/ScreenStackHeaderConfig.js
+--- a/node_modules/react-native-screens/lib/module/components/ScreenStackHeaderConfig.js
++++ b/node_modules/react-native-screens/lib/module/components/ScreenStackHeaderConfig.js
+@@ -13,7 +13,7 @@
+   ref: ref,
+   topInsetEnabled: EDGE_TO_EDGE ? true : props.topInsetEnabled,
+   style: styles.headerConfig,
+-  pointerEvents: "box-none"
++  pointerEvents: Platform.OS === "ios" ? undefined : "box-none"
+ })));
+ ScreenStackHeaderConfig.displayName = 'ScreenStackHeaderConfig';
+ export const ScreenStackHeaderBackButtonImage = props => /*#__PURE__*/React.createElement(ScreenStackHeaderSubview, {
+diff --git a/node_modules/react-native-screens/lib/commonjs/components/ScreenStackHeaderConfig.js b/node_modules/react-native-screens/lib/commonjs/components/ScreenStackHeaderConfig.js
+--- a/node_modules/react-native-screens/lib/commonjs/components/ScreenStackHeaderConfig.js
++++ b/node_modules/react-native-screens/lib/commonjs/components/ScreenStackHeaderConfig.js
+@@ -17,7 +17,7 @@
+   ref: ref,
+   topInsetEnabled: _edgeToEdge.EDGE_TO_EDGE ? true : props.topInsetEnabled,
+   style: styles.headerConfig,
+-  pointerEvents: "box-none"
++  pointerEvents: _reactNative.Platform.OS === "ios" ? undefined : "box-none"
+ })));
+ ScreenStackHeaderConfig.displayName = 'ScreenStackHeaderConfig';
+ const ScreenStackHeaderBackButtonImage = props => /*#__PURE__*/_react.default.createElement(ScreenStackHeaderSubview, {
+diff --git a/node_modules/react-native-screens/ios/RNSScreen.mm b/node_modules/react-native-screens/ios/RNSScreen.mm
+--- a/node_modules/react-native-screens/ios/RNSScreen.mm
++++ b/node_modules/react-native-screens/ios/RNSScreen.mm
+@@ -1170,3 +1170,3 @@
+ {
+-  NSLog(@"ScreenView [%ld] setFrame: %@", self.tag, NSStringFromCGRect(frame));
++  RCTLogTrace(@"ScreenView [%ld] setFrame: %@", self.tag, NSStringFromCGRect(frame));
+   [super setFrame:frame];
+@@ -1176,3 +1176,3 @@
+ {
+-  NSLog(@"ScreenView [%ld] setBounds: %@", self.tag, NSStringFromCGRect(bounds));
++  RCTLogTrace(@"ScreenView [%ld] setBounds: %@", self.tag, NSStringFromCGRect(bounds));
+   [super setBounds:bounds];

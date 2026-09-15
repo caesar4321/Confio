@@ -33,12 +33,18 @@ import { AuthProvider, useAuth } from '../AuthContext';
 describe('session loss after biometric unlock', () => {
   let renderer: ReactTestRenderer;
   let authState: ReturnType<typeof useAuth>;
+  const authenticatedStates: boolean[] = [];
   const navigationRef = { current: { reset: jest.fn() } };
-  const Probe = () => { authState = useAuth(); return null; };
+  const Probe = () => {
+    authState = useAuth();
+    authenticatedStates.push(authState.isAuthenticated);
+    return null;
+  };
 
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    authenticatedStates.length = 0;
     AppState.currentState = 'active';
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -104,5 +110,42 @@ describe('session loss after biometric unlock', () => {
     });
     await act(async () => { jest.advanceTimersByTime(2000); });
     expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { phoneNumber: null, phoneCountry: null },
+    { phoneNumber: '123', phoneCountry: null },
+  ])('opens phone verification without entering Home for an incomplete phone link: %j', async phone => {
+    mockClient.query.mockResolvedValue({ data: { me: { id: '1', ...phone } } });
+    await mount();
+    expect(authenticatedStates).not.toContain(true);
+    expect(authState!.isLoading).toBe(false);
+    expect(navigationRef.current.reset).toHaveBeenCalledWith({
+      index: 0, routes: [{ name: 'Auth', params: { screen: 'PhoneVerification', params: undefined } }],
+    });
+    expect(await Keychain.getGenericPassword()).toBeTruthy();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('routes an already open session to phone verification when its phone link is removed', async () => {
+    await mount();
+    expect(authState!.isAuthenticated).toBe(true);
+    navigationRef.current.reset.mockClear();
+    mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: null, phoneCountry: null } } });
+    await act(async () => { await authState!.refreshProfile(); });
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(navigationRef.current.reset).toHaveBeenCalledWith({
+      index: 0, routes: [{ name: 'Auth', params: { screen: 'PhoneVerification', params: undefined } }],
+    });
+    expect(await Keychain.getGenericPassword()).toBeTruthy();
+  });
+
+  it('applies the backup-completion route after startup finishes loading', async () => {
+    mockClient.query.mockResolvedValue({ data: { me: { id: '1', requiresBackupCompletion: true } } });
+    await mount();
+    expect(authenticatedStates).not.toContain(true);
+    expect(navigationRef.current.reset).toHaveBeenCalledWith({
+      index: 0, routes: [{ name: 'Auth', params: { screen: 'BackupCompletion', params: undefined } }],
+    });
   });
 });

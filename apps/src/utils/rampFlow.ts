@@ -3,6 +3,13 @@ import { Alert } from 'react-native';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { formatRampMoney } from './rampFormat';
 
+const ACTION_COPY = {
+  compra: ['la compra', 'esta compra'],
+  retiro: ['el retiro', 'este retiro'],
+  'envío': ['el envío', 'este envío'],
+  'conversión': ['la conversión', 'esta conversión'],
+} as const;
+
 export const requestRampCriticalAuth = async ({
   amount,
   assetUnit,
@@ -13,11 +20,12 @@ export const requestRampCriticalAuth = async ({
   assetUnit: string;
   // Where the money lands, when the unit alone doesn't say it ("ahorro").
   assetNote?: string;
-  actionLabel: 'compra' | 'retiro';
+  actionLabel: 'compra' | 'retiro' | 'envío' | 'conversión';
 }) => {
+  const [definite, demonstrative] = ACTION_COPY[actionLabel];
   const authMessage = amount > 0
-    ? `Autoriza ${actionLabel === 'compra' ? 'la compra' : 'el retiro'} de ${formatRampMoney(amount, assetUnit)}${assetNote ? ` (${assetNote})` : ''}`
-    : `Autoriza ${actionLabel === 'compra' ? 'esta compra' : 'este retiro'}`;
+    ? `Autoriza ${definite} de ${formatRampMoney(amount, assetUnit)}${assetNote ? ` (${assetNote})` : ''}`
+    : `Autoriza ${demonstrative}`;
 
   let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
   if (authenticated) {
@@ -36,7 +44,7 @@ export const requestRampCriticalAuth = async ({
   const shouldRetry = await new Promise<boolean>((resolve) => {
     Alert.alert(
       'Autenticación requerida',
-      `Debes autenticarte para confirmar ${actionLabel === 'compra' ? 'esta compra' : 'este retiro'}.`,
+      `Debes autenticarte para confirmar ${demonstrative}.`,
       [
         { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
         { text: 'Reintentar', onPress: () => resolve(true) },

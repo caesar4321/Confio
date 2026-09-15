@@ -8,7 +8,7 @@ key signs inside KMS — the private key never leaves the HSM.
 
 ## Run order
 
-All commands assume you are at the repo root, with `aws-vault` configured for
+All commands assume you are at the repo root, with standard AWS credentials configured for
 profile `Julian` (the AWS account that owns the new sponsor key).
 
 Each script asks for an explicit typed confirmation before submitting any
@@ -17,19 +17,19 @@ mainnet transaction.
 1. **Seed ALGO** — send 5 ALGO from legacy → new so the new sponsor can pay
    for its own opt-ins.
    ```
-   aws-vault exec Julian -- myvenv/bin/python \
+   env AWS_PROFILE=Julian myvenv/bin/python \
        scripts/contracts/migrate_sponsor_native_kms/seed_algo.py
    ```
 2. **ASA opt-ins** — opt the new sponsor into USDC, cUSD, CONFIO.
    ```
-   aws-vault exec Julian -- myvenv/bin/python \
+   env AWS_PROFILE=Julian myvenv/bin/python \
        scripts/contracts/migrate_sponsor_native_kms/optin_assets.py
    ```
 3. **App opt-ins** — opt the new sponsor into apps `3198259271` (cUSD) and
    `3353218127` (prod presale). The legacy presale `3351520941` is
    intentionally excluded.
    ```
-   aws-vault exec Julian -- myvenv/bin/python \
+   env AWS_PROFILE=Julian myvenv/bin/python \
        scripts/contracts/migrate_sponsor_native_kms/optin_apps.py
    ```
 4. **Update sponsor on the 6 WPJC6BX-admin contracts** — admin is the
@@ -53,7 +53,7 @@ mainnet transaction.
 
 7. **Drain residual ALGO** — leaves min-balance + 1 ALGO on legacy.
    ```
-   aws-vault exec Julian -- myvenv/bin/python \
+   env AWS_PROFILE=Julian myvenv/bin/python \
        scripts/contracts/migrate_sponsor_native_kms/drain_legacy.py
    ```
 

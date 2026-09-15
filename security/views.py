@@ -94,6 +94,17 @@ def didit_webhook(request):
         test_webhook,
     )
 
+    # EDD sessions are not identity documents: they must never create or
+    # overwrite an IdentityVerification.
+    from payment_accounts.edd import is_edd_session, sync_edd_session
+    if is_edd_session(str(session_id)):
+        try:
+            sync_edd_session(str(session_id))
+        except Exception:
+            logger.exception('Didit EDD webhook sync failed for %s', session_id)
+            return JsonResponse({'ok': False, 'error': 'Unexpected error'}, status=500)
+        return JsonResponse({'ok': True, 'edd': True})
+
     try:
         verification, _ = sync_didit_session(session_id=str(session_id))
     except DiditAPIError as exc:

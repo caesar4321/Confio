@@ -1,4 +1,4 @@
-import crashlytics from '@react-native-firebase/crashlytics';
+import { getCrashlytics, log, recordError } from '@react-native-firebase/crashlytics';
 
 /**
  * Safe wrapper around Crashlytics breadcrumbs. Crashlytics may not be
@@ -7,7 +7,7 @@ import crashlytics from '@react-native-firebase/crashlytics';
  */
 export function logBreadcrumb(message: string): void {
   try {
-    crashlytics().log(message);
+    log(getCrashlytics(), message);
   } catch {
     // Swallow — breadcrumbs are best-effort.
   }
@@ -16,9 +16,9 @@ export function logBreadcrumb(message: string): void {
 export function recordCrashError(error: unknown): void {
   try {
     if (error instanceof Error) {
-      crashlytics().recordError(error);
+      recordError(getCrashlytics(), error);
     } else {
-      crashlytics().recordError(new Error(String(error)));
+      recordError(getCrashlytics(), new Error(String(error)));
     }
   } catch {
     // Swallow.

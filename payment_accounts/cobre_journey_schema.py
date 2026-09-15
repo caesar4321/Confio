@@ -64,6 +64,8 @@ class CreateCobreJourney(graphene.Mutation):
         from .schema import _active_account, _public_error
         try:
             owner = _active_account(info, permission='send_funds', owner_only=True)
+            from .breb_location import require_location_pass
+            require_location_pass(owner, info.context.META)  # Cobre is Colombia's Bre-B rail
             accounts = FinancialAccount.objects.filter(provider_profile__confio_account=owner).select_related('provider_profile')
             local = accounts.get(internal_id=local_account_id)
             crypto = accounts.get(internal_id=crypto_account_id)

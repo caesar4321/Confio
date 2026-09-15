@@ -8,7 +8,7 @@ comfortably above that.
 
 Run with::
 
-    aws-vault exec Julian -- myvenv/bin/python \
+    env AWS_PROFILE=Julian myvenv/bin/python \
         scripts/contracts/migrate_sponsor_native_kms/seed_algo.py
 """
 from __future__ import annotations

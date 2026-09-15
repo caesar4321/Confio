@@ -20,9 +20,9 @@ Dry run by default — it prints the plan and exits. Add the literal word
 `execute` to broadcast.
 
 Usage:
-  aws-vault exec Julian -- env CONFIO_ENV=mainnet myvenv/bin/python \
+  env AWS_PROFILE=Julian env CONFIO_ENV=mainnet myvenv/bin/python \
       scripts/contracts/fund_bsc_native_kms.py --to 0x... --bnb 0.0005
-  aws-vault exec Julian -- env CONFIO_ENV=mainnet myvenv/bin/python \
+  env AWS_PROFILE=Julian env CONFIO_ENV=mainnet myvenv/bin/python \
       scripts/contracts/fund_bsc_native_kms.py --to 0x... --usdt all
   # append the literal word `execute` to broadcast.
 """

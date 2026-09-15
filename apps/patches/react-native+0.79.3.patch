@@ -222,3 +222,11 @@ index c0d7459..b975a33 100644
            onFail,
            onSuccess,
          );
+diff --git a/node_modules/react-native/Libraries/Network/RCTNetworking.mm b/node_modules/react-native/Libraries/Network/RCTNetworking.mm
+--- a/node_modules/react-native/Libraries/Network/RCTNetworking.mm
++++ b/node_modules/react-native/Libraries/Network/RCTNetworking.mm
+@@ -337,3 +337,3 @@
+   NSDictionary<NSString *, id> *data = [RCTConvert NSDictionary:RCTNilIfNull(query[@"data"])];
+-  NSString *trackingName = data[@"trackingName"];
++  NSString *trackingName = [RCTConvert NSString:RCTNilIfNull(data[@"trackingName"])];
+   if (trackingName) {

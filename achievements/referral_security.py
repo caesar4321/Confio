@@ -172,7 +172,9 @@ def _get_verified_identity_user_ids(
     """
     from security.models import IdentityVerification
 
-    base = _personal_context_filter(IdentityVerification.objects.filter(status='verified'))
+    # all_documents: a passport verified as an additional document is still
+    # that person's identity, so it links accounts like a primary one does.
+    base = _personal_context_filter(IdentityVerification.all_documents.filter(status='verified'))
 
     user_ids: set = set()
 
@@ -299,41 +301,42 @@ def get_duplicate_referee_reward_error(referral: UserReferral | None):
 
     from security.models import IdentityVerification
 
-    # Select the latest verified row WITHOUT filtering on its key. The previous
+    # Every verified personal row, WITHOUT filtering on its key. The previous
     # .exclude(document_number_normalized='') dropped the malformed row before
     # the fail-closed check could see it, so the function concluded "no verified
     # identity" and returned no error — failing open in exactly the case the
     # check exists for.
-    verification = (
-        IdentityVerification.objects.filter(
+    # all_documents: rewards accept a document from another country, so the
+    # identity deduplicated here includes it. EVERY document counts, not only
+    # the newest: an older national ID shared with another account is still a
+    # duplicate after a newer passport (with different name spellings) is added.
+    verifications = list(
+        IdentityVerification.all_documents.filter(
             user_id=referral.referred_user_id,
             status='verified',
         )
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
         .order_by('-verified_at', '-updated_at', '-created_at')
-        .first()
     )
-    if not verification:
+    if not verifications:
         # No verified identity yet. Not a duplicate question — the payout gate
         # is what requires verification, and this must not block accrual.
         return None
 
-    person_key = person_key_for(verification)
-    has_document_key = has_usable_document_key(verification)
-
     # Fail CLOSED: a verified row carrying neither a usable document tuple nor
     # a usable person key cannot be deduplicated, so it must not be answered
     # with "no duplicate".
-    if not has_document_key and not person_key:
+    if any(not has_usable_document_key(row) and not person_key_for(row) for row in verifications):
         return INCOMPLETE_IDENTITY_REWARD_ERROR
 
-    result = enforce_referee_reward_uniqueness_for_identity(
-        verification.document_issuing_country,
-        verification.document_number_normalized,
-        person_key,
-    )
-    if result['winner_referral_id'] and result['winner_referral_id'] != referral.id:
-        return DUPLICATE_REFEREE_REWARD_ERROR
+    for verification in verifications:
+        result = enforce_referee_reward_uniqueness_for_identity(
+            verification.document_issuing_country,
+            verification.document_number_normalized,
+            person_key_for(verification),
+        )
+        if result['winner_referral_id'] and result['winner_referral_id'] != referral.id:
+            return DUPLICATE_REFEREE_REWARD_ERROR
     return None
 
 
@@ -351,7 +354,8 @@ def get_referrer_claim_verification_error(referral: UserReferral | None):
         return "No encontramos al referido para esta recompensa."
 
     referred_user = referral.referred_user
-    if referred_user.is_identity_verified:
+    # Any verified document counts for rewards, including another country's.
+    if referred_user.has_verified_identity_document:
         return None
 
     verification_status = (getattr(referred_user, 'verification_status', None) or 'unverified').lower()
@@ -392,7 +396,7 @@ def get_referral_reward_policy_stats():
 
     rewarded_user_ids = set(earned_by_user.keys())
     verified_user_ids = set(
-        IdentityVerification.objects.filter(
+        IdentityVerification.all_documents.filter(  # any document unlocks rewards
             status='verified',
             user_id__in=rewarded_user_ids,
         )
@@ -413,7 +417,7 @@ def get_referral_reward_policy_stats():
     )
 
     duplicate_identity_review_users = set(
-        IdentityVerification.objects.filter(
+        IdentityVerification.all_documents.filter(  # flags can land on additional documents too
             risk_factors__duplicate_identity__isnull=False,
         )
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
