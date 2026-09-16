@@ -74,6 +74,26 @@ class AdmissionTests(TestCase):
         AccountCapability.objects.filter(capability='receive_third_party').update(status='pending')
         self.assertEqual(assess(self.entry).reason, 'provider_third_party_not_enabled')
 
+    def test_missing_provider_capability_uses_confio_controls_not_pending_default(self):
+        from payment_accounts.services import _infinia_capabilities
+        self.account.provider_data = {'latest': {}}
+        _infinia_capabilities(self.account)
+        self.assertEqual(AccountCapability.objects.get(financial_account=self.account,
+            capability='receive_third_party').status, 'enabled')
+        self.assertFalse(assess(self.entry).allowed)
+        self.grants()
+        self.assertTrue(assess(self.entry).allowed)
+        ThirdPartyPayinSwitch.objects.filter(confio_account=self.owner).update(enabled=False)
+        self.assertEqual(assess(self.entry).reason, 'user_not_enabled')
+
+    def test_explicit_provider_restrictions_override_confio_managed_default(self):
+        from payment_accounts.services import _infinia_capabilities
+        self.grants()
+        for value in (False, 'DISABLED', 'PENDING', 'UPON_APPROVAL'):
+            self.account.provider_data = {'latest': {'capabilities': {'payin_third_party': value}}}
+            _infinia_capabilities(self.account)
+            self.assertEqual(assess(self.entry).reason, 'provider_third_party_not_enabled')
+
     def test_wildcard_grants_keep_exact_stops_and_other_gates(self):
         self.grants()
         ThirdPartyPayinSwitch.objects.filter(rail='BANK').update(rail='*')

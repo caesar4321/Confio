@@ -29,6 +29,17 @@ class _Response:
 
 
 class ProviderClientTests(SimpleTestCase):
+    @override_settings(INFINIA_SECRET_ID='client', INFINIA_SECRET_PASSWORD='password')
+    def test_internal_transfer_lookup_uses_account_endpoint_and_exact_key(self):
+        for kind in ('conversion', 'internal_transfer'):
+            session = mock.Mock()
+            session.headers = {}
+            session.request.return_value = _Response(200, [])
+            self.assertEqual(InfiniaClient(session=session).find_operation(kind, 'exact-key'), [])
+            call = session.request.call_args
+            self.assertTrue(call.args[1].endswith('/v1/accounts/internal-transfer/'))
+            self.assertEqual(call.kwargs['params'], {'idempotency_key': 'exact-key'})
+
     def test_first_item_supports_cobre_paginated_contents(self):
         self.assertEqual(
             first_item({'contents': [{'id': 'acc_1'}], 'total_items': 1}),
