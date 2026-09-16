@@ -71,6 +71,7 @@ it('shows incoming receipts without steps, selection, summary or manual conversi
   mockApollo.query.mockResolvedValue({data: {localIncomingDeposits: [{
     internalId: 'auto-credit', asset: 'BRL', amount: '32.51', occurredAt: '2026-09-16T04:08:43Z',
     held: false, heldReason: '', automaticStatus: 'pending',
+    sender: {name: 'Ana Pérez', bankName: 'Banco', accountMasked: '•••• 7890', reference: 'REF-1'},
   }]}});
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<Screen />);});
@@ -79,6 +80,7 @@ it('shows incoming receipts without steps, selection, summary or manual conversi
   expect(tree.root.findAllByType(TouchableOpacity).some(t => t.findAllByType(Text).includes(node))).toBe(false);
   expect(tree.root.findAllByType('Step' as any)).toHaveLength(0);
   const text = JSON.stringify(tree.toJSON());
+  for (const value of ['Ana Pérez', 'Banco', '•••• 7890', 'REF-1']) expect(text).toContain(value);
   for (const oldCopy of ['Resumen', 'Convertir a dólares', 'Listo para convertir', 'Escríbenos a soporte', 'confirma la conversión']) {
     expect(text).not.toContain(oldCopy);
   }

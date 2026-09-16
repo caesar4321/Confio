@@ -410,6 +410,16 @@ function InfiniaLocalReceiveScreen() {
                 ) : deposits.map(row => (
                   <View key={row.internalId} style={styles.savedCard}>
                     <View style={styles.savedCopy}>
+                      <Text style={styles.savedTitle}>{row.sender?.name || 'Remitente no informado'}</Text>
+                      {row.sender?.bankName || row.sender?.bankCode || row.sender?.accountMasked ? (
+                        <Text style={styles.savedText}>{[
+                          row.sender.bankName || (row.sender.bankCode ? `Banco ${row.sender.bankCode}` : ''),
+                          row.sender.accountMasked,
+                        ].filter(Boolean).join(' · ')}</Text>
+                      ) : null}
+                      {row.sender?.reference ? <Text style={styles.savedText} selectable>
+                        Referencia bancaria: {row.sender.reference}
+                      </Text> : null}
                       <Text style={styles.savedText}>{shortDate(row.occurredAt)}</Text>
                       <Text style={row.held ? styles.warningText : styles.savedText}>
                         {row.held ? 'Ingreso en revisión' : 'Ingreso recibido'}

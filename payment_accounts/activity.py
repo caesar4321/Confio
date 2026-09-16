@@ -133,7 +133,7 @@ def sync_activity(journey_id, *, notify=True):
     from users.models_unified import UnifiedTransactionTable
     j = InfiniaJourney.objects.select_for_update(of=('self',)).select_related(
         'confio_account__user', 'confio_account__business', 'money_flow', 'bridge',
-        'wallet_conversion', 'local_account').get(pk=journey_id)
+        'wallet_conversion', 'local_account', 'funding_credit').get(pk=journey_id)
     _link_mint(j)
     incoming = j.direction == 'to_wallet'
     bridge = j.bridge
@@ -152,14 +152,17 @@ def sync_activity(journey_id, *, notify=True):
     status = 'CONFIRMED' if stage == 'completed' else 'FAILED' if stage in ['failed', 'refunded'] else 'PENDING'
     label = 'Ingreso por cuenta local' if incoming else 'Envío reembolsado' if stage == 'refunded' else 'Envío a banco o billetera'
     destination = j.destination_snapshot.get('display_label', '')
+    from .incoming_details import sender_details, incoming_credit
+    sender = sender_details(incoming_credit(j)) or {}
+    activity_label = f"Ingreso de {sender['name']}" if incoming and sender.get('name') else label
     row, created = UnifiedTransactionTable.objects.update_or_create(local_money_flow=j.money_flow, defaults={
         'transaction_type': 'local_transfer', 'amount': str(amount or 0), 'token_type': token,
         'amount_denomination': 'USD_VALUE' if token == 'CUSD_PLUS' else 'TOKEN_UNITS',
-        'status': status, 'description': label, 'transaction_date': j.created_at,
+        'status': status, 'description': activity_label, 'transaction_date': j.created_at,
         'sender_user': None if incoming or business else owner.user,
         'sender_business': None if incoming else business,
         'sender_type': 'external' if incoming else 'business' if business else 'user',
-        'sender_display_name': 'Cuenta local' if incoming else owner.display_name or '',
+        'sender_display_name': (sender.get('name') or 'Cuenta local') if incoming else owner.display_name or '',
         'sender_address': '' if incoming else j.wallet_address,
         'counterparty_user': owner.user if incoming and not business else None,
         'counterparty_business': business if incoming else None,
@@ -241,10 +244,10 @@ def sync_activity(journey_id, *, notify=True):
     return row
 
 
-def _refresh(ids):
+def _refresh(ids, *, notify=True):
     for pk in ids:
         try:
-            sync_activity(pk)
+            sync_activity(pk, notify=notify)
         except Exception:
             logger.exception('Local transfer activity refresh failed for %s', pk)
 
@@ -274,6 +277,21 @@ def journey_changed(sender, instance, **kwargs):
         {'money_flow': instance} if sender is MoneyFlow else {'bridge': instance}))
     ids = list(query.values_list('pk', flat=True))
     transaction.on_commit(lambda: _refresh(ids))
+
+
+@receiver(post_save, sender='payment_accounts.LedgerEntry')
+def receipt_changed(sender, instance, created, **kwargs):
+    # Sender evidence may arrive after the journey and activity were created.
+    # Refresh display metadata, never issue another push for this enrichment.
+    if created or kwargs.get('raw') or instance.provider != 'infinia':
+        return
+    ids = list(InfiniaJourney.objects.filter(direction='to_wallet',
+        funding_credit=instance).values_list('pk', flat=True))
+    if ids:
+        # Persist a dirty marker for refresh_stale_activity if the callback is
+        # interrupted. QuerySet.update avoids recursively firing journey_changed.
+        InfiniaJourney.objects.filter(pk__in=ids).update(updated_at=timezone.now())
+        transaction.on_commit(lambda: _refresh(ids, notify=False))
 
 
 @receiver(post_save, sender='conversion.Conversion')

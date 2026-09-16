@@ -38,7 +38,8 @@ type Route = RouteProp<MainStackParamList, 'LocalTransferStatus'>;
 const TERMINAL = new Set(['completed', 'failed', 'needs_review', 'refunded']);
 // Stages that never change again: polling stops only for these.
 const FINAL = new Set(['completed', 'failed', 'refunded']);
-const title = (j: LocalJourney) => (j.direction === 'to_bank' ? j.destinationSummary : 'Hacia tu Confío Dollar');
+const title = (j: LocalJourney) => (j.direction === 'to_bank' ? j.destinationSummary
+  : j.sender?.name ? `De ${j.sender.name}` : 'Ingreso por cuenta local');
 
 function Timeline({ journey }: { journey: LocalJourney }) {
   const steps = journeySteps(journey.direction, journey.localAsset);
@@ -141,7 +142,7 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
         onRefresh={refresh} tintColor={colors.primary} colors={[colors.primary]} />}>
       <RampReveal delay={0}>
         <RampHero
-          eyebrow={journey?.direction === 'to_wallet' ? 'Conversión' : 'Envío'}
+          eyebrow={journey?.direction === 'to_wallet' ? 'Ingreso' : 'Envío'}
           title={heading}
           subtitle={journey ? title(journey)
             : failed ? 'Revisa tu conexión e intenta de nuevo.' : 'Cargando el estado de tu transferencia.'}
@@ -251,12 +252,39 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
                     </View>
                   </>
                 ) : (
+                  <>
+                  <View style={styles.reviewRow}>
+                    <Text style={styles.reviewLabel}>Remitente</Text>
+                    <Text style={styles.reviewValue}>{journey.sender?.name || 'No informado'}</Text>
+                  </View>
+                  {journey.sender?.bankName || journey.sender?.bankCode ? (
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>{journey.sender.bankName ? 'Banco de origen' : 'Código del banco'}</Text>
+                      <Text style={styles.reviewValue}>{journey.sender.bankName || journey.sender.bankCode}</Text>
+                    </View>
+                  ) : null}
+                  {journey.sender?.accountMasked ? (
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Cuenta de origen</Text>
+                      <Text style={styles.reviewValue}>{journey.sender.accountMasked}</Text>
+                    </View>
+                  ) : null}
+                  {journey.receivedFiatAmount ? (
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Ingreso recibido</Text>
+                      <Text style={styles.reviewValue}>{formatRampMoney(journey.receivedFiatAmount, journey.localAsset)}</Text>
+                    </View>
+                  ) : null}
+                  {journey.sender?.reference ? <Text style={styles.reference} selectable>
+                    Referencia bancaria: {journey.sender.reference}
+                  </Text> : null}
                   <View style={styles.reviewRow}>
                     <Text style={styles.reviewLabel}>{journey.walletReceivedAmount ? 'Recibiste, después de conversión' : 'Ingreso a tu Confío Dollar'}</Text>
                     <Text style={styles.reviewValueHighlight}>
                       {journey.walletReceivedAmount ? formatRampMoney(journey.walletReceivedAmount, 'US$') : 'Pendiente'}
                     </Text>
                   </View>
+                  </>
                 )}
                 <Text style={styles.reference} selectable>Referencia {journey.internalId}</Text>
               </View>

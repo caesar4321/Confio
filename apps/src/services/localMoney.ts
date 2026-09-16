@@ -94,7 +94,16 @@ export interface LocalReceiveAccount {
   receiveThirdParty: string;
 }
 
+export interface LocalPaymentSender {
+  name: string;
+  bankName: string;
+  bankCode: string;
+  accountMasked: string;
+  reference: string;
+}
+
 export interface LocalDeposit {
+  sender?: LocalPaymentSender | null;
   automaticStatus?: string;
   internalId: string;
   asset: string;
@@ -105,6 +114,8 @@ export interface LocalDeposit {
 }
 
 export interface LocalJourney {
+  sender?: LocalPaymentSender | null;
+  receivedFiatAmount?: string | null;
   refundAmount?: string | null;
   walletReceivedAmount?: string | null;
   internalId: string;
@@ -259,6 +270,7 @@ export const LOCAL_DEPOSITS = gql`
       held
       heldReason
       automaticStatus
+      sender { name bankName bankCode accountMasked reference }
     }
   }
 `;
@@ -271,6 +283,8 @@ export const LOCAL_JOURNEY = gql`
       stage
       refundAmount
       walletReceivedAmount
+      receivedFiatAmount
+      sender { name bankName bankCode accountMasked reference }
       failureCode
       destinationSummary
       localAsset
@@ -296,6 +310,8 @@ export const LOCAL_JOURNEY_BRIDGE = gql`
 export const LOCAL_JOURNEYS = gql`
   query LocalJourneys($offset: Int!, $limit: Int!) {
     myInfiniaJourneys(offset: $offset, limit: $limit) {
+      sender { name bankName bankCode accountMasked reference }
+      receivedFiatAmount
       internalId
       direction
       stage

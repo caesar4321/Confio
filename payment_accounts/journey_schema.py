@@ -4,9 +4,28 @@ from graphene_django import DjangoObjectType
 from .models import InfiniaJourney, FinancialAccount, LedgerEntry, PayoutDestination, PaymentBridgeTransfer
 from .infinia_journeys import create_journey, attach_return_bridge
 from .services import PaymentAccountError
+from .incoming_details import sender_details, incoming_credit
+
+
+class LocalPaymentSenderType(graphene.ObjectType):
+    name = graphene.String(required=True)
+    bank_name = graphene.String(required=True)
+    bank_code = graphene.String(required=True)
+    account_masked = graphene.String(required=True)
+    reference = graphene.String(required=True)
 
 
 class InfiniaJourneyType(DjangoObjectType):
+    sender = graphene.Field(LocalPaymentSenderType)
+    received_fiat_amount = graphene.String()
+
+    def resolve_sender(self, info):
+        return sender_details(incoming_credit(self))
+
+    def resolve_received_fiat_amount(self, info):
+        entry = incoming_credit(self)
+        return str(entry.amount) if entry else None
+
     stage = graphene.String(required=True)
     wallet_mint_units = graphene.String()
     wallet_mint_request_id = graphene.String()
@@ -82,6 +101,11 @@ class InfiniaJourneyType(DjangoObjectType):
 
 
 class InfiniaDepositType(DjangoObjectType):
+    sender = graphene.Field(LocalPaymentSenderType)
+
+    def resolve_sender(self, info):
+        return sender_details(self)
+
     automatic_status = graphene.String(required=True)
     held = graphene.Boolean(required=True)
     held_reason = graphene.String(required=True)
@@ -236,7 +260,7 @@ class JourneyQuery(graphene.ObjectType):
         from .schema import _active_account
         owner = _active_account(info, permission='view_transactions')
         return InfiniaJourney.objects.filter(confio_account=owner, internal_id=internal_id).select_related(
-            'bridge', 'local_account', 'crypto_account', 'payout_operation', 'wallet_conversion').first()
+            'bridge', 'local_account', 'crypto_account', 'payout_operation', 'wallet_conversion', 'funding_credit').first()
 
     def resolve_infinia_journeys_enabled(self, info):
         from .schema import _active_account
@@ -247,7 +271,7 @@ class JourneyQuery(graphene.ObjectType):
     def resolve_my_infinia_journeys(self, info, offset=0, limit=20):
         from .schema import _active_account
         owner = _active_account(info, permission='view_transactions')
-        return InfiniaJourney.objects.filter(confio_account=owner).select_related('bridge', 'local_account', 'crypto_account', 'payout_operation', 'wallet_conversion').order_by('-created_at')[max(0,offset):max(0,offset)+max(1,min(limit,100))]
+        return InfiniaJourney.objects.filter(confio_account=owner).select_related('bridge', 'local_account', 'crypto_account', 'payout_operation', 'wallet_conversion', 'funding_credit').order_by('-created_at')[max(0,offset):max(0,offset)+max(1,min(limit,100))]
 
     def resolve_infinia_journey_deposits(self, info, account_id, offset=0):
         from .schema import _active_account
