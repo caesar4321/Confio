@@ -1,16 +1,19 @@
 from django.core.cache import cache
 from django.test import SimpleTestCase
+from unittest.mock import patch
+from decimal import Decimal
 
 from ramps.schema import Query
 
 
 class LandingStatsTests(SimpleTestCase):
     def tearDown(self):
-        cache.delete('landing_stats_v2')
+        cache.delete('landing_stats_v3')
+        cache.delete('stats_summary_v13')
 
     def test_cached_public_stats_include_registered_users(self):
         cache.set(
-            'landing_stats_v2',
+            'landing_stats_v3',
             {
                 'deposited_volume_usd': 125430.0,
                 'presale_raised_usd': 3597.0,
@@ -22,3 +25,13 @@ class LandingStatsTests(SimpleTestCase):
         result = Query().resolve_landing_stats(None)
 
         self.assertEqual(result.registered_users, 8164)
+
+    def test_uncached_stats_use_combined_provider_metric(self):
+        cache.delete('landing_stats_v3')
+        cache.set('stats_summary_v13', {'total_users': 123}, 60)
+        with patch('ramps.metrics.deposited_volume_by_provider', return_value={
+            'koywe': Decimal('10'), 'infinia': Decimal('1.982'), 'cobre': Decimal('2')}), \
+                patch('presale.models.PresalePhase.objects.all', return_value=[]):
+            result = Query().resolve_landing_stats(None)
+        self.assertEqual(result.deposited_volume_usd, 13.982)
+        self.assertEqual(result.registered_users, 123)

@@ -116,9 +116,46 @@ from .models import InfiniaJourney
 
 
 class InfiniaJourneyAdmin(admin.ModelAdmin):
-    list_display = ('internal_id', 'direction', 'stage', 'failure_code', 'updated_at')
-    list_filter = ('direction', 'stage')
+    list_display = ('internal_id', 'confio_account', 'direction', 'corridor', 'receiving_rail', 'counterparty', 'input_amount', 'current_stage', 'wallet_credit_usd', 'failure_code', 'updated_at')
+    list_filter = ('direction', 'stage', 'local_account__country', 'local_account__asset')
+    search_fields = ('internal_id', 'confio_account__user__username', 'confio_account__user__email', 'failure_code')
+    ordering = ('-created_at',)
     readonly_fields = tuple(field.name for field in InfiniaJourney._meta.fields)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('confio_account__user', 'confio_account__business', 'local_account', 'money_flow', 'bridge', 'wallet_conversion', 'funding_credit')
+
+    @admin.display(description='Sender / recipient')
+    def counterparty(self, obj):
+        from .incoming_details import incoming_credit, sender_details
+        if obj.direction == 'to_wallet':
+            return (sender_details(incoming_credit(obj)) or {}).get('name') or 'Unknown'
+        return (obj.destination_snapshot or {}).get('display_label') or 'See destination details'
+
+    @admin.display(description='Country / currency')
+    def corridor(self, obj):
+        return f'{obj.local_account.country} / {obj.local_account.asset}'
+
+    @admin.display(description='Receiving rail')
+    def receiving_rail(self, obj):
+        return obj.local_account.payin_rail if obj.direction == 'to_wallet' else '—'
+
+    @admin.display(description='Input')
+    def input_amount(self, obj):
+        return f'{obj.money_flow.source_amount} {obj.money_flow.source_asset}'
+
+    @admin.display(description='End-to-end status')
+    def current_stage(self, obj):
+        from .activity import display_stage
+        return display_stage(obj)
+
+    @admin.display(description='Delivered wallet USD')
+    def wallet_credit_usd(self, obj):
+        from .monitoring import delivered_usd
+        return delivered_usd(obj) if obj.direction == 'to_wallet' else '—'
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
     def has_add_permission(self, request):
         return False
@@ -128,6 +165,35 @@ class InfiniaJourneyAdmin(admin.ModelAdmin):
 
 
 from .models import CobreJourney
+
+from .models import AutomaticPayin
+
+
+class AutomaticPayinAdmin(admin.ModelAdmin):
+    list_display = ('id', 'deposit_account', 'deposit_amount', 'status', 'reason', 'updated_at')
+    list_filter = ('status', 'reason', 'entry__financial_account__country')
+    ordering = ('-updated_at',)
+    readonly_fields = tuple(field.name for field in AutomaticPayin._meta.fields)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('entry__financial_account')
+
+    @admin.display(description='Financial account')
+    def deposit_account(self, obj):
+        return obj.entry.financial_account.internal_id
+
+    @admin.display(description='Fiat received')
+    def deposit_amount(self, obj):
+        return f'{obj.entry.amount} {obj.entry.asset}'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 from django import forms

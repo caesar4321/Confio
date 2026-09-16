@@ -1259,6 +1259,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             volume_change='Verified send (cUSD + cUSD+)',
         )
 
+        from payment_accounts.monitoring import dashboard_context
+        context.update(dashboard_context(request))
         return render(request, 'admin/dashboard.html', context)
     
     def p2p_analytics_view(self, request):
@@ -2187,6 +2189,10 @@ confio_admin_site.register(
 from payment_accounts.models import InfiniaJourney
 from payment_accounts.admin import InfiniaJourneyAdmin
 confio_admin_site.register(InfiniaJourney, InfiniaJourneyAdmin)
+
+from payment_accounts.models import AutomaticPayin
+from payment_accounts.admin import AutomaticPayinAdmin
+confio_admin_site.register(AutomaticPayin, AutomaticPayinAdmin)
 
 from payment_accounts.models import CobreJourney
 from payment_accounts.admin import CobreJourneyAdmin
