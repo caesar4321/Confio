@@ -59,7 +59,8 @@ class RelayTests(SimpleTestCase):
         self.assertTrue(body['useDepositAddress'])
         self.assertNotIn('strict', body)
         self.assertNotIn('appFees', body)
-        self.assertEqual(body['slippageTolerance'], '50')
+        # Relay's own tolerance is amount-aware; a fixed 50 bps refused small sends.
+        self.assertNotIn('slippageTolerance', body)
         self.assertFalse(self.session.request.call_args.kwargs['allow_redirects'])
 
     def test_reverse_small_quote(self):
@@ -90,6 +91,33 @@ class RelayTests(SimpleTestCase):
                 mutate(payload)
                 with self.assertRaises(NextError):
                     self.route(payload)
+
+    def _with_minimum(self, out, minimum):
+        payload = deepcopy(self.payload)
+        payload['details']['currencyOut'].update(amount=str(out), minimumAmount=str(minimum))
+        payload['protocol']['v2']['orderData']['output']['payments'][0].update(
+            expectedAmount=str(out), minimumAmount=str(minimum))
+        return payload
+
+    def test_accepts_relays_amount_aware_tier_on_small_sends(self):
+        # Live tiers on 2026-09-15: 335 bps at $2, 452 bps at $0.50. A fixed
+        # 0.5% clamp rejected both; the dollar-denominated ceiling accepts them.
+        for out, bps in [(1947372, 335), (450189, 452)]:
+            with self.subTest(out=out, bps=bps):
+                minimum = out - out * bps // 10000
+                self.assertIsNotNone(self.route(self._with_minimum(out, minimum)))
+
+    def test_rejects_deterioration_above_the_confio_ceiling(self):
+        # Floor binds below ~$6: $0.15 allowed, $0.25 refused.
+        self.assertIsNotNone(self.route(self._with_minimum(1950000, 1950000 - 150000)))
+        with self.assertRaisesRegex(RelayError, 'allowed slippage'):
+            self.route(self._with_minimum(1950000, 1950000 - 250000))
+
+    def test_bps_ceiling_binds_on_larger_sends(self):
+        # At $100 the 250 bps term ($2.50) is the binding limit, not the floor.
+        self.assertIsNotNone(self.route(self._with_minimum(100_000000, 98_000000)))
+        with self.assertRaisesRegex(RelayError, 'allowed slippage'):
+            self.route(self._with_minimum(100_000000, 97_000000))
 
     def test_safe_structured_error(self):
         self.session.request.return_value = mock.Mock(status_code=400, json=lambda: {'errorCode': 'AMOUNT_TOO_LOW', 'message': SENDER})
