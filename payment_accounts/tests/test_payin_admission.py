@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from payment_accounts.models import AccountCapability, LedgerEntry, MoneyFlow, MoneyOperation, ThirdPartyPayinSwitch
-from payment_accounts.payin_admission import assess, sender_matches, require_source_admitted
+from payment_accounts.payin_admission import assess, sender_matches, require_source_admitted, receiving_capabilities
 from payment_accounts.services import PaymentAccountError
 from .test_bridge import BridgeQuoteTests
 
@@ -81,6 +81,62 @@ class AdmissionTests(TestCase):
             ThirdPartyPayinSwitch.objects.filter(**filters).update(enabled=False)
             self.assertEqual(assess(self.entry).reason, reason)
             ThirdPartyPayinSwitch.objects.filter(**filters).update(enabled=True)
+
+    def test_pix_receive_response_requires_recipient_grant_not_provider_support(self):
+        from payment_accounts.local_money import receive_account
+        from types import SimpleNamespace
+        self.account.country, self.account.asset, self.account.payin_rail = 'BRA', 'BRL', 'PIX'
+        self.account.save()
+        method = SimpleNamespace(id='br_pix_receive', country='BRA', asset='BRL', instruction_kind='pix_key')
+        with mock.patch('payment_accounts.local_money.get_method', return_value=method), \
+             mock.patch('payment_accounts.local_money.accounts_for', return_value=(self.account, None)), \
+             mock.patch('payment_accounts.local_money._public_pair_status', return_value='active'), \
+             mock.patch('payment_accounts.activation.usable', return_value=True):
+            for rail in ('', '*'):
+                ThirdPartyPayinSwitch.objects.create(provider='infinia', country='BR', rail=rail,
+                    enabled=True, evidence='Approved global scope')
+            view = receive_account(self.owner, 'br_pix_receive')
+            self.assertEqual(view['receive_third_party'], 'disabled')
+            self.assertEqual(view['receive_same_name'], 'enabled')
+            grant = ThirdPartyPayinSwitch.objects.create(provider='infinia', country='BR', rail='*',
+                confio_account=self.owner, enabled=True, evidence='Approved recipient')
+            self.assertEqual(receive_account(self.owner, 'br_pix_receive')['receive_third_party'], 'enabled')
+            stop = ThirdPartyPayinSwitch.objects.create(provider='infinia', country='BR', rail='PIX',
+                confio_account=self.owner, enabled=False, evidence='Revoked recipient')
+            self.assertEqual(receive_account(self.owner, 'br_pix_receive')['receive_third_party'], 'disabled')
+            stop.delete()
+            grant.enabled = False
+            grant.save()
+            self.assertEqual(receive_account(self.owner, 'br_pix_receive')['receive_third_party'], 'disabled')
+
+    def test_receiving_permissions_and_admission_agree_on_third_party_gates(self):
+        self.grants()
+        self.assertEqual(receiving_capabilities(self.account)['receive_third_party'], 'enabled')
+        for filters in ({'rail': ''}, {'rail': 'BANK', 'confio_account__isnull': True},
+                {'confio_account': self.owner}):
+            for change in ({'enabled': False}, {'evidence': '   '}):
+                with self.subTest(filters=filters, change=change):
+                    ThirdPartyPayinSwitch.objects.filter(**filters).update(**change)
+                    self.assertFalse(assess(self.entry).allowed)
+                    self.assertEqual(receiving_capabilities(self.account)['receive_third_party'], 'disabled')
+                    ThirdPartyPayinSwitch.objects.filter(**filters).update(enabled=True, evidence='Approved')
+        AccountCapability.objects.filter(capability='receive_third_party').update(status='pending')
+        self.assertEqual(receiving_capabilities(self.account)['receive_third_party'], 'disabled')
+
+    def test_receiving_permissions_require_verified_account_context(self):
+        self.grants()
+        disabled = {'receive_same_name': 'disabled', 'receive_third_party': 'disabled'}
+        for obj, field, bad in ((self.account, 'status', 'suspended'),
+                (self.account, 'payin_rail', ''), (self.account, 'payin_rail', '*'),
+                (self.account, 'country', 'invalid'), (self.profile, 'status', 'pending'),
+                (self.profile.identity_verification, 'status', 'pending')):
+            with self.subTest(field=field, bad=bad):
+                original = getattr(obj, field)
+                setattr(obj, field, bad)
+                self.assertEqual(receiving_capabilities(self.account), disabled)
+                setattr(obj, field, original)
+        self.profile.owner_type = 'business'
+        self.assertEqual(receiving_capabilities(self.account)['receive_same_name'], 'disabled')
 
     def test_provider_capability_is_independent(self):
         self.grants()

@@ -402,12 +402,13 @@ class FunnelEventAdmin(admin.ModelAdmin):
         'source_type',
         'channel',
         'country',
+        'ip_country',
         'platform',
         'user',
         'short_session_id',
         'properties_preview',
     )
-    list_filter = ('event_name', 'source_type', 'channel', 'country', 'platform', 'created_at')
+    list_filter = ('event_name', 'source_type', 'channel', 'country', 'ip_country', 'platform', 'created_at')
     search_fields = ('event_name', 'source_type', 'channel', 'session_id', 'user__username', 'user__phone_number')
     date_hierarchy = 'created_at'
     ordering = ('-created_at',)
@@ -417,6 +418,7 @@ class FunnelEventAdmin(admin.ModelAdmin):
         'user',
         'session_id',
         'country',
+        'ip_country',
         'platform',
         'source_type',
         'channel',

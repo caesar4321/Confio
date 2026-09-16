@@ -24,7 +24,12 @@ export type ClientFunnelEvent =
     // Local fiat rails (Bre-B, CLABE, alias/CVU, Pix, QR). Which corridor
     // people ask for decides which one we build and which virtual accounts
     // are worth paying to open.
-    | 'local_rail_interest';
+    | 'local_rail_interest'
+    // A rail the person's own identity blocks (today: a Venezuelan document,
+    // refused by the provider's eligibility policy). How many ask to be told
+    // when it opens is the demand estimate for that corridor; the server adds
+    // the country of their IP, so "Venezuelans in Colombia" is countable.
+    | 'local_rail_blocked_interest';
 
 export const AnalyticsService = {
     /**

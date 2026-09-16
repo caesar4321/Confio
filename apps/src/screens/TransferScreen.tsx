@@ -23,7 +23,7 @@ import { ContactSyncProgress } from '../components/common/ContactSyncProgress';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
-import { LOCAL_MONEY_METHODS, type LocalMethod } from '../services/localMoney';
+import { isIdentityBlocked, showIdentityBlockedInterest, LOCAL_MONEY_METHODS, type LocalMethod } from '../services/localMoney';
 import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
 import { useRampCountry } from '../hooks/useRampCountry';
 import {
@@ -792,8 +792,10 @@ export const TransferScreen = () => {
   // the probes: phone country hoists, it never decides.
   const usableMethods = useCallback((data: any): LocalMethod[] => {
     const rows = ((data?.localMoneyMethods || []) as LocalMethod[]).filter(
+      // A rail this person's identity blocks stays listed: saying so plainly
+      // beats hiding it behind a "próximamente" probe that is not the truth.
       method => method.status === 'live' || method.status === 'needs_verification'
-        || method.status === 'needs_document',
+        || method.status === 'needs_document' || isIdentityBlocked(method),
     );
     const mine = toIso2(phoneCountryHint);
     return [...rows.filter(m => m.country === mine), ...rows.filter(m => m.country !== mine)];
@@ -811,13 +813,31 @@ export const TransferScreen = () => {
   }, [usableMethods, sendMethodsData]);
   const liveReceiveMethods = useMemo(() => usableMethods(receiveMethodsData), [usableMethods, receiveMethodsData]);
 
+  // The rail exists, but the provider refuses this person's nationality.
+  // Saying so plainly, and counting who asks to be
+  // told when it opens, is the demand estimate for that corridor. The server
+  // adds the country of their IP, so "Venezuelans in Colombia" is countable.
+  const handleBlockedRailInterest = useCallback((method: LocalMethod) => {
+    setShowLocalSendSelection(false);
+    setShowLocalReceiveSelection(false);
+    const event = {
+      rail: method.id, country: method.country, direction: method.direction, reason: method.reason,
+    };
+    showIdentityBlockedInterest(`${method.title} · ${countryName(method.country)}`, stage => {
+      AnalyticsService.logFunnelEvent('local_rail_blocked_interest', { ...event, stage },
+        { sourceType: 'rail_interest', channel: method.direction });
+    });
+  }, []);
+
   const methodToOption = useCallback((method: LocalMethod) => ({
     id: method.id,
-    icon: method.direction === 'send' ? 'send' : 'download',
+    icon: isIdentityBlocked(method) ? 'clock' : method.direction === 'send' ? 'send' : 'download',
     flag: countryFlag(method.country),
     title: method.title,
     subtitle: method.subtitle,
-    note: method.status === 'needs_verification'
+    note: isIdentityBlocked(method)
+      ? 'No disponible por ahora para tu nacionalidad'
+      : method.status === 'needs_verification'
       ? 'Verifica tu identidad para usarlo'
       : method.status === 'needs_document'
         ? (method.documentTypes?.length === 1 && method.documentTypes[0] === 'P'
@@ -827,6 +847,10 @@ export const TransferScreen = () => {
     onPress: () => {
       setShowLocalSendSelection(false);
       setShowLocalReceiveSelection(false);
+      if (isIdentityBlocked(method)) {
+        handleBlockedRailInterest(method);
+        return;
+      }
       if (method.status === 'needs_verification') {
         navigation.navigate('Verification');
         return;
@@ -842,7 +866,7 @@ export const TransferScreen = () => {
       }
       navigation.navigate(method.direction === 'send' ? 'LocalSend' : 'LocalReceive', { methodId: method.id });
     },
-  }), [navigation]);
+  }), [handleBlockedRailInterest, navigation]);
 
   // Same two-stage demand probe the crypto receive sheet uses: a bare tap is
   // curiosity, the confirmation is the real signal. Every corridor is a probe

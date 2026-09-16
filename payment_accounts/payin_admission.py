@@ -97,6 +97,20 @@ def decision(entry):
         return permitted, 'same_owner' if permitted else 'provider_same_name_not_enabled', country, rail
     if rail in {'', '*'}:
         return False, 'unverified_rail', country, rail
+    grant_reason = third_party_grant_reason(profile, country, rail)
+    if grant_reason:
+        return False, grant_reason, country, rail
+    # Missing/ambiguous sender evidence never becomes an implied match or a
+    # blanket bypass, even for an approved third-party recipient.
+    if not isinstance(sender, dict) or sender.get('type') != 'FIAT' or not normalized_name(sender.get('full_name')):
+        return False, 'sender_identity_missing', country, rail
+    permitted = AccountCapability.objects.filter(financial_account=account,
+        capability='receive_third_party', status='enabled').exists()
+    return permitted, 'third_party_enabled' if permitted else 'provider_third_party_not_enabled', country, rail
+
+
+def third_party_grant_reason(profile, country, rail):
+    """Shared country/rail/recipient permission for admission and receive UI."""
     # One SQL snapshot: independent EXISTS calls could combine approvals that
     # were never enabled simultaneously while an operator changes the rollout.
     switches = {(row.rail, row.confio_account_id): row.enabled and bool(row.evidence.strip())
@@ -117,14 +131,33 @@ def decision(entry):
     )
     for reason, filters in scopes:
         if not allows(*filters):
-            return False, reason, country, rail
-    # Missing/ambiguous sender evidence never becomes an implied match or a
-    # blanket bypass, even for an approved third-party recipient.
-    if not isinstance(sender, dict) or sender.get('type') != 'FIAT' or not normalized_name(sender.get('full_name')):
-        return False, 'sender_identity_missing', country, rail
-    permitted = AccountCapability.objects.filter(financial_account=account,
-        capability='receive_third_party', status='enabled').exists()
-    return permitted, 'third_party_enabled' if permitted else 'provider_third_party_not_enabled', country, rail
+            return reason
+    return ''
+
+
+def receiving_capabilities(account):
+    """Effective permissions, never raw provider support advertised as approval."""
+    result = {'receive_same_name': 'disabled', 'receive_third_party': 'disabled'}
+    profile = account.provider_profile
+    identity = profile.identity_verification
+    rail = account.payin_rail.strip().upper()
+    try:
+        country = iso_alpha2(account.country)
+    except ValueError:
+        return result
+    if (account.status != 'active' or profile.status != 'active'
+            or not identity or identity.status != 'verified' or rail in {'', '*'}):
+        return result
+    capabilities = {row.capability: row.status for row in account.capabilities.all()}
+    snapshot = profile.identity_snapshot
+    if (profile.owner_type == 'individual' and isinstance(snapshot, dict)
+            and normalized_name(snapshot.get('full_name'))
+            and capabilities.get('receive_same_name') == 'enabled'):
+        result['receive_same_name'] = 'enabled'
+    if (capabilities.get('receive_third_party') == 'enabled'
+            and not third_party_grant_reason(profile, country, rail)):
+        result['receive_third_party'] = 'enabled'
+    return result
 
 
 def assess(entry):

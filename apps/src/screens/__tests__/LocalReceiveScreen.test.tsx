@@ -40,6 +40,26 @@ beforeEach(() => {
     instructionKind: 'qr', value: 'pix-copy-paste', holderName: 'Ana', institution: 'Bank', receiveThirdParty: 'enabled'};
 });
 
+it('shows own-name-only guidance when third-party permission is disabled', async () => {
+  mockAccount = {...mockAccount, receiveThirdParty: 'disabled', receiveSameName: 'enabled'};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const text = tree.root.findAllByType(Text).map(node => node.props.children);
+  expect(text).toContain('Por ahora recibe solo desde cuentas a tu nombre.');
+  expect(text).not.toContain('Puedes recibir de cualquier persona o empresa.');
+  await act(async () => tree.unmount());
+});
+
+it('does not invite deposits when neither receiving permission is enabled', async () => {
+  mockAccount = {...mockAccount, receiveThirdParty: 'disabled', receiveSameName: 'disabled'};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const text = tree.root.findAllByType(Text).map(node => node.props.children);
+  expect(text).toContain('Los depósitos aún no están disponibles en esta cuenta. Contacta a soporte antes de recibir un pago.');
+  expect(text).not.toContain('Puedes recibir de cualquier persona o empresa.');
+  await act(async () => tree.unmount());
+});
+
 it('renders and copies the exact Pix QR payload and labels shared data correctly', async () => {
   const share = jest.spyOn(Share, 'share').mockResolvedValue({action: Share.sharedAction});
   let tree!: renderer.ReactTestRenderer;

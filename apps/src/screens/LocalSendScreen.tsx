@@ -293,9 +293,14 @@ export default function LocalSendScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const resolve = useCallback(async (raw?: string, via: string = methodId) => {
+  // Leaving the field and then tapping Continue asks for the same recipient
+  // twice: share the request still in flight instead of starting another.
+  const inFlight = useRef<{ key: string; run: number; promise: Promise<LocalDestination | undefined> } | null>(null);
+  const resolve = useCallback((raw?: string, via: string = methodId): Promise<LocalDestination | undefined> => {
     const input = (raw ?? value).trim();
-    if (!input) return;
+    if (!input) return Promise.resolve(undefined);
+    const key = `${via}:${input}`;
+    if (inFlight.current?.key === key && inFlight.current.run === lookup.current) return inFlight.current.promise;
     const run = ++lookup.current;
     setRetryRecipient(null);
     setLocationBlocked(false);
@@ -304,28 +309,36 @@ export default function LocalSendScreen() {
     setResolveError('');
     setDestination(null);
     setConfirmedUnverified(false);
-    let row: LocalDestination;
-    try {
-      row = await withTimeout(resolveLocalDestination(via, input, LOOKUP_TIMEOUT_MS), LOOKUP_TIMEOUT_MS);
-    } catch (error: any) {
-      if (isCurrent(run)) {
-        setResolveError(error?.message || 'No pudimos revisar esos datos.');
-        setLocationBlocked(isBrebLocationFailure(error));
-        setResolving(false);
+    const promise = (async () => {
+      let row: LocalDestination;
+      try {
+        row = await withTimeout(resolveLocalDestination(via, input, LOOKUP_TIMEOUT_MS), LOOKUP_TIMEOUT_MS);
+      } catch (error: any) {
+        if (isCurrent(run)) {
+          setResolveError(error?.message || 'No pudimos revisar esos datos.');
+          setLocationBlocked(isBrebLocationFailure(error));
+          setResolving(false);
+        }
+        return undefined;
       }
-      return;
-    }
-    if (!isCurrent(run)) return;
-    // Show the recipient at once; the amount stays editable while the holder
-    // name arrives. Review stays locked until it settles (recipientReady).
-    setDestination(row);
-    setResolving(false);
-    savedQuery.refetch().catch(() => {});
-    void followUntilSettled(run, row);
-    return row;
+      if (!isCurrent(run)) return undefined;
+      // Show the recipient at once; the amount stays editable while the holder
+      // name arrives. Review stays locked until it settles (recipientReady).
+      setDestination(row);
+      setResolving(false);
+      savedQuery.refetch().catch(() => {});
+      void followUntilSettled(run, row);
+      return row;
+    })();
+    inFlight.current = { key, run, promise };
+    // A settled request is never shared: a retry after a failure asks again.
+    promise.finally(() => { if (inFlight.current?.run === run) inFlight.current = null; });
+    return promise;
+    // isCurrent only reads refs, so the first render's copy stays correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, methodId, resetReview, savedQuery, followUntilSettled]);
 
-  // Pasting only fills the form. The server saves the recipient on Continue.
+  // A pasted key is a finished entry: fill the field and prepare it at once.
   const paste = useCallback(async () => {
     if (locked) return; // the reviewed send is being signed
     const text = (await Clipboard.getString().catch(() => '')).trim();
@@ -335,7 +348,7 @@ export default function LocalSendScreen() {
       return;
     }
     const auto = AUTO_LOOKUP[methodId];
-    const input = auto ? text.replace(/\D/g, '') : text;
+    const input = auto ? text.replace(/[\s.\-/]/g, '') : text;
     startNewRecipient();
     setValue(input);
     setResolveError('');
@@ -343,7 +356,8 @@ export default function LocalSendScreen() {
       setResolveError(auto.error);
       return;
     }
-  }, [methodId, locked, resetReview]);
+    void resolve(input);
+  }, [methodId, locked, resetReview, resolve]);
 
   // Live estimate while typing; the authoritative quote is priced again on
   // the prepared bridge at review.
@@ -376,6 +390,12 @@ export default function LocalSendScreen() {
   const draftReady = !destination && Boolean(scannedQr || (value.trim()
     && (!inputCheck || inputCheck.valid(value.replace(/[\s.\-/]/g, '')))));
   const canContinue = (recipientReady || draftReady) && !resolving && pairReady && amountNumber > 0 && !amountError;
+  // Typing has no button of its own: leaving the field (or Done) prepares the
+  // recipient, so its card and the estimate appear without waiting for Continue.
+  // Never per keystroke: each preparation saves a recipient on the server.
+  const commitDraft = () => {
+    if (draftReady && !scannedQr && !resolving && !locked) void resolve();
+  };
 
   const handleContinue = async () => {
     if (!canContinue || !cryptoInstruction) return;
@@ -551,7 +571,7 @@ export default function LocalSendScreen() {
 
   const recipientCard = useMemo(() => {
     if (resolving) {
-      return null; // The Continue action owns the bounded preparation spinner.
+      return <Text style={styles.helperText}>Preparando destinatario…</Text>;
     }
     if (!destination && scannedQr) return <Text style={styles.helperText}>QR escaneado. Ingresa el monto para continuar.</Text>;
     if (!destination) return null;
@@ -740,9 +760,11 @@ export default function LocalSendScreen() {
                           setValue(next);
                           setResolveError('');
                           const auto = AUTO_LOOKUP[methodId];
-                          const digits = next.replace(/\D/g, '');
+                          const digits = next.replace(/[\s.\-/]/g, '');
                           if (auto && digits.length === auto.length) {
-                            if (!auto.valid(digits)) setResolveError(auto.error);
+                            // A complete number has nothing left to type.
+                            if (auto.valid(digits)) void resolve(digits);
+                            else setResolveError(auto.error);
                           }
                         }}
                         placeholder={copy.placeholder}
@@ -750,6 +772,8 @@ export default function LocalSendScreen() {
                         keyboardType={copy.keyboard || 'default'}
                         autoCapitalize="none"
                         autoCorrect={false}
+                        onBlur={commitDraft}
+                        onSubmitEditing={commitDraft}
                         returnKeyType="done"
                       />
                         <TouchableOpacity style={styles.addButton} onPress={paste} disabled={locked}
@@ -993,6 +1017,7 @@ export default function LocalSendScreen() {
           setValue('');
           setResolveError('');
           setScannedQr({payload, methodId: qrMethod?.id || methodId});
+          void resolve(payload, qrMethod?.id || methodId);
         }}
       />
     </SafeAreaView>

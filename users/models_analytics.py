@@ -295,6 +295,17 @@ class FunnelEvent(models.Model):
         help_text="ISO 3166-1 alpha-2; empty if unknown.",
     )
 
+    ip_country = models.CharField(
+        max_length=2,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "ISO 3166-1 alpha-2 estimated from the request IP, "
+            "as opposed to `country` (declared or phone). Empty if "
+            "unknown. Never the IP itself."
+        ),
+    )
+
     platform = models.CharField(
         max_length=16,
         blank=True,
@@ -327,6 +338,7 @@ class FunnelEvent(models.Model):
         indexes = [
             models.Index(fields=['event_name', 'created_at']),
             models.Index(fields=['country', 'event_name', 'created_at']),
+            models.Index(fields=['ip_country', 'event_name', 'created_at']),
             models.Index(fields=['source_type', 'event_name', 'created_at']),
             models.Index(fields=['channel', 'event_name', 'created_at']),
             models.Index(fields=['user', 'event_name']),
