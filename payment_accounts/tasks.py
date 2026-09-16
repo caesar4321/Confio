@@ -118,7 +118,8 @@ def reconcile_infinia_journeys():
 def reconcile_cobre_journeys():
     from .models import CobreJourney
     from .cobre_journeys import advance_journey
-    rows = CobreJourney.objects.exclude(stage__in=['completed', 'failed', 'needs_review']).order_by('updated_at')[:100]
+    from .infinia_bridge import live_journeys
+    rows = live_journeys(CobreJourney.objects.all(), recoverable=()).order_by('updated_at')[:100]
     count = 0
     for row in rows:
         try:

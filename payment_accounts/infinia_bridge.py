@@ -30,17 +30,19 @@ RECOVERABLE_DELAYS = frozenset({'provider_deposit_delayed', 'source_confirmation
 SETTLED_BRIDGE_FAILURES = frozenset({'failed', 'expired', 'refunded'})
 
 
-def live_journeys(queryset):
+def live_journeys(queryset, *, recoverable=RECOVERABLE_DELAYS):
     """Journeys the worker will still advance -- the only ones that can race.
 
-    The gate on starting a new journey and the worker's own filter must use the
-    same predicate. A journey nothing will ever act on cannot race with anything
-    and must never block the owner's next payment.
+    Every gate that asks "is another journey using these funds?" must use this
+    predicate, and so must the worker that advances them, or the two disagree
+    and a journey nothing will ever touch blocks one that is trying to run.
+    Cobre's reconciler never retries needs_review, so it passes recoverable=().
     """
     from django.db.models import Q
-    return queryset.filter(
-        ~Q(stage__in=['completed', 'failed', 'needs_review'])
-        | Q(stage='needs_review', failure_code__in=RECOVERABLE_DELAYS))
+    live = ~Q(stage__in=['completed', 'failed', 'needs_review'])
+    if recoverable:
+        live |= Q(stage='needs_review', failure_code__in=sorted(recoverable))
+    return queryset.filter(live)
 
 
 def preflight(journey, amount):
