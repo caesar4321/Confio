@@ -20,6 +20,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
+import { Glyph } from '../components/icons/IconChip';
+import { transactionVisual } from '../components/icons/vocabulary';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
@@ -1538,30 +1540,17 @@ export const TransactionDetailScreen = () => {
     setTimeout(() => setCopied(''), 2000);
   };
 
-  const getTransactionIcon = (type: string) => {
-    switch (type) {
-      case 'received':
-        return <Icon name="arrow-down" size={24} color={colors.primaryDark} />;
-      case 'sent':
-        return <Icon name="arrow-up" size={24} color={colors.text.primary} />;
-      case 'exchange':
-      case 'conversion':
-        return <Icon name="refresh-cw" size={24} color={colors.accent} />;
-      case 'payment':
-        return <Icon name="shopping-bag" size={24} color={colors.secondary} />;
-      case 'ramp':
-        return <Icon name="repeat" size={24} color="#0EA5E9" />;
-      case 'payroll':
-        return <Icon name="briefcase" size={24} color={colors.primaryDark} />;
-      case 'humanitarian':
-        return <Icon name="heart" size={24} color="#E11D48" />;
-      case 'deposit':
-        return <Icon name="arrow-down-circle" size={24} color={colors.primaryDark} />;
-      case 'withdrawal':
-        return <Icon name="arrow-up-circle" size={24} color={colors.danger} />;
-      default:
-        return <Icon name="arrow-up" size={24} color={colors.text.secondary} />;
-    }
+  // The header tile draws its own 72px white circle, so it takes the glyph
+  // alone — but from the same vocabulary the lists use, which is how a local
+  // transfer stopped opening under a generic arrow here too.
+  const getTransactionIcon = (tx: any) => {
+    const raw = tx?.amount;
+    const incoming = typeof raw === 'string' ? !raw.startsWith('-') : Number(raw) >= 0;
+    const kind = tx?.localTransferId ? 'local_transfer'
+      : typeof tx?.description === 'string' && tx.description.startsWith('Ondo Stocks: ') ? 'stocks'
+      : tx?.type;
+    const visual = transactionVisual(kind, incoming);
+    return <Glyph name={visual.glyph} color={visual.color} size={24} />;
   };
 
   const getTransactionTitle = (tx: any) => {
@@ -1921,7 +1910,7 @@ export const TransactionDetailScreen = () => {
 
           <View style={styles.transactionSummary}>
             <View style={styles.iconContainer}>
-              {getTransactionIcon(currentTx.type)}
+              {getTransactionIcon(currentTx)}
             </View>
 
             {(() => {

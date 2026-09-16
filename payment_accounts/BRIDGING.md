@@ -165,7 +165,8 @@ been a $5 minimum in disguise. The 1000bps cap exists because the floor alone
 left no ceiling where it applies -- $0.15 is 15.7% of a $1 output and 75% of a
 $0.75 one. Observed tiers peak at 495bps, so the cap keeps ~2x headroom.
 
-A separate backstop caps total cost at 2500bps. Relay prices tiny routes it
+A separate backstop caps total cost at 2500bps, measured against the authorized
+minimum output, not just the optimistic expected output. Relay prices tiny routes it
 cannot serve rather than returning `AMOUNT_TOO_LOW`: on 2026-09-15 it quoted
 $0.05 USDT to $0.0031 USDC, destroying 94%, and we would have accepted it. This
 is a cost rule, not a size floor -- it bites on value destroyed, so it moves with
@@ -239,19 +240,23 @@ A provider rejection before execution is retried, not queued. Infinia refuses a
 submission whose FX quote has expired without creating anything, and
 `_sync_flow_status` filed that as `provider_leg_requires_review` like any failed
 leg -- stranding the customer's money at the provider over a quote that is free
-to replace. `never_executed()` (failed, no `provider_operation_id`, no refund)
-now re-quotes on the SAME operation row, so the idempotency key never changes
-and a submission the provider did record deduplicates rather than converting
-twice. Bounded by `FX_REQUOTE_LIMIT`. A leg with a `provider_operation_id` is
-never re-quoted -- that is the ambiguous case and it still goes to review.
+to replace. Re-quoting requires an explicit HTTP 400 expired-quote rejection
+matching the saved quote, an authoritative empty lookup under the original
+idempotency key, and no linked debit. Missing operation IDs alone are not proof
+of non-execution. The same operation/key is retained, changes are conditional
+on an unchanged operation snapshot, and prior rejection evidence is recorded
+in `fx_requote_history`. Retries are bounded by `FX_REQUOTE_LIMIT` and preserve
+the user's minimum and inbound bridge prerequisites. Ambiguous results stay
+under review rather than changing the economic instruction.
 
 `submit_money_operation` shares it too. That guard asks whether another journey
 is using these funds, and excluding only `completed`/`failed` meant an abandoned
 review stalled every later journey at submit -- after its money had already
 reached the provider, which is worse than refusing up front. Cobre passes
 `recoverable=()` because its reconciler never retries `needs_review`. Any new
-"is another journey using these funds?" check must call `live_journeys()` rather
-than write its own stage list. Preparation blocks
+"is another journey using these funds?" check must also account for unresolved
+provider operations: worker eligibility alone does not release funds reserved
+by an unknown or submitted instruction on a parked journey. Preparation blocks
 only on genuinely in-flight transfers (`submitted`, `bridging`, unexpired
 `prepared`); funds are protected by `reserved_usdt_wei`, which reserves for
 `submitted`/`prepared` only, because by `bridging` the USDT has already left the

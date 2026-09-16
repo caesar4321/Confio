@@ -17,6 +17,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { RouteSheet } from '../components/RouteSheet';
+import { IconChip } from '../components/icons/IconChip';
+import { transactionVisual } from '../components/icons/vocabulary';
 import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import cUSDLogo from '../assets/png/cUSD.png';
@@ -405,20 +407,10 @@ export function FriendDetailScreen() {
     }
   }, []);
 
-  const getTransactionIcon = useCallback((transaction: Transaction) => {
-    switch(transaction.type) {
-      case 'received':
-        return <Icon name="arrow-down" size={20} color={colors.primaryDark} />;
-      case 'sent':
-        return <Icon name="arrow-up" size={20} color={colors.text.primary} />;
-      case 'payment':
-        return <Icon name="shopping-bag" size={20} color={colors.secondary} />;
-      case 'exchange':
-        return <Icon name="repeat" size={20} color={colors.secondary} />;
-      default:
-        return <Icon name="arrow-up" size={20} color={colors.text.secondary} />;
-    }
-  }, []);
+  // Same rows as the account ledger, so the same vocabulary draws them.
+  const getTransactionVisual = useCallback((transaction: Transaction) =>
+    transactionVisual(transaction.type, transaction.type === 'received' || transaction.amount.startsWith('+')),
+  []);
 
   const TransactionItem = memo(({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
     // Only treat as an active invitation if not claimed, not reverted, and not expired
@@ -431,9 +423,10 @@ export function FriendDetailScreen() {
     
     return (
       <TouchableOpacity style={[styles.transactionItem, isInvitationTransaction && styles.invitedTransactionItem]} onPress={onPress}>
-        <View style={[styles.transactionIconContainer, isInvitationTransaction && styles.invitedIconContainer]}>
-          {getTransactionIcon(transaction)}
-        </View>
+        <IconChip
+          visual={getTransactionVisual(transaction)}
+          style={[styles.transactionIconContainer, isInvitationTransaction && styles.invitedIconContainer]}
+        />
         <View style={styles.transactionInfo}>
           <Text style={styles.transactionTitle}>{getTransactionTitle(transaction)}</Text>
           <Text style={styles.transactionDate}>{transaction.date} • {transaction.time}</Text>
@@ -1039,12 +1032,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   transactionIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.neutral,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   invitedIconContainer: {

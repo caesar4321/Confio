@@ -31,11 +31,13 @@ SETTLED_BRIDGE_FAILURES = frozenset({'failed', 'expired', 'refunded'})
 
 
 def live_journeys(queryset, *, recoverable=RECOVERABLE_DELAYS):
-    """Journeys the worker will still advance -- the only ones that can race.
+    """Journeys the worker may advance, including proven re-quote candidates.
 
     Every gate that asks "is another journey using these funds?" must use this
     predicate, and so must the worker that advances them, or the two disagree
     and a journey nothing will ever touch blocks one that is trying to run.
+    This is not sufficient funds-release evidence: unresolved provider
+    operations reserve their source accounts even on parked journeys.
     Cobre's reconciler never retries needs_review, so it passes recoverable=().
     """
     from django.db.models import Q
@@ -44,11 +46,19 @@ def live_journeys(queryset, *, recoverable=RECOVERABLE_DELAYS):
         live |= Q(stage='needs_review', failure_code__in=sorted(recoverable))
         # A conversion the provider refused without creating anything is going
         # to be re-quoted, so it is live in both senses: the worker must pick it
-        # up, and it still contends for the funds. never_executed() re-checks
-        # the refund condition in Python; being over-inclusive here only means
-        # advance_journey returns early, which is the safe direction.
+        # up, and it still contends for the funds. Do not select every failed
+        # operation: permanent rejections would otherwise reserve forever.
+        from django.db.models import F, Value, TextField
+        from django.db.models.functions import Concat
+        from django.db.models.fields.json import KeyTextTransform
+        queryset = queryset.alias(
+            _fx_rejection_text=KeyTextTransform('message', 'fx_operation__provider_data'),
+            _expired_quote_message=Concat(Value('Quote: '),
+                KeyTextTransform('id', 'fx_quote'), Value(' is expired'), output_field=TextField()))
         live |= (Q(stage='needs_review', failure_code='provider_leg_requires_review',
-                   payout_operation__isnull=True, fx_operation__status='failed')
+                   payout_operation__isnull=True, fx_operation__status='failed',
+                   fx_operation__failure_code='400', fx_operation__provider_data__status='fail',
+                   _fx_rejection_text=F('_expired_quote_message'))
                  & (Q(fx_operation__provider_operation_id__isnull=True)
                     | Q(fx_operation__provider_operation_id='')))
     return queryset.filter(live)

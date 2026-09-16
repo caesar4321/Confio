@@ -41,6 +41,7 @@ class JourneyTests(TestCase):
         self.policies = mock.patch('payment_accounts.infinia_journeys.enforce_and_record').start()
         self.submit = mock.patch('payment_accounts.infinia_journeys.submit_money_operation', side_effect=lambda op: op).start()
         self.api = mock.Mock()
+        self.api.find_operation.return_value = []
         from types import SimpleNamespace
         from payment_accounts.infinia_bridge import prepare_infinia_bridge
         from .test_bridge_execution import build, binding, tokens
@@ -254,7 +255,8 @@ class JourneyTests(TestCase):
         op = j.fx_operation
         op.status = 'failed'
         op.provider_operation_id = provider_operation_id
-        op.provider_data = {'status': 'fail', 'message': 'Quote: abc is expired'}
+        op.failure_code = '400'
+        op.provider_data = {'status': 'fail', 'message': f"Quote: {j.fx_quote['id']} is expired"}
         op.save()
         _sync_flow_status(j.money_flow)
         j.refresh_from_db()
@@ -287,6 +289,8 @@ class JourneyTests(TestCase):
         # Same row, same key: a submission the provider did record deduplicates.
         self.assertEqual(j.fx_operation.idempotency_key, before)
         self.assertEqual(j.money_flow.metadata['fx_requote_count'], 1)
+        self.assertEqual(j.fx_operation.failure_code, '')
+        self.assertEqual(j.money_flow.metadata['fx_requote_history'][0]['previous_quote_id'], 'fx-quote')
 
     def test_a_leg_the_provider_did_create_is_never_requoted(self):
         """The safety boundary: an operation may exist on their side."""
@@ -309,7 +313,8 @@ class JourneyTests(TestCase):
             j.refresh_from_db()
             op = j.fx_operation
             op.status = 'failed'
-            op.provider_data = {'status': 'fail', 'message': 'expired'}
+            op.failure_code = '400'
+            op.provider_data = {'status': 'fail', 'message': f"Quote: {j.fx_quote['id']} is expired"}
             op.save()
             _sync_flow_status(j.money_flow)
             j.refresh_from_db()
@@ -321,6 +326,111 @@ class JourneyTests(TestCase):
         j.refresh_from_db()
         self.assertEqual(j.failure_code, 'fx_quote_retries_exhausted')
         self.api.create_transfer_quote.assert_not_called()
+
+    def test_arbitrary_failed_response_does_not_authorize_requote(self):
+        from payment_accounts.infinia_bridge import live_journeys
+        j = self.rejected_fx()
+        for payload in ({}, {'status': 'fail', 'message': 'Compliance rejected'},
+                        {'status': 'fail', 'message': 'Quote: another-quote is expired'}):
+            j.fx_operation.provider_data = payload; j.fx_operation.save()
+            self.api.create_transfer_quote.reset_mock()
+            self.assertFalse(live_journeys(InfiniaJourney.objects.filter(pk=j.pk)).exists())
+            advance_journey(j.pk, client=self.api)
+            self.api.create_transfer_quote.assert_not_called()
+
+    def test_worker_runs_safe_requote_through_real_handler(self):
+        from payment_accounts.tasks import reconcile_infinia_journeys
+        j = self.rejected_fx()
+        self.fx_quote()
+        with mock.patch('payment_accounts.infinia_journeys.InfiniaClient', return_value=self.api):
+            reconcile_infinia_journeys()
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+        self.assertEqual(j.money_flow.metadata['fx_requote_count'], 1)
+        self.api.find_operation.assert_called_once_with('conversion', j.fx_operation.idempotency_key)
+
+    def test_requote_requires_explicit_empty_provider_lookup(self):
+        j = self.rejected_fx()
+        for lookup in ({}, None, {'results': [], 'next': 'page2'},
+                       {'results': [], 'count': 1}, {'data': [], 'status': 'error'},
+                       [{'id': 'already-created'}]):
+            InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review', failure_code='provider_leg_requires_review')
+            self.api.find_operation.return_value = lookup
+            self.api.create_transfer_quote.reset_mock()
+            advance_journey(j.pk, client=self.api)
+            self.api.create_transfer_quote.assert_not_called()
+            j.refresh_from_db()
+            self.assertEqual(j.fx_operation.status, 'failed')
+
+    def test_requote_refuses_existing_debit(self):
+        j = self.rejected_fx()
+        LedgerEntry.objects.create(provider='infinia', financial_account=self.local,
+            operation=j.fx_operation, provider_entry_id='debit-proof', direction='debit',
+            asset=self.local.asset, amount='10', occurred_at=timezone.now())
+        self.api.create_transfer_quote.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        self.api.create_transfer_quote.assert_not_called()
+
+    def test_requote_preserves_customer_minimum(self):
+        j = self.rejected_fx()
+        self.fx_quote(output='1.99')
+        self.submit.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'fx_quote_outside_authorization')
+        self.assertEqual(j.fx_operation.status, 'failed')
+        self.submit.assert_not_called()
+
+    def test_requote_rechecks_inbound_bridge_prerequisites(self):
+        from payment_accounts.infinia_bridge import InfiniaBridgeReview
+        j = self.rejected_fx()
+        self.fx_quote()
+        self.submit.reset_mock()
+        with mock.patch('payment_accounts.infinia_bridge.preflight', side_effect=InfiniaBridgeReview('disabled')):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'direct_bridge_unavailable')
+        self.assertEqual(j.fx_operation.status, 'failed')
+        self.submit.assert_not_called()
+
+    def test_requote_does_not_overwrite_concurrent_provider_evidence(self):
+        j = self.rejected_fx()
+        self.fx_quote()
+        quote = self.api.create_transfer_quote.return_value
+        def concurrent_quote(*args, **kwargs):
+            MoneyOperation.objects.filter(pk=j.fx_operation_id).update(
+                provider_operation_id='arrived-concurrently', status='processing')
+            return quote
+        self.api.create_transfer_quote.side_effect = concurrent_quote
+        self.submit.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.fx_operation.status, 'processing')
+        self.assertEqual(j.fx_operation.provider_operation_id, 'arrived-concurrently')
+        self.submit.assert_not_called()
+
+    def test_reviewed_journey_unknown_operation_still_reserves_funds(self):
+        from payment_accounts.services import submit_money_operation
+        from payment_accounts.models import MoneyFlow
+        j = self.rejected_fx()
+        j.fx_operation.status='unknown'; j.fx_operation.save()
+        flow = MoneyFlow.objects.create(confio_account=self.owner, kind='transfer',
+            source_asset=self.crypto.asset, source_amount='1')
+        pending = MoneyOperation.objects.create(money_flow=j.money_flow, provider='infinia',
+            operation_type='conversion', source_account=self.crypto, destination_account=self.local,
+            source_asset=self.crypto.asset, target_asset=self.local.asset, source_amount='1',
+            idempotency_key=str(uuid.uuid4()), status='unknown')
+        op = MoneyOperation.objects.create(money_flow=flow, provider='infinia',
+            operation_type='conversion', source_account=self.crypto, destination_account=self.local,
+            source_asset=self.crypto.asset, target_asset=self.local.asset, source_amount='1',
+            idempotency_key=str(uuid.uuid4()))
+        with mock.patch('payment_accounts.services.get_provider') as provider:
+            from payment_accounts.providers.common import ProviderResult
+            provider.return_value.create_transfer.return_value = ProviderResult(
+                'unexpected-second-operation', 'processing', 'PROCESSING', {})
+            with self.assertRaisesRegex(PaymentAccountError, 'unresolved operation'):
+                submit_money_operation(op)
+            provider.assert_not_called()
 
     def settle_fx(self, j, account, amount='2.5'):
         j.refresh_from_db(); op=j.fx_operation
