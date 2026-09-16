@@ -145,11 +145,20 @@ and `prod/infinia-webhook-signing-key`. Explicit environment
 overrides take precedence. Sandbox credentials use the `sandbox/` prefix.
 `INFINIA_ENV=production|sandbox` selects the API URL and all three secret names
 independently of `CONFIO_ENV`. The checked-in `.env.testnet` uses production
-Infinia to look up real recipients: the sandbox only resolves its documented
+Infinia for real provider operations: the sandbox only resolves its documented
 test values and otherwise leaves bank validations pending (see
 [sandbox testing](https://docs.infiniaweb.com/docs/sandbox-testing.md)). This makes Infinia
 operations live even while the wallet uses testnet. Existing sandbox provider
 IDs do not work in production; pending recipient lookups must be run again.
+Paid account-owner lookups default to off (`INFINIA_ACCOUNT_VALIDATION_ENABLED=False`).
+New and rechecked recipients still pass local format checks and return `not_checked`
+when no lookup runs. The app shows their destination and a normal final review,
+without a verified-owner claim or a failed-verification warning. Fresh cached
+verified results remain reusable until their existing TTL expires. Both validation
+creation and polling are blocked at the provider client while the flag is off.
+Only re-enable it after agreeing to the per-lookup price. Release the updated app
+alongside this change: older apps treat `not_checked` as their existing unverified
+fallback and still require its extra confirmation.
 `INFINIA_WEBHOOK_SIGNING_KEY` is independent of the API user; missing signing
 configuration rejects webhooks. Production `INFINIA_API_URL` defaults to
 `https://app2.infiniaweb.com/infinia_api`, as specified in Infinia's

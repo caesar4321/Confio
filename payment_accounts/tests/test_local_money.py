@@ -15,7 +15,8 @@ from payment_accounts.services import PaymentAccountError, _infinia_capabilities
 from security.models import IdentityVerification
 from users.models import Account, User
 
-FLAGS = dict(INFINIA_PAYMENT_ACCOUNTS_ENABLED=True, INFINIA_JOURNEYS_ENABLED=True)
+FLAGS = dict(INFINIA_PAYMENT_ACCOUNTS_ENABLED=True, INFINIA_JOURNEYS_ENABLED=True,
+             INFINIA_ACCOUNT_VALIDATION_ENABLED=True)
 
 
 def tlv(tag, value):
@@ -92,6 +93,7 @@ class IdentifierTests(SimpleTestCase):
         self.assertEqual(local_money.verification_state({'status': 'IN_PROGRESS'}), 'pending')
         self.assertEqual(local_money.verification_state({'status': 'ERROR'}), 'not_found')
         self.assertEqual(local_money.verification_state({'status': 'TEMPORARY_FAILURE'}), 'unverified')
+        self.assertEqual(local_money.verification_state({'status': 'DISABLED'}), 'not_checked')
         self.assertEqual(local_money.verification_state(None), 'unverified')
 
     def test_summary_reads_owner_name_and_masks_document(self):
@@ -202,6 +204,80 @@ class LocalMoneyTests(TestCase):
 
     # ---- recipients
 
+    @override_settings(**{**FLAGS, 'INFINIA_ACCOUNT_VALIDATION_ENABLED': False})
+    def test_disabled_validation_resolves_and_rechecks_without_provider_calls(self):
+        destination = local_money.resolve_destination(self.owner, 'co_breb', '@maria.rod', client=self.client_api)
+        self.assertEqual(local_money.destination_view(destination)['verification'], 'not_checked')
+        destination = local_money.recheck_destination(destination, client=self.client_api)
+        local_money.require_current_destination(destination)
+        self.assertEqual(destination.holder_name, '')
+        self.client_api.create_bank_account_validation.assert_not_called()
+        self.client_api.get_bank_account_validation.assert_not_called()
+
+    @override_settings(**FLAGS)
+    def test_disabling_validation_releases_pending_recipient_without_polling(self):
+        self.client_api.create_bank_account_validation.return_value = {'id': 'v1', 'status': 'IN_PROGRESS'}
+        destination = local_money.resolve_destination(self.owner, 'co_breb', '@maria.rod', client=self.client_api)
+        self.client_api.reset_mock()
+        with override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=False):
+            destination = local_money.refresh_destination(destination, client=self.client_api)
+        self.assertEqual(local_money.destination_view(destination)['verification'], 'not_checked')
+        self.client_api.create_bank_account_validation.assert_not_called()
+        self.client_api.get_bank_account_validation.assert_not_called()
+
+    @override_settings(**{**FLAGS, 'INFINIA_ACCOUNT_VALIDATION_ENABLED': False})
+    def test_disabled_lookups_keep_qr_recipients_distinguishable(self):
+        labels = []
+        for merchant, city in [('Kiosco', 'CORDOBA'), ('Kiosco', 'ROSARIO'), ('', 'ROSARIO')]:
+            payload = qr(('43', 'com.mercadolibre'), ('53', '032'), ('58', 'AR'),
+                         ('59', merchant), ('60', city))
+            row = local_money.resolve_destination(self.owner, 'ar_qr', payload, client=self.client_api)
+            view = local_money.destination_view(row)
+            self.assertEqual(view['verification'], 'not_checked')
+            self.assertEqual(view['holder_name'], '')
+            self.assertIn(merchant or 'Código de pago', view['label'])
+            labels.append(view['label'])
+        self.assertEqual(len(set(labels)), 3)
+        self.client_api.create_bank_account_validation.assert_not_called()
+
+    @override_settings(**{**FLAGS, 'INFINIA_ACCOUNT_VALIDATION_ENABLED': False})
+    def test_review_shows_full_long_key_even_for_older_truncated_saved_label(self):
+        value = 'a' * 120 + '@example.com'
+        row = local_money.resolve_destination(self.owner, 'co_breb', value, client=self.client_api)
+        self.assertLessEqual(len(row.label), 100)
+        self.assertEqual(local_money.destination_view(row)['label'], f'Llave Bre-B · {value}')
+        row.label = 'Llave Bre-B · old truncated label'
+        row.save(update_fields=['label'])
+        self.assertEqual(local_money.destination_view(local_money.recheck_destination(row))['label'],
+                         f'Llave Bre-B · {value}')
+
+    @override_settings(**FLAGS)
+    def test_disabling_lookups_reuses_fresh_names_but_clears_expired_names(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self.client_api.create_bank_account_validation.return_value = self.validation()
+        row = local_money.resolve_destination(self.owner, 'co_breb', '@maria.rod', client=self.client_api)
+        self.client_api.reset_mock()
+        with override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=False):
+            self.assertEqual(local_money.destination_view(local_money.recheck_destination(row))['verification'], 'verified')
+            row.provider_data['validation']['checked_at'] = (timezone.now() - timedelta(days=2)).isoformat()
+            row.save(update_fields=['provider_data'])
+            row = local_money.recheck_destination(row, client=self.client_api)
+            self.assertEqual(local_money.destination_view(row)['verification'], 'not_checked')
+            self.assertEqual(row.holder_name, '')
+            local_money.require_current_destination(row)
+        self.client_api.create_bank_account_validation.assert_not_called()
+        self.client_api.get_bank_account_validation.assert_not_called()
+
+    @override_settings(**{**FLAGS, 'INFINIA_ACCOUNT_VALIDATION_ENABLED': False})
+    def test_reenabling_lookups_rechecks_a_previously_skipped_recipient(self):
+        row = local_money.resolve_destination(self.owner, 'co_breb', '@maria.rod', client=self.client_api)
+        self.client_api.create_bank_account_validation.return_value = self.validation()
+        with override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=True):
+            row = local_money.recheck_destination(row, client=self.client_api)
+        self.assertEqual(local_money.destination_view(row)['verification'], 'verified')
+        self.client_api.create_bank_account_validation.assert_called_once()
+
     def validation(self, status='SUCCESSFUL', name='María Rodríguez'):
         return {'id': 'v1', 'status': status, 'countryData': {
             'account': {'bankName': 'Bancolombia'}, 'owners': [{'name': name, 'documentNumber': '1020304821'}]}}
@@ -225,7 +301,7 @@ class LocalMoneyTests(TestCase):
         self.client_api.create_bank_account_validation.return_value = self.validation()
         row = local_money.resolve_destination(self.owner, 'mx_clabe', '032 180 000118359719', client=self.client_api)
         self.assertEqual(row.details, {'type': 'CLABE', 'clabe': '032180000118359719', 'reference': 'Confio'})
-        self.assertEqual(row.label, 'CLABE · •••• 9719')
+        self.assertEqual(row.label, 'CLABE · 032180000118359719')
 
     @override_settings(**FLAGS)
     def test_provider_failure_is_unverified_never_verified(self):

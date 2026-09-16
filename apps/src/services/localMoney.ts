@@ -20,7 +20,7 @@ export type LocalPairStatus =
   | 'suspended'
   | 'closed'
   | 'failed';
-export type LocalVerification = 'verified' | 'pending' | 'unverified' | 'not_found';
+export type LocalVerification = 'verified' | 'pending' | 'unverified' | 'not_found' | 'not_checked';
 
 export interface LocalMethod {
   id: string;

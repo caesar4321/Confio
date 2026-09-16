@@ -89,8 +89,7 @@ const COPY: Record<string, {
 
 const AMOUNT_PATTERN = /^\d+([.,]\d{1,2})?$/;
 
-// Same check digits as the server (local_money.clabe_valid / cbu_valid): a
-// complete, valid CLABE or CVU/CBU is looked up without pressing Revisar.
+// Same check digits as the server, checked locally before Continue.
 const clabeValid = (v: string) => /^\d{18}$/.test(v)
   && (10 - v.slice(0, 17).split('').reduce((sum, d, i) => sum + (Number(d) * [3, 7, 1][i % 3]) % 10, 0) % 10) % 10
     === Number(v[17]);
@@ -104,8 +103,7 @@ const AUTO_LOOKUP: Record<string, { length: number; valid: (v: string) => boolea
   ar_cvu: { length: 22, valid: cbuValid, error: 'Ese CVU o CBU no es válido. Revisa los 22 dígitos.' },
 };
 
-// A lost response must end the lookup, never leave the spinner up. The
-// server caps the provider check at 8 s, so 20 s means the answer is gone.
+// Bound the entire recipient request, including any location retry.
 const LOOKUP_TIMEOUT_MS = 20000;
 
 // Falling back to "unverified" must not keep a holder we can no longer vouch
@@ -116,7 +114,7 @@ const unverifiedCopy = (row: LocalDestination): LocalDestination => ({
 });
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('La revisión tardó demasiado. Intenta de nuevo.')), ms);
+    const timer = setTimeout(() => reject(new Error('No pudimos preparar el destinatario. Intenta de nuevo.')), ms);
     promise.then(
       result => { clearTimeout(timer); resolve(result); },
       error => { clearTimeout(timer); reject(error); },
@@ -185,6 +183,7 @@ export default function LocalSendScreen() {
   const refreshAccounts = () => Promise.allSettled([methodsQuery.refetch(), accountsQuery.refetch()]);
 
   const [value, setValue] = useState('');
+  const [scannedQr, setScannedQr] = useState<{payload: string; methodId: string} | null>(null);
   const [destination, setDestination] = useState<LocalDestination | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
@@ -262,6 +261,7 @@ export default function LocalSendScreen() {
   // A different recipient (typed, pasted, even invalid): the checked one, its
   // confirmation, the prepared review and any lookup in flight no longer apply.
   const startNewRecipient = () => {
+    setScannedQr(null);
     setRetryRecipient(null);
     setLocationBlocked(false);
     lookup.current += 1;
@@ -306,8 +306,7 @@ export default function LocalSendScreen() {
     setConfirmedUnverified(false);
     let row: LocalDestination;
     try {
-      // The timeout bounds the lookup request, not a location check it may need first.
-      row = await resolveLocalDestination(via, input, LOOKUP_TIMEOUT_MS);
+      row = await withTimeout(resolveLocalDestination(via, input, LOOKUP_TIMEOUT_MS), LOOKUP_TIMEOUT_MS);
     } catch (error: any) {
       if (isCurrent(run)) {
         setResolveError(error?.message || 'No pudimos revisar esos datos.');
@@ -322,10 +321,11 @@ export default function LocalSendScreen() {
     setDestination(row);
     setResolving(false);
     savedQuery.refetch().catch(() => {});
-    await followUntilSettled(run, row);
+    void followUntilSettled(run, row);
+    return row;
   }, [value, methodId, resetReview, savedQuery, followUntilSettled]);
 
-  // Keys usually arrive by chat: pasting fills the field and checks it at once.
+  // Pasting only fills the form. The server saves the recipient on Continue.
   const paste = useCallback(async () => {
     if (locked) return; // the reviewed send is being signed
     const text = (await Clipboard.getString().catch(() => '')).trim();
@@ -343,8 +343,7 @@ export default function LocalSendScreen() {
       setResolveError(auto.error);
       return;
     }
-    resolve(input);
-  }, [methodId, resolve, locked]);
+  }, [methodId, locked, resetReview]);
 
   // Live estimate while typing; the authoritative quote is priced again on
   // the prepared bridge at review.
@@ -372,14 +371,27 @@ export default function LocalSendScreen() {
 
   const recipientReady = Boolean(destination) && destination!.verification !== 'not_found'
     && destination!.verification !== 'pending'
-    && (destination!.verification === 'verified' || confirmedUnverified);
-  const canContinue = recipientReady && pairReady && amountNumber > 0 && !amountError;
+    && (destination!.verification === 'verified' || destination!.verification === 'not_checked' || confirmedUnverified);
+  const inputCheck = AUTO_LOOKUP[methodId];
+  const draftReady = !destination && Boolean(scannedQr || (value.trim()
+    && (!inputCheck || inputCheck.valid(value.replace(/[\s.\-/]/g, '')))));
+  const canContinue = (recipientReady || draftReady) && !resolving && pairReady && amountNumber > 0 && !amountError;
 
   const handleContinue = async () => {
-    if (!canContinue || !destination || !cryptoInstruction) return;
+    if (!canContinue || !cryptoInstruction) return;
+    let recipient = destination;
+    if (!recipient) {
+      const pending = resolve(scannedQr?.payload, scannedQr?.methodId || methodId);
+      const resolutionRun = prepareRun.current;
+      recipient = await pending || null;
+      if (resolutionRun !== prepareRun.current || !mounted.current || !recipient) return;
+      // An enabled lookup may return a pending/failed check. Show that result
+      // before allowing review; skipped lookups follow the normal send path.
+      if (!['verified', 'not_checked'].includes(recipient.verification)) return;
+    }
     // A response for an older form (edited meanwhile) is dropped, never shown or signed.
     const run = ++prepareRun.current;
-    const snapshot = { amount: normalizedAmount, destinationId: destination.id };
+    const snapshot = { amount: normalizedAmount, destinationId: recipient.id };
     let bridgePrepared = false;
     setStep('preparing');
     setFlowError('');
@@ -500,22 +512,25 @@ export default function LocalSendScreen() {
     const run = ++lookup.current; // a lookup still in flight must not replace this choice
     setRetryRecipient(null);
     setLocationBlocked(false);
-    setResolving(false);
+    setResolving(true);
     resetReview();
     setValue('');
+    setScannedQr(null);
     setResolveError('');
     setConfirmedUnverified(false);
     // A saved check can be old (keys get re-registered to someone else): it is
     // not shown as verified until the server confirms or re-checks it.
     setDestination({ ...row, verification: 'pending' });
-    recheckLocalDestination(row.id, LOOKUP_TIMEOUT_MS)
+    withTimeout(recheckLocalDestination(row.id, LOOKUP_TIMEOUT_MS), LOOKUP_TIMEOUT_MS)
       .then(fresh => {
         if (!isCurrent(run)) return undefined;
+        setResolving(false);
         setDestination(fresh);
         return followUntilSettled(run, fresh);
       })
       .catch((error: any) => {
         if (!isCurrent(run)) return;
+        setResolving(false);
         // A failed request says nothing about the holder. Never turn a
         // transport/auth/schema error into permission to override verification.
         setDestination(null);
@@ -524,7 +539,7 @@ export default function LocalSendScreen() {
           setResolveError(error?.message || 'Confirma tu ubicación para usar Bre-B.');
           setLocationBlocked(true);
         } else {
-          setResolveError('No pudimos actualizar la verificación de este destinatario. Intenta de nuevo.');
+          setResolveError('No pudimos cargar los datos del destinatario. Intenta de nuevo.');
         }
         setRetryRecipient(row);
       });
@@ -536,14 +551,21 @@ export default function LocalSendScreen() {
 
   const recipientCard = useMemo(() => {
     if (resolving) {
+      return null; // The Continue action owns the bounded preparation spinner.
+    }
+    if (!destination && scannedQr) return <Text style={styles.helperText}>QR escaneado. Ingresa el monto para continuar.</Text>;
+    if (!destination) return null;
+    if (destination.verification === 'not_checked') {
       return (
-        <View style={[styles.checkboxRow, { alignItems: 'center' }]}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.helperText}>Revisando los datos…</Text>
+        <View style={styles.recipientCard}>
+          <Icon name="user" size={20} color={colors.primary} />
+          <View style={styles.savedCopy}>
+            <Text style={styles.savedTitle}>{destination.label}</Text>
+            <Text style={styles.savedText}>Confirma que estos son los datos que te compartió quien recibe.</Text>
+          </View>
         </View>
       );
     }
-    if (!destination) return null;
     if (destination.verification === 'not_found') {
       return <Text style={styles.errorText}>No encontramos esta cuenta. Revisa los datos.</Text>;
     }
@@ -606,7 +628,7 @@ export default function LocalSendScreen() {
         </TouchableOpacity>
       </>
     );
-  }, [resolving, destination, confirmedUnverified, locked, resetReview]);
+  }, [resolving, destination, scannedQr, confirmedUnverified, locked, resetReview]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -691,8 +713,8 @@ export default function LocalSendScreen() {
                     <TouchableOpacity key={row.id} style={[styles.savedCard, selected && styles.savedCardSelected]}
                       onPress={() => pickSaved(row)} activeOpacity={0.7}>
                       <View style={styles.savedCopy}>
-                        <Text style={styles.savedTitle}>{row.holderName || 'Titular sin verificar'}</Text>
-                        <Text style={styles.savedText}>{row.label}</Text>
+                        <Text style={styles.savedTitle}>{row.holderName || row.label}</Text>
+                        {row.holderName ? <Text style={styles.savedText}>{row.label}</Text> : null}
                       </View>
                       <View style={[styles.radioOuter, selected && styles.radioOuterChecked]}>
                         {selected ? <View style={styles.radioInner} /> : null}
@@ -705,7 +727,7 @@ export default function LocalSendScreen() {
                   {methodId === 'ar_qr' ? (
                     <TouchableOpacity style={styles.smallPrimary} onPress={() => { if (!locked) setScannerOpen(true); }}>
                       <Icon name="maximize" size={18} color={colors.white} />
-                      <Text style={styles.smallPrimaryText}>{value ? 'Escanear otro QR' : 'Escanear QR'}</Text>
+                      <Text style={styles.smallPrimaryText}>{scannedQr ? 'Escanear otro QR' : 'Escanear QR'}</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={[styles.amountInputRow, styles.amountInputRowFocused]}>
@@ -720,11 +742,9 @@ export default function LocalSendScreen() {
                           const auto = AUTO_LOOKUP[methodId];
                           const digits = next.replace(/\D/g, '');
                           if (auto && digits.length === auto.length) {
-                            if (auto.valid(digits)) resolve(digits);
-                            else setResolveError(auto.error);
+                            if (!auto.valid(digits)) setResolveError(auto.error);
                           }
                         }}
-                        onSubmitEditing={() => resolve()}
                         placeholder={copy.placeholder}
                         placeholderTextColor={colors.textSecondary}
                         keyboardType={copy.keyboard || 'default'}
@@ -732,18 +752,10 @@ export default function LocalSendScreen() {
                         autoCorrect={false}
                         returnKeyType="done"
                       />
-                      {/* Empty field: paste. With text: check it (complete CLABE/CVU
-                          numbers are also checked on their own). */}
-                      {value.trim() ? (
-                        <TouchableOpacity style={styles.addButton} onPress={() => resolve()} disabled={resolving || locked}>
-                          <Text style={styles.addButtonText}>Revisar</Text>
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity style={styles.addButton} onPress={paste}
+                        <TouchableOpacity style={styles.addButton} onPress={paste} disabled={locked}
                           accessibilityLabel="Pegar desde el portapapeles">
                           <Text style={styles.addButtonText}>Pegar</Text>
                         </TouchableOpacity>
-                      )}
                       {qrMethod ? (
                         <TouchableOpacity style={[styles.addButton, { marginLeft: 8 }]} onPress={() => { if (!locked) setScannerOpen(true); }}
                           accessibilityLabel="Escanear QR">
@@ -900,16 +912,17 @@ export default function LocalSendScreen() {
               <RampReveal delay={0}>
                 <View style={styles.reviewCard}>
                   <Text style={styles.reviewTitle}>Revisión final</Text>
-                  <View style={styles.reviewRow}>
+                  {destination.holderName ? <View style={styles.reviewRow}>
                     <Icon name="user" size={16} color={colors.textSecondary} />
                     <Text style={styles.reviewLabel}>Para</Text>
-                    <Text style={styles.reviewValue}>{destination.holderName || 'Titular sin verificar'}</Text>
-                  </View>
+                    <Text style={styles.reviewValue}>{destination.holderName}</Text>
+                  </View> : null}
                   <View style={styles.reviewRow}>
                     <Icon name="credit-card" size={16} color={colors.textSecondary} />
                     <Text style={styles.reviewLabel}>Destino</Text>
                     <Text style={styles.reviewValue}>{destination.label}</Text>
                   </View>
+                  <Text style={styles.helperText}>Revisa el destino y el monto antes de confirmar el envío.</Text>
                   <View style={styles.reviewRow}>
                     <Icon name="dollar-sign" size={16} color={colors.textSecondary} />
                     <Text style={styles.reviewLabel}>Envías</Text>
@@ -962,7 +975,7 @@ export default function LocalSendScreen() {
                     ? () => navigation.navigate('HomeMessages', { initialChannelId: 'soporte' })
                     : !pairReady ? refreshAccounts : handleContinue}
                   primaryDisabled={pairReady ? !canContinue : false}
-                  primaryLoading={step === 'preparing'}
+                  primaryLoading={resolving || step === 'preparing'}
                   primaryIconName="chevron-right"
                 />
               </RampReveal>
@@ -975,9 +988,11 @@ export default function LocalSendScreen() {
         onClose={() => setScannerOpen(false)}
         hint="Apunta al código QR del comercio"
         onScanned={payload => {
-          // The raw EMV payload is never shown in the CVU field.
-          if (!qrMethod) setValue(payload);
-          resolve(payload, qrMethod?.id || methodId);
+          if (locked) return;
+          startNewRecipient();
+          setValue('');
+          setResolveError('');
+          setScannedQr({payload, methodId: qrMethod?.id || methodId});
         }}
       />
     </SafeAreaView>

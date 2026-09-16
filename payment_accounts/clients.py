@@ -318,10 +318,14 @@ class InfiniaClient(BaseProviderClient):
     # answer is worth less than a fast "could not confirm", which already falls
     # back to an explicit confirmation, so they get a shorter timeout.
     def create_bank_account_validation(self, payload):
+        if not getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False):
+            raise ProviderConfigurationError('Infinia account validation is disabled')
         return self.request('POST', '/v1/bank-account-validation/', payload=payload,
                             timeout=getattr(settings, 'LOCAL_MONEY_VALIDATION_TIMEOUT_SECONDS', 8))
 
     def get_bank_account_validation(self, validation_id):
+        if not getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False):
+            raise ProviderConfigurationError('Infinia account validation is disabled')
         return self.request('GET', f'/v1/bank-account-validation/{validation_id}/',
                             timeout=getattr(settings, 'LOCAL_MONEY_VALIDATION_TIMEOUT_SECONDS', 8))
 

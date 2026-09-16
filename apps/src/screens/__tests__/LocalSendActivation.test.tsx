@@ -1,11 +1,14 @@
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text, TextInput, TouchableOpacity} from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 const mockNavigate = jest.fn();
 const mockRefetch = jest.fn().mockResolvedValue({});
 const mockRecheck = jest.fn();
 const mockPrepareBridge = jest.fn();
+const mockPayoutQuote = jest.fn();
+const mockResolve = jest.fn();
 let mockBridgeSequence = 0;
 let mockAccountStatus = 'none';
 let mockAccounts: any[] = [];
@@ -45,12 +48,16 @@ jest.mock('../../services/localMoney', () => ({
   currencyName: () => 'pesos',
   // Picking a saved recipient re-checks it on the server; here it is still current.
   recheckLocalDestination: (id: string) => mockRecheck(id),
+  fetchPayoutQuote: (...args: any[]) => mockPayoutQuote(...args),
+  resolveLocalDestination: (...args: any[]) => mockResolve(...args),
 }));
 import Screen from '../LocalSendScreen';
 
 beforeEach(() => {
   jest.clearAllMocks(); mockAccountStatus = 'none';
   mockPrepareBridge.mockReset(); mockBridgeSequence = 0;
+  mockPayoutQuote.mockReset();
+  mockResolve.mockReset();
   mockAccounts = []; mockLimits = undefined;
   mockRecheck.mockImplementation(async (id: string) => ({id, holderName: 'Ana', label: 'Llave', verification: 'verified'}));
 });
@@ -141,6 +148,73 @@ it('a failed saved-recipient request cannot become an unverified-holder override
   await act(async () => {tree.unmount();});
 });
 
+it.each(['not_checked', 'unverified'])('handles %s recipients without conflating skipped and failed checks', async verification => {
+  mockAccountStatus = 'active';
+  mockAccounts = [
+    {provider: 'infinia', asset: 'COP', status: 'active'},
+    {provider: 'infinia', asset: 'USDC_POL', status: 'active', fundingInstructions: [{kind: 'crypto_address', status: 'active'}]},
+  ];
+  mockRecheck.mockResolvedValueOnce({id: 'recipient', holderName: '', label: 'Bre-B · @maria.rod', verification});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  try {
+    const saved = tree.root.findAllByType(TouchableOpacity).find(node =>
+      node.findAllByType(Text).some(text => text.props.children === 'Ana'))!;
+    await act(async () => {saved.props.onPress();});
+    await act(async () => {tree.root.findAllByType(TextInput).find(node => node.props.placeholder === '0')!.props.onChangeText('5');});
+    const texts = tree.root.findAllByType(Text).map(node => node.props.children);
+    expect(texts).not.toContain('Titular sin verificar');
+    expect(texts).not.toContain('Titular verificado');
+    expect(tree.root.findByType('ActionBar' as any).props.primaryDisabled).toBe(verification === 'unverified');
+    if (verification === 'not_checked') {
+      expect(texts).toContain('Bre-B · @maria.rod');
+      expect(texts).not.toContain('No pudimos verificar el titular');
+      expect(texts).not.toContain('Revisé los datos y son correctos');
+    } else {
+      expect(texts).toContain('No pudimos verificar el titular');
+      expect(texts).toContain('Revisé los datos y son correctos');
+    }
+  } finally {
+    await act(async () => tree.unmount());
+  }
+});
+
+it.each(['Llave Bre-B · @maria.rod', 'QR · Kiosco · ABC1234567'])(
+  'reviews the exact destination %s and invalidates review when it is edited', async label => {
+    mockAccountStatus = 'active';
+    mockAccounts = [
+      {internalId: 'local', provider: 'infinia', asset: 'COP', status: 'active'},
+      {internalId: 'crypto', provider: 'infinia', asset: 'USDC_POL', status: 'active',
+        fundingInstructions: [{internalId: 'instruction', kind: 'crypto_address', status: 'active'}]},
+    ];
+    mockRecheck.mockResolvedValueOnce({id: 'recipient', holderName: '', label, verification: 'not_checked'});
+    mockPrepareBridge.mockResolvedValueOnce({internalId: 'bridge', feeUnits: '0', deadline: '9999999999'});
+    mockPayoutQuote.mockResolvedValue({minimumTarget: '19000', asset: 'COP', rate: '3800'});
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {tree = renderer.create(<Screen />);});
+    try {
+      const saved = tree.root.findAllByType(TouchableOpacity).find(node =>
+        node.findAllByType(Text).some(text => text.props.children === 'Ana'))!;
+      await act(async () => {saved.props.onPress();});
+      await act(async () => {tree.root.findAllByType(TextInput).find(node => node.props.placeholder === '0')!.props.onChangeText('5');});
+      await act(async () => {await tree.root.findByType('ActionBar' as any).props.onPrimaryPress();});
+      const texts = () => tree.root.findAllByType(Text).map(node => node.props.children);
+      expect(texts()).toContain('Revisión final');
+      expect(texts()).toContain(label);
+      expect(texts()).not.toContain('Titular sin verificar');
+      expect(texts()).not.toContain('Titular verificado');
+      expect(tree.root.findByType('ActionBar' as any).props.primaryLabel).toBe('Confirmar envío');
+      expect(mockPayoutQuote).toHaveBeenCalledWith('recipient', {bridgeId: 'bridge'});
+      await act(async () => {tree.root.findAllByType(TextInput).find(node => node.props.placeholder !== '0')!.props.onChangeText('@otra.persona');});
+      expect(texts()).not.toContain('Revisión final');
+      expect(tree.root.findByType('ActionBar' as any).props.primaryLabel).toBe('Continuar');
+      expect(mockResolve).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => tree.unmount());
+    }
+  },
+);
+
 it('a failed location check on a saved recipient says why and offers the location screen', async () => {
   mockAccountStatus = 'active';
   mockAccounts = [
@@ -161,6 +235,87 @@ it('a failed location check on a saved recipient says why and offers the locatio
   await act(async () => {confirm.props.onPress();});
   expect(mockNavigate).toHaveBeenCalledWith('BrebLocationCheck');
   await act(async () => {tree.unmount();});
+});
+
+it.each(['typed', 'pasted', 'scanned'])('does not look up a %s recipient until Continue', async source => {
+  mockAccountStatus = 'active';
+  mockAccounts = [
+    {provider: 'infinia', asset: 'COP', status: 'active'},
+    {provider: 'infinia', asset: 'USDC_POL', status: 'active',
+      fundingInstructions: [{internalId: 'instruction', kind: 'crypto_address', status: 'active'}]},
+  ];
+  mockResolve.mockResolvedValue({id: 'new-recipient', holderName: '', label: 'Llave Bre-B · @maria', verification: 'not_checked'});
+  mockPrepareBridge.mockResolvedValue({internalId: 'bridge', feeUnits: '0', deadline: '9999999999'});
+  mockPayoutQuote.mockResolvedValue({minimumTarget: '19000', asset: 'COP', rate: '3800'});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  try {
+    await act(async () => {
+      if (source === 'typed') {
+        tree.root.findAllByType(TextInput).find(node => node.props.placeholder !== '0')!.props.onChangeText('@maria');
+      } else if (source === 'pasted') {
+        (Clipboard.getString as jest.Mock).mockResolvedValueOnce('@maria');
+        await tree.root.findAllByType(TouchableOpacity).find(node =>
+          node.props.accessibilityLabel === 'Pegar desde el portapapeles')!.props.onPress();
+      } else {
+        tree.root.findByType('Scanner' as any).props.onScanned('qr-payload');
+      }
+      tree.root.findAllByType(TextInput).find(node => node.props.placeholder === '0')!.props.onChangeText('5');
+    });
+    const texts = () => tree.root.findAllByType(Text).map(node => node.props.children);
+    expect(texts()).not.toContain('Revisar');
+    expect(texts()).not.toContain('Revisando los datos…');
+    expect(mockResolve).not.toHaveBeenCalled();
+    expect(tree.root.findByType('ActionBar' as any).props.primaryLoading).toBe(false);
+    expect(tree.root.findByType('ActionBar' as any).props.primaryDisabled).toBe(false);
+    await act(async () => {await tree.root.findByType('ActionBar' as any).props.onPrimaryPress();});
+    expect(mockResolve).toHaveBeenCalledTimes(1);
+    expect(mockResolve).toHaveBeenCalledWith('co_breb', source === 'scanned' ? 'qr-payload' : '@maria', 20000);
+    expect(texts()).toContain('Revisión final');
+  } finally {
+    await act(async () => tree.unmount());
+  }
+});
+
+it.each(['timeout', 'edit'])('ignores late recipient responses after %s', async reason => {
+  jest.useFakeTimers({doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate']});
+  mockAccountStatus = 'active';
+  mockAccounts = [
+    {provider: 'infinia', asset: 'COP', status: 'active'},
+    {provider: 'infinia', asset: 'USDC_POL', status: 'active',
+      fundingInstructions: [{internalId: 'instruction', kind: 'crypto_address', status: 'active'}]},
+  ];
+  let finish!: (row: any) => void;
+  mockResolve.mockReturnValue(new Promise(resolve => {finish = resolve;}));
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  try {
+    await act(async () => {
+      tree.root.findAllByType(TextInput).find(node => node.props.placeholder !== '0')!.props.onChangeText('@maria');
+      tree.root.findAllByType(TextInput).find(node => node.props.placeholder === '0')!.props.onChangeText('5');
+    });
+    let continuing!: Promise<void>;
+    await act(async () => {continuing = tree.root.findByType('ActionBar' as any).props.onPrimaryPress();});
+    expect(tree.root.findByType('ActionBar' as any).props.primaryLoading).toBe(true);
+    if (reason === 'edit') {
+      await act(async () => {
+        tree.root.findAllByType(TextInput).find(node => node.props.placeholder !== '0')!.props.onChangeText('@otra');
+      });
+    } else {
+      await act(async () => {jest.advanceTimersByTime(20000); await continuing;});
+    }
+    expect(tree.root.findByType('ActionBar' as any).props.primaryLoading).toBe(false);
+    if (reason === 'timeout') {
+      expect(tree.root.findAllByType(Text).map(node => node.props.children))
+        .toContain('No pudimos preparar el destinatario. Intenta de nuevo.');
+    }
+    await act(async () => {finish({id: 'late', verification: 'not_checked', label: 'Late recipient'}); await continuing;});
+    expect(mockPrepareBridge).not.toHaveBeenCalled();
+    expect(tree.root.findAllByType(Text).map(node => node.props.children)).not.toContain('Late recipient');
+  } finally {
+    await act(async () => tree.unmount());
+    jest.useRealTimers();
+  }
 });
 
 it.each([['none', 'Solicitar cuenta'], ['awaiting_payment', 'Completar apertura']])(

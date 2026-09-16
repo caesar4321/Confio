@@ -7,6 +7,7 @@ answers "can I use this rail", opens the accounts a rail needs, resolves and
 verifies a recipient, prices a transfer, reports the monthly limit, and takes
 enhanced-due-diligence (EDD) requests to raise it.
 """
+import hashlib
 import re
 import uuid
 from dataclasses import dataclass
@@ -478,6 +479,8 @@ def summarize_validation(response):
 
 def verification_state(validation):
     status = (validation or {}).get('status')
+    if status == 'DISABLED':
+        return 'not_checked'
     if status == 'SUCCESSFUL' and validation.get('holder_name'):
         return VERIFIED
     if status == 'IN_PROGRESS':
@@ -491,10 +494,16 @@ def verification_state(validation):
 
 def _label(method, value, validation):
     if method.id == 'ar_qr':
-        name = validation.get('holder_name')
-        return f'QR · {name}'[:100] if name else 'QR'
-    shown = _mask(value) if value.isdigit() and len(value) > 8 else value
-    return f'{method.title} · {shown}'[:100]
+        # Merchant text comes from the QR itself, not an owner lookup. Include
+        # a stable reference so two saved codes with the same name differ.
+        fields = emv_fields(value) or {}
+        name = validation.get('holder_name') if verification_state(validation) == VERIFIED else fields.get('59')
+        name = ' '.join(str(name or 'Código de pago').split())[:60]
+        reference = hashlib.sha256(value.encode('utf-8')).hexdigest()[:10].upper()
+        return f'QR · {name} · {reference}'
+    # The account identifier is the recipient's primary identity when paid
+    # holder lookups are off. Keep it visible for the final send review.
+    return f'{method.title} · {value}'
 
 
 def _start_check(destination):
@@ -524,7 +533,7 @@ def _apply_validation(destination, method, value, validation, *, answers=None, c
         if check is not None and data.get('check') != check:
             return destination
         destination.holder_name = validation['holder_name'] if verification_state(validation) == VERIFIED else ''
-        destination.label = _label(method, value, validation)
+        destination.label = _label(method, value, validation)[:100]
         destination.provider_data = {**(destination.provider_data or {}), 'method_id': method.id,
                                      'validation': validation}
         destination.save(update_fields=['holder_name', 'label', 'provider_data', 'updated_at'])
@@ -550,6 +559,9 @@ def _current_verified(destination):
 
 
 def _validate(method, value, client):
+    if not getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False):
+        return {'id': '', 'status': 'DISABLED', 'holder_name': '', 'holder_document': '',
+                'institution': '', 'checked_at': timezone.now().isoformat()}
     try:
         return summarize_validation(
             (client or InfiniaClient()).create_bank_account_validation(_validation_request(method, value)))
@@ -577,7 +589,7 @@ def resolve_destination(owner, method_id, raw_value, *, client=None):
         if destination is None:
             destination = create_payout_destination(
                 confio_account=owner, provider='infinia', kind=method.kind, country=method.country,
-                asset=method.asset, label=_label(method, value, {}), holder_name='', details=details)
+                asset=method.asset, label=_label(method, value, {})[:100], holder_name='', details=details)
         check = _start_check(destination)
     validation = _validate(method, value, client)
     return _apply_validation(destination, method, value, validation, check=check)
@@ -590,6 +602,9 @@ def refresh_destination(destination, *, client=None):
     if not method or verification_state(validation) != PENDING or not validation.get('id'):
         return destination
     value = destination.details.get(method.field, '')
+    if not getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False):
+        check = _start_check(destination)
+        return _apply_validation(destination, method, value, _validate(method, value, client), check=check)
     if not checked_recently(validation):
         # An abandoned check answers about the holder back then, not today.
         check = _start_check(destination)
@@ -629,8 +644,10 @@ def destination_view(destination):
     data = destination.provider_data or {}
     validation = data.get('validation') or {}
     state = verification_state(validation)
+    method = METHODS.get(data.get('method_id'))
+    label = _label(method, destination.details.get(method.field, ''), validation) if method else destination.label
     return {
-        'id': destination.internal_id, 'method_id': str(data.get('method_id') or ''), 'label': destination.label,
+        'id': destination.internal_id, 'method_id': str(data.get('method_id') or ''), 'label': label,
         'holder_name': validation.get('holder_name', '') if state == VERIFIED else '',
         'holder_document': validation.get('holder_document', '') if state == VERIFIED else '',
         'institution': validation.get('institution', ''), 'verification': state,
