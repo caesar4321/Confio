@@ -19,21 +19,34 @@ class SenderTests(SimpleTestCase):
         self.assertTrue(confio_admin_site.is_registered(PayinAdmission))
 
     def test_name_word_boundaries_and_non_strings_do_not_match(self):
-        identity = dict(full_name='Ann A', document_number='123', document_type='DNI', document_issuing_country='PE')
-        sender = dict(type='FIAT', full_name='Anna', document_number='123', document_type='DNI')
-        self.assertFalse(sender_matches(sender, identity, 'PE'))
-        sender.update(full_name='Ann A', document_number=123)
-        self.assertFalse(sender_matches(sender, identity, 'PE'))
+        identity = dict(full_name='Ann A')
+        for name in ('Anna', None, 123, [], {}, '', '   ', '---'):
+            with self.subTest(name=name):
+                self.assertFalse(sender_matches(dict(type='FIAT', full_name=name), identity))
 
-    def test_documents_and_names_required(self):
+    def test_name_matches_ignore_all_document_evidence(self):
         identity = dict(full_name='José Pérez', document_number='12-34', document_type='DNI', document_issuing_country='PER')
-        sender = dict(type='FIAT', full_name='JOSE PEREZ', document_number='1234', document_type='DNI')
-        self.assertTrue(sender_matches(sender, identity, 'PE'))
-        for field in ('full_name', 'document_number', 'document_type'):
-            self.assertFalse(sender_matches(dict(sender, **{field: None}), identity, 'PE'))
-        self.assertFalse(sender_matches(sender, identity, 'AR'))
-        self.assertFalse(sender_matches(sender, identity, ''))
-        self.assertFalse(sender_matches(dict(sender, document_number='999'), identity, 'PE'))
+        sender = dict(type='FIAT', full_name='JOSE PEREZ')
+        for documents in ({}, {'document_number': None, 'document_type': None},
+                {'document_number': '999', 'document_type': 'OTHER'},
+                {'document_number': 123, 'document_type': []}):
+            with self.subTest(documents=documents):
+                self.assertTrue(sender_matches(dict(sender, **documents), identity))
+        self.assertTrue(sender_matches(sender, {'full_name': 'José Pérez'}))
+
+    def test_complete_name_components_allow_formatting_and_order(self):
+        for name in ('  JOSE   PEREZ\t', 'Pérez, José', 'JOSE-PEREZ', 'Jose\u0301 Pe\u0301rez'):
+            with self.subTest(name=name):
+                self.assertTrue(sender_matches(dict(type='FIAT', full_name=name), {'full_name': 'José Pérez'}))
+
+    def test_similar_incomplete_or_extra_names_do_not_match(self):
+        for name in ('Maria Elena', 'M Elena Santos', 'Marie Elena Santos', 'Maria Elena Santos Other',
+                'Maria Elena Elena Santos'):
+            with self.subTest(name=name):
+                self.assertFalse(sender_matches(dict(type='FIAT', full_name=name), {'full_name': 'Maria Elena Santos'}))
+        self.assertFalse(sender_matches({'type': 'CRYPTO', 'full_name': 'Owner'}, {'full_name': 'Owner'}))
+        for identity in (None, [], {'full_name': None}, {'full_name': '---'}):
+            self.assertFalse(sender_matches({'type': 'FIAT', 'full_name': 'Owner'}, identity))
 
 
 class AdmissionTests(TestCase):
@@ -127,6 +140,38 @@ class AdmissionTests(TestCase):
         self.entry.provider_data['third_party'].update(full_name='Owner', document_number='123')
         self.assertEqual(assess(self.entry).reason, 'same_owner')
         self.assertTrue(assess(self.entry).allowed)
+
+    def test_mxn_payload_shape_matches_by_name_without_document_jurisdiction(self):
+        # Synthetic identifiers preserve the observed MXN shape without customer PII.
+        self.account.country = 'MEX'
+        self.account.asset = self.entry.asset = 'MXN'
+        self.account.payin_rail = 'SPEI'
+        self.account.payin_document_country = ''
+        self.profile.identity_snapshot = dict(full_name='María Elena Santos',
+            document_number='VERIFIED0000000001', document_type='national_id')
+        self.entry.provider_data = {'operation': {'type': 'CREDIT', 'operation_id': None},
+            'third_party': dict(type='FIAT', full_name='MARIA ELENA SANTOS                       ',
+                document_number='SENDER0000001', document_type=None, bank_name=None)}
+        result = assess(self.entry)
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.reason, 'same_owner')
+
+    def test_same_name_still_requires_rail_identity_and_provider_permission(self):
+        self.entry.provider_data = {'third_party': {'type': 'FIAT', 'full_name': 'Owner'}}
+        AccountCapability.objects.filter(capability='receive_same_name').update(status='pending')
+        self.assertEqual(assess(self.entry).reason, 'provider_same_name_not_enabled')
+        self.account.payin_rail = ''
+        self.assertEqual(assess(self.entry).reason, 'unverified_rail')
+        self.profile.identity_verification.status = 'pending'
+        self.assertEqual(assess(self.entry).reason, 'identity_not_verified')
+
+    def test_third_party_without_documents_requires_all_switches(self):
+        self.entry.provider_data = {'third_party': {'type': 'FIAT', 'full_name': 'Other'}}
+        self.assertFalse(assess(self.entry).allowed)
+        self.grants()
+        self.assertTrue(assess(self.entry).allowed)
+        ThirdPartyPayinSwitch.objects.filter(confio_account=self.owner).update(enabled=False)
+        self.assertEqual(assess(self.entry).reason, 'user_not_enabled')
 
     def test_unknown_sender_rail_and_revoked_identity_fail_closed(self):
         self.grants()
