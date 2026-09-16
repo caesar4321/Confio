@@ -99,6 +99,52 @@ class AutomaticPayinTests(TestCase):
         self.assertTrue(journey.money_flow.metadata['automatic_payin'])
         self.submit.assert_not_called()  # Only the existing journey worker moves funds.
 
+    def test_pending_name_only_deposit_rechecks_admission_before_starting(self):
+        from payment_accounts.models import AccountCapability, ProviderProfile
+        from payment_accounts.payin_admission import assess
+        from payment_accounts.infinia_journeys import advance_journey
+        from payment_accounts.services import PaymentAccountError, submit_money_operation
+        ProviderProfile.objects.filter(pk=self.local.provider_profile_id).update(
+            identity_snapshot={'full_name': 'María Elena Santos'})
+        self.local.payin_document_country = ''
+        self.local.save(update_fields=['payin_document_country'])
+        entry = self.credit(self.local, provider_data={'operation': {'type': 'CREDIT'},
+            'third_party': {'type': 'FIAT', 'full_name': 'SANTOS, MARIA ELENA   ',
+                'document_type': None, 'document_number': 'UNRELATED'}})
+        row = enqueue(entry)
+        row.reason = 'sender_identity_missing'
+        row.save(update_fields=['reason'])
+        with mock.patch('payment_accounts.local_money._active_pair', return_value=(self.local, self.crypto)), \
+             mock.patch('payment_accounts.local_money.deposit_quote', return_value={
+                 'minimum_fx_output': '2', 'minimum_wallet_output': '2.4'}) as quote:
+            process(row.pk)
+            process(row.pk)
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.reason), ('started', ''))
+        self.assertEqual(InfiniaJourney.objects.filter(funding_credit=entry).count(), 1)
+        quote.assert_called_once()
+        self.submit.assert_not_called()
+
+        journey = InfiniaJourney.objects.get(funding_credit=entry)
+        JourneyTests.fx_quote(self)
+        advance_journey(journey.pk, client=self.api)
+        journey.refresh_from_db()
+        self.assertIsNotNone(journey.fx_operation_id)
+        AccountCapability.objects.filter(financial_account=self.local,
+            capability='receive_same_name').update(status='disabled')
+        with mock.patch('payment_accounts.services.get_provider') as adapter:
+            with self.assertRaisesRegex(PaymentAccountError, 'Pay-in requires review'):
+                submit_money_operation(journey.fx_operation)
+            adapter.assert_not_called()
+
+        # A similarly spelled sender still fails admission without grants.
+        other = self.credit(self.local, provider_data={'third_party': {
+            'type': 'FIAT', 'full_name': 'Marie Elena Santos'}})
+        other = LedgerEntry.objects.select_related(
+            'financial_account__provider_profile__identity_verification').get(pk=other.pk)
+        self.assertFalse(assess(other).allowed)
+        self.assertFalse(InfiniaJourney.objects.filter(funding_credit=other).exists())
+
     def test_revoked_admission_never_quotes_or_creates_journey(self):
         entry = self.credit(self.local, provider_data={'third_party': {'type': 'FIAT', 'full_name': 'Other', 'document_number': 'other'}})
         row = enqueue(entry)

@@ -17,6 +17,25 @@ capability data defaults to enabled: Confío owns country/rail/recipient approva
 Explicit provider restrictions still override that default. Capability sync does
 not create or enable any Confío recipient grants.
 
+First-party admission for individual owners compares the incoming FIAT
+`third_party.full_name` with the provisioned owner's verified identity snapshot.
+Comparison ignores case, accents, punctuation, whitespace, and complete-component
+order, but requires every name component with its original repetition count.
+Initials, omitted components, and fuzzy spelling are not matches. Document number,
+type, and issuing country are not admission evidence; provider identifiers can
+differ from KYC identifiers or be absent. The legacy `payin_document_country`
+field is retained but no longer gates admission.
+
+A name match bypasses third-party grants, while verified identity, active profile,
+known receiving rail, and enabled `receive_same_name` capability remain required.
+Different names require all existing third-party grants and provider capability;
+a nonempty sender name is required, but document fields are optional. Business
+representative names never establish first-party business ownership. Name matching
+cannot distinguish unrelated people with identical names. These rules do not add
+automatic refunds or a historical sweep. Existing pending automatic-pay-in jobs
+are re-evaluated by the worker and may proceed under the new name policy; jobs
+already marked for review are not automatically restarted.
+
 Conversion settlement may reference a bank `voucher_id` or, for USDC on Polygon,
 a crypto credit's `transaction_hash`. Match the completed conversion's exact
 voucher set, account identities and amount; never infer settlement from amount alone.

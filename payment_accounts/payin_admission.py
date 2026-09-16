@@ -8,31 +8,27 @@ from .models import AccountCapability, MoneyOperation, PayinAdmission, ThirdPart
 from .providers.common import iso_alpha2, same_country
 
 
-def normalized(value):
-    if not isinstance(value, str):
-        return ''
-    return ''.join(c for c in unicodedata.normalize('NFKD', value).upper()
-                   if c.isalnum() and not unicodedata.combining(c))
-
-
 def normalized_name(value):
+    """Preserve complete name components, ignoring formatting and their order."""
     if not isinstance(value, str):
         return ''
     value = ''.join(c for c in unicodedata.normalize('NFKD', value).upper()
                     if not unicodedata.combining(c))
-    return ' '.join(value.split())
+    # Punctuation separates components; never collapse "Ann A" into "Anna".
+    value = ''.join(c if c.isalnum() else ' ' for c in value)
+    return ' '.join(sorted(value.split()))
 
 
-def sender_matches(sender, identity, document_country):
-    """No fuzzy names, no matching document numbers across jurisdictions/types."""
-    if not isinstance(sender, dict) or sender.get('type') != 'FIAT':
-        return False
-    if not same_country(document_country, identity.get('document_issuing_country')):
+def sender_matches(sender, identity):
+    """Match verified full names; provider document fields are not comparable.
+
+    This is name-based admission, not proof of bank-account ownership. Require
+    all name components (including repetitions); no initials or fuzzy matching.
+    """
+    if not isinstance(sender, dict) or sender.get('type') != 'FIAT' or not isinstance(identity, dict):
         return False
     return (bool(normalized_name(sender.get('full_name')))
-            and normalized_name(sender.get('full_name')) == normalized_name(identity.get('full_name'))
-            and all(normalized(sender.get(key)) and normalized(sender.get(key)) == normalized(identity.get(key))
-                    for key in ('document_number', 'document_type')))
+            and normalized_name(sender.get('full_name')) == normalized_name(identity.get('full_name')))
 
 
 def is_external_fiat_credit(entry):
@@ -95,7 +91,7 @@ def decision(entry):
     # Snapshot identifies the actual provisioned owner. Do not compare a business
     # bank sender against the personal identity of its representative.
     if profile.owner_type == 'individual' and rail not in {'', '*'} and sender_matches(
-            sender, profile.identity_snapshot or {}, account.payin_document_country):
+            sender, profile.identity_snapshot or {}):
         permitted = AccountCapability.objects.filter(financial_account=account,
             capability='receive_same_name', status='enabled').exists()
         return permitted, 'same_owner' if permitted else 'provider_same_name_not_enabled', country, rail
@@ -124,7 +120,7 @@ def decision(entry):
             return False, reason, country, rail
     # Missing/ambiguous sender evidence never becomes an implied match or a
     # blanket bypass, even for an approved third-party recipient.
-    if not isinstance(sender, dict) or sender.get('type') != 'FIAT' or not normalized(sender.get('full_name')) or not normalized(sender.get('document_number')):
+    if not isinstance(sender, dict) or sender.get('type') != 'FIAT' or not normalized_name(sender.get('full_name')):
         return False, 'sender_identity_missing', country, rail
     permitted = AccountCapability.objects.filter(financial_account=account,
         capability='receive_third_party', status='enabled').exists()

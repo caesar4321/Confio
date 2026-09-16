@@ -82,7 +82,7 @@ class FinancialAccount(models.Model):
     country = models.CharField(max_length=3)
     asset = models.CharField(max_length=24)
     payin_rail = models.CharField(max_length=50, blank=True, default='', help_text='Verified receiving rail, e.g. SPEI or PIX. Leave blank if ambiguous.')
-    payin_document_country = models.CharField(max_length=2, blank=True, default='', help_text='Verified jurisdiction of sender document numbers on this rail (ISO-2). Blank disables automatic same-owner matching.')
+    payin_document_country = models.CharField(max_length=2, blank=True, default='', help_text='Legacy sender document jurisdiction (ISO-2), retained for historical reference. Not used by name-based pay-in admission.')
     status = models.CharField(
         max_length=20, choices=ResourceStatus.choices, default=ResourceStatus.PENDING
     )
