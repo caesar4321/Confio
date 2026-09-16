@@ -16,6 +16,7 @@ from .allbridge_next import address
 from .clients import CobreClient
 from .eligibility import context_from_identity, enforce_and_record
 from .infinia_journeys import positive, _state
+from .infinia_bridge import SETTLED_BRIDGE_FAILURES
 from .models import CobreJourney, FinancialAccount, LedgerEntry, MoneyFlow, MoneyOperation, PayoutDestination
 from .services import PaymentAccountError, _require_provider_enabled, _require_capability, submit_money_operation
 
@@ -210,7 +211,11 @@ def advance_journey(journey_id, *, client=None):
             if op and op.status in FAILED:
                 _state(j, 'needs_review', failure='provider_leg_' + op.status); return j
         if not j.funding_credit_id:
-            if j.bridge.status in {'failed', 'expired', 'refunded', 'needs_review'}:
+            if j.bridge.status in SETTLED_BRIDGE_FAILURES:
+                # Resolved: nothing moved, or the refund is back in the user's
+                # own wallet. Terminal for the journey, and nothing to review.
+                _state(j, 'failed', failure='bridge_' + j.bridge.status); return j
+            if j.bridge.status == 'needs_review':
                 _state(j, 'needs_review', failure='bridge_not_delivered'); return j
             if j.bridge.status != 'delivered' or not j.bridge.provider_credit_id:
                 return j

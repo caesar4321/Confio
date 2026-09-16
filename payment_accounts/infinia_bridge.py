@@ -24,6 +24,25 @@ class InfiniaDepositExpired(PaymentAccountError):
 RECOVERABLE_DELAYS = frozenset({'provider_deposit_delayed', 'source_confirmation_delayed'})
 
 
+# Bridge outcomes that are finished and understood: nothing moved, or the funds
+# verifiably returned to the user's own wallet. The journey failed; no human has
+# anything to decide. Only an unresolved bridge propagates as review.
+SETTLED_BRIDGE_FAILURES = frozenset({'failed', 'expired', 'refunded'})
+
+
+def live_journeys(queryset):
+    """Journeys the worker will still advance -- the only ones that can race.
+
+    The gate on starting a new journey and the worker's own filter must use the
+    same predicate. A journey nothing will ever act on cannot race with anything
+    and must never block the owner's next payment.
+    """
+    from django.db.models import Q
+    return queryset.filter(
+        ~Q(stage__in=['completed', 'failed', 'needs_review'])
+        | Q(stage='needs_review', failure_code__in=RECOVERABLE_DELAYS))
+
+
 def preflight(journey, amount):
     from .bridge_execution import execution_enabled
     try:
