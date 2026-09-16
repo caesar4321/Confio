@@ -22,6 +22,10 @@ PAID_STATES = ('active', 'legacy')
 OPEN_STATES = ('provisioning', 'awaiting_payment', 'payment_pending')
 
 
+class OpeningFundsError(PaymentAccountError):
+    """Recoverable affordability/read failure, not a provider rejection."""
+
+
 def require_paid(owner, country, asset):
     query = AccountActivation.objects.filter(confio_account=owner, status__in=PAID_STATES)
     if (country, asset) != ('XXX', 'USDC_POL'):
@@ -59,6 +63,38 @@ def require_opening_intent(owner, country, asset):
         query = query.filter(country=country, asset=asset)
     if not query.exists():
         raise PaymentAccountError('Confirma el costo de apertura antes de solicitar la cuenta.')
+    if not query.filter(status__in=PAID_STATES).exists():
+        require_opening_funds(owner)
+
+
+def require_opening_funds(owner):
+    """Fail closed before provider costs; this is not a reservation of user funds."""
+    from cusd_plus import vault
+    from send.bsc_flow import EVM_ADDR_RE, WAD, activation_unwrap_plan
+    if not (getattr(settings, 'CUSD_PLUS_7702_ENABLED', False)
+            and getattr(settings, 'BSC_SEND_ENABLED', False)):
+        raise OpeningFundsError('El pago de apertura no está disponible todavía.')
+    address = (owner.bsc_address or '').lower()
+    cusd = getattr(settings, 'CUSD_VAULT_ADDRESS', '').lower()
+    savings = getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '').lower()
+    if any(not EVM_ADDR_RE.fullmatch(value) or int(value, 16) == 0 for value in (address, cusd, savings)):
+        raise OpeningFundsError('No pudimos verificar tu saldo para abrir la cuenta. Intenta de nuevo.')
+    try:
+        # Spending existing holdings is an exit, not an Ondo mint. Phone/IP
+        # eligibility may have changed since acquisition. Use one whole balance.
+        cusd_raw = vault.erc20_balance_raw(cusd, address)
+        use_savings = cusd_raw < int(FEE * WAD)
+        pps = vault.p_plus_wad(fresh=True) if use_savings else WAD
+        oracle = vault.last_oracle_price_wad(fresh=True) if use_savings else WAD
+        shares_raw = vault.erc20_balance_raw(savings, address) if use_savings else 0
+        if pps <= 0 or oracle <= 0 or cusd_raw < 0 or shares_raw < 0:
+            raise ValueError('Invalid activation balance or price')
+        _, _, error = activation_unwrap_plan(int(FEE * WAD), cusd_raw, shares_raw, pps, oracle,
+                                             use_savings=use_savings)
+    except Exception as exc:
+        raise OpeningFundsError('No pudimos verificar tu saldo para abrir la cuenta. Intenta de nuevo.') from exc
+    if error:
+        raise OpeningFundsError('Necesitas US$10.00 en tu saldo Confío. Agrega dólares y vuelve a intentarlo.')
 
 
 def collector():
@@ -99,8 +135,6 @@ def _prepare_send(owner, jwt_ctx, row):
         code = result.get('error', '')
         if code == 'insufficient_balance':
             raise PaymentAccountError('Necesitas US$10.00 en tu saldo Confío. Agrega dólares y vuelve a intentarlo.')
-        if code == 'activation_conversion_minimum':
-            raise PaymentAccountError('Tu saldo alcanza US$10, pero una parte en ahorro está por debajo del mínimo de conversión. Agrega US$1 a tu saldo Confío y vuelve a intentarlo.')
         logging.getLogger(__name__).warning('Activation payment preparation rejected: %s', code)
         raise PaymentAccountError('No pudimos preparar el pago. Intenta de nuevo en unos minutos.')
     payment = SendTransaction.objects.get(internal_id=result['send_id'])
@@ -167,6 +201,7 @@ def _opening(owner, identity, method_id, accepted_fee=None):
             raise PaymentAccountError('Confirma el costo vigente de US$10.00.')
         if AccountActivation.objects.filter(confio_account__user_id=owner.user_id, status__in=OPEN_STATES).exists():
             raise PaymentAccountError('Completa la apertura pendiente antes de solicitar otra cuenta.')
+        require_opening_funds(owner)
         address = collector()  # Check collection configuration before incurring provider costs.
         row = AccountActivation.objects.create(
             confio_account=owner, country=method.country, asset=method.asset, method_id=method_id,
@@ -264,6 +299,9 @@ def reconcile(activation_id):
         row.next_opening_retry_at is None or row.next_opening_retry_at > timezone.now()
     ):
         return row
+    # Recheck on app polling and worker retries too. Keep affordability failures
+    # out of provider retry/error state, so a later top-up can resume safely.
+    require_opening_funds(row.confio_account)
     from .schema import _verified_identity
     try:
         identity = _verified_identity(row.confio_account)
@@ -271,6 +309,11 @@ def reconcile(activation_id):
         identity = None
     try:
         status = local_money.activate(row.confio_account, identity, row.method_id)
+    except OpeningFundsError:
+        # A later guard may observe spending between the crypto and local
+        # requests. Commit any provider IDs already returned, without turning
+        # this recoverable balance problem into a permanent provider rejection.
+        return row
     except Exception as exc:
         from .clients import ProviderAPIError, ComplianceHandoffError
         from .eligibility import EligibilityDenied, EligibilityPolicyNotConfigured

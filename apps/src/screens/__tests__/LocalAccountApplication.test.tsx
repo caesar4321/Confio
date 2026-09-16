@@ -207,7 +207,7 @@ it('rearms key hiding when application renews an already-valid pass', async () =
 it('approving the opening fee covers only the amount shown', async () => {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<Screen />); });
-  expect(bar(tree).props.primaryLabel).toBe('Aceptar y solicitar · US$10');
+  expect(bar(tree).props.primaryLabel).toBe('Abrir y pagar · US$10');
   const answers: boolean[] = [];
   mockPay.mockImplementationOnce(async (_id: string, prompts: any) => {
     answers.push(await prompts.confirmFee('10.00'), await prompts.confirmFee('12'));
@@ -216,8 +216,59 @@ it('approving the opening fee covers only the amount shown', async () => {
   await act(async () => { await bar(tree).props.onPrimaryPress(); });
   expect(answers).toEqual([true, false]);
   // The changed amount is shown and needs its own approval.
-  expect(bar(tree).props.primaryLabel).toBe('Aceptar y solicitar · US$12');
+  expect(bar(tree).props.primaryLabel).toBe('Abrir y pagar · US$12');
   expect(texts(tree).join('\n')).toContain('ahora es US$12');
+  await act(async () => { tree.unmount(); });
+});
+
+it('one tap authorizes opening and payment of the displayed fee when ready immediately', async () => {
+  const approvals: boolean[] = [];
+  mockPay.mockImplementationOnce(async (_id: string, prompts: any) => {
+    approvals.push(await prompts.confirmFee('10.00'));
+    approvals.push(await prompts.confirmPayment('10.00'));
+    return approvals.every(Boolean);
+  });
+  mockActivate.mockResolvedValue('active');
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  await act(async () => { await bar(tree).props.onPrimaryPress(); });
+  expect(approvals).toEqual([true, true]);
+  expect(mockPay).toHaveBeenCalledTimes(1);
+  expect(mockActivate).toHaveBeenCalledTimes(1);
+  expect(tree.root.findByType(Modal).props.visible).toBe(false);
+  await act(async () => { tree.unmount(); });
+});
+
+it('one tap continues to payment after provider provisioning without another confirmation', async () => {
+  mockPay.mockImplementationOnce(async (_id: string, prompts: any) => prompts.confirmFee('10'));
+  const approvals: boolean[] = [];
+  mockPay.mockImplementationOnce(async (_id: string, prompts: any) => {
+    approvals.push(await prompts.confirmPayment('10'));
+    return approvals[0];
+  });
+  mockActivate.mockResolvedValueOnce('awaiting_payment').mockResolvedValueOnce('active');
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  await act(async () => { await bar(tree).props.onPrimaryPress(); });
+  expect(approvals).toEqual([true]);
+  expect(mockPay).toHaveBeenCalledTimes(2);
+  expect(mockActivate).toHaveBeenCalledTimes(2);
+  await act(async () => { tree.unmount(); });
+});
+
+it('one tap does not authorize a payment greater than the displayed opening fee', async () => {
+  const approvals: boolean[] = [];
+  mockPay.mockImplementationOnce(async (_id: string, prompts: any) => {
+    approvals.push(await prompts.confirmFee('10'));
+    approvals.push(await prompts.confirmPayment('12'));
+    return approvals.every(Boolean);
+  });
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  await act(async () => { await bar(tree).props.onPrimaryPress(); });
+  expect(approvals).toEqual([true, false]);
+  expect(mockActivate).not.toHaveBeenCalled();
+  expect(bar(tree).props.primaryLabel).toBe('Abrir y pagar · US$12');
   await act(async () => { tree.unmount(); });
 });
 
@@ -267,7 +318,7 @@ it('an opening already started elsewhere offers a retry instead of hanging', asy
   const retry = tree.root.findAllByType(TouchableOpacity).find(node =>
     node.findAllByType(Text).some(text => ([] as any[]).concat(text.props.children).join('').includes('Intentar de nuevo')))!;
   await act(async () => { retry.props.onPress(); });
-  expect(bar(tree).props.primaryLabel).toBe('Aceptar y solicitar · US$10');
+  expect(bar(tree).props.primaryLabel).toBe('Abrir y pagar · US$10');
   await act(async () => { tree.unmount(); });
 });
 

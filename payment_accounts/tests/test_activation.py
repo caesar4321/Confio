@@ -31,6 +31,11 @@ class ActivationTests(TestCase):
         self.preflight.start(); self.addCleanup(self.preflight.stop)
         self.collector=mock.patch.object(activation,'collector',return_value=COLLECTOR)
         self.collector.start(); self.addCleanup(self.collector.stop)
+        for target, value in [('p_plus_wad', WAD), ('last_oracle_price_wad', WAD),
+                              ('erc20_balance_raw', 10 * WAD)]:
+            patcher = mock.patch('cusd_plus.vault.' + target, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def open_accounts(self, *args):
         profile,_=ProviderProfile.objects.get_or_create(confio_account=self.owner, provider='infinia',
@@ -62,6 +67,100 @@ class ActivationTests(TestCase):
         self.assertIsNone(payment)
         self.assertFalse(AccountActivation.objects.exists())
         opening.assert_not_called(); pay.assert_not_called()
+
+    def test_insufficient_funds_blocks_before_any_provider_opening(self):
+        with mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
+             mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=100 * WAD), \
+             mock.patch('payment_accounts.local_money.activate', side_effect=self.open_accounts) as opening:
+            with self.assertRaises(PaymentAccountError):
+                self.prepare('10')
+        opening.assert_not_called()
+        self.assertFalse(AccountActivation.objects.exists())
+        self.assertFalse(FinancialAccount.objects.exists())
+
+    def test_worker_cannot_open_after_balance_is_spent(self):
+        row = self.row()
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
+             mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
+             mock.patch('payment_accounts.local_money.activate') as opening:
+            with self.assertRaises(PaymentAccountError):
+                activation.reconcile(row.pk)
+        opening.assert_not_called()
+
+    def test_opening_funds_requires_one_full_balance_regardless_of_changed_eligibility(self):
+        for country, cusd, savings, allowed in [('BR', 10, 0, True), ('CO', 0, 10, True),
+                ('BR', 0, 20, True), ('CO', 20, 0, True), ('CO', 4, 6, False), ('BR', 4, 6, False)]:
+            self.user.phone_country = country
+            with self.subTest(country=country, cusd=cusd, savings=savings), mock.patch(
+                    'cusd_plus.vault.erc20_balance_raw',
+                    side_effect=lambda token, holder: (cusd if token == TOKEN else savings) * WAD):
+                if allowed:
+                    activation.require_opening_funds(self.owner)
+                else:
+                    with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US'):
+                        activation.require_opening_funds(self.owner)
+
+    def test_opening_funds_values_savings_at_price_not_share_count(self):
+        self.user.phone_country = 'CO'
+        with mock.patch('cusd_plus.vault.p_plus_wad', return_value=2 * WAD), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw',
+                        side_effect=lambda token, holder: 0 if token == TOKEN else 5 * WAD):
+            activation.require_opening_funds(self.owner)
+
+    def test_balance_rpc_failure_does_not_create_or_open(self):
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', side_effect=TimeoutError), \
+             mock.patch('payment_accounts.local_money.activate') as opening:
+            with self.assertRaisesMessage(PaymentAccountError, 'verificar tu saldo'):
+                self.prepare('10')
+        opening.assert_not_called()
+        self.assertFalse(AccountActivation.objects.exists())
+
+    def test_unspendable_split_balance_blocks_before_opening(self):
+        with mock.patch('cusd_plus.vault.erc20_balance_raw',
+                        side_effect=lambda token, holder: 95 * WAD // 10 if token == TOKEN else WAD // 2), \
+             mock.patch('payment_accounts.local_money.activate') as opening:
+            with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US'):
+                self.prepare('10')
+        opening.assert_not_called()
+        self.assertFalse(AccountActivation.objects.exists())
+
+    def test_direct_provisioning_guard_rechecks_unpaid_but_not_paid(self):
+        row = self.row()
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=0):
+            with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US'):
+                activation.require_opening_intent(self.owner, 'COL', 'COP')
+            row.status = 'active'
+            row.save(update_fields=['status'])
+            activation.require_opening_intent(self.owner, 'COL', 'COP')
+
+    def test_mid_opening_balance_change_preserves_provider_ids_for_retry(self):
+        def partially_open(*args):
+            ProviderProfile.objects.create(confio_account=self.owner, provider='infinia',
+                owner_type='individual', provider_owner_id='keep-after-balance-change')
+            raise activation.OpeningFundsError('Necesitas US$10.00')
+        with mock.patch('payment_accounts.local_money.activate', side_effect=partially_open):
+            row, payment = self.prepare('10')
+        self.assertIsNone(payment)
+        self.assertEqual(row.status, 'provisioning')
+        self.assertEqual(row.opening_error, '')
+        self.assertTrue(ProviderProfile.objects.filter(provider_owner_id='keep-after-balance-change').exists())
+
+    def test_worker_resumes_after_top_up_without_duplicate_opening(self):
+        row = self.row()
+        with mock.patch('cusd_plus.vault.erc20_balance_raw', return_value=0), \
+             mock.patch('payment_accounts.local_money.activate') as opening:
+            with self.assertRaises(activation.OpeningFundsError):
+                activation.reconcile(row.pk)
+            opening.assert_not_called()
+        with mock.patch('payment_accounts.local_money.activate', side_effect=self.open_accounts) as opening:
+            updated = activation.reconcile(row.pk)
+        self.assertEqual(updated.status, 'awaiting_payment')
+        self.assertEqual(updated.opening_error, '')
+        self.assertEqual(AccountActivation.objects.count(), 1)
+        opening.assert_called_once()
 
     def test_provider_failure_is_persisted_and_prepare_reports_safe_error(self):
         from payment_accounts.clients import ProviderAPIError
@@ -422,10 +521,12 @@ class ActivationTests(TestCase):
     def test_real_signing_batch_delivers_exact_cusd_to_collector(self):
         from send.bsc_flow import _validate_send_batch
         from cusd_plus.sponsor_7702 import PolicyError,SEL_TRANSFER,SEL_UNWRAP_TO_CUSD
+        self.user.phone_country = 'CO'
+        self.user.save(update_fields=['phone_country'])
         self.open_accounts();row=self.row('awaiting_payment')
         with mock.patch('cusd_plus.vault.p_plus_wad',return_value=WAD), \
              mock.patch('cusd_plus.vault.last_oracle_price_wad',return_value=WAD), \
-             mock.patch('cusd_plus.vault.erc20_balance_raw',side_effect=lambda token,holder: 6*WAD), \
+             mock.patch('cusd_plus.vault.erc20_balance_raw',side_effect=lambda token,holder: (0 if token == TOKEN else 10)*WAD), \
              mock.patch('cusd_plus.vault.usdt_balance_raw',return_value=0):
             row,result=self.prepare()
         self.assertEqual(result['token_type'],'CUSD');self.assertEqual(result['fee_amount'],'0')
@@ -436,21 +537,56 @@ class ActivationTests(TestCase):
         self.assertEqual(calls[0]['data'][2:10],SEL_UNWRAP_TO_CUSD)
         self.assertEqual(calls[0]['data'][-40:],self.owner.bsc_address[2:])
         meta=json.loads(row.payment.bsc_calls_json)
+        self.assertEqual(int(meta['mixed']['unwrap_min']), 10 * WAD)
         _validate_send_batch(calls,row.payment,meta)
         with self.assertRaises(PolicyError): _validate_send_batch(calls,row.payment,{**meta,'units':str(11*WAD)})
+        with self.assertRaises(PolicyError):
+            _validate_send_batch(calls, row.payment, {**meta, 'mixed': {**meta['mixed'], 'unwrap_min': str(4 * WAD)}})
+        self.user.phone_country = 'BR'
+        self.user.save(update_fields=['phone_country'])
+        # A changed mint eligibility must not prevent spending existing savings.
+        _validate_send_batch(calls, row.payment, meta)
 
-    def test_split_balance_below_conversion_minimum_explains_recovery(self):
+    def test_payment_does_not_supplement_insufficient_cusd_with_savings(self):
         self.open_accounts()
         row = self.row('awaiting_payment')
         with mock.patch('cusd_plus.vault.p_plus_wad', return_value=WAD), \
              mock.patch('cusd_plus.vault.last_oracle_price_wad', return_value=WAD), \
              mock.patch('cusd_plus.vault.erc20_balance_raw', side_effect=lambda token, holder: 95 * WAD // 10 if token == TOKEN else WAD // 2), \
              mock.patch('cusd_plus.vault.usdt_balance_raw', return_value=0):
-            with self.assertRaisesMessage(PaymentAccountError, 'mínimo de conversión'):
+            with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US'):
                 self.prepare()
         row.refresh_from_db()
         self.assertEqual(row.status, 'awaiting_payment')
         self.assertIsNone(row.payment_id)
+
+    def test_payment_rejects_split_balance_even_if_combined_total_covers_fee(self):
+        self.open_accounts()
+        row = self.row('awaiting_payment')
+        for country, cusd, savings in [('CO', 4, 6), ('BR', 4, 6)]:
+            self.user.phone_country = country
+            self.user.save(update_fields=['phone_country'])
+            with self.subTest(country=country, cusd=cusd, savings=savings), mock.patch(
+                    'cusd_plus.vault.erc20_balance_raw',
+                    side_effect=lambda token, holder: (cusd if token == TOKEN else savings) * WAD):
+                with self.assertRaisesMessage(PaymentAccountError, 'Necesitas US'):
+                    self.prepare()
+            row.refresh_from_db()
+            self.assertIsNone(row.payment_id)
+
+    def test_cusd_only_payment_does_not_depend_on_savings_oracle(self):
+        self.user.phone_country = 'CO'
+        self.user.save(update_fields=['phone_country'])
+        self.open_accounts()
+        self.row('awaiting_payment')
+        with mock.patch('cusd_plus.vault.p_plus_wad', side_effect=AssertionError('unrelated oracle')), \
+             mock.patch('cusd_plus.vault.last_oracle_price_wad', side_effect=AssertionError('unrelated oracle')):
+            activation.require_opening_funds(self.owner)
+            row, result = self.prepare()
+        self.assertEqual(len(result['calls']), 1)
+        self.assertEqual(json.loads(row.payment.bsc_calls_json)['kind'], 'send_cusd')
+        from send.bsc_flow import _validate_send_batch
+        _validate_send_batch(result['calls'], row.payment, json.loads(row.payment.bsc_calls_json))
 
     def test_existing_account_migration_is_idempotent(self):
         self.open_accounts()
@@ -481,6 +617,7 @@ class ConcurrentActivationTests(TransactionTestCase):
                 connections.close_all()
         with mock.patch('payment_accounts.local_money.activate', side_effect=ProviderAPIError(
                 'unavailable', status_code=500, retryable=True)) as opening, \
+                mock.patch.object(activation, 'require_opening_funds'), \
                 ThreadPoolExecutor(max_workers=2) as pool:
             counts = list(pool.map(worker, range(2)))
         self.assertEqual(counts, [1, 1])
@@ -503,6 +640,7 @@ class ConcurrentActivationTests(TransactionTestCase):
             except PaymentAccountError: return 'blocked'
             finally: connections.close_all()
         with mock.patch('payment_accounts.local_money.activation_preflight',side_effect=preflight), \
+             mock.patch.object(activation,'require_opening_funds'), \
              mock.patch.object(activation,'collector',return_value=COLLECTOR), \
              mock.patch('payment_accounts.local_money.activate',return_value='provisioning'), \
              ThreadPoolExecutor(max_workers=2) as pool:

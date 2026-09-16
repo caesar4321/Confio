@@ -72,6 +72,23 @@ MAX_SEND_DUST_WEI = 10 ** 12
 EVM_ADDR_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 
+def activation_unwrap_plan(amount_wei, cusd_raw, shares_raw, pps_wad, oracle_p_wad, *, use_savings):
+    """Shared affordability calculation for opening admission and fee execution."""
+    from cusd_plus import vault as cp_vault
+    if not use_savings:
+        return 0, 0, '' if cusd_raw >= amount_wei else 'insufficient_balance'
+    # Pay the whole fee from savings. Never supplement it with cUSD.
+    redeem_target = max(amount_wei, cp_vault.ONDO_MIN_REDEEM_WEI)
+    shares = -(-redeem_target * WAD // pps_wad)
+    for _ in range(8):
+        if cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) >= redeem_target:
+            break
+        shares += 1
+    if shares > shares_raw or cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) < redeem_target:
+        return 0, 0, 'insufficient_balance'
+    return shares, redeem_target, ''
+
+
 def _min_usdy_out(dollar_wei: int, oracle_price_wad: int) -> int:
     """USDY-token floor for a dollar-denominated internal wrap.
 
@@ -387,15 +404,18 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         # Funding source: prefer the yield position, then universal cUSD.
         # Raw USDT is only a transient-arrival compatibility fallback.
         try:
-            pps_wad = cp_vault.p_plus_wad()
+            activation_cusd = cp_vault.erc20_balance_raw(cusd_addr, sender_addr) if activation_payment is not None else None
+            activation_savings = activation_payment is not None and activation_cusd < amount_wei
+            cusd_only_activation = activation_payment is not None and not activation_savings
+            pps_wad = WAD if cusd_only_activation else cp_vault.p_plus_wad()
             # Needed to predict a redeem exactly (the chain floors twice).
-            oracle_p_wad = cp_vault.last_oracle_price_wad()
+            oracle_p_wad = WAD if cusd_only_activation else cp_vault.last_oracle_price_wad()
             if pps_wad <= 0 or oracle_p_wad <= 0:
                 raise ValueError('invalid vault price')
-            shares_raw = cp_vault.erc20_balance_raw(vault_addr, sender_addr)
+            shares_raw = 0 if cusd_only_activation else cp_vault.erc20_balance_raw(vault_addr, sender_addr)
             shares_value_wei = (shares_raw * pps_wad) // WAD
-            cusd_raw = cp_vault.erc20_balance_raw(cusd_addr, sender_addr)
-            usdt_raw = cp_vault.usdt_balance_raw(sender_addr, fresh=True)
+            cusd_raw = activation_cusd if activation_payment is not None else cp_vault.erc20_balance_raw(cusd_addr, sender_addr)
+            usdt_raw = 0 if activation_payment is not None else cp_vault.usdt_balance_raw(sender_addr, fresh=True)
         except Exception as exc:  # noqa: BLE001
             logger.warning('[SEND][BSC] balance rpc failed: %s', exc)
             return {'success': False, 'error': 'balance_unavailable'}
@@ -404,18 +424,12 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             # Deliver exactly the fixed cUSD fee. Unwrap into the user's own
             # wallet first; any rounding surplus stays with the user.
             calls = []
-            shortfall = max(0, amount_wei - cusd_raw)
-            if shortfall:
-                redeem_target = max(shortfall, cp_vault.ONDO_MIN_REDEEM_WEI)
-                shares = -(-redeem_target * WAD // pps_wad)
-                for _ in range(8):
-                    if cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) >= redeem_target:
-                        break
-                    shares += 1
-                if shares > shares_raw or cp_vault.redeem_gross_usdt_out(shares, pps_wad, oracle_p_wad) < redeem_target:
-                    if shortfall < cp_vault.ONDO_MIN_REDEEM_WEI and cusd_raw + shares_value_wei >= amount_wei:
-                        return {'success': False, 'error': 'activation_conversion_minimum'}
-                    return {'success': False, 'error': 'insufficient_balance'}
+            shares, redeem_target, error = activation_unwrap_plan(
+                amount_wei, cusd_raw, shares_raw, pps_wad, oracle_p_wad,
+                use_savings=activation_savings)
+            if error:
+                return {'success': False, 'error': error}
+            if activation_savings:
                 calls.append({
                     'to': vault_addr, 'value': '0',
                     'data': '0x' + SEL_UNWRAP_TO_CUSD + _uint_word(shares)
@@ -426,7 +440,8 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
                 'to': cusd_addr, 'value': '0',
                 'data': '0x' + SEL_TRANSFER + _addr_word(recipient_addr) + _uint_word(amount_wei),
             })
-            kind = 'send_mixed_cusd' if shortfall else 'send_cusd'
+            # Existing batch kind names describe unwrap+transfer, not mixed funding.
+            kind = 'send_mixed_cusd' if activation_savings else 'send_cusd'
             token_type = 'CUSD'
             token_addr, units, min_out = cusd_addr, amount_wei, None
         elif shares_value_wei + MAX_SEND_DUST_WEI >= amount_wei:
@@ -823,6 +838,9 @@ def _validate_send_batch(calls: list, send_tx, meta: dict) -> None:
         ).first()
         if (kind not in {'send_cusd', 'send_mixed_cusd'}
                 or int(meta.get('units', 0)) != int(send_tx.amount * WAD) or not activation):
+            raise PolicyError('invalid_activation_payment')
+        if (kind == 'send_mixed_cusd'
+                and int((meta.get('mixed') or {}).get('unwrap_min', 0)) != int(send_tx.amount * WAD)):
             raise PolicyError('invalid_activation_payment')
         try:
             require_payment_ready(activation)
