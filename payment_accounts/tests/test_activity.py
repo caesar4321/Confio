@@ -105,6 +105,50 @@ class ActivityTests(TestCase):
         self.assertEqual(row.counterparty_user, self.owner.user)
         self.assertFalse(UnifiedTransactionTable.objects.filter(conversion=mint, deleted_at__isnull=True).exists())
 
+    def test_incoming_activity_uses_original_fiat_sender_and_preserves_one_row(self):
+        j, _ = self.incoming_arrived()
+        entry = j.funding_credit
+        entry.provider_data = {'third_party': {'type': 'FIAT', 'full_name': 'Ana Pérez',
+            'document_number': 'private-document', 'account_number': '1234567890'}}
+        entry.save(update_fields=['provider_data'])
+        row = sync_activity(j.pk, notify=False)
+        self.assertEqual(row.sender_display_name, 'Ana Pérez')
+        self.assertEqual(row.description, 'Ingreso de Ana Pérez')
+        self.assertEqual(row.sender_address, '')
+        self.assertEqual(sync_activity(j.pk, notify=False).pk, row.pk)
+        entry.provider_data = {'third_party': {'type': 'CRYPTO', 'full_name': 'Bridge'}}
+        entry.save(update_fields=['provider_data'])
+        self.assertEqual(sync_activity(j.pk, notify=False).sender_display_name, 'Cuenta local')
+
+    def test_late_sender_evidence_refreshes_existing_activity_without_push(self):
+        j, _ = self.incoming_arrived()
+        row = sync_activity(j.pk, notify=False)
+        entry = j.funding_credit
+        entry.provider_data = {'third_party': {'type': 'FIAT', 'full_name': 'Updated Sender'}}
+        with mock.patch('payment_accounts.activity._push_notice') as push:
+            with self.captureOnCommitCallbacks(execute=True):
+                entry.save(update_fields=['provider_data'])
+            row.refresh_from_db()
+            self.assertEqual(row.sender_display_name, 'Updated Sender')
+            self.assertEqual(row.description, 'Ingreso de Updated Sender')
+            self.assertEqual(UnifiedTransactionTable.objects.filter(local_money_flow=j.money_flow).count(), 1)
+            push.assert_not_called()
+
+    def test_sender_refresh_is_recoverable_if_commit_callback_is_missed(self):
+        from payment_accounts.activity import refresh_stale_activity
+        j, _ = self.incoming_arrived()
+        mint = self.mint(j)
+        mint.status = 'COMPLETED'
+        mint.save()
+        row = sync_activity(j.pk, notify=False)
+        entry = j.funding_credit
+        entry.provider_data = {'third_party': {'type': 'FIAT', 'full_name': 'Recovered Sender'}}
+        # TestCase defers on_commit callbacks, simulating an interrupted worker.
+        entry.save(update_fields=['provider_data'])
+        refresh_stale_activity()
+        row.refresh_from_db()
+        self.assertEqual(row.sender_display_name, 'Recovered Sender')
+
     def test_matching_amount_without_request_identity_is_not_linked(self):
         j, _ = self.incoming_arrived()
         mint = self.mint(j, request_id='unrelated')

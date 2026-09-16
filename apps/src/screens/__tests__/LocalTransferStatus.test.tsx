@@ -4,6 +4,7 @@ import {RefreshControl} from 'react-native';
 
 let mockStage = 'refunded';
 let mockDirection = 'to_bank';
+let mockSender: any = null;
 const mockStop = jest.fn();
 const mockRefetch = jest.fn().mockResolvedValue({});
 jest.mock('@react-navigation/native', () => ({
@@ -12,7 +13,8 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('@apollo/client', () => ({useApolloClient: jest.fn(), useQuery: () => ({
   data: {infiniaJourney: {internalId: 'journey', direction: mockDirection,
-    stage: mockStage, localAsset: 'MXN', destinationSummary: 'CLABE', refundAmount: '1.982'}},
+    stage: mockStage, localAsset: 'MXN', destinationSummary: 'CLABE', refundAmount: '1.982',
+    sender: mockSender, receivedFiatAmount: '32.51'}},
   stopPolling: mockStop, startPolling: jest.fn(), refetch: mockRefetch,
 })}));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
@@ -31,7 +33,32 @@ import Screen from '../LocalTransferStatusScreen';
 const screenText = (tree: renderer.ReactTestRenderer) =>
   JSON.stringify(tree.toJSON(), (key, value) => key === 'refreshControl' ? undefined : value);
 
-beforeEach(() => {mockStage = 'refunded'; mockDirection = 'to_bank'; mockStop.mockClear(); mockRefetch.mockReset().mockResolvedValue({data: {infiniaJourney: {}}});});
+beforeEach(() => {mockSender = null; mockStage = 'refunded'; mockDirection = 'to_bank'; mockStop.mockClear(); mockRefetch.mockReset().mockResolvedValue({data: {infiniaJourney: {}}});});
+
+it('shows reported incoming sender, masked bank details, reference and original currency', async () => {
+  mockDirection = 'to_wallet'; mockStage = 'completed';
+  mockSender = {name: 'Ana Pérez', bankName: 'Banco', bankCode: '', accountMasked: '•••• 7890', reference: 'REF-1'};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const text = screenText(tree);
+  for (const value of ['Ana Pérez', 'Banco de origen', '•••• 7890', 'REF-1', 'MXN']) expect(text).toContain(value);
+  expect(tree.root.findByType('Hero' as any).props.subtitle).toBe('De Ana Pérez');
+  await act(async () => tree.unmount());
+});
+
+it('does not invent missing incoming sender data or show it on sends', async () => {
+  mockDirection = 'to_wallet';
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(screenText(tree)).toContain('No informado');
+  expect(screenText(tree)).not.toContain('Cuenta de origen');
+  await act(async () => tree.unmount());
+  mockDirection = 'to_bank'; mockSender = {name: 'Hidden sender'};
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(screenText(tree)).not.toContain('Hidden sender');
+  expect(screenText(tree)).toContain('Destino');
+  await act(async () => tree.unmount());
+});
 it('shows a refund without promising a future completion', async () => {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<Screen />);});
