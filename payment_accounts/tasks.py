@@ -94,6 +94,8 @@ def reconcile_operations():
 
 @shared_task(name='payment_accounts.reconcile_infinia_journeys')
 def reconcile_infinia_journeys():
+    from .auto_payin import reconcile as reconcile_payins
+    reconcile_payins()
     from .models import InfiniaJourney
     from .infinia_journeys import advance_journey
     from .infinia_bridge import live_journeys

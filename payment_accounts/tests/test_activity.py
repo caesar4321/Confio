@@ -331,8 +331,45 @@ class ActivityTests(TestCase):
     def test_completion_push_waits_for_committed_activity(self):
         j, bridge = self.outgoing()
         bridge.source_tx_hash = '0x'+'76'*32; bridge.save()
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='completed')
         with mock.patch('payment_accounts.activity._push_notice') as push:
             with self.captureOnCommitCallbacks(execute=True):
                 sync_activity(j.pk)
                 push.assert_not_called()
             push.assert_called_once()
+
+    def test_progress_updates_one_notice_and_only_pushes_completion(self):
+        j, bridge = self.outgoing()
+        bridge.source_tx_hash = '0x'+'77'*32; bridge.save()
+        with mock.patch('payment_accounts.activity._push_notice') as push:
+            for stage, text in [('awaiting_credit', 'preparando'),
+                                ('converting', 'soles'),
+                                ('paying_out', 'cuenta de destino')]:
+                InfiniaJourney.objects.filter(pk=j.pk).update(stage=stage)
+                with self.captureOnCommitCallbacks(execute=True):
+                    sync_activity(j.pk)
+                notices = Notification.objects.filter(data__local_transfer_id=str(j.internal_id))
+                self.assertEqual(notices.count(), 1)
+                self.assertIn(text, notices.get().message)
+            push.assert_not_called()
+            notice = notices.get()
+            from notifications.models import NotificationRead
+            NotificationRead.objects.create(notification=notice, user=self.owner.user, account=self.owner)
+            InfiniaJourney.objects.filter(pk=j.pk).update(stage='completed')
+            with self.captureOnCommitCallbacks(execute=True):
+                sync_activity(j.pk)
+                sync_activity(j.pk)
+            push.assert_called_once_with(notice.pk)
+            notice.refresh_from_db()
+            self.assertEqual(notice.message, 'Tu envío se completó.')
+            self.assertFalse(notice.reads.exists())
+            self.assertEqual(notices.count(), 1)
+
+    def test_incoming_messages_do_not_describe_a_bank_payout(self):
+        from payment_accounts.activity import progress_message
+        j, _ = self.outgoing()
+        j.direction = 'to_wallet'
+        self.assertIn('ingreso a dólares', progress_message(j, 'converting'))
+        self.assertIn('a tu billetera', progress_message(j, 'paying_out'))
+        self.assertIn('Abre la app', progress_message(j, 'awaiting_wallet_conversion'))
+        self.assertEqual(progress_message(j, 'completed'), 'Tu ingreso se completó.')

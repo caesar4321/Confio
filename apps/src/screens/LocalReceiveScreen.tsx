@@ -26,22 +26,15 @@ import { useBrebLocationPass } from '../components/breb/BrebLocationGate';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
-import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { rampFlowStyles as styles } from '../components/ramps/rampFlowStyles';
-import { formatRampMoney, formatRampRate, USD_UNIT } from '../utils/rampFormat';
-import { requestRampCriticalAuth } from '../utils/rampFlow';
-import { createInfiniaJourney } from '../services/infiniaJourney';
-import { bridgeRequestId } from '../services/paymentBridge';
+import { formatRampMoney, USD_UNIT } from '../utils/rampFormat';
 import {
   currencyName,
-  fetchDepositQuote,
-  heldReasonCopy,
   LOCAL_DEPOSITS,
   LOCAL_MONEY_LIMITS,
   LOCAL_MONEY_METHODS,
   LOCAL_RECEIVE_ACCOUNT,
   LocalDeposit,
-  LocalDepositQuote,
   LocalLimits,
   LocalMethod,
   LocalReceiveAccount,
@@ -59,7 +52,7 @@ const COPY: Record<string, { hero: string; label: string; rail: string }> = {
   ar_cvu_receive: { hero: 'Tu propio CVU', label: 'Tu CVU', rail: 'transferencia' },
 };
 
-const DEPOSITS_PAGE = 20; // the server's page size for infiniaJourneyDeposits
+const DEPOSITS_PAGE = 20; // the server's page size for localIncomingDeposits
 
 const shortDate = (value: string) => {
   try {
@@ -116,9 +109,8 @@ function InfiniaLocalReceiveScreen() {
   const active = account?.status === 'active' && Boolean(account.value);
   const limitsQuery = useQuery(LOCAL_MONEY_LIMITS, { fetchPolicy: 'network-only', errorPolicy: 'all', skip: !active });
   const limits: LocalLimits | undefined = limitsQuery.data?.localMoneyLimits;
-  // Every loaded page is refreshed together (poll, return to the screen, after
-  // a conversion), so rows never go stale, duplicate, or fall between pages
-  // when a new deposit arrives; converted deposits simply drop out.
+  // Refresh all loaded pages together. Incoming receipts remain in history
+  // after conversion; provider settlement credits are not deposits.
   const apollo = useApolloClient();
   const [depositPages, setDepositPages] = useState(1);
   const [loadedPages, setLoadedPages] = useState(0);
@@ -131,10 +123,18 @@ function InfiniaLocalReceiveScreen() {
   // previous account can neither block nor consume the current one's.
   const depositsBusy = useRef<number | null>(null);
   const depositsQueued = useRef<{ gen: number; pages: number } | null>(null);
-  const selectedRef = useRef<string | null>(null);
   const localAccountId = active ? account?.localAccountId : undefined;
   // Results from another account, or after unmount, never land.
-  useEffect(() => () => { depositsRun.current += 1; }, [localAccountId]);
+  useEffect(() => {
+    setDepositPages(1);
+    setLoadedPages(0);
+    setDepositRows(null);
+    setDepositsError(false);
+    setMoreDeposits(false);
+    setDepositsLoading(false);
+    depositsQueued.current = null;
+    return () => { depositsRun.current += 1; };
+  }, [localAccountId]);
   // One load at a time. A request that arrives meanwhile (poll, return to the
   // screen, a conversion) is coalesced and runs right after, so a slow load is
   // never discarded by the next poll.
@@ -157,7 +157,7 @@ function InfiniaLocalReceiveScreen() {
           variables: { account: localAccountId, offset: page * DEPOSITS_PAGE },
           fetchPolicy: 'network-only',
         });
-        const rows: LocalDeposit[] = result.data?.infiniaJourneyDeposits || [];
+        const rows: LocalDeposit[] = result.data?.localIncomingDeposits || [];
         rows.forEach(row => { if (!byId.has(row.internalId)) byId.set(row.internalId, row); });
         lastPage = rows.length;
         if (rows.length < DEPOSITS_PAGE) break;
@@ -165,11 +165,6 @@ function InfiniaLocalReceiveScreen() {
       if (run !== depositsRun.current) return;
       const loaded = [...byId.values()];
       setDepositRows(loaded);
-      // A selection that is no longer convertible (converted, held) is dropped
-      // with the very results that show it, whatever else is still loading.
-      if (selectedRef.current && !loaded.some(row => row.internalId === selectedRef.current && !row.held)) {
-        setSelectedId(null);
-      }
       setMoreDeposits(lastPage === DEPOSITS_PAGE);
       setLoadedPages(pageCount);
       setDepositsError(false);
@@ -206,90 +201,18 @@ function InfiniaLocalReceiveScreen() {
   };
   useFocusEffect(useCallback(() => { refreshOnFocus.current(); }, []));
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  selectedRef.current = selectedId;
   const aliveRef = useRef(true);
   useEffect(() => () => { aliveRef.current = false; }, []);
-  const [quote, setQuote] = useState<LocalDepositQuote | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  // One request id per deposit: a retry after a lost response returns the
-  // same journey instead of opening a second one.
-  const requestIds = useRef<Record<string, string>>({});
 
   const flag = account ? countryFlag(account.country) : '';
   const place = account ? countryName(account.country) : '';
   const currency = account ? currencyName(account.asset) : 'moneda local';
 
 
-  useEffect(() => {
-    setQuote(null);
-    setQuoteError('');
-    if (!selectedId) return;
-    let cancelled = false;
-    setQuoteLoading(true);
-    fetchDepositQuote(selectedId)
-      .then(next => { if (!cancelled) setQuote(next); })
-      .catch((error: any) => { if (!cancelled) setQuoteError(error?.message || 'No pudimos cotizar este depósito.'); })
-      .finally(() => { if (!cancelled) setQuoteLoading(false); });
-    return () => { cancelled = true; };
-  }, [selectedId]);
-
   const shareMessage = account
     ? [`${copy.label}: ${accountValue}`, account.holderName ? `Titular: ${account.holderName}` : '',
       account.institution ? `Banco: ${account.institution}` : ''].filter(Boolean).join('\n')
     : '';
-
-  const handleConvert = async () => {
-    if (!quote || !selectedId || !account?.localAccountId || !account.cryptoAccountId || submitting) return;
-    // Everything below belongs to this deposit and this quote: captured now,
-    // the form locked before authentication, and checked again after it.
-    const creditId = selectedId;
-    const chosen = quote;
-    const localAccountId = account.localAccountId;
-    const cryptoAccountId = account.cryptoAccountId;
-    setSubmitting(true);
-    try {
-      const authenticated = await requestRampCriticalAuth({
-        amount: Number(chosen.minimumWalletOutput), assetUnit: USD_UNIT, actionLabel: 'conversión',
-      });
-      if (!authenticated || !aliveRef.current || selectedRef.current !== creditId) return;
-      requestIds.current[creditId] ||= bridgeRequestId();
-      // Direct mode: the provider pays straight into the bridge to the user's
-      // wallet. Both minimums are the user's one authorization; nothing is
-      // signed later.
-      const journey = await createInfiniaJourney({
-        direction: 'to_wallet',
-        requestId: requestIds.current[creditId],
-        localAccountId,
-        cryptoAccountId,
-        minimumFxOutput: chosen.minimumFxOutput,
-        minimumWalletOutput: chosen.minimumWalletOutput,
-        creditId,
-      });
-      // The conversion exists: wherever the person is now, the Transfer tab's
-      // history link must show it (it may have refreshed before this landed).
-      apollo.refetchQueries({ include: ['PaymentBridgeAvailability'] }).catch(() => {});
-      // The person may have left while the request ran: nothing lands, nothing opens.
-      // The selection is deliberately not re-checked here: the conversion now
-      // exists, and a poll that dropped the deposit meanwhile only saw it spent
-      // by this journey (rows cannot be reselected while submitting).
-      if (!aliveRef.current) return;
-      // Done with this deposit: returning here must not show its old summary.
-      setSelectedId(null);
-      setQuote(null);
-      await loadDeposits(depositPagesRef.current); // the converted deposit drops out
-      // Opened only from this screen: if the person moved to another one
-      // meanwhile, the conversion waits in their history instead of covering it.
-      if (!aliveRef.current || !navigation.isFocused()) return;
-      navigation.navigate('LocalTransferStatus', { journeyId: journey.internalId });
-    } catch (error: any) {
-      Alert.alert('No pudimos convertir', error?.message || 'Revisa el estado antes de volver a intentar.');
-    } finally {
-      if (aliveRef.current) setSubmitting(false);
-    }
-  };
 
   const capabilityLine = account?.receiveThirdParty === 'enabled'
     ? 'Puedes recibir de cualquier persona o empresa.'
@@ -305,7 +228,7 @@ function InfiniaLocalReceiveScreen() {
           <RampHero
             eyebrow="Recibir"
             title={copy.hero}
-            subtitle={`Recibe ${currency} por ${copy.rail} y confirma la conversión para acreditarlos en tu saldo en dólares.`}
+            subtitle={`Recibe ${currency} por ${copy.rail}. Los ingresos aprobados se convierten automáticamente a dólares.`}
             onBack={() => navigation.goBack()}
             compact={isCompact}
           />
@@ -359,15 +282,8 @@ function InfiniaLocalReceiveScreen() {
         ) : !active ? (
           <RampReveal delay={80}>
             <View style={styles.section}>
-              <RampStepHeader
-                number={1}
-                title={`Activa ${copy.label.replace('Tu ', 'tu ')}`}
-                meta={`${flag ? `${flag} ` : ''}${place} · ${account.asset}`}
-                accentColor={colors.primaryDark}
-                accentBackground={colors.primaryLight}
-                titleColor={colors.dark}
-                metaColor={colors.textSecondary}
-              />
+              <Text style={styles.savedTitle}>{`Activa ${copy.label.replace('Tu ', 'tu ')}`}</Text>
+              <Text style={styles.detailMeta}>{`${flag ? `${flag} ` : ''}${place} · ${account.asset}`}</Text>
               <View style={styles.inputCard}>
                 {account.status === 'provisioning' ? (
                   <View style={styles.emptyQuote}>
@@ -381,7 +297,7 @@ function InfiniaLocalReceiveScreen() {
                     {[
                       ['repeat', 'Siempre la misma', 'Compártela las veces que quieras.'],
                       ['zap', `Llega por ${copy.rail}`, 'Desde cualquier banco o billetera, normalmente en minutos.'],
-                      ['dollar-sign', 'De pagos locales a dólares', 'Cuando llegue un depósito, confirma la conversión para recibir dólares en tu saldo.'],
+                      ['dollar-sign', 'Conversión automática', 'Los depósitos aprobados se convierten y se envían a tu billetera automáticamente. Abre Confío para completar la conversión a Confío Dollar.'],
                     ].map(([icon, title, body]) => (
                       <View key={title} style={[styles.reviewRow, { alignItems: 'center' }]}>
                         <View style={styles.methodIcon}>
@@ -413,18 +329,11 @@ function InfiniaLocalReceiveScreen() {
           </RampReveal>
         ) : (
           <>
-            {/* ─── Step 1: Receiving details ─── */}
+            {/* Receiving details */}
             <RampReveal delay={80}>
               <View style={styles.section}>
-                <RampStepHeader
-                  number={1}
-                  title="Tus datos para recibir"
-                  meta={`${flag ? `${flag} ` : ''}${place} · ${account.asset}`}
-                  accentColor={colors.primaryDark}
-                  accentBackground={colors.primaryLight}
-                  titleColor={colors.dark}
-                  metaColor={colors.textSecondary}
-                />
+                <Text style={styles.savedTitle}>Tus datos para recibir</Text>
+                <Text style={styles.detailMeta}>{`${flag ? `${flag} ` : ''}${place} · ${account.asset}`}</Text>
                 <View style={styles.inputCard}>
                   <Text style={styles.inputLabel}>{copy.label}</Text>
                   {isPixQr ? (
@@ -477,18 +386,10 @@ function InfiniaLocalReceiveScreen() {
               </View>
             </RampReveal>
 
-            {/* ─── Step 2: Deposits ─── */}
+            {/* Incoming-payment history */}
             <RampReveal delay={120}>
               <View style={styles.section}>
-                <RampStepHeader
-                  number={2}
-                  title="Depósitos"
-                  meta={deposits.length ? 'Elige uno para convertir' : null}
-                  accentColor={colors.primaryDark}
-                  accentBackground={colors.primaryLight}
-                  titleColor={colors.dark}
-                  metaColor={colors.textSecondary}
-                />
+                <Text style={styles.savedTitle}>Depósitos recibidos</Text>
                 {depositRows === null && !depositsError && Boolean(localAccountId) ? (
                   <ActivityIndicator color={colors.primary} />
                 ) : depositsError && !deposits.length ? (
@@ -504,34 +405,19 @@ function InfiniaLocalReceiveScreen() {
                   <View style={styles.emptyCard}>
                     <Icon name="inbox" size={22} color={colors.textSecondary} />
                     <Text style={styles.emptyTitle}>Todavía no recibiste depósitos</Text>
-                    <Text style={styles.emptyText}>Comparte tus datos y aquí verás cada transferencia que llegue.</Text>
+                    <Text style={styles.emptyText}>Aquí verás los pagos que lleguen a estos datos. Se convierten automáticamente; no necesitas elegir un depósito.</Text>
                   </View>
-                ) : deposits.map(row => {
-                  const selected = selectedId === row.internalId;
-                  return (
-                    <TouchableOpacity
-                      key={row.internalId}
-                      style={[styles.savedCard, selected && styles.savedCardSelected]}
-                      onPress={() => { if (!row.held && !submitting) setSelectedId(selected ? null : row.internalId); }}
-                      activeOpacity={row.held ? 1 : 0.7}
-                    >
-                      <View style={styles.savedCopy}>
-                        <Text style={styles.savedText}>{shortDate(row.occurredAt)}</Text>
-                        {row.held ? (
-                          <>
-                            <Text style={[styles.warningText, { marginTop: 0 }]}>En revisión: {heldReasonCopy(row.heldReason)}</Text>
-                            <TouchableOpacity onPress={() => navigation.navigate('HomeMessages', { initialChannelId: 'soporte' })}>
-                              <Text style={styles.warningLink}>Escríbenos a soporte</Text>
-                            </TouchableOpacity>
-                          </>
-                        ) : (
-                          <Text style={styles.savedText}>Listo para convertir</Text>
-                        )}
-                      </View>
-                      <Text style={[styles.savedTitle, { fontSize: 16 }]}>{formatRampMoney(row.amount, row.asset)}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                ) : deposits.map(row => (
+                  <View key={row.internalId} style={styles.savedCard}>
+                    <View style={styles.savedCopy}>
+                      <Text style={styles.savedText}>{shortDate(row.occurredAt)}</Text>
+                      <Text style={row.held ? styles.warningText : styles.savedText}>
+                        {row.held ? 'Ingreso en revisión' : 'Ingreso recibido'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.savedTitle, { fontSize: 16 }]}>{formatRampMoney(row.amount, row.asset)}</Text>
+                  </View>
+                ))}
                 {depositsError && deposits.length ? (
                   // A failed refresh or a failed extra page: retry, never a stuck spinner.
                   <TouchableOpacity onPress={() => { loadDeposits(depositPagesRef.current); }}
@@ -542,7 +428,7 @@ function InfiniaLocalReceiveScreen() {
                     </Text>
                   </TouchableOpacity>
                 ) : deposits.length > 0 && (moreDeposits || depositPages > loadedPages) ? (
-                  // Older deposits (a convertible one included) stay reachable.
+                  // Older incoming receipts stay reachable.
                   // The spinner shows only while a newly requested page is loading;
                   // a requested page that never loaded is retried, not skipped.
                   <TouchableOpacity
@@ -557,59 +443,6 @@ function InfiniaLocalReceiveScreen() {
               </View>
             </RampReveal>
 
-            {/* ─── Step 3: Conversion summary ─── */}
-            {selectedId ? (
-              <RampReveal delay={0}>
-                <View style={styles.section}>
-                  <RampStepHeader
-                    number={3}
-                    title="Resumen"
-                    accentColor={colors.primaryDark}
-                    accentBackground={colors.primaryLight}
-                    titleColor={colors.dark}
-                  />
-                  <View style={styles.quoteCard}>
-                    {quoteLoading ? (
-                      <ActivityIndicator color={colors.primary} />
-                    ) : quoteError ? (
-                      <View style={styles.emptyQuote}>
-                        <Icon name="alert-circle" size={20} color={colors.textSecondary} />
-                        <Text style={styles.emptyText}>{quoteError}</Text>
-                      </View>
-                    ) : quote ? (
-                      <>
-                        <Text style={styles.quoteEyebrow}>Recibes en tu Confío Dollar</Text>
-                        <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>
-                          {`≈ ${formatRampMoney(quote.targetAmount, USD_UNIT)}`}
-                        </Text>
-                        <Text style={styles.quoteRate}>{`1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · todo incluido`}</Text>
-                        <View style={styles.quoteDivider} />
-                        <View style={styles.quoteRow}>
-                          <Text style={styles.quoteLabel}>Conviertes</Text>
-                          <Text style={styles.quoteValue}>{formatRampMoney(quote.sourceAmount, quote.asset)}</Text>
-                        </View>
-                        <View style={styles.quoteFinalDivider} />
-                        <View style={styles.quoteFinalRow}>
-                          <Text style={styles.quoteFinalLabel}>Recibes al menos</Text>
-                          <Text style={styles.quoteFinalValue}>{formatRampMoney(quote.minimumWalletOutput, USD_UNIT)}</Text>
-                        </View>
-                        <View style={styles.disclaimerPill}>
-                          <Icon name="info" size={12} color={colors.primaryDark} />
-                          <Text style={styles.quoteNote}>Si la conversión diera menos, no la hacemos y te avisamos.</Text>
-                        </View>
-                      </>
-                    ) : null}
-                  </View>
-                </View>
-                <RampActionBar
-                  primaryLabel="Convertir a dólares"
-                  onPrimaryPress={handleConvert}
-                  primaryLoading={submitting}
-                  primaryDisabled={!quote}
-                  primaryIconName="chevron-right"
-                />
-              </RampReveal>
-            ) : null}
           </>
         )}
       </ScrollView>

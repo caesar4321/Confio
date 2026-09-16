@@ -57,7 +57,7 @@ def live_journeys(queryset, *, recoverable=RECOVERABLE_DELAYS):
                 KeyTextTransform('id', 'fx_quote'), Value(' is expired'), output_field=TextField()))
         live |= (Q(stage='needs_review', failure_code='provider_leg_requires_review',
                    payout_operation__isnull=True, fx_operation__status='failed',
-                   fx_operation__failure_code='400', fx_operation__provider_data__status='fail',
+                   fx_operation__failure_code__in=['400', '409'], fx_operation__provider_data__status='fail',
                    _fx_rejection_text=F('_expired_quote_message'))
                  & (Q(fx_operation__provider_operation_id__isnull=True)
                     | Q(fx_operation__provider_operation_id='')))

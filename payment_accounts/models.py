@@ -678,6 +678,16 @@ class InfiniaJourney(models.Model):
         indexes = [models.Index(fields=['stage', 'updated_at'], name='infinia_journey_stage_idx')]
 
 
+class AutomaticPayin(models.Model):
+    """Durable, once-per-credit work; old ledger history is never auto-enqueued."""
+    entry = models.OneToOneField(LedgerEntry, on_delete=models.PROTECT, related_name='automatic_payin')
+    status = models.CharField(max_length=20, default='pending', choices=[
+        ('pending', 'Pending'), ('started', 'Started'), ('review', 'Review')])
+    reason = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class LimitIncreaseRequest(models.Model):
     """Enhanced due diligence to raise a provider's monthly limit.
 

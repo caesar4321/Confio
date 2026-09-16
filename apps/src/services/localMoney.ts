@@ -95,6 +95,7 @@ export interface LocalReceiveAccount {
 }
 
 export interface LocalDeposit {
+  automaticStatus?: string;
   internalId: string;
   asset: string;
   amount: string;
@@ -250,13 +251,14 @@ export const LOCAL_RECEIVE_ACCOUNT = gql`
 
 export const LOCAL_DEPOSITS = gql`
   query LocalDeposits($account: UUID!, $offset: Int!) {
-    infiniaJourneyDeposits(accountId: $account, offset: $offset) {
+    localIncomingDeposits(accountId: $account, offset: $offset) {
       internalId
       asset
       amount
       occurredAt
       held
       heldReason
+      automaticStatus
     }
   }
 `;

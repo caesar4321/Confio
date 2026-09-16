@@ -12,7 +12,7 @@ from .allbridge_next import address
 from .clients import InfiniaClient
 from .eligibility import context_from_identity, enforce_and_record
 from .models import InfiniaJourney, MoneyFlow, MoneyOperation, LedgerEntry
-from .services import PaymentAccountError, _require_provider_enabled, _require_capability, submit_money_operation
+from .services import PaymentAccountError, _require_provider_enabled, _require_capability, submit_money_operation, require_unreserved_source
 from .infinia_bridge import SETTLED_BRIDGE_FAILURES, live_journeys
 
 
@@ -251,7 +251,7 @@ def expired_fx_rejection(op, quote_id):
     data = op.provider_data if op and isinstance(op.provider_data, dict) else {}
     return bool(op and quote_id and op.operation_type == 'conversion'
         and op.status == 'failed' and not op.provider_operation_id
-        and op.failure_code == '400' and data.get('status') == 'fail'
+        and op.failure_code in {'400', '409'} and data.get('status') == 'fail'
         and data.get('message') == f'Quote: {quote_id} is expired')
 
 
@@ -264,6 +264,20 @@ def _explicitly_empty_lookup(payload):
         and set(payload).issubset({'results', 'count', 'next', 'previous'})
         and payload.get('results') == [] and type(payload.get('count')) is int
         and payload['count'] == 0 and not payload.get('next'))
+
+
+def stale_unsubmitted_quote(j):
+    op = j.fx_operation
+    if not (op and op.status == 'created' and op.submitted_at is None
+            and not op.provider_operation_id and op.operation_type == 'conversion'):
+        return False
+    try:
+        expires = parse_datetime(str(j.fx_quote.get('expire_at', '')))
+        if expires and timezone.is_naive(expires):
+            expires = timezone.make_aware(expires, dt_timezone.utc)
+        return expires is None or expires <= timezone.now()
+    except (TypeError, ValueError):
+        return True
 
 
 def _requotable(j):
@@ -344,6 +358,9 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             j.funding_credit = credit
             j.save(update_fields=['funding_credit', 'updated_at'])
         if not j.fx_operation_id:
+            # Waiting is not a failure. Do not start a quote's expiry clock
+            # while another operation still reserves this source account.
+            require_unreserved_source('infinia', source, j.money_flow_id)
             _require_capability(source, 'convert')
             credit_amount = positive(j.funding_credit.amount)
             if credit_amount < FX_SOURCE_QUANTUM:
@@ -373,14 +390,16 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             j.save(update_fields=['fx_quote', 'fx_operation', 'updated_at'])
             _state(j, 'converting')
             operation = j.fx_operation
-        elif expired_fx_rejection(j.fx_operation, j.fx_quote.get('id')):
-            # Reuse the operation only after explicit quote rejection AND an
-            # authoritative empty lookup. Idempotency alone does not authorize
-            # changing the quote on an ambiguously executed request.
+        elif expired_fx_rejection(j.fx_operation, j.fx_quote.get('id')) or stale_unsubmitted_quote(j):
+            # A never-submitted quote can expire during a reservation race.
+            # Otherwise require explicit rejection AND an empty provider lookup;
+            # idempotency alone never authorizes changing an ambiguous request.
+            require_unreserved_source('infinia', source, j.money_flow_id)
+            unsubmitted = stale_unsubmitted_quote(j)
             tries = int((j.money_flow.metadata or {}).get('fx_requote_count', 0))
             if tries >= FX_REQUOTE_LIMIT:
                 _state(j, 'needs_review', failure='fx_quote_retries_exhausted'); return j
-            lookup = (client or InfiniaClient()).find_operation('conversion', j.fx_operation.idempotency_key)
+            lookup = [] if unsubmitted else (client or InfiniaClient()).find_operation('conversion', j.fx_operation.idempotency_key)
             if not _explicitly_empty_lookup(lookup):
                 _state(j, 'needs_review', failure='fx_requote_provider_unresolved'); return j
             # Reject contradictory ledger evidence even if a lookup returns []:
@@ -399,7 +418,8 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                     _state(j, 'needs_review', failure='direct_bridge_unavailable'); return j
             operation = j.fx_operation
             previous = dict(operation.provider_data)
-            changed = MoneyOperation.objects.filter(pk=operation.pk, status='failed',
+            changed = MoneyOperation.objects.filter(pk=operation.pk, status=operation.status,
+                submitted_at=operation.submitted_at,
                 provider_operation_id=operation.provider_operation_id,
                 updated_at=operation.updated_at, provider_data=previous).update(
                     status='created', failure_code='', failure_detail='',
@@ -409,7 +429,8 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             operation.refresh_from_db()
             history = list((j.money_flow.metadata or {}).get('fx_requote_history', []))
             history.append({'previous_quote_id': j.fx_quote['id'], 'quote_id': quote['id'],
-                            'rejection': previous, 'provider_lookup': 'empty'})
+                            'rejection': previous,
+                            'provider_lookup': 'never_submitted' if unsubmitted else 'empty'})
             j.money_flow.metadata = dict(j.money_flow.metadata or {}, fx_requote_count=tries + 1,
                                         fx_requote_history=history)
             j.money_flow.save(update_fields=['metadata'])
