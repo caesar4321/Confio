@@ -444,6 +444,13 @@ class LocalMoneyTests(TestCase):
         for result in (estimate, review):
             self.assertEqual(result['source_amount'], Decimal('1.95'))
             self.assertEqual(result['rate'], Decimal('3900'))
+            # Disclosure: what should land sits above the minimum we authorize,
+            # and the cost is measured against the user's whole $2 budget.
+            self.assertEqual(result['expected_source_amount'], Decimal('1.96'))
+            self.assertEqual(result['target_amount'], Decimal('7800'))
+            self.assertEqual(result['expected_target'], Decimal('7840'))
+            self.assertGreater(result['expected_target'], result['minimum_target'])
+            self.assertEqual(result['total_cost_percent'], Decimal('2.00'))
 
     def test_subcent_bridge_output_does_not_request_a_zero_quote(self):
         _, crypto = self.pair()
