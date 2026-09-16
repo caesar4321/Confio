@@ -261,10 +261,12 @@ def _infinia_capabilities(account):
     # Didit's country is only a fallback for snapshots taken before it existed.
     is_national = same_country(
         identity.get('address_country') or identity.get('residence_country'), account.country)
-    is_business = account.provider_profile.owner_type == 'business'
     documented_defaults = {
         'payin_same_name': 'enabled' if is_national else 'not_applicable',
-        'payin_third_party': 'enabled' if is_business else 'pending',
+        # Confirmed program policy: Confío controls third-party admission via
+        # country/rail/recipient switches. Missing provider capability data is
+        # not an additional approval queue. Explicit provider values still win.
+        'payin_third_party': 'enabled',
         'payout_same_name': 'enabled' if is_national else 'not_applicable',
         'payout_third_party': 'enabled',
         'payout_qr': 'enabled',
@@ -287,7 +289,9 @@ def _infinia_capabilities(account):
                 'status': status,
                 'reason': (
                     'Provider response' if provider_name in values
-                    else 'Infinia documented account-owner default'
+                    else ('Confio-managed third-party admission'
+                          if provider_name == 'payin_third_party'
+                          else 'Infinia documented account-owner default')
                 ),
                 'provider_value': {'value': value},
             },

@@ -12,6 +12,11 @@ There is no per-account opt-in. Existing country/rail/user admission switches,
 identity checks, account-opening payment requirements and global enablement
 remain mandatory. Cobre behavior is unchanged.
 
+Under the confirmed program policy (2026-09-16), missing Infinia third-party
+capability data defaults to enabled: Confío owns country/rail/recipient approval.
+Explicit provider restrictions still override that default. Capability sync does
+not create or enable any Confío recipient grants.
+
 Migration `0023` introduces `AutomaticPayin`, one durable job per ledger credit.
 Authenticated new external-fiat movements enqueue it in the webhook transaction.
 The existing journey worker processes the queue and creates a direct-to-wallet

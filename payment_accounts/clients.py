@@ -331,7 +331,7 @@ class InfiniaClient(BaseProviderClient):
         elif operation_type == 'payin':
             path, params = '/v1/payments/', {'reference': idempotency_key}
         elif operation_type in {'internal_transfer', 'conversion'}:
-            path = '/v1/internal-transfers/'
+            path = '/v1/accounts/internal-transfer/'
             params = {'idempotency_key': idempotency_key}
         else:
             raise ProviderAPIError(f'Infinia cannot reconcile {operation_type}')
