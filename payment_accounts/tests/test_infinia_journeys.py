@@ -244,6 +244,73 @@ class JourneyTests(TestCase):
                 submit_money_operation(j.fx_operation)
             adapter.assert_not_called()
 
+    def rejected_fx(self, provider_operation_id=None):
+        """A journey whose conversion the provider refused outright."""
+        from payment_accounts.services import _sync_flow_status
+        j = self.inbound()
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        op = j.fx_operation
+        op.status = 'failed'
+        op.provider_operation_id = provider_operation_id
+        op.provider_data = {'status': 'fail', 'message': 'Quote: abc is expired'}
+        op.save()
+        _sync_flow_status(j.money_flow)
+        j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'provider_leg_requires_review'))
+        return j
+
+    def test_expired_quote_is_requoted_in_place_not_queued_for_a_human(self):
+        j = self.rejected_fx()
+        before = j.fx_operation.idempotency_key
+        self.fx_quote()
+        self.api.create_transfer_quote.return_value = dict(
+            self.api.create_transfer_quote.return_value, id='fx-quote-2')
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+        self.assertEqual(j.fx_operation.status, 'created')
+        self.assertEqual(j.fx_quote['id'], 'fx-quote-2')
+        self.assertEqual(j.fx_operation.provider_data['quote_id'], 'fx-quote-2')
+        # Same row, same key: a submission the provider did record deduplicates.
+        self.assertEqual(j.fx_operation.idempotency_key, before)
+        self.assertEqual(j.money_flow.metadata['fx_requote_count'], 1)
+
+    def test_a_leg_the_provider_did_create_is_never_requoted(self):
+        """The safety boundary: an operation may exist on their side."""
+        j = self.rejected_fx(provider_operation_id='transfer-id')
+        self.fx_quote()
+        self.api.create_transfer_quote.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+        self.assertEqual(j.fx_operation.status, 'failed')
+        self.api.create_transfer_quote.assert_not_called()
+
+    def test_requoting_is_bounded(self):
+        from payment_accounts.infinia_journeys import FX_REQUOTE_LIMIT
+        from payment_accounts.services import _sync_flow_status
+        j = self.rejected_fx()
+        for _ in range(FX_REQUOTE_LIMIT):
+            self.fx_quote()
+            advance_journey(j.pk, client=self.api)
+            j.refresh_from_db()
+            op = j.fx_operation
+            op.status = 'failed'
+            op.provider_data = {'status': 'fail', 'message': 'expired'}
+            op.save()
+            _sync_flow_status(j.money_flow)
+            j.refresh_from_db()
+        self.assertEqual(j.money_flow.metadata['fx_requote_count'], FX_REQUOTE_LIMIT)
+        # The next pass stops retrying instead of spinning on a dying quote.
+        self.fx_quote()
+        self.api.create_transfer_quote.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.failure_code, 'fx_quote_retries_exhausted')
+        self.api.create_transfer_quote.assert_not_called()
+
     def settle_fx(self, j, account, amount='2.5'):
         j.refresh_from_db(); op=j.fx_operation
         op.provider_operation_id='transfer-id'; op.status='settling';op.save()
