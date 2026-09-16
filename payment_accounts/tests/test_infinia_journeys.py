@@ -81,6 +81,38 @@ class JourneyTests(TestCase):
             source_account_id=source, target_account_id=target, source_amount=amount, target_amount=output,
             expire_at=(timezone.now()+timedelta(minutes=1)).isoformat())
 
+    def test_dead_review_journey_does_not_stall_a_later_operation(self):
+        """The create gate is not enough: the submit guard had its own rule.
+
+        A journey could start, get as far as moving money to the provider, then
+        never submit its conversion, because an abandoned needs_review row on
+        the same accounts still counted as reserving the funds.
+        """
+        from payment_accounts.services import submit_money_operation
+        from payment_accounts.models import MoneyFlow
+        dead = self.inbound()
+        InfiniaJourney.objects.filter(pk=dead.pk).update(
+            stage='needs_review', failure_code='bridge_not_delivered')
+        flow = MoneyFlow.objects.create(
+            confio_account=self.owner, kind='withdraw', source_asset='USDT_BSC',
+            source_amount=Decimal('2'), target_asset=self.local.asset,
+            metadata={'orchestrator': 'infinia'})
+        live = InfiniaJourney.objects.create(
+            money_flow=flow, confio_account=self.owner, request_id=uuid.uuid4(),
+            direction='to_bank', local_account=self.local, crypto_account=self.crypto,
+            minimum_fx_output=Decimal('2'), destination_snapshot=dead.destination_snapshot,
+            wallet_address=dead.wallet_address, stage='converting')
+        op = MoneyOperation.objects.create(
+            provider='infinia', money_flow=flow, operation_type='conversion',
+            source_account=self.crypto, destination_account=self.local,
+            source_asset=self.crypto.asset, target_asset=self.local.asset,
+            source_amount=Decimal('1'), idempotency_key=str(uuid.uuid4()), status='created')
+        self.assertEqual(live.stage, 'converting')
+        try:
+            submit_money_operation(op)
+        except Exception as exc:  # any later validation is fine; this one is not
+            self.assertNotIn('reserved by an active journey', str(exc))
+
     def test_dead_review_journey_does_not_block_the_next_payment(self):
         """A needs_review row the worker will never touch must not gate anyone."""
         from payment_accounts.infinia_bridge import RECOVERABLE_DELAYS, live_journeys

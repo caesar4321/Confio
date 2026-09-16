@@ -789,7 +789,16 @@ def submit_money_operation(operation):
             account_filter = Q(local_account=operation.source_account) | Q(crypto_account=operation.source_account)
             if operation.provider == 'cobre':
                 account_filter |= Q(copco_account=operation.source_account)
-            if journey_model.objects.filter(account_filter).exclude(stage__in=['completed', 'failed']).exclude(money_flow_id=operation.money_flow_id).exists():
+            # Only a journey the worker will still advance can contend for these
+            # funds. Excluding just completed/failed counted abandoned reviews as
+            # live, so one dead row stalled every later journey's operations at
+            # submit -- after its money had already reached the provider.
+            from .infinia_bridge import RECOVERABLE_DELAYS, live_journeys
+            contenders = live_journeys(
+                journey_model.objects.filter(account_filter),
+                recoverable=RECOVERABLE_DELAYS if operation.provider == 'infinia' else (),
+            ).exclude(money_flow_id=operation.money_flow_id)
+            if contenders.exists():
                 raise PaymentAccountError('Provider funds are reserved by an active journey')
         if operation.operation_type == 'payout':
             if operation.provider == 'infinia':

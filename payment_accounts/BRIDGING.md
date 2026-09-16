@@ -224,14 +224,24 @@ raw transactions and does not allow deleting or editing financial evidence.
 Delayed source confirmations and refund/amount mismatches require review.
 Never reset the source hash and resubmit an unresolved transfer.
 
-`needs_review` is an operator flag, never a gate on the user. This applies to
-journeys as well as transfers: `live_journeys()` is the single predicate for
+`needs_review` is an operator flag, never a gate on the user. This applies at
+every layer -- the same wrong predicate appeared three times, each found only
+after the previous fix let the user reach the next one. `live_journeys()` is now
+the single predicate for
 "the worker will still act on this", shared by the reconcile task and by the
 gate on starting a new journey, so they cannot drift apart. A journey nothing
 will ever advance cannot race with anything and must not block the owner.
 A resolved bridge outcome (`failed`, `expired`, `refunded`) fails its journey
 outright rather than queueing a review; only an unresolved bridge propagates as
-`bridge_not_delivered`. Same fix in the Cobre orchestrator. Preparation blocks
+`bridge_not_delivered`. Same fix in the Cobre orchestrator.
+
+`submit_money_operation` shares it too. That guard asks whether another journey
+is using these funds, and excluding only `completed`/`failed` meant an abandoned
+review stalled every later journey at submit -- after its money had already
+reached the provider, which is worse than refusing up front. Cobre passes
+`recoverable=()` because its reconciler never retries `needs_review`. Any new
+"is another journey using these funds?" check must call `live_journeys()` rather
+than write its own stage list. Preparation blocks
 only on genuinely in-flight transfers (`submitted`, `bridging`, unexpired
 `prepared`); funds are protected by `reserved_usdt_wei`, which reserves for
 `submitted`/`prepared` only, because by `bridging` the USDT has already left the
