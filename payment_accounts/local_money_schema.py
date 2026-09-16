@@ -69,6 +69,11 @@ class LocalPayoutQuoteType(graphene.ObjectType):
     source_amount = graphene.String(required=True)
     target_amount = graphene.String(required=True)
     minimum_target = graphene.String(required=True)
+    # What should land versus the minimum we authorize. The gap widens on small
+    # sends because Relay's tolerance is amount-aware; the app shows both.
+    expected_source_amount = graphene.String(required=True)
+    expected_target = graphene.String(required=True)
+    total_cost_percent = graphene.String(required=True)
     rate = graphene.String(required=True)
     asset = graphene.String(required=True)
     expires_at = graphene.String(required=True)

@@ -436,7 +436,7 @@ class LocalMoneyTests(TestCase):
             api.return_value = [{'messenger': 'relay',
                 'amountOut': '1960000', 'amountOutMin': '1958795'}]
             estimate = local_money.payout_quote(self.owner, destination, amount='2', client=self.client_api)
-        bridge = SimpleNamespace(amount_out_min='1958795', quote=SimpleNamespace(
+        bridge = SimpleNamespace(amount_out_min='1958795', amount_out='1960000', quote=SimpleNamespace(
             confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
             funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
             money_flow=SimpleNamespace(source_amount=Decimal('2'))))
@@ -447,7 +447,7 @@ class LocalMoneyTests(TestCase):
 
     def test_subcent_bridge_output_does_not_request_a_zero_quote(self):
         _, crypto = self.pair()
-        bridge = SimpleNamespace(amount_out_min='9999', quote=SimpleNamespace(
+        bridge = SimpleNamespace(amount_out_min='9999', amount_out='10000', quote=SimpleNamespace(
             confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
             funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
             money_flow=SimpleNamespace(source_amount=Decimal('0.02'))))
@@ -469,7 +469,7 @@ class LocalMoneyTests(TestCase):
     def test_review_uses_total_budget_for_rate_and_rejects_reverse_bridge(self):
         _, crypto = self.pair()
         destination = SimpleNamespace(country='COL', asset='COP')
-        bridge = SimpleNamespace(amount_out_min='49000000', quote=SimpleNamespace(
+        bridge = SimpleNamespace(amount_out_min='49000000', amount_out='49500000', quote=SimpleNamespace(
             confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
             funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
             money_flow=SimpleNamespace(source_amount=Decimal('50'))))

@@ -79,6 +79,14 @@
   # Access Django shell
   myvenv/bin/python manage.py shell
   ```
+- **AWS Credentials**: Use the plain `AWS_PROFILE` environment variable, NOT `aws-vault`.
+  `aws-vault exec` fails on this machine ("could not be found in the keyring").
+- **Running Tests**: Settings load the master key from SSM, so tests need credentials:
+  ```bash
+  AWS_PROFILE=Julian CONFIO_ENV=testnet myvenv/bin/python manage.py test <labels> --keepdb
+  ```
+  Known pre-existing failures: the 13 `SeededProviderEligibilityTests` errors depend on
+  seeded policy rows absent from the reused `--keepdb` database. Not caused by your change.
 
 ### Security Notes
 - Never store private keys or sensitive data

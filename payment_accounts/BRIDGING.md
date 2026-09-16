@@ -7,14 +7,17 @@ both directions. Existing NEXT quotes/transfers continue with NEXT/NEAR Intents;
 never change an in-flight transfer's provider or deposit address.
 
 `relay.py` validates canonical tokens, base-unit amounts, recipient, refund
-terms, protocol output, 0.5% slippage, and exactly one ERC20 transfer with zero
-native value. No router calldata, approvals, app fee, or arbitrary URLs are
+terms, protocol output, the authorized deterioration ceiling, and exactly one
+ERC20 transfer with zero native value. No router calldata, approvals, app fee, or arbitrary URLs are
 accepted. The deposit-address fee is included in the displayed quote. Confío's
 0.9% remains at cUSD mint/redeem; no second fee is added through Relay.
 
 Julian explicitly selected the API-trusted deposit-address model. Relay does
 not yet expose independent derivation of a deposit address from order terms.
 Also, `/quote/v2` ignores `strict`; EXACT_INPUT addresses can reprice on deposit.
+(`strict` is documented as ignored, but it is still what unlocks `EXACT_OUTPUT`:
+without it `/quote/v2` returns 400 `INVALID_REQUEST_PARAMS`. We stay on
+`EXACT_INPUT` regardless — see the slippage section below.)
 Do not claim that our local minimum is independently enforced on chain. We
 retain the reviewed minimum and hold any shortfall for review after checking
 finalized destination receipts. We cap local authorization at ten minutes.
@@ -138,6 +141,42 @@ separate provider integration.
 Cobre's public docs now describe stablecoin balances and COPco on/off-ramp, but
 its existing adapter still does not compose an end-user Bre-B COP balance into
 that path. A COP/Bre-B key is never accepted as a Polygon deposit address.
+
+## Slippage and small transfers
+
+Rolled back the hard-coded `slippageTolerance: '50'` on 2026-09-15. Relay's cost
+is roughly fixed per crossing, so a flat 0.5% band is far tighter than the route
+can hold at small sizes and refuses the transfers this product exists to serve.
+Measured live that day, BSC USDT -> Polygon USDC:
+
+| Size | $0.50 | $1 | $2 | $5 | $50 | $1000 |
+|---|---:|---:|---:|---:|---:|---:|
+| Relay auto tier | 452bps | 409bps | 335bps | 200bps | 200bps | 200bps |
+| All-in cost | 9.96% | 5.08% | 2.63% | 0.97% | 0.28% | 0.19% |
+
+Cost is ~$0.043 fixed + ~0.19%. Sampling one $2 quote every 5s for a minute, the
+quoted output moved 3.80% between the median and the worst sample, so the band
+must absorb an absolute swing, not a proportional one.
+
+We now omit `slippageTolerance` and take Relay's amount-aware tier as a proposal,
+bounded by `allowed_deterioration()`: `max(250bps, $0.15)`. The dollar floor is
+what keeps sub-$5 sends alive; a flat 200bps ceiling would have been a $5 minimum
+in disguise. There is no minimum transfer size — small QR/Alias/Pix sends are the
+product, so the cost is disclosed rather than blocked. `payout_quote` returns
+`expected_source_amount`, `expected_target` and `total_cost_percent` alongside the
+minimum, and `target_amount` is still priced off `amount_out_min`.
+
+Not established: whether an EXACT_INPUT deposit-address order can deliver anywhere
+between `minimumAmount` and the quoted amount, and who keeps the improvement when
+execution beats the quote. One observed transfer delivered exactly the quoted
+amount; that is not proof. Until Relay confirms, assume the user receives only the
+minimum and display it that way. A wider tier authorizes a worse result even if
+most fills land at the expected amount.
+
+`EXACT_OUTPUT` was evaluated and rejected: it inverts this pipeline, which derives
+the USDT input from the user's budget after the cUSD redemption fee, and under
+strict semantics the leftover returns as an excess refund on every transfer --
+manufacturing the exact event whose handling needs a contract redeploy.
 
 ## Configuration and rollout
 

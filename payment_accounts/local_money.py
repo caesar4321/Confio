@@ -11,7 +11,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_UP, Decimal, InvalidOperation
 
 from django.conf import settings
 from django.db.models import Q, Sum
@@ -707,6 +707,8 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
                 or bridge.quote.funding_instruction.financial_account_id != crypto.pk):
             raise PaymentAccountError('Este envío no corresponde a tu cuenta.')
         source = (Decimal(int(bridge.amount_out_min)) / Decimal(10 ** 6)).quantize(USDC_UNIT, rounding=ROUND_DOWN)
+        expected_source = (Decimal(int(bridge.amount_out)) / Decimal(10 ** 6)).quantize(USDC_UNIT, rounding=ROUND_DOWN)
+        spend = bridge.quote.money_flow.source_amount
     else:
         # The typed amount is the user's total budget, not the USDC principal.
         # Price the post-redemption USDT through the same bridge used at review.
@@ -728,12 +730,21 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
                                                        owner.bsc_address, recipient))
         route = routes[0]
         source = Decimal(bridge_route_minimum(route)) / Decimal(10 ** 6)
+        expected_source = Decimal(int(route['amountOut'])) / Decimal(10 ** 6)
+        spend = total
     source = fx_source_amount(source)
     target, expires = _quote(client or InfiniaClient(), crypto, local, source)
     minimum = (target * (1 - _tolerance('LOCAL_MONEY_FX_TOLERANCE_BPS', 100))).quantize(FIAT_CENT, rounding=ROUND_DOWN)
+    # Relay's tolerance is amount-aware, so the gap between what should land and
+    # the minimum we authorize widens on small sends. Show both rather than
+    # blocking the send: target_amount is already priced off the minimum.
+    expected_target = (target * expected_source / source).quantize(FIAT_CENT, rounding=ROUND_DOWN)
+    cost = ((spend - expected_source) / spend * 100).quantize(FIAT_CENT, rounding=ROUND_UP)
     return {'source_amount': source, 'target_amount': target, 'minimum_target': minimum,
-            'rate': (target / (bridge.quote.money_flow.source_amount if bridge is not None else total)).quantize(
-                Decimal('0.0001')), 'asset': local.asset, 'expires_at': expires}
+            'expected_source_amount': expected_source, 'expected_target': expected_target,
+            'total_cost_percent': cost,
+            'rate': (target / spend).quantize(Decimal('0.0001')),
+            'asset': local.asset, 'expires_at': expires}
 
 
 def deposit_quote(owner, credit, *, client=None):

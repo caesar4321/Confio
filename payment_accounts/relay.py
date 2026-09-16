@@ -16,6 +16,24 @@ from .allbridge_next import NextError, TOKENS, address, uint
 CHAINS = {'BSC:USDT': 56, 'POL:USDC': 137}
 PROTOCOL_CHAINS = {'BSC:USDT': 'bnb', 'POL:USDC': 'polygon'}
 
+# Relay's cost is roughly fixed per crossing (~$0.05 measured 2026-09-15 from
+# $0.50 to $10), so its own tolerance is amount-aware: 200 bps at $5 and above,
+# rising to 452 bps at $0.50. We omit slippageTolerance to take that tier and
+# bound it here instead. The bound is in dollars, not basis points: a flat bps
+# ceiling rejects every small transfer, which is the size this product must
+# keep serving. Above ~$6 the bps term binds; below it the floor does.
+DETERIORATION_BPS = 250
+DETERIORATION_FLOOR_CENTS = 15
+
+
+def allowed_deterioration(output, destination):
+    """Ceiling on the shortfall Relay's tolerance may authorize, in base units.
+
+    Both destinations are dollar stablecoins, so the floor converts directly.
+    """
+    return max(output * DETERIORATION_BPS // 10000,
+               DETERIORATION_FLOOR_CENTS * 10 ** TOKENS[destination][1] // 100)
+
 
 class RelayError(NextError):
     """Safe provider error compatible with existing bridge error handling."""
@@ -75,7 +93,7 @@ class RelayClient:
             'user': sender, 'recipient': recipient, 'refundTo': sender,
             'originChainId': CHAINS[source], 'destinationChainId': CHAINS[destination],
             'originCurrency': TOKENS[source][0], 'destinationCurrency': TOKENS[destination][0],
-            'amount': amount, 'tradeType': 'EXACT_INPUT', 'slippageTolerance': '50',
+            'amount': amount, 'tradeType': 'EXACT_INPUT',
             'includeProtocolData': True,
         }
         if deposit_address:
@@ -103,7 +121,7 @@ class RelayClient:
                 raise RelayError('Relay input amount mismatch')
             output = uint(details['currencyOut']['amount'], positive=True)
             minimum = uint(details['currencyOut']['minimumAmount'], positive=True)
-            if minimum > output or minimum < output * 9950 // 10000:
+            if minimum > output or output - minimum > allowed_deterioration(output, destination):
                 raise RelayError('Relay output exceeds the allowed slippage')
             order = result['protocol']['v2']['orderData']
             inputs, output_order = order['inputs'], order['output']
