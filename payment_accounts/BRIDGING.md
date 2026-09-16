@@ -224,6 +224,20 @@ raw transactions and does not allow deleting or editing financial evidence.
 Delayed source confirmations and refund/amount mismatches require review.
 Never reset the source hash and resubmit an unresolved transfer.
 
+`needs_review` is an operator flag, never a gate on the user. Preparation blocks
+only on genuinely in-flight transfers (`submitted`, `bridging`, unexpired
+`prepared`); funds are protected by `reserved_usdt_wei`, which reserves for
+`submitted`/`prepared` only, because by `bridging` the USDT has already left the
+wallet. Gating on `needs_review` meant one unresolved row denied that wallet
+every future bridge indefinitely -- a Relay outage alone sets
+`relay_settlement_delayed`. Observed in production 2026-09-15.
+
+A refund net of gas is a complete refund, not an anomaly. Relay documents that
+refunds are paid "minus the cost of gas", so the previous exact-equality check
+could never hold and sent every refund to review. `refund_gas_allowance()`
+accepts a shortfall up to $0.25 once the receipts prove the funds returned to
+the user's own source wallet; a genuinely short return still goes to review.
+
 ## Validation
 
 Tests cover quote idempotency/concurrency, ownership and recipient isolation,

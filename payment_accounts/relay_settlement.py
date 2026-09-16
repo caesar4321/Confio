@@ -2,7 +2,7 @@
 import re
 import time
 
-from .relay import RelayClient, RelayError, CHAINS, PROTOCOL_CHAINS
+from .relay import RelayClient, RelayError, CHAINS, PROTOCOL_CHAINS, refund_gas_allowance
 from .allbridge_next import TOKENS, NextError
 from . import bridge_chain as chain
 
@@ -110,9 +110,15 @@ def _reconcile_relay(transfer, *, client=None):
         'received_units': str(total),
     })
     if state == 'refund':
-        # Partial refunds (e.g. execution fees retained) require explicit review.
-        transfer.status = 'refunded' if total == int(q.amount_units) else 'needs_review'
-        transfer.failure_code = 'relay_refunded' if transfer.status == 'refunded' else 'relay_refund_amount_mismatch'
+        # The receipts above already prove this returned to the user's own
+        # source wallet. Relay deducts refund gas by documented design, so
+        # demanding exact equality marked every refund needs_review, and that
+        # status blocks the wallet from starting any further bridge. Allow the
+        # gas deduction; a genuinely short return still requires review.
+        shortfall = int(q.amount_units) - total
+        complete = 0 <= shortfall <= refund_gas_allowance(q.source_token_id)
+        transfer.status = 'refunded' if complete else 'needs_review'
+        transfer.failure_code = 'relay_refunded' if complete else 'relay_refund_amount_mismatch'
     elif total < int(transfer.amount_out_min):
         transfer.status, transfer.failure_code = 'needs_review', 'destination_amount_mismatch'
     else:

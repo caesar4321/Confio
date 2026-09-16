@@ -129,10 +129,16 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         if previous:
             return previous
         current_provider(q, owner)
+        # Only genuinely in-flight transfers hold the wallet. needs_review is an
+        # operator flag, not a user gate: it can persist indefinitely (a Relay
+        # outage alone sets relay_settlement_delayed), and leaving it here meant
+        # one unresolved row denied that wallet every future bridge. Funds are
+        # protected by reserved_usdt_wei, which reserves for submitted/prepared
+        # only, because by 'bridging' the USDT has already left the wallet.
         if PaymentBridgeTransfer.objects.filter(quote__source_address=q.source_address).filter(
-                Q(status__in=['submitted', 'bridging', 'needs_review']) |
+                Q(status__in=['submitted', 'bridging']) |
                 Q(status='prepared', deadline__gt=int(time.time()))).exists():
-            raise NextError('An existing bridge is pending; check its status first')
+            raise NextError('Ya tienes un envío en curso; revisa su estado primero.')
         if q.expires_at <= timezone.now():
             raise NextError('Quote expired; request a fresh quote')
         if type(route_index) is not int or not 0 <= route_index < len(q.routes):

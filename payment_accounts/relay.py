@@ -33,6 +33,13 @@ DETERIORATION_MAX_BPS = 1000
 # AMOUNT_TOO_LOW is not a reliable backstop, so cap the loss itself. This is a
 # cost rule, not a size floor: legitimate small sends measured 11.5% at $0.75.
 TOTAL_COST_MAX_BPS = 2500
+# Relay refunds "minus the cost of gas", so a full refund never equals the
+# deposit and an equality check sent every refund to review -- which blocks the
+# wallet's next bridge outright. Refund gas is an absolute cost, unrelated to
+# transfer size, so the allowance is absolute too. Observed 2026-09-15:
+# $0.034466 on BSC. This only widens what counts as a *complete* refund to the
+# user's own wallet; a genuinely short return still goes to review.
+REFUND_GAS_ALLOWANCE_CENTS = 25
 
 
 def allowed_deterioration(output, destination):
@@ -43,6 +50,11 @@ def allowed_deterioration(output, destination):
     floor = DETERIORATION_FLOOR_CENTS * 10 ** TOKENS[destination][1] // 100
     return min(max(output * DETERIORATION_BPS // 10000, floor),
                output * DETERIORATION_MAX_BPS // 10000)
+
+
+def refund_gas_allowance(token):
+    """How far below the deposit a complete refund may land, in base units."""
+    return REFUND_GAS_ALLOWANCE_CENTS * 10 ** TOKENS[token][1] // 100
 
 
 def rebase(amount, source, destination):
