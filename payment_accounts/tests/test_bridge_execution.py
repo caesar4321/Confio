@@ -274,8 +274,24 @@ class BridgeRecoveryTests(BridgeExecutionTests):
     def test_second_preparation_for_pending_wallet_is_rejected(self):
         self.prepared()
         self.request_id = uuid.uuid4()
-        with self.assertRaisesRegex(NextError, 'existing bridge'):
+        with self.assertRaisesRegex(NextError, 'en curso'):
             self.prepared()
+
+    def test_a_reviewed_transfer_never_blocks_the_next_bridge(self):
+        # needs_review can persist indefinitely -- a Relay outage alone sets
+        # relay_settlement_delayed -- so gating on it denied the wallet every
+        # future bridge. The USDT has already left by then; reserved_usdt_wei
+        # protects the funds that are still there.
+        t, _ = self.prepared()
+        for i, status in enumerate(('needs_review', 'refunded', 'delivered', 'failed', 'expired')):
+            with self.subTest(status=status):
+                # deposit_address is unique per transfer; free the fixture's.
+                PaymentBridgeTransfer.objects.filter(pk=t.pk).update(
+                    status=status, deposit_address='0x%040x' % (0xaa0000 + i))
+                self.request_id = uuid.uuid4()
+                second, _ = self.prepared()
+                self.assertIsNotNone(second)
+                PaymentBridgeTransfer.objects.filter(pk=second.pk).delete()
 
     def test_polygon_signed_bytes_survive_failed_broadcast_and_retry(self):
         from payment_accounts.bridge_execution import _submit_polygon

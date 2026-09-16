@@ -193,6 +193,39 @@ class RelaySettlementTests(SimpleTestCase):
         self.assertEqual(self.transfer.actual_out_units, '1934823')
         self.assertEqual(self.transfer.binding['settlement_evidence']['origin_transaction_hashes'], [REQUEST])
 
+    def refund_fixture(self, returned):
+        """A Relay refund landing back in the user's own wallet."""
+        from .test_bridge_execution import receipt
+        receipts = self.collection_fixture()
+        self.status['status'] = 'refund'
+        receipts[2] = receipt('BSC:USDT', SENDER, returned)
+        return receipts
+
+    def test_refund_net_of_gas_is_complete_not_a_review(self):
+        # The live refund on 2026-09-15 returned 1.947534 of 1.982 USDT. Relay
+        # documents that gas is deducted, so exact equality never holds and
+        # every refund used to land in needs_review, which blocks the wallet.
+        returned = 2 * 10**18 - 34465742240440549
+        with mock.patch('payment_accounts.relay_settlement.chain.final_receipt',
+                        side_effect=self.refund_fixture(returned)):
+            reconcile_relay(self.transfer, client=self.client)
+        self.assertEqual(self.transfer.status, 'refunded')
+        self.assertEqual(self.transfer.failure_code, 'relay_refunded')
+
+    def test_short_refund_still_requires_review(self):
+        # $0.30 missing is beyond any refund gas; a human still looks at it.
+        with mock.patch('payment_accounts.relay_settlement.chain.final_receipt',
+                        side_effect=self.refund_fixture(2 * 10**18 - 3 * 10**17)):
+            reconcile_relay(self.transfer, client=self.client)
+        self.assertEqual(self.transfer.status, 'needs_review')
+        self.assertEqual(self.transfer.failure_code, 'relay_refund_amount_mismatch')
+
+    def test_refund_larger_than_the_deposit_requires_review(self):
+        with mock.patch('payment_accounts.relay_settlement.chain.final_receipt',
+                        side_effect=self.refund_fixture(2 * 10**18 + 1)):
+            reconcile_relay(self.transfer, client=self.client)
+        self.assertEqual(self.transfer.status, 'needs_review')
+
     def test_collection_rejects_unrelated_or_wrong_amount_receipts(self):
         for kind in ('sender', 'recipient', 'token', 'amount', 'earlier', 'funding'):
             with self.subTest(kind=kind):
