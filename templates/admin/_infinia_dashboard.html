@@ -1,0 +1,37 @@
+{% load humanize %}
+{% if infinia_sections %}
+<h2 class="section-title">Infinia local payments</h2>
+<div class="metric-card"><div class="metric-label">Website deposited volume — all providers, all time (USD)</div><div class="metric-value">${{ deposited_all_providers|floatformat:2|intcomma }}</div>
+<div class="metric-change">{% for provider, volume in deposited_provider_volumes.items %}{{ provider|title }}: ${{ volume|floatformat:2|intcomma }} · {% endfor %}</div>
+<p>Recorded incoming settlements only. Excludes outgoing payments and intermediate legs. This total is not affected by the filters below. Transak history requires imported settlement records.</p></div>
+<p><a href="{% url 'admin:payment_accounts_infiniajourney_changelist' %}">All transfers and provider legs</a>
+{% if infinia_unstarted != None %} · <a href="{% url 'admin:payment_accounts_automaticpayin_changelist' %}">Automatic deposit processing</a> · {{ infinia_unstarted }} deposits without a started transfer{% endif %}</p>
+<form method="get" class="data-table" style="padding:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <label>Direction <select name="infinia_direction">
+        <option value="all" {% if infinia_direction == 'all' %}selected{% endif %}>Both</option>
+        <option value="to_wallet" {% if infinia_direction == 'to_wallet' %}selected{% endif %}>Incoming</option>
+        <option value="to_bank" {% if infinia_direction == 'to_bank' %}selected{% endif %}>Outgoing</option>
+    </select></label>
+    <label>Account country <select name="infinia_country"><option value="">All countries</option>
+        {% for country in infinia_countries %}<option value="{{ country }}" {% if infinia_country == country %}selected{% endif %}>{{ country }}</option>{% endfor %}
+    </select></label>
+    <button type="submit" class="button default">Apply</button>
+    <a href="{% url 'admin:dashboard' %}">Reset</a>
+</form>
+{% for section in infinia_sections %}
+<h3 class="section-title">{{ section.title }}</h3>
+<div class="metrics-grid">
+    {% if section.incoming %}<div class="metric-card"><div class="metric-label">Net wallet delivery (USD)</div><div class="metric-value">${{ section.volume|floatformat:2|intcomma }}</div><div class="metric-change">Completed wallet conversion, not fiat received or bridge quotes</div></div>{% endif %}
+    <div class="metric-card"><div class="metric-label">End-to-end completion</div><div class="metric-value">{{ section.rate|floatformat:1 }}%</div><div class="metric-change">{{ section.counts.completed|default:0 }} / {{ section.counts.total|default:0 }} started transfers</div></div>
+    <div class="metric-card"><div class="metric-label">Processing</div><div class="metric-value">{{ section.counts.processing|default:0 }}</div><div class="metric-change">{{ section.counts.stalled|default:0 }} unchanged for over 1 hour — not abandoned</div></div>
+    <div class="metric-card"><div class="metric-label">Needs review / failed / refunded</div><div class="metric-value">{{ section.counts.needs_review|default:0 }} / {{ section.counts.failed|default:0 }} / {{ section.counts.refunded|default:0 }}</div></div>
+</div>
+<div class="data-table"><table><thead><tr><th>Account country</th><th>Currency</th><th>Rail</th><th>Started</th><th>Completed</th>{% if section.incoming %}<th>Net wallet USD</th>{% else %}<th>Delivered fiat (by currency)</th>{% endif %}</tr></thead><tbody>
+{% for row in section.breakdown %}<tr><td>{{ row.country }}</td><td>{{ row.currency }}</td><td>{{ row.rail|default:'Unknown' }}</td><td>{{ row.count }}</td><td>{{ row.completed }}</td>{% if section.incoming %}<td>${{ row.volume|floatformat:2|intcomma }}</td>{% else %}<td>{% if row.fiat_known %}{{ row.fiat_delivered|floatformat:2|intcomma }} {{ row.currency }}{% else %}—{% endif %}{% if row.fiat_unknown %}<br>{{ row.fiat_unknown }} completed payment{{ row.fiat_unknown|pluralize }} with unknown net amount{% endif %}</td>{% endif %}</tr>{% empty %}<tr><td>No transfers yet.</td></tr>{% endfor %}
+</tbody></table></div>
+<h4>Recent activity</h4>
+<div class="data-table"><table><thead><tr><th>Transfer</th><th>Account</th><th>Input</th><th>End-to-end state</th><th>Failure</th><th>Created</th></tr></thead><tbody>
+{% for row in section.recent %}<tr><td><a href="{{ row.url }}">{{ row.id }}</a></td><td>{{ row.account }}</td><td>{{ row.amount|floatformat:2 }} {{ row.asset }}</td><td>{{ row.stage }}</td><td>{{ row.failure|default:'—' }}</td><td>{{ row.created_at }}</td></tr>{% empty %}<tr><td>No transfers yet.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endfor %}
+{% endif %}

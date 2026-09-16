@@ -1538,8 +1538,8 @@ class CreateMockRampOrder(graphene.Mutation):
 
 class LandingStatsType(graphene.ObjectType):
     """Public traction numbers for the confio.lat landing page. Definitions
-    mirror the admin dashboard so marketing and ops always quote the same
-    figures (Koywe grey-box "On-chain Deposited Volume"; presale raised)."""
+    include delivered incoming payments across providers, never intermediate
+    FX/bridge legs or outgoing transfers."""
     deposited_volume_usd = graphene.Float()
     presale_raised_usd = graphene.Float()
     registered_users = graphene.Int()
@@ -1553,15 +1553,13 @@ class Query(graphene.ObjectType):
 
     def resolve_landing_stats(self, info):
         from django.core.cache import cache
-        from django.db.models import Sum
 
-        cached = cache.get('landing_stats_v2')
+        cached = cache.get('landing_stats_v3')
         if cached:
             return LandingStatsType(**cached)
 
-        deposited = RampTransaction.objects.filter(
-            provider='koywe', direction='on_ramp', status='COMPLETED',
-        ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0')
+        from ramps.metrics import deposited_volume_by_provider
+        deposited = sum(deposited_volume_by_provider().values(), Decimal('0'))
 
         from presale.models import PresalePhase
         raised = sum((p.total_raised for p in PresalePhase.objects.all()), Decimal('0'))
@@ -1584,7 +1582,7 @@ class Query(graphene.ObjectType):
             'presale_raised_usd': float(raised),
             'registered_users': registered_users,
         }
-        cache.set('landing_stats_v2', data, 600)
+        cache.set('landing_stats_v3', data, 600)
         return LandingStatsType(**data)
 
     koywe_bank_info = graphene.List(
