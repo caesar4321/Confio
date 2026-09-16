@@ -159,9 +159,19 @@ quoted output moved 3.80% between the median and the worst sample, so the band
 must absorb an absolute swing, not a proportional one.
 
 We now omit `slippageTolerance` and take Relay's amount-aware tier as a proposal,
-bounded by `allowed_deterioration()`: `max(250bps, $0.15)`. The dollar floor is
-what keeps sub-$5 sends alive; a flat 200bps ceiling would have been a $5 minimum
-in disguise. There is no minimum transfer size — small QR/Alias/Pix sends are the
+bounded by `allowed_deterioration()`: `min(max(250bps, $0.15), 1000bps)`. The
+dollar floor is what keeps sub-$5 sends alive; a flat 200bps ceiling would have
+been a $5 minimum in disguise. The 1000bps cap exists because the floor alone
+left no ceiling where it applies -- $0.15 is 15.7% of a $1 output and 75% of a
+$0.75 one. Observed tiers peak at 495bps, so the cap keeps ~2x headroom.
+
+A separate backstop caps total cost at 2500bps. Relay prices tiny routes it
+cannot serve rather than returning `AMOUNT_TOO_LOW`: on 2026-09-15 it quoted
+$0.05 USDT to $0.0031 USDC, destroying 94%, and we would have accepted it. This
+is a cost rule, not a size floor -- it bites on value destroyed, so it moves with
+gas instead of blocking an amount. Legitimate small sends measured 11.5% at
+$0.75 and 8.68% at $1. Its message is Spanish because `NextError` text reaches
+the user verbatim through `_public_error`. There is no minimum transfer size — small QR/Alias/Pix sends are the
 product, so the cost is disclosed rather than blocked. `payout_quote` returns
 `expected_source_amount`, `expected_target` and `total_cost_percent` alongside the
 minimum, and `target_amount` is still priced off `amount_out_min`.

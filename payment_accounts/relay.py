@@ -24,6 +24,15 @@ PROTOCOL_CHAINS = {'BSC:USDT': 'bnb', 'POL:USDC': 'polygon'}
 # keep serving. Above ~$6 the bps term binds; below it the floor does.
 DETERIORATION_BPS = 250
 DETERIORATION_FLOOR_CENTS = 15
+# Without this the dollar floor leaves no ceiling at all where it applies: on a
+# $1 send $0.15 is 15.7% of the output, on a $0.75 send it is 75%. Observed
+# tiers peak at 495 bps, so 10% keeps ~2x headroom over any real quote.
+DETERIORATION_MAX_BPS = 1000
+# Relay prices tiny routes it cannot serve economically rather than refusing
+# them: on 2026-09-15 it quoted $0.05 USDT -> $0.0031 USDC, destroying 94%.
+# AMOUNT_TOO_LOW is not a reliable backstop, so cap the loss itself. This is a
+# cost rule, not a size floor: legitimate small sends measured 11.5% at $0.75.
+TOTAL_COST_MAX_BPS = 2500
 
 
 def allowed_deterioration(output, destination):
@@ -31,8 +40,17 @@ def allowed_deterioration(output, destination):
 
     Both destinations are dollar stablecoins, so the floor converts directly.
     """
-    return max(output * DETERIORATION_BPS // 10000,
-               DETERIORATION_FLOOR_CENTS * 10 ** TOKENS[destination][1] // 100)
+    floor = DETERIORATION_FLOOR_CENTS * 10 ** TOKENS[destination][1] // 100
+    return min(max(output * DETERIORATION_BPS // 10000, floor),
+               output * DETERIORATION_MAX_BPS // 10000)
+
+
+def rebase(amount, source, destination):
+    """Restate a source base-unit amount in destination units, both dollar pegs.
+
+    Amounts cross this module as integer strings; coerce rather than assume.
+    """
+    return uint(amount, positive=True) * 10 ** TOKENS[destination][1] // 10 ** TOKENS[source][1]
 
 
 class RelayError(NextError):
@@ -123,6 +141,9 @@ class RelayClient:
             minimum = uint(details['currencyOut']['minimumAmount'], positive=True)
             if minimum > output or output - minimum > allowed_deterioration(output, destination):
                 raise RelayError('Relay output exceeds the allowed slippage')
+            if output * 10000 < rebase(amount, source, destination) * (10000 - TOTAL_COST_MAX_BPS):
+                # NextError text reaches the user verbatim via _public_error.
+                raise RelayError('Este monto es muy pequeño para enviar en este momento.')
             order = result['protocol']['v2']['orderData']
             inputs, output_order = order['inputs'], order['output']
             if len(inputs) != 1 or len(output_order['payments']) != 1:

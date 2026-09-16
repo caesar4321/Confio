@@ -92,32 +92,57 @@ class RelayTests(SimpleTestCase):
                 with self.assertRaises(NextError):
                     self.route(payload)
 
-    def _with_minimum(self, out, minimum):
-        payload = deepcopy(self.payload)
+    def shaped(self, amount, out, minimum, source='BSC:USDT', destination='POL:USDC'):
+        """A quote whose input and output are consistent with each other."""
+        payload = response(source, destination, amount)
         payload['details']['currencyOut'].update(amount=str(out), minimumAmount=str(minimum))
         payload['protocol']['v2']['orderData']['output']['payments'][0].update(
             expectedAmount=str(out), minimumAmount=str(minimum))
-        return payload
+        self.session.request.return_value = mock.Mock(status_code=200, json=lambda: payload)
+        return self.client.routes(source, destination, amount, SENDER, RECIPIENT)[0]
 
     def test_accepts_relays_amount_aware_tier_on_small_sends(self):
-        # Live tiers on 2026-09-15: 335 bps at $2, 452 bps at $0.50. A fixed
-        # 0.5% clamp rejected both; the dollar-denominated ceiling accepts them.
-        for out, bps in [(1947372, 335), (450189, 452)]:
+        # Live tiers on 2026-09-15: 335 bps at $2, 409 bps at $1. A fixed 0.5%
+        # clamp rejected both; the dollar-denominated ceiling accepts them.
+        for amount, out, bps in [('1982000000000000000', 1947372, 335),
+                                 ('1000000000000000000', 913213, 409)]:
             with self.subTest(out=out, bps=bps):
-                minimum = out - out * bps // 10000
-                self.assertIsNotNone(self.route(self._with_minimum(out, minimum)))
+                self.assertIsNotNone(self.shaped(amount, out, out - out * bps // 10000))
 
     def test_rejects_deterioration_above_the_confio_ceiling(self):
-        # Floor binds below ~$6: $0.15 allowed, $0.25 refused.
-        self.assertIsNotNone(self.route(self._with_minimum(1950000, 1950000 - 150000)))
+        # Floor binds between ~$1.50 and ~$6: $0.15 allowed, $0.25 refused.
+        amount = '1982000000000000000'
+        self.assertIsNotNone(self.shaped(amount, 1950000, 1950000 - 150000))
         with self.assertRaisesRegex(RelayError, 'allowed slippage'):
-            self.route(self._with_minimum(1950000, 1950000 - 250000))
+            self.shaped(amount, 1950000, 1950000 - 250000)
 
     def test_bps_ceiling_binds_on_larger_sends(self):
         # At $100 the 250 bps term ($2.50) is the binding limit, not the floor.
-        self.assertIsNotNone(self.route(self._with_minimum(100_000000, 98_000000)))
+        amount = '100000000000000000000'
+        self.assertIsNotNone(self.shaped(amount, 100_000000, 98_000000))
         with self.assertRaisesRegex(RelayError, 'allowed slippage'):
-            self.route(self._with_minimum(100_000000, 97_000000))
+            self.shaped(amount, 100_000000, 97_000000)
+
+    def test_dollar_floor_cannot_disable_the_ceiling_on_small_sends(self):
+        # $0.15 is 15.7% of a $1 output, so the floor alone authorized almost
+        # anything exactly where it applies. The 10% cap is what binds here.
+        amount = '1000000000000000000'
+        self.assertIsNotNone(self.shaped(amount, 913213, 913213 - 91321))
+        with self.assertRaisesRegex(RelayError, 'allowed slippage'):
+            self.shaped(amount, 913213, 913213 - 91322)
+
+    def test_rejects_a_route_that_destroys_the_amount(self):
+        # Relay prices tiny routes it cannot serve (observed $0.05 -> $0.0031)
+        # rather than returning AMOUNT_TOO_LOW. 11.5% at $0.75 is legitimate.
+        amount = '1000000000000000000'
+        self.assertIsNotNone(self.shaped(amount, 760000, 760000))
+        with self.assertRaisesRegex(RelayError, 'muy pequeño'):
+            self.shaped(amount, 740000, 740000)
+
+    def test_cost_backstop_covers_the_reverse_direction(self):
+        out = 740000000000000000
+        with self.assertRaisesRegex(RelayError, 'muy pequeño'):
+            self.shaped('1000000', out, out, source='POL:USDC', destination='BSC:USDT')
 
     def test_safe_structured_error(self):
         self.session.request.return_value = mock.Mock(status_code=400, json=lambda: {'errorCode': 'AMOUNT_TOO_LOW', 'message': SENDER})
