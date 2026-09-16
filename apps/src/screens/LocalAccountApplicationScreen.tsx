@@ -218,14 +218,14 @@ function Application({ methodId }: { methodId: string }) {
     }
     return false;
   };
-  const runOpening = async (payNow: boolean) => {
+  const runOpening = async () => {
     if (openingInFlight.current) return;
     openingInFlight.current = true;
     setBusy(true);
     setError('');
     const prompts = {
       confirmFee: async (amount: string) => approves(amount),
-      confirmPayment: async (amount: string) => payNow && approves(amount),
+      confirmPayment: async (amount: string) => approves(amount),
     };
     try {
       if (!await payLocalActivation(methodId, prompts) || !alive.current) return;
@@ -241,7 +241,7 @@ function Application({ methodId }: { methodId: string }) {
           return;
         }
         if (next === 'awaiting_payment') {
-          if (!payNow || !await payLocalActivation(methodId, prompts) || !alive.current) return;
+          if (!await payLocalActivation(methodId, prompts) || !alive.current) return;
           continue;
         }
         if (next !== 'provisioning') throw new Error('No pudimos abrir tu cuenta. Escríbenos a soporte.');
@@ -422,7 +422,7 @@ function Application({ methodId }: { methodId: string }) {
         : ['credit-card', 'Tu cuenta está lista', 'Toca abajo para ver el monto antes de pagar.']]
       : fee?.amount
         ? [
-          ['credit-card', `Apertura: US$${fee.amount}`, 'Un solo pago, con tu saldo Confío.'],
+          ['credit-card', `Apertura: US$${fee.amount}`, 'Al confirmar, verificamos tu saldo, abrimos la cuenta y cobramos automáticamente cuando esté lista.'],
           ['check-circle', 'Pagas cuando esté lista', 'Si no se puede abrir, no se cobra nada.'],
         ]
         : [];
@@ -445,14 +445,14 @@ function Application({ methodId }: { methodId: string }) {
   } else if (status === 'awaiting_payment') {
     action = {
       label: fee?.amount ? `Pagar US$${fee.amount} y activar` : 'Ver el monto a pagar',
-      onPress: () => runOpening(true), disabled: busy, icon: 'check',
+      onPress: runOpening, disabled: busy, icon: 'check',
     };
   } else if (status === 'provisioning') {
-    action = { label: 'Revisar la apertura', onPress: () => runOpening(false), disabled: busy };
+    action = { label: fee?.amount ? `Abrir y pagar · US$${fee.amount}` : 'Revisar la apertura', onPress: runOpening, disabled: busy };
   } else {
     action = {
-      label: fee?.amount ? `Aceptar y solicitar · US$${fee.amount}` : 'Solicitar cuenta',
-      onPress: () => runOpening(false),
+      label: fee?.amount ? `Abrir y pagar · US$${fee.amount}` : 'Solicitar cuenta',
+      onPress: runOpening,
       disabled: !ready || !fee?.amount || busy,
       icon: 'check',
     };
