@@ -11,6 +11,40 @@ import {gql} from '@apollo/client';
 // verified KYC, eligibility policy); phone country only orders rows.
 
 export type LocalMethodStatus = 'live' | 'needs_verification' | 'needs_document' | 'unavailable';
+
+/** Permanent eligibility refusals, separate from a missing document or a
+ * residence restriction. The current policy blocks Venezuelan nationality. */
+const IDENTITY_BLOCKED_REASONS = new Set([
+  'infinia_nationality_not_supported',
+]);
+
+/** True when this rail is refused because of who they are, not what they are missing. */
+export const isIdentityBlocked = (method: {status: string; reason?: string}): boolean =>
+  method.status === 'unavailable' && IDENTITY_BLOCKED_REASONS.has(method.reason || '');
+
+/** Nationality eligibility cannot be resolved by uploading another document. */
+export function showIdentityBlockedInterest(
+  title: string,
+  onStage: (stage: 'tap' | 'confirmed') => void,
+): void {
+  onStage('tap');
+  Alert.alert(
+    title,
+    'Por ahora este servicio no está disponible para personas de nacionalidad venezolana, '
+      + 'aunque tengan un documento de otro país. ¿Quieres que te avisemos cuando esté disponible para ti?',
+    [
+      {text: 'Solo miraba', style: 'cancel'},
+      {
+        text: 'Sí, avísame',
+        onPress: () => {
+          onStage('confirmed');
+          Alert.alert('¡Anotado!', 'Registramos tu interés para avisarte cuando esté disponible.');
+        },
+      },
+    ],
+  );
+}
+
 export type LocalPairStatus =
   | 'none'
   | 'active'

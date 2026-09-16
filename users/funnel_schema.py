@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import json
+import ipaddress
 
 import graphene
 
@@ -26,7 +27,31 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'financiera_whatsapp_tapped',
     'receive_rail_interest',
     'local_rail_interest',
+    'local_rail_blocked_interest',
 })
+
+
+def _cached_ip_country(meta):
+    """Best-effort country enrichment; analytics must not make network calls."""
+    from security.geo import normalize_country
+    from security.models import IPAddress
+    from security.request_utils import extract_client_ip_from_meta
+
+    meta = meta or {}
+    country = normalize_country(meta.get('HTTP_CF_IPCOUNTRY'))
+    if country:
+        return country
+    client_ip = extract_client_ip_from_meta(meta)
+    if not client_ip:
+        return ''
+    try:
+        if not ipaddress.ip_address(client_ip).is_global:
+            return ''
+    except ValueError:
+        return ''
+    country = IPAddress.objects.filter(ip_address=client_ip).values_list(
+        'country_code', flat=True).first()
+    return normalize_country(country) or ''
 
 
 class TrackFunnelEvent(graphene.Mutation):
@@ -96,6 +121,14 @@ class TrackFunnelEvent(graphene.Mutation):
         if not country and user is not None:
             country = getattr(user, 'phone_country', '') or ''
 
+        # Estimated request country for demand analytics; VPNs/proxies can
+        # differ from physical location. Store only the country, never the IP.
+        try:
+            ip_country = _cached_ip_country(getattr(info.context, 'META', {}))
+        except Exception:
+            logger.warning('[funnel] ip country lookup failed')
+            ip_country = ''
+
         try:
             from users.funnel import emit_event, emit_once
             dedupe_key = str(properties.get('dedupe_key') or '') if isinstance(properties, dict) else ''
@@ -105,6 +138,7 @@ class TrackFunnelEvent(graphene.Mutation):
                     user=user,
                     session_id=session_id or '',
                     country=country or '',
+                    ip_country=ip_country,
                     platform=platform or '',
                     source_type=source_type or '',
                     channel=channel or '',
@@ -117,6 +151,7 @@ class TrackFunnelEvent(graphene.Mutation):
                     user=user,
                     session_id=session_id or '',
                     country=country or '',
+                    ip_country=ip_country,
                     platform=platform or '',
                     source_type=source_type or '',
                     channel=channel or '',

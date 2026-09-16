@@ -408,7 +408,8 @@ def receive_account(owner, method_id):
         local, crypto = None, None
     if local:
         instruction = receive_instructions(local, method).first()
-        capabilities = {row.capability: row.status for row in local.capabilities.all()}
+        from .payin_admission import receiving_capabilities
+        capabilities = receiving_capabilities(local)
     return {
         'method': method, 'status': public_status, 'local': local, 'crypto': crypto,
         'instruction_kind': instruction.kind if instruction else method.instruction_kind,
