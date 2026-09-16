@@ -135,9 +135,19 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         # one unresolved row denied that wallet every future bridge. Funds are
         # protected by reserved_usdt_wei, which reserves for submitted/prepared
         # only, because by 'bridging' the USDT has already left the wallet.
-        if PaymentBridgeTransfer.objects.filter(quote__source_address=q.source_address).filter(
-                Q(status__in=['submitted', 'bridging']) |
-                Q(status='prepared', deadline__gt=int(time.time()))).exists():
+        now_ts = int(time.time())
+        holder = PaymentBridgeTransfer.objects.filter(quote__source_address=q.source_address).filter(
+            Q(status__in=['submitted', 'bridging']) |
+            Q(status='prepared', deadline__gt=now_ts)).order_by('-deadline').first()
+        if holder is not None:
+            # An abandoned preparation reserves the wallet until its deadline.
+            # "Check its status" is useless advice there -- nothing was ever
+            # submitted -- so say how long the hold lasts instead.
+            if holder.status == 'prepared' and not holder.source_tx_hash:
+                wait = max(1, holder.deadline - now_ts)
+                left = f'{wait // 60} min' if wait >= 60 else f'{wait} s'
+                raise NextError(
+                    f'Tu envío anterior sigue reservado. Vuelve a intentarlo en {left}.')
             raise NextError('Ya tienes un envío en curso; revisa su estado primero.')
         if q.expires_at <= timezone.now():
             raise NextError('Quote expired; request a fresh quote')

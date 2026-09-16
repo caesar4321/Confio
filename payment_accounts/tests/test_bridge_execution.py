@@ -274,6 +274,16 @@ class BridgeRecoveryTests(BridgeExecutionTests):
     def test_second_preparation_for_pending_wallet_is_rejected(self):
         self.prepared()
         self.request_id = uuid.uuid4()
+        # Nothing was submitted, so "check its status" is useless: say how long
+        # the reservation holds the wallet instead.
+        with self.assertRaisesRegex(NextError, 'sigue reservado'):
+            self.prepared()
+
+    def test_an_in_flight_transfer_still_says_check_its_status(self):
+        t, _ = self.prepared()
+        PaymentBridgeTransfer.objects.filter(pk=t.pk).update(
+            status='submitted', source_tx_hash='0x' + 'ab' * 32)
+        self.request_id = uuid.uuid4()
         with self.assertRaisesRegex(NextError, 'en curso'):
             self.prepared()
 
