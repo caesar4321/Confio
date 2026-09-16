@@ -192,6 +192,10 @@ export const rampFlowStyles = StyleSheet.create({
 
   // ── Local-money additions, built from the same tokens ──
   textInput: { flex: 1, fontSize: 17, fontWeight: '600', color: colors.dark, paddingVertical: 10 },
+  recipientCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.white,
+    borderRadius: 16, padding: 16, marginTop: 12,
+  },
   verifiedCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#f0fdf4', borderRadius: 16, padding: 16,
     marginTop: 12, borderWidth: 1, borderColor: '#bbf7d0',
