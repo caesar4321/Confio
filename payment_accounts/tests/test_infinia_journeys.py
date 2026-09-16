@@ -81,6 +81,25 @@ class JourneyTests(TestCase):
             source_account_id=source, target_account_id=target, source_amount=amount, target_amount=output,
             expire_at=(timezone.now()+timedelta(minutes=1)).isoformat())
 
+    def test_dead_review_journey_does_not_block_the_next_payment(self):
+        """A needs_review row the worker will never touch must not gate anyone."""
+        from payment_accounts.infinia_bridge import RECOVERABLE_DELAYS, live_journeys
+        first = self.inbound()
+        InfiniaJourney.objects.filter(pk=first.pk).update(
+            stage='needs_review', failure_code='bridge_not_delivered')
+        self.assertFalse(live_journeys(InfiniaJourney.objects.filter(pk=first.pk)).exists())
+        second = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+            request_id=uuid.uuid4(), minimum_fx_output='2', minimum_wallet_output='2.4',
+            direction='to_wallet', credit=self.credit(self.local))
+        self.assertNotEqual(second.pk, first.pk)
+        # A review the worker WILL retry is still in flight and still blocks.
+        InfiniaJourney.objects.filter(pk=second.pk).update(
+            stage='needs_review', failure_code=sorted(RECOVERABLE_DELAYS)[0])
+        with self.assertRaisesRegex(PaymentAccountError, 'en curso'):
+            create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                request_id=uuid.uuid4(), minimum_fx_output='2', minimum_wallet_output='2.4',
+                direction='to_wallet', credit=self.credit(self.local))
+
     def test_unidentified_deposit_cannot_create_journey(self):
         with self.assertRaisesRegex(PaymentAccountError, 'Pay-in requires review'):
             create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,

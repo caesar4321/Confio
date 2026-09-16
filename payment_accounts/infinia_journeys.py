@@ -13,6 +13,7 @@ from .clients import InfiniaClient
 from .eligibility import context_from_identity, enforce_and_record
 from .models import InfiniaJourney, MoneyFlow, MoneyOperation, LedgerEntry
 from .services import PaymentAccountError, _require_provider_enabled, _require_capability, submit_money_operation
+from .infinia_bridge import SETTLED_BRIDGE_FAILURES, live_journeys
 
 
 def enabled():
@@ -123,10 +124,12 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
             status__in=['created', 'submitted', 'processing', 'settling', 'unknown']).exclude(
                 money_flow__infinia_journey__stage='completed').exists():
         raise PaymentAccountError('An existing provider operation is still pending')
-    # One provider journey per owner while unsettled; reserve the credit for
-    # exactly one journey and avoid concurrent conversion/payout balance races.
-    if InfiniaJourney.objects.filter(confio_account=owner).exclude(stage__in=['completed', 'failed']).exists():
-        raise PaymentAccountError('An existing local payment is still pending')
+    # One provider journey per owner while unsettled, to avoid concurrent
+    # conversion/payout balance races. Only journeys the worker will still
+    # advance can race: a needs_review row nothing will ever touch again must
+    # not deny the owner every future payment (production lockout 2026-09-15).
+    if live_journeys(InfiniaJourney.objects.filter(confio_account=owner)).exists():
+        raise PaymentAccountError('Ya tienes un pago local en curso.')
     if credit and InfiniaJourney.objects.filter(funding_credit=credit).exists():
         raise PaymentAccountError('Deposit already used by a journey')
     flow = MoneyFlow.objects.create(confio_account=owner, kind='withdraw' if direction == 'to_bank' else 'fund',
@@ -266,7 +269,11 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             _state(j, 'needs_review', failure='wallet_changed'); return j
         source, target = (j.crypto_account, j.local_account) if j.direction == 'to_bank' else (j.local_account, j.crypto_account)
         if not j.funding_credit_id:
-            if j.bridge.status in {'failed', 'expired', 'refunded', 'needs_review'}:
+            if j.bridge.status in SETTLED_BRIDGE_FAILURES:
+                # Resolved: nothing moved, or the refund is back in the user's
+                # own wallet. Terminal for the journey, and nothing to review.
+                _state(j, 'failed', failure='bridge_' + j.bridge.status); return j
+            if j.bridge.status == 'needs_review':
                 _state(j, 'needs_review', failure='bridge_not_delivered'); return j
             if not j.bridge.provider_credit_id:
                 return j
