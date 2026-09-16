@@ -165,8 +165,8 @@ def _credit_for_operation(operation, account, *, voucher_entry=None):
     accepted = [e for e in entries if (e.provider_data.get('operation') or {}).get('type') in {'INTERNAL_TRANSFER', 'CREDIT'}]
     if accepted and voucher_entry is None:
         return sum((e.amount for e in accepted), Decimal(0))
-    # Some fiat legs arrive as bank credits with no operation_id. Infinia's
-    # completed transfer supplies voucher_ids, which bind those exact credits.
+    # Some legs arrive without operation_id. Infinia's completed transfer
+    # supplies voucher_ids: bank vouchers, or Polygon transaction hashes.
     # Never infer this relationship from amounts/descriptions or mutate the
     # original webhook evidence to manufacture an operation_id.
     data = operation.provider_data or {}
@@ -189,12 +189,29 @@ def _credit_for_operation(operation, account, *, voucher_entry=None):
         expected = positive(data.get('destination_amount'))
     except (ValueError, TypeError, ArithmeticError, PaymentAccountError):
         return Decimal(0)
-    candidates = list(LedgerEntry.objects.filter(financial_account=account, provider='infinia',
+    from django.db.models import Q
+    from .providers.common import same_country
+    import re
+    polygon = account.asset == 'USDC_POL' and same_country(account.country, 'XX')
+    matching = Q(provider_data__third_party__voucher_id__in=vouchers)
+    if polygon:
+        matching |= Q(provider_data__third_party__transaction_hash__in=vouchers)
+    candidates = list(LedgerEntry.objects.filter(matching, financial_account=account, provider='infinia',
         direction='credit', asset=account.asset, amount__gt=0,
-        provider_data__third_party__voucher_id__in=vouchers).select_related('operation'))
+        ).select_related('operation'))
+    def voucher_for(entry):
+        sender = entry.provider_data.get('third_party') or {}
+        voucher, tx_hash = sender.get('voucher_id'), sender.get('transaction_hash')
+        if polygon and tx_hash:
+            if (sender.get('type') != 'CRYPTO' or sender.get('crypto_network') != 'POLYGON'
+                    or not isinstance(tx_hash, str) or not re.fullmatch(r'0x[0-9a-fA-F]{64}', tx_hash)
+                    or (voucher and voucher != tx_hash)):
+                return None
+            return tx_hash
+        return voucher
     if (len(candidates) != len(vouchers)
             or (voucher_entry is not None and voucher_entry.pk not in {e.pk for e in candidates})
-            or {e.provider_data['third_party']['voucher_id'] for e in candidates} != set(vouchers)
+            or {voucher_for(e) for e in candidates} != set(vouchers)
             or any(e.provider_data.get('operation') for e in candidates)
             or any(e.operation_id and e.operation_id != operation.pk
                    and e.operation.operation_type not in {'deposit', 'payin'} for e in candidates)):

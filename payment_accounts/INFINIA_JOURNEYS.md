@@ -17,6 +17,10 @@ capability data defaults to enabled: Confío owns country/rail/recipient approva
 Explicit provider restrictions still override that default. Capability sync does
 not create or enable any Confío recipient grants.
 
+Conversion settlement may reference a bank `voucher_id` or, for USDC on Polygon,
+a crypto credit's `transaction_hash`. Match the completed conversion's exact
+voucher set, account identities and amount; never infer settlement from amount alone.
+
 Migration `0023` introduces `AutomaticPayin`, one durable job per ledger credit.
 Authenticated new external-fiat movements enqueue it in the webhook transaction.
 The existing journey worker processes the queue and creates a direct-to-wallet
