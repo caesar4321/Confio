@@ -242,20 +242,35 @@ def _authorized_fx_quote(j, source, target, amount, client=None):
 FX_REQUOTE_LIMIT = 3
 
 
-def never_executed(op):
-    """True when the provider refused this leg without creating an operation.
+def expired_fx_rejection(op, quote_id):
+    """Only an explicit rejection of this exact expired quote can be retried.
 
-    No provider operation id and no refund means nothing happened on their side.
-    Retries reuse this row, so the idempotency key never changes and a submission
-    the provider did record would deduplicate instead of converting twice.
+    Absence of an operation ID (or a refund) is not proof of non-execution.
+    A fresh provider lookup is additionally required before changing terms.
     """
-    return bool(op) and op.status == 'failed' and not op.provider_operation_id and not has_refund(op)
+    data = op.provider_data if op and isinstance(op.provider_data, dict) else {}
+    return bool(op and quote_id and op.operation_type == 'conversion'
+        and op.status == 'failed' and not op.provider_operation_id
+        and op.failure_code == '400' and data.get('status') == 'fail'
+        and data.get('message') == f'Quote: {quote_id} is expired')
+
+
+def _explicitly_empty_lookup(payload):
+    if isinstance(payload, list):
+        return payload == []
+    # Accept only an unambiguous paginated empty collection, not arbitrary
+    # error objects containing an empty data/results field.
+    return (isinstance(payload, dict)
+        and set(payload).issubset({'results', 'count', 'next', 'previous'})
+        and payload.get('results') == [] and type(payload.get('count')) is int
+        and payload['count'] == 0 and not payload.get('next'))
 
 
 def _requotable(j):
     """A journey parked for review solely because its conversion never ran."""
     return (j.failure_code == 'provider_leg_requires_review'
-            and not j.payout_operation_id and never_executed(j.fx_operation))
+            and not j.payout_operation_id
+            and expired_fx_rejection(j.fx_operation, j.fx_quote.get('id')))
 
 
 def _new_operation(j, leg, source, target, amount):
@@ -358,24 +373,45 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             j.save(update_fields=['fx_quote', 'fx_operation', 'updated_at'])
             _state(j, 'converting')
             operation = j.fx_operation
-        elif never_executed(j.fx_operation):
-            # The provider refused this submission outright -- an expired quote,
-            # typically -- without creating anything, so nothing moved. Re-quote
-            # on the SAME operation row: its idempotency key is unchanged, so a
-            # submission the provider did record deduplicates instead of
-            # converting twice. A human has nothing to decide here.
+        elif expired_fx_rejection(j.fx_operation, j.fx_quote.get('id')):
+            # Reuse the operation only after explicit quote rejection AND an
+            # authoritative empty lookup. Idempotency alone does not authorize
+            # changing the quote on an ambiguously executed request.
             tries = int((j.money_flow.metadata or {}).get('fx_requote_count', 0))
             if tries >= FX_REQUOTE_LIMIT:
                 _state(j, 'needs_review', failure='fx_quote_retries_exhausted'); return j
+            lookup = (client or InfiniaClient()).find_operation('conversion', j.fx_operation.idempotency_key)
+            if not _explicitly_empty_lookup(lookup):
+                _state(j, 'needs_review', failure='fx_requote_provider_unresolved'); return j
+            # Reject contradictory ledger evidence even if a lookup returns []:
+            # a missing provider operation ID must never bypass a known debit.
+            if LedgerEntry.objects.filter(operation=j.fx_operation, direction='debit').exists():
+                _state(j, 'needs_review', failure='fx_requote_debit_exists'); return j
             amount = positive(j.fx_operation.source_amount)
             quote = _authorized_fx_quote(j, source, target, amount, client)
             if quote is None:
                 _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
+            if j.direction == 'to_wallet' and j.minimum_wallet_output is not None:
+                from .infinia_bridge import preflight, InfiniaBridgeReview
+                try:
+                    preflight(j, positive(quote['target_amount']))
+                except InfiniaBridgeReview:
+                    _state(j, 'needs_review', failure='direct_bridge_unavailable'); return j
             operation = j.fx_operation
-            operation.status = 'created'
-            operation.provider_data = dict(operation.provider_data or {}, quote_id=quote['id'])
-            operation.save(update_fields=['status', 'provider_data', 'updated_at'])
-            j.money_flow.metadata = dict(j.money_flow.metadata or {}, fx_requote_count=tries + 1)
+            previous = dict(operation.provider_data)
+            changed = MoneyOperation.objects.filter(pk=operation.pk, status='failed',
+                provider_operation_id=operation.provider_operation_id,
+                updated_at=operation.updated_at, provider_data=previous).update(
+                    status='created', failure_code='', failure_detail='',
+                    provider_data={'quote_id': quote['id']}, updated_at=timezone.now())
+            if not changed:
+                return j
+            operation.refresh_from_db()
+            history = list((j.money_flow.metadata or {}).get('fx_requote_history', []))
+            history.append({'previous_quote_id': j.fx_quote['id'], 'quote_id': quote['id'],
+                            'rejection': previous, 'provider_lookup': 'empty'})
+            j.money_flow.metadata = dict(j.money_flow.metadata or {}, fx_requote_count=tries + 1,
+                                        fx_requote_history=history)
             j.money_flow.save(update_fields=['metadata'])
             j.fx_quote = quote
             j.save(update_fields=['fx_quote', 'updated_at'])

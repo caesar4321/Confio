@@ -153,7 +153,7 @@ class RelayClient:
             minimum = uint(details['currencyOut']['minimumAmount'], positive=True)
             if minimum > output or output - minimum > allowed_deterioration(output, destination):
                 raise RelayError('Relay output exceeds the allowed slippage')
-            if output * 10000 < rebase(amount, source, destination) * (10000 - TOTAL_COST_MAX_BPS):
+            if minimum * 10000 < rebase(amount, source, destination) * (10000 - TOTAL_COST_MAX_BPS):
                 # NextError text reaches the user verbatim via _public_error.
                 raise RelayError('Este monto es muy pequeño para enviar en este momento.')
             order = result['protocol']['v2']['orderData']

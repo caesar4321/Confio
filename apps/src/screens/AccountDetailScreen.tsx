@@ -34,6 +34,8 @@ import { InlineBanner } from '../components/common/InlineBanner';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { EmptyState } from '../components/EmptyState';
+import { IconChip } from '../components/icons/IconChip';
+import { transactionVisual } from '../components/icons/vocabulary';
 import cUSDLogo from '../assets/png/cUSD.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
@@ -1093,42 +1095,17 @@ export const AccountDetailScreen = () => {
     }
   };
 
-  // Icon chip per category: colored glyph on a soft tint of the same color,
-  // matching the app-wide icon-chip grammar. Sent stays neutral — outgoing
-  // money is not an alert.
-  const getTransactionVisual = (transaction: Transaction): { icon: string; color: string; bg: string } => {
-    if (transaction.description?.startsWith('Ondo Stocks: ')) {
-      return { icon: 'trending-up', color: colors.primaryDark, bg: colors.primarySoft };
-    }
-    switch (transaction.type) {
-      case 'received':
-        return { icon: 'arrow-down', color: colors.primaryDark, bg: colors.primarySoft };
-      case 'sent':
-        return { icon: 'arrow-up', color: colors.text.primary, bg: colors.neutralDark };
-      case 'exchange':
-        return { icon: 'refresh-cw', color: colors.accent, bg: '#EFF6FF' };
-      case 'conversion':
-        return { icon: 'repeat', color: colors.primaryDark, bg: colors.primarySoft };
-      case 'ramp':
-        return { icon: 'repeat', color: '#0EA5E9', bg: '#E0F2FE' };
-      case 'payment':
-        return { icon: 'shopping-bag', color: colors.secondary, bg: colors.violetLight };
-      case 'reward':
-        return { icon: 'gift', color: colors.offRampIcon, bg: colors.warningLight };
-      case 'presale':
-        return { icon: 'lock', color: '#6366F1', bg: '#EEF2FF' };
-      case 'payroll':
-        return { icon: 'briefcase', color: colors.primaryDark, bg: colors.primarySoft };
-      case 'humanitarian':
-        return { icon: 'heart', color: '#E11D48', bg: '#FFE4E6' };
-      default:
-        return { icon: 'arrow-up', color: colors.text.secondary, bg: colors.neutralDark };
-    }
-  };
-
-  const getTransactionIcon = (transaction: Transaction) => {
-    const visual = getTransactionVisual(transaction);
-    return <Icon name={visual.icon} size={20} color={visual.color} />;
+  // Which row kind the shared icon vocabulary should draw. A local transfer
+  // arrives typed as a plain send or receive, so the journey id is what tells
+  // it apart — without this it fell through to the default arrow.
+  const getTransactionVisual = (transaction: Transaction) => {
+    const kind = transaction.description?.startsWith('Ondo Stocks: ') ? 'stocks'
+      : transaction.localTransferId ? 'local_transfer'
+      : transaction.type;
+    // Credits carry a leading +, which is the same signal the row already
+    // uses to color its amount.
+    const incoming = transaction.type === 'received' || transaction.amount.startsWith('+');
+    return transactionVisual(kind, incoming);
   };
 
   // Use unified transactions if available, fallback to legacy format
@@ -1650,9 +1627,11 @@ export const AccountDetailScreen = () => {
         accessibilityLabel={transactionAccessibilityLabel}
         accessibilityHint="Abre el detalle de la transacción."
       >
-        <View style={[styles.transactionIconContainer, { backgroundColor: getTransactionVisual(transaction).bg }]}>
-          {getTransactionIcon(transaction)}
-        </View>
+        <IconChip
+          visual={getTransactionVisual(transaction)}
+          radius={12}
+          style={styles.transactionIconContainer}
+        />
         <View style={styles.transactionInfo}>
           <View style={styles.transactionTitleRow}>
             {(() => {
@@ -3354,12 +3333,6 @@ const styles = StyleSheet.create({
     borderColor: colors.error.border,
   },
   transactionIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.neutralDark,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   transactionInfo: {

@@ -144,6 +144,10 @@ class RelayTests(SimpleTestCase):
         with self.assertRaisesRegex(RelayError, 'muy pequeño'):
             self.shaped('1000000', out, out, source='POL:USDC', destination='BSC:USDT')
 
+    def test_cost_backstop_applies_to_authorized_minimum_not_expected(self):
+        with self.assertRaisesRegex(RelayError, 'muy pequeño'):
+            self.shaped('1000000000000000000', 760000, 740000)
+
     def test_safe_structured_error(self):
         self.session.request.return_value = mock.Mock(status_code=400, json=lambda: {'errorCode': 'AMOUNT_TOO_LOW', 'message': SENDER})
         with self.assertRaisesRegex(RelayError, 'too low') as caught:
@@ -219,6 +223,15 @@ class RelaySettlementTests(SimpleTestCase):
             reconcile_relay(self.transfer, client=self.client)
         self.assertEqual(self.transfer.status, 'needs_review')
         self.assertEqual(self.transfer.failure_code, 'relay_refund_amount_mismatch')
+
+    def test_zero_received_is_never_a_complete_refund(self):
+        self.transfer.quote.amount_units = str(10**17)
+        self.status['status'] = 'refund'
+        with mock.patch('payment_accounts.relay_settlement._source_evidence', return_value=True), \
+             mock.patch('payment_accounts.relay_settlement.chain.final_receipt', return_value={}), \
+             mock.patch('payment_accounts.relay_settlement.chain.received_units', return_value=0):
+            reconcile_relay(self.transfer, client=self.client)
+        self.assertEqual(self.transfer.status, 'needs_review')
 
     def test_refund_larger_than_the_deposit_requires_review(self):
         with mock.patch('payment_accounts.relay_settlement.chain.final_receipt',

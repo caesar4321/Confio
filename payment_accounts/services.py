@@ -800,6 +800,13 @@ def submit_money_operation(operation):
             ).exclude(money_flow_id=operation.money_flow_id)
             if contenders.exists():
                 raise PaymentAccountError('Provider funds are reserved by an active journey')
+            # Worker eligibility is not a funds reservation. A parked journey's
+            # unknown/submitted operation can still settle externally.
+            if MoneyOperation.objects.filter(provider=operation.provider,
+                    source_account=operation.source_account,
+                    status__in=['created', 'submitted', 'processing', 'settling', 'unknown']
+                    ).exclude(money_flow_id=operation.money_flow_id).exists():
+                raise PaymentAccountError('Provider funds are reserved by an unresolved operation')
         if operation.operation_type == 'payout':
             if operation.provider == 'infinia':
                 from .payin_admission import require_source_admitted

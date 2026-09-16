@@ -19,6 +19,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { APP_LAYOUT } from '../config/layout';
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { IconChip } from '../components/icons/IconChip';
+import { notificationVisual } from '../components/icons/vocabulary';
 import { Header } from '../navigation/Header';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
@@ -106,6 +108,16 @@ const normalizeRampNotificationPayload = (data: any, notifType: string, createdA
 };
 
 type NotificationScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
+
+// The data blob arrives either parsed or as a JSON string depending on the
+// server version, and a malformed one must not take the row down with it.
+const parseNotificationData = (data: any): any => {
+  let parsed = data;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch { parsed = {}; }
+  }
+  return parsed && typeof parsed === 'object' ? parsed : {};
+};
 
 interface Notification {
   id: string;
@@ -368,9 +380,7 @@ export const NotificationScreen = () => {
     if (notifType === 'RAMP_PENDING' || notifType === 'RAMP_PROCESSING' || notifType === 'RAMP_COMPLETED' || notifType === 'RAMP_FAILED') baseTxnType = 'ramp';
 
     // Parse data blob once
-    let parsedData: any = notification.data;
-    if (typeof parsedData === 'string') { try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; } }
-    if (parsedData == null || typeof parsedData !== 'object') parsedData = {};
+    const parsedData: any = parseNotificationData(notification.data);
     const localRoute = notifType === 'LOCAL_TRANSFER_UPDATED' ? localTransferRoute(parsedData.local_transfer_id) : null;
     if (localRoute) {
       navigation.navigate(localRoute.screen, localRoute.params);
@@ -1003,72 +1013,6 @@ export const NotificationScreen = () => {
     }
   }, [hasNextPage, loading, fetchMore, data, canQueryNotifications]);
 
-  const getNotificationIcon = (type: string) => {
-    const iconMap: { [key: string]: { icon: string; color: string } } = {
-      // Send transactions
-      SEND_RECEIVED: { icon: 'download', color: colors.primaryDark },
-      SEND_SENT: { icon: 'send', color: colors.accent },
-      SEND_INVITATION_SENT: { icon: 'user-plus', color: colors.secondary },
-      SEND_INVITATION_CLAIMED: { icon: 'user-check', color: colors.primaryDark },
-      INVITE_RECEIVED: { icon: 'gift', color: colors.primaryDark },
-      SEND_INVITATION_EXPIRED: { icon: 'user-x', color: colors.danger },
-      SEND_FROM_EXTERNAL: { icon: 'download', color: '#06B6D4' },
-
-      // Payment transactions
-      PAYMENT_RECEIVED: { icon: 'credit-card', color: colors.primaryDark },
-      PAYMENT_SENT: { icon: 'credit-card', color: colors.accent },
-      INVOICE_PAID: { icon: 'file-text', color: colors.primaryDark },
-      PAYROLL_RECEIVED: { icon: 'briefcase', color: colors.primaryDark },
-      PAYROLL_SENT: { icon: 'briefcase', color: colors.accent },
-
-      // P2P Trade
-      P2P_OFFER_RECEIVED: { icon: 'bell', color: colors.offRampIcon },
-      P2P_OFFER_ACCEPTED: { icon: 'check-circle', color: colors.primaryDark },
-      P2P_TRADE_STARTED: { icon: 'refresh-cw', color: colors.secondary },
-      P2P_PAYMENT_CONFIRMED: { icon: 'check', color: colors.primaryDark },
-      P2P_CRYPTO_RELEASED: { icon: 'unlock', color: colors.primaryDark },
-      P2P_TRADE_COMPLETED: { icon: 'check-circle', color: colors.primaryDark },
-      P2P_TRADE_CANCELLED: { icon: 'x-circle', color: colors.danger },
-      P2P_TRADE_DISPUTED: { icon: 'alert-triangle', color: colors.offRampIcon },
-
-      // Conversion
-      CONVERSION_COMPLETED: { icon: 'refresh-cw', color: colors.secondary },
-      CONVERSION_FAILED: { icon: 'x-circle', color: colors.danger },
-
-      // USDC
-      USDC_DEPOSIT_PENDING: { icon: 'clock', color: colors.offRampIcon },
-      USDC_DEPOSIT_COMPLETED: { icon: 'download', color: '#06B6D4' },
-      USDC_WITHDRAWAL_COMPLETED: { icon: 'upload', color: '#06B6D4' },
-      RAMP_PENDING: { icon: 'repeat', color: colors.offRampIcon },
-      RAMP_PROCESSING: { icon: 'download', color: colors.accent },
-      RAMP_COMPLETED: { icon: 'repeat', color: '#06B6D4' },
-      RAMP_FAILED: { icon: 'x-circle', color: colors.danger },
-
-      // Account & Security
-      ACCOUNT_VERIFIED: { icon: 'user-check', color: colors.primaryDark },
-      SECURITY_ALERT: { icon: 'shield', color: colors.danger },
-      NEW_LOGIN: { icon: 'log-in', color: colors.offRampIcon },
-
-      // Business
-      BUSINESS_EMPLOYEE_ADDED: { icon: 'users', color: colors.secondary },
-      BUSINESS_PERMISSION_CHANGED: { icon: 'settings', color: colors.offRampIcon },
-
-      // General
-      PROMOTION: { icon: 'gift', color: '#EC4899' },
-      SYSTEM: { icon: 'info', color: colors.text.secondary },
-      ANNOUNCEMENT: { icon: 'bell', color: colors.accent },
-
-      // Achievements
-      ACHIEVEMENT_EARNED: { icon: 'award', color: '#FFD700' },
-
-      // Referrals
-      REFERRAL_FRIEND_JOINED: { icon: 'users', color: '#F97316' },
-      REFERRAL_FIRST_TRANSACTION: { icon: 'trending-up', color: colors.primaryDark },
-      REFERRAL_ACTION_REMINDER: { icon: 'target', color: '#F97316' },
-    };
-
-    return iconMap[type] || { icon: 'bell', color: colors.text.secondary };
-  };
 
   const formatTime = (dateString: string) => {
     moment.locale('es');
@@ -1172,7 +1116,17 @@ export const NotificationScreen = () => {
       if (item.notificationType === 'PAYROLL_RECEIVED') {
       }
 
-      const { icon, color } = getNotificationIcon(item.notificationType);
+      const localData = item.notificationType === 'LOCAL_TRANSFER_UPDATED'
+        ? parseNotificationData(item.data)
+        : null;
+      const visual = notificationVisual(item.notificationType, localData ? {
+        stage: localData.stage,
+        // Notices stored before the payload carried a direction still have the
+        // title the server built from that same direction.
+        incoming: localData.direction
+          ? localData.direction === 'to_wallet'
+          : item.title === 'Ingreso por cuenta local',
+      } : undefined);
 
       // Process title and message to replace with contact names
       const processedTitle = replaceWithContactNames(item.title, item.data);
@@ -1186,9 +1140,11 @@ export const NotificationScreen = () => {
           ]}
           onPress={() => handleNotificationPress(item)}
         >
-          <View style={[styles.notificationIcon, { backgroundColor: `${color}20` }]}>
-            <Icon name={icon as any} size={20} color={color} />
-          </View>
+          <IconChip
+            visual={visual}
+            ringColor={item.isRead ? colors.background : colors.primarySoft}
+            style={styles.notificationIcon}
+          />
           <View style={styles.notificationContent}>
             <View style={styles.notificationHeader}>
               <Text style={[
@@ -1459,11 +1415,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   notificationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   notificationContent: {

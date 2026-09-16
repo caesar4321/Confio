@@ -40,6 +40,9 @@ class ActivityTests(TestCase):
         sync_activity(j.pk)
         self.assertEqual(UnifiedTransactionTable.objects.filter(local_money_flow=j.money_flow).count(), 1)
         self.assertEqual(Notification.objects.filter(data__local_transfer_id=str(j.internal_id)).count(), 1)
+        notice = Notification.objects.get(data__local_transfer_id=str(j.internal_id))
+        self.assertEqual(notice.data['direction'], 'to_bank')
+        self.assertEqual(notice.data['stage'], 'awaiting_credit')
         j.stage='completed'; j.save()
         self.assertEqual(sync_activity(j.pk).status, 'CONFIRMED')
 
@@ -176,6 +179,8 @@ class ActivityTests(TestCase):
         notice.refresh_from_db()
         self.assertEqual(notice.notification_type, 'LOCAL_TRANSFER_UPDATED')
         self.assertEqual(notice.data['local_transfer_id'], str(j.internal_id))
+        self.assertEqual(notice.data['direction'], 'to_bank')
+        self.assertEqual(notice.data['stage'], 'needs_review')
         self.assertEqual(display_stage(j), 'needs_review')
         self.assertTrue(arrival_owned(tx, j.wallet_address))
         self.assertFalse(arrival_owned(tx, '0x' + '99' * 20))
@@ -310,6 +315,7 @@ class ActivityTests(TestCase):
         receipt.refresh_from_db(); notice.refresh_from_db()
         self.assertIsNotNone(receipt.deleted_at)
         self.assertEqual(notice.data['local_transfer_id'], str(j.internal_id))
+        self.assertEqual(notice.data['direction'], 'to_wallet')
         self.assertEqual(row.created_at, j.created_at)
 
     def test_known_arrival_cannot_be_recreated_as_external_deposit(self):

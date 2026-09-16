@@ -81,6 +81,7 @@ def arrival_owned(tx_hash, wallet):
 
 def _retarget_notice(notice, j, label):
     notice.data = dict(notice.data, local_transfer_id=str(j.internal_id),
+        direction=j.direction, stage=display_stage(j),
         pending_auto_mint=False, corrected_to_local_transfer=True)
     notice.title, notice.message = label, 'Consulta el estado de tu transferencia.'
     notice.notification_type = 'LOCAL_TRANSFER_UPDATED'
@@ -193,7 +194,8 @@ def sync_activity(journey_id, *, notify=True):
                      'El puente devolvió los fondos. Consulta el importe y la moneda recibidos.' if stage == 'refunded' else
                      'No se completó. Consulta el estado antes de intentarlo de nuevo.' if stage in ['failed', 'needs_review']
                      else 'Tu transferencia está en proceso.'),
-            data={'event_key': key, 'local_transfer_id': str(j.internal_id), 'stage': stage},
+            data={'event_key': key, 'local_transfer_id': str(j.internal_id), 'stage': stage,
+                  'direction': j.direction},
             send_push=False,
             action_url=f'confio://local-transfer/{j.internal_id}',
             related_object_type='InfiniaJourney', related_object_id=str(j.internal_id))
