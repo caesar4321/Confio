@@ -212,6 +212,52 @@ def has_refund(operation):
         provider_data__operation__operation_id=operation.provider_operation_id).exists()
 
 
+def _authorized_fx_quote(j, source, target, amount, client=None):
+    """A fresh provider quote, or None when it falls outside the authorization.
+
+    Always the provider's default expiry; explicit durations require separate
+    LONGER_QUOTE_TIME terms. Quotes don't move money, so obtaining another after
+    a crash cannot cause a second debit. The returned expiry is validated here.
+    """
+    quote = (client or InfiniaClient()).create_transfer_quote({
+        'external_id': str(j.internal_id), 'source_account_id': source.provider_account_id,
+        'target_account_id': target.provider_account_id, 'source_amount': provider_number(amount)})
+    try:
+        expires = parse_datetime(str(quote.get('expire_at', '')))
+        if expires and timezone.is_naive(expires):
+            expires = expires.replace(tzinfo=dt_timezone.utc)
+        valid = (quote.get('id') and quote.get('status') == 'ACTIVE' and expires
+            and expires > timezone.now() and str(quote.get('source_account_id')) == source.provider_account_id
+            and str(quote.get('target_account_id')) == target.provider_account_id
+            and positive(quote.get('source_amount')) == amount
+            and positive(quote.get('target_amount')) >= j.minimum_fx_output)
+    except (AttributeError, TypeError, ValueError, ArithmeticError, PaymentAccountError):
+        valid = False
+    return quote if valid else None
+
+
+# A provider that rejects a submission before creating anything has not moved
+# money, so the leg is re-quotable rather than a case for a human. Bounded so an
+# endlessly expiring quote cannot spin.
+FX_REQUOTE_LIMIT = 3
+
+
+def never_executed(op):
+    """True when the provider refused this leg without creating an operation.
+
+    No provider operation id and no refund means nothing happened on their side.
+    Retries reuse this row, so the idempotency key never changes and a submission
+    the provider did record would deduplicate instead of converting twice.
+    """
+    return bool(op) and op.status == 'failed' and not op.provider_operation_id and not has_refund(op)
+
+
+def _requotable(j):
+    """A journey parked for review solely because its conversion never ran."""
+    return (j.failure_code == 'provider_leg_requires_review'
+            and not j.payout_operation_id and never_executed(j.fx_operation))
+
+
 def _new_operation(j, leg, source, target, amount):
     return MoneyOperation.objects.create(money_flow=j.money_flow, provider='infinia',
         operation_type='conversion' if leg == 'fx' else 'payout', source_account=source,
@@ -236,7 +282,7 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             'fx_operation', 'payout_operation').get(pk=journey_id)
         if j.stage in {'completed', 'failed'}:
             return j
-        if j.stage == 'needs_review':
+        if j.stage == 'needs_review' and not _requotable(j):
             # Only a delayed deposit can recover automatically, using receipts
             # alone. Never resume money-moving legs or override another review.
             from .infinia_bridge import RECOVERABLE_DELAYS
@@ -289,25 +335,8 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 _state(j, 'needs_review', failure='fx_source_below_precision')
                 return j
             amount = fx_source_amount(credit_amount)
-            # Always request a fresh quote with the provider's default expiry;
-            # explicit durations require separate LONGER_QUOTE_TIME terms.
-            # Quotes don't move money; a crash before saving may obtain another
-            # quote without a second debit. Validate the returned expiry below.
-            quote = (client or InfiniaClient()).create_transfer_quote({
-                'external_id': str(j.internal_id), 'source_account_id': source.provider_account_id,
-                'target_account_id': target.provider_account_id, 'source_amount': provider_number(amount)})
-            try:
-                expires = parse_datetime(str(quote.get('expire_at', '')))
-                if expires and timezone.is_naive(expires):
-                    expires = expires.replace(tzinfo=dt_timezone.utc)
-                valid = (quote.get('id') and quote.get('status') == 'ACTIVE' and expires
-                    and expires > timezone.now() and str(quote.get('source_account_id')) == source.provider_account_id
-                    and str(quote.get('target_account_id')) == target.provider_account_id
-                    and positive(quote.get('source_amount')) == amount
-                    and positive(quote.get('target_amount')) >= j.minimum_fx_output)
-            except (AttributeError, TypeError, ValueError, ArithmeticError, PaymentAccountError):
-                valid = False
-            if not valid:
+            quote = _authorized_fx_quote(j, source, target, amount, client)
+            if quote is None:
                 _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
             if j.direction == 'to_wallet' and j.minimum_wallet_output is not None:
                 from .infinia_bridge import preflight, InfiniaBridgeReview
@@ -329,6 +358,28 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             j.save(update_fields=['fx_quote', 'fx_operation', 'updated_at'])
             _state(j, 'converting')
             operation = j.fx_operation
+        elif never_executed(j.fx_operation):
+            # The provider refused this submission outright -- an expired quote,
+            # typically -- without creating anything, so nothing moved. Re-quote
+            # on the SAME operation row: its idempotency key is unchanged, so a
+            # submission the provider did record deduplicates instead of
+            # converting twice. A human has nothing to decide here.
+            tries = int((j.money_flow.metadata or {}).get('fx_requote_count', 0))
+            if tries >= FX_REQUOTE_LIMIT:
+                _state(j, 'needs_review', failure='fx_quote_retries_exhausted'); return j
+            amount = positive(j.fx_operation.source_amount)
+            quote = _authorized_fx_quote(j, source, target, amount, client)
+            if quote is None:
+                _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
+            operation = j.fx_operation
+            operation.status = 'created'
+            operation.provider_data = dict(operation.provider_data or {}, quote_id=quote['id'])
+            operation.save(update_fields=['status', 'provider_data', 'updated_at'])
+            j.money_flow.metadata = dict(j.money_flow.metadata or {}, fx_requote_count=tries + 1)
+            j.money_flow.save(update_fields=['metadata'])
+            j.fx_quote = quote
+            j.save(update_fields=['fx_quote', 'updated_at'])
+            _state(j, 'converting')
         elif j.fx_operation.status in {'failed', 'reversed', 'needs_review'}:
             _state(j, 'needs_review', failure='conversion_' + j.fx_operation.status)
         elif not j.payout_operation_id:

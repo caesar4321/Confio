@@ -235,6 +235,16 @@ A resolved bridge outcome (`failed`, `expired`, `refunded`) fails its journey
 outright rather than queueing a review; only an unresolved bridge propagates as
 `bridge_not_delivered`. Same fix in the Cobre orchestrator.
 
+A provider rejection before execution is retried, not queued. Infinia refuses a
+submission whose FX quote has expired without creating anything, and
+`_sync_flow_status` filed that as `provider_leg_requires_review` like any failed
+leg -- stranding the customer's money at the provider over a quote that is free
+to replace. `never_executed()` (failed, no `provider_operation_id`, no refund)
+now re-quotes on the SAME operation row, so the idempotency key never changes
+and a submission the provider did record deduplicates rather than converting
+twice. Bounded by `FX_REQUOTE_LIMIT`. A leg with a `provider_operation_id` is
+never re-quoted -- that is the ambiguous case and it still goes to review.
+
 `submit_money_operation` shares it too. That guard asks whether another journey
 is using these funds, and excluding only `completed`/`failed` meant an abandoned
 review stalled every later journey at submit -- after its money had already
