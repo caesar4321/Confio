@@ -163,6 +163,62 @@ class JourneyTests(TestCase):
         self.assertIsNone(entry.provider_data['operation'])
         self.assertIsNone(entry.operation_id)
 
+    def crypto_voucher_conversion(self):
+        op, entry = self.voucher_conversion()
+        op.provider_data['voucher_ids'] = [DEST_HASH]
+        op.save()
+        entry.provider_data = {'operation': None, 'third_party': {
+            'type': 'CRYPTO', 'crypto_network': 'POLYGON', 'transaction_hash': DEST_HASH}}
+        entry.save()
+        return op, entry
+
+    def test_completed_crypto_conversion_hash_binds_exact_credit_once(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        original = dict(entry.provider_data)
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal('2.5'))
+        j = op.money_flow.infinia_journey
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        payout_id = j.payout_operation_id
+        self.assertIsNotNone(payout_id)
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.payout_operation_id, payout_id)
+        self.assertEqual(j.money_flow.operations.filter(operation_type='payout').count(), 1)
+        entry.refresh_from_db()
+        self.assertEqual(entry.provider_data, original)
+
+    def test_crypto_voucher_requires_polygon_type_amount_and_unique_credit(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        original = dict(entry.provider_data['third_party'])
+        for field, value in [('type', 'FIAT'), ('crypto_network', 'BSC'),
+                ('crypto_network', ''), ('transaction_hash', '0x' + 'a' * 64),
+                ('voucher_id', 'conflicting-voucher')]:
+            with self.subTest(field=field):
+                entry.provider_data['third_party'] = dict(original, **{field: value})
+                entry.save()
+                self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+        entry.provider_data['third_party'] = original
+        entry.amount = Decimal('2.4')
+        entry.save()
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+        entry.amount = Decimal('2.5')
+        entry.save()
+        self.credit(self.crypto, amount='2.5', provider_data=entry.provider_data)
+        self.assertEqual(_credit_for_operation(op, self.crypto), Decimal(0))
+
+    def test_crypto_transaction_hash_is_not_a_fiat_voucher(self):
+        from payment_accounts.infinia_journeys import _credit_for_operation
+        op, entry = self.crypto_voucher_conversion()
+        op.destination_account = self.local
+        op.provider_data['target_account_id'] = self.local.provider_account_id
+        op.save()
+        entry.financial_account, entry.asset = self.local, self.local.asset
+        entry.save()
+        self.assertEqual(_credit_for_operation(op, self.local), Decimal(0))
+
     def test_voucher_binding_requires_exact_completed_transfer_identity(self):
         from payment_accounts.infinia_journeys import _credit_for_operation
         op, entry = self.voucher_conversion()
