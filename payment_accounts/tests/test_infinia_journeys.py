@@ -261,6 +261,17 @@ class JourneyTests(TestCase):
         self.assertEqual((j.stage, j.failure_code), ('needs_review', 'provider_leg_requires_review'))
         return j
 
+    def test_the_worker_actually_selects_a_requotable_journey(self):
+        """advance_journey handling it is useless if the worker filters it out."""
+        from payment_accounts.infinia_bridge import live_journeys
+        j = self.rejected_fx()
+        self.assertTrue(live_journeys(InfiniaJourney.objects.filter(pk=j.pk)).exists())
+        # ...but not once the provider has an operation we cannot see.
+        InfiniaJourney.objects.filter(pk=j.pk).update()
+        j.fx_operation.provider_operation_id = 'transfer-id'
+        j.fx_operation.save()
+        self.assertFalse(live_journeys(InfiniaJourney.objects.filter(pk=j.pk)).exists())
+
     def test_expired_quote_is_requoted_in_place_not_queued_for_a_human(self):
         j = self.rejected_fx()
         before = j.fx_operation.idempotency_key
