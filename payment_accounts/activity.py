@@ -66,6 +66,32 @@ def display_stage(j):
     return j.stage
 
 
+def progress_message(j, stage):
+    incoming = j.direction == 'to_wallet'
+    currency = j.local_account.asset
+    currency = {'MXN': 'pesos mexicanos', 'COP': 'pesos colombianos',
+        'ARS': 'pesos argentinos', 'BRL': 'reales', 'PEN': 'soles',
+        'BOB': 'bolivianos', 'CLP': 'pesos chilenos', 'PYG': 'guaraníes',
+        'UYU': 'pesos uruguayos', 'USD': 'dólares', 'EUR': 'euros',
+        'GBP': 'libras esterlinas'}.get(currency, currency)
+    return {
+        'awaiting_credit': ('Estamos esperando la confirmación del ingreso a tu cuenta local.' if incoming
+                            else 'Estamos preparando los fondos para tu envío.'),
+        'converting': ('Estamos convirtiendo tu ingreso a dólares.' if incoming
+                       else f'Estamos convirtiendo tus fondos a {currency}.'),
+        'paying_out': ('Estamos enviando los dólares a tu billetera.' if incoming
+                       else 'Estamos enviando tu dinero a la cuenta de destino.'),
+        'bridging': 'Estamos transfiriendo los dólares a tu billetera.',
+        'awaiting_wallet_delivery': 'Estamos esperando la llegada de los dólares a tu billetera.',
+        'awaiting_wallet_authorization': 'Tu ingreso está listo. Abre la app para confirmar la conversión.',
+        'awaiting_wallet_conversion': 'Tus dólares llegaron. Abre la app para completar la conversión a Confío Dollar.',
+        'completed': 'Tu ingreso se completó.' if incoming else 'Tu envío se completó.',
+        'refunded': 'Se devolvieron fondos a tu billetera. Consulta el importe y la moneda recibidos.',
+        'failed': 'La transferencia no se completó. Consulta el estado antes de intentarlo de nuevo.',
+        'needs_review': 'Tu transferencia necesita revisión. Consulta el estado antes de intentarlo de nuevo.',
+    }.get(stage, 'Estamos consultando el estado de tu transferencia.')
+
+
 def arrival_owned(tx_hash, wallet):
     if not tx_hash:
         return False
@@ -83,7 +109,7 @@ def _retarget_notice(notice, j, label):
     notice.data = dict(notice.data, local_transfer_id=str(j.internal_id),
         direction=j.direction, stage=display_stage(j),
         pending_auto_mint=False, corrected_to_local_transfer=True)
-    notice.title, notice.message = label, 'Consulta el estado de tu transferencia.'
+    notice.title, notice.message = label, progress_message(j, display_stage(j))
     notice.notification_type = 'LOCAL_TRANSFER_UPDATED'
     notice.action_url = f'confio://local-transfer/{j.internal_id}'
     notice.related_object_type, notice.related_object_id = 'InfiniaJourney', str(j.internal_id)
@@ -107,7 +133,7 @@ def sync_activity(journey_id, *, notify=True):
     from users.models_unified import UnifiedTransactionTable
     j = InfiniaJourney.objects.select_for_update(of=('self',)).select_related(
         'confio_account__user', 'confio_account__business', 'money_flow', 'bridge',
-        'wallet_conversion').get(pk=journey_id)
+        'wallet_conversion', 'local_account').get(pk=journey_id)
     _link_mint(j)
     incoming = j.direction == 'to_wallet'
     bridge = j.bridge
@@ -184,23 +210,34 @@ def sync_activity(journey_id, *, notify=True):
     elif j.wallet_conversion_id:
         conversions = Conversion.objects.filter(pk=j.wallet_conversion_id)
     UnifiedTransactionTable.objects.filter(conversion__in=conversions).update(deleted_at=timezone.now())
-    # Persist one notification per public state. No duplicate on repeated polling.
+    # One evolving inbox item, not a new notification at every internal step.
     from notifications.utils import create_notification
     key = f'local-transfer:{j.internal_id}:{stage}'
-    if not Notification.objects.filter(user=owner.user, data__event_key=key).exists():
+    notice = Notification.objects.filter(user=owner.user,
+        notification_type='LOCAL_TRANSFER_UPDATED',
+        data__local_transfer_id=str(j.internal_id)).order_by('created_at', 'pk').first()
+    previous_stage = notice.data.get('stage') if notice else None
+    push_stages = {'completed', 'failed', 'needs_review', 'refunded',
+                   'awaiting_wallet_authorization', 'awaiting_wallet_conversion'}
+    if notice:
+        notice.title, notice.message = label, progress_message(j, stage)
+        notice.data = dict(notice.data, event_key=key, stage=stage, direction=j.direction)
+        if previous_stage != stage and stage in push_stages:
+            notice.reads.all().delete()
+            notice.push_sent = False
+            notice.push_sent_at = None
+        notice.save()
+    else:
         notice = create_notification(user=owner.user, account=owner, business=business,
             notification_type='LOCAL_TRANSFER_UPDATED', title=label,
-            message=('Transferencia completada.' if stage == 'completed' else
-                     'El puente devolvió los fondos. Consulta el importe y la moneda recibidos.' if stage == 'refunded' else
-                     'No se completó. Consulta el estado antes de intentarlo de nuevo.' if stage in ['failed', 'needs_review']
-                     else 'Tu transferencia está en proceso.'),
+            message=progress_message(j, stage),
             data={'event_key': key, 'local_transfer_id': str(j.internal_id), 'stage': stage,
                   'direction': j.direction},
             send_push=False,
             action_url=f'confio://local-transfer/{j.internal_id}',
             related_object_type='InfiniaJourney', related_object_id=str(j.internal_id))
-        if notify:
-            transaction.on_commit(lambda: _push_notice(notice.pk))
+    if notice and notify and previous_stage != stage and stage in push_stages:
+        transaction.on_commit(lambda pk=notice.pk: _push_notice(pk))
     return row
 
 

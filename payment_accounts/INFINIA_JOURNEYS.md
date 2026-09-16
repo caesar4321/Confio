@@ -4,6 +4,44 @@ An `InfiniaJourney` is an owner-authorized parent MoneyFlow with durable
 conversion and payout legs. Its worker continues after the app closes.
 `INFINIA_JOURNEYS_ENABLED` defaults to false and is separate from the bridge flags.
 
+## Automatic incoming deposits
+
+Product policy: automatic conversion applies to newly received deposits on all
+eligible Infinia receiving accounts, including accounts opened before rollout.
+There is no per-account opt-in. Existing country/rail/user admission switches,
+identity checks, account-opening payment requirements and global enablement
+remain mandatory. Cobre behavior is unchanged.
+
+Migration `0023` introduces `AutomaticPayin`, one durable job per ledger credit.
+Authenticated new external-fiat movements enqueue it in the webhook transaction.
+The existing journey worker processes the queue and creates a direct-to-wallet
+journey using `deposit_quote`'s FX and bridge minimums and existing cost caps.
+The deposit's deterministic request ID and unique journey funding credit prevent
+duplicate conversion, including a race with the manual flow. Failed quotes and
+busy accounts remain pending. Eligibility is rechecked before creation/execution.
+
+Receiving detection covers every configured fiat country/currency pair. Explicit
+account funding instructions verify SPEI (checksum-valid CLABE), Pix, Bre-B,
+CBU/CVU, TED (`ted_brl`) and FPS (`fps_gbp`). Multiple rails on one account are
+ambiguous: the account-level switch must not silently choose one for a deposit.
+`provider_data.receiving_rail_detection` records status, candidate rails, reason,
+and field names without copying banking PII. Generic bank/IBAN/QR details produce
+inferred candidates only (including CL, BO, PE, PY, UY, US and EUR accounts).
+Only `payin_rail`, populated by unambiguous evidence, is used for admission.
+Country/currency, payout schemas, and the coverage table never authorize a rail.
+Unknown shapes remain pending and are reclassified when the authenticated account
+snapshot is refreshed. Sender document jurisdiction is not inferred. Sources:
+[account schema](https://docs.infiniaweb.com/reference/v1_2_get_account_.md) and
+[coverage table](https://docs.infiniaweb.com/docs/virtual-accounts.md), read 2026-09-16.
+
+Historical ledger credits are deliberately not swept: an unlinked credit may
+already have been spent. An operator can inspect a specific deposit with
+`manage.py recover_automatic_payin --provider-entry-id ID` and authorize it with
+`--apply`. A subsequent debit places it in review rather than replaying it.
+Run `migrate` before restarting workers. The rollout does not change existing
+in-flight journeys or send funds to a Confío treasury. USDT is delivered directly
+to the user's wallet; the final cUSD mint still uses the app's signing flow.
+
 ## Confirmed API contracts
 
 Read the **OpenAPI definitions** in Infinia's Markdown pages, not just the
@@ -32,7 +70,7 @@ rendered examples. Verified on 2026-09-05:
 
 ## Outbound: dollars → local bank
 
-1. Prepare a NEXT bridge to the user's verified Infinia USDC_POL account.
+1. Prepare a bridge through the configured provider (currently Relay) to the user's verified Infinia USDC_POL account.
 2. On confirmation, persist the local account, bank destination snapshot,
    minimum acceptable FX output and bridge ID in a journey; then sign the
    source bridge. A retry uses the same request UUID and cannot change terms.
@@ -49,7 +87,7 @@ Payout amounts are rounded down to two fiat decimal places; any fractional
 remainder remains in the user's provider account. No Confío fee is calculated
 inside provider legs: the existing on-chain dollar perimeter owns that fee.
 
-## Inbound: local deposit → NEXT deposit → BSC wallet
+## Inbound: local deposit → bridge deposit → BSC wallet
 
 1. The user selects an authenticated, unused deposit credit and authorizes its
    conversion to USDC_POL with a minimum FX output and a separate minimum net
@@ -57,9 +95,9 @@ inside provider legs: the existing on-chain dollar perimeter owns that fee.
    Each credit can fund one journey only. Check bridge feature flags, an active
    crypto instruction, and the quoted FX output against the bridge cap before
    submitting FX; repeat these checks before subsequent submissions.
-2. After the matching conversion credit, prepare a deposit-based NEXT route for
+2. After the matching conversion credit, prepare a deposit-address bridge route for
    that amount of native Polygon USDC, rounded down to six decimals. Persist the
-   bridge and Infinia payout in the same transaction. NEXT's BSC recipient and
+   bridge and Infinia payout in the same transaction. The bridge's BSC recipient and
    Polygon refund address are the user's EVM address snapshotted at authorization.
    The built minimum output must meet the user's wallet minimum before creating
    the payout. An unacceptable minimum or unavailable prerequisite requires review;
@@ -72,7 +110,7 @@ inside provider legs: the existing on-chain dollar perimeter owns that fee.
    for this exact payout and account. Verify the exact native USDC receipt at
    the deposit address; the sender may be Infinia's hot wallet. An amount mismatch
    requires manual review, never a top-up or replacement payout.
-5. Reconcile NEXT status and finalized BSC USDT receipts to the pinned user
+5. Reconcile bridge status and finalized BSC USDT receipts to the pinned user
    wallet. On-chain delivery can complete the journey before the payout status
    webhook arrives. The existing dollar conversion remains a subsequent operation.
 
@@ -82,7 +120,7 @@ bridges. The app may close after the user authorizes conversion and payout.
 
 The [Infinia v2 payout schema](https://docs.infiniaweb.com/reference/v2_create_payout__post)
 was checked on 2026-09-14: it specifies `amount` but exposes no fee/net-amount quote
-or documented deduction formula. The same exact amount funds the payout and NEXT
+or documented deduction formula. The same exact amount funds the payout and bridge
 quote; absence of a fee field is **not** proof of zero provider fees. Actual
 on-chain funding is checked before recognizing bridge completion.
 
@@ -126,12 +164,13 @@ journeys require the separate wallet minimum; older clients must update.
 
 ## App and deployment
 
-`Pagos con cuenta local`, accessible from the dollar/local-account screen,
-provides bank selection, deposit selection, minimum-output authorization,
-review-before-signing and paginated journey history. Existing destinations and
-provider accounts must be provisioned first.
+`Recibir por cuenta local` shows receiving details and incoming fiat receipts,
+without manual conversion selection or a summary step. Outgoing transfers retain
+bank selection, minimum-output authorization and review-before-signing.
+Transfer status supports pull-to-refresh. Existing destinations and provider
+accounts must be provisioned first.
 
-Apply payment_accounts migrations through **0013** before enabling callers.
+Apply payment_accounts migrations through **0023** before restarting workers.
 Run Celery beat/worker; `payment_accounts.reconcile_infinia_journeys` runs every
 30 seconds. The custom admin shows immutable journey evidence and failure codes.
 

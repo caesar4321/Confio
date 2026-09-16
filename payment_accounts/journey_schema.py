@@ -82,6 +82,7 @@ class InfiniaJourneyType(DjangoObjectType):
 
 
 class InfiniaDepositType(DjangoObjectType):
+    automatic_status = graphene.String(required=True)
     held = graphene.Boolean(required=True)
     held_reason = graphene.String(required=True)
 
@@ -96,11 +97,18 @@ class InfiniaDepositType(DjangoObjectType):
     def resolve_held_reason(self, info):
         return deposit_admission(self)[1]
 
+    def resolve_automatic_status(self, info):
+        row = getattr(self, 'automatic_payin', None)
+        return row.status if row else ''
+
 
 def deposit_admission(entry):
     """(allowed, reason) for one credit. Read-only: the admin action and
     journey creation own persistence."""
     from .payin_admission import decision, is_external_fiat_credit
+    automatic = getattr(entry, 'automatic_payin', None)
+    if automatic and automatic.status == 'review':
+        return False, automatic.reason
     if not is_external_fiat_credit(entry):
         return True, ''
     allowed, reason, _, _ = decision(entry)
@@ -169,6 +177,46 @@ class AttachInfiniaReturnBridge(graphene.Mutation):
 
 
 class JourneyQuery(graphene.ObjectType):
+    local_incoming_deposits = graphene.List(graphene.NonNull(InfiniaDepositType), required=True,
+        account_id=graphene.UUID(required=True), offset=graphene.Int(default_value=0))
+
+    def resolve_local_incoming_deposits(self, info, account_id, offset=0):
+        from .schema import _active_account
+        from .activation import visible_accounts
+        from .payin_admission import is_external_fiat_credit
+        from .models import MoneyOperation
+        from django.db.models import Q
+        owner = _active_account(info, permission='view_transactions')
+        accounts = visible_accounts(FinancialAccount.objects.filter(provider_profile__confio_account=owner))
+        entries = LedgerEntry.objects.filter(
+            Q(provider_data__operation__type__isnull=True) | Q(provider_data__operation__type__in=['PAYIN', 'CREDIT']),
+            provider='infinia', direction='credit', amount__gt=0,
+            financial_account__in=accounts, financial_account__internal_id=account_id,
+            provider_data__third_party__type='FIAT',
+        ).select_related('financial_account__provider_profile', 'operation', 'automatic_payin').order_by('-occurred_at', '-pk')
+        result, skip = [], max(0, offset)
+        # Filter economic provenance BEFORE pagination. Completed incoming
+        # receipts remain visible; a conversion's target credit never becomes
+        # a new incoming payment merely because its operation_id is missing.
+        for entry in entries.iterator(chunk_size=100):
+            if entry.operation and entry.operation.operation_type in {'conversion', 'internal_transfer', 'payout'}:
+                continue
+            voucher = (entry.provider_data.get('third_party') or {}).get('voucher_id')
+            if voucher and MoneyOperation.objects.filter(provider='infinia',
+                    destination_account=entry.financial_account,
+                    operation_type__in=['conversion', 'internal_transfer'],
+                    provider_data__voucher_ids__contains=[voucher]).exists():
+                continue
+            if not is_external_fiat_credit(entry):
+                continue
+            if skip:
+                skip -= 1
+                continue
+            result.append(entry)
+            if len(result) == 20:
+                break
+        return result
+
     local_transfer_mints = graphene.List(graphene.NonNull(InfiniaJourneyType), required=True)
 
     def resolve_local_transfer_mints(self, info):
@@ -212,7 +260,7 @@ class JourneyQuery(graphene.ObjectType):
             financial_account__in=allowed,
             provider='infinia', direction='credit', amount__gt=0,
             financial_account__internal_id=account_id, financial_account__provider_profile__confio_account=owner,
-            funded_journey__isnull=True).order_by('-occurred_at')[max(0,offset):max(0,offset)+20]
+            funded_journey__isnull=True).select_related('automatic_payin').order_by('-occurred_at')[max(0,offset):max(0,offset)+20]
 
 
 class JourneyMutation(graphene.ObjectType):

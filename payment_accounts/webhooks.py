@@ -250,8 +250,11 @@ def _record_ledger_entry(event, normalized, account, operation):
         from .cobre_journeys import observe_refund
         observe_refund(entry)
     if event.provider == 'infinia' and created:
+        from .auto_payin import sync_verified_rail, enqueue
+        sync_verified_rail(account)
         from .payin_admission import assess
         assess(entry)
+        enqueue(entry)
         from .infinia_journeys import observe_refund
         observe_refund(entry)
     if balance is not None:

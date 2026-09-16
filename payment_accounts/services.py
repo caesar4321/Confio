@@ -395,6 +395,8 @@ def sync_embedded_funding_instructions(account):
                 'instruction_data': item,
             },
         )
+    from .auto_payin import sync_verified_rail
+    sync_verified_rail(account)
 
 
 def provision_payment_account(
@@ -740,6 +742,25 @@ def create_money_operation(
         raise
 
 
+def require_unreserved_source(provider, source, money_flow_id):
+    """Same reservation gate before quoting and again under the submit lock."""
+    from .models import InfiniaJourney, CobreJourney
+    from django.db.models import Q
+    from .infinia_bridge import RECOVERABLE_DELAYS, live_journeys
+    journey_model = InfiniaJourney if provider == 'infinia' else CobreJourney
+    account_filter = Q(local_account=source) | Q(crypto_account=source)
+    if provider == 'cobre':
+        account_filter |= Q(copco_account=source)
+    if live_journeys(journey_model.objects.filter(account_filter),
+            recoverable=RECOVERABLE_DELAYS if provider == 'infinia' else ()
+            ).exclude(money_flow_id=money_flow_id).exists():
+        raise PaymentAccountError('Provider funds are reserved by an active journey')
+    if MoneyOperation.objects.filter(provider=provider, source_account=source,
+            status__in=['created', 'submitted', 'processing', 'settling', 'unknown']
+            ).exclude(money_flow_id=money_flow_id).exists():
+        raise PaymentAccountError('Provider funds are reserved by an unresolved operation')
+
+
 def submit_money_operation(operation):
     with transaction.atomic():
         operation = MoneyOperation.objects.select_for_update(of=('self',), no_key=True).select_related(
@@ -756,7 +777,6 @@ def submit_money_operation(operation):
         if operation.provider in {'infinia', 'cobre'}:
             from .models import InfiniaJourney, CobreJourney
             journey_model = InfiniaJourney if operation.provider == 'infinia' else CobreJourney
-            from django.db.models import Q
             own_journey = journey_model.objects.select_for_update().filter(money_flow_id=operation.money_flow_id).first()
             # Refund webhooks lock the journey before updating its balance.
             # Keep this order and allow FK inserts to take KEY SHARE locks.
@@ -786,27 +806,7 @@ def submit_money_operation(operation):
                         reason = 'provider_deposit_delayed' if isinstance(exc, InfiniaDepositExpired) else 'provider_bridge_submission_invalid'
                         _state(own_journey, 'needs_review', failure=reason)
                         return operation
-            account_filter = Q(local_account=operation.source_account) | Q(crypto_account=operation.source_account)
-            if operation.provider == 'cobre':
-                account_filter |= Q(copco_account=operation.source_account)
-            # Only a journey the worker will still advance can contend for these
-            # funds. Excluding just completed/failed counted abandoned reviews as
-            # live, so one dead row stalled every later journey's operations at
-            # submit -- after its money had already reached the provider.
-            from .infinia_bridge import RECOVERABLE_DELAYS, live_journeys
-            contenders = live_journeys(
-                journey_model.objects.filter(account_filter),
-                recoverable=RECOVERABLE_DELAYS if operation.provider == 'infinia' else (),
-            ).exclude(money_flow_id=operation.money_flow_id)
-            if contenders.exists():
-                raise PaymentAccountError('Provider funds are reserved by an active journey')
-            # Worker eligibility is not a funds reservation. A parked journey's
-            # unknown/submitted operation can still settle externally.
-            if MoneyOperation.objects.filter(provider=operation.provider,
-                    source_account=operation.source_account,
-                    status__in=['created', 'submitted', 'processing', 'settling', 'unknown']
-                    ).exclude(money_flow_id=operation.money_flow_id).exists():
-                raise PaymentAccountError('Provider funds are reserved by an unresolved operation')
+            require_unreserved_source(operation.provider, operation.source_account, operation.money_flow_id)
         if operation.operation_type == 'payout':
             if operation.provider == 'infinia':
                 from .payin_admission import require_source_admitted

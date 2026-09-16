@@ -292,6 +292,76 @@ class JourneyTests(TestCase):
         self.assertEqual(j.fx_operation.failure_code, '')
         self.assertEqual(j.money_flow.metadata['fx_requote_history'][0]['previous_quote_id'], 'fx-quote')
 
+    def test_409_expired_quote_is_selected_and_recovered_with_provider_check(self):
+        from payment_accounts.infinia_bridge import live_journeys
+        j = self.rejected_fx()
+        j.fx_operation.failure_code = '409'; j.fx_operation.save()
+        self.assertTrue(live_journeys(InfiniaJourney.objects.filter(pk=j.pk)).exists())
+        self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+        self.api.find_operation.assert_called_once_with('conversion', j.fx_operation.idempotency_key)
+
+    def test_409_other_rejection_is_not_retried(self):
+        from payment_accounts.infinia_bridge import live_journeys
+        j = self.rejected_fx()
+        j.fx_operation.failure_code = '409'
+        j.fx_operation.provider_data = {'status': 'fail', 'message': 'Duplicate transfer'}
+        j.fx_operation.save()
+        self.api.create_transfer_quote.reset_mock()
+        self.assertFalse(live_journeys(InfiniaJourney.objects.filter(pk=j.pk)).exists())
+        advance_journey(j.pk, client=self.api)
+        self.api.create_transfer_quote.assert_not_called()
+
+    def test_waits_for_unresolved_source_before_requesting_quote(self):
+        from payment_accounts.models import MoneyFlow
+        j = self.inbound()
+        other_flow = MoneyFlow.objects.create(confio_account=self.owner, kind='transfer',
+            source_asset=self.local.asset, source_amount='1')
+        other = MoneyOperation.objects.create(money_flow=other_flow, provider='infinia',
+            operation_type='conversion', source_account=self.local, destination_account=self.crypto,
+            source_asset=self.local.asset, source_amount='1', idempotency_key=str(uuid.uuid4()), status='processing')
+        self.fx_quote()
+        with self.assertRaisesRegex(PaymentAccountError, 'reserved by an unresolved operation'):
+            advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertIsNone(j.fx_operation_id)
+        self.api.create_transfer_quote.assert_not_called()
+        self.submit.assert_not_called()
+        other.status = 'succeeded'; other.save()
+        advance_journey(j.pk, client=self.api)
+        self.api.create_transfer_quote.assert_called_once()
+        self.submit.assert_called_once()
+
+    def test_stale_never_submitted_quote_refreshes_same_operation(self):
+        j = self.inbound(); self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        original_id, original_key = j.fx_operation_id, j.fx_operation.idempotency_key
+        j.fx_quote['expire_at'] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        j.save(update_fields=['fx_quote'])
+        self.fx_quote()
+        self.api.create_transfer_quote.return_value['id'] = 'fresh-after-wait'
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        self.assertEqual((j.fx_operation_id, j.fx_operation.idempotency_key), (original_id, original_key))
+        self.assertEqual(j.fx_operation.provider_data['quote_id'], 'fresh-after-wait')
+        self.api.find_operation.assert_not_called()
+
+    def test_stale_quote_with_submission_history_is_not_replaced(self):
+        j = self.inbound(); self.fx_quote()
+        advance_journey(j.pk, client=self.api)
+        j.refresh_from_db()
+        j.fx_quote['expire_at'] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        j.save(update_fields=['fx_quote'])
+        j.fx_operation.status = 'unknown'
+        j.fx_operation.submitted_at = timezone.now(); j.fx_operation.save()
+        self.api.create_transfer_quote.reset_mock(); self.submit.reset_mock()
+        advance_journey(j.pk, client=self.api)
+        self.api.create_transfer_quote.assert_not_called()
+        self.submit.assert_not_called()
+
     def test_a_leg_the_provider_did_create_is_never_requoted(self):
         """The safety boundary: an operation may exist on their side."""
         j = self.rejected_fx(provider_operation_id='transfer-id')

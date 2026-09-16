@@ -364,7 +364,9 @@ function Application({ methodId }: { methodId: string }) {
     ? [
       ['repeat', `${copy.item}, siempre la misma`, 'Compártela las veces que quieras.'],
       ['zap', `Te pagan por ${rail}`, 'Desde cualquier banco o billetera, normalmente en minutos.'],
-      ['dollar-sign', 'De pagos locales a dólares', 'Cuando llegue un depósito, confirma la conversión para recibir dólares en tu saldo.'],
+      ['dollar-sign', 'De pagos locales a dólares', isCobre
+        ? 'Cuando llegue un depósito, confirma la conversión para recibir dólares en tu saldo.'
+        : 'Los ingresos aprobados se convierten y se envían automáticamente a tu billetera. Abre Confío para completar la conversión a Confío Dollar.'],
     ]
     : [
       ['send', `Envía por ${rail}`, `A cualquier banco o billetera de ${place}.`],

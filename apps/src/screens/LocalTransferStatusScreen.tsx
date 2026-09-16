@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -71,9 +72,12 @@ function Timeline({ journey }: { journey: LocalJourney }) {
 }
 
 function JourneyDetail({ journeyId }: { journeyId: string }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshBusy = useRef(false);
   const navigation = useNavigation<Nav>();
   const query = useQuery(LOCAL_JOURNEY, { variables: { id: journeyId }, fetchPolicy: 'network-only', pollInterval: 5000 });
-  const journey: LocalJourney | undefined = query.data?.infiniaJourney;
+  const journey: LocalJourney | undefined = (query.data ?? query.previousData)?.infiniaJourney;
   // A bank send whose bridge is still 'prepared' is not funded: it needs the
   // owner's confirmation, not patience. Its own query (older servers).
   const bridgeQuery = useQuery(LOCAL_JOURNEY_BRIDGE, {
@@ -96,12 +100,29 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
       bridgeQuery.stopPolling();
     } else if (journey.stage === 'needs_review') {
       query.startPolling(30000);
+      bridgeQuery.startPolling(30000);
+    } else {
+      query.startPolling(5000);
+      bridgeQuery.startPolling(10000);
     }
   }, [journey?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
   const refreshOnFocus = useRef(() => {});
+  const refresh = async () => {
+    if (refreshBusy.current) return;
+    refreshBusy.current = true;
+    setRefreshing(true);
+    try {
+      const results = await Promise.allSettled([query.refetch(), bridgeQuery.refetch()]);
+      setRefreshFailed(results.some(result => result.status === 'rejected' ||
+        Boolean(result.value.error || result.value.errors?.length) ||
+        !result.value.data?.infiniaJourney));
+    } finally {
+      refreshBusy.current = false;
+      setRefreshing(false);
+    }
+  };
   refreshOnFocus.current = () => {
-    query.refetch().catch(() => {});
-    bridgeQuery.refetch().catch(() => {});
+    void refresh();
   };
   useFocusEffect(useCallback(() => { refreshOnFocus.current(); }, []));
 
@@ -115,7 +136,9 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
           : 'En proceso';
 
   return (
-    <>
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}
+      alwaysBounceVertical refreshControl={<RefreshControl refreshing={refreshing}
+        onRefresh={refresh} tintColor={colors.primary} colors={[colors.primary]} />}>
       <RampReveal delay={0}>
         <RampHero
           eyebrow={journey?.direction === 'to_wallet' ? 'Conversión' : 'Envío'}
@@ -125,6 +148,11 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
           onBack={() => navigation.goBack()}
         />
       </RampReveal>
+      {journey && refreshFailed ? (
+        <TouchableOpacity onPress={refresh} accessibilityRole="button">
+          <Text style={styles.warningLink}>No pudimos actualizar el estado. Mostramos la última información disponible. Toca para intentar de nuevo.</Text>
+        </TouchableOpacity>
+      ) : null}
       {failed ? (
         <View style={styles.emptyCard}>
           <Icon name="alert-circle" size={22} color={colors.textSecondary} />
@@ -245,7 +273,7 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
           <RampActionBar primaryLabel="Listo" onPrimaryPress={() => navigation.popToTop()} />
         </>
       )}
-    </>
+    </ScrollView>
   );
 }
 
@@ -384,9 +412,11 @@ export default function LocalTransferStatusScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {journeyId ? <JourneyDetail journeyId={journeyId} /> : <JourneyList />}
-      </ScrollView>
+      {journeyId ? <JourneyDetail key={journeyId} journeyId={journeyId} /> : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <JourneyList />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }

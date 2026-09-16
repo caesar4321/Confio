@@ -379,6 +379,40 @@ class LocalMoneyTests(TestCase):
 
     # ---- quotes
 
+    def test_incoming_history_excludes_provider_legs_before_pagination(self):
+        from django.utils import timezone
+        from payment_accounts.models import LedgerEntry, MoneyOperation, MoneyFlow, InfiniaJourney
+        from payment_accounts.journey_schema import JourneyQuery
+        local, crypto = self.pair()
+        def entry(key, *, kind='CREDIT', op=None, voucher=None):
+            sender = {'type': 'FIAT', 'full_name': 'Sender', 'document_number': '123'}
+            if voucher:
+                sender['voucher_id'] = voucher
+            return LedgerEntry.objects.create(provider='infinia', financial_account=local,
+                provider_entry_id=key, direction='credit', asset=local.asset, amount='32.51',
+                occurred_at=timezone.now(), operation=op,
+                provider_data={'operation': {'type': kind, 'operation_id': None}, 'third_party': sender})
+        receipt = entry('real-incoming')
+        flow = MoneyFlow.objects.create(confio_account=self.owner, kind='fund', source_asset='COP', source_amount='32.51')
+        InfiniaJourney.objects.create(confio_account=self.owner, money_flow=flow, request_id=uuid.uuid4(),
+            local_account=local, crypto_account=crypto, direction='to_wallet', funding_credit=receipt,
+            minimum_fx_output='1', minimum_wallet_output='0.9', stage='completed', wallet_address='0x'+'1'*40)
+        conversion = MoneyOperation.objects.create(provider='infinia', operation_type='conversion',
+            source_account=crypto, destination_account=local, source_asset='USDC_POL', source_amount='2',
+            idempotency_key='conversion-history', provider_data={'voucher_ids': ['conversion-voucher']})
+        # These newer entries must not consume the first page or masquerade as pay-ins.
+        for n in range(21):
+            entry(f'conversion-{n}', op=conversion)
+        entry('voucher-only', voucher='conversion-voucher')
+        entry('null-operation-voucher', kind=None, voucher='conversion-voucher')
+        entry('refund', kind='PAYOUT_REFUND')
+        entry('internal', kind='INTERNAL_TRANSFER')
+        with mock.patch('payment_accounts.schema._active_account', return_value=self.owner):
+            rows = JourneyQuery.resolve_local_incoming_deposits(None, SimpleNamespace(), local.internal_id)
+            self.assertEqual([r.pk for r in rows], [receipt.pk])
+            self.assertEqual(JourneyQuery.resolve_local_incoming_deposits(None, SimpleNamespace(), local.internal_id, 1), [])
+            self.assertEqual(JourneyQuery.resolve_local_incoming_deposits(None, SimpleNamespace(), uuid.uuid4()), [])
+
     def fx(self, target):
         self.client_api.create_transfer_quote.return_value = {
             'id': 'q', 'status': 'ACTIVE', 'target_amount': target, 'expire_at': '2026-09-14T12:00:00Z'}
