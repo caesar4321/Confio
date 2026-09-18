@@ -976,7 +976,7 @@ class CreateRampOrder(graphene.Mutation):
         except (InvalidOperation, TypeError):
             return RampOrderType(success=False, error='Invalid amount')
 
-        if decimal_amount <= 0:
+        if not decimal_amount.is_finite() or decimal_amount <= 0:
             return RampOrderType(success=False, error='Amount must be greater than zero')
 
         fee_capable_client = str(
@@ -1042,13 +1042,16 @@ class CreateRampOrder(graphene.Mutation):
                 from cusd_plus.cusd_vault import WAD, preview_redeem_wei
                 gross_wei = int((decimal_amount * WAD).to_integral_value(rounding=ROUND_DOWN))
                 order_fee_preview = preview_redeem_wei(gross_wei)
-                # New builds fund the exact net. An already-shipped build
+                # Koywe settles at six decimals. Keep contract fee precision
+                # separately; the order and payment must use the SAME net.
+                # An already-shipped build
                 # ignores confioDepositAmountWei and signs the entered amount;
                 # its provider order must therefore remain that amount. It
                 # still pays the 0.9% on top at redemption during the short
                 # review window, but cannot overfund a smaller order.
                 provider_order_amount = (
-                    order_fee_preview.net if fee_capable_client else decimal_amount)
+                    _koywe_provider_amount(order_fee_preview.net)
+                    if fee_capable_client else decimal_amount)
             except Exception as exc:  # noqa: BLE001
                 logger.warning('cUSD fee preview failed during order creation', exc_info=True)
                 return RampOrderType(
@@ -1385,6 +1388,8 @@ class CreateRampOrder(graphene.Mutation):
             order_payload['confioNetAmount'] = format(order_fee_preview.net, 'f')
             order_payload['confioFeeBps'] = order_fee_preview.fee_bps
             order_payload['confioFeeMode'] = 'gross_debit_net_provider'
+            if normalized_direction == 'OFF_RAMP' and fee_capable_client:
+                order_payload['confioProviderAmount'] = format(provider_order_amount, 'f')
         ramp_tx = upsert_koywe_ramp_transaction(
             destination=destination,
             actor_user=user,
@@ -1431,7 +1436,10 @@ class CreateRampOrder(graphene.Mutation):
                     enforce=(normalized_direction == 'OFF_RAMP'),
                 ),
                 deposit_amount_wei=(
-                    order_fee_preview.net_wei
+                    int(provider_order_amount * Decimal(10 ** 18))
+                    if normalized_direction == 'OFF_RAMP'
+                    and fee_capable_client and order_fee_preview is not None
+                    else order_fee_preview.net_wei
                     if fee_capable_client and order_fee_preview is not None
                     else None
                 ),
@@ -1477,7 +1485,7 @@ class CreateMockRampOrder(graphene.Mutation):
         except (InvalidOperation, TypeError):
             return RampOrderType(success=False, error="Invalid amount")
 
-        if decimal_amount <= 0:
+        if not decimal_amount.is_finite() or decimal_amount <= 0:
             return RampOrderType(success=False, error="Amount must be greater than zero")
 
         current_account = _get_ramp_account_for_user(info, user)
@@ -1762,7 +1770,7 @@ class Query(graphene.ObjectType):
         except (InvalidOperation, TypeError):
             raise ValidationError("Invalid amount")
 
-        if decimal_amount <= 0:
+        if not decimal_amount.is_finite() or decimal_amount <= 0:
             raise ValidationError("Amount must be greater than zero")
 
         if normalized_direction == "ON_RAMP" and not (payment_method_code or "").strip():
@@ -1778,7 +1786,7 @@ class Query(graphene.ObjectType):
                 from cusd_plus.cusd_vault import WAD, preview_redeem_wei
                 gross_wei = int((decimal_amount * WAD).to_integral_value(rounding=ROUND_DOWN))
                 fee_preview = preview_redeem_wei(gross_wei)
-                provider_amount = fee_preview.net
+                provider_amount = _koywe_provider_amount(fee_preview.net)
             except Exception as exc:  # noqa: BLE001
                 logger.warning('cUSD fee preview failed for off-ramp quote', exc_info=True)
                 raise ValidationError('No pudimos calcular la comisión de Confío.') from exc
@@ -1904,6 +1912,10 @@ class Query(graphene.ObjectType):
             actor_user=user,
         ).first()
 
+        # Snapshot the authorized amounts before syncing mutable provider state.
+        expected_amount = _ramp_tx_crypto_amount(ramp_tx)
+        deposit_wei = _stored_koywe_deposit_wei(ramp_tx)
+        gross_wei = _stored_confio_preview_wei(ramp_tx, 'confioGrossAmount')
         try:
             koywe_email = str((ramp_tx.metadata or {}).get('auth_email') or '').strip() if ramp_tx else ''
             if not koywe_email:
@@ -1930,6 +1942,23 @@ class Query(graphene.ObjectType):
             logger.exception("Unexpected Koywe ramp order status failure")
             return RampOrderStatusType(success=False, error="Unexpected Koywe error while reading the order")
 
+        payment_payload = dict(result.raw_response or {})
+        is_off_ramp = (getattr(ramp_tx, 'direction', '') or '').lower() == 'off_ramp'
+        address_fields_agree = True
+        # Koywe's GET /orders uses destinationAddress for the crypto deposit
+        # on off-ramps. On on-ramps it is the user's receiving wallet instead.
+        if is_off_ramp and payment_payload.get('destinationAddress'):
+            payment_payload['depositAddress'] = payment_payload.get(
+                'depositAddress') or payment_payload['destinationAddress']
+            address_fields_agree = str(payment_payload['depositAddress']).strip().lower() == str(
+                payment_payload['destinationAddress']).strip().lower()
+        created_payload = ((ramp_tx.metadata or {}).get('provider_payload_created') or {}) if ramp_tx else {}
+        has_fee_metadata = any(key in created_payload for key in (
+            'confioFeeMode', 'confioGrossAmount', 'confioNetAmount',
+            'confioFeeAmount', 'confioProviderAmount', 'confioFeeBps',
+        ))
+        fee_voucher_valid = not is_off_ramp or not has_fee_metadata or (
+            gross_wei is not None and deposit_wei is not None)
         return RampOrderStatusType(
             success=True,
             error=None,
@@ -1938,7 +1967,7 @@ class Query(graphene.ObjectType):
             status_details=result.status_details,
             next_action_url=result.next_action_url,
             payment_details=annotate_koywe_deposit_address(
-                result.raw_response,
+                payment_payload,
                 savings_rail=(getattr(ramp_tx, 'destination', None) == 'cusd_plus'),
                 # Re-verify on EVERY read, against the amount this order was
                 # created for. Defaulting to allow_funding=True here handed a
@@ -1949,16 +1978,14 @@ class Query(graphene.ObjectType):
                 # reading `direction` off a missing row yielded enforce=False,
                 # which vouched for an address with no order behind it
                 # (round 4 [P2] #11).
-                allow_funding=_provider_amount_matches(
-                    getattr(result, 'amount_in', None),
-                    _ramp_tx_crypto_amount(ramp_tx),
+                allow_funding=address_fields_agree and fee_voucher_valid and _provider_amount_matches(
+                    (result.raw_response or {}).get('amountIn'),
+                    expected_amount,
                     enforce=(ramp_tx is None
                              or (getattr(ramp_tx, 'direction', '') or '').lower() == 'off_ramp'),
                 ),
-                deposit_amount_wei=_stored_confio_preview_wei(
-                    ramp_tx, 'confioNetAmount'),
-                gross_debit_amount_wei=_stored_confio_preview_wei(
-                    ramp_tx, 'confioGrossAmount'),
+                deposit_amount_wei=deposit_wei,
+                gross_debit_amount_wei=gross_wei,
             ),
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=result.raw_response,
@@ -2160,6 +2187,41 @@ CONFIO_DEPOSIT_AMOUNT_WEI_KEY = 'confioDepositAmountWei'
 CONFIO_GROSS_DEBIT_AMOUNT_WEI_KEY = 'confioGrossDebitAmountWei'
 
 
+def _koywe_provider_amount(value) -> Decimal:
+    """The six-decimal settlement amount shared by quote, order and payment."""
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite():
+            raise ValueError('non-finite amount')
+        amount = amount.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        if amount <= 0:
+            raise ValueError('non-positive amount')
+        return amount
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError('Invalid provider settlement amount') from exc
+
+
+def _stored_koywe_deposit_wei(ramp_tx) -> int | None:
+    """Recover the actual order amount, never the higher-precision fee net.
+
+    Historical orders predate confioProviderAmount. Their recorded provider
+    amount is usable only when bounded by the creation-time redemption net.
+    """
+    net_wei = _stored_confio_preview_wei(ramp_tx, 'confioNetAmount')
+    gross_wei = _stored_confio_preview_wei(ramp_tx, 'confioGrossAmount')
+    if net_wei is None or gross_wei is None or net_wei > gross_wei:
+        return None
+    amount = _ramp_tx_crypto_amount(ramp_tx)
+    if amount is None or not amount.is_finite() or amount <= 0:
+        return None
+    wei = int(amount * Decimal(10 ** 18))
+    created = (ramp_tx.metadata or {}).get('provider_payload_created') or {}
+    recorded = created.get('confioProviderAmount')
+    if recorded is not None and not _provider_amount_matches(recorded, amount, enforce=True):
+        return None
+    return wei if wei <= net_wei else None
+
+
 def _stored_confio_preview_wei(ramp_tx, field: str) -> int | None:
     """Recover a creation-time fee voucher after app close/resume."""
     if ramp_tx is None:
@@ -2171,6 +2233,8 @@ def _stored_confio_preview_wei(ramp_tx, field: str) -> int | None:
         return None
     try:
         value = Decimal(str(raw))
+        if not value.is_finite():
+            return None
         wei = int((value * Decimal(10 ** 18)).to_integral_value(rounding=ROUND_DOWN))
         return wei if wei > 0 else None
     except (InvalidOperation, TypeError, ValueError):
@@ -2204,11 +2268,16 @@ def _ramp_tx_crypto_amount(ramp_tx) -> Decimal | None:
     """
     if ramp_tx is None:
         return None
-    raw = getattr(ramp_tx, 'crypto_amount_estimated', None)
+    created = ((getattr(ramp_tx, 'metadata', None) or {}).get(
+        'provider_payload_created') or {})
+    # Polling overwrites crypto_amount_estimated. It must never become the
+    # authority for funding, even on a second poll of a historical order.
+    raw = created.get('amountIn', created.get('confioProviderAmount'))
     if raw is None:
         return None
     try:
-        return Decimal(str(raw)).quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        amount = Decimal(str(raw))
+        return amount if amount.is_finite() and amount > 0 else None
     except (InvalidOperation, TypeError, ValueError):
         return None
 
@@ -2231,13 +2300,15 @@ def _provider_amount_matches(provider_amount_in, requested, *,
         logger.error('No recorded order amount to verify against; refusing to auto-fund')
         return False
     try:
-        echoed = Decimal(str(provider_amount_in)).quantize(
-            Decimal('0.000001'), rounding=ROUND_DOWN)
+        echoed = Decimal(str(provider_amount_in))
+        expected = Decimal(str(requested))
+        if not echoed.is_finite() or not expected.is_finite() or echoed <= 0 or expected <= 0:
+            return False
     except (InvalidOperation, TypeError, ValueError):
         logger.error('Koywe returned an unreadable amount_in (%r); refusing to auto-fund',
                      provider_amount_in)
         return False
-    if echoed != requested:
+    if echoed != expected:
         logger.error(
             'Koywe amount_in %s != requested %s; refusing to auto-fund this order',
             echoed, requested,

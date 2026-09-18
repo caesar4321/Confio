@@ -1427,9 +1427,9 @@ export class AuthService {
 
       // ----------------------------------------------------------------------
       // NATIVE V2 CHECK:
-      // New V2 users may generate a random master secret. Existing identities
-      // with a server-side Algorand address must recover the matching secret
-      // instead of silently minting a replacement V2 wallet.
+      // Ordinary V2 setup generates only for new/unregistered identities.
+      // Sign-in reconciliation may restore or durably provision a replacement
+      // under its recovery checks before ordinary setup runs.
       // ----------------------------------------------------------------------
       try {
         const reconciled = await reconcileSignInWallet({
@@ -1458,11 +1458,9 @@ export class AuthService {
         throw error;
       }
       let serverAlgorandAddress = authData.user?.algorandAddress || null;
-      // Algorand deprecated: BSC-only returning users have NO Algorand address,
-      // so the registered BSC address is the wallet anchor. Never silently mint
-      // a replacement master secret when the server knows a wallet on either
-      // chain — the BSC address is immutable server-side, so a fresh secret
-      // would strand the funds on the original address.
+      // BSC-only returning users have no Algorand address. Reconciliation above
+      // may update these anchors; ordinary setup must use the resulting
+      // registration and must not generate another replacement.
       const serverBscAddress = authData.user?.bscAddress || null;
       const allowV2SecretGeneration = !!authData.isNewUser || (!serverAlgorandAddress && !serverBscAddress);
       let verifiedV2AlgorandAddress: string | null = null;

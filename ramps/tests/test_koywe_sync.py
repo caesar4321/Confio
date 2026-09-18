@@ -4,7 +4,7 @@ from unittest import mock
 
 import requests
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
 from ramps import schema as ramps_schema
 from ramps import signals as ramps_signals
@@ -335,6 +335,7 @@ class KoyweOrderAmbiguityTests(SimpleTestCase):
         cache_delete.assert_not_called()
 
 
+@override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
 class KoyweAddressReservationTests(TestCase):
     def setUp(self):
         self.user = User.objects.create(
