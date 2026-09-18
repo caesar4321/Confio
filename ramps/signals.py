@@ -212,7 +212,10 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
         and ramp_tx.direction == 'off_ramp'
         and ramp_tx.final_amount is not None
     ):
-        return ramp_tx.final_amount, 'USDC'
+        # This amount is the provider settlement amount, not the wallet's
+        # gross debit. Savings orders settle in USDT-BSC; legacy ones in USDC.
+        token = 'USDT' if ramp_tx.destination == 'cusd_plus' else 'USDC'
+        return ramp_tx.final_amount, token
 
     if ramp_tx.conversion_id and ramp_tx.conversion:
         if ramp_tx.direction == 'on_ramp':
