@@ -101,6 +101,9 @@ class User(AbstractUser, SoftDeleteModel):
     all_objects = AllObjectsUserManager()
 
     firebase_uid = models.CharField(max_length=128, unique=True)
+    # Public Drive IDs only. A stable create-only reservation coordinates
+    # missing-backup recovery across devices without storing wallet secrets.
+    wallet_recovery_drive_ids = models.JSONField(default=list, blank=True)
     # Unified activity timestamp for MAU/WAU/DAU (updated on any user activity)
     last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
     phone_country = models.CharField(

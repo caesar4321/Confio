@@ -88,15 +88,17 @@ class PrepareWalletReconciliation(graphene.Mutation):
     class Arguments:
         firebase_id_token = graphene.String(required=True)
         bsc_address = graphene.String()
+        recovery_file_ids = graphene.List(graphene.NonNull(graphene.String))
 
     success = graphene.Boolean()
     error = graphene.String()
     grant = graphene.String()
     challenge = graphene.String()
     accounts = graphene.List(graphene.NonNull(WalletReconciliationAccount))
+    recovery_file_ids = graphene.List(graphene.NonNull(graphene.String))
 
     @classmethod
-    def mutate(cls, root, info, firebase_id_token, bsc_address=None):
+    def mutate(cls, root, info, firebase_id_token, bsc_address=None, recovery_file_ids=None):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated or not user.is_active:
             return cls(success=False, error='Authentication required')
@@ -120,6 +122,24 @@ class PrepareWalletReconciliation(graphene.Mutation):
                         and item.account_index == 0), None)
         if not account:
             return cls(success=False, error='Account not found')
+        if recovery_file_ids is not None:
+            # [] reads the reservation. A pair proposes one only if no device
+            # has won yet. Never replace it on timeout/retry or client request.
+            if (provider != 'google.com' or address is not None
+                    or not isinstance(recovery_file_ids, list)
+                    or (recovery_file_ids and (
+                        len(recovery_file_ids) != 2 or len(set(recovery_file_ids)) != 2
+                        or any(not isinstance(value, str) or not re.fullmatch(
+                            r'[A-Za-z0-9_-]{10,100}', value) for value in recovery_file_ids)))):
+                return cls(success=False, error='Invalid Drive recovery reservation')
+            with transaction.atomic():
+                owner = User.objects.select_for_update().get(pk=user.pk)
+                if not owner.is_active or owner.firebase_uid != identity['uid']:
+                    return cls(success=False, error='Authentication required')
+                if not owner.wallet_recovery_drive_ids and recovery_file_ids:
+                    owner.wallet_recovery_drive_ids = recovery_file_ids
+                    owner.save(update_fields=['wallet_recovery_drive_ids'])
+                return cls(success=True, recovery_file_ids=owner.wallet_recovery_drive_ids)
         if address is None:
             return cls(success=True, accounts=account_results(accounts))
         payload = {

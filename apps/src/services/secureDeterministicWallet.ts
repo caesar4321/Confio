@@ -1696,6 +1696,142 @@ export async function clearReconciledLegacyWallets(contexts: Array<{
   }
 }
 
+const missingBackupQueues = new Map<string, Promise<void>>();
+
+/** Serialize local retries; each attempt rechecks Drive with its own identity/token. */
+export async function createMissingSignInWalletCandidate(
+  userSub: string,
+  driveToken: string,
+  registrations: NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations'],
+  reserveFileIds: (proposed: string[]) => Promise<string[]>,
+) {
+  const previous = missingBackupQueues.get(userSub);
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  missingBackupQueues.set(userSub, current);
+  if (previous) await previous;
+  try {
+    return await provisionMissingSignInWalletCandidate(userSub, driveToken, registrations, reserveFileIds);
+  } finally {
+    release();
+    if (missingBackupQueues.get(userSub) === current) missingBackupQueues.delete(userSub);
+  }
+}
+
+/** Provision a durable Google wallet only after both supported backups are absent. */
+async function provisionMissingSignInWalletCandidate(
+  userSub: string,
+  driveToken: string,
+  registrations: NonNullable<Parameters<typeof getSignInWalletCandidate>[2]>['legacyRegistrations'],
+  reserveFileIds: (proposed: string[]) => Promise<string[]>,
+) {
+  if (!userSub || !driveToken || !registrations.some(row => row.algorandAddress || row.bscAddress)) {
+    throw new WalletRecoveryError('unexpected');
+  }
+  // Recheck absence here, not just at the caller. Authentication, network,
+  // malformed backups and legacy mismatches are never generation permission.
+  const existing = async () => {
+    try {
+      return await getSignInWalletCandidate(userSub, driveToken);
+    } catch (error) {
+      if (!(error instanceof WalletRecoveryError) || error.code !== 'missing') throw error;
+    }
+    try {
+      return await getSignInWalletCandidate(userSub, driveToken, { legacyRegistrations: registrations });
+    } catch (error) {
+      if (!(error instanceof WalletRecoveryError) || error.code !== 'missing') throw error;
+    }
+    return null;
+  };
+  const recovered = await existing();
+  if (recovered) return recovered;
+  const { credentialStorage } = await import('./credentialStorage');
+  const { googleDriveStorage, GoogleDriveStorageError } = await import('./googleDriveStorage');
+  // The server atomically elects public IDs, not a secret or a device. The
+  // reservation never expires: a suspended phone can only create the SAME
+  // files, and Drive rejects duplicate IDs rather than overwriting content.
+  let reserved = await reserveFileIds([]);
+  if (!reserved.length) reserved = await reserveFileIds(await googleDriveStorage.generateRecoveryFileIds(driveToken));
+  if (reserved.length !== 2 || new Set(reserved).size !== 2
+      || reserved.some(value => typeof value !== 'string' || !/^[A-Za-z0-9_-]{10,100}$/.test(value))) {
+    throw new WalletRecoveryError('unexpected');
+  }
+  const [payloadId, manifestId] = reserved;
+  const readReservedSecret = async () => {
+    const body = await googleDriveStorage.downloadFile(driveToken, payloadId);
+    const recovered = decryptBackup(body, require('crypto-js/aes'), APP_BACKUP_KEY, require('crypto-js/enc-utf8'));
+    if (!recovered) throw new WalletRecoveryError('unreadable');
+    return recovered;
+  };
+  let secret: Uint8Array | null = null;
+  try {
+    // A previous upload may be durable even when manifest publication failed.
+    // Restore it before reading a corrupt staging key or attempting an upload.
+    secret = await readReservedSecret();
+  } catch (error) {
+    if (!(error instanceof GoogleDriveStorageError) || error.status !== 404) throw error;
+  }
+  const id = `recovery_${payloadId}`;
+  const filename = `confio_wallet_v2_${id}.enc`;
+  if (!secret) {
+    try {
+      secret = await getExistingLocalV2MasterSecret(userSub);
+    } catch (error) {
+      if (!(error instanceof CorruptMasterSecretError)) throw error;
+    }
+    // Keep a retryable staged key without rebinding the active wallet/session.
+    // A failed upload must not cause a new random wallet on every attempt.
+    const stagingAlias = `confio_missing_backup_v1_${bytesToHex(sha256(utf8ToBytes(userSub)))}`;
+    if (!secret) secret = await readMasterSecret(credentialStorage, stagingAlias, 'missing-backup staging');
+    if (!secret) {
+      secret = generateRandomSecret();
+      await credentialStorage.storeSecret(stagingAlias, secret);
+      const reread = await readMasterSecret(credentialStorage, stagingAlias, 'missing-backup staging');
+      if (!reread || !secretsEqual(reread, secret)) throw new WalletRecoveryError('local_corrupt');
+    }
+    try {
+      await googleDriveStorage.createFile(driveToken, filename,
+        `${DRIVE_SECURITY_HEADER}\n${encryptBackupV2(secret, APP_BACKUP_KEY)}`, payloadId);
+    } catch (error) {
+      if (!(error instanceof GoogleDriveStorageError) || error.status !== 409) throw error;
+    }
+    // On 409 another device (or a lost-response retry) won. Adopt the verified
+    // winner, never overwrite it with this device's staged candidate.
+    secret = await readReservedSecret();
+  }
+  // Another device may have completed recovery while our upload was running.
+  // Prefer its readable canonical wallet instead of overwriting it.
+  const concurrent = await existing();
+  if (concurrent) return concurrent;
+  const now = new Date().toISOString();
+  const manifest = { wallets: [{
+    id, createdAt: now, lastBackupAt: now,
+    deviceHint: `${await DeviceInfo.getDeviceName()} (${Platform.OS})`, providerHint: 'Google',
+  }] };
+  const manifests = await googleDriveStorage.listFiles(driveToken, MANIFEST_FILENAME);
+  if (manifests.length > 1) throw new WalletRecoveryError('unreadable');
+  if (manifests.length) {
+    // A previously missing payload may have appeared during provisioning.
+    const appeared = await existing();
+    if (appeared) return appeared;
+    // All coordinated writers refer to the identical create-only payload.
+    await googleDriveStorage.updateFile(driveToken, manifests[0].id, JSON.stringify(manifest));
+  } else {
+    try {
+      await googleDriveStorage.createFile(driveToken, MANIFEST_FILENAME, JSON.stringify(manifest), manifestId);
+    } catch (error) {
+      if (!(error instanceof GoogleDriveStorageError) || error.status !== 409) throw error;
+    }
+  }
+  // Only a decryptable canonical read-back may proceed to server replacement.
+  const verified = await getSignInWalletCandidate(userSub, driveToken);
+  const expected = deriveEvmKeyFromMasterSecret(secret, { accountType: 'personal', accountIndex: 0 });
+  if (!verified || verified.bscAddress.toLowerCase() !== expected.address.toLowerCase()) {
+    throw new WalletRecoveryError('mismatch');
+  }
+  return verified;
+}
+
 /** Recover existing key material only. Never generate or rewrite a Drive backup.
  * Without a Drive token this inspects Keychain. With one, the single canonical
  * Drive manifest is authoritative, independently of the old server address.

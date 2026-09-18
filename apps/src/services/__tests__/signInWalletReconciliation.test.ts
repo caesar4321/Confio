@@ -1,5 +1,5 @@
-jest.mock('../secureDeterministicWallet', () => ({ getSignInWalletCandidate: jest.fn(), clearReconciledLegacyWallets: jest.fn().mockResolvedValue(undefined), reportBackupStatus: jest.fn().mockResolvedValue(true) }));
-import { getSignInWalletCandidate, reportBackupStatus } from '../secureDeterministicWallet';
+jest.mock('../secureDeterministicWallet', () => ({ createMissingSignInWalletCandidate: jest.fn(), getSignInWalletCandidate: jest.fn(), clearReconciledLegacyWallets: jest.fn().mockResolvedValue(undefined), reportBackupStatus: jest.fn().mockResolvedValue(true) }));
+import { createMissingSignInWalletCandidate, getSignInWalletCandidate, reportBackupStatus } from '../secureDeterministicWallet';
 import { reconcileSignInWallet } from '../signInWalletReconciliation';
 import { WalletRecoveryError } from '../walletRecoveryErrors';
 
@@ -90,13 +90,50 @@ it('matching Google wallet with an unfinished backup can reach backup setup', as
   expect(args.client.mutate).toHaveBeenCalledTimes(1);
   expect(wallet.persist).not.toHaveBeenCalled();
 });
-it.each(['missing', 'unreadable', 'drive_access'] as const)('does not replace on %s backup', async code => {
+it.each(['unreadable', 'drive_access'] as const)('does not replace on %s backup', async code => {
   recover.mockResolvedValueOnce(candidate()).mockRejectedValueOnce(new WalletRecoveryError(code));
-  if (code === 'missing') recover.mockRejectedValueOnce(new WalletRecoveryError('missing'));
   const args = fixture();
   await expect(reconcileSignInWallet(args)).rejects.toThrow();
   expect(args.client.mutate).toHaveBeenCalledTimes(1);
   expect(args.authData.user.bscAddress).toBe('0xold');
+});
+it.each([null, 'local'] as const)('replaces a confirmed missing Drive backup with %s local material', async local => {
+  const wallet = candidate();
+  recover.mockResolvedValueOnce(local ? candidate() : null)
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'));
+  (createMissingSignInWalletCandidate as jest.Mock).mockResolvedValueOnce(wallet);
+  const args = fixture();
+  expect(await reconcileSignInWallet(args)).toBe(true);
+  expect(createMissingSignInWalletCandidate).toHaveBeenCalledWith('subject', 'drive-token', expect.any(Array), expect.any(Function));
+  expect(wallet.persist).toHaveBeenCalledTimes(1);
+  expect(args.authData.user.bscAddress).toBe('0xnew');
+});
+it('does not commit a replacement when the new backup cannot be verified', async () => {
+  recover.mockResolvedValueOnce(null).mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'));
+  (createMissingSignInWalletCandidate as jest.Mock).mockRejectedValueOnce(new Error('Drive upload failed'));
+  const args = fixture();
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('Drive upload failed');
+  expect(args.client.mutate).toHaveBeenCalledTimes(1);
+  expect(args.authData.user.bscAddress).toBe('0xold');
+});
+it('reserves recovery IDs with fresh identity and the sign-in request token', async () => {
+  recover.mockResolvedValueOnce(null).mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'));
+  const args = fixture();
+  const original = args.client.mutate.getMockImplementation()!;
+  args.client.mutate.mockImplementation(call => 'recoveryFileIds' in call.variables
+    ? Promise.resolve({ data: { prepareWalletReconciliation: { success: true, recoveryFileIds: ['payload-id', 'manifest-id'] } } })
+    : original(call));
+  (createMissingSignInWalletCandidate as jest.Mock).mockImplementationOnce(async (_sub, _token, _accounts, reserve) => {
+    expect(await reserve([])).toEqual(['payload-id', 'manifest-id']);
+    return candidate();
+  });
+  expect(await reconcileSignInWallet(args)).toBe(true);
+  const reservation = args.client.mutate.mock.calls.find(([call]) => 'recoveryFileIds' in call.variables)![0];
+  expect(reservation.context).toEqual({ pinnedAuthToken: 'session', skipProactiveRefresh: true });
+  expect(reservation.variables).toEqual({ firebaseIdToken: 'fresh-identity', recoveryFileIds: [] });
 });
 it('Keychain write failure prevents server commit', async () => {
   const wallet = candidate();

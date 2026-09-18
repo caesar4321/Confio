@@ -17,6 +17,13 @@ const COMPLETE = gql`
     }
   }
 `;
+const RESERVE_RECOVERY = gql`
+  mutation ReserveWalletRecovery($firebaseIdToken: String!, $recoveryFileIds: [String!]!) {
+    prepareWalletReconciliation(firebaseIdToken: $firebaseIdToken, recoveryFileIds: $recoveryFileIds) {
+      success error recoveryFileIds
+    }
+  }
+`;
 
 type Registration = {
   accountId: string; accountType: 'personal' | 'business'; accountIndex: number;
@@ -61,7 +68,8 @@ export function candidateMatchesRegistration(
 }
 
 /** Runs inside social sign-in, with its request-scoped JWT. No setup UI and no
- * balance inspection. Failure never turns a missing backup into a new secret.
+ * balance inspection. Confirmed missing Google backups are provisioned and
+ * read back before using the same signed registration replacement flow.
  */
 export async function reconcileSignInWallet(options: {
   provider: 'google' | 'apple'; subject: string; firebaseToken: string;
@@ -72,7 +80,7 @@ export async function reconcileSignInWallet(options: {
 }): Promise<boolean> {
   const { authData, provider, subject, client } = options;
   if (authData.isNewUser) return false;
-  const { getSignInWalletCandidate, reportBackupStatus, clearReconciledLegacyWallets } = await import('./secureDeterministicWallet');
+  const { getSignInWalletCandidate, createMissingSignInWalletCandidate, reportBackupStatus, clearReconciledLegacyWallets } = await import('./secureDeterministicWallet');
   let candidate: Awaited<ReturnType<typeof getSignInWalletCandidate>> | undefined;
   let restoredLegacyBackup = false;
   const acknowledgeBackup = async () => {
@@ -176,7 +184,16 @@ export async function reconcileSignInWallet(options: {
         } catch (legacyError) {
           if (candidate === null && accounts.every(row => !row.isKeylessMigrated && !row.bscAddress)
               && legacyError instanceof WalletRecoveryError && legacyError.code === 'missing') return false;
-          throw legacyError;
+          if (!(legacyError instanceof WalletRecoveryError) || legacyError.code !== 'missing') throw legacyError;
+          candidate = await createMissingSignInWalletCandidate(subject, token, accounts, async proposed => {
+            const response = await client.mutate({ mutation: RESERVE_RECOVERY, context,
+              variables: { firebaseIdToken: options.firebaseToken, recoveryFileIds: proposed } });
+            const result = response.data?.prepareWalletReconciliation;
+            if (!result?.success || !Array.isArray(result.recoveryFileIds)) {
+              throw new Error('No pudimos coordinar la recuperación. Intenta nuevamente. Código: RECOVERY-RESERVATION.');
+            }
+            return result.recoveryFileIds;
+          });
         }
       } else {
         // Never fall back from an unreadable or unreachable canonical backup.

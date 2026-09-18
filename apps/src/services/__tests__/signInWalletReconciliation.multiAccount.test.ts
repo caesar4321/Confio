@@ -1,9 +1,10 @@
 jest.mock('../secureDeterministicWallet', () => ({
   getSignInWalletCandidate: jest.fn(),
+  createMissingSignInWalletCandidate: jest.fn(),
   clearReconciledLegacyWallets: jest.fn(),
   reportBackupStatus: jest.fn(),
 }));
-import { getSignInWalletCandidate, clearReconciledLegacyWallets, reportBackupStatus } from '../secureDeterministicWallet';
+import { createMissingSignInWalletCandidate, getSignInWalletCandidate, clearReconciledLegacyWallets, reportBackupStatus } from '../secureDeterministicWallet';
 import { reconcileSignInWallet, walletAccountChallenge } from '../signInWalletReconciliation';
 import { WalletRecoveryError } from '../walletRecoveryErrors';
 
@@ -234,7 +235,7 @@ it('does not use the V1 shortcut for corrupt local V2 storage', async () => {
   expect(args.getGoogleDriveToken).toHaveBeenCalledTimes(1);
 });
 
-it('never falls back to V1 when corrupt local V2 material has no canonical or legacy backup', async () => {
+it('does not fall back to V1 or commit when missing-backup provisioning fails', async () => {
   const { args, state, wallet } = fixture();
   state.accounts = state.accounts.map(row => ({ ...row, bscAddress: null as any,
     algorandAddress: `legacy-${row.accountId}`, isKeylessMigrated: false }));
@@ -243,11 +244,25 @@ it('never falls back to V1 when corrupt local V2 material has no canonical or le
     .mockRejectedValueOnce(new WalletRecoveryError('missing'))
     .mockRejectedValueOnce(new WalletRecoveryError('missing'));
   const getLegacyV1Address = jest.fn();
-  await expect(reconcileSignInWallet({ ...args, getLegacyV1Address })).rejects.toMatchObject({ code: 'missing' });
+  (createMissingSignInWalletCandidate as jest.Mock).mockRejectedValueOnce(new Error('upload failed'));
+  await expect(reconcileSignInWallet({ ...args, getLegacyV1Address })).rejects.toThrow('upload failed');
+  expect(createMissingSignInWalletCandidate).toHaveBeenCalled();
   expect(getLegacyV1Address).not.toHaveBeenCalled();
   expect(wallet.persist).not.toHaveBeenCalled();
   expect(args.beforeWalletChange).not.toHaveBeenCalled();
   expect(args.client.mutate).toHaveBeenCalledTimes(1);
+});
+
+it('replaces all owned registrations after provisioning a missing Google backup', async () => {
+  const { args, wallet, state } = fixture();
+  (getSignInWalletCandidate as jest.Mock).mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'));
+  (createMissingSignInWalletCandidate as jest.Mock).mockResolvedValueOnce(wallet);
+  expect(await reconcileSignInWallet(args)).toBe(true);
+  expect(state.accounts.every(row => row.bscAddress === wallet.forAccount(row).bscAddress && !row.algorandAddress)).toBe(true);
+  expect(args.client.mutate.mock.calls[2][0].variables.wallets).toHaveLength(3);
+  expect(wallet.persist).toHaveBeenCalledTimes(1);
 });
 
 it('restores matching legacy-format backup only after canonical absence without reconciling', async () => {

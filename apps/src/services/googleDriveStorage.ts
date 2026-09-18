@@ -105,6 +105,18 @@ async function driveFetch(
  * avoiding the need for a separate heavy Drive SDK dependency.
  */
 export const googleDriveStorage = {
+    async generateRecoveryFileIds(accessToken: string): Promise<string[]> {
+        const response = await driveFetch('generate_ids', `${DRIVE_API_URL}/generateIds?count=2&space=appDataFolder&type=files`, {
+            method: 'GET', headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!response.ok) throw await createDriveError('generate_ids', response);
+        const data = await response.json();
+        if (!Array.isArray(data?.ids) || data.ids.length !== 2 || new Set(data.ids).size !== 2
+            || data.ids.some((id: unknown) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{10,100}$/.test(id))) {
+            throw new GoogleDriveStorageError('generate_ids', 0, 'invalid_ids');
+        }
+        return data.ids;
+    },
     /**
      * List files in the AppData folder.
      * @param accessToken - Valid Google OAuth Access Token
@@ -119,23 +131,44 @@ export const googleDriveStorage = {
                 query += ` and name='${filename}'`;
             }
 
-            const response = await driveFetch(
-                'list',
-                `${DRIVE_API_URL}?spaces=appDataFolder&q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime)`,
-                {
-                    method: 'GET',
-                    headers: {
-                        Authorization: `Bearer ${accessToken}`,
+            const files: DriveFile[] = [];
+            const seenTokens = new Set<string>();
+            let pageToken: string | undefined;
+            do {
+                const response = await driveFetch(
+                    'list',
+                    `${DRIVE_API_URL}?spaces=appDataFolder&q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime),nextPageToken,incompleteSearch${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`,
+                    {
+                        method: 'GET',
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                        },
                     },
+                );
+
+                if (!response.ok) {
+                    throw await createDriveError('list', response);
                 }
-            );
 
-            if (!response.ok) {
-                throw await createDriveError('list', response);
-            }
-
-            const data = await response.json();
-            return data.files || [];
+                const data = await response.json();
+                if (!data || typeof data !== 'object' || Array.isArray(data)
+                    || data.incompleteSearch === true
+                    || (data.files !== undefined && !Array.isArray(data.files))
+                    || (data.files || []).some((file: any) => !file || typeof file.id !== 'string' || !file.id
+                        || typeof file.name !== 'string' || !file.name)
+                    || (data.nextPageToken !== undefined && (typeof data.nextPageToken !== 'string' || !data.nextPageToken))) {
+                    throw new GoogleDriveStorageError('list', 0, 'incomplete_listing');
+                }
+                files.push(...(data.files || []));
+                pageToken = data.nextPageToken;
+                if (pageToken) {
+                    if (seenTokens.has(pageToken) || seenTokens.size >= 100) {
+                        throw new GoogleDriveStorageError('list', 0, 'incomplete_listing');
+                    }
+                    seenTokens.add(pageToken);
+                }
+            } while (pageToken);
+            return files;
         } catch (error) {
 
             throw error;
@@ -206,9 +239,10 @@ export const googleDriveStorage = {
      * @param filename - Name of the file
      * @param content - Content (utf-8 string, e.g. Base64 encoded secret)
      */
-    async createFile(accessToken: string, filename: string, content: string): Promise<string> {
+    async createFile(accessToken: string, filename: string, content: string, reservedId?: string): Promise<string> {
         try {
             const metadata = {
+                ...(reservedId ? { id: reservedId } : {}),
                 name: filename,
                 parents: ['appDataFolder'],
             };

@@ -71,7 +71,9 @@ jest.mock('../credentialStorage', () => ({
 }));
 
 jest.mock('../googleDriveStorage', () => ({
+  GoogleDriveStorageError: jest.requireActual('../googleDriveStorage').GoogleDriveStorageError,
   googleDriveStorage: {
+    generateRecoveryFileIds: jest.fn().mockResolvedValue(['reserved-payload-0001', 'reserved-manifest-0001']),
     listFiles: jest.fn().mockResolvedValue([]),
     listRevisions: jest.fn().mockResolvedValue([]),
     downloadFile: jest.fn().mockRejectedValue(new Error('no files in test Drive')),
@@ -82,6 +84,7 @@ jest.mock('../googleDriveStorage', () => ({
 
 import {
   createWalletReenrollmentDriveAttestation,
+  createMissingSignInWalletCandidate as provisionMissingWallet,
   getExistingLocalV2MasterSecret,
   getSignInWalletCandidate,
   getEvmAddressForDisplay,
@@ -93,11 +96,14 @@ import {
   SecureDeterministicWalletService,
 } from '../secureDeterministicWallet';
 import { deriveEvmKeyFromMasterSecret } from '../evmWallet';
-import { googleDriveStorage } from '../googleDriveStorage';
+import { googleDriveStorage, GoogleDriveStorageError } from '../googleDriveStorage';
 import { apolloClient } from '../../apollo/client';
 
 const USER_SUB = '111222333444555666777';
 const MASTER_SECRET = new Uint8Array(32).fill(7);
+const mockReserveIds = jest.fn(async (_proposed: string[]) => ['reserved-payload-0001', 'reserved-manifest-0001']);
+const createMissingSignInWalletCandidate = (subject: string, token: string, registrations: Parameters<typeof provisionMissingWallet>[2]) =>
+  provisionMissingWallet(subject, token, registrations, mockReserveIds);
 
 const subjectAlias = () =>
   `confio_master_secret_v2_${bytesToHex(sha256(utf8ToBytes(USER_SUB)))}`;
@@ -114,6 +120,191 @@ describe('sign-in canonical wallet recovery', () => {
     jest.clearAllMocks();
     mockMemoryStore.clear();
     (googleDriveStorage.listFiles as jest.Mock).mockResolvedValue([]);
+  });
+
+  describe('confirmed missing backup replacement', () => {
+    const files = new Map<string, string>();
+    const ids = new Map<string, string>();
+    const registrations = [{ accountType: 'personal' as const, accountIndex: 0, bscAddress: '0xold' }];
+    beforeEach(() => {
+      files.clear();
+      ids.clear();
+      mockReserveIds.mockReset().mockResolvedValue(['reserved-payload-0001', 'reserved-manifest-0001']);
+      (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (_token, name) =>
+        files.has(name) ? [{ id: [...ids].find(([, value]) => value === name)?.[0] || name }] : []);
+      (googleDriveStorage.downloadFile as jest.Mock).mockImplementation(async (_token, id) => {
+        const body = files.get(ids.get(id) || id);
+        if (body === undefined) throw new GoogleDriveStorageError('download', 404);
+        return body;
+      });
+      (googleDriveStorage.createFile as jest.Mock).mockImplementation(async (_token, name, body, reservedId) => {
+        if (reservedId && ids.has(reservedId)) throw new GoogleDriveStorageError('upload', 409);
+        files.set(name, body);
+        if (reservedId) ids.set(reservedId, name);
+        return reservedId || name;
+      });
+      (googleDriveStorage.updateFile as jest.Mock).mockImplementation(async (_token, id, body) => {
+        files.set(ids.get(id) || id, body); return { id };
+      });
+    });
+    afterEach(() => {
+      (googleDriveStorage.listFiles as jest.Mock).mockReset().mockResolvedValue([]);
+      (googleDriveStorage.downloadFile as jest.Mock).mockReset().mockRejectedValue(new Error('no files in test Drive'));
+      (googleDriveStorage.createFile as jest.Mock).mockReset().mockResolvedValue({ id: 'new-file-id' });
+      (googleDriveStorage.updateFile as jest.Mock).mockReset().mockResolvedValue({ id: 'updated-file-id' });
+    });
+    it.each([false, true])('backs up and verifies a replacement, existing local secret: %s', async local => {
+      if (local) mockMemoryStore.set(subjectAlias(), MASTER_SECRET);
+      const wallet = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(wallet).not.toBeNull();
+      // Provisioning never changes active Keychain or publishes receiving addresses.
+      expect(mockMemoryStore.get(subjectAlias())).toEqual(local ? MASTER_SECRET : undefined);
+      if (local) expect(wallet!.algorandAddress).toBe(expectedAddress);
+      const retry = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(retry!.bscAddress).toBe(wallet!.bscAddress);
+      expect(googleDriveStorage.createFile).toHaveBeenCalledTimes(2);
+      await wallet!.persist();
+      expect((await getSignInWalletCandidate(USER_SUB))!.bscAddress).toBe(wallet!.bscAddress);
+    });
+    it('reuses the staged secret after an interrupted upload', async () => {
+      (googleDriveStorage.createFile as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toThrow('offline');
+      const staged = [...mockMemoryStore.entries()].find(([name]) => name.startsWith('confio_missing_backup_v1_'))![1];
+      const wallet = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(wallet!.bscAddress).toBe(deriveEvmKeyFromMasterSecret(staged, { accountType: 'personal', accountIndex: 0 }).address);
+    });
+    it('reuses an uploaded payload after manifest creation fails', async () => {
+      const create = (googleDriveStorage.createFile as jest.Mock).getMockImplementation()!;
+      let failManifest = true;
+      (googleDriveStorage.createFile as jest.Mock).mockImplementation(async (token, name, body, reservedId) => {
+        if (name === 'confio_wallet_manifest_v2.json' && failManifest) {
+          failManifest = false;
+          throw new Error('manifest offline');
+        }
+        return create(token, name, body, reservedId);
+      });
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toThrow('manifest offline');
+      await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect([...files.keys()].filter(name => name.endsWith('.enc'))).toHaveLength(1);
+    });
+    it('recovers an uploaded wallet even when the staged local copy becomes corrupt', async () => {
+      const create = (googleDriveStorage.createFile as jest.Mock).getMockImplementation()!;
+      let interrupt = true;
+      (googleDriveStorage.createFile as jest.Mock).mockImplementation(async (token, name, body, reservedId) => {
+        if (name === 'confio_wallet_manifest_v2.json' && interrupt) {
+          interrupt = false;
+          throw new Error('interrupted');
+        }
+        return create(token, name, body, reservedId);
+      });
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toThrow('interrupted');
+      const staging = [...mockMemoryStore.keys()].find(name => name.startsWith('confio_missing_backup_v1_'))!;
+      const original = mockMemoryStore.get(staging)!;
+      mockMemoryStore.set(staging, new Uint8Array([1]));
+      (googleDriveStorage.createFile as jest.Mock).mockClear();
+      const wallet = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(wallet!.bscAddress).toBe(deriveEvmKeyFromMasterSecret(original, { accountType: 'personal', accountIndex: 0 }).address);
+      expect(googleDriveStorage.createFile).toHaveBeenCalledTimes(1); // Only finish the manifest.
+    });
+    it('serializes simultaneous provisioning on the same device', async () => {
+      const wallets = await Promise.all([
+        createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations),
+        createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations),
+      ]);
+      expect(wallets[0]!.bscAddress).toBe(wallets[1]!.bscAddress);
+      expect(googleDriveStorage.createFile).toHaveBeenCalledTimes(2);
+    });
+    it('two isolated device key stores adopt the same create-only Drive winner', async () => {
+      // Different aliases simulate separate device-local Keychains and bypass
+      // the in-process queue. Both use the same server-elected reservation.
+      const wallets = await Promise.all([
+        provisionMissingWallet('device-a', 'drive', registrations, mockReserveIds),
+        provisionMissingWallet('device-b', 'drive', registrations, mockReserveIds),
+      ]);
+      expect(wallets[0]!.bscAddress).toBe(wallets[1]!.bscAddress);
+      expect(files.size).toBe(2);
+      expect(ids.size).toBe(2);
+      expect(googleDriveStorage.updateFile).not.toHaveBeenCalled();
+    });
+    it('does not generate or upload when reservation fails', async () => {
+      mockReserveIds.mockRejectedValueOnce(new Error('reservation unavailable'));
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toThrow('reservation unavailable');
+      expect(mockMemoryStore.size).toBe(0);
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    });
+    it.each([401, 403, 429, 500])('does not generate when the reserved-file read fails with %s', async status => {
+      (googleDriveStorage.downloadFile as jest.Mock).mockRejectedValueOnce(new GoogleDriveStorageError('download', status));
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toMatchObject({ status });
+      expect(mockMemoryStore.size).toBe(0);
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    });
+    it('does not replace a corrupt reserved payload even without a manifest', async () => {
+      files.set('reserved-backup', 'broken');
+      ids.set('reserved-payload-0001', 'reserved-backup');
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toMatchObject({ code: 'unreadable' });
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+      expect(mockMemoryStore.size).toBe(0);
+    });
+    it('uses the server winner instead of its proposed IDs', async () => {
+      mockReserveIds.mockResolvedValueOnce([]).mockResolvedValueOnce(['winning-payload-id', 'winning-manifest-id']);
+      await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(googleDriveStorage.generateRecoveryFileIds).toHaveBeenCalledWith('drive');
+      expect(ids.has('winning-payload-id')).toBe(true);
+      expect(ids.has('reserved-payload-0001')).toBe(false);
+    });
+    it('does not overwrite a wallet published by another device immediately before manifest save', async () => {
+      const incumbent = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      const otherDeviceFiles = new Map(files);
+      files.clear();
+      ids.clear();
+      mockMemoryStore.clear();
+      const list = (googleDriveStorage.listFiles as jest.Mock).getMockImplementation()!;
+      let manifestReads = 0;
+      (googleDriveStorage.listFiles as jest.Mock).mockImplementation(async (token, name) => {
+        if (name === 'confio_wallet_manifest_v2.json' && ++manifestReads === 5) {
+          for (const [key, value] of otherDeviceFiles) files.set(key, value);
+        }
+        return list(token, name);
+      });
+      const recovered = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(recovered!.bscAddress).toBe(incumbent!.bscAddress);
+    });
+    it('does not generate on Drive access failure', async () => {
+      (googleDriveStorage.listFiles as jest.Mock).mockRejectedValueOnce(new Error('unauthorized'));
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toThrow('unauthorized');
+      expect(mockMemoryStore.size).toBe(0);
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    });
+    it('does not replace an unreadable canonical backup', async () => {
+      files.set('confio_wallet_manifest_v2.json', '{broken');
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toMatchObject({ code: 'unreadable' });
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    });
+    it('does not publish a manifest for an unreadable upload', async () => {
+      (googleDriveStorage.downloadFile as jest.Mock)
+        .mockRejectedValueOnce(new GoogleDriveStorageError('download', 404)).mockResolvedValue('broken');
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toMatchObject({ code: 'unreadable' });
+      expect(googleDriveStorage.createFile).toHaveBeenCalledTimes(1);
+      expect(mockMemoryStore.get(subjectAlias())).toBeUndefined();
+    });
+    it('repairs a canonical manifest whose payload is absent', async () => {
+      files.set('confio_wallet_manifest_v2.json', JSON.stringify({ wallets: [{ id: 'lost' }] }));
+      const wallet = await createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations);
+      expect(wallet).not.toBeNull();
+      expect(googleDriveStorage.updateFile).toHaveBeenCalledTimes(1);
+      expect((await getSignInWalletCandidate(USER_SUB, 'drive'))!.bscAddress).toBe(wallet!.bscAddress);
+    });
+    it('preserves unreadable legacy material instead of generating', async () => {
+      files.set(`${subjectAlias()}.json`, 'broken');
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toMatchObject({ code: 'unreadable' });
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    });
+    it('does not create a wallet when Keychain is inaccessible', async () => {
+      const { credentialStorage } = require('../credentialStorage');
+      credentialStorage.retrieveSecretStrict.mockRejectedValueOnce(new Error('locked'));
+      await expect(createMissingSignInWalletCandidate(USER_SUB, 'drive', registrations)).rejects.toThrow('locked');
+      expect(googleDriveStorage.createFile).not.toHaveBeenCalled();
+    });
   });
 
   it('Keychain absence does not generate a secret', async () => {

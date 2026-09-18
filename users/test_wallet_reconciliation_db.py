@@ -2,7 +2,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
+from django.db import close_old_connections, connection
 from django.utils import timezone
 from eth_account import Account as EvmAccount
 from eth_account.messages import encode_defunct
@@ -13,6 +14,38 @@ from users.web3auth_schema import UpdateAlgorandAddressMutation
 from users.wallet_reconciliation import (
     PrepareWalletReconciliation, CompleteWalletReconciliation, wallet_challenge,
 )
+
+
+class RecoveryReservationConcurrencyTests(TransactionTestCase):
+    def test_competing_connections_get_the_same_reservation(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        user = User.objects.create_user(username='concurrent-recovery', firebase_uid='concurrent-recovery')
+        Account.objects.create(user=user, account_type='personal', account_index=0,
+                               bsc_address='0x' + '56' * 20, is_keyless_migrated=True)
+        identity = {'uid': user.firebase_uid, 'auth_time': timezone.now().timestamp(),
+                    'firebase': {'sign_in_provider': 'google.com'}}
+        barrier = Barrier(2)
+
+        def reserve(proposal):
+            close_old_connections()
+            try:
+                caller = User.objects.get(pk=user.pk)
+                info = SimpleNamespace(context=SimpleNamespace(user=caller))
+                barrier.wait(timeout=10)
+                result = PrepareWalletReconciliation.mutate(None, info, 'fresh-token', recovery_file_ids=proposal)
+                return result.success, result.recovery_file_ids
+            finally:
+                connection.close()
+
+        proposals = [['first-payload-id', 'first-manifest-id'], ['second-payload-id', 'second-manifest-id']]
+        with patch('firebase_admin.auth.verify_id_token', return_value=identity), ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(reserve, proposals))
+        self.assertTrue(all(success for success, _ in results))
+        self.assertEqual(results[0][1], results[1][1])
+        self.assertIn(results[0][1], proposals)
+        user.refresh_from_db()
+        self.assertEqual(user.wallet_recovery_drive_ids, results[0][1])
 
 
 class WalletReconciliationDatabaseTests(TestCase):
@@ -35,6 +68,39 @@ class WalletReconciliationDatabaseTests(TestCase):
 
     def complete(self):
         return CompleteWalletReconciliation.mutate(None, self.info, self.proof.grant, self.signature)
+
+    def reserve(self, ids, provider='google.com', uid=None, age=0):
+        identity = {'uid': uid or self.user.firebase_uid,
+                    'auth_time': timezone.now().timestamp() - age,
+                    'firebase': {'sign_in_provider': provider}}
+        with patch('firebase_admin.auth.verify_id_token', return_value=identity):
+            return PrepareWalletReconciliation.mutate(None, self.info, 'fresh-token', recovery_file_ids=ids)
+
+    def test_recovery_reservation_is_durable_and_first_writer_wins(self):
+        self.assertEqual(self.reserve([]).recovery_file_ids, [])
+        first = ['drive-payload-first', 'drive-manifest-first']
+        self.assertEqual(self.reserve(first).recovery_file_ids, first)
+        # A second device carries a stale User instance and different proposed
+        # IDs. The locked database row, not that stale object, decides.
+        self.assertEqual(self.reserve(['drive-payload-second', 'drive-manifest-second']).recovery_file_ids, first)
+        self.assertEqual(self.reserve([]).recovery_file_ids, first)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.bsc_address, self.old_address)
+
+    def test_recovery_reservation_rejects_wrong_or_stale_identity_and_apple(self):
+        ids = ['drive-payload-first', 'drive-manifest-first']
+        for kwargs in ({'uid': 'other'}, {'age': 601}, {'provider': 'apple.com'}):
+            with self.subTest(kwargs=kwargs):
+                self.assertFalse(self.reserve(ids, **kwargs).success)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.wallet_recovery_drive_ids, [])
+
+    def test_recovery_reservation_rejects_invalid_ids(self):
+        for ids in (['x'], ['identical-id', 'identical-id'], ['invalid/id', 'valid-manifest-id'], ['valid-first-id', 'x']):
+            with self.subTest(ids=ids):
+                self.assertFalse(self.reserve(ids).success)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.wallet_recovery_drive_ids, [])
 
     def test_commit_keeps_history_and_retries_without_duplicate_audit_rows(self):
         self.assertTrue(self.complete().success)
