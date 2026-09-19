@@ -352,6 +352,15 @@ class RampPaymentMethodType(graphene.ObjectType):
 
 
 class RampAvailabilityType(graphene.ObjectType):
+    has_test_identity = graphene.Boolean()
+
+    def resolve_has_test_identity(self, info):
+        user = getattr(info.context, 'user', None)
+        return bool(
+            user and user.is_authenticated
+            and _get_koywe_test_account_override(user=user, country_code=self.country_code)
+        )
+
     country_code = graphene.String()
     country_name = graphene.String()
     fiat_currency = graphene.String()

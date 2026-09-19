@@ -1764,6 +1764,16 @@ export const GET_RAMP_PAYMENT_METHODS = gql`
   }
 `;
 
+// Optional capability: keep separate so older servers can still return methods.
+export const GET_RAMP_TEST_IDENTITY = gql`
+  query GetRampTestIdentity($countryCode: String) {
+    rampAvailability(countryCode: $countryCode) {
+      countryCode
+      hasTestIdentity
+    }
+  }
+`;
+
 export const GET_RAMP_AVAILABILITY = gql`
   query GetRampAvailability($countryCode: String) {
     rampAvailability(countryCode: $countryCode) {

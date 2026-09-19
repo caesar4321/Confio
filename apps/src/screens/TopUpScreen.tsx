@@ -23,6 +23,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   GET_ME,
   GET_RAMP_AVAILABILITY,
+  GET_RAMP_TEST_IDENTITY,
   GET_MY_RAMP_ADDRESS,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
@@ -33,6 +34,7 @@ import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
+import { hasKoyweTestIdentity } from '../utils/koyweTestIdentity';
 import { USD_UNIT, formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
@@ -127,6 +129,15 @@ const TopUpScreen = () => {
   });
 
   const availability = availabilityData?.rampAvailability;
+  const { data: testIdentityData } = useQuery(GET_RAMP_TEST_IDENTITY, {
+    variables: { countryCode },
+    skip: !isKoyweCountry,
+    fetchPolicy: 'network-only',
+    errorPolicy: 'ignore',
+  });
+  const hasTestIdentity = hasKoyweTestIdentity(
+    meData?.me?.username, countryCode, testIdentityData?.rampAvailability,
+  );
   const methods: RampMethod[] = availability?.onRampMethods || [];
   const derivedCountryTuple = useMemo(
     () => (countryCode ? getCountryByIso(countryCode) : undefined),
@@ -162,6 +173,8 @@ const TopUpScreen = () => {
     selectCreateRampOrderMutation(isSavingsRail),
   );
   const isVerified = useMemo(() => {
+    // Match Koywe's test identity, including servers predating the optional flag.
+    if (isKoyweMapped && hasTestIdentity) return true;
     const candidates = [
       personalKycData?.myPersonalKycStatus?.status,
       kycData?.myKycStatus?.status,
@@ -171,6 +184,8 @@ const TopUpScreen = () => {
       .map((status: string) => status.toLowerCase());
     return candidates.includes('verified') || meData?.me?.isIdentityVerified;
   }, [
+    isKoyweMapped,
+    hasTestIdentity,
     kycData?.myKycStatus?.status,
     meData?.me?.isIdentityVerified,
     meData?.me?.verificationStatus,
@@ -239,7 +254,7 @@ const TopUpScreen = () => {
     orderSubmissionInFlightRef.current = true;
     setIsSubmittingOrder(true);
     try {
-      const walletSafe = await checkBackupEnforcement('deposit');
+      const walletSafe = await checkBackupEnforcement(isSavingsRail ? 'bsc_deposit' : 'deposit');
       if (!walletSafe) {
         return;
       }
@@ -312,7 +327,7 @@ const TopUpScreen = () => {
 
   const handleContinue = () => {
     void (async () => {
-      const backupAllowed = await checkBackupEnforcement('deposit');
+      const backupAllowed = await checkBackupEnforcement(isSavingsRail ? 'bsc_deposit' : 'deposit');
       if (!backupAllowed) {
         return;
       }
