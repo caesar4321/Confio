@@ -26,6 +26,7 @@ import {
   GET_ME,
   GET_MY_BALANCES,
   GET_RAMP_AVAILABILITY,
+  GET_RAMP_TEST_IDENTITY,
   GET_MY_RAMP_ADDRESS,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
@@ -37,6 +38,7 @@ import { getFriendlyRampError } from '../utils/rampErrors';
 import { requestRampCriticalAuth } from '../utils/rampFlow';
 import { useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
 import { useRampCountry } from '../hooks/useRampCountry';
+import { hasKoyweTestIdentity } from '../utils/koyweTestIdentity';
 import { formatRampMoney, formatRampRate, rampUnitCode } from '../utils/rampFormat';
 import { formatMicros, microsToNumber, parseUsdMicros } from '../utils/tokenAmount';
 import { RampActionBar } from '../components/ramps/RampActionBar';
@@ -176,6 +178,15 @@ export const SellScreen = () => {
   });
 
   const availability = availabilityData?.rampAvailability;
+  const { data: testIdentityData } = useQuery(GET_RAMP_TEST_IDENTITY, {
+    variables: { countryCode },
+    skip: !isKoyweCountry,
+    fetchPolicy: 'network-only',
+    errorPolicy: 'ignore',
+  });
+  const hasTestIdentity = hasKoyweTestIdentity(
+    meData?.me?.username, countryCode, testIdentityData?.rampAvailability,
+  );
   const methods: RampMethod[] = availability?.offRampMethods || [];
   const derivedCountryTuple = useMemo(
     () => (countryCode ? getCountryByIso(countryCode) : undefined),
@@ -191,6 +202,8 @@ export const SellScreen = () => {
   );
   const [createRampOrder] = useMutation(selectCreateRampOrderMutation(isSavingsSell));
   const isVerified = useMemo(() => {
+    // Match Koywe's test identity, including servers predating the optional flag.
+    if (isKoyweMapped && hasTestIdentity) return true;
     const candidates = [
       personalKycData?.myPersonalKycStatus?.status,
       kycData?.myKycStatus?.status,
@@ -199,7 +212,7 @@ export const SellScreen = () => {
       .filter(Boolean)
       .map((status: string) => status.toLowerCase());
     return candidates.includes('verified') || meData?.me?.isIdentityVerified;
-  }, [kycData?.myKycStatus?.status, meData?.me?.isIdentityVerified, meData?.me?.verificationStatus, personalKycData?.myPersonalKycStatus?.status]);
+  }, [isKoyweMapped, hasTestIdentity, kycData?.myKycStatus?.status, meData?.me?.isIdentityVerified, meData?.me?.verificationStatus, personalKycData?.myPersonalKycStatus?.status]);
   const hasCompleteRampAddress = Boolean(rampAddressData?.myRampAddress?.isComplete);
 
   const savedMethods: SavedPayoutMethod[] = useMemo(() => {

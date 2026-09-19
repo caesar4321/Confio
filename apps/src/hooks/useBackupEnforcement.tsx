@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform, Alert, ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { AuthService } from '../services/authService';
-import { useApolloClient, useQuery } from '@apollo/client';
+import { gql, useApolloClient, useQuery } from '@apollo/client';
 import { GET_MY_BALANCES, GET_MY_MIGRATION_STATUS } from '../apollo/queries';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
@@ -12,7 +12,15 @@ import { oauthStorage } from '../services/oauthStorageService';
 import authService from '../services/authService';
 import { GOOGLE_CLIENT_IDS } from '../config/env';
 
-type EnforcementAction = 'presale' | 'transaction' | 'app_launch' | 'deposit';
+type EnforcementAction = 'presale' | 'transaction' | 'app_launch' | 'deposit' | 'bsc_deposit';
+
+// This existing field resolves the JWT's active account, including business
+// address permissions. myWalletAnchors resolves personal/0 only.
+const GET_INBOUND_BSC_ADDRESS = gql`
+    query GetInboundBscAddress {
+        stockWalletAddress
+    }
+`;
 
 let activeMigrationPromise: Promise<boolean> | null = null;
 
@@ -30,6 +38,11 @@ export const useBackupEnforcement = () => {
     const [migrationStatus, setMigrationStatus] = useState('Verificando estado de la billetera...');
 
     const resolveRef = useRef<((value: boolean) => void) | null>(null);
+    const mountedRef = useRef(true);
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
 
     // Fetch balance fallback (for simple cases if needed, though we rely on passed balance for app_launch)
     const { data: myBalancesData } = useQuery(GET_MY_BALANCES, {
@@ -146,12 +159,54 @@ export const useBackupEnforcement = () => {
     }, []);
 
     const verifyInboundSigningWallet = useCallback(async (action: EnforcementAction): Promise<boolean> => {
-        if (action !== 'deposit' && action !== 'presale') {
+        if (action !== 'deposit' && action !== 'bsc_deposit' && action !== 'presale') {
             return true;
         }
 
         try {
             const activeContext = await authService.getActiveAccountContext();
+            if (action === 'bsc_deposit') {
+                const identity = await oauthStorage.getOAuthSubject();
+                if (!mountedRef.current) return false;
+                if (!identity?.subject || !identity?.provider) {
+                    throw new Error('Signing identity unavailable');
+                }
+                const { getActiveEvmWallet } = await import('../services/secureDeterministicWallet');
+                // Derive from the recovered secret, never from a display cache.
+                // This refuses to generate a replacement secret when one is absent.
+                const localWallet = await getActiveEvmWallet(activeContext);
+                const { data } = await apolloClient.query({
+                    query: GET_INBOUND_BSC_ADDRESS,
+                    fetchPolicy: 'no-cache',
+                    errorPolicy: 'none',
+                    context: { fetchOptions: { cache: 'no-store' } as any },
+                });
+                const currentContext = await authService.getActiveAccountContext();
+                const currentIdentity = await oauthStorage.getOAuthSubject();
+                // A delayed response may outlive sign-out or this screen. Two
+                // different users can both have the same personal/0 context.
+                if (!mountedRef.current) return false;
+                if (currentIdentity?.subject !== identity.subject
+                    || currentIdentity?.provider !== identity.provider) {
+                    throw new Error('Signed-in identity changed during deposit verification');
+                }
+                if (currentContext.type !== activeContext.type
+                    || currentContext.index !== activeContext.index
+                    || String(currentContext.businessId || '') !== String(activeContext.businessId || '')) {
+                    throw new Error('Active account changed during deposit verification');
+                }
+                const serverAddress = data?.stockWalletAddress;
+                if (typeof serverAddress !== 'string'
+                    || !/^0x[0-9a-fA-F]{40}$/.test(serverAddress)
+                    || /^0x0{40}$/i.test(serverAddress)) {
+                    throw new Error('Registered BSC wallet unavailable');
+                }
+                if (localWallet.address.toLowerCase() !== serverAddress.toLowerCase()) {
+                    Alert.alert(WALLET_MISMATCH_TITLE, WALLET_MISMATCH_MESSAGE);
+                    return false;
+                }
+                return true;
+            }
             const { data } = await apolloClient.query({
                 query: GET_MY_MIGRATION_STATUS,
                 fetchPolicy: 'no-cache',
@@ -226,6 +281,7 @@ export const useBackupEnforcement = () => {
             );
             return false;
         } catch (error) {
+            if (action === 'bsc_deposit' && !mountedRef.current) return false;
             console.error('Inbound wallet verification error:', error);
             Alert.alert(
                 'No pudimos verificar tu billetera',
@@ -236,8 +292,12 @@ export const useBackupEnforcement = () => {
     }, [apolloClient]);
 
     const checkBackupEnforcement = useCallback(async (action: EnforcementAction, totalBalanceUSD?: number): Promise<boolean> => {
-        const migrationReady = await ensureV2Migration();
-        if (!migrationReady) return false;
+        // BSC recovery already establishes its signing secret. Retired Algorand
+        // registrations and legacy chain outages must not gate BSC deposits.
+        if (action !== 'bsc_deposit') {
+            const migrationReady = await ensureV2Migration();
+            if (!migrationReady) return false;
+        }
 
         // 1. iOS Check - Implicitly backed up via iCloud
         if (Platform.OS === 'ios') return verifyInboundSigningWallet(action);
@@ -277,7 +337,7 @@ export const useBackupEnforcement = () => {
         // Transaction: "매번 송금/페이 시" (Prompt every time)
         // App Launch: "앱 킬때마다 팝업" (Prompt)
 
-        setStrictMode(action === 'presale' || action === 'deposit');
+        setStrictMode(action === 'presale' || action === 'deposit' || action === 'bsc_deposit');
         setModalVisible(true);
 
         // Return a promise that resolves when user makes a choice

@@ -1135,6 +1135,23 @@ class KoyweExistingAccountProfileTests(SimpleTestCase):
 
 
 class KoyweEmailSelectionTests(SimpleTestCase):
+    def test_availability_exposes_only_authenticated_country_test_overrides(self):
+        for username, authenticated, country, expected in (
+            ('julianm', True, 'AR', True),
+            ('julianmoonluna', True, 'CO', True),
+            (' JULIANM ', True, 'mx', True),
+            ('ordinary-user', True, 'AR', False),
+            ('julianm', False, 'AR', False),
+            ('julianm', True, 'US', False),
+            ('julianm', True, '', False),
+        ):
+            with self.subTest(username=username, authenticated=authenticated, country=country):
+                info = SimpleNamespace(context=SimpleNamespace(user=SimpleNamespace(
+                    username=username, is_authenticated=authenticated,
+                )))
+                availability = ramps_schema.RampAvailabilityType(country_code=country)
+                self.assertEqual(availability.resolve_has_test_identity(info), expected)
+
     def test_previous_emails_do_not_include_duende_test_accounts(self):
         emails = ramps_schema._get_koywe_previous_emails(
             country_code='AR',

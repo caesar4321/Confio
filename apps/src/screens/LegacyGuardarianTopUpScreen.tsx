@@ -315,7 +315,7 @@ const TopUpScreen = () => {
   };
 
   const handleStartTopUp = async () => {
-    const backupAllowed = await checkBackupEnforcement('deposit');
+    const backupAllowed = await checkBackupEnforcement(isSavingsRail ? 'bsc_deposit' : 'deposit');
     if (!backupAllowed) {
       return;
     }
@@ -349,7 +349,7 @@ const TopUpScreen = () => {
 
   const handleProceedToGuardarian = async () => {
     setShowPreFlightModal(false);
-    const walletSafe = await checkBackupEnforcement('deposit');
+    const walletSafe = await checkBackupEnforcement(isSavingsRail ? 'bsc_deposit' : 'deposit');
     if (!walletSafe) {
       return;
     }

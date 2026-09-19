@@ -7,6 +7,16 @@ const readScreen = (name: string) =>
   readFileSync(resolve(__dirname, `../${name}`), 'utf8');
 
 describe('ramp quote fee hierarchy', () => {
+  it('keeps the optional test identity field out of the payment-method query for older servers', () => {
+    const source = readFileSync(resolve(__dirname, '../../apollo/queries.ts'), 'utf8');
+    const availability = source.split('export const GET_RAMP_AVAILABILITY = gql`')[1].split('`;')[0];
+    const identity = source.split('export const GET_RAMP_TEST_IDENTITY = gql`')[1].split('`;')[0];
+    expect(availability).toContain('onRampMethods');
+    expect(availability).toContain('offRampMethods');
+    expect(availability).not.toContain('hasTestIdentity');
+    expect(identity).toContain('hasTestIdentity');
+  });
+
   it('shows the on-ramp gross amount, then the Confío fee, then the final net receipt', () => {
     const source = readScreen('TopUpScreen.tsx');
     const gross = source.indexOf('Monto antes de comisión Confío');
