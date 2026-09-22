@@ -30,6 +30,27 @@ class _Refused(ValueError):
         self.code = code
 
 
+def _certificate_diagnostic(reported, configured):
+    """Counts and byte equality only; never log certificates or token payloads."""
+    def decode(values):
+        result = set()
+        if not isinstance(values, (list, tuple)):
+            return result
+        for value in values:
+            if not isinstance(value, str) or len(value) not in (43, 44):
+                continue
+            try:
+                raw = base64.b64decode(value + '=' * (-len(value) % 4), altchars=b'-_', validate=True)
+                if len(raw) == 32:
+                    result.add(raw)
+            except (ValueError, TypeError):
+                continue
+        return result
+    reported_bytes, configured_bytes = decode(reported), decode(configured)
+    return (len(reported) if isinstance(reported, (list, tuple)) else -1,
+            len(reported_bytes), len(configured_bytes), bool(reported_bytes & configured_bytes))
+
+
 def ip_allowed(meta):
     # Same trusted Cloudflare/origin boundary as the existing geo checks.
     # Unknown geography is not evidence of an allowed location.
@@ -284,6 +305,10 @@ def verify(owner, meta, challenge_token, location_json, integrity_token):
         }
         failed = [name for name, passed in checks.items() if not passed]
         if failed:
+            if 'certificate' in failed:
+                logger.warning(
+                    'breb_certificate_diagnostic reported_count=%s valid_reported=%s valid_configured=%s byte_match=%s',
+                    *_certificate_diagnostic(app.get('certificateSha256Digest', []), settings.BREB_PLAY_CERTIFICATE_DIGESTS))
             # Fixed check names only, never tokens, fingerprints or location.
             logger.warning('breb_android_integrity_refused checks=%s', ','.join(failed))
             raise _Refused('android:' + ','.join(failed))
