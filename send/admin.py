@@ -118,7 +118,9 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
                 '<span style="background-color: #6B7280; color: white; padding: 2px 6px; '
                 'border-radius: 4px; font-size: 11px; margin-right: 4px;">EXTERNAL</span>'
                 '<code style="font-size: 11px;">{}</code>',
-                obj.sender_address[:10] + '...' + obj.sender_address[-6:] if len(obj.sender_address) > 20 else obj.sender_address
+                (obj.sender_address[:10] + '...' + obj.sender_address[-6:]
+                 if len(obj.sender_address or '') > 20 else obj.sender_address)
+                or obj.sender_display_name or 'Unknown Sender'
             )
         elif obj.sender_business:
             return format_html(
