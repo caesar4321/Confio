@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
@@ -11,6 +10,8 @@ import { Header } from '../navigation/Header';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
+import { TrustPillars } from '../components/ConfioNarrative';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -22,7 +23,7 @@ export const ConfioTokenInfoScreen = () => {
   });
 
   const formatWholeNumber = (n: number | null | undefined) => {
-    if (n == null) return '-';
+    if (n == null) return '—';
     const rounded = Math.round(n);
     try {
       return new Intl.NumberFormat('en-US', {
@@ -37,39 +38,13 @@ export const ConfioTokenInfoScreen = () => {
     }
   };
 
-  const sections = [
-    {
-      title: '¿Qué es $CONFIO?',
-      icon: 'help-circle',
-      content: '$CONFIO es la moneda de gobernanza de la app de Confío. Cada moneda representa tu participación en el futuro de una economía estable sin inflación en Latinoamérica.',
-    },
-    {
-      title: '¿Por qué están bloqueadas?',
-      icon: 'lock',
-      content: 'Las monedas están bloqueadas temporalmente para asegurar un crecimiento sostenible. Cuando se liberen, podrás usarlas para votar en decisiones importantes, acceder a beneficios exclusivos y más.',
-    },
-    {
-      title: 'El Futuro de $CONFIO',
-      icon: 'trending-up',
-      content: 'Imagina cuando millones en Venezuela, Argentina, Bolivia y toda Latinoamérica puedan construir su vida sin miedo a la inflación. Tu participación temprana será recompensada cuando el ecosistema crezca.',
-    },
-    {
-      title: 'Cómo Ganar Más $CONFIO',
-      icon: 'gift',
-      bullets: [
-        'Invita amigos con tu código y gana el equivalente a US$5 en $CONFIO por cada referido elegible',
-      ],
-    },
-  ];
-
   const s = data?.statsSummary;
-  const protectedSavingsTotal =
+  const dollarSavingsTotal =
     s?.totalValueLocked == null ||
     s?.cusdBscReserve == null ||
     s?.usdyReserve == null
       ? null
       : s.totalValueLocked + s.cusdBscReserve + s.usdyReserve;
-  const liveLabel = s?.statsSource === 'algorand' ? 'en blockchain' : 'actualizado';
   const usersNew7d = Math.max(0, Math.round(s?.usersNew7d ?? 0));
   const presaleRaised7d = Math.max(0, s?.presaleCusdRaised7d ?? 0);
   const usersGrowth = usersNew7d > 0
@@ -88,28 +63,69 @@ export const ConfioTokenInfoScreen = () => {
   }> = [
     {
       label: 'Usuarios registrados',
-      value: formatWholeNumber(s?.totalUsers ?? 0),
+      value: formatWholeNumber(s?.totalUsers),
       growth: usersGrowth,
       growthHighlight: usersNew7d > 0,
       description: 'Personas con teléfono verificado y acceso con Apple o Google.',
       route: 'LatamCommunity',
     },
     {
-      label: 'Ahorros Protegidos',
-      value: protectedSavingsTotal == null
+      label: 'Ahorros en dólares',
+      value: dollarSavingsTotal == null
         ? '—'
-        : `$${formatWholeNumber(protectedSavingsTotal)}`,
-      growth: liveLabel,
-      description: 'Reservas verificables: USDC para el antiguo a-cUSD, USDT para cUSD y USDY para cUSD+.',
+        : `$${formatWholeNumber(dollarSavingsTotal)}`,
+      growth: 'reservas verificables',
+      growthHighlight: false,
+      description: 'Reservas en USDT, USDC y USDY detrás de Confío Dollar y Confío Dollar+. No respaldan $CONFIO.',
       route: 'ProtectedSavings',
     },
     {
       label: 'Preventa de $CONFIO',
-      value: `$${formatWholeNumber(s?.presaleCusdRaised ?? 0)}`,
+      value: s?.presaleCusdRaised == null ? '—' : `$${formatWholeNumber(s.presaleCusdRaised)}`,
       growth: presaleGrowth,
       growthHighlight: presaleRaised7d > 0,
       description: 'Dólares aportados por la comunidad en la preventa.',
       route: 'ConfioPresale',
+    },
+  ];
+
+  // Milestones, not calendar promises: only shipped work carries a year.
+  const timeline: Array<{ status: 'done' | 'now' | 'next'; tag: string; title: string; text: string }> = [
+    {
+      status: 'done',
+      tag: '2025',
+      title: 'Nace Confío',
+      text: 'Una billetera donde tus claves son tuyas, con dólares digitales y envíos entre personas.',
+    },
+    {
+      status: 'done',
+      tag: '2026',
+      title: 'El dinero local se conecta',
+      text: 'Recargas y retiros con métodos de pago locales en varios países de Latinoamérica.',
+    },
+    {
+      status: 'done',
+      tag: '2026',
+      title: 'Ahorrar e invertir en la misma app',
+      text: 'Confío Dollar+ con Ondo Finance y acciones de EE. UU. para usuarios elegibles.',
+    },
+    {
+      status: 'done',
+      tag: '2026',
+      title: '$CONFIO llega a BNB Smart Chain',
+      text: 'Suministro fijo y una preventa continua que cualquiera puede verificar.',
+    },
+    {
+      status: 'now',
+      tag: 'Ahora',
+      title: 'Del uso a la costumbre',
+      text: 'Más personas cobrando, pagando y ahorrando en Confío todos los días. Más comercios y empresas.',
+    },
+    {
+      status: 'next',
+      tag: 'Lo que sigue',
+      title: 'Reputación y acuerdos',
+      text: 'Que la confianza que construyes viaje contigo, y que más promesas se cumplan con reglas verificables.',
     },
   ];
 
@@ -118,42 +134,67 @@ export const ConfioTokenInfoScreen = () => {
       <Header
         navigation={navigation as any}
         title="Moneda $CONFIO"
-        backgroundColor={colors.primary}
+        backgroundColor={colors.secondary}
         isLight
         showBackButton
       />
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Hero Section */}
+        {/* Hero — violet brand field, same family as Preventa/Distribución */}
         <View style={styles.heroSection}>
-          <View style={styles.tokenIcon}>
-            <Image 
-              source={require('../assets/png/CONFIO.png')} 
-              style={styles.tokenImage}
-              resizeMode="contain"
-            />
+          <BrandFieldBackground id="tokenInfoField" fromColor={colors.secondary} toColor={colors.secondaryDark} ringCy="22%" ringR={80} ringWidth={20} />
+          <View style={styles.heroInner}>
+            <View style={styles.tokenIcon}>
+              <Image
+                source={require('../assets/png/CONFIO.png')}
+                style={styles.tokenImage}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={styles.heroTitle}>¿Por qué se llama Confío?</Text>
+            <Text style={styles.heroSubtitle}>
+              Porque la confianza ya existe. Nuestro trabajo es que se mueva contigo.
+            </Text>
           </View>
-          <Text style={styles.heroTitle}>Tu Inversión en el Futuro</Text>
-          <Text style={styles.heroSubtitle}>
-            Sé parte de la economía estable sin inflación en Latinoamérica
+        </View>
+
+        {/* Manifesto */}
+        <View style={styles.section}>
+          <Text style={styles.manifestoTitle}>La confianza ya existe.</Text>
+          <Text style={styles.manifestoText}>
+            En Latinoamérica trabajamos, vendemos, prestamos y nos ayudamos todos los días.
+            La confianza está en nuestras relaciones, en nuestra palabra y en cada vez que cumplimos.
+          </Text>
+          <Text style={styles.manifestoText}>
+            El problema es que casi nunca nos pertenece. Tu dinero depende de una institución.
+            Tu reputación queda atrapada en una plataforma. Tus acuerdos dependen de intermediarios
+            que pueden cambiar las reglas.
+          </Text>
+          <Text style={styles.manifestoEmphasis}>
+            No hay que inventar la confianza. Hay que darle infraestructura.
           </Text>
         </View>
 
-        {/* Vision Card */}
-        <View style={styles.visionCard}>
-          <Icon name="zap" size={24} color={colors.violet} />
-          <Text style={styles.visionTitle}>Nuestra Visión</Text>
-          <Text style={styles.visionText}>
-            "Imagina cuando toda Venezuela, Argentina, Bolivia y el resto de Latinoamérica use la app de Confío. 
-            Cuando millones de familias puedan construir su vida sin miedo a la inflación, 
-            con una moneda estable y una economía predecible. Ese es el futuro que estamos construyendo juntos."
-          </Text>
-          <Text style={styles.visionAuthor}>- Julian Moon, Fundador</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionHeading}>Dinero · Reputación · Acuerdos</Text>
+          <View style={styles.pillarsCard}>
+            <TrustPillars variant="full" />
+          </View>
         </View>
 
-        {/* Growth Stats */}
-        <View style={styles.statsContainer}>
-          <Text style={styles.statsTitle}>Crecimiento Exponencial</Text>
+        {/* Founder quote */}
+        <View style={styles.quoteCard}>
+          <Icon name="message-circle" size={22} color={colors.secondary} />
+          <Text style={styles.quoteText}>
+            "No porque tengas que confiar ciegamente en nosotros, sino porque estamos construyendo
+            un sistema donde puedas volver a confiar en tu propio dinero."
+          </Text>
+          <Text style={styles.quoteAuthor}>— Julian Moon, fundador de Confío</Text>
+        </View>
+
+        {/* Proof, not promises */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeading}>Confío hoy</Text>
           <View style={styles.statsGrid}>
             {stats.map((stat, index) => (
               <TouchableOpacity
@@ -174,11 +215,9 @@ export const ConfioTokenInfoScreen = () => {
                       {stat.value}
                     </Text>
                     <View style={styles.growthBadge}>
-                      <Icon
-                        name="trending-up"
-                        size={12}
-                        color={stat.growthHighlight === false ? colors.text.secondary : colors.primary}
-                      />
+                      {stat.growthHighlight !== false && (
+                        <Icon name="trending-up" size={12} color={colors.primary} />
+                      )}
                       <Text
                         style={[
                           styles.growthText,
@@ -201,83 +240,69 @@ export const ConfioTokenInfoScreen = () => {
           </View>
         </View>
 
-        {/* Info Sections */}
-        {sections.map((section, index) => (
-          <View key={index} style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Icon name={section.icon} size={20} color={colors.primary} />
-              <Text style={styles.sectionTitle}>{section.title}</Text>
-            </View>
-            {section.content && (
-              <Text style={styles.sectionContent}>{section.content}</Text>
-            )}
-            {section.bullets && (
-              <View style={styles.bulletList}>
-                {section.bullets.map((bullet, idx) => (
-                  <View key={idx} style={styles.bulletItem}>
-                    <Text style={styles.bulletPoint}>•</Text>
-                    <Text style={styles.bulletText}>{bullet}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-        ))}
-
         {/* Timeline */}
-        <View style={styles.timelineSection}>
-          <Text style={styles.timelineTitle}>Roadmap 2025-2026</Text>
-        <View style={styles.timeline}>
-          <View style={styles.timelineItem}>
-            <View style={[styles.timelineDot, styles.timelineDotCompleted]} />
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineDate}>Q4 2025 · 🇻🇪</Text>
-              <Text style={styles.timelineText}>Lanzamiento en Venezuela: P2P completo. Fundador pivotó el primer mercado principal hacia Argentina tras rechazo de entrada en Venezuela.</Text>
-            </View>
-          </View>
-          <View style={styles.timelineItem}>
-            <View style={[styles.timelineDot, styles.timelineDotCompleted]} />
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineDate}>Q1 2026 · 🚀</Text>
-              <Text style={styles.timelineText}>Alianzas Onramp, recargas automáticas y primera preventa oficial de $CONFIO.</Text>
-            </View>
-          </View>
-          <View style={styles.timelineItem}>
-            <View style={[styles.timelineDot, styles.timelineDotCompleted]} />
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineDate}>Q2 2026 · 🇦🇷</Text>
-              <Text style={styles.timelineText}>Lanzamiento en Argentina con métodos de pago locales.</Text>
-            </View>
-          </View>
-          <View style={styles.timelineItem}>
-            <View style={[styles.timelineDot, styles.timelineDotActive]} />
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineDate}>Q3 2026 · 🤝</Text>
-              <Text style={styles.timelineText}>Alianza con Ondo Finance: ahorro con rendimiento (Confío Dollar+) y acciones de EE.UU. dentro de Confío.</Text>
-            </View>
-          </View>
-          <View style={styles.timelineItem}>
-            <View style={styles.timelineDot} />
-            <View style={styles.timelineContent}>
-              <Text style={styles.timelineDate}>Q4 2026 · 🇧🇴</Text>
-              <Text style={styles.timelineText}>Expansión a Bolivia y consolidación regional.</Text>
-            </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionHeading}>De una idea a una red latinoamericana</Text>
+          <View>
+            {timeline.map((item, index) => {
+              const isLast = index === timeline.length - 1;
+              return (
+                <View key={item.title} style={styles.timelineItem}>
+                  <View style={styles.timelineRail}>
+                    <View
+                      style={[
+                        styles.timelineDot,
+                        item.status === 'done' && styles.timelineDotDone,
+                        item.status === 'now' && styles.timelineDotNow,
+                      ]}
+                    >
+                      {item.status === 'done' && <Icon name="check" size={10} color={colors.white} />}
+                    </View>
+                    {!isLast && (
+                      <View style={[styles.timelineLine, item.status === 'done' && styles.timelineLineDone]} />
+                    )}
+                  </View>
+                  <View style={[styles.timelineContent, !isLast && styles.timelineContentSpaced]}>
+                    <Text
+                      style={[
+                        styles.timelineTag,
+                        item.status === 'now' && styles.timelineTagNow,
+                      ]}
+                    >
+                      {item.tag}
+                    </Text>
+                    <Text style={styles.timelineTitle}>{item.title}</Text>
+                    <Text style={styles.timelineText}>{item.text}</Text>
+                  </View>
+                </View>
+              );
+            })}
           </View>
         </View>
-      </View>
 
         {/* CTA */}
         <View style={styles.ctaSection}>
-          <Text style={styles.ctaTitle}>¿Listo para ser parte del cambio?</Text>
+          <Text style={styles.ctaTitle}>Súmate desde el principio</Text>
           <Text style={styles.ctaSubtitle}>
-            Gana más $CONFIO invitando amigos y guiándolos en su primera operación
+            $CONFIO es la moneda de la comunidad que construye Confío. Conoce la preventa o gana
+            $CONFIO invitando a tus amigos.
           </Text>
           <Button
-            title="Ver programa de referidos"
-            onPress={() => navigation.navigate('Achievements')}
-            icon={<Icon name="arrow-right" size={20} color={colors.white} />}
-            style={{ backgroundColor: colors.primary, borderRadius: 24, paddingHorizontal: 24 }}
+            title="Ver la preventa"
+            onPress={() => navigation.navigate('ConfioPresale')}
+            icon={<Icon name="star" size={20} color={colors.white} />}
+            style={{ backgroundColor: colors.secondary, borderRadius: 24, paddingHorizontal: 24, marginBottom: 12, alignSelf: 'stretch' }}
           />
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => navigation.navigate('Achievements')}
+          >
+            <Icon name="gift" size={16} color={colors.secondary} />
+            <Text style={styles.secondaryButtonText}>Programa de referidos</Text>
+          </TouchableOpacity>
+          <Text style={styles.ctaFinePrint}>
+            Las recompensas se registran hoy y se reclaman cuando $CONFIO se lance en un DEX.
+          </Text>
         </View>
 
         <View style={styles.bottomPadding} />
@@ -295,6 +320,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroSection: {
+    backgroundColor: colors.secondary,
+    overflow: 'hidden',
+  },
+  heroInner: {
     alignItems: 'center',
     paddingVertical: 32,
     paddingHorizontal: 20,
@@ -310,63 +339,86 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
   },
-  tokenSymbol: {
-    fontSize: 32,
+  heroTitle: {
+    fontSize: 26,
     fontWeight: 'bold',
     color: colors.white,
-  },
-  heroTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.dark,
     marginBottom: 8,
     textAlign: 'center',
+    lineHeight: 32,
   },
   heroSubtitle: {
     fontSize: 16,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  visionCard: {
-    marginHorizontal: 16,
-    marginBottom: 24,
-    backgroundColor: colors.violetLight,
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.violet,
-  },
-  visionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.dark,
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  visionText: {
-    fontSize: 15,
-    color: colors.dark,
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
     lineHeight: 24,
-    fontStyle: 'italic',
   },
-  visionAuthor: {
+  section: {
+    paddingHorizontal: 20,
+    paddingTop: 32,
+  },
+  manifestoTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: colors.dark,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  manifestoText: {
+    fontSize: 16,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 25,
+    marginBottom: 12,
+  },
+  manifestoEmphasis: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.secondaryDark,
+    textAlign: 'center',
+    lineHeight: 26,
+    marginTop: 4,
+  },
+  sectionHeading: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.dark,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  pillarsCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  quoteCard: {
+    marginHorizontal: 20,
+    marginTop: 32,
+    backgroundColor: colors.violetLight,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+  },
+  quoteText: {
+    fontSize: 16,
+    color: colors.dark,
+    textAlign: 'center',
+    lineHeight: 25,
+    fontStyle: 'italic',
+    marginTop: 12,
+  },
+  quoteAuthor: {
     fontSize: 14,
     color: colors.text.secondary,
     marginTop: 12,
     fontWeight: '600',
-  },
-  statsContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 24,
-  },
-  statsTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.dark,
-    marginBottom: 16,
-    textAlign: 'center',
   },
   statsGrid: {
     flexDirection: 'column',
@@ -429,113 +481,112 @@ const styles = StyleSheet.create({
   statChevron: {
     marginLeft: 4,
   },
-  sectionCard: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: colors.neutral,
-    borderRadius: 12,
-    padding: 16,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.dark,
-  },
-  sectionContent: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    lineHeight: 20,
-  },
-  bulletList: {
-    marginTop: 8,
-  },
-  bulletItem: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  bulletPoint: {
-    fontSize: 14,
-    color: colors.primary,
-    marginRight: 8,
-    fontWeight: 'bold',
-  },
-  bulletText: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.text.secondary,
-  },
-  timelineSection: {
-    marginHorizontal: 16,
-    marginBottom: 24,
-  },
-  timelineTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.dark,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  timeline: {
-    paddingLeft: 20,
-  },
   timelineItem: {
     flexDirection: 'row',
-    marginBottom: 24,
-    position: 'relative',
+  },
+  timelineRail: {
+    alignItems: 'center',
+    width: 20,
+    marginRight: 14,
   },
   timelineDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.border,
-    marginRight: 16,
-    marginTop: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    borderWidth: 2,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 1,
   },
-  timelineDotCompleted: {
+  timelineDotDone: {
     backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  timelineDotActive: {
-    backgroundColor: colors.violet,
+  timelineDotNow: {
+    borderColor: colors.secondary,
+    borderWidth: 6,
+  },
+  timelineLine: {
+    flex: 1,
+    width: 2,
+    marginVertical: 2,
+    backgroundColor: colors.border,
+  },
+  timelineLineDone: {
+    backgroundColor: colors.primaryLight,
   },
   timelineContent: {
     flex: 1,
   },
-  timelineDate: {
+  timelineContentSpaced: {
+    paddingBottom: 20,
+  },
+  timelineTag: {
     fontSize: 12,
+    fontWeight: '700',
     color: colors.text.secondary,
-    marginBottom: 4,
-    fontWeight: '600',
+    marginBottom: 2,
+  },
+  timelineTagNow: {
+    color: colors.secondary,
+  },
+  timelineTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.dark,
+    marginBottom: 2,
   },
   timelineText: {
     fontSize: 14,
-    color: colors.dark,
+    color: colors.text.secondary,
+    lineHeight: 20,
   },
   ctaSection: {
-    marginHorizontal: 16,
-    marginBottom: 24,
-    backgroundColor: colors.primaryLight,
-    borderRadius: 16,
-    padding: 24,
+    marginTop: 32,
+    paddingHorizontal: 20,
+    paddingVertical: 32,
     alignItems: 'center',
+    backgroundColor: colors.neutralDark,
   },
   ctaTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: 'bold',
     color: colors.dark,
     marginBottom: 8,
     textAlign: 'center',
   },
   ctaSubtitle: {
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text.secondary,
     marginBottom: 20,
     textAlign: 'center',
+    lineHeight: 22,
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: colors.secondary,
+    borderRadius: 24,
+    alignSelf: 'stretch',
+  },
+  secondaryButtonText: {
+    fontSize: 15,
+    color: colors.secondary,
+    fontWeight: '600',
+  },
+  ctaFinePrint: {
+    fontSize: 12,
+    color: colors.text.light,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 16,
   },
   bottomPadding: {
     height: 40,
