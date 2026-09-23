@@ -29,6 +29,36 @@ def qr(*fields):
 
 
 class IdentifierTests(SimpleTestCase):
+    def test_breb_qr_decodes_key_and_retains_requested_amount_and_merchant(self):
+        payload = qr(('01', '12'), ('26', tlv('00', 'CO.COM.RBM.LLA') + tlv('04', '@tienda')),
+                     ('53', '170'), ('54', '15000.50'), ('58', 'CO'), ('59', 'Tienda'), ('60', 'Bogota'))
+        method = local_money.METHODS['co_qr']
+        self.assertEqual(local_money.normalize_value(method, payload), payload)
+        self.assertEqual(local_money.decode_breb_qr(payload), {
+            'payload': payload, 'key': '@tienda', 'amount': '15000.50',
+            'merchant_name': 'Tienda', 'merchant_city': 'Bogota'})
+        self.assertEqual(local_money._validation_request(method, payload),
+                         {'country': 'CO', 'account': {'dataType': 'BREB_KEY', 'brebKey': '@tienda'}})
+
+    def test_breb_static_merchant_key_fallback(self):
+        payload = qr(('01', '11'), ('50', tlv('00', 'CO.COM.CRB.CU') + tlv('01', '123456789')),
+                     ('53', '170'), ('58', 'CO'))
+        self.assertEqual(local_money.decode_breb_qr(payload)['key'], '123456789')
+
+    def test_breb_qr_rejects_ambiguous_unsupported_and_malformed_fields(self):
+        template = tlv('00', 'CO.COM.RBM.LLA') + tlv('04', '@tienda')
+        base = [('01', '11'), ('26', template), ('53', '170'), ('58', 'CO')]
+        cases = [base + [('54', v)] for v in ('', 'NaN', '-1', '0', '1e4', '1.001')]
+        cases += [[(k, '986' if k == '53' else v) for k, v in base],
+                  [(k, template + tlv('03', 'other@example.com') if k == '26' else v) for k, v in base],
+                  [(k, tlv('00', 'UNKNOWN') + tlv('04', '@tienda') if k == '26' else v) for k, v in base],
+                  [(k, 'bad' if k == '26' else v) for k, v in base]]
+        for fields in cases:
+            with self.subTest(fields=fields), self.assertRaises(PaymentAccountError):
+                local_money.decode_breb_qr(qr(*fields))
+        with self.assertRaises(PaymentAccountError):
+            local_money.decode_breb_qr(qr(*base)[:-4] + '0000')
+
     def test_malformed_emv_headers_fail_closed(self):
         for payload in ('000', '000201991', '00020199²²', '000201９９00'):
             with self.subTest(payload=payload):
@@ -147,6 +177,99 @@ class IdentifierTests(SimpleTestCase):
 
 
 class LocalMoneyTests(TestCase):
+    def test_colombian_qr_only_opening_requires_usable_reusable_receiving_data(self):
+        from payment_accounts import activation
+        from payment_accounts.models import FundingInstruction
+        local, crypto = self.pair()
+        FundingInstruction.objects.create(financial_account=crypto, kind='crypto_address', status='active',
+            provider_resource_id='crypto', display_value='0x' + '1' * 40)
+        instruction = FundingInstruction.objects.create(financial_account=local, kind='qr', status='active',
+            provider_resource_id='qr', display_value='bad')
+        opening = AccountActivation.objects.get(confio_account=self.owner, country='COL', asset='COP')
+        base = [('26', tlv('00', 'CO.COM.CRB.LLA') + tlv('04', '@ana')), ('53', '170'), ('58', 'CO')]
+        for payload, ready in [('bad', False), (qr(('01', '11'), *base, ('54', '1000')), False),
+                               (qr(('01', '12'), *base), False),
+                               (qr(('01', '11'), ('26', tlv('00', 'UNSUPPORTED')), ('53', '170'), ('58', 'CO')), False),
+                               (qr(('01', '11'), *base), True)]:
+            with self.subTest(payload=payload):
+                instruction.display_value = payload
+                instruction.save(update_fields=['display_value'])
+                self.assertEqual(activation.opening_ready(opening), ready)
+                self.assertEqual(bool(local_money.receive_account(self.owner, 'co_breb_receive')['value']), ready)
+
+    @override_settings(INFINIA_PAYMENT_ACCOUNTS_ENABLED=True)
+    def test_plain_key_lookup_cannot_claim_a_qr_while_validation_is_pending(self):
+        payload = qr(('01', '11'), ('26', tlv('00', 'CO.COM.CRB.LLA') + tlv('04', '@tienda')),
+                     ('53', '170'), ('58', 'CO'))
+        plain = []
+        def validate(method, value, client):
+            if method.id == 'co_qr':
+                plain.append(local_money.resolve_destination(self.owner, 'co_breb', '@tienda'))
+            return {'id': '', 'status': 'DISABLED', 'holder_name': ''}
+        with mock.patch.object(local_money, '_validate', side_effect=validate):
+            scanned = local_money.resolve_destination(self.owner, 'co_qr', payload)
+        self.assertNotEqual(scanned.pk, plain[0].pk)
+        scanned.refresh_from_db()
+        self.assertEqual(scanned.provider_data['method_id'], 'co_qr')
+        self.assertEqual(scanned.provider_data['breb_qr']['payload'], payload)
+
+    @override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=False, INFINIA_PAYMENT_ACCOUNTS_ENABLED=True)
+    def test_breb_qr_uses_key_payout_and_keeps_each_qr_intent_separate(self):
+        def payload(amount):
+            return qr(('01', '11'), ('26', tlv('00', 'CO.COM.CRB.LLA') + tlv('04', '@tienda')),
+                      ('53', '170'), ('54', amount), ('58', 'CO'), ('59', 'Tienda'))
+        first = local_money.resolve_destination(self.owner, 'co_qr', payload('1000'))
+        second = local_money.resolve_destination(self.owner, 'co_qr', payload('2000'))
+        plain = local_money.resolve_destination(self.owner, 'co_breb', '@tienda')
+        self.assertEqual(len({first.pk, second.pk, plain.pk}), 3)
+        self.assertEqual(first.details, {'type': 'BREB_KEY', 'brebKey': '@tienda'})
+        self.assertEqual(first.kind, 'breb_key')
+        view = local_money.destination_view(first)
+        self.assertEqual(view['qr_amount'], '1000')
+        self.assertEqual(view['qr_merchant_name'], 'Tienda')
+        self.assertEqual(view['holder_name'], '')
+        self.assertEqual(local_money.recheck_destination(first).provider_data['breb_qr']['payload'], payload('1000'))
+
+    def test_breb_receive_keeps_key_and_only_matches_its_provider_qr(self):
+        from payment_accounts.models import FundingInstruction
+        local, _ = self.pair()
+        key = FundingInstruction.objects.create(financial_account=local, kind='breb_key', status='active',
+            provider_resource_id='key', display_value='@ana')
+        def payload(value):
+            return qr(('01', '11'), ('26', tlv('00', 'CO.COM.CRB.LLA') + tlv('04', value)),
+                      ('53', '170'), ('58', 'CO'))
+        match = FundingInstruction.objects.create(financial_account=local, kind='qr', status='active',
+            provider_resource_id='qr', display_value=payload('@ana'))
+        view = local_money.receive_account(self.owner, 'co_breb_receive')
+        self.assertEqual(view['value'], key.display_value)
+        self.assertEqual(view['qr_value'], match.display_value)
+        match.display_value = payload('@other')
+        match.save(update_fields=['display_value'])
+        self.assertEqual(local_money.receive_account(self.owner, 'co_breb_receive')['qr_value'], '')
+        match.status = 'closed'
+        match.save(update_fields=['status'])
+        self.assertEqual(local_money.receive_account(self.owner, 'co_breb_receive')['qr_value'], '')
+        key.instruction_data = {'qr_code': payload('@ana')}
+        key.save(update_fields=['instruction_data'])
+        self.assertEqual(local_money.receive_account(self.owner, 'co_breb_receive')['qr_value'], payload('@ana'))
+
+    def test_colombia_qr_removed_from_provider_snapshot_is_closed(self):
+        from payment_accounts.models import FundingInstruction
+        from payment_accounts.services import sync_embedded_funding_instructions
+        local, _ = self.pair()
+        code = FundingInstruction.objects.create(financial_account=local, kind='qr', status='active',
+            provider_resource_id='removed', display_value='old')
+        key = FundingInstruction.objects.create(financial_account=local, kind='breb_key', status='active',
+            provider_resource_id='old-key', display_value='@old', instruction_data={'qr_code': 'removed-qr'})
+        with mock.patch('payment_accounts.auto_payin.sync_verified_rail'):
+            sync_embedded_funding_instructions(local)
+        code.refresh_from_db()
+        self.assertEqual(code.status, 'closed')
+        key.refresh_from_db()
+        self.assertEqual(key.status, 'closed')
+        view = local_money.receive_account(self.owner, 'co_breb_receive')
+        self.assertEqual((view['value'], view['qr_value']), ('', ''))
+
     def setUp(self):
         self.user = User.objects.create_user(username='local-money', firebase_uid='local-money')
         self.owner = Account.objects.create(user=self.user, account_type='personal')
@@ -175,7 +298,7 @@ class LocalMoneyTests(TestCase):
 
     def test_rails_are_unavailable_until_both_flags_are_on(self):
         rows = local_money.methods(self.owner, self.identity, 'send')
-        self.assertEqual({row['method'].id for row in rows}, {'br_pix', 'br_qr', 'co_breb', 'mx_clabe', 'ar_cvu', 'ar_qr'})
+        self.assertEqual({row['method'].id for row in rows}, {'br_pix', 'br_qr', 'co_breb', 'co_qr', 'mx_clabe', 'ar_cvu', 'ar_qr'})
         self.assertEqual({row['status'] for row in rows}, {'unavailable'})
 
     @override_settings(**FLAGS)

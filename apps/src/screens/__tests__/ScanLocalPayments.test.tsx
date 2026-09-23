@@ -44,7 +44,7 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 const scan = (value: string) => mockScanner.onCodeScanned([{value}]);
 
-it.each([['BR','br_qr'],['AR','ar_qr']])('routes %s QR through server availability, without paying', async (country, methodId) => {
+it.each([['BR','br_qr'],['AR','ar_qr'],['CO','co_qr']])('routes %s QR through server availability, without paying', async (country, methodId) => {
   mockQuery.mockResolvedValue({data: {localMoneyMethods: [{id: methodId, status: 'live'}]}});
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<ScanScreen />);});

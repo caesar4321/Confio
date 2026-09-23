@@ -51,6 +51,8 @@ METHODS = {m.id: m for m in (
            kind='qr', destination_type='BR_CODE', field='brCode'),
     Method('co_breb', 'send', 'COL', 'CO', 'COP', 'Llave Bre-B', 'Nequi, Bancolombia, Daviplata y más',
            kind='breb_key', destination_type='BREB_KEY', field='brebKey'),
+    Method('co_qr', 'send', 'COL', 'CO', 'COP', 'QR Bre-B', 'Escanea una llave Bre-B desde un QR',
+           kind='breb_key', destination_type='BREB_KEY', field='brebKey'),
     # Infinia requires a CLABE reference: it is the SPEI concept the recipient sees.
     Method('mx_clabe', 'send', 'MEX', 'MX', 'MXN', 'CLABE', 'Transferencia SPEI a cualquier banco',
            kind='bank_account', destination_type='CLABE', field='clabe', constants=(('reference', 'Confio'),)),
@@ -128,6 +130,46 @@ def emv_crc(data):
 _EVP = re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
 
 
+def decode_breb_qr(value):
+    """Decode supported key-bearing EMV profiles, not arbitrary Colombian QRs.
+
+    The original payload is retained locally; only its key goes to BREB_KEY.
+    QR merchant text is self-reported, never a verified holder identity.
+    EASPBV industry v1.4 (2025), tags 26/50, 53/54, 58/59/60.
+    """
+    fields = emv_fields(value) if len(value) <= 4096 else None
+    if (not fields or fields.get('00') != '01' or fields.get('58') != 'CO'
+            or fields.get('53') != '170' or fields.get('01') not in {'11', '12'}
+            or not value[-8:].startswith('6304') or value[-4:].upper() != emv_crc(value[:-4])):
+        raise PaymentAccountError('Este código no es un QR Bre-B válido en pesos colombianos.')
+    template = emv_fields(fields.get('26', '')) or {}
+    if '26' in fields and not template:
+        raise PaymentAccountError('La llave del QR está incompleta.')
+    if template:
+        if template.get('00') not in {'CO.COM.RBM.LLA', 'CO.COM.CRB.LLA'}:
+            raise PaymentAccountError('Este formato de QR Bre-B aún no está disponible.')
+        keys = [v for k, v in template.items() if k in {'01', '02', '03', '04', '05'} and v]
+        if len(keys) != 1 or set(template) - {'00', '01', '02', '03', '04', '05'}:
+            raise PaymentAccountError('El QR debe identificar una sola llave Bre-B.')
+        key = keys[0]
+    else:
+        template = emv_fields(fields.get('50', '')) or {}
+        if template.get('00') not in {'CO.COM.RBM.CU', 'CO.COM.CRB.CU'} or not template.get('01'):
+            raise PaymentAccountError('Este QR no contiene una llave Bre-B compatible.')
+        key = template['01']
+    key = normalize_value(METHODS['co_breb'], key)
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in key):
+        raise PaymentAccountError('La llave del QR no es válida.')
+    amount = fields.get('54', '')
+    if amount and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount)
+                   or Decimal(amount) <= 0):
+        raise PaymentAccountError('El monto del QR no es válido.')
+    if '54' in fields and not amount:
+        raise PaymentAccountError('El monto del QR no es válido.')
+    return {'payload': value, 'key': key, 'amount': amount,
+            'merchant_name': fields.get('59', ''), 'merchant_city': fields.get('60', '')}
+
+
 def _pix_key(value):
     if _EVP.fullmatch(value):
         return value.lower()
@@ -148,7 +190,9 @@ def normalize_value(method, raw):
     value = str(raw or '').strip()
     if not value:
         raise PaymentAccountError('Ingresa los datos de quien recibe.')
-    if method.id == 'mx_clabe':
+    if method.id == 'co_qr':
+        decode_breb_qr(value)
+    elif method.id == 'mx_clabe':
         value = _digits(value)
         if not clabe_valid(value):
             raise PaymentAccountError('Revisa la CLABE: son 18 dígitos.')
@@ -405,7 +449,7 @@ def activate(owner, identity, method_id):
 
 
 def receive_instruction_kinds(method):
-    return ('pix_key', 'qr') if method.id == 'br_pix_receive' else (method.instruction_kind,)
+    return (method.instruction_kind, 'qr') if method.id in {'br_pix_receive', 'co_breb_receive'} else (method.instruction_kind,)
 
 
 def receive_instructions(account, method):
@@ -413,6 +457,36 @@ def receive_instructions(account, method):
         Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
         kind__in=receive_instruction_kinds(method), status='active',
     ).exclude(display_value='').order_by('-updated_at', '-pk')
+
+
+def breb_receiving_details(instructions):
+    """One readiness rule for both charging an opening and revealing its data."""
+    rows = list(instructions)
+    instruction = next((row for row in rows if row.kind == 'breb_key'), None)
+    value = instruction.display_value if instruction else ''
+    candidates = [(row, row.display_value) for row in rows if row.kind == 'qr']
+    if instruction:
+        embedded = (instruction.instruction_data or {}).get('qr_code')
+        if isinstance(embedded, str) and embedded:
+            candidates.append((instruction, embedded))
+    for candidate, payload in candidates:
+        try:
+            decoded = decode_breb_qr(payload)
+        except PaymentAccountError:
+            continue
+        # Receiving details are reusable. Do not display a one-order dynamic
+        # QR or an amount-specific collection instruction as a permanent key.
+        if (not decoded['amount'] and emv_fields(payload).get('01') == '11'
+                and (not instruction or decoded['key'] == value.strip())):
+            return instruction or candidate, decoded['key'], payload
+    return instruction, value, ''
+
+
+def receiving_ready(account, method):
+    rows = receive_instructions(account, method)
+    if method.id == 'co_breb_receive':
+        return bool(breb_receiving_details(rows)[1])
+    return rows.exists()
 
 
 def receive_account(owner, method_id):
@@ -427,10 +501,15 @@ def receive_account(owner, method_id):
         instruction = receive_instructions(local, method).first()
         from .payin_admission import receiving_capabilities
         capabilities = receiving_capabilities(local)
+    qr_value = ''
+    receiving_value = instruction.display_value if instruction else ''
+    if local and method.id == 'co_breb_receive':
+        instruction, receiving_value, qr_value = breb_receiving_details(receive_instructions(local, method))
     return {
         'method': method, 'status': public_status, 'local': local, 'crypto': crypto,
         'instruction_kind': instruction.kind if instruction else method.instruction_kind,
-        'value': instruction.display_value if instruction else '',
+        'value': receiving_value,
+        'qr_value': qr_value,
         'holder_name': instruction.holder_display_name if instruction else '',
         'institution': str(((instruction.instruction_data or {}) if instruction else {}).get('bank_name') or ''),
         'receive_same_name': capabilities.get('receive_same_name', ''),
@@ -448,6 +527,8 @@ _VALIDATION_TYPES = {
 
 
 def _validation_request(method, value):
+    if method.id == 'co_qr':
+        return {'country': 'CO', 'account': {'dataType': 'BREB_KEY', 'brebKey': decode_breb_qr(value)['key']}}
     if method.id == 'br_qr':
         # Static Pix QR embeds the registered key; the live validation API
         # accepts PIX_KEY, not a BR_CODE/QR_CODE validation request.
@@ -521,6 +602,8 @@ def verification_state(validation):
 
 
 def _label(method, value, validation):
+    if method.id == 'co_qr':
+        return f"QR Bre-B · {decode_breb_qr(value)['key']}"
     if method.kind == 'qr':
         # Merchant text comes from the QR itself, not an owner lookup. Include
         # a stable reference so two saved codes with the same name differ.
@@ -603,21 +686,35 @@ def resolve_destination(owner, method_id, raw_value, *, client=None):
     method = get_method(method_id, 'send')
     value = normalize_value(method, raw_value)
     details = {'type': method.destination_type, method.field: value, **dict(method.constants)}
+    qr_data = decode_breb_qr(value) if method.id == 'co_qr' else None
+    if qr_data:
+        details[method.field] = qr_data['key']
     with transaction.atomic():
         # One destination per owner and key, found or created under the owner's
         # lock, with its check claimed before the provider is asked: overlapping
         # first lookups share one row and only the latest check records its answer.
         # A new row stays out of the saved list until its answer lands.
         type(owner).objects.select_for_update().filter(pk=owner.pk).first()
-        destination = PayoutDestination.objects.filter(
+        candidates = PayoutDestination.objects.filter(
             confio_account=owner, provider='infinia', kind=method.kind, country=method.country, details=details,
-        ).order_by('-created_at').first()
+        )
+        # Different QR amounts/references must never overwrite a saved intent.
+        if qr_data:
+            candidates = candidates.filter(provider_data__breb_qr__payload=value)
+        else:
+            candidates = candidates.filter(Q(provider_data__method_id__isnull=True)
+                                           | ~Q(provider_data__method_id='co_qr'))
+        destination = candidates.order_by('-created_at').first()
         if destination and _current_verified(destination):
             return destination
         if destination is None:
             destination = create_payout_destination(
                 confio_account=owner, provider='infinia', kind=method.kind, country=method.country,
                 asset=method.asset, label=_label(method, value, {})[:100], holder_name='', details=details)
+            if qr_data:
+                destination.provider_data = {**(destination.provider_data or {}),
+                                             'method_id': method.id, 'breb_qr': qr_data}
+                destination.save(update_fields=['provider_data'])
         check = _start_check(destination)
     validation = _validate(method, value, client)
     return _apply_validation(destination, method, value, validation, check=check)
@@ -629,7 +726,7 @@ def refresh_destination(destination, *, client=None):
     method = METHODS.get(data.get('method_id'))
     if not method or verification_state(validation) != PENDING or not validation.get('id'):
         return destination
-    value = destination.details.get(method.field, '')
+    value = _destination_value(destination, method)
     if not getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False):
         check = _start_check(destination)
         return _apply_validation(destination, method, value, _validate(method, value, client), check=check)
@@ -656,7 +753,7 @@ def recheck_destination(destination, *, client=None):
         return destination
     if verification_state(data.get('validation')) == PENDING:
         return refresh_destination(destination, client=client)
-    value = destination.details.get(method.field, '')
+    value = _destination_value(destination, method)
     check = _start_check(destination)
     return _apply_validation(destination, method, value, _validate(method, value, client), check=check)
 
@@ -668,18 +765,27 @@ def require_current_destination(destination):
         raise PaymentAccountError('Revisa de nuevo a quien recibe antes de enviar.')
 
 
+def _destination_value(destination, method):
+    if method.id == 'co_qr':
+        return (destination.provider_data or {}).get('breb_qr', {}).get('payload', '')
+    return destination.details.get(method.field, '')
+
+
 def destination_view(destination):
     data = destination.provider_data or {}
     validation = data.get('validation') or {}
     state = verification_state(validation)
     method = METHODS.get(data.get('method_id'))
-    label = _label(method, destination.details.get(method.field, ''), validation) if method else destination.label
+    label = _label(method, _destination_value(destination, method), validation) if method else destination.label
+    qr_data = data.get('breb_qr') or {}
     return {
         'id': destination.internal_id, 'method_id': str(data.get('method_id') or ''), 'label': label,
         'holder_name': validation.get('holder_name', '') if state == VERIFIED else '',
         'holder_document': validation.get('holder_document', '') if state == VERIFIED else '',
         'institution': validation.get('institution', ''), 'verification': state,
         'country': iso_alpha2(destination.country), 'asset': destination.asset,
+        'qr_amount': qr_data.get('amount', ''), 'qr_merchant_name': qr_data.get('merchant_name', ''),
+        'qr_merchant_city': qr_data.get('merchant_city', ''),
     }
 
 

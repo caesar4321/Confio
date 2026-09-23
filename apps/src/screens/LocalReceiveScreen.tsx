@@ -344,6 +344,16 @@ function InfiniaLocalReceiveScreen() {
                       </Text>
                     </View>
                   ) : null}
+                  {methodId === 'co_breb_receive' && account.qrValue ? (
+                    <View style={{ alignItems: 'center', padding: 16, backgroundColor: '#fff' }}>
+                      <QRCode value={account.qrValue} size={Math.min(220, width - 112)} />
+                      <Text style={[styles.detailMeta, { marginTop: 12 }]}>Escanea este QR para pagar a tu llave Bre-B.</Text>
+                      <TouchableOpacity style={styles.smallGhost}
+                        onPress={() => Share.share({message: account.qrValue!})}>
+                        <Text style={styles.smallGhostText}>Compartir código QR</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
                   <Text style={styles.detailValue} selectable>{accountValue}</Text>
                   {account.holderName ? <Text style={styles.detailMeta}>Titular: {account.holderName}</Text> : null}
                   {account.institution ? <Text style={styles.detailMeta}>Banco: {account.institution}</Text> : null}

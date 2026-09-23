@@ -29,7 +29,8 @@ def _digits(value, length):
 
 def detect_receiving_rail(account):
     """Return a PII-free assessment of the latest authenticated snapshot."""
-    from .local_money import clabe_valid, cbu_valid
+    from .local_money import clabe_valid, cbu_valid, decode_breb_qr
+    from .services import PaymentAccountError
     try:
         country = iso_alpha2(account.country)
     except ValueError:
@@ -83,8 +84,24 @@ def detect_receiving_rail(account):
                 accept('TED', 'ted_brl')
             elif ted:
                 unknown = True
-        elif pair == ('CO', 'COP') and _text(item.get('breb_key')):
-            accept('BREB', 'breb_key')
+        elif pair == ('CO', 'COP'):
+            key = _text(item.get('breb_key'))
+            if key:
+                accept('BREB', 'breb_key')
+            qr_fields = ('qr_code', 'value', 'address') if item.get('type') == 'qr' else ('qr_code',)
+            payloads = {_text(item.get(field)) for field in qr_fields if _text(item.get(field))}
+            if len(payloads) > 1:
+                unknown = True
+            elif payloads:
+                try:
+                    decoded = decode_breb_qr(next(iter(payloads)))
+                except PaymentAccountError:
+                    unknown = True
+                else:
+                    if key and decoded['key'] != key:
+                        unknown = True
+                    else:
+                        accept('BREB', 'qr:breb_key')
         elif pair == ('GB', 'GBP'):
             fps = item.get('fps_gbp')
             if isinstance(fps, dict) and _digits(fps.get('account_number'), 8) and _digits(
@@ -98,7 +115,7 @@ def detect_receiving_rail(account):
         known_fields = {'type', 'id', 'reference', 'account_number', 'bank_name', 'bank_code', 'iban', 'bic'}
         known_fields |= {
             ('BR', 'BRL'): {'br_code', 'ted_brl', 'pix_key', 'pix_key_brl', 'br_code_brl'},
-            ('CO', 'COP'): {'breb_key'},
+            ('CO', 'COP'): {'breb_key', 'qr_code'} | ({'value', 'address'} if item.get('type') == 'qr' else set()),
             ('GB', 'GBP'): {'fps_gbp'},
         }.get(pair, set())
         if any(v not in (None, '', {}, []) for k, v in item.items() if k not in known_fields):

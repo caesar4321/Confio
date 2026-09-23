@@ -40,6 +40,20 @@ beforeEach(() => {
     instructionKind: 'qr', value: 'pix-copy-paste', holderName: 'Ana', institution: 'Bank', receiveThirdParty: 'enabled'};
 });
 
+it('shows a provider Bre-B QR alongside the llave without replacing copy-key controls', async () => {
+  mockMethodId = 'co_breb_receive';
+  mockAccount = {...mockAccount, country: 'CO', asset: 'COP', instructionKind: 'breb_key',
+    value: '@ana', qrValue: 'provider-breb-payload'};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  expect(tree.root.findByType('QRCode' as any).props.value).toBe('provider-breb-payload');
+  const copy = tree.root.findAllByType(TouchableOpacity)
+    .find(node => node.findAllByType(Text).some(t => t.props.children === 'Copiar'))!;
+  await act(async () => {copy.props.onPress();});
+  expect(Clipboard.setString).toHaveBeenCalledWith('@ana');
+  await act(async () => tree.unmount());
+});
+
 it('shows own-name-only guidance when third-party permission is disabled', async () => {
   mockAccount = {...mockAccount, receiveThirdParty: 'disabled', receiveSameName: 'enabled'};
   let tree!: renderer.ReactTestRenderer;

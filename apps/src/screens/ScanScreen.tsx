@@ -23,6 +23,7 @@ type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
 // The payable QR networks, by the method ids the scan handler routes to.
 const QR_RAILS: Record<string, string> = {
   br_qr: 'Pix',
+  co_qr: 'Bre-B',
   ar_qr: 'QR Argentina',
 };
 
@@ -180,7 +181,7 @@ export const ScanScreen = () => {
           variables: {direction: 'send'}, fetchPolicy: 'network-only'});
         if (scanSession.current !== session) return;
         const method: LocalMethod | undefined = data?.localMoneyMethods?.find((m: LocalMethod) => m.id === localQr.methodId);
-        if (!['ar_qr', 'br_qr'].includes(localQr.methodId) || !method
+        if (!['ar_qr', 'br_qr', 'co_qr'].includes(localQr.methodId) || !method
           || !['live', 'needs_verification', 'needs_document'].includes(method.status)) {
           showScanError('Medio no disponible', 'Este tipo de QR todavía no está habilitado para tu cuenta.');
           return;

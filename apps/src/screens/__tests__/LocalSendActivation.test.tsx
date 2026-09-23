@@ -67,6 +67,20 @@ beforeEach(() => {
   mockRecheck.mockImplementation(async (id: string) => ({id, holderName: 'Ana', label: 'Llave', verification: 'verified'}));
 });
 
+it('keeps the QR amount in COP and merchant text separate from the holder and dollar input', async () => {
+  mockMethodId = 'co_qr'; mockInitialQr = 'breb-qr'; mockAccountStatus = 'active';
+  mockResolve.mockResolvedValue({id: 'qr', methodId: 'co_qr', verification: 'not_checked',
+    label: 'QR Bre-B · @tienda', qrAmount: '15000', qrMerchantName: 'Tienda', qrMerchantCity: 'Bogota'});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<Screen />);});
+  const text = JSON.stringify(tree.toJSON());
+  expect(text).toContain('Comercio indicado en el QR:');
+  expect(text).toContain('Tienda');
+  expect(text).toContain('Monto indicado en el QR:');
+  expect(tree.root.findAllByType(TextInput).some(n => n.props.value === '15000')).toBe(false);
+  await act(async () => tree.unmount());
+});
+
 it('retains the main scanner QR through account opening and resolves it only once', async () => {
   mockMethodId = 'br_qr'; mockInitialQr = 'gateway-qr';
   mockResolve.mockResolvedValue({id: 'qr', methodId: 'br_qr', verification: 'not_checked', label: 'QR'});
@@ -120,7 +134,7 @@ it('a new handoff param on the mounted screen replaces the old code at once', as
   await act(async () => tree.unmount());
 });
 
-it.each([['br_pix', 'br_qr'], ['ar_cvu', 'ar_qr']])('offers a labelled QR entry on %s and resolves through %s', async (methodId, qrId) => {
+it.each([['br_pix', 'br_qr'], ['ar_cvu', 'ar_qr'], ['co_breb', 'co_qr']])('offers a labelled QR entry on %s and resolves through %s', async (methodId, qrId) => {
   mockMethodId = methodId;
   mockAccountStatus = 'active';
   mockExtraMethods = [{id: qrId, country: 'CO', asset: 'COP', status: 'live'}];

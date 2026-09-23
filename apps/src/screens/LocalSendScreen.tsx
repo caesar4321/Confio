@@ -69,6 +69,10 @@ const COPY: Record<string, {
     placeholder: 'Celular, cédula, correo o alias',
     helper: 'Pídesela a quien vas a pagar. Llega a Nequi, Bancolombia, Daviplata y más.',
   },
+  co_qr: {
+    hero: 'Paga con QR Bre-B', field: 'Código QR Bre-B', placeholder: 'Escanea o importa el QR Bre-B',
+    helper: 'Enviamos a la llave del QR. Revisa el monto en pesos antes de confirmar.',
+  },
   br_pix: {
     hero: 'Envía por Pix', field: 'Chave Pix de quien recibe',
     placeholder: 'CPF, celular, e-mail o clave aleatoria', helper: 'Los celulares llevan +55 al inicio.',
@@ -862,6 +866,18 @@ export default function LocalSendScreen() {
                     </TouchableOpacity>
                   ) : null}
                   {recipientCard}
+                  {destination?.methodId === 'co_qr' ? (
+                    <View>
+                      {destination.qrMerchantName ? <Text style={styles.helperText}>
+                        Comercio indicado en el QR: {destination.qrMerchantName}
+                        {destination.qrMerchantCity ? ` · ${destination.qrMerchantCity}` : ''}
+                      </Text> : null}
+                      {destination.qrAmount ? <Text style={styles.helperText}>
+                        Monto indicado en el QR: {formatRampMoney(destination.qrAmount, 'COP')}.
+                        {' '}El envío se calcula desde dólares; compara este monto con la estimación en pesos.
+                      </Text> : null}
+                    </View>
+                  ) : null}
                 </View>
               </View>
             </RampReveal>
