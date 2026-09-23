@@ -73,12 +73,50 @@ it('retains the main scanner QR through account opening and resolves it only onc
   let tree!: renderer.ReactTestRenderer;
   await act(async () => { tree = renderer.create(<Screen />); });
   expect(mockResolve).not.toHaveBeenCalled();
+  // Scanned already, from the first frame: no second "Escanear QR" prompt
+  // while the account is still opening (users were scanning twice).
+  const labels = tree.root.findAllByType(Text).map(n => [].concat(n.props.children).join(''));
+  expect(labels).toContain('QR escaneado');
+  expect(labels).not.toContain('Escanear QR');
   mockAccountStatus = 'active';
   await act(async () => { tree.update(<Screen />); });
   expect(mockResolve).toHaveBeenCalledWith('br_qr', 'gateway-qr', 20000);
   await act(async () => { tree.update(<Screen />); });
   expect(mockResolve).toHaveBeenCalledTimes(1);
   expect(mockPrepareBridge).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+it('a re-scan during account opening replaces the handed-over code and waits for activation', async () => {
+  mockMethodId = 'br_qr'; mockInitialQr = 'code-A';
+  mockResolve.mockResolvedValue({id: 'qr', methodId: 'br_qr', verification: 'not_checked', label: 'QR'});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  await act(async () => {
+    tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === 'Escanear otro QR')!.props.onPress();
+  });
+  await act(async () => { tree.root.findByType('Scanner' as any).props.onScanned('code-B'); });
+  // Account still opening: nothing resolves yet.
+  expect(mockResolve).not.toHaveBeenCalled();
+  mockAccountStatus = 'active';
+  await act(async () => { tree.update(<Screen />); });
+  // Only the newer code, once — the stale handoff never overwrites it.
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(mockResolve).toHaveBeenCalledWith('br_qr', 'code-B', 20000);
+  await act(async () => tree.unmount());
+});
+
+it('a new handoff param on the mounted screen replaces the old code at once', async () => {
+  mockMethodId = 'br_qr'; mockInitialQr = 'code-A';
+  mockResolve.mockResolvedValue({id: 'qr', methodId: 'br_qr', verification: 'not_checked', label: 'QR'});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  mockInitialQr = 'code-C';
+  await act(async () => { tree.update(<Screen />); });
+  mockAccountStatus = 'active';
+  await act(async () => { tree.update(<Screen />); });
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(mockResolve).toHaveBeenCalledWith('br_qr', 'code-C', 20000);
   await act(async () => tree.unmount());
 });
 
