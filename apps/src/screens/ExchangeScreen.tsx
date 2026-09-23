@@ -1222,8 +1222,8 @@ export const ExchangeScreen = () => {
     // Check if user has configured payment methods for this offer (only for trade action)
     if (action === 'trade' && !checkPaymentMethodAvailability(offer)) {
       Alert.alert(
-        'Configura tu forma de cobro',
-        'Para convertir con esta oferta, primero debes configurar una forma de cobro compatible.',
+        'Configura tu cuenta',
+        'Para convertir con esta oferta, primero debes configurar una cuenta compatible.',
         [
           { text: 'Cancelar', style: 'cancel' },
           {

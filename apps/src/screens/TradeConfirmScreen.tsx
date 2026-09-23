@@ -379,7 +379,7 @@ export const TradeConfirmScreen: React.FC = () => {
           />
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Seleccionar forma de cobro</Text>
+              <Text style={styles.modalTitle}>Seleccionar cuenta</Text>
               <TouchableOpacity onPress={() => setShowPaymentModal(false)} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={24} color="#6B7280" />
               </TouchableOpacity>
@@ -435,7 +435,7 @@ export const TradeConfirmScreen: React.FC = () => {
                         )}
                       </View>
                       <Text style={[styles.paymentOptionDescription, !isConfigured && styles.paymentOptionDescriptionDisabled]}>
-                        {isConfigured ? getPaymentMethodDescription(method) : 'Toca para configurar esta forma de cobro'}
+                        {isConfigured ? getPaymentMethodDescription(method) : 'Toca para configurar esta cuenta'}
                         {method.bank?.country?.name && ` • ${method.bank.country.name}`}
                       </Text>
                     </View>

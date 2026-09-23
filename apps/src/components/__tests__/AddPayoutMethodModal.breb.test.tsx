@@ -64,7 +64,7 @@ const key = (tree: renderer.ReactTestRenderer) => tree.root.findAllByType(TextIn
 const prepare = async (value: string) => {
   const tree = render();
   await press(tree, 'Llave Bre-B');
-  fill(tree, 'Titular de la cuenta asociada a la llave', 'Ana García');
+  fill(tree, 'Como aparece en tu banco', 'Ana García');
   fill(tree, 'Celular con +57, NIT, correo o alias', value);
   await press(tree, 'Cuenta de Ahorros');
   return tree;
@@ -80,7 +80,7 @@ it.each(['+573001234567', '900123456-7', 'ana@example.com', '@ANA', '+receipts@e
   'saves opaque Bre-B key %s with bank and account type', async value => {
     const tree = await prepare(value);
     expect(key(tree).props).toMatchObject({ keyboardType: 'default', maxLength: 254, autoCapitalize: 'none', autoCorrect: false });
-    await press(tree, 'Agregar forma de cobro');
+    await press(tree, 'Agregar cuenta');
     expect(mockCreate).toHaveBeenCalledTimes(1);
     const variables = mockCreate.mock.calls[0][0].variables;
     expect(variables).toMatchObject({ accountNumber: value, accountType: 'ahorro' });
@@ -89,7 +89,7 @@ it.each(['+573001234567', '900123456-7', 'ana@example.com', '@ANA', '+receipts@e
 );
 it.each(['', '+13001234567', '+57300123', 'ana garcia', 'a'.repeat(255)])('rejects malformed or empty key %s before saving', async value => {
   const tree = await prepare(value);
-  await press(tree, 'Agregar forma de cobro');
+  await press(tree, 'Agregar cuenta');
   expect(mockCreate).not.toHaveBeenCalled();
 });
 it('restores saved Bre-B metadata and updates without losing the key', async () => {
@@ -148,15 +148,44 @@ it('shows Bre-B as a separate payment method and opens the key form directly', a
     await press(tree, 'Bancolombia');
     await press(tree, 'Bre-B');
     expect(key(tree)).toBeDefined();
-    fill(tree, 'Titular de la cuenta asociada a la llave', 'Ana García');
+    fill(tree, 'Como aparece en tu banco', 'Ana García');
     fill(tree, 'Celular con +57, NIT, correo o alias', 'ana@example.com');
     await press(tree, 'Cuenta de Ahorros');
-    await press(tree, 'Agregar forma de cobro');
+    await press(tree, 'Agregar cuenta');
     const variables = mockCreate.mock.calls[0][0].variables;
     expect(variables.rampPaymentMethodId).toBe('breb');
     expect(JSON.parse(variables.providerMetadata).rail).toBe('BREB');
-    expect(tree.root.findAllByType(TouchableOpacity).some(n => n.props.accessibilityRole === 'radio')).toBe(false);
+    const radioLabels = tree.root.findAllByType(TouchableOpacity)
+      .filter(n => n.props.accessibilityRole === 'radio')
+      .flatMap(n => n.findAllByType(Text).map(t => t.props.children));
+    expect(radioLabels).not.toContain('Llave Bre-B');
+    expect(radioLabels).not.toContain('Cuenta bancaria');
   } finally {
     mockMethods.pop();
   }
+});
+
+const textOrder = (tree: renderer.ReactTestRenderer) =>
+  tree.root.findAllByType(Text).map(t => [t.props.children].flat().filter(c => typeof c === 'string').join(''));
+
+it('orders the form rail → bank account (type, then number) → holder', () => {
+  const tree = render();
+  const texts = textOrder(tree);
+  const at = (label: string) => {
+    const idx = texts.indexOf(label);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    return idx;
+  };
+  expect(at('Banco o billetera *')).toBeLessThan(at('Cómo recibir el retiro'));
+  expect(at('Cómo recibir el retiro')).toBeLessThan(at('Datos de la cuenta'));
+  expect(at('Datos de la cuenta')).toBeLessThan(at('Tipo de cuenta *'));
+  expect(at('Tipo de cuenta *')).toBeLessThan(at('Número de cuenta Bancolombia *'));
+  expect(at('Número de cuenta Bancolombia *')).toBeLessThan(at('Datos del titular'));
+});
+
+it('reports the first missing field in render order', async () => {
+  const tree = render();
+  await press(tree, 'Agregar cuenta');
+  expect(mockCreate).not.toHaveBeenCalled();
+  expect(textOrder(tree)).toContain('Por favor selecciona el tipo de cuenta');
 });

@@ -910,7 +910,7 @@ export const SellScreen = () => {
                 <Text style={styles.reviewTitle}>Revisión final</Text>
                 <View style={styles.reviewRow}>
                   <Icon name="credit-card" size={16} color={colors.textSecondary} />
-                  <Text style={styles.reviewLabel}>Forma de cobro</Text>
+                  <Text style={styles.reviewLabel}>Cuenta de destino</Text>
                   <Text style={styles.reviewValue}>{selectedMethod?.displayName}</Text>
                 </View>
                 <View style={styles.reviewRow}>
