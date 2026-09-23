@@ -1,4 +1,5 @@
 import algosdk from 'algosdk';
+import { inspectLegacyWalletBalance } from './legacyWalletBalance';
 import { Buffer } from 'buffer';
 import { apolloClient } from '../apollo/client';
 import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
@@ -31,7 +32,6 @@ import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, GOOGLE_CLIENT_IDS, USDC_ASSET_
 // Legacy CONFÍO asset ID from before token migration
 // Users who have this in V1 need it swept to V2
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
-const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
 
 
 // Use public AlgoNode API for client-side state checks (Read-Only)
@@ -155,19 +155,12 @@ class WalletMigrationService {
             return true;
         }
 
-        const relevantAssets = (info.assets || []).filter((a: any) => {
-            const aid = String(a['asset-id']);
-            const amount = Number(a['amount'] || 0);
-            return amount > 0 && (
-                aid === String(CONFIO_ASSET_ID) ||
-                aid === String(LEGACY_CONFIO_ASSET_ID) ||
-                aid === String(CUSD_ASSET_ID) ||
-                aid === String(USDC_ASSET_ID)
-            );
-        });
-
-        const spendableAlgo = Math.max(0, Number(info.amount || 0) - Number(info['min-balance'] || 0));
-        return relevantAssets.length > 0 || spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS;
+        try {
+            return inspectLegacyWalletBalance(info,
+                [CONFIO_ASSET_ID, LEGACY_CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID]).hasMaterialValue;
+        } catch {
+            return true; // Invalid account data is unknown, never proof of an empty wallet.
+        }
     }
 
     /**
@@ -269,27 +262,12 @@ class WalletMigrationService {
                 return { needsMigration: false, v1Address: undefined };
             }
 
-            const balance = v1Info.amount;
-            const assets = v1Info.assets || [];
-            // Filter for relevant assets only (CONFIO, CUSD, USDC)
-            // This prevents "Junk Assets" (airdrops/spam) from triggering infinite migration loops
-            const relevantAssets = assets.filter((a: any) => {
-                const aid = a['asset-id'];
-                // Robust comparison (String) to handle BigInt/Number mismatch
-                // This detects Opt-Ins even if balance is 0
-                // Include legacy CONFIO asset ID for users with old tokens
-                return (
-                    String(aid) === String(CONFIO_ASSET_ID) ||
-                    String(aid) === String(LEGACY_CONFIO_ASSET_ID) ||
-                    String(aid) === String(CUSD_ASSET_ID) ||
-                    String(aid) === String(USDC_ASSET_ID)
-                );
-            });
-
-            const hasRelevantAssets = relevantAssets.length > 0;
-            const spendableAlgo = Math.max(0, Number(v1Info.amount || 0) - Number(v1Info['min-balance'] || 0));
-            const hasMaterialAlgo = spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS;
-            const hasMaterialV1Value = hasRelevantAssets || hasMaterialAlgo;
+            const balance = Number(v1Info.amount);
+            const { assets, relevantAssets, hasMaterialValue } = inspectLegacyWalletBalance(v1Info,
+                [CONFIO_ASSET_ID, LEGACY_CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID]);
+            // Migration must still sweep relevant empty opt-ins; recovery and
+            // post-migration checks only count positive token/spendable value.
+            const hasMaterialV1Value = relevantAssets.length > 0 || hasMaterialValue;
 
             // Only ask for what the server will sponsor: PrepareAtomicMigration
             // sweeps nothing but a V1 that one of the caller's rows registers
@@ -346,7 +324,7 @@ class WalletMigrationService {
                 return {
                     needsMigration: true,
                     v1Balance: balance,
-                    v1Assets: assets.map((a: any) => a['asset-id']),
+                    v1Assets: assets.map(a => Number(a.assetId)),
                     v1Address,
                     v2Address: v2Wallet.address
                 };
@@ -355,7 +333,7 @@ class WalletMigrationService {
                 return {
                     needsMigration: true,
                     v1Balance: balance,
-                    v1Assets: assets.map((a: any) => a['asset-id']),
+                    v1Assets: assets.map(a => Number(a.assetId)),
                     v1Address,
                     // V2 address unknown until generation
                 };

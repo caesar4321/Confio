@@ -69,18 +69,18 @@ const check = () => migrationService.checkNeedsMigration(ISS, 'sub', 'web', 'goo
 
 // The shape of user 1120's V1 on mainnet: sponsor MBR only, empty opt-ins.
 const strandedV1 = {
-  amount: 300000,
-  'min-balance': 300000,
+  amount: BigInt(300000),
+  minBalance: BigInt(300000),
   assets: [
-    { 'asset-id': 3198259450, amount: 0 },
-    { 'asset-id': 3198568509, amount: 0 },
+    { assetId: BigInt(3198259450), amount: BigInt(0) },
+    { assetId: BigInt(3198568509), amount: BigInt(0) },
   ],
 };
 
 // The shape of user 2501's V1: real USDC left behind.
 const fundedV1 = {
   ...strandedV1,
-  assets: [{ 'asset-id': 31566704, amount: 12218160 }],
+  assets: [{ assetId: BigInt(31566704), amount: BigInt(12218160) }],
 };
 
 const registered = (algorandAddress: string | null, isKeylessMigrated: boolean) => ({
@@ -197,5 +197,41 @@ describe('performMigration without a Drive token', () => {
     await expect(
       migrationService.performMigration(ISS, 'sub', 'web', 'google', 0),
     ).rejects.toBeInstanceOf(DriveAuthorizationRequiredError);
+  });
+});
+
+describe('post-migration balance inspection', () => {
+  const atRisk = () => (migrationService as any).hasMaterialBalanceAtRisk('V1ADDR');
+
+  it('does not count locked minimum or sub-threshold dust as funds remaining', async () => {
+    mockAccountInformation.mockResolvedValue({ ...strandedV1, amount: BigInt(568000), minBalance: BigInt(557000) });
+    expect(await atRisk()).toBe(false);
+  });
+
+  it('detects real token value returned by the SDK', async () => {
+    mockAccountInformation.mockResolvedValue(fundedV1);
+    expect(await atRisk()).toBe(true);
+  });
+
+  it('refuses to declare success when account data is incomplete', async () => {
+    mockAccountInformation.mockResolvedValue({ amount: BigInt(0), assets: [] });
+    expect(await atRisk()).toBe(true);
+    expect(await check()).toEqual({ needsMigration: false, statusUnknown: true });
+  });
+
+  it('preserves unknown state on network failures', async () => {
+    mockAccountInformation.mockRejectedValue(new Error('offline'));
+    expect(await atRisk()).toBe(true);
+  });
+
+  it('allows an absent account to be finalized', async () => {
+    mockAccountInformation.mockRejectedValue({ status: 404 });
+    expect(await atRisk()).toBe(false);
+  });
+
+  it('publishes numeric balance and asset IDs for migration UI', async () => {
+    mockAccountInformation.mockResolvedValue(fundedV1);
+    mockQuery.mockResolvedValue(registered('V1ADDR', false));
+    expect(await check()).toMatchObject({ needsMigration: true, v1Balance: 300000, v1Assets: [31566704] });
   });
 });

@@ -10,6 +10,7 @@ import { walletRecoveryMessage } from './walletRecoveryErrors';
 import { reconcileSignInWallet } from './signInWalletReconciliation';
 import { persistSignInSession } from './signInSessionStorage';
 import { canReplaceAfterRecoveryFailure, collisionRefusalMessage } from './walletReenrollmentDecision';
+import { inspectLegacyWalletBalance } from './legacyWalletBalance';
 import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
 import { getAuth, GoogleAuthProvider, AppleAuthProvider, signInWithCredential, getIdToken, signOut } from '@react-native-firebase/auth';
@@ -370,7 +371,6 @@ async function registerBscAddressBestEffort() {
 
 
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
-const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
 const GOOGLE_DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const ga4SignUpServiceForUser = (userId: string) => `com.confio.analytics.sign_up.${userId}`;
 const pendingGa4SignUps = new Set<string>();
@@ -527,7 +527,7 @@ export class AuthService {
       const algosdk = await import('algosdk');
       const algod = new algosdk.Algodv2('', this.getPublicAlgodServer(), '');
 
-      let info: any;
+      let info: import('algosdk').modelsv2.Account;
       let inspectionTimeout: ReturnType<typeof setTimeout> | undefined;
       try {
         info = await Promise.race([
@@ -552,23 +552,14 @@ export class AuthService {
         if (inspectionTimeout) clearTimeout(inspectionTimeout);
       }
 
-      const relevantAssets = (info.assets || []).filter((asset: any) => {
-        const aid = String(asset['asset-id']);
-        const amount = Number(asset['amount'] || 0);
-        return amount > 0 && (
-          aid === String(CONFIO_ASSET_ID) ||
-          aid === String(LEGACY_CONFIO_ASSET_ID) ||
-          aid === String(CUSD_ASSET_ID) ||
-          aid === String(USDC_ASSET_ID)
-        );
-      });
-
-      const spendableAlgo = Math.max(0, Number(info.amount || 0) - Number(info['min-balance'] || 0));
-      if (relevantAssets.length > 0 || spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS) {
+      const { relevantAssets, spendableAlgo, hasMaterialValue } = inspectLegacyWalletBalance(
+        info, [CONFIO_ASSET_ID, LEGACY_CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID],
+      );
+      if (hasMaterialValue) {
         console.log('[AuthService] Legacy V1 wallet still holds value; preserving active address until migration completes.', {
           legacyAddress: legacyWallet.address,
-          relevantAssetIds: relevantAssets.map((asset: any) => asset['asset-id']),
-          spendableAlgo,
+          relevantAssetIds: relevantAssets.filter(asset => asset.amount > BigInt(0)).map(asset => asset.assetId),
+          spendableAlgo: spendableAlgo.toString(),
         });
         return {
           legacyAddress: legacyWallet.address,
