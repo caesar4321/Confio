@@ -57,11 +57,11 @@ export const useRampCountry = () => {
         Alert.alert(
           'No disponible en tu país',
           screen === 'TopUp'
-            ? 'Las recargas con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.'
-            : 'Los retiros con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.',
+            ? 'Las recargas con proveedores aún no están disponibles en tu país. Puedes cambiar efectivo con financieras locales verificadas cerca de ti.'
+            : 'Los retiros con proveedores aún no están disponibles en tu país. Puedes cambiar efectivo con financieras locales verificadas cerca de ti.',
           [
             { text: 'Cancelar', style: 'cancel' },
-            { text: 'Ir a Efectivo', onPress: () => navigation.navigate('Financieras') },
+            { text: 'Ver financieras', onPress: () => navigation.navigate('Financieras') },
           ],
         );
         return;

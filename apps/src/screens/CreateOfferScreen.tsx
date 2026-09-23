@@ -28,6 +28,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
+import { exitToDiscover } from '../navigation/exitToDiscover';
 
 // Colors from the design
 type PaymentMethod = {
@@ -217,7 +218,7 @@ export const CreateOfferScreen = () => {
               {
                 text: 'Ver Mis Ofertas',
                 onPress: () => {
-                  navigation.navigate('BottomTabs', { screen: 'Discover' });
+                  exitToDiscover(navigation as any);
                 },
               },
             ]
@@ -251,13 +252,13 @@ export const CreateOfferScreen = () => {
               {
                 text: 'Ver Mis Ofertas',
                 onPress: () => {
-                  navigation.navigate('BottomTabs', { screen: 'Discover' });
+                  exitToDiscover(navigation as any);
                 },
               },
               {
                 text: 'Continuar',
                 onPress: () => {
-                  navigation.navigate('BottomTabs', { screen: 'Discover' });
+                  exitToDiscover(navigation as any);
                 },
                 style: 'cancel'
               },
@@ -299,7 +300,7 @@ export const CreateOfferScreen = () => {
                     {
                       text: 'Entendido',
                       onPress: () => {
-                        navigation.navigate('BottomTabs', { screen: 'Discover' });
+                        exitToDiscover(navigation as any);
                       },
                     },
                   ]

@@ -39,6 +39,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { apolloClient } from '../apollo/client';
 import { GET_DISPUTE_EVIDENCE_CODE } from '../apollo/mutations';
+import { exitToDiscover } from '../navigation/exitToDiscover';
 
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
@@ -409,7 +410,7 @@ export const ActiveTradeScreen: React.FC = () => {
           onPress: () => {
             // Here you would typically call an API to cancel the trade
             Alert.alert('Intercambio cancelado', 'El intercambio ha sido cancelado.');
-            navigation.navigate('BottomTabs', { screen: 'Discover' });
+            exitToDiscover(navigation as any);
           },
         },
       ]
@@ -1329,7 +1330,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
             <TouchableOpacity
               style={styles.viewAllTradesHint}
-              onPress={() => navigation.navigate('BottomTabs', { screen: 'Discover' })}
+              onPress={() => exitToDiscover(navigation as any)}
               accessibilityRole="button"
               accessibilityLabel="Ver todos mis intercambios"
             >

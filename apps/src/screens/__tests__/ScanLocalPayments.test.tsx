@@ -23,15 +23,21 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({params: {mode: mockMode}}), useIsFocused: () => true,
   useFocusEffect: (fn: any) => {require('react').useEffect(fn, [fn]);},
 }));
-jest.mock('@apollo/client', () => ({useApolloClient: () => ({query: mockQuery}), useMutation: () => [mockInvoice]}));
+let mockChipMethods: any[] = [];
+jest.mock('@apollo/client', () => ({
+  useApolloClient: () => ({query: mockQuery}), useMutation: () => [mockInvoice],
+  useQuery: () => ({data: {localMoneyMethods: mockChipMethods}, refetch: () => Promise.resolve()}),
+}));
 jest.mock('../../apollo/queries', () => ({GET_INVOICE: 'invoice'}));
 jest.mock('../../services/localMoney', () => ({LOCAL_MONEY_METHODS: 'methods'}));
-jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: {id: 'user-1', type: 'personal'}})}));
+let mockAccount: any = {id: 'user-1', type: 'personal'};
+jest.mock('../../contexts/AccountContext', () => ({useAccount: () => ({activeAccount: mockAccount})}));
 jest.mock('../../components/common/Button', () => ({Button: 'Button'}));
 import {ScanScreen} from '../ScanScreen';
 
 beforeEach(() => {
-  jest.clearAllMocks(); mockMode = 'pagar';
+  jest.clearAllMocks(); mockMode = 'pagar'; mockChipMethods = [];
+  mockAccount = {id: 'user-1', type: 'personal'};
   AppState.currentState = 'active';
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
@@ -142,5 +148,37 @@ it('does not treat an embedded verification link in a malformed EMV code as a Co
   expect(mockNavigate).not.toHaveBeenCalled();
   expect(mockInvoice).not.toHaveBeenCalled();
   expect(mockQuery).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+it('shows only live rails in the pill, and routes a pending rail from the sheet', async () => {
+  mockChipMethods = [
+    {id: 'br_qr', status: 'live', country: 'BR'},
+    {id: 'ar_qr', status: 'needs_document', country: 'AR', documentCountry: 'ARG', documentTypes: ['ID']},
+    {id: 'pe_qr', status: 'live', country: 'PE'},
+  ];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<ScanScreen />);});
+  // The pill names only what works now: Brazil, not the pending Argentina
+  // rail, and never a rail the scan handler cannot route (Peru).
+  const pill = tree.root.findByProps({accessibilityLabel: 'Paga QR en Brasil'});
+  expect(pill).toBeTruthy();
+  await act(async () => {pill.props.onPress();});
+  await act(async () => {
+    tree.root.findByProps({accessibilityLabel: 'QR Argentina, Argentina: verifica tu documento para pagar'}).props.onPress();
+  });
+  expect(mockNavigate).toHaveBeenCalledWith('AdditionalDocument', expect.objectContaining({idCountry: 'ARG', documentTypes: ['ID']}));
+  await act(async () => tree.unmount());
+});
+
+it('stops an employee at a local QR before any server lookup (owner-only rail)', async () => {
+  mockAccount = {id: 'emp-1', type: 'business', isEmployee: true, employeePermissions: {sendFunds: true}};
+  mockQuery.mockResolvedValue({data: {localMoneyMethods: [{id: 'br_qr', status: 'live'}]}});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<ScanScreen />);});
+  await act(async () => {scan('0002015802BR63040000');});
+  expect(mockQuery).not.toHaveBeenCalled();
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(Alert.alert).toHaveBeenCalledWith('Solo para el dueño', expect.any(String), expect.any(Array), {cancelable: false});
   await act(async () => tree.unmount());
 });

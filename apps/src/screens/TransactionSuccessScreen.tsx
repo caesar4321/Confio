@@ -318,8 +318,13 @@ export const TransactionSuccessScreen = () => {
     (navigation as any).navigate('BottomTabs', { screen: 'Home' });
   };
 
+  // Reset to tabs + Enviar so back from it lands on Inicio, not on this
+  // receipt with the finished transfer flow underneath.
   const handleViewContacts = () => {
-    (navigation as any).navigate('BottomTabs', { screen: 'Transfer' });
+    (navigation as any).reset({
+      index: 1,
+      routes: [{ name: 'BottomTabs', params: { screen: 'Home' } }, { name: 'Send' }],
+    });
   };
 
   const displayId = (transactionData as any).internalId || (transactionData as any).transactionId || 'pendiente';

@@ -24,12 +24,7 @@ export function navigate(name: string, params?: any) {
     } catch (error) {
       // If navigation fails, try to navigate to a safe fallback
       if (name.includes('Trade') || name.includes('P2P')) {
-        unsafeNavigate('Main', {
-          screen: 'BottomTabs',
-          params: {
-            screen: 'Discover'
-          }
-        });
+        unsafeNavigate('Main', { screen: 'Discover' });
       }
     }
   } else {

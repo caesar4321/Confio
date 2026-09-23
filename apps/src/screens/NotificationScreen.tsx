@@ -435,10 +435,8 @@ export const NotificationScreen = () => {
         return;
       }
       if (url.endsWith('send') || url.includes('send?')) {
-        // Transfer is a bottom-tab route, not a MainStack screen. Target the
-        // nested navigator explicitly so notification deep links resolve from
-        // anywhere in the main stack.
-        navigation.navigate('BottomTabs', { screen: 'Transfer' });
+        // Enviar is a MainStack screen (it used to be the Transferir tab).
+        navigation.navigate('Send' as any);
         return;
       }
       if (url.includes('wallet')) {

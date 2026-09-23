@@ -14,14 +14,14 @@ const statsSummary = {
 const mockNavigate = jest.fn();
 const mockRefetch = jest.fn(() => Promise.resolve());
 const mockRemoveAppStateListener = jest.fn();
+const mockAssets = [{ticker: 'SPY'}, {ticker: 'AAPL'}, {ticker: 'GLD'}];
+const mockAssetRefetch = jest.fn(() => Promise.resolve());
 const mockUseQuery = jest.fn(
-  (_query: any, _options: any): {
-    data: {statsSummary: typeof statsSummary} | undefined;
-    refetch: typeof mockRefetch;
-  } => ({
-    data: {statsSummary},
-    refetch: mockRefetch,
-  }),
+  (query: any, _options: any): any => (
+    String(query).includes('GmAssetCount')
+      ? {data: {gmMarket: {assets: mockAssets}}, refetch: mockAssetRefetch}
+      : {data: {statsSummary}, refetch: mockRefetch}
+  ),
 );
 let appStateHandler: ((state: AppStateStatus) => void) | undefined;
 jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, handler) => {
@@ -127,10 +127,15 @@ describe('HomeStatsSection layout', () => {
     expect(ahorros).not.toContain('54.821 USD');
   });
 
-  it('labels the stock figure as current market value rather than cost basis', () => {
-    const acciones = tileLabels(render(true).root)[2];
-    expect(acciones).toContain('Valor total invertido');
-    expect(acciones).not.toContain('Valor invertido');
+  it('shows what the network offers (asset count) and opens the explorer', () => {
+    const root = render(true).root;
+    const acciones = tileLabels(root)[2];
+    // The invested total (US$60 in production) read as evidence against the
+    // product inside a proof strip; the offer is just as verifiable.
+    expect(acciones).toContain('Acciones: 3.');
+    expect(acciones).not.toContain('4.321');
+    root.findByProps({accessibilityLabel: acciones}).props.onPress();
+    expect(mockNavigate).toHaveBeenCalledWith('StocksList');
   });
 
   it('refreshes marked-to-market stats on the server snapshot cadence', () => {

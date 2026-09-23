@@ -1010,10 +1010,7 @@ class MessagingService {
           } else if (parts[1] === 'offer' && parts[2]) {
             // Exchange is not exposed in the app shell; fall back to Discover.
             navigationRef.current?.navigate('Main' as never, {
-              screen: 'BottomTabs',
-              params: {
-                screen: 'Discover'
-              }
+              screen: 'Discover',
             } as never);
           }
           break;
@@ -1039,9 +1036,7 @@ class MessagingService {
               contentItemId: Number(parts[2]),
             });
           } else {
-            this.navigateInsideMain('BottomTabs', {
-              screen: 'Discover'
-            });
+            this.navigateInsideMain('Discover');
           }
           break;
         case 'settings':
@@ -1129,10 +1124,7 @@ class MessagingService {
       case 'P2POffer':
         // Exchange is not exposed in the app shell; fall back to Discover.
         navigationRef.current?.navigate('Main' as never, {
-          screen: 'BottomTabs',
-          params: {
-            screen: 'Discover'
-          }
+          screen: 'Discover',
         } as never);
         break;
       case 'Business':
