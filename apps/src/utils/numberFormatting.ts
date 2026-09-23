@@ -89,10 +89,17 @@ export function formatNumber(
 ): string {
   const locale = getLocaleForCountry(countryCode);
   
+  // Defaults are 2 decimals, but a caller that only caps the maximum (counts:
+  // `{ maximumFractionDigits: 0 }`) must not keep the default minimum of 2 —
+  // Intl throws on max < min and the fallback below printed "312.00" people.
+  const minimumFractionDigits =
+    options.minimumFractionDigits ?? Math.min(2, options.maximumFractionDigits ?? 2);
+  const maximumFractionDigits =
+    options.maximumFractionDigits ?? Math.max(2, minimumFractionDigits);
   const formatOptions: Intl.NumberFormatOptions = {
     style: options.style || 'decimal',
-    minimumFractionDigits: options.minimumFractionDigits ?? 2,
-    maximumFractionDigits: options.maximumFractionDigits ?? 2,
+    minimumFractionDigits,
+    maximumFractionDigits,
     useGrouping: options.useGrouping ?? true,
   };
   
@@ -105,7 +112,7 @@ export function formatNumber(
   } catch (error) {
     console.error('Number formatting error:', error);
     // Fallback to basic formatting
-    return value.toFixed(options.minimumFractionDigits || 2);
+    return value.toFixed(maximumFractionDigits);
   }
 }
 
