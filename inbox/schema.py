@@ -293,6 +293,11 @@ class DiscoverFeedPageType(graphene.ObjectType):
     has_more = graphene.Boolean(required=True)
 
 
+class DiscoverSectionType(graphene.ObjectType):
+    key = graphene.String(required=True)
+    label = graphene.String(required=True)
+
+
 class PortalContentItemType(graphene.ObjectType):
     poll = graphene.Field(ContentPollType)
     id = graphene.ID(required=True)
@@ -845,6 +850,14 @@ class Query(graphene.ObjectType):
         limit=graphene.Int(required=False),
         section=graphene.String(required=False),
     )
+    # Kept for app builds from 2df03d94, which query it for publisher-type
+    # chips. Never remove a field a built app queries: an unknown field fails
+    # that build's whole request. Empty = those builds show no chips.
+    discover_sections = graphene.List(
+        graphene.NonNull(DiscoverSectionType),
+        required=True,
+        deprecation_reason='Descubrir feeds are fixed: for_you, official, community.',
+    )
     portal_support_conversations = graphene.List(
         PortalSupportConversationType,
         status=graphene.String(required=False),
@@ -932,6 +945,10 @@ class Query(graphene.ObjectType):
             ],
             has_more=has_more,
         )
+
+    @login_required
+    def resolve_discover_sections(self, info):
+        return []
 
     @login_required
     def resolve_portal_support_conversations(self, info, status=None, search=None):
