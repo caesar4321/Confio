@@ -52,7 +52,7 @@ Confío의 제품 시스템은 모두 BNB Smart Chain에서 결제된다.
 | USDT | 범용 입금·유동성·출금 레일 | 현지·국제 제공자가 BSC-USDT를 사용자 주소로 보내며, 직접 보유·전송하거나 cUSD+ 입출력에 사용한다. |
 | cUSD+ | 주 달러 저축·거래 잔액 | USDY 기반 누적형 볼트 지분으로 저축, 송금, 결제, 급여에 쓰고 USDT로 상환할 수 있다. |
 | Ondo Stocks | 적격 사용자의 토큰화 시장 접근 | 전용 소스 검증 라우터를 통해 cUSD+로 매수하고 매도대금을 다시 cUSD+로 전환한다. 완료된 매수·매도마다 명시적인 Confío 수수료 0.30%가 부과된다. |
-| $CONFIO | 커뮤니티·생태계 토큰 | 고정 공급 BEP-20이며 USDT 표시 온체인 프리세일을 사용한다. 사용자 달러 잔액의 담보가 아니다. |
+| $CONFIO | 커뮤니티·생태계 토큰 | 고정 공급 BEP-20이며 cUSD로 결제하는 온체인 프리세일을 사용한다. 사용자 달러 잔액의 담보가 아니다. |
 
 단일 네트워크는 막연한 체인 선택이 아니다. Ondo Finance가 USDY, InstantManager, 가격 오라클과 USDT 구독·상환 경로를 BNB Smart Chain에 제공했고, Confío는 체인 전환과 유동성 분산을 없애기 위해 결제, 급여, 송금과 $CONFIO도 같은 네트워크로 통합했다. <sup>[7, 8, 10]</sup>
 
@@ -100,7 +100,7 @@ cUSD+ 볼트, Ondo Stocks 라우터, 스폰서드 트랜잭션 델리게이트, 
 | 가맹점 결제 | cUSD+ 또는 $CONFIO, 결제 재원은 cUSD+ 또는 USDT | 가맹점이 cUSD+ 또는 $CONFIO로 청구하고, 계약이 0.9%를 계산해 가맹점에 순액을 지급한다. |
 | 급여 | cUSD+, 선택적 USDT 출금 | 기업이 에스크로를 채우고 승인된 델리게이트가 지급을 서명한다. |
 | Ondo Stock 매수·매도 | cUSD+, Ondo Stock 토큰, 주식 라우터 | 스폰서드 트랜잭션이 Ondo Global Markets에서 결제된다. 매수는 필요한 cUSD+를 USDT로 상환해 토큰을 사용자에게 전달하고, 매도는 순수익을 cUSD+로 되돌린다. |
-| $CONFIO 프리세일 | USDT | 스폰서드 트랜잭션이 불변 가격곡선에서 배분을 산다. |
+| $CONFIO 프리세일 | cUSD | 스폰서드 트랜잭션이 불변 가격곡선에서 배분을 산다. |
 | 리워드 | RewardVault | 누적 권리가 DB에 기록되고 DEX 해제 뒤 온체인 청구된다. |
 
 ### 3.1 공개 BNB Smart Chain 배포
@@ -109,16 +109,17 @@ cUSD+ 볼트, Ondo Stocks 라우터, 스폰서드 트랜잭션 델리게이트, 
 
 | 계약 | 주소 |
 | --- | --- |
+| cUSD 볼트 프록시 | [`0x6101cC370635cF2c7f2725EaB010aC407A8d543F`](https://bscscan.com/address/0x6101cC370635cF2c7f2725EaB010aC407A8d543F#code) |
 | cUSD+ 볼트 프록시 | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Ondo Stocks 라우터(UUPS 프록시) | [`0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | 스폰서드 배치 델리게이트 | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 | $CONFIO 토큰 | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| 프리세일 볼트 | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
+| 프리세일 볼트 | [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
 | 리워드 볼트 | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | 베스팅 볼트 | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
-| 초대 에스크로 | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| 가맹점 결제 | [`0x039Ebe91283c686F23F4C751600a39567967736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
-| 급여 볼트 | [`0x851cA801c3028D4C0e651d29803f8e35D86d7299`](https://bscscan.com/address/0x851cA801c3028D4C0e651d29803f8e35D86d7299#code) |
+| 초대 에스크로 | [`0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
+| 가맹점 결제 | [`0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
+| 급여 볼트 | [`0x851e1a56De5c0ADBB75e904B2E7325e132692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
 
 ### 3.2 하나의 네트워크가 중요한 이유
 
@@ -199,7 +200,7 @@ $CONFIO는 10억 개 고정 공급의 비업그레이드 BEP-20이다. owner, mi
 
 ### 7.2 온체인 프리세일
 
-USDT 기반 불변 연속곡선은 0–4M CONFIO에서 US$0.20→0.30, 4–24M에서 US$0.30→0.70, 24–74M에서 US$0.70→1.30이다. 계약은 곡선 아래 적분값을 받고 분할구매 할인을 방지하며 충분한 CONFIO가 있을 때만 청구를 연다. <sup>[17]</sup>
+cUSD로 결제하는 불변 연속곡선은 0–4M CONFIO에서 US$0.20→0.30, 4–24M에서 US$0.30→0.70, 24–74M에서 US$0.70→1.30이다. 계약은 곡선 아래 적분값을 받고 분할구매 할인을 방지하며 충분한 CONFIO가 있을 때만 청구를 연다. <sup>[17]</sup>
 
 ### 7.3 리워드와 DEX 잠금 청구
 

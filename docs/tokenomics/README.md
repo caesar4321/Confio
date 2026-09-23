@@ -1,6 +1,6 @@
 # $CONFIO Tokenomics
 
-**Authoritative English Edition · Version 3.0 · 31 July 2026**
+**Authoritative English Edition · Version 3.1 · 23 September 2026**
 
 > **Fixed supply. Continuous on-chain presale. Founder ownership disclosed plainly.**
 
@@ -8,7 +8,7 @@ This document describes the canonical $CONFIO token on BNB Smart Chain, its fixe
 
 The English edition is the authoritative source. [Spanish](README.es.md) and [Korean](README.ko.md) editions are convenience translations and may temporarily lag behind this document. If a translation conflicts with the English edition, the English edition controls.
 
-$CONFIO is separate from USDT, cUSD+, USDY, Ondo Stocks, and the operating company. It does not back user dollar balances and does not by itself represent equity, debt, revenue share, or a claim on Confío’s assets or profits.
+$CONFIO is separate from USDT, cUSD, cUSD+, USDY, Ondo Stocks, and the operating company. It does not back user dollar balances and does not by itself represent equity, debt, revenue share, or a claim on Confío’s assets or profits.
 
 ## Contents
 
@@ -87,7 +87,7 @@ The 10,000,000-token creative co-builder allocation was carved out of Julian Moo
 
 ### 4.1 One curve, no phases
 
-The public presale offers up to 74,000,000 CONFIO through one continuous, USDT-denominated price curve. There are no Phase 1, Phase 2, Phase 3, sub-rounds, scheduled repricings, or manual price transitions.
+The public presale offers up to 74,000,000 CONFIO through one continuous, U.S.-dollar-denominated price curve, paid in cUSD. There are no Phase 1, Phase 2, Phase 3, sub-rounds, scheduled repricings, or manual price transitions.
 
 The contract divides the curve into three mathematical **segments** solely to calculate a continuous price efficiently:
 
@@ -100,7 +100,7 @@ The contract divides the curve into three mathematical **segments** solely to ca
 
 Within each segment, the spot price rises linearly with cumulative tokens sold. The endpoints and allocation are constructor-set and the deployed contract has no function that can change them.
 
-The integrated curve-cost figures show the mathematical cost of traversing each complete segment from its first token to its last. Actual BSC-USDT proceeds exclude purchase amounts collected under the earlier presale system and can also be lower if the curve is not fully sold.
+The integrated curve-cost figures show the mathematical cost of traversing each complete segment from its first token to its last. Actual BSC proceeds (BSC-USDT under the superseded vault, cUSD under the current vault) exclude purchase amounts collected under the earlier Algorand presale system and can also be lower if the curve is not fully sold.
 
 The segment boundaries do **not** create sales phases. Purchases can cross a boundary in one transaction, and the contract applies the appropriate portion of the continuous curve on each side.
 
@@ -130,19 +130,24 @@ These are simple price-times-supply references. They are not company valuations,
 
 ### 4.4 Presale contract and controls
 
-**Canonical presale contract:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+**Canonical presale contract:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
 
 The contract is non-upgradeable. Its owner cannot rewrite the curve or mint CONFIO. Its limited administrative powers include:
 
 - rotating approved transaction sponsors;
 - pausing new purchases;
 - assigning or correcting bounded legacy purchase credits;
+- assigning allocations from the fixed pool imported from the superseded vault, with no reverse operation;
 - wiring the canonical CONFIO token once;
 - opening claims once, subject to full backing;
 - withdrawing presale proceeds; and
 - withdrawing only CONFIO that exceeds outstanding presale obligations.
 
-Purchases use BSC-USDT and sponsored EIP-7702 transaction batches. Confío’s backend applies product terms, geographic eligibility, sanctions controls, purchase limits, and account checks; the contract independently enforces price and allocation accounting.
+Purchases are paid in cUSD, Confío’s USDT-backed dollar on BSC, through sponsored EIP-7702 transaction batches, so buyers do not have to redeem cUSD or cUSD+ into USDT first. Confío’s backend applies product terms, geographic eligibility, sanctions controls, purchase limits, and account checks; the contract independently enforces price and allocation accounting.
+
+**Superseded presale contract:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+
+From 31 July to 31 August 2026, the BSC presale ran on the superseded contract above, paid in BSC-USDT. On 31 August 2026 the multi-party treasury paused new purchases on it and deployed the current contract, which charges cUSD. The current contract was initialized at the exact cumulative sold position of its predecessor, so the curve price continued rather than reset. The three outstanding buyer allocations on the superseded contract, totaling 323.97608200352 CONFIO, were imported one-for-one through a fixed legacy pool that cannot be reversed, and the current contract was funded with CONFIO for every outstanding obligation, including the unassigned migration pool. The superseded contract accepts no new purchases and is not an official place to buy.
 
 ### 4.5 Claims and backing
 
@@ -160,7 +165,7 @@ If the presale is closed before all 74,000,000 tokens are sold, the unsold amoun
 
 ### 4.6 Earlier presale purchases
 
-The replacement BSC vault was initialized with **17,713.85 CONFIO** previously sold under the earlier presale system. This amount was included in `totalSold`, establishing the correct starting point on the continuous curve, and in a bounded migration pool.
+The BSC presale vaults were initialized with **17,713.85 CONFIO** previously sold under the earlier Algorand presale system, and the current vault carries the same amount forward. This amount was included in `totalSold`, establishing the correct starting point on the continuous curve, and in a bounded migration pool.
 
 As users’ current BSC addresses are linked, their exact earlier allocations can be credited from that pool. Credits reduce the remaining pool and cannot create obligations beyond the amount already included in the curve. A mistaken, unclaimed credit can be corrected; a claimed allocation cannot be revoked through the migration-credit mechanism.
 
@@ -291,7 +296,7 @@ $CONFIO’s current and intended role includes community recognition, product re
 
 $CONFIO does **not**:
 
-- back USDT, cUSD+, USDY, or Ondo Stocks;
+- back USDT, cUSD, cUSD+, USDY, or Ondo Stocks;
 - represent a right to redeem one dollar or any other fixed amount;
 - automatically receive Confío’s cUSD+ yield share, merchant fees, payroll fees, Ondo Stocks fees, provider revenue share, or company revenue;
 - represent shares in Confío or an affiliated legal entity; or
@@ -308,7 +313,7 @@ Before the official DEX launch and token-claim unlock, Confío should publish a 
 - the canonical token, presale, reward, and active vesting-contract addresses;
 - current total supply and any burns;
 - treasury and distribution-vault balances;
-- total presale amount sold, total USDT raised, unassigned legacy pool, claims, and unclaimed obligations;
+- total presale amount sold, total raised (BSC-USDT in the superseded vault and cUSD in the current vault), unassigned legacy pool, claims, and unclaimed obligations;
 - reward-pool funding, aggregate recorded entitlements, claim rules, and amounts claimed;
 - founder, co-builder, and cultural vesting activation status;
 - verified circulating supply under the definition in this document;
@@ -332,7 +337,7 @@ The initial DEX price is a market and liquidity event. It is not guaranteed to e
 | Vesting implementation | The BSC vault is deployed, but each founder, co-builder, and cultural grant still must be reconciled, funded, added, activated, and reported correctly. Administrative or migration errors can affect release timing or create double-release risk. |
 | Smart-contract risk | The token, presale, reward, vesting, sponsored-transaction, and related contracts can contain defects despite public code and extensive testing. |
 | Network risk | BNB Smart Chain can experience congestion, validator or infrastructure concentration, censorship, reorganization, exploits, fee changes, or interruption. |
-| Stablecoin risk | Presale purchases use USDT, which carries issuer, reserve, depeg, freeze, legal, and redemption risks. |
+| Stablecoin risk | Presale purchases are paid in cUSD, which depends on its USDT reserve and Confío’s vault contracts. USDT carries issuer, reserve, depeg, freeze, legal, and redemption risks. |
 | Regulatory classification | Authorities may classify the token, presale, reward, or future utility differently across jurisdictions or over time. |
 | Eligibility and sanctions | A transaction can be technically possible while legally or contractually unavailable. Eligibility rules and provider policies can change. |
 | No automatic value capture | Growth in Confío users, cUSD+ balances, payment volume, fees, or company revenue does not automatically create demand or distributions for $CONFIO. |
@@ -359,8 +364,8 @@ The deployed smart contracts and definitive transaction records control on-chain
 1. Canonical ConfioToken on BscScan: 1,000,000,000 initial supply; no token owner, minter, or pause; ERC-2612 Permit and holder burn.
    https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8
 
-2. Canonical ConfioPresaleVault on BscScan: immutable curve, USDT purchases, purchase accounting, backing checks, legacy-credit pool, and claim controls.
-   https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code
+2. Canonical ConfioPresaleVault on BscScan: immutable curve, cUSD purchases, purchase accounting, backing checks, imported predecessor allocations, legacy-credit pool, and claim controls. The superseded, paused vault is 0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c.
+   https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code
 
 3. Canonical ConfioRewardVault on BscScan: cumulative EIP-712 claims, one-way DEX unlock signal, signer rotation, pause, and treasury withdrawal controls.
    https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code

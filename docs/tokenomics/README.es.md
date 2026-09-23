@@ -1,6 +1,6 @@
 # Tokenomics de $CONFIO
 
-**Traducción al español · Versión 3.0 · 31 de julio de 2026**
+**Traducción al español · Versión 3.1 · 23 de septiembre de 2026**
 
 > **Oferta fija. Preventa continua on-chain. Propiedad del fundador divulgada con claridad.**
 
@@ -8,7 +8,7 @@ Este documento describe el token $CONFIO canónico en BNB Smart Chain, su oferta
 
 **[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** Esta versión en español es una traducción de cortesía y puede quedar temporalmente desactualizada. Si existe cualquier diferencia, prevalece la edición en inglés.
 
-$CONFIO es independiente de USDT, cUSD+, USDY, Ondo Stocks y de la empresa operadora. No respalda los saldos en dólares de los usuarios y, por sí solo, no representa acciones, deuda, participación en ingresos ni un derecho sobre los activos o utilidades de Confío.
+$CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa operadora. No respalda los saldos en dólares de los usuarios y, por sí solo, no representa acciones, deuda, participación en ingresos ni un derecho sobre los activos o utilidades de Confío.
 
 ## Contenido
 
@@ -87,7 +87,7 @@ Los 10,000,000 tokens de la co-builder creativa se separaron de la asignación o
 
 ### 4.1 Una curva, sin fases
 
-La preventa ofrece hasta 74,000,000 CONFIO mediante una sola curva continua denominada en USDT. No existen Fase 1, Fase 2, Fase 3, subrondas, cambios de precio programados ni transiciones manuales.
+La preventa ofrece hasta 74,000,000 CONFIO mediante una sola curva continua denominada en dólares estadounidenses y pagada en cUSD. No existen Fase 1, Fase 2, Fase 3, subrondas, cambios de precio programados ni transiciones manuales.
 
 El contrato divide la curva en tres **tramos** matemáticos únicamente para calcular eficientemente un precio continuo:
 
@@ -100,7 +100,7 @@ El contrato divide la curva en tres **tramos** matemáticos únicamente para cal
 
 Dentro de cada tramo, el precio spot aumenta linealmente con los tokens vendidos acumulados. Los extremos y la asignación quedaron fijados en el constructor, y el contrato desplegado no contiene una función capaz de cambiarlos.
 
-Las cifras de costo integrado muestran el costo matemático de recorrer cada tramo completo desde su primer token hasta el último. Los ingresos reales en BSC-USDT excluyen montos recaudados por el sistema anterior y también pueden ser menores si la curva no se vende por completo.
+Las cifras de costo integrado muestran el costo matemático de recorrer cada tramo completo desde su primer token hasta el último. Los ingresos reales en BSC (BSC-USDT en el vault reemplazado y cUSD en el vault actual) excluyen montos recaudados por el sistema anterior de Algorand y también pueden ser menores si la curva no se vende por completo.
 
 Los límites de los tramos **no** crean fases de venta. Una compra puede atravesar un límite en una sola transacción y el contrato aplica a cada parte la porción correspondiente de la curva continua.
 
@@ -130,19 +130,24 @@ Estas son referencias simples de precio multiplicado por oferta. No son valoraci
 
 ### 4.4 Contrato y controles de la preventa
 
-**Contrato canónico de preventa:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+**Contrato canónico de preventa:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
 
 El contrato no es actualizable. Su propietario no puede cambiar la curva ni acuñar CONFIO. Sus poderes administrativos limitados incluyen:
 
 - rotar sponsors de transacciones aprobados;
 - pausar nuevas compras;
 - asignar o corregir créditos de compras anteriores dentro de un pool limitado;
+- asignar las asignaciones del pool fijo importado del vault reemplazado, sin operación inversa;
 - conectar una sola vez el token CONFIO canónico;
 - abrir los reclamos una sola vez, sujeto a respaldo completo;
 - retirar los ingresos de la preventa; y
 - retirar únicamente CONFIO que exceda las obligaciones pendientes.
 
-Las compras usan BSC-USDT y lotes patrocinados de transacciones EIP-7702. El backend aplica términos, elegibilidad geográfica, controles de sanciones, límites de compra y verificaciones de cuenta; el contrato aplica independientemente el precio y la contabilidad de asignaciones.
+Las compras se pagan en cUSD, el dólar de Confío en BSC respaldado por USDT, mediante lotes patrocinados de transacciones EIP-7702, sin que el comprador tenga que canjear primero cUSD o cUSD+ por USDT. El backend aplica términos, elegibilidad geográfica, controles de sanciones, límites de compra y verificaciones de cuenta; el contrato aplica independientemente el precio y la contabilidad de asignaciones.
+
+**Contrato de preventa reemplazado:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+
+Del 31 de julio al 31 de agosto de 2026, la preventa en BSC funcionó en el contrato reemplazado, pagada en BSC-USDT. El 31 de agosto de 2026 la tesorería multiparte pausó las nuevas compras en ese contrato y desplegó el actual, que cobra en cUSD. El contrato actual se inicializó en la posición acumulada exacta de su predecesor, por lo que el precio de la curva continuó sin reiniciarse. Las tres asignaciones pendientes del contrato reemplazado, por un total de 323.97608200352 CONFIO, se importaron una por una mediante un pool fijo e irreversible, y el contrato actual se fondeó con CONFIO para todas las obligaciones pendientes, incluido el pool de migración no asignado. El contrato reemplazado no acepta nuevas compras y no es un lugar oficial de compra.
 
 ### 4.5 Reclamos y respaldo
 
@@ -160,7 +165,7 @@ Si la preventa se cierra antes de vender los 74,000,000 tokens, el remanente seg
 
 ### 4.6 Compras anteriores
 
-El vault BSC de reemplazo se inicializó con **17,713.85 CONFIO** vendidos bajo el sistema anterior. Este monto se incluyó en `totalSold`, estableciendo el punto inicial correcto de la curva, y en un pool de migración limitado.
+Los vaults de preventa en BSC se inicializaron con **17,713.85 CONFIO** vendidos bajo el sistema anterior de Algorand, y el vault actual conserva ese mismo monto. Este monto se incluyó en `totalSold`, estableciendo el punto inicial correcto de la curva, y en un pool de migración limitado.
 
 A medida que se vinculan las direcciones BSC actuales de los usuarios, sus asignaciones exactas pueden acreditarse desde ese pool. Cada crédito reduce el saldo restante y no puede crear obligaciones superiores al monto ya contabilizado en la curva. Un crédito erróneo aún no reclamado puede corregirse; una asignación ya reclamada no puede revocarse mediante este mecanismo.
 
@@ -291,7 +296,7 @@ La función actual y prevista de $CONFIO incluye reconocimiento comunitario, rec
 
 $CONFIO **no**:
 
-- respalda USDT, cUSD+, USDY u Ondo Stocks;
+- respalda USDT, cUSD, cUSD+, USDY u Ondo Stocks;
 - representa un derecho de redención por un dólar u otra cantidad fija;
 - recibe automáticamente la participación de Confío en el rendimiento de cUSD+, comisiones de comercios, payroll, Ondo Stocks, revenue share de proveedores o ingresos de la empresa;
 - representa acciones de Confío o una entidad afiliada; ni
@@ -308,7 +313,7 @@ Antes del lanzamiento oficial y el desbloqueo de reclamos, Confío debería publ
 - contratos canónicos del token, preventa, recompensas y vesting activo;
 - oferta total actual y cualquier quema;
 - saldos de tesorería y vaults de distribución;
-- total vendido, USDT recaudado, pool anterior no asignado, reclamos y obligaciones pendientes;
+- total vendido, total recaudado (BSC-USDT en el vault reemplazado y cUSD en el actual), pool anterior no asignado, reclamos y obligaciones pendientes;
 - fondeo del pool de recompensas, derechos agregados registrados, reglas y montos reclamados;
 - estado de activación del vesting del fundador, co-builder y Fondo Cultural;
 - oferta circulante verificada bajo esta definición;
@@ -332,7 +337,7 @@ El precio inicial en DEX es un evento de mercado y liquidez. No se garantiza que
 | Implementación de vesting | El vault BSC está desplegado, pero cada asignación aún debe conciliarse, fondearse, agregarse, activarse y reportarse correctamente. Errores pueden alterar tiempos o crear riesgo de doble liberación. |
 | Contratos inteligentes | Los contratos de token, preventa, recompensas, vesting y transacciones patrocinadas pueden contener defectos pese al código público y las pruebas extensas. |
 | Red | BNB Smart Chain puede sufrir congestión, concentración, censura, reorganizaciones, exploits, cambios de comisiones o interrupciones. |
-| Stablecoin | Las compras usan USDT, que conlleva riesgos de emisor, reservas, depeg, congelamiento, legalidad y redención. |
+| Stablecoin | Las compras se pagan en cUSD, que depende de su reserva en USDT y de los contratos de Confío. USDT conlleva riesgos de emisor, reservas, depeg, congelamiento, legalidad y redención. |
 | Clasificación regulatoria | Las autoridades pueden clasificar el token, preventa, recompensas o utilidad futura de forma diferente entre jurisdicciones o con el tiempo. |
 | Elegibilidad y sanciones | Una transacción puede ser técnicamente posible pero no legal o contractualmente disponible. Las reglas pueden cambiar. |
 | Sin captura automática de valor | El crecimiento de usuarios, saldos cUSD+, pagos, comisiones o ingresos no crea automáticamente demanda ni distribuciones para $CONFIO. |
@@ -359,8 +364,8 @@ Los contratos desplegados y registros definitivos controlan el comportamiento on
 1. ConfioToken canónico en BscScan: oferta inicial de 1,000,000,000; sin propietario, minter ni pausa; ERC-2612 Permit y quema por el titular.
    https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8
 
-2. ConfioPresaleVault canónico: curva inmutable, compras en USDT, contabilidad, respaldo, pool anterior y controles de reclamo.
-   https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code
+2. ConfioPresaleVault canónico: curva inmutable, compras en cUSD, contabilidad, respaldo, asignaciones importadas del predecesor, pool anterior y controles de reclamo. El vault reemplazado y pausado es 0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c.
+   https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code
 
 3. ConfioRewardVault canónico: reclamos EIP-712 acumulados, señal irreversible de desbloqueo DEX, rotación de firmante, pausa y retiros de tesorería.
    https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code

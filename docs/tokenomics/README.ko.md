@@ -1,6 +1,6 @@
 # $CONFIO 토크노믹스
 
-**한국어 편의 번역본 · 버전 3.0 · 2026년 7월 31일**
+**한국어 편의 번역본 · 버전 3.1 · 2026년 9월 23일**
 
 > **고정 공급량. 연속형 온체인 프리세일. 명확히 공개된 창업자 소유분.**
 
@@ -8,7 +8,7 @@
 
 **[영문판](README.md)이 유일한 공식 원본이다.** 한국어판은 편의를 위한 번역이며 원본보다 늦게 갱신될 수 있다. 내용이 다르면 영문판이 우선한다.
 
-$CONFIO는 USDT, cUSD+, USDY, Ondo Stocks 및 운영회사와 별개다. 사용자 달러 잔액을 담보하지 않으며, 그 자체로 지분·부채·수익 배분권 또는 Confío의 자산이나 이익에 대한 청구권을 뜻하지 않는다.
+$CONFIO는 USDT, cUSD, cUSD+, USDY, Ondo Stocks 및 운영회사와 별개다. 사용자 달러 잔액을 담보하지 않으며, 그 자체로 지분·부채·수익 배분권 또는 Confío의 자산이나 이익에 대한 청구권을 뜻하지 않는다.
 
 ## 목차
 
@@ -81,7 +81,7 @@ Creative co-builder 10,000,000개는 Julian Moon의 원래 창업자 배분 903,
 
 ### 4.1 하나의 곡선, 단계 없음
 
-최대 74,000,000 CONFIO를 하나의 USDT 표시 연속 곡선으로 판매한다. Phase 1·2·3, sub-round, 예정된 가격 변경, 수동 전환은 없다.
+최대 74,000,000 CONFIO를 미국 달러로 표시되고 cUSD로 결제하는 하나의 연속 곡선으로 판매한다. Phase 1·2·3, sub-round, 예정된 가격 변경, 수동 전환은 없다.
 
 계약은 연속 가격을 효율적으로 계산하기 위해 곡선을 세 개의 수학적 **구간**으로 나눈다.
 
@@ -92,7 +92,7 @@ Creative co-builder 10,000,000개는 Julian Moon의 원래 창업자 배분 903,
 | 24,000,000–74,000,000 | US$0.70 → US$1.30 | 50,000,000 | US$50,000,000 |
 | **전체 곡선** | **US$0.20 → US$1.30** | **74,000,000** | **US$61,000,000** |
 
-각 구간에서 가격은 누적 판매량에 따라 선형 상승한다. 끝점과 배분량은 constructor에서 고정됐으며 변경 함수가 없다. 적분 비용은 각 전체 구간을 처음부터 끝까지 통과하는 이론적 비용이다. 실제 BSC-USDT 수입은 이전 시스템에서 받은 금액을 제외하며 완판되지 않으면 더 적다.
+각 구간에서 가격은 누적 판매량에 따라 선형 상승한다. 끝점과 배분량은 constructor에서 고정됐으며 변경 함수가 없다. 적분 비용은 각 전체 구간을 처음부터 끝까지 통과하는 이론적 비용이다. 실제 BSC 수입(대체된 Vault는 BSC-USDT, 현재 Vault는 cUSD)은 이전 Algorand 시스템에서 받은 금액을 제외하며 완판되지 않으면 더 적다.
 
 구간 경계는 판매 단계를 만들지 않는다. 한 구매가 경계를 통과할 수 있고 계약은 양쪽에 연속 곡선을 적용한다.
 
@@ -122,11 +122,15 @@ Creative co-builder 10,000,000개는 Julian Moon의 원래 창업자 배분 903,
 
 ### 4.4 계약과 통제권
 
-**공식 프리세일 계약:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+**공식 프리세일 계약:** [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code)
 
-계약은 업그레이드할 수 없다. Owner는 곡선을 바꾸거나 CONFIO를 민팅할 수 없다. 제한된 권한은 승인 sponsor 교체, 신규 구매 pause, 한도 내 이전 구매 credit 정정, 공식 토큰 1회 연결, 완전 담보 조건부 1회 청구 개방, 판매대금 및 의무 초과 CONFIO 인출이다.
+계약은 업그레이드할 수 없다. Owner는 곡선을 바꾸거나 CONFIO를 민팅할 수 없다. 제한된 권한은 승인 sponsor 교체, 신규 구매 pause, 한도 내 이전 구매 credit 정정, 대체된 Vault에서 가져온 고정 pool의 배분(되돌릴 수 없음), 공식 토큰 1회 연결, 완전 담보 조건부 1회 청구 개방, 판매대금 및 의무 초과 CONFIO 인출이다.
 
-구매는 BSC-USDT와 sponsor가 전송하는 EIP-7702 batch를 사용한다. Backend는 약관, 지역·제재·계정·구매한도를 적용하고 계약은 가격과 배분 기록을 독립적으로 집행한다.
+구매는 BSC에서 USDT로 담보되는 Confío 달러인 cUSD로 결제하며, sponsor가 전송하는 EIP-7702 batch를 사용한다. 구매자가 cUSD나 cUSD+를 먼저 USDT로 상환할 필요가 없다. Backend는 약관, 지역·제재·계정·구매한도를 적용하고 계약은 가격과 배분 기록을 독립적으로 집행한다.
+
+**대체된 프리세일 계약:** [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code)
+
+2026년 7월 31일부터 8월 31일까지 BSC 프리세일은 위의 대체된 계약에서 BSC-USDT로 운영됐다. 2026년 8월 31일 multi-party treasury가 이 계약의 신규 구매를 pause하고 cUSD로 결제받는 현재 계약을 배포했다. 현재 계약은 이전 계약의 누적 판매 위치 그대로 초기화되어 곡선 가격이 초기화되지 않고 이어진다. 대체된 계약에 남아 있던 구매자 배분 3건, 합계 323.97608200352 CONFIO는 되돌릴 수 없는 고정 pool을 통해 1:1로 이전됐고, 현재 계약은 미배정 migration pool을 포함한 모든 미청구 의무만큼 CONFIO로 펀딩됐다. 대체된 계약은 신규 구매를 받지 않으며 공식 구매처가 아니다.
 
 ### 4.5 청구와 담보
 
@@ -142,7 +146,7 @@ Creative co-builder 10,000,000개는 Julian Moon의 원래 창업자 배분 903,
 
 ### 4.6 이전 구매
 
-대체 BSC Vault는 이전 시스템에서 판매된 **17,713.85 CONFIO**를 `totalSold`와 한도가 있는 migration pool에 포함해 곡선의 올바른 시작점을 정했다. 사용자 BSC 주소가 연결되면 정확한 이전 배분을 pool에서 차감해 credit한다. Pool을 초과하는 의무는 만들 수 없다. 잘못 배정된 미청구 credit은 고칠 수 있지만 이미 청구된 배분은 취소할 수 없다.
+BSC 프리세일 Vault들은 이전 Algorand 시스템에서 판매된 **17,713.85 CONFIO**를 `totalSold`와 한도가 있는 migration pool에 포함해 곡선의 올바른 시작점을 정했다. 사용자 BSC 주소가 연결되면 정확한 이전 배분을 pool에서 차감해 credit한다. Pool을 초과하는 의무는 만들 수 없다. 잘못 배정된 미청구 credit은 고칠 수 있지만 이미 청구된 배분은 취소할 수 없다.
 
 ### 4.7 참가 자격
 
@@ -232,7 +236,7 @@ RewardVault는 배포·소스 검증됐지만 적립과 청구는 운영 feature
 
 $CONFIO는 커뮤니티 인정, 제품 리워드, 생태계 참여 및 가능한 향후 거버넌스·혜택을 목적으로 한다. 중요한 유틸리티는 사용자가 의존하기 전에 구현·공개해야 한다.
 
-$CONFIO는 USDT·cUSD+·USDY·Ondo Stocks를 담보하지 않으며, 1달러 상환권, Confío의 수익·수수료·yield share 자동 배분권, 회사 지분을 뜻하지 않는다. 투표권·상장·유동성·가격상승·수익·배당·buyback·burn도 보장하지 않는다. 향후 제안은 최종 약관, 구현, 법률검토와 계약 공개 전까지 가정해서는 안 된다.
+$CONFIO는 USDT·cUSD·cUSD+·USDY·Ondo Stocks를 담보하지 않으며, 1달러 상환권, Confío의 수익·수수료·yield share 자동 배분권, 회사 지분을 뜻하지 않는다. 투표권·상장·유동성·가격상승·수익·배당·buyback·burn도 보장하지 않는다. 향후 제안은 최종 약관, 구현, 법률검토와 계약 공개 전까지 가정해서는 안 된다.
 
 ## 11. DEX 출시 공시
 
@@ -241,7 +245,7 @@ $CONFIO는 USDT·cUSD+·USDY·Ondo Stocks를 담보하지 않으며, 1달러 상
 - 토큰·프리세일·리워드·활성 베스팅 계약
 - 현재 총공급량과 소각
 - Treasury·배포 Vault 잔액
-- 총판매량, USDT 조달액, 미배정 이전 pool, 청구와 미청구 의무
+- 총판매량, 조달액(대체된 Vault는 BSC-USDT, 현재 Vault는 cUSD), 미배정 이전 pool, 청구와 미청구 의무
 - 리워드 펀딩, 기록된 총권리, 규칙과 청구량
 - 창업자·co-builder·문화 grant 활성화 상태
 - 이 문서 기준 검증 유통량
@@ -262,7 +266,7 @@ DEX 초기 가격은 시장·유동성 이벤트이며 현재 곡선가나 최�
 | 베스팅 구현 | 각 grant의 조정·펀딩·추가·활성화·보고 오류는 일정 또는 이중 해제 위험을 만든다. |
 | 스마트계약 | 공개 코드와 테스트에도 결함이 있을 수 있다. |
 | 네트워크 | 혼잡, 집중, 검열, 재조직, exploit, 수수료 변경, 중단 위험이 있다. |
-| USDT | 발행자·준비금·depeg·동결·법률·상환 위험이 있다. |
+| 스테이블코인 | 구매는 cUSD로 결제하며, cUSD는 USDT 준비금과 Confío의 Vault 계약에 의존한다. USDT에는 발행자·준비금·depeg·동결·법률·상환 위험이 있다. |
 | 규제 | 관할·시점별 분류가 달라질 수 있다. |
 | 자격·제재 | 기술적으로 가능해도 법률·계약상 이용 불가할 수 있다. |
 | 자동 가치포착 없음 | 사용자·잔액·수수료·회사 매출 성장이 $CONFIO 수요·배분을 자동 생성하지 않는다. |
@@ -283,7 +287,7 @@ $CONFIO는 은행예금이나 보험상품이 아니며 가치 전부를 잃을 
 ## 14. 1차 출처
 
 1. 공식 ConfioToken: https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8
-2. 공식 ConfioPresaleVault: https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code
+2. 공식 ConfioPresaleVault(cUSD 결제, 이전 Vault 배분 이전 포함): https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code (대체되어 pause된 Vault: 0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c)
 3. 공식 ConfioRewardVault: https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code
 4. BSC 계약·테스트·배포 기록: https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus
 5. 공식 ConfioVestingVault: https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code
