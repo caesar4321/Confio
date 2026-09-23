@@ -422,7 +422,7 @@ export const ConfioPresaleScreen = () => {
               ))}
             </View>
             <Text style={styles.footnote}>
-              Tu asignación queda reservada para tu billetera en el contrato. La podrás reclamar cuando $CONFIO salga al mercado y se habilite el reclamo. Salir al mercado es su lanzamiento oficial en un mercado abierto en blockchain (un DEX), donde cualquiera puede comprar y vender $CONFIO sin intermediarios.
+              Tu asignación queda reservada para tu billetera en el contrato. La podrás reclamar cuando $CONFIO salga al mercado y se habilite el reclamo. Salir al mercado es su lanzamiento oficial en una plataforma de intercambio descentralizada (DEX), donde cualquiera puede comprar y vender $CONFIO sin intermediarios.
             </Text>
           </View>
         )}
