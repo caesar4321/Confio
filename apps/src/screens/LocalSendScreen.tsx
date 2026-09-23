@@ -187,7 +187,13 @@ export default function LocalSendScreen() {
   const refreshAccounts = () => Promise.allSettled([methodsQuery.refetch(), accountsQuery.refetch()]);
 
   const [value, setValue] = useState('');
-  const [scannedQr, setScannedQr] = useState<{payload: string; methodId: string} | null>(null);
+  // A code handed over by the Pagar scanner counts as scanned from the first
+  // frame. It used to appear only once the rail and account had loaded (and
+  // were active), so the screen opened on a big "Escanear QR" button and
+  // people scanned the same code twice. Resolving still waits (effect below).
+  const [scannedQr, setScannedQr] = useState<{payload: string; methodId: string} | null>(
+    () => (initialQr && methodId.endsWith('_qr') ? {payload: initialQr, methodId} : null),
+  );
   const [destination, setDestination] = useState<LocalDestination | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
@@ -342,18 +348,40 @@ export default function LocalSendScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, methodId, resetReview, savedQuery, followUntilSettled]);
 
-  // Main Scan gateway handoff: retain through verification/opening, then
-  // resolve exactly once. Never auto-quote, sign or send from a scanned code.
-  const consumedQr = useRef<string | null>(null);
+  // ONE path for every scanned code — handed over by the Pagar scanner or
+  // scanned here. Two paths let a stale handoff overwrite a newer scan
+  // (Codex P1) and let a re-scan resolve before the account was open.
+  //
+  // 1. Route handoff: a NEW code replaces whatever was there, immediately,
+  //    and invalidates any recipient or lookup for the old one. The mount
+  //    value is already in state (see the useState initializer).
+  const handedOffQr = useRef<string | null>(
+    initialQr && methodId.endsWith('_qr') ? `${methodId}:${initialQr}` : null,
+  );
   useEffect(() => {
-    if (!initialQr || !methodId.endsWith('_qr') || method?.status !== 'live'
-        || method.accountStatus !== 'active' || locked) return;
+    if (!initialQr || !methodId.endsWith('_qr')) return;
     const key = `${methodId}:${initialQr}`;
-    if (consumedQr.current === key) return;
-    consumedQr.current = key;
+    if (handedOffQr.current === key) return;
+    handedOffQr.current = key;
+    startNewRecipient();
+    setValue('');
+    setResolveError('');
     setScannedQr({payload: initialQr, methodId});
-    void resolve(initialQr, methodId);
-  }, [initialQr, methodId, method?.status, method?.accountStatus, locked, resolve]);
+    // startNewRecipient only touches setters and refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQr, methodId]);
+
+  // 2. Resolve gate: each scanned code (by identity — scanning the same
+  //    payload again is a fresh intent) is resolved once, and only while the
+  //    rail is live and the account active. Retained through verification
+  //    and account opening. Never auto-quote, sign or send from a code.
+  const resolvedQr = useRef<typeof scannedQr>(null);
+  const qrReady = method?.status === 'live' && method.accountStatus === 'active' && !locked;
+  useEffect(() => {
+    if (!scannedQr || !qrReady || resolvedQr.current === scannedQr) return;
+    resolvedQr.current = scannedQr;
+    void resolve(scannedQr.payload, scannedQr.methodId);
+  }, [scannedQr, qrReady, resolve]);
 
   // A pasted key is a finished entry: fill the field and prepare it at once.
   const paste = useCallback(async () => {
@@ -761,10 +789,25 @@ export default function LocalSendScreen() {
                 })}
                 <View style={[styles.inputCard, saved.length ? { marginTop: 12 } : null]}>
                   <Text style={styles.inputLabel}>{saved.length ? 'Nuevo destinatario' : copy.field}</Text>
-                  {methodId.endsWith('_qr') ? (
+                  {methodId.endsWith('_qr') && scannedQr ? (
+                    // Already scanned: confirm it, and make re-scanning the
+                    // quiet option rather than the call to action.
+                    <View style={styles.scannedRow}>
+                      <Icon name="check-circle" size={20} color={colors.primaryDark} />
+                      <Text style={styles.scannedText}>QR escaneado</Text>
+                      <TouchableOpacity
+                        onPress={() => { if (!locked) setScannerOpen(true); }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Escanear otro QR"
+                      >
+                        <Text style={styles.scannedAgain}>Escanear otro</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : methodId.endsWith('_qr') ? (
                     <TouchableOpacity style={styles.smallPrimary} onPress={() => { if (!locked) setScannerOpen(true); }}>
                       <Icon name="maximize" size={18} color={colors.white} />
-                      <Text style={styles.smallPrimaryText}>{scannedQr ? 'Escanear otro QR' : 'Escanear QR'}</Text>
+                      <Text style={styles.smallPrimaryText}>Escanear QR</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={[styles.amountInputRow, styles.amountInputRowFocused]}>
@@ -1034,8 +1077,8 @@ export default function LocalSendScreen() {
           startNewRecipient();
           setValue('');
           setResolveError('');
+          // Resolved by the gate above, like a handed-over code.
           setScannedQr({payload, methodId: qrMethod?.id || methodId});
-          void resolve(payload, qrMethod?.id || methodId);
         }}
       />
     </SafeAreaView>

@@ -232,6 +232,12 @@ export const rampFlowStyles = StyleSheet.create({
     paddingVertical: 13, backgroundColor: colors.primaryDark,
   },
   smallPrimaryText: { color: colors.white, fontSize: 15, fontWeight: '800' },
+  scannedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 14, backgroundColor: '#f0fdf4',
+  },
+  scannedText: { flex: 1, color: colors.successText, fontSize: 15, fontWeight: '700' },
+  scannedAgain: { color: colors.primaryDark, fontSize: 14, fontWeight: '700' },
   smallGhost: {
     flex: 1, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', borderRadius: 14,
     paddingVertical: 13, borderWidth: 1, borderColor: colors.primaryLight, backgroundColor: '#f0fdf4',
