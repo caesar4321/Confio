@@ -50,7 +50,7 @@ export const ConfioTokenomicsScreen = () => {
       category: 'Preventa pública',
       tokens: presaleTokens,
       description: 'Una sola curva continua de US$0,20 a US$1,30, sin fases ni cambios manuales.',
-      release: 'Se reclama al lanzar en DEX',
+      release: 'Se reclama al salir al mercado',
       color: colors.primaryDark,
       icon: 'users',
     },
@@ -74,7 +74,7 @@ export const ConfioTokenomicsScreen = () => {
       category: 'Referidos y uso',
       tokens: rewardsTokens,
       description: 'Recompensas por invitar y usar Confío, según las reglas del programa vigente.',
-      release: 'Se reclama al lanzar en DEX',
+      release: 'Se reclama al salir al mercado',
       color: colors.primaryDeep,
       icon: 'gift',
     },
@@ -91,12 +91,12 @@ export const ConfioTokenomicsScreen = () => {
     {
       icon: 'droplet',
       title: 'Liquidez y precio',
-      text: 'No se garantiza un listado ni liquidez. El precio en un DEX lo fija el mercado y puede quedar por debajo de la curva.',
+      text: 'No se garantiza que salga al mercado ni que haya liquidez. Allí el precio lo fijan la oferta y la demanda, y puede quedar por debajo de la curva.',
     },
     {
       icon: 'unlock',
       title: 'Desbloqueo',
-      text: 'Al lanzar en DEX, los reclamos de preventa y recompensas pueden aumentar de golpe la oferta disponible.',
+      text: 'Al salir al mercado, los reclamos de preventa y recompensas pueden aumentar de golpe la oferta disponible.',
     },
     {
       icon: 'code',
@@ -212,8 +212,10 @@ export const ConfioTokenomicsScreen = () => {
             </View>
             <Text style={styles.lifecycleText}>
               Ningún bloque circula solo por estar asignado. La preventa y las recompensas se
-              reclaman al lanzar en DEX. Cada vesting empieza con su propia transacción de
-              activación, que se publica en blockchain.
+              reclaman cuando $CONFIO salga al mercado, es decir, con su lanzamiento oficial en
+              un exchange descentralizado (DEX), donde cualquiera puede comprar y vender sin
+              intermediarios. Cada vesting empieza con su propia transacción de activación, que
+              se publica en blockchain.
             </Text>
           </View>
         </View>

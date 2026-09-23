@@ -81,7 +81,7 @@ export const ConfioPresaleScreen = () => {
       return false;
     }
     if (iso === 'KR') {
-      Alert.alert('Restricción', 'Lo sentimos, los ciudadanos/residentes de Corea del Sur no pueden participar en la preventa.');
+      Alert.alert('Restricción', 'Lo sentimos, la preventa no está disponible en tu país.');
       return false;
     }
     return true;
@@ -406,7 +406,7 @@ export const ConfioPresaleScreen = () => {
               {[
                 { icon: 'shopping-bag', label: 'Participas' },
                 { icon: 'bookmark', label: 'Se registra tu asignación' },
-                { icon: 'unlock', label: 'Reclamas al lanzar en DEX' },
+                { icon: 'unlock', label: 'Reclamas cuando salga al mercado' },
               ].map((step, index, all) => (
                 <React.Fragment key={step.label}>
                   <View style={styles.flowStep}>
@@ -422,7 +422,7 @@ export const ConfioPresaleScreen = () => {
               ))}
             </View>
             <Text style={styles.footnote}>
-              Tu asignación queda reservada para tu billetera en el contrato. Se podrá reclamar cuando se lance oficialmente en un DEX y se habilite el reclamo.
+              Tu asignación queda reservada para tu billetera en el contrato. La podrás reclamar cuando $CONFIO salga al mercado y se habilite el reclamo. Salir al mercado es su lanzamiento oficial en un exchange descentralizado (DEX), un mercado en blockchain donde cualquiera puede comprar y vender sin intermediarios.
             </Text>
           </View>
         )}
@@ -501,7 +501,7 @@ export const ConfioPresaleScreen = () => {
                 <Text style={styles.tokenomicsButtonText}>Distribución, reglas y riesgos</Text>
               </TouchableOpacity>
               <Text style={styles.ctaFinePrint}>
-                Puedes perder parte o todo lo que aportes. No disponible para residentes de EE. UU. ni para ciudadanos o residentes de Corea del Sur.
+                Puedes perder parte o todo lo que aportes. No disponible para residentes de EE. UU.
               </Text>
             </>
           )}
