@@ -12,7 +12,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  FlatList,
+  SectionList,
   StatusBar,
   Image,
   ActivityIndicator,
@@ -24,6 +24,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { FEATURED_STOCK_TICKERS, prioritizeStocks } from '../config/stockPresentation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useGmMarket, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
@@ -44,7 +45,7 @@ export const StocksListScreen = () => {
   // Every row carries BOTH numbers with the app-wide hierarchy: the big
   // right-side number is always MY balance ($0.00 included, gray), exactly
   // like the home wallet rows; market price + day % are the small secondary
-  // line beneath it. Held stocks sort first.
+  // line beneath it. Featured assets precede the market-cap ranking.
   const positionByTicker = useMemo(() => {
     const map: Record<string, number> = {};
     myStocks.positions.forEach((p) => {
@@ -60,16 +61,24 @@ export const StocksListScreen = () => {
           (s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
         )
       : stocks;
-    // Held group: MY biggest money first (the hub's ordering), not market
-    // cap; discovery order (market cap) only applies to the unheld rest.
-    const held = base
-      .filter((s) => (positionByTicker[s.ticker] || 0) > 0)
-      .sort(
-        (a, b) => (positionByTicker[b.ticker] || 0) - (positionByTicker[a.ticker] || 0),
-      );
-    const rest = base.filter((s) => !((positionByTicker[s.ticker] || 0) > 0));
-    return [...held, ...rest];
-  }, [search, stocks, positionByTicker]);
+    return prioritizeStocks(base);
+  }, [search, stocks]);
+
+  const sections = useMemo(() => {
+    const featured = new Set<string>(FEATURED_STOCK_TICKERS);
+    return [
+      {
+        title: 'Destacados',
+        description: 'Una selección de índices y metales para explorar.',
+        data: filtered.filter(stock => featured.has(stock.ticker)),
+      },
+      {
+        title: 'Por capitalización de mercado',
+        description: 'De mayor a menor valor total en bolsa.',
+        data: filtered.filter(stock => !featured.has(stock.ticker)),
+      },
+    ].filter(section => section.data.length > 0);
+  }, [filtered]);
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -192,10 +201,17 @@ export const StocksListScreen = () => {
         </View>
       </SafeAreaView>
 
-      <FlatList
-        data={filtered}
+      <SectionList
+        sections={sections}
+        stickySectionHeadersEnabled={false}
         keyExtractor={(s) => s.ticker}
         renderItem={renderRow}
+        renderSectionHeader={({ section }) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
+            <Text style={styles.sectionDescription}>{section.description}</Text>
+          </View>
+        )}
         contentContainerStyle={styles.listContent}
         initialNumToRender={12}
         maxToRenderPerBatch={10}
@@ -326,6 +342,9 @@ const styles = StyleSheet.create({
   buyingPower: { fontSize: 11, color: colors.white, fontWeight: '600' },
 
   listContent: { padding: 16, paddingBottom: 40 },
+  sectionHeader: { paddingTop: 12, paddingBottom: 10 },
+  sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  sectionDescription: { fontSize: 12, lineHeight: 17, color: colors.text.secondary, marginTop: 3 },
 
   searchBox: {
     flexDirection: 'row',

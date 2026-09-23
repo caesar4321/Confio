@@ -548,7 +548,7 @@ class Query(graphene.ObjectType):
             ranked.append((float(um.get('marketCap') or 0), asset))
         # Discovery order = market cap descending: with 438 assets the list
         # must open on household names (AAPL, NVDA, SPY…), not alphabet soup.
-        # The client still floats the user's HELD positions above everything.
+        # The client pins SPY, QQQ, GLD and SLV before this ranking.
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return GmMarketType(session=session, assets=[a for _, a in ranked])
 
