@@ -6,7 +6,7 @@
 
 Este documento describe el token $CONFIO canónico en BNB Smart Chain, su oferta fija y asignación, la curva continua de preventa, la distribución de recompensas, los compromisos de vesting, los controles de gobernanza y los riesgos materiales.
 
-**[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** Esta versión en español es una traducción de cortesía y puede quedar temporalmente desactualizada. Si existe cualquier diferencia, prevalece la edición en inglés.
+**[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** Las versiones en español y [coreano](README.ko.md) son traducciones de cortesía y pueden quedar temporalmente desactualizadas. Si existe cualquier diferencia, prevalece la edición en inglés. Esta traducción se sincronizó con la versión 3.1 en inglés el 23 de septiembre de 2026.
 
 $CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa operadora. No respalda los saldos en dólares de los usuarios y, por sí solo, no representa acciones, deuda, participación en ingresos ni un derecho sobre los activos o utilidades de Confío.
 
@@ -58,7 +58,7 @@ $CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa
 | Poderes privilegiados del token | Sin propietario, sin minter y sin pausa a nivel del token |
 | Extensiones | ERC-2612 Permit y Burnable iniciado por el titular |
 
-La oferta completa de mil millones de tokens se acuñó una sola vez a la tesorería multipartita del proyecto durante el despliegue. Distribuir desde esa tesorería conforme a este documento no constituye una nueva emisión.
+La oferta completa de mil millones de tokens se acuñó una sola vez a la tesorería multipartita del proyecto durante el despliegue. La distribución desde esa tesorería se rige por las asignaciones y condiciones de liberación de este documento; no constituye una nueva emisión.
 
 El nombre on-chain usa la forma ASCII **“Confio”** porque los exploradores y wallets muestran metadatos acentuados de manera inconsistente. El producto y la marca siguen siendo **“Confío.”**
 
@@ -153,7 +153,7 @@ Del 31 de julio al 31 de agosto de 2026, la preventa en BSC funcionó en el cont
 
 Comprar durante la preventa registra una asignación; no vuelve transferibles los tokens inmediatamente.
 
-- Los reclamos permanecen bloqueados hasta el lanzamiento oficial en DEX.
+- Los reclamos de preventa permanecen bloqueados hasta el lanzamiento oficial en DEX y el evento de desbloqueo.
 - Antes del desbloqueo irreversible, el vault debe tener suficiente CONFIO canónico para cubrir todas las asignaciones pendientes.
 - Después del desbloqueo, el contrato rechaza cualquier nueva obligación que no esté respaldada por tokens ya mantenidos en el vault.
 - Cada comprador reclama directamente a la misma dirección BSC propietaria de la asignación.
@@ -240,7 +240,7 @@ Su liberación prevista es vesting lineal de 24 meses después de la activación
 
 Confío usa deliberadamente una analogía con una startup tradicional: el fundador comienza como propietario de la oferta fija y vende o asigna porciones definidas mediante la preventa, programas comunitarios y asignaciones a colaboradores. Esto describe la lógica de propiedad y financiamiento; **$CONFIO no es capital social**, y comprarlo no convierte a nadie en accionista de Confío ni de una entidad afiliada.
 
-La estructura prevista es aproximadamente 36 meses de vesting lineal después de la activación. Distribuir 893,600,000 CONFIO linealmente durante 36 meses equivale en promedio a que aproximadamente **24.82 millones de CONFIO se vuelvan vested por mes**. El vesting es continuo, no una venta mensual programada, y vested no significa transferido ni vendido.
+La estructura prevista es aproximadamente 36 meses de vesting lineal después de la activación. Distribuir 893,600,000 CONFIO linealmente durante 36 meses equivale en promedio a que aproximadamente **24.82 millones de CONFIO completen su restricción temporal cada mes**. El vesting es continuo, no una venta mensual programada; completar esa restricción (quedar vested) no significa transferir ni vender los tokens.
 
 El vault BSC canónico está desplegado, no es actualizable, tiene código verificado y pertenece a la tesorería multipartita. Exige fondeo completo antes de agregar una asignación, vesting lineal después de una transacción de inicio separada, reclamo por el beneficiario, irrevocabilidad después del inicio y retiros de tesorería limitados al excedente.
 
@@ -335,11 +335,11 @@ El precio inicial en DEX es un evento de mercado y liquidez. No se garantiza que
 | Presión del desbloqueo DEX | Los reclamos de preventa y recompensas pueden crear una oferta transferible significativa mientras la liquidez disponible sea mucho menor. |
 | Confianza en tesorería y recompensas | Los derechos viven en la base de datos y dependen de un vault controlado por tesorería, un firmante, fondeo y disponibilidad operativa. |
 | Implementación de vesting | El vault BSC está desplegado, pero cada asignación aún debe conciliarse, fondearse, agregarse, activarse y reportarse correctamente. Errores pueden alterar tiempos o crear riesgo de doble liberación. |
-| Contratos inteligentes | Los contratos de token, preventa, recompensas, vesting y transacciones patrocinadas pueden contener defectos pese al código público y las pruebas extensas. |
-| Red | BNB Smart Chain puede sufrir congestión, concentración, censura, reorganizaciones, exploits, cambios de comisiones o interrupciones. |
+| Contratos inteligentes | Los contratos de token, preventa, recompensas, vesting, transacciones patrocinadas y otros contratos relacionados pueden contener defectos pese al código público y las pruebas extensas. |
+| Red | BNB Smart Chain puede sufrir congestión, concentración de validadores o infraestructura, censura, reorganizaciones, exploits, cambios de comisiones o interrupciones. |
 | Stablecoin | Las compras se pagan en cUSD, que depende de su reserva en USDT y de los contratos de Confío. USDT conlleva riesgos de emisor, reservas, depeg, congelamiento, legalidad y redención. |
 | Clasificación regulatoria | Las autoridades pueden clasificar el token, preventa, recompensas o utilidad futura de forma diferente entre jurisdicciones o con el tiempo. |
-| Elegibilidad y sanciones | Una transacción puede ser técnicamente posible pero no legal o contractualmente disponible. Las reglas pueden cambiar. |
+| Elegibilidad y sanciones | Una transacción puede ser técnicamente posible pero no legal o contractualmente disponible. Las reglas de elegibilidad y las políticas de los proveedores pueden cambiar. |
 | Sin captura automática de valor | El crecimiento de usuarios, saldos cUSD+, pagos, comisiones o ingresos no crea automáticamente demanda ni distribuciones para $CONFIO. |
 | Mercado y liquidez | No se garantiza listado en DEX o CEX. Si existe, el precio puede ser volátil y la liquidez puede desaparecer. |
 | Claves y tesorería | La gobernanza multipartita reduce el riesgo de una sola clave, pero no elimina colusión, compromiso, falla del firmante o transacciones erróneas. |

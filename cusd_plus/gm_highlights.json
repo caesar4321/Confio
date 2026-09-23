@@ -16,11 +16,11 @@
     {
       "key": "crypto",
       "title": "Bitcoin y cripto",
-      "subtitle": "Sigue su precio sin abrir cuenta en un exchange. Puede subir o bajar mucho en poco tiempo.",
+      "subtitle": "Invierte en cripto sin abrir cuenta en un exchange. Puede subir o bajar mucho en poco tiempo.",
       "items": [
-        {"ticker": "IBIT", "tagline": "Sigue el precio de bitcoin"},
-        {"ticker": "ETHA", "tagline": "Sigue el precio de ether"},
-        {"ticker": "FSOL", "tagline": "Sigue el precio de Solana"}
+        {"ticker": "IBIT", "tagline": "Sube y baja con bitcoin"},
+        {"ticker": "ETHA", "tagline": "Sube y baja con ether"},
+        {"ticker": "FSOL", "tagline": "Sube y baja con Solana"}
       ]
     }
   ],
