@@ -7,7 +7,6 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -21,7 +20,6 @@ import {
   GET_MY_BILLING_OBLIGATIONS,
   GET_MY_BILLING_SUMMARY,
 } from '../apollo/queries';
-import { parseInstitutionLink } from '../utils/institutionLinks';
 import { InstitutionLogo } from '../components/InstitutionLogo';
 import {
   CLAIM_INSTITUTION_MEMBERSHIP,
@@ -104,10 +102,6 @@ export const MembershipsScreen = () => {
   const route = useRoute<any>();
   const [payingId, setPayingId] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
-  const [codeOpen, setCodeOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
-  const [codeValue, setCodeValue] = useState('');
-  const [codeError, setCodeError] = useState('');
   const authReady = useAuthReady();
   const { data, loading, error, refetch } = useQuery(GET_MY_BILLING_OBLIGATIONS, {
     skip: !authReady,
@@ -121,7 +115,8 @@ export const MembershipsScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   // Its own document, not a field on a shared query: a server without
-  // institutionDirectory fails this alone and leaves scan/paste working.
+  // institutionDirectory fails this alone and leaves the rest of the screen
+  // working.
   const { data: directoryData } = useQuery(GET_INSTITUTION_DIRECTORY, {
     skip: !authReady,
     fetchPolicy: 'cache-and-network',
@@ -180,18 +175,6 @@ export const MembershipsScreen = () => {
     }
   }, [createIntent, navigation, payingId]);
 
-  const submitCode = useCallback(() => {
-    const parsed = parseInstitutionLink(codeValue);
-    if (!parsed) {
-      setCodeError('Ese enlace no es válido. Pídele a tu institución uno nuevo.');
-      return;
-    }
-    setCodeError('');
-    setCodeOpen(false);
-    setCodeValue('');
-    // Reuses the claim effect above rather than duplicating the mutation.
-    navigation.setParams({ provider: parsed.provider, token: parsed.token });
-  }, [codeValue, navigation]);
 
   const obligations: Obligation[] = data?.myBillingObligations || [];
   const selected = obligations.find(row => row.id === route.params?.obligationId);
@@ -209,92 +192,41 @@ export const MembershipsScreen = () => {
   const outstandingGroups = groupByInstitution(outstanding);
   const showInstitutionHeaders = outstandingGroups.length > 1;
 
-  // One definition, rendered in both states. A linked member must still be
-  // able to add a second institution; gating this on !linked recreated the
-  // discovery problem one step further down the funnel.
-  const addInstitutionBlock = (
-    <View style={styles.addBlock}>
-      {directory.length > 0 && (
-        <View style={styles.directory}>
-          {/* "Disponibles para vincular", never "Instituciones en Confío":
-              the heading has to say these are NOT yours yet. */}
-          <Text style={styles.directoryTitle}>Disponibles para vincular</Text>
-          {directory.map((entry, index) => (
-            <View
-              key={entry.id}
-              style={[styles.directoryRow, index > 0 && styles.directoryRowDivided]}
-            >
-              <InstitutionLogo
-                name={entry.name}
-                logoUrl={entry.logoUrl}
-                size={36}
-                background={colors.primaryDark}
-              />
-              <Text style={styles.directoryName} numberOfLines={2}>{entry.name}</Text>
-              {/* A verb is what disambiguates a row from an owned card. Owned
-                  cards carry money; available rows carry an action. Inert
-                  until the member-number flow exists. */}
-              {entry.linkingAvailable
-                ? <Text style={styles.linkAction}>Vincular</Text>
-                : (
-                  // The View owns the pill. On iOS RCTTextView is a plain
-                  // UIView, so a Text's borderRadius skips RCTView's clamping:
-                  // radius 999 plus overflow:hidden masked the label away.
-                  <View style={styles.soonPill}>
-                    <Text style={styles.soonPillText}>Próximamente</Text>
-                  </View>
-                )}
-            </View>
-          ))}
-        </View>
-      )}
-      <Text style={styles.addHint}>¿Tu institución te envió un enlace?</Text>
-      <TouchableOpacity
-        style={styles.primaryButton}
-        onPress={() => navigation.navigate('Scan')}
-        accessibilityRole="button"
-        accessibilityLabel="Escanear QR"
-      >
-        <Icon name="maximize" size={18} color={colors.white} />
-        <Text style={styles.primaryText}>Escanear QR</Text>
-      </TouchableOpacity>
-      {codeOpen ? (
-        <View style={styles.codeBox}>
-          <TextInput
-            style={styles.input}
-            value={codeValue}
-            onChangeText={value => { setCodeValue(value); if (codeError) setCodeError(''); }}
-            placeholder="Pega aquí el enlace de tu institución"
-            placeholderTextColor={colors.text.light}
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-            accessibilityLabel="Enlace de tu institución"
-          />
-          {!!codeError && <Text style={styles.errorText}>{codeError}</Text>}
-          <TouchableOpacity
-            style={[styles.primaryButton, !codeValue.trim() && styles.buttonDisabled]}
-            disabled={!codeValue.trim()}
-            onPress={submitCode}
-            accessibilityRole="button"
-            accessibilityLabel="Continuar"
-          >
-            <Text style={styles.primaryText}>Continuar</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => setCodeOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Tengo un enlace o código"
+  // Just the catalogue. The scan button and paste box were removed: linking
+  // happens through the personal link the institution sends, which linking.ts
+  // routes into the claim effect above with no UI at all, and ScanScreen
+  // already handles institution QRs on its own.
+  const directoryBlock = directory.length > 0 ? (
+    <View style={styles.directory}>
+      {/* "Disponibles para vincular", never "Instituciones en Confío":
+          the heading has to say these are NOT yours yet. */}
+      <Text style={styles.directoryTitle}>Disponibles para vincular</Text>
+      {directory.map((entry, index) => (
+        <View
+          key={entry.id}
+          style={[styles.directoryRow, index > 0 && styles.directoryRowDivided]}
         >
-          <Text style={styles.secondaryText}>Tengo un enlace o código</Text>
-        </TouchableOpacity>
-      )}
-      <Text style={styles.fine}>Un QR público no verifica tu identidad. Confío no te pedirá tu DNI en esta pantalla.</Text>
+          <InstitutionLogo
+            name={entry.name}
+            logoUrl={entry.logoUrl}
+            size={36}
+            background={colors.primaryDark}
+          />
+          <Text style={styles.directoryName} numberOfLines={2}>{entry.name}</Text>
+          {entry.linkingAvailable
+            ? <Text style={styles.linkAction}>Vincular</Text>
+            : (
+              // The View owns the pill. On iOS RCTTextView is a plain UIView,
+              // so a Text's borderRadius skips RCTView's clamping: radius 999
+              // plus overflow:hidden masked the label away.
+              <View style={styles.soonPill}>
+                <Text style={styles.soonPillText}>Próximamente</Text>
+              </View>
+            )}
+        </View>
+      ))}
     </View>
-  );
+  ) : null;
 
   return (
     <View style={styles.safe}>
@@ -348,8 +280,8 @@ export const MembershipsScreen = () => {
               <Icon name="users" size={30} color={colors.primaryDark} />
             </View>
             <Text style={styles.emptyTitle}>Aún no tienes instituciones</Text>
-            <Text style={styles.muted}>Vincula la tuya para ver y pagar sus cuotas desde Confío.</Text>
-            {addInstitutionBlock}
+            <Text style={styles.muted}>Tu institución te enviará un enlace para vincularte. Aquí verás y pagarás sus cuotas.</Text>
+            {directoryBlock}
           </View>
         ) : obligations.length === 0 ? (
           <View style={styles.empty}>
@@ -358,7 +290,6 @@ export const MembershipsScreen = () => {
             </View>
             <Text style={styles.emptyTitle}>Estás al día</Text>
             <Text style={styles.muted}>Tu institución aún no ha emitido cuotas. Cuando lo haga, aparecerán aquí.</Text>
-            {addInstitutionBlock}
           </View>
         ) : (
           <>
@@ -430,22 +361,6 @@ export const MembershipsScreen = () => {
                 </View>
               </>
             )}
-            {!selected && (
-              addOpen ? (
-                <View style={styles.addOpenWrap}>{addInstitutionBlock}</View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.addRow}
-                  onPress={() => setAddOpen(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Agregar otra institución"
-                >
-                  <Icon name="plus-circle" size={20} color={colors.primaryDark} />
-                  <Text style={styles.addRowText}>Agregar otra institución</Text>
-                  <Icon name="chevron-right" size={16} color={colors.text.light} />
-                </TouchableOpacity>
-              )
-            )}
           </>
         )}
       </ScrollView>
@@ -466,34 +381,19 @@ const styles = StyleSheet.create({
   emptyDisc: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   emptyTitle: { fontSize: 19, fontWeight: '700', textAlign: 'center', color: colors.text.primary, letterSpacing: -0.2 },
   muted: { color: colors.text.secondary, textAlign: 'center', fontSize: 14, lineHeight: 21 },
-  fine: { fontSize: 12, color: colors.text.light, textAlign: 'center', lineHeight: 17 },
   link: { color: colors.primaryDark, fontWeight: '700' },
 
   directory: { alignSelf: 'stretch', backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 14, paddingBottom: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
   directoryTitle: { fontSize: 11, fontWeight: '700', color: colors.text.light, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 2 },
   directoryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
   directoryRowDivided: { borderTopWidth: 1, borderTopColor: colors.borderLight },
-  directoryDisc: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   directoryName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary, lineHeight: 20 },
-  addBlock: { alignSelf: 'stretch', gap: 12, marginTop: 4 },
-  addOpenWrap: { marginTop: 20 },
-  addHint: { fontSize: 13, color: colors.text.secondary, textAlign: 'center', marginTop: 4 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.white, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 16, marginTop: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
-  addRowText: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.primaryDark },
   linkAction: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
   // Pills are a View (background, radius) around a Text (type, colour). Never
   // put a rounded background on a Text: iOS does not clamp its radius.
   soonPill: { flexShrink: 0, backgroundColor: colors.neutralDark, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   soonPillText: { fontSize: 11, fontWeight: '700', color: colors.text.secondary },
 
-  primaryButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', minHeight: 52, borderRadius: 14, backgroundColor: colors.primary, paddingHorizontal: 16, shadowColor: colors.primaryDark, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
-  primaryText: { color: colors.white, fontWeight: '700', fontSize: 16 },
-  secondaryButton: { alignSelf: 'stretch', minHeight: 52, borderRadius: 14, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
-  secondaryText: { color: colors.text.primary, fontWeight: '700', fontSize: 15 },
-  buttonDisabled: { opacity: 0.5, shadowOpacity: 0 },
-  codeBox: { alignSelf: 'stretch', gap: 12 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, backgroundColor: colors.white, paddingHorizontal: 14, paddingVertical: 12, minHeight: 76, color: colors.text.primary, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
-  errorText: { color: colors.danger, fontSize: 13, lineHeight: 18 },
 
   groupHeader: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginTop: 8, marginBottom: 10 },
   section: { fontSize: 11, fontWeight: '700', color: colors.text.light, marginTop: 20, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
@@ -501,7 +401,6 @@ const styles = StyleSheet.create({
   card: { backgroundColor: colors.white, borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   // 44/22 circle on primaryDark: identical to HomeScreen's walletLogoContainer.
-  logo: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDark },
   institution: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   reference: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   statusPill: { flexShrink: 0, backgroundColor: colors.primaryLight, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
