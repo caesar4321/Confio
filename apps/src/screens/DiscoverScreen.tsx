@@ -64,8 +64,7 @@ export const DiscoverScreen = () => {
   const feedVariables = legacyServer ? {} : { section };
   const { data, refetch, fetchMore, networkStatus } = legacyServer ? legacy : sectioned;
   const loading = legacyServer ? legacy.loading : sectioned.loading;
-  // "Couldn't load" must never read as "nothing here".
-  const loadFailed = !data && !loading && Boolean(legacyServer ? legacy.error : sectioned.error);
+  const feedError = legacyServer ? legacy.error : sectioned.error;
 
   const items = useMemo<DiscoverItem[]>(() => {
     return (data?.discoverFeed?.items || []).map((item: DiscoverFeedDto) => ({
@@ -88,6 +87,20 @@ export const DiscoverScreen = () => {
     }));
   }, [data]);
 
+  // "Couldn't load" must never read as "nothing here". Apollo keeps the last
+  // good data when a refresh fails, so key off the error, not missing data.
+  const loadFailed = !loading && Boolean(feedError) && items.length === 0;
+
+  // Every list replacement (section switch, refresh) starts a new generation.
+  // A next page merges only into the generation it was requested from, so a
+  // late page from an earlier visit (Oficial → Comunidad → Oficial) is dropped.
+  const feedGeneration = useRef(0);
+  const selectSection = (next: DiscoverSectionKey) => {
+    if (next === section) return;
+    feedGeneration.current += 1;
+    setSection(next);
+  };
+
   // Descubrir is a tab again, so it stays mounted: re-read the first page on
   // every return (not the first focus — mount already fetched). Only while
   // the user is still on that page: the server caps a response at one page,
@@ -109,6 +122,7 @@ export const DiscoverScreen = () => {
       }
       if (loadedCount.current > PAGE_SIZE || paginating.current) return;
       focusRefreshing.current = true;
+      feedGeneration.current += 1;
       refetch({ offset: 0, limit: PAGE_SIZE })
         .catch(() => {})
         .finally(() => { focusRefreshing.current = false; });
@@ -119,21 +133,16 @@ export const DiscoverScreen = () => {
   const isRefreshing = networkStatus === NetworkStatus.refetch;
 
   const handleRefresh = async () => {
+    feedGeneration.current += 1;
     await refetch({ offset: 0, limit: PAGE_SIZE });
   };
-
-  // The section a page was requested for. fetchMore merges into whatever the
-  // query holds when the response lands, so a page requested before a chip
-  // switch must be dropped rather than appended to the new section's list.
-  const currentSection = useRef(section);
-  currentSection.current = section;
 
   const handleLoadMore = async () => {
     // Never alongside a refresh: whichever lands last replaces the list.
     if (isFetchingMore || isRefreshing || focusRefreshing.current || !hasMore) {
       return;
     }
-    const requestedSection = section;
+    const requestedGeneration = feedGeneration.current;
     setIsFetchingMore(true);
     try {
       await fetchMore({
@@ -142,7 +151,7 @@ export const DiscoverScreen = () => {
           limit: PAGE_SIZE,
         },
         updateQuery: (previousResult, { fetchMoreResult }) => {
-          if (!fetchMoreResult?.discoverFeed || currentSection.current !== requestedSection) {
+          if (!fetchMoreResult?.discoverFeed || feedGeneration.current !== requestedGeneration) {
             return previousResult;
           }
 
@@ -164,6 +173,8 @@ export const DiscoverScreen = () => {
   };
 
   const handleReact = async (itemId: number, emoji: string) => {
+    // The refetch below replaces the list.
+    feedGeneration.current += 1;
     await reactToMessageContent({
       variables: {
         contentItemId: String(itemId),
@@ -206,12 +217,13 @@ export const DiscoverScreen = () => {
         loading={waitingForItems}
         loadFailed={loadFailed}
         onRetry={() => {
+          feedGeneration.current += 1;
           refetch({ offset: 0, limit: PAGE_SIZE }).catch(() => {});
         }}
         sections={legacyServer ? [] : DISCOVER_SECTIONS}
         // The legacy feed is unfiltered: its empty state is Para ti's.
         activeSection={legacyServer ? 'for_you' : section}
-        onSelectSection={setSection}
+        onSelectSection={selectSection}
         onOpenItem={(item: DiscoverItem) => {
           navigation.navigate('DiscoverPostDetail', { contentItemId: item.id });
         }}

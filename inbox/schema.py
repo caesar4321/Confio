@@ -42,6 +42,13 @@ logger = logging.getLogger(__name__)
 # Oficial rule (inbox.official); "community" is anything a user wrote — empty
 # until user posting ships.
 DISCOVER_FEED_SECTIONS = ('for_you', 'official', 'community')
+# Publisher-type filters from 2df03d94. Installed builds may still send them
+# (a chip picked before the deploy), so they keep filtering by channel kind.
+LEGACY_DISCOVER_SECTION_KINDS = {
+    'confio': (ChannelKind.FOUNDER, ChannelKind.NEWS, ChannelKind.SYSTEM),
+    'institutions': (ChannelKind.INSTITUTION,),
+    'businesses': (ChannelKind.BUSINESS,),
+}
 # A user's post never borrows its channel's verification, even inside an
 # Oficial channel (e.g. a member post on an institution's board).
 USER_AUTHORED = Q(owner_type=OwnerType.USER) | Q(channel__owner_type=OwnerType.USER)
@@ -925,9 +932,11 @@ class Query(graphene.ObjectType):
             .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
         )
         section = section or 'for_you'
-        if section not in DISCOVER_FEED_SECTIONS:
+        if section in LEGACY_DISCOVER_SECTION_KINDS:
+            queryset = queryset.filter(channel__kind__in=LEGACY_DISCOVER_SECTION_KINDS[section])
+        elif section not in DISCOVER_FEED_SECTIONS:
             raise GraphQLError('Unknown Discover section')
-        if section == 'official':
+        elif section == 'official':
             queryset = queryset.filter(channel_id__in=all_official_channel_ids()).exclude(USER_AUTHORED)
         elif section == 'community':
             queryset = queryset.filter(USER_AUTHORED)
