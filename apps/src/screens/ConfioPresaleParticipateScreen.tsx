@@ -343,7 +343,7 @@ export const ConfioPresaleParticipateScreen = () => {
       return;
     }
     if (iso === 'KR') {
-      Alert.alert('Restricción', 'Lo sentimos, los ciudadanos/residentes de Corea del Sur no pueden participar en la preventa.');
+      Alert.alert('Restricción', 'Lo sentimos, la preventa no está disponible en tu país.');
       return;
     }
 

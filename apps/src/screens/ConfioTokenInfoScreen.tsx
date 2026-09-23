@@ -301,7 +301,7 @@ export const ConfioTokenInfoScreen = () => {
             <Text style={styles.secondaryButtonText}>Programa de referidos</Text>
           </TouchableOpacity>
           <Text style={styles.ctaFinePrint}>
-            Las recompensas se registran hoy y se reclaman cuando $CONFIO se lance en un DEX.
+            Las recompensas se registran hoy y se reclaman cuando $CONFIO salga al mercado.
           </Text>
         </View>
 
