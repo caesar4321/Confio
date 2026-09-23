@@ -19,10 +19,11 @@ import { colors } from '../config/theme';
 
 import { Header } from '../navigation/Header';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
-import { GET_DISCOVER_POST } from '../apollo/queries';
+import { GET_DISCOVER_POST, GET_DISCOVER_POST_SOURCE } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from '../components/ResponsiveImage';
 import { EmptyState } from '../components/EmptyState';
+import { DiscoverSource } from '../components/DiscoverSource';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
@@ -180,6 +181,11 @@ export const DiscoverPostDetailScreen = () => {
   });
 
   const post = data?.discoverPost as DiscoverPostDto | undefined;
+  const { data: sourceData } = useQuery(GET_DISCOVER_POST_SOURCE, {
+    variables: { contentItemId: String(contentItemId) },
+    fetchPolicy: 'network-only',
+  });
+  const source = sourceData?.discoverPost as { sourceName?: string; isOfficial?: boolean } | undefined;
 
   const handleOpenLink = async (
     url: string,
@@ -269,6 +275,7 @@ export const DiscoverPostDetailScreen = () => {
       />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
+          <DiscoverSource name={source?.sourceName} isOfficial={source?.isOfficial} size="detail" />
           <View style={styles.headerRow}>
             <View style={[styles.tagPill, { backgroundColor: `${post.tagColor}18` }]}>
               <Text style={[styles.tagText, { color: post.tagColor }]}>

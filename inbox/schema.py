@@ -15,6 +15,7 @@ from security.s3_utils import build_s3_key, generate_presigned_post, public_s3_u
 
 from .models import (
     Channel,
+    ChannelKind,
     ChannelScope,
     ChannelMembership,
     ContentReaction,
@@ -31,9 +32,20 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
+from .official import official_channel_ids
 from .push_service import send_support_reply_push, send_support_staff_push
 
 logger = logging.getLogger(__name__)
+
+# Descubrir groups posts by who published them, not by topic: the reader's
+# question is "can I trust this source", and the topic already rides on `tag`.
+DISCOVER_SECTIONS = (
+    ('confio', 'Confío', (ChannelKind.FOUNDER, ChannelKind.NEWS, ChannelKind.SYSTEM)),
+    ('institutions', 'Instituciones', (ChannelKind.INSTITUTION,)),
+    ('businesses', 'Negocios', (ChannelKind.BUSINESS,)),
+)
+DISCOVER_SECTION_KINDS = {key: kinds for key, _, kinds in DISCOVER_SECTIONS}
+DISCOVER_KIND_SECTION = {kind: key for key, _, kinds in DISCOVER_SECTIONS for kind in kinds}
 
 DISCOVER_TAG_COLOR_MAP = {
     'producto': '#1DB587',
@@ -263,11 +275,19 @@ class DiscoverFeedItemType(graphene.ObjectType):
     reaction_summary = graphene.List(MessageReactionType, required=True)
     viewer_reaction = graphene.String()
     can_react = graphene.Boolean(required=True)
+    source_name = graphene.String(required=True)
+    source_section = graphene.String(required=True)
+    is_official = graphene.Boolean(required=True)
 
 
 class DiscoverFeedPageType(graphene.ObjectType):
     items = graphene.List(DiscoverFeedItemType, required=True)
     has_more = graphene.Boolean(required=True)
+
+
+class DiscoverSectionType(graphene.ObjectType):
+    key = graphene.String(required=True)
+    label = graphene.String(required=True)
 
 
 class PortalContentItemType(graphene.ObjectType):
@@ -397,7 +417,9 @@ def build_portal_content_payload(item: ContentItem, poll_payloads=None):
     )
 
 
-def build_discover_feed_item_payload(item: ContentItem, user, account, business, poll_payloads=None):
+def build_discover_feed_item_payload(item: ContentItem, user, account, business, poll_payloads=None, official_ids=None):
+    if official_ids is None:
+        official_ids = official_channel_ids([item.channel])
     metadata = item.metadata or {}
     blocks = metadata.get('blocks') or []
     preview_image = metadata.get('image') or next(
@@ -460,6 +482,17 @@ def build_discover_feed_item_payload(item: ContentItem, user, account, business,
         ],
         viewer_reaction=viewer_reaction,
         can_react=True,
+        source_name=item.channel.title or '',
+        source_section=DISCOVER_KIND_SECTION.get(item.channel.kind, 'confio'),
+        is_official=item.channel_id in official_ids,
+    )
+
+
+def published_discover_items():
+    return ContentItem.objects.filter(
+        status=ContentStatus.PUBLISHED,
+        published_at__isnull=False,
+        surfaces__surface=ContentSurfaceType.DISCOVER,
     )
 
 
@@ -807,7 +840,9 @@ class Query(graphene.ObjectType):
         DiscoverFeedPageType,
         offset=graphene.Int(required=False),
         limit=graphene.Int(required=False),
+        section=graphene.String(required=False),
     )
+    discover_sections = graphene.List(graphene.NonNull(DiscoverSectionType), required=True)
     portal_support_conversations = graphene.List(
         PortalSupportConversationType,
         status=graphene.String(required=False),
@@ -862,32 +897,47 @@ class Query(graphene.ObjectType):
         return build_discover_feed_item_payload(item, user, account, business)
 
     @login_required
-    def resolve_discover_feed(self, info, offset=0, limit=10):
+    def resolve_discover_feed(self, info, offset=0, limit=10, section=None):
         user, account, business, _ = get_context_models(info)
         offset = max(offset or 0, 0)
         limit = min(max(limit or 10, 1), 20)
 
         queryset = (
-            ContentItem.objects.select_related('channel')
+            published_discover_items()
+            .select_related('channel')
             .prefetch_related('reactions__reaction_type', 'surfaces')
-            .filter(
-                status=ContentStatus.PUBLISHED,
-                published_at__isnull=False,
-                surfaces__surface=ContentSurfaceType.DISCOVER,
-            )
             .distinct()
             .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
         )
+        if section:
+            kinds = DISCOVER_SECTION_KINDS.get(section)
+            if kinds is None:
+                raise GraphQLError('Unknown Discover section')
+            queryset = queryset.filter(channel__kind__in=kinds)
         page_items = list(queryset[offset:offset + limit + 1])
         has_more = len(page_items) > limit
         if has_more:
             page_items = page_items[:limit]
 
         poll_payloads = build_poll_payloads(page_items, user.id)
+        official_ids = official_channel_ids(item.channel for item in page_items)
         return DiscoverFeedPageType(
-            items=[build_discover_feed_item_payload(item, user, account, business, poll_payloads) for item in page_items],
+            items=[
+                build_discover_feed_item_payload(item, user, account, business, poll_payloads, official_ids)
+                for item in page_items
+            ],
             has_more=has_more,
         )
+
+    @login_required
+    def resolve_discover_sections(self, info):
+        """Sections that have something to read; empty ones are never offered."""
+        kinds = set(published_discover_items().order_by().values_list('channel__kind', flat=True).distinct())
+        return [
+            DiscoverSectionType(key=key, label=label)
+            for key, label, section_kinds in DISCOVER_SECTIONS
+            if kinds.intersection(section_kinds)
+        ]
 
     @login_required
     def resolve_portal_support_conversations(self, info, status=None, search=None):

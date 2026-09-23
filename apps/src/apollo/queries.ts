@@ -3107,6 +3107,63 @@ export const GET_DISCOVER_FEED = gql`
   }
 `;
 
+// Source-sectioned Descubrir. Kept apart from GET_DISCOVER_FEED until every
+// server has `section`/`sourceName`/`isOfficial`: one unknown field fails the
+// whole query, so the screen falls back to the legacy query on error.
+export const GET_DISCOVER_FEED_SECTIONED = gql`
+  query GetDiscoverFeedSectioned($offset: Int, $limit: Int, $section: String) {
+    discoverFeed(offset: $offset, limit: $limit, section: $section) {
+      items {
+        id
+        type
+        tag
+        tagColor
+        title
+        body
+        time
+        thumbnail
+        platformLinks {
+          platform
+          url
+        }
+        imageUrl
+        poll { id question closed totalVotes viewerOptionId options { id label count } }
+        reactionSummary {
+          emoji
+          count
+        }
+        viewerReaction
+        canReact
+        sourceName
+        sourceSection
+        isOfficial
+      }
+      hasMore
+    }
+  }
+`;
+
+export const GET_DISCOVER_SECTIONS = gql`
+  query GetDiscoverSections {
+    discoverSections {
+      key
+      label
+    }
+  }
+`;
+
+// Its own document: an older server without these fields fails only the
+// source line, never the post itself.
+export const GET_DISCOVER_POST_SOURCE = gql`
+  query GetDiscoverPostSource($contentItemId: ID!) {
+    discoverPost(contentItemId: $contentItemId) {
+      id
+      sourceName
+      isOfficial
+    }
+  }
+`;
+
 export const GET_DISCOVER_POST = gql`
   query GetDiscoverPost($contentItemId: ID!) {
     discoverPost(contentItemId: $contentItemId) {

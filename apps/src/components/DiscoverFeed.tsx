@@ -5,6 +5,7 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -12,6 +13,7 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { ResponsiveImage } from './ResponsiveImage';
 import { EmptyState } from './EmptyState';
+import { DiscoverSource } from './DiscoverSource';
 import { colors } from '../config/theme';
 
 const emojiOptions = ['🔥', '🙌', '😍', '🤯', '💡', '😎', '💪', '👀', '😢', '❤️'];
@@ -39,6 +41,13 @@ export type DiscoverItem = {
   poll?: ContentPollData | null;
   canReact?: boolean;
   imageUrl?: string | null;
+  sourceName?: string;
+  isOfficial?: boolean;
+};
+
+export type DiscoverSection = {
+  key: string;
+  label: string;
 };
 
 const tagIcons: Record<DiscoverItem['type'], string> = {
@@ -63,6 +72,10 @@ type DiscoverFeedProps = {
   onRefresh?: () => void;
   onEndReached?: () => void;
   onReact?: (itemId: number, emoji: string) => Promise<void>;
+  loading?: boolean;
+  sections?: DiscoverSection[];
+  activeSection?: string | null;
+  onSelectSection?: (key: string | null) => void;
 };
 
 export function DiscoverFeed({
@@ -74,6 +87,10 @@ export function DiscoverFeed({
   onRefresh,
   onEndReached,
   onReact,
+  loading = false,
+  sections = [],
+  activeSection = null,
+  onSelectSection,
 }: DiscoverFeedProps) {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState<number | null>(null);
 
@@ -86,6 +103,7 @@ export function DiscoverFeed({
     return (
       <View style={styles.card}>
         <Pressable onPress={() => onOpenItem?.(item)} style={styles.cardPressable}>
+          <DiscoverSource name={item.sourceName} isOfficial={item.isOfficial} />
           <View style={styles.cardHeader}>
             <View style={[styles.tagPill, { backgroundColor: `${item.tagColor}18` }]}>
               <Text style={[styles.tagText, { color: item.tagColor }]}>
@@ -195,9 +213,39 @@ export function DiscoverFeed({
     );
   };
 
+  // Only worth a filter once a second kind of source has published: a lone
+  // "Confío" chip beside "Todo" is noise, and an empty section is a dead end.
+  const sectionChips = sections.length > 1 || (sections.length === 1 && activeSection)
+    ? [{ key: null as string | null, label: 'Todo' }, ...sections]
+    : [];
+  const sectionHeader = sectionChips.length ? (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.sectionRow}
+      style={styles.sectionScroller}
+    >
+      {sectionChips.map(({ key, label }) => {
+        const selected = key === activeSection;
+        return (
+          <Pressable
+            key={key ?? 'all'}
+            onPress={() => onSelectSection?.(key)}
+            style={[styles.sectionChip, selected && styles.sectionChipActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+          >
+            <Text style={[styles.sectionChipText, selected && styles.sectionChipTextActive]}>{label}</Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  ) : null;
+
   return (
     <FlatList
       data={items}
+      ListHeaderComponent={sectionHeader}
       keyExtractor={(item) => String(item.id)}
       renderItem={renderItem}
       contentContainerStyle={styles.content}
@@ -207,11 +255,17 @@ export function DiscoverFeed({
         ) : undefined
       }
       ListEmptyComponent={
+        loading ? (
+          <View style={styles.footerLoader}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : (
         <EmptyState
           icon="compass"
           title="Nada por aquí todavía"
           subtitle="Vuelve pronto — aquí publicamos novedades de Confío y la comunidad."
         />
+        )
       }
       onEndReachedThreshold={0.35}
       onEndReached={() => {
@@ -252,6 +306,35 @@ const styles = StyleSheet.create({
   },
   cardPressable: {
     marginBottom: 2,
+  },
+  sectionScroller: {
+    marginHorizontal: -16,
+    marginBottom: 12,
+    flexGrow: 0,
+  },
+  sectionRow: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  sectionChip: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sectionChipActive: {
+    backgroundColor: colors.dark,
+    borderColor: colors.dark,
+  },
+  sectionChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+  },
+  sectionChipTextActive: {
+    color: '#FFFFFF',
   },
   cardHeader: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib import messages
 from django import forms
+from django.utils.html import format_html
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
@@ -20,6 +21,14 @@ from .models import (
     SupportConversation,
     SupportConversationState,
     SupportMessage,
+)
+from .official import (
+    NOT_GRANTED,
+    OFFICIAL,
+    OWNER_NOT_ELIGIBLE,
+    OWNER_NOT_VERIFIED,
+    official_status,
+    owner_status,
 )
 from .tasks import send_content_item_push_task
 
@@ -194,8 +203,89 @@ class ContentItemInline(admin.TabularInline):
     ordering = ('-published_at', '-created_at')
 
 
+OFFICIAL_STATUS_DISPLAY = {
+    OFFICIAL: ('#16A34A', 'Oficial'),
+    OWNER_NOT_VERIFIED: ('#D97706', 'Concedido · KYB del negocio no verificado'),
+    OWNER_NOT_ELIGIBLE: ('#DC2626', 'Concedido · dueño no puede ser Oficial'),
+    NOT_GRANTED: ('#6B7280', 'No concedido'),
+}
+
+
+class ChannelAdminForm(forms.ModelForm):
+    grant_official = forms.BooleanField(
+        required=False,
+        label='Oficial',
+        help_text=(
+            'Muestra la insignia "Oficial" en Descubrir. Requiere: canal propio de Confío '
+            '(fundador/noticias/sistema) o canal de un negocio con KYB verificado, y una nota '
+            'de cómo se confirmó quién controla el canal. Si el KYB deja de estar verificado, '
+            'la insignia desaparece sola.'
+        ),
+    )
+
+    class Meta:
+        model = Channel
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['grant_official'].initial = bool(self.instance.pk and self.instance.official_granted_at)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get('grant_official'):
+            return cleaned
+        if not (cleaned.get('official_note') or '').strip():
+            self.add_error('official_note', 'Explica cómo se verificó quién controla el canal.')
+        candidate = Channel(
+            kind=cleaned.get('kind'),
+            owner_type=cleaned.get('owner_type'),
+            owner_business=cleaned.get('owner_business'),
+        )
+        status = owner_status(candidate)
+        if status == OWNER_NOT_VERIFIED:
+            self.add_error('grant_official', 'El negocio dueño del canal no tiene un KYB verificado.')
+        elif status == OWNER_NOT_ELIGIBLE:
+            self.add_error(
+                'grant_official',
+                'Solo canales propios de Confío (fundador/noticias/sistema) o de un negocio '
+                'pueden ser Oficiales.',
+            )
+        return cleaned
+
+
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
+    form = ChannelAdminForm
+    actions = ('revoke_official',)
+
+    def save_model(self, request, obj, form, change):
+        granted = form.cleaned_data.get('grant_official')
+        if granted and obj.official_granted_at is None:
+            obj.official_granted_at = timezone.now()
+            obj.official_granted_by = request.user
+        elif not granted and obj.official_granted_at is not None:
+            obj.official_granted_at = None
+            obj.official_granted_by = None
+        super().save_model(request, obj, form, change)
+
+    @admin.display(description='Oficial')
+    def official_badge(self, obj):
+        color, label = OFFICIAL_STATUS_DISPLAY[official_status(obj)]
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 12px; font-size: 12px;">{}</span>',
+            color,
+            label,
+        )
+
+    @admin.action(description='Revocar Oficial', permissions=['change'])
+    def revoke_official(self, request, queryset):
+        revoked = queryset.filter(official_granted_at__isnull=False).update(
+            official_granted_at=None, official_granted_by=None, updated_at=timezone.now(),
+        )
+        self.message_user(request, f'Oficial revocado en {revoked} canal(es).', level=messages.SUCCESS)
+
     @transaction.atomic
     def save_formset(self, request, form, formset, change):
         if formset.model is not ContentItem:
@@ -214,11 +304,13 @@ class ChannelAdmin(admin.ModelAdmin):
         'subscription_mode',
         'channel_scope',
         'owner_type',
+        'official_badge',
         'is_active',
         'sort_order',
     )
     list_filter = (
         'kind',
+        ('official_granted_at', admin.EmptyFieldListFilter),
         'subscription_mode',
         'channel_scope',
         'owner_type',
@@ -226,7 +318,7 @@ class ChannelAdmin(admin.ModelAdmin):
     )
     search_fields = ('title', 'slug', 'subtitle', 'avatar_value')
     autocomplete_fields = ('owner_user', 'owner_business')
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'official_badge', 'official_granted_at', 'official_granted_by')
     ordering = ('sort_order', 'title')
     inlines = [ContentItemInline]
     fieldsets = (
@@ -241,6 +333,22 @@ class ChannelAdmin(admin.ModelAdmin):
                     'is_active',
                     'sort_order',
                 )
+            },
+        ),
+        (
+            'Verification',
+            {
+                'fields': (
+                    'official_badge',
+                    'grant_official',
+                    'official_note',
+                    'official_granted_at',
+                    'official_granted_by',
+                ),
+                'description': (
+                    'Estado en vivo: "Oficial" solo si fue concedido Y el dueño califica en este '
+                    'momento (KYB del negocio verificado para negocios e instituciones).'
+                ),
             },
         ),
         (
