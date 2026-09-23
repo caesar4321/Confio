@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   TextInput,
   SectionList,
+  ScrollView,
   StatusBar,
   Image,
   ActivityIndicator,
@@ -24,7 +25,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
-import { FEATURED_STOCK_TICKERS, prioritizeStocks } from '../config/stockPresentation';
+import { FEATURED_STOCK_TICKERS, STOCK_TAGLINES } from '../config/stockPresentation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useGmMarket, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
@@ -54,31 +55,69 @@ export const StocksListScreen = () => {
     return map;
   }, [myStocks.positions]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const base = q
+  const query = search.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (query
       ? stocks.filter(
-          (s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
-        )
-      : stocks;
-    return prioritizeStocks(base);
-  }, [search, stocks]);
+        (s) => s.ticker.toLowerCase().includes(query) || s.name.toLowerCase().includes(query),
+      )
+      : stocks),
+    [query, stocks],
+  );
 
+  // What you own leads — it used to be scattered through 443 rows, findable
+  // only by its non-grey balance. The full list keeps the server's
+  // market-cap order: the starter shelf above it already features the
+  // indices and metals, so they no longer need to jump the queue here.
   const sections = useMemo(() => {
-    const featured = new Set<string>(FEATURED_STOCK_TICKERS);
+    if (query) {
+      return [{ key: 'results', title: 'Resultados', data: filtered }]
+        .filter(section => section.data.length > 0);
+    }
+    const mine = stocks
+      .filter(stock => (positionByTicker[stock.ticker] || 0) > 0)
+      .sort((a, b) => (positionByTicker[b.ticker] || 0) - (positionByTicker[a.ticker] || 0));
     return [
-      {
-        title: 'Destacados',
-        description: 'Una selección de índices y metales para explorar.',
-        data: filtered.filter(stock => featured.has(stock.ticker)),
-      },
-      {
-        title: 'Por capitalización de mercado',
-        description: 'De mayor a menor valor total en bolsa.',
-        data: filtered.filter(stock => !featured.has(stock.ticker)),
-      },
+      { key: 'mine', title: 'Tus acciones', data: mine },
+      { key: 'all', title: `Todas · ${stocks.length}`, data: stocks },
     ].filter(section => section.data.length > 0);
-  }, [filtered]);
+  }, [query, filtered, stocks, positionByTicker]);
+
+  // What the investment is made of: the four largest positions, the rest
+  // folded into "Otras". Shares of the total, so the bar always adds up.
+  const allocation = useMemo(() => {
+    const total = myStocks.totalUsd;
+    if (total <= 0) return [];
+    const sorted = [...myStocks.positions]
+      .filter(p => p.valueUsd > 0)
+      .sort((a, b) => b.valueUsd - a.valueUsd);
+    const top = sorted.slice(0, 4).map(p => ({ key: p.ticker, label: p.name, share: p.valueUsd / total }));
+    const rest = sorted.slice(4).reduce((sum, p) => sum + p.valueUsd, 0);
+    const slices = rest > 0 ? [...top, { key: 'other', label: 'Otras', share: rest / total }] : top;
+    // Largest-remainder rounding so the legend always reads 100%: rounding
+    // each slice alone gave 33+33+33 = 99 (or 101).
+    const floors = slices.map(slice => Math.floor(slice.share * 100));
+    let remainder = 100 - floors.reduce((sum, n) => sum + n, 0);
+    const byRemainder = slices
+      .map((slice, index) => ({ index, frac: slice.share * 100 - floors[index] }))
+      .sort((a, b) => b.frac - a.frac);
+    for (const { index } of byRemainder) {
+      if (remainder <= 0) break;
+      floors[index] += 1;
+      remainder -= 1;
+    }
+    return slices.map((slice, index) => ({ ...slice, pct: floors[index] }));
+  }, [myStocks.positions, myStocks.totalUsd]);
+  // Today's move as a percent of yesterday's value (total minus today's P&L).
+  const todayBase = myStocks.totalUsd - myStocks.earnedTodayUsd;
+  const todayPct = todayBase > 0 ? (myStocks.earnedTodayUsd / todayBase) * 100 : null;
+
+  const starters = useMemo(
+    () => FEATURED_STOCK_TICKERS
+      .map(ticker => stocks.find(stock => stock.ticker === ticker))
+      .filter((stock): stock is GmStock => !!stock),
+    [stocks],
+  );
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -149,26 +188,80 @@ export const StocksListScreen = () => {
               <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Acciones de EE.UU.</Text>
-            <View style={styles.headerIconBtn} />
+            {/* "¿Cómo funciona?" lives up here now: at the end of a 450-row
+                list nobody ever reached it. */}
+            <TouchableOpacity
+              onPress={() => navigation.navigate('OndoStocksInfo')}
+              style={styles.headerIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Cómo funcionan las acciones de Estados Unidos"
+            >
+              <Icon name="help-circle" size={22} color={colors.white} />
+            </TouchableOpacity>
           </View>
           {/* Portfolio header (moved here with the Ahorros/Acciones split):
               the invested total + day P&L — red days are honest HERE, never
               on the home or the dollar account. ≥ $0.01 rule via
               formatUsdDeltaAbs; hidden entirely with no positions. */}
+          {myStocks.totalUsd <= 0 && (
+            // No holdings yet: an invitation, stated plainly. Fractions are
+            // the real unlock — people assume a share costs hundreds.
+            <View style={styles.inviteHero}>
+              <Text style={styles.inviteTitle}>Invierte en las empresas que usas</Text>
+              <Text style={styles.inviteSub}>
+                Compra fracciones con tus dólares. No necesitas una acción entera.
+              </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('OndoStocksInfo')}
+                style={styles.inviteLink}
+                accessibilityRole="button"
+                accessibilityLabel="Cómo funciona"
+              >
+                <Text style={styles.inviteLinkText}>¿Cómo funciona?</Text>
+                <Icon name="chevron-right" size={16} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          )}
           {myStocks.totalUsd > 0 && (
+            // Yours, and alive: the total, today's move as a pill (red days
+            // are honest HERE, never on Home), and what it is made of. No
+            // "total return": there is no cost basis to compute it from, and
+            // an invented one would be worse than none.
             <View style={styles.portfolioHero}>
-              <Text style={styles.portfolioLabel}>Tu inversión</Text>
+              <Text style={styles.portfolioLabel}>Tu inversión en EE.UU.</Text>
               <Text style={styles.portfolioAmount}>{fmtUsd(myStocks.totalUsd)}</Text>
               {formatUsdDeltaAbs(myStocks.earnedTodayUsd) && (
-                <Text
-                  style={[
-                    styles.portfolioDelta,
-                    myStocks.earnedTodayUsd < 0 && styles.portfolioDeltaDown,
-                  ]}
-                >
-                  hoy {myStocks.earnedTodayUsd >= 0 ? '+' : '−'}
-                  {formatUsdDeltaAbs(myStocks.earnedTodayUsd)}
-                </Text>
+                <View style={[styles.todayPill, myStocks.earnedTodayUsd < 0 && styles.todayPillDown]}>
+                  <Text style={[styles.todayPillText, myStocks.earnedTodayUsd < 0 && styles.todayPillTextDown]}>
+                    {myStocks.earnedTodayUsd >= 0 ? '▲ +' : '▼ −'}
+                    {formatUsdDeltaAbs(myStocks.earnedTodayUsd)}
+                    {todayPct !== null ? ` (${formatNumber(Math.abs(todayPct), { maximumFractionDigits: 2 })}%)` : ''} hoy
+                  </Text>
+                </View>
+              )}
+              {allocation.length > 0 && (
+                <View style={styles.allocation}>
+                  <View style={styles.allocationBar}>
+                    {allocation.map((slice, index) => (
+                      <View
+                        key={slice.key}
+                        style={[
+                          styles.allocationSlice,
+                          { flex: slice.share, opacity: 1 - index * 0.2 },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                  {/* Wrapping items, never truncated: every slice in the bar
+                      has a readable label, at any width or text size. */}
+                  <View style={styles.allocationLegend}>
+                    {allocation.map(slice => (
+                      <Text key={slice.key} style={styles.allocationLegendItem}>
+                        {`${slice.label} ${slice.pct}%`}
+                      </Text>
+                    ))}
+                  </View>
+                </View>
               )}
             </View>
           )}
@@ -209,7 +302,6 @@ export const StocksListScreen = () => {
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
-            <Text style={styles.sectionDescription}>{section.description}</Text>
           </View>
         )}
         contentContainerStyle={styles.listContent}
@@ -219,6 +311,49 @@ export const StocksListScreen = () => {
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View>
+            {/* Partner attribution ABOVE the fold: with 400+ rows, a footer
+                placement is effectively invisible. One slim line here shows
+                on first paint and scrolls away with the list — visibility
+                without permanently reserving screen. */}
+            <View style={styles.partnerRowTop}>
+              <Text style={styles.partnerText}>En alianza con</Text>
+              <Image source={OndoLogo} style={styles.partnerLogo} />
+              <Text style={styles.partnerBrand}>Ondo Finance</Text>
+            </View>
+            {/* Starter shelf: the four broad, low-effort places to begin,
+                each with one factual line. Replaces the "¿No sabes por dónde
+                empezar?" box, which framed the user as lost and ended on a
+                warning. Hidden while searching. */}
+            {!query && starters.length > 0 && (
+              <View style={styles.shelf}>
+                <Text style={styles.shelfTitle} accessibilityRole="header">Empieza por aquí</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelfRow}>
+                  {starters.map(stock => {
+                    const up = stock.dayChangePct >= 0;
+                    return (
+                      <TouchableOpacity
+                        key={stock.ticker}
+                        style={styles.shelfCard}
+                        activeOpacity={0.85}
+                        onPress={() => navigation.navigate('StockDetail', { ticker: stock.ticker })}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${stock.name}. ${STOCK_TAGLINES[stock.ticker] || ''}`}
+                      >
+                        <TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={32} />
+                        <Text style={styles.shelfName} numberOfLines={1}>{stock.name}</Text>
+                        <Text style={styles.shelfTagline} numberOfLines={2}>{STOCK_TAGLINES[stock.ticker] || stock.ticker}</Text>
+                        <View style={styles.shelfPriceRow}>
+                          <Text style={styles.rowMarketPrice}>{fmtUsd(stock.priceUsd)}</Text>
+                          <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
+                            {up ? '▲' : '▼'} {formatNumber(Math.abs(stock.dayChangePct), { maximumFractionDigits: 2 })}%
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
             <View style={styles.searchBox}>
               <Icon name="search" size={18} color={colors.text.light} />
               <TextInput
@@ -236,33 +371,6 @@ export const StocksListScreen = () => {
               )}
             </View>
 
-            {/* Partner attribution ABOVE the fold: with 400+ rows, a footer
-                placement is effectively invisible. One slim line here shows
-                on first paint and scrolls away with the list — visibility
-                without permanently reserving screen. */}
-            <View style={styles.partnerRowTop}>
-              <Text style={styles.partnerText}>En alianza con</Text>
-              <Image source={OndoLogo} style={styles.partnerLogo} />
-              <Text style={styles.partnerBrand}>Ondo Finance</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.howItWorksRow}
-              onPress={() => navigation.navigate('OndoStocksInfo')}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Cómo funcionan las acciones de Estados Unidos"
-            >
-              <View style={styles.howItWorksIcon}>
-                <Icon name="info" size={16} color={colors.primaryDark} />
-              </View>
-              <View style={styles.howItWorksCopy}>
-                <Text style={styles.howItWorksTitle}>¿Cómo funciona?</Text>
-                <Text style={styles.howItWorksSub}>
-                  Respaldo, dividendos, costos y riesgos — sin letra chica
-                </Text>
-              </View>
-              <Icon name="chevron-right" size={18} color={colors.text.light} />
-            </TouchableOpacity>
           </View>
         }
         ListEmptyComponent={
@@ -282,6 +390,8 @@ export const StocksListScreen = () => {
         }
         ListFooterComponent={
           <View>
+            {/* Disclosure is layered: the explainer is the ? in the header;
+                the issuer's wording closes the list. */}
             {/* Attribution lives in the list header (above the fold); the
                 footer keeps only the risk disclaimer + a closing mention. */}
             <Text style={styles.footerDisclaimer}>
@@ -309,9 +419,6 @@ const styles = StyleSheet.create({
   portfolioHero: { alignItems: 'center', marginTop: 14 },
   portfolioLabel: { fontSize: 12, color: colors.white, opacity: 0.85 },
   portfolioAmount: { fontSize: 32, fontWeight: 'bold', color: colors.white, marginTop: 2 },
-  portfolioDelta: { fontSize: 13, fontWeight: '600', color: colors.white, opacity: 0.9, marginTop: 4 },
-  // red-200 — legible red on the emerald gradient (error.icon is too dark)
-  portfolioDeltaDown: { color: colors.error.border, opacity: 1 },
   headerMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -344,7 +451,53 @@ const styles = StyleSheet.create({
   listContent: { padding: 16, paddingBottom: 40 },
   sectionHeader: { paddingTop: 12, paddingBottom: 10 },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
-  sectionDescription: { fontSize: 12, lineHeight: 17, color: colors.text.secondary, marginTop: 3 },
+  inviteHero: { marginTop: 14 },
+  inviteLink: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 10, alignSelf: 'flex-start' },
+  inviteLinkText: { fontSize: 14, fontWeight: '700', color: colors.white, textDecorationLine: 'underline' },
+  todayPill: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  todayPillDown: { backgroundColor: 'rgba(127,29,29,0.35)' },
+  todayPillText: { fontSize: 13, fontWeight: '700', color: colors.white },
+  todayPillTextDown: { color: colors.error.border },
+  allocation: { alignSelf: 'stretch', marginTop: 14 },
+  allocationBar: {
+    flexDirection: 'row',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    gap: 2,
+  },
+  allocationSlice: { backgroundColor: colors.white },
+  allocationLegend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    columnGap: 12,
+    rowGap: 2,
+    marginTop: 6,
+  },
+  allocationLegendItem: { fontSize: 12, color: colors.white, opacity: 0.9 },
+  inviteTitle: { fontSize: 22, fontWeight: 'bold', color: colors.white },
+  inviteSub: { fontSize: 14, lineHeight: 20, color: colors.white, opacity: 0.9, marginTop: 4 },
+  shelf: { marginTop: 4, marginBottom: 8 },
+  shelfTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary, marginBottom: 10 },
+  shelfRow: { gap: 10, paddingRight: 16 },
+  shelfCard: {
+    width: 148,
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+  },
+  shelfName: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginTop: 8 },
+  shelfTagline: { fontSize: 12, lineHeight: 16, color: colors.text.secondary, marginTop: 2, minHeight: 32 },
+  shelfPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
 
   searchBox: {
     flexDirection: 'row',
@@ -396,29 +549,6 @@ const styles = StyleSheet.create({
   partnerLogo: { width: 16, height: 16, borderRadius: 4 },
   partnerBrand: { fontSize: 12, fontWeight: '700', color: colors.text.secondary },
 
-  howItWorksRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    backgroundColor: colors.white,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-  },
-  howItWorksIcon: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    backgroundColor: colors.primaryLight,
-  },
-  howItWorksCopy: { flex: 1, marginLeft: 10 },
-  howItWorksTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  howItWorksSub: { marginTop: 2, fontSize: 11, lineHeight: 16, color: colors.text.secondary },
 
   footerDisclaimer: {
     fontSize: 11,

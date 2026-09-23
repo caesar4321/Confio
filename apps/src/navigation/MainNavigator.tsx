@@ -42,6 +42,10 @@ import LocalTransferStatusScreen from '../screens/LocalTransferStatusScreen';
 import LocalLimitIncreaseScreen from '../screens/LocalLimitIncreaseScreen';
 import AdditionalDocumentScreen from '../screens/AdditionalDocumentScreen';
 import LocalAccountApplicationScreen from '../screens/LocalAccountApplicationScreen';
+import ReceiveScreen from '../screens/ReceiveScreen';
+import { TransferScreen } from '../screens/TransferScreen';
+import DiscoverScreen from '../screens/DiscoverScreen';
+import { DiscoverStackHeader, SendStackHeader } from './StackScreenHeaders';
 import BrebLocationCheckScreen from '../screens/BrebLocationCheckScreen';
 import RampHistoryScreen from '../screens/RampHistoryScreen';
 
@@ -286,6 +290,10 @@ export const MainNavigator = () => {
         <Stack.Screen name="LocalAccountFunding" component={LocalAccountFundingScreen} options={{ headerShown: false }} />
         <Stack.Screen name="LocalSend" component={LocalSendScreen} options={{ headerShown: false }} />
         <Stack.Screen name="LocalReceive" component={LocalReceiveScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Receive" component={ReceiveScreen} options={{ headerShown: false }} />
+        {/* Enviar and Descubrir used to be bottom tabs; both are pushed now. */}
+        <Stack.Screen name="Send" component={TransferScreen} options={{ headerShown: true, header: () => <SendStackHeader /> }} />
+        <Stack.Screen name="Discover" component={DiscoverScreen} options={{ headerShown: true, header: () => <DiscoverStackHeader /> }} />
         <Stack.Screen name="LocalTransferStatus" component={LocalTransferStatusScreen} options={{ headerShown: false }} />
         <Stack.Screen name="LocalLimitIncrease" component={LocalLimitIncreaseScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AdditionalDocument" component={AdditionalDocumentScreen} options={{ headerShown: false }} />

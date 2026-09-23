@@ -28,6 +28,18 @@ export const STOCK_PRESENTATION: Record<string, {name: string; description: stri
   },
 };
 
+/**
+ * One line per starter-shelf card: what you get, in plain words. Factual, not
+ * promotional — no "safe", no "refugio" (gold falls too) — and no risk
+ * sermon either; the disclosure lives in its layered places (footer, info).
+ */
+export const STOCK_TAGLINES: Record<string, string> = {
+  SPY: '500 grandes empresas en una compra',
+  QQQ: 'Sigue al índice Nasdaq-100',
+  GLD: 'Sigue el precio del oro',
+  SLV: 'Sigue el precio de la plata',
+};
+
 /** Input is already ranked by market capitalization by gmMarket. */
 export const prioritizeStocks = <T extends {ticker: string}>(stocks: T[]): T[] => {
   const featured = new Set<string>(FEATURED_STOCK_TICKERS);

@@ -1813,8 +1813,7 @@ export const AccountDetailScreen = () => {
   */
 
   const handleSend = useCallback(() => {
-    // @ts-ignore - Navigation type mismatch, but should work at runtime
-    navigation.navigate('BottomTabs', { screen: 'Transfer' });
+    navigation.navigate('Send' as any);
   }, [navigation]);
 
   // Retirar mirrors Home: where no ramp provider operates, point to the
@@ -1823,10 +1822,10 @@ export const AccountDetailScreen = () => {
     if (isRampBlockedCountry(userProfile?.phoneCountry)) {
       Alert.alert(
         'No disponible en tu país',
-        'Los retiros con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.',
+        'Los retiros con proveedores aún no están disponibles en tu país. Puedes cambiar efectivo con financieras locales verificadas cerca de ti.',
         [
           { text: 'Cancelar', style: 'cancel' },
-          { text: 'Ir a Efectivo', onPress: () => (navigation as any).navigate('Financieras') },
+          { text: 'Ver financieras', onPress: () => (navigation as any).navigate('Financieras') },
         ],
       );
       return;

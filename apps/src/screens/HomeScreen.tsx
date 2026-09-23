@@ -25,7 +25,6 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
-import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
@@ -53,9 +52,7 @@ import {
 } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
-import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
-import { useRampCountry } from '../hooks/useRampCountry';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -800,254 +797,53 @@ export const HomeScreen = () => {
     }
   }, [claimingInvite, userProfile?.phoneNumber, userProfile?.phoneCountry]);
 
-  // Recargar/Retirar run through ramp providers (Koywe/Guardarian). Where
-  // neither operates (VE, NI, PA, CU, ...), the shared hook blocks up front
-  // and points to the Efectivo directory instead of failing deep inside the
-  // provider flow. It lives in the hook so every entry point gets the guard —
-  // this check used to be local to Home, which is how the referral CTAs
-  // walked blocked-country users straight into the ramp screen.
-  const { navigateToRampOrEfectivo } = useRampCountry();
-
-  // World pickers: Recargar/Retirar route money between the two settlement
-  // worlds — spend (cUSD · Algorand) vs grow (cUSD+ · savings chain). Two
-  // doors teach the split; more doors teach confusion. Employees skip these
-  // (savings is a personal-account feature).
-  const [rechargeSheetVisible, setRechargeSheetVisible] = useState(false);
-  const [withdrawSheetVisible, setWithdrawSheetVisible] = useState(false);
-
-  // cUSD phase-out (cusdDepositsPaused, server-flipped): the promoted door
-  // for EVERYONE is the USDT-BSC rail. Eligibility only decides what the
-  // delivered USDT becomes (silent mint to cUSD+ vs raw "Confío Dollar"),
-  // so the copy varies but the destination doesn't.
-  const savingsRechargeOption: RouteOption = {
-    icon: 'trending-up',
-    title: savingsPortfolio.savings.enabled
-      ? 'Para ahorrar e invertir'
-      : 'Recargar dólares',
-    subtitle: savingsPortfolio.savings.enabled
-      ? 'Gana rendimiento mientras decides · cUSD+'
-      : 'Se acreditan en tu Confío Dollar',
-    onPress: () => {
-      // USDT-BSC rail: Koywe delivers USDT to the user's own address. Goes
-      // through the shared helper so the blocked-country check (VE/NI/PA/CU)
-      // applies here too — this row used to navigate straight past it.
-      navigateToRampOrEfectivo('TopUp', { destination: 'cusd_plus' });
-    },
-  };
-  const cusdRechargeOption: RouteOption = {
-    icon: 'dollar-sign',
-    // While paused this door exists to UNBLOCK A DRAIN, not to sell cUSD:
-    // an off-ramp has a per-method minimum, so a leftover balance below it
-    // is stranded unless the user can top it back up to the threshold.
-    title: savingsPortfolio.savings.cusdDepositsPaused
-      ? 'Al antiguo Confío Dollar'
-      : 'Para usar día a día',
-    subtitle: savingsPortfolio.savings.cusdDepositsPaused
-      ? 'Completa el mínimo para poder retirarlo · cUSD'
-      : 'Enviar, pagar y comprar CONFIO · cUSD',
-    onPress: () => navigateToRampOrEfectivo('TopUp'),
-  };
-  // The BSC rail is offered whether or not the user is Ondo-eligible: an
-  // ineligible user's top-up lands as plain Confío Dollar (cUSD) instead of
-  // minting yield, which is exactly what savingsRechargeOption's subtitle
-  // already promises.
+  // Two verbs, nothing else. Recargar is "receive from my own bank" and
+  // lives inside Recibir; Retirar is "send to my own bank" inside Enviar;
+  // Pagar is the QR tab; the cash directory is the fallback row inside both
+  // wherever no ramp provider operates.
   //
-  // The cUSD door follows the SAME rule as the legacy wallet row below
-  // (`!paused || cUSDBalance > 0`): hidden from people with nothing to
-  // drain, kept for holders — otherwise a balance under the off-ramp
-  // minimum can never be withdrawn at all.
-  const showLegacyCusdDoor =
-    !savingsPortfolio.savings.cusdDepositsPaused || cUSDBalance > 0;
-  const rechargeOptions: RouteOption[] = showLegacyCusdDoor
-    ? [savingsRechargeOption, cusdRechargeOption]
-    : [savingsRechargeOption];
-  // A one-option sheet is pure friction: go straight to the flow. Read via
-  // a ref because the quickActions useMemo (narrow deps) would otherwise
-  // capture a stale options array.
-  const rechargeOptionsRef = React.useRef(rechargeOptions);
-  rechargeOptionsRef.current = rechargeOptions;
-  const openRechargeFlow = React.useCallback(() => {
-    const opts = rechargeOptionsRef.current;
-    if (opts.length === 1) {
-      opts[0].onPress();
-      return;
-    }
-    setRechargeSheetVisible(true);
-  }, []);
+  // Positions never swap (muscle memory). Only the emphasis moves: with
+  // nothing to send, the useful door is Recibir, so it is the filled one.
+  const balancesLoaded = !myBalancesLoading && !savingsPortfolio.loading;
+  // Positions, not the dollar total: a position marked at $0.00 is still
+  // something the user owns.
+  const hasStockHoldings = savingsPortfolio.stocks.positions.length > 0
+    || savingsPortfolio.stocks.totalUsd > 0;
+  // Names, not a count alone: "S&P 500 · NVIDIA" is yours; "2 posiciones"
+  // is a statement. Home stays calm — no day change here.
+  const stockHoldingsSummary = React.useMemo(() => {
+    const names = [...savingsPortfolio.stocks.positions]
+      .sort((a, b) => b.valueUsd - a.valueUsd)
+      .map(p => p.name);
+    if (names.length === 0) return 'Inversiones · Ondo';
+    return names.length <= 2 ? names.join(' · ') : `${names.slice(0, 2).join(' · ')} y ${names.length - 2} más`;
+  }, [savingsPortfolio.stocks.positions]);
+  const primaryAction: 'send' | 'receive' =
+    balancesLoaded && totalUSDValue < 0.01 ? 'receive' : 'send';
 
-  // What the BSC withdrawal rail can actually move in ONE operation: BOTH
-  // legs. The funding batch redeems the shortfall out of the vault and pays
-  // from the combined balance in a single transaction, and the server's
-  // sufficiency check authorizes the two Confío-dollar positions. Transient
-  // raw USDT remains visible in the total but waits for foreground conversion
-  // before it can fund a normal withdrawal — so max() understated
-  // a split balance and sent users to a door that looked too small to use
-  // (audit 2026-08-03 [P2] #13). SUM, matching the sell screens.
-  const bscWithdrawableUsd =
-    savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd;
-
-  // Both options land in the user's bank — the differentiator is where the
-  // money sits NOW, so subtitles show live balances instead of destinations.
-  // The legacy cUSD row is OMITTED (not merely disabled) once drained, so a
-  // user with no cUSD sees a single door and skips the sheet entirely —
-  // same rule as the recharge sheet and the legacy wallet row.
-  const withdrawOptions: RouteOption[] = [
-    ...(showLegacyCusdDoor
-      ? [{
-        icon: 'dollar-sign',
-        title: 'Desde mi cUSD',
-        subtitle: `$${formatFixedFloor(cUSDBalance, 2)} disponibles`,
-        disabled: cUSDBalance <= 0,
-        onPress: () => navigateToRampOrEfectivo('Sell'),
-      } as RouteOption]
-      : []),
-    {
-      icon: 'trending-up',
-      title: 'Desde mis ahorros',
-      // cUSD+ position, cUSD, or transient USDT — the rail exits every leg,
-      // including an Ondo-ineligible user's universal cUSD, so they can
-      // reach a bank. Stocks stay excluded: they can't exit through here, so
-      // totalUsd would overstate what's withdrawable.
-      subtitle: bscWithdrawableUsd > 0
-          ? `$${formatFixedFloor(bscWithdrawableUsd, 2)} en ${savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar'}`
-          : 'Aún no tienes ahorros',
-      disabled: bscWithdrawableUsd <= 0,
-      onPress: () => {
-        // Savings sells ride Guardarian everywhere (SellScreen routes on
-        // `destination`, not on the country), so the only gate left is the
-        // one that applies to every ramp: countries where NO provider
-        // operates go to the Efectivo directory instead.
-        navigateToRampOrEfectivo('Sell', { destination: 'cusd_plus' });
-      },
-    },
-  ];
-  // Same one-option rule as Recargar: a sheet that only ever offers one door
-  // is pure friction. Ref for the same reason — quickActionsData's useMemo
-  // has narrow deps and would otherwise capture a stale options array.
-  const withdrawOptionsRef = React.useRef(withdrawOptions);
-  withdrawOptionsRef.current = withdrawOptions;
-  const openWithdrawFlow = React.useCallback(() => {
-    const opts = withdrawOptionsRef.current;
-    // Skip the sheet only when exactly one door is actually USABLE. Unlike
-    // the recharge options, a withdraw row can be disabled (nothing to
-    // withdraw from that leg), and onPress() would happily fire anyway —
-    // dropping the user into an empty Sell screen.
-    const usable = opts.filter((o) => !o.disabled);
-    if (usable.length === 1) {
-      usable[0].onPress();
-      return;
-    }
-    setWithdrawSheetVisible(true);
-  }, []);
-
-  // Filter quick actions based on employee permissions
   const quickActions = React.useMemo(() => {
-    // If user is an employee, filter actions based on permissions
+    const send = {
+      id: 'send' as const,
+      label: 'Enviar',
+      icon: 'arrow-up-right',
+      route: () => navigation.navigate('Send' as any),
+    };
+    const receive = {
+      id: 'receive' as const,
+      label: 'Recibir',
+      icon: 'arrow-down-left',
+      route: () => navigation.navigate('Receive' as any),
+    };
+    // Employees move the business's money only as far as their permissions
+    // allow, and never to or from a bank: that is the owner's alone
+    // (CreateRampOrder refuses employees server-side, _employee_ramp_denial).
+    // Recibir is mostly bank rails and the owner's own number, so employees
+    // get Enviar alone — cobrar is the Cobrar tab.
     if (activeAccount?.isEmployee) {
-      const permissions = activeAccount.employeePermissions || {
-        acceptPayments: false,
-        viewTransactions: false,
-        viewBalance: false,
-        sendFunds: false,
-        manageEmployees: false,
-        viewBusinessAddress: false,
-        viewAnalytics: false,
-        manageP2p: false,
-      };
-
-      return [
-        {
-          id: 'send',
-          label: 'Enviar',
-          icon: 'send',
-          color: colors.primary,
-          route: () => navigation.navigate('BottomTabs', { screen: 'Transfer' }),
-        },
-        {
-          id: 'pay',
-          label: 'Pagar',
-          icon: 'shopping-bag',
-          color: colors.secondary,
-          route: () => {
-            const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-            navigation.navigate('BottomTabs', {
-              screen: isBusinessAccount ? 'Charge' : 'Scan'
-            } as any);
-          },
-        },
-        {
-          id: 'efectivo',
-          label: 'Efectivo',
-          icon: 'cash',
-          color: colors.primaryDark,
-          route: () => navigation.navigate('Financieras'),
-        },
-      ].filter(action => {
-        switch (action.id) {
-          case 'send':
-            return permissions.sendFunds === true;
-          // 'receive' removed
-          case 'pay':
-            return permissions.sendFunds === true;
-          // Recargar/Retirar are deliberately absent from the list above:
-          // moving business money to or from a BANK is the owner's alone.
-          // They were previously gated on manageP2p and sendFunds, which
-          // are operational permissions and grant no banking authority —
-          // any employee who could pay a supplier could also drain the
-          // account to a bank. CreateRampOrder now refuses employees
-          // server-side too (_employee_ramp_denial).
-          default:
-            return true;
-        }
-      });
+      return activeAccount.employeePermissions?.sendFunds === true ? [send] : [];
     }
-
-    // Non-employees get new default actions (No Receive, Add Withdraw)
-    return [
-      {
-        id: 'send',
-        label: 'Enviar',
-        icon: 'send',
-        color: colors.primary,
-        route: () => navigation.navigate('BottomTabs', { screen: 'Transfer' }),
-      },
-      {
-        id: 'pay',
-        label: 'Pagar',
-        icon: 'shopping-bag',
-        color: colors.secondary,
-        route: () => {
-          const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-          navigation.navigate('BottomTabs', {
-            screen: isBusinessAccount ? 'Charge' : 'Scan'
-          } as any);
-        },
-      },
-      {
-        id: 'exchange',
-        label: 'Recargar',
-        icon: 'dollar-sign',
-        color: colors.accent,
-        route: openRechargeFlow,
-      },
-      {
-        id: 'withdraw',
-        label: 'Retirar',
-        icon: 'bank',
-        color: colors.offRampIcon,
-        route: () => openWithdrawFlow(),
-      },
-      {
-        id: 'efectivo',
-        label: 'Efectivo',
-        icon: 'cash',
-        color: colors.primaryDark,
-        route: () => navigation.navigate('Financieras'),
-      }
-    ];
-    // Both flows are useCallback([]) and read their options through refs, so
-    // they're referentially stable and can't go stale here.
-  }, [activeAccount, navigation, openRechargeFlow, openWithdrawFlow]);
+    return [send, receive];
+  }, [activeAccount, navigation]);
 
   // Entrance animation - only run after initialization
   React.useEffect(() => {
@@ -1379,7 +1175,7 @@ export const HomeScreen = () => {
             }
           ]}
         >
-          <BrandFieldBackground id="homeField" ringCx="102%" ringCy="46%" ringR={80} ringWidth={20} />
+          <BrandFieldBackground id="homeField" ringCx="100%" ringCy="58%" ringR={96} ringWidth={22} />
           <View style={styles.balanceCardInner}>
           <View style={styles.portfolioHeader}>
             <View style={styles.portfolioTitleContainer}>
@@ -1435,6 +1231,31 @@ export const HomeScreen = () => {
               {displayedPortfolioBalance}
             </Text>
           </Animated.View>
+
+          {/* The two verbs sit ON the brand field, where the coin ring runs
+              behind them — part of the hero, not a white slab under it. The
+              emphasised one is solid white (the strongest mark on emerald);
+              the other is glass. Positions never swap. */}
+          {quickActions.length > 0 && (
+            <View style={styles.heroActions}>
+              {quickActions.map((action) => {
+                const filled = action.id === primaryAction || quickActions.length === 1;
+                return (
+                  <TouchableOpacity
+                    key={action.id}
+                    style={[styles.heroAction, filled ? styles.heroActionFilled : styles.heroActionGlass]}
+                    onPress={action.route}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel={action.label}
+                  >
+                    <Icon name={action.icon} size={20} color={filled ? colors.primaryDeep : colors.white} />
+                    <Text style={[styles.heroActionLabel, filled && styles.heroActionLabelFilled]}>{action.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
           </View>
         </Animated.View>
 
@@ -1575,22 +1396,15 @@ export const HomeScreen = () => {
             </View>
           </Animated.View>
         )}
-        {/* Quick Actions */}
-        <Animated.View
-          style={[
-            styles.quickActionsCard,
-            {
-              opacity: fadeAnim,
-              transform: [
-                {
-                  translateY: fadeTranslateY30
-                }
-              ],
-            }
-          ]}
-        >
-          {/* Show employee welcome message if limited actions available */}
-          {activeAccount?.isEmployee && quickActions.length <= 1 ? (
+        {/* Employees with nothing to send get a welcome card where the
+            verbs would be (the verbs themselves live inside the hero). */}
+        {activeAccount?.isEmployee && quickActions.length === 0 && (
+          <Animated.View
+            style={[
+              styles.employeeWelcomeSlot,
+              { opacity: fadeAnim, transform: [{ translateY: fadeTranslateY30 }] },
+            ]}
+          >
             <View style={styles.employeeWelcomeContainer}>
               <View style={styles.employeeWelcomeIcon}>
                 <Icon name="briefcase" size={32} color={colors.secondaryDark} />
@@ -1606,33 +1420,20 @@ export const HomeScreen = () => {
                   ? 'estás listo para recibir pagos y atender a nuestros clientes.'
                   : 'eres una parte importante de nuestro equipo.'}
               </Text>
-            </View>
-          ) : (
-            quickActions.map((action, index) => (
+              {/* The old Efectivo quick action had no permission gate: it is
+                  a directory, not a transfer. Keep it reachable here. */}
               <TouchableOpacity
-                key={action.id}
-                style={styles.actionButton}
-                onPress={action.route}
-                activeOpacity={0.7}
+                style={styles.employeeCashLink}
+                onPress={() => navigation.navigate('Financieras' as any)}
+                accessibilityRole="button"
+                accessibilityLabel="Efectivo con un agente"
               >
-                <View
-                  style={[
-                    styles.actionIcon,
-                    { backgroundColor: action.color },
-                  ]}
-                >
-                  {/* @ts-ignore */}
-                  {action.icon === 'bank' || action.icon === 'cash' ? (
-                    <MCIcon name={action.icon} size={action.icon === 'cash' ? 22 : 20} color={colors.white} />
-                  ) : (
-                    <Icon name={action.icon} size={22} color={colors.white} />
-                  )}
-                </View>
-                <Text style={styles.actionLabel}>{action.label}</Text>
+                <Icon name="map-pin" size={16} color={colors.primaryDark} />
+                <Text style={styles.employeeCashLinkText}>Efectivo con un agente</Text>
               </TouchableOpacity>
-            ))
-          )}
-        </Animated.View>
+            </View>
+          </Animated.View>
+        )}
 
         {/* Crecimiento Confío stats */}
         <HomeStatsSection
@@ -1851,16 +1652,28 @@ export const HomeScreen = () => {
                     <View style={styles.walletLogoContainer}>
                       <Icon name="trending-up" size={22} color={colors.white} />
                     </View>
+                    {/* Nothing invested yet: an invitation, not a "$0.00"
+                        dead end. The balance slot holds no market data — it
+                        becomes an "Explorar" pill until there is money of
+                        the user's own to show there. */}
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName}>Acciones de EE.UU.</Text>
-                      <Text style={styles.walletSymbol}>Inversiones · Ondo</Text>
+                      <Text style={styles.walletSymbol}>
+                        {hasStockHoldings ? stockHoldingsSummary : 'Compra fracciones con tus dólares'}
+                      </Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
-                      <Text style={styles.walletBalanceText}>
-                        {(canViewBalance && showBalance)
-                          ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}`
-                          : '••••'}
-                      </Text>
+                      {hasStockHoldings ? (
+                        <Text style={styles.walletBalanceText}>
+                          {(canViewBalance && showBalance)
+                            ? `$${formatFixedFloor(savingsPortfolio.stocks.totalUsd, 2)}`
+                            : '••••'}
+                        </Text>
+                      ) : (
+                        <View style={styles.explorePill}>
+                          <Text style={styles.explorePillText}>Explorar</Text>
+                        </View>
+                      )}
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
                   </View>
@@ -1880,18 +1693,6 @@ export const HomeScreen = () => {
         )}
       </ScrollView>
 
-      <RouteSheet
-        visible={rechargeSheetVisible}
-        title="¿Para qué es esta recarga?"
-        options={rechargeOptions}
-        onClose={() => setRechargeSheetVisible(false)}
-      />
-      <RouteSheet
-        visible={withdrawSheetVisible}
-        title="¿Desde dónde quieres retirar?"
-        options={withdrawOptions}
-        onClose={() => setWithdrawSheetVisible(false)}
-      />
 
       {/* Profile Menu */}
       <ProfileMenu
@@ -2031,42 +1832,75 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
   },
   // Quick actions styles
-  quickActionsCard: {
+  heroActions: {
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    paddingVertical: 24,
-    paddingHorizontal: 16,
+    gap: 12,
+    marginTop: 6,
+  },
+  heroAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    borderRadius: 16,
+  },
+  heroActionFilled: {
+    backgroundColor: colors.white,
+    shadowColor: '#064E3B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  heroActionGlass: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+  },
+  heroActionLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  heroActionLabelFilled: {
+    color: colors.primaryDeep,
+  },
+  explorePill: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  explorePillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primaryDeep,
+  },
+  employeeWelcomeSlot: {
     backgroundColor: colors.white,
     marginHorizontal: 20,
     marginTop: -20,
     borderRadius: 20,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
     elevation: 5,
   },
-  actionButton: {
+  employeeCashLink: {
+    flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 6,
   },
-  actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  actionLabel: {
-    fontSize: 13,
-    color: colors.text.primary,
+  employeeCashLinkText: {
+    fontSize: 14,
     fontWeight: '600',
+    color: colors.primaryDark,
   },
   // Wallets section styles
   walletsSection: {

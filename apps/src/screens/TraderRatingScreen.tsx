@@ -151,15 +151,12 @@ export const TraderRatingScreen: React.FC = () => {
 
   const handleGoBack = () => {
     // Exchange is no longer exposed in the tab shell.
-    navigation.reset({
-      index: 0,
+    (navigation as any).reset({
+      index: 1,
+      // Descubrir is a pushed screen now, so it sits on top of the tabs.
       routes: [
-        { 
-          name: 'BottomTabs',
-          params: { 
-            screen: 'Discover'
-          }
-        }
+        { name: 'BottomTabs' },
+        { name: 'Discover' },
       ],
     });
   };

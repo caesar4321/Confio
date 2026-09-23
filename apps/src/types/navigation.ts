@@ -20,11 +20,9 @@ export type AuthStackParamList = {
 // Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
-  Transfer: undefined;
   Employees: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
-  Discover: undefined;
   Exchange: {
     showMyOffers?: boolean;
     refreshData?: boolean;
@@ -43,6 +41,9 @@ export type MainStackParamList = {
   LocalAccountFunding: undefined;
   LocalSend: { methodId: string; scannedQr?: string };
   LocalReceive: { methodId: string };
+  Receive: undefined;
+  Send: undefined;
+  Discover: undefined;
   LocalTransferStatus: { journeyId?: string } | undefined;
   LocalLimitIncrease: undefined;
   AdditionalDocument: { idCountry?: string; documentTypes?: string[]; reason?: string } | undefined;

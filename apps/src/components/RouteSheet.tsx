@@ -57,6 +57,47 @@ export interface RouteOption {
   disabled?: boolean;
 }
 
+/**
+ * One routing row. Exported so screens that list the same routes inline (the
+ * Recibir screen) look exactly like the sheets that list them as a picker.
+ * `onPress` defaults to the option's own action.
+ */
+export const RouteOptionRow = ({
+  option: o,
+  onPress,
+  first = false,
+}: {
+  option: RouteOption;
+  onPress?: () => void;
+  /** Drops the top hairline — for the first row of an inline card. */
+  first?: boolean;
+}) => (
+  <TouchableOpacity
+    style={[styles.option, first && { borderTopWidth: 0 }, o.disabled && { opacity: 0.45 }]}
+    disabled={o.disabled}
+    onPress={onPress ?? o.onPress}
+    activeOpacity={0.8}
+    accessibilityRole="button"
+  >
+    {o.image ? (
+      <Image source={o.image} style={styles.optionImage} />
+    ) : (
+      <View style={styles.optionIcon}>
+        <Icon name={o.icon} size={20} color={colors.primaryDark} />
+      </View>
+    )}
+    <View style={{ flex: 1 }}>
+      <View style={styles.optionTitleRow}>
+        {o.flag ? <Text style={styles.optionFlag}>{o.flag}</Text> : null}
+        <Text style={styles.optionTitle}>{o.title}</Text>
+      </View>
+      <Text style={styles.optionSubtitle}>{o.subtitle}</Text>
+      {o.note ? <Text style={styles.optionNote}>{o.note}</Text> : null}
+    </View>
+    <Icon name="chevron-right" size={18} color={colors.text.light} />
+  </TouchableOpacity>
+);
+
 export const RouteSheet = ({
   visible,
   title,
@@ -105,33 +146,14 @@ export const RouteSheet = ({
             bounces={false}
           >
             {options.map((o) => (
-              <TouchableOpacity
+              <RouteOptionRow
                 key={o.id ?? o.title}
-                style={[styles.option, o.disabled && { opacity: 0.45 }]}
-                disabled={o.disabled}
+                option={o}
                 onPress={() => {
                   onClose();
                   o.onPress();
                 }}
-                activeOpacity={0.8}
-              >
-                {o.image ? (
-                  <Image source={o.image} style={styles.optionImage} />
-                ) : (
-                  <View style={styles.optionIcon}>
-                    <Icon name={o.icon} size={20} color={colors.primaryDark} />
-                  </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <View style={styles.optionTitleRow}>
-                    {o.flag ? <Text style={styles.optionFlag}>{o.flag}</Text> : null}
-                    <Text style={styles.optionTitle}>{o.title}</Text>
-                  </View>
-                  <Text style={styles.optionSubtitle}>{o.subtitle}</Text>
-                  {o.note ? <Text style={styles.optionNote}>{o.note}</Text> : null}
-                </View>
-                <Icon name="chevron-right" size={18} color={colors.text.light} />
-              </TouchableOpacity>
+              />
             ))}
           </ScrollView>
         </View>

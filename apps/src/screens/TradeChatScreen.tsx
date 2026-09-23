@@ -39,6 +39,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { technicalFontFamily } from '../utils/fontFamily';
+import { exitToDiscover } from '../navigation/exitToDiscover';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -1211,7 +1212,7 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   const handleGoBack = () => {
-    navigation.navigate('BottomTabs', { screen: 'Discover' });
+    exitToDiscover(navigation as any);
   };
 
   const handleAbandonTrade = () => {
@@ -1238,7 +1239,7 @@ export const TradeChatScreen: React.FC = () => {
                   setBanner({ variant: 'error', message: err });                  return;
                 }
                 Alert.alert('Solicitud eliminada', 'Se eliminó la solicitud y el chat.');
-                navigation.navigate('BottomTabs', { screen: 'Discover' });
+                exitToDiscover(navigation as any);
               } catch (e) {
                 setBanner({ variant: 'error', message: 'No se pudo eliminar la solicitud.' });              }
             });
@@ -1249,7 +1250,7 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   const handleViewTrade = () => {
-    navigation.navigate('BottomTabs', { screen: 'Discover' });
+    exitToDiscover(navigation as any);
   };
 
   const [showConfirmPaidModal, setShowConfirmPaidModal] = useState(false);
@@ -2006,7 +2007,7 @@ export const TradeChatScreen: React.FC = () => {
                       if (!res.success) throw new Error(res.error || 'No se pudo cancelar');
                     });
                     Alert.alert('Intercambio cancelado', 'Fondos recuperados y chat cerrado.');
-                    navigation.navigate('BottomTabs', { screen: 'Discover' });
+                    exitToDiscover(navigation as any);
                   } catch (e) {
                     setBanner({ variant: 'error', message: 'No se pudo cancelar y recuperar.' });                  }
                 }}
@@ -2033,7 +2034,7 @@ export const TradeChatScreen: React.FC = () => {
                       if (!res.success) throw new Error(res.error || 'No se pudo cancelar');
                     });
                     Alert.alert('Cancelado', 'Tiempo agotado. Fondos recuperados y chat cerrado.');
-                    navigation.navigate('BottomTabs', { screen: 'Discover' });
+                    exitToDiscover(navigation as any);
                   } catch (e) {
                     setBanner({ variant: 'error', message: 'No se pudo cancelar por tiempo agotado.' });                  }
                 }}

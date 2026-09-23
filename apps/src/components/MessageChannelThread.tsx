@@ -586,6 +586,18 @@ export function MessageChannelThread({
         ) : null}
         <View style={styles.channelContextCard}>
           <Text style={styles.channelContextText}>{channelMeta[channel.id].description}</Text>
+          {/* Descubrir is no longer a tab: its full feed (and the announcement
+              mute toggle) opens from the channels that carry its posts. */}
+          {channel.id !== 'soporte' && (
+            <Pressable
+              onPress={() => navigation.navigate('Discover')}
+              accessibilityRole="button"
+              accessibilityLabel="Ver todo en Descubrir"
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Text style={styles.discoverLink}>Ver todo en Descubrir ›</Text>
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.messagesWrap}>
@@ -738,6 +750,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     color: colors.text.light,
+  },
+  discoverLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primaryDark,
+    marginTop: 6,
   },
   messagesWrap: {
     paddingHorizontal: 14,

@@ -1,25 +1,22 @@
 import React, { useCallback, useMemo } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
-import { View, StyleSheet, Platform, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../types/navigation';
 import { HomeScreen } from '../screens/HomeScreen';
-import { TransferScreen } from '../screens/TransferScreen';
 import EmployeesScreen from '../screens/EmployeesScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
-import DiscoverScreen from '../screens/DiscoverScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
+import { QrPayIcon } from '../components/QrPayIcon';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useQuery } from '@apollo/client';
-import { GET_MESSAGE_INBOX_UNREAD_COUNT, GET_NOTIFICATION_PREFERENCES } from '../apollo/queries';
-import { useMutation } from '@apollo/client';
-import { UPDATE_NOTIFICATION_PREFERENCES } from '../apollo/mutations';
+import { GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import { Text } from 'react-native';
 
 // Single navigator instance
@@ -40,10 +37,6 @@ export const BottomTabNavigator = () => {
     nextFetchPolicy: 'cache-first',
     skip: !canQueryMessages,
   });
-  const { data: notificationPrefsData } = useQuery(GET_NOTIFICATION_PREFERENCES, {
-    skip: !isAuthenticated || authLoading,
-  });
-  const [updateNotificationPreferences] = useMutation(UPDATE_NOTIFICATION_PREFERENCES);
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
@@ -59,14 +52,6 @@ export const BottomTabNavigator = () => {
   const handleMessagesPress = useCallback(() => {
     navigation.navigate('HomeMessages' as any);
   }, [navigation]);
-  const handleDiscoverMutePress = useCallback(() => {
-    void updateNotificationPreferences({
-      variables: {
-        pushAnnouncements: !Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements),
-      },
-    });
-  }, [notificationPrefsData?.notificationPreferences?.pushAnnouncements, updateNotificationPreferences]);
-
   React.useEffect(() => {
     if (!canQueryMessages) {
       return;
@@ -92,61 +77,10 @@ export const BottomTabNavigator = () => {
     />
   ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, handleMessagesPress, unreadNotifications, currentAccountAvatar, messageUnreadData?.messageInboxUnreadCount]);
 
-  // Dynamic scan header that updates based on account type
-  const ScanHeader = useCallback(() => {
-    const title = 'Escanear';
-    return (
-      <Header
-        navigation={navigation}
-        isHomeScreen={false}
-        title={title}
-        onProfilePress={undefined}
-        onNotificationPress={undefined}
-        backgroundColor={undefined}
-        showBackButton={false}
-        isLight={false}
-        unreadNotifications={0}
-        currentAccountAvatar="U"
-      />
-    );
-  }, [navigation]);
 
   // Charge header removed since ChargeScreen has its own header
 
 
-
-  const DiscoverHeader = useCallback(() => (
-    <Header
-      navigation={navigation}
-      isHomeScreen={false}
-      title="Descubrir"
-      onProfilePress={undefined}
-      onNotificationPress={undefined}
-      backgroundColor="#fff"
-      showBackButton={false}
-      isLight={false}
-      unreadNotifications={0}
-      currentAccountAvatar="U"
-      rightAccessory={(
-        <TouchableOpacity
-          onPress={handleDiscoverMutePress}
-          style={[
-            styles.headerIconButton,
-            !Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) && styles.headerIconButtonActive,
-          ]}
-          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-          accessibilityRole="button"
-          accessibilityLabel={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? 'Activar anuncios' : 'Silenciar anuncios'}
-        >
-          <Icon
-            name={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? 'volume-x' : 'bell-off'}
-            size={16}
-            color={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? '#FFFFFF' : '#667085'}
-          />
-        </TouchableOpacity>
-      )}
-    />
-  ), [navigation, handleDiscoverMutePress, notificationPrefsData?.notificationPreferences?.pushAnnouncements]);
 
   const ProfileHeader = useCallback(() => (
     <Header
@@ -166,19 +100,13 @@ export const BottomTabNavigator = () => {
   // Check if account is business (using normalized type)
   const isBusinessAccount = accountType === 'business';
 
-  // Two different tabs share this header. The personal tab is no longer an
-  // address book — it routes money (local rails, crypto addresses, contacts),
-  // so it reads "Transferir"; the business tab is still the employee roster.
-  const peopleTabTitle = useMemo(
-    () => (isBusinessAccount ? 'Empleados' : 'Transferir'),
-    [isBusinessAccount]
-  );
-
+  // Business-only roster tab. The personal "Transferir" tab is gone: sending
+  // is the Enviar screen, pushed from Home's Enviar button.
   const PeopleTabHeader = useCallback(() => (
     <Header
       navigation={navigation}
       isHomeScreen={false}
-      title={peopleTabTitle}
+      title="Empleados"
       onProfilePress={undefined}
       onNotificationPress={undefined}
       backgroundColor="#fff"
@@ -187,24 +115,36 @@ export const BottomTabNavigator = () => {
       unreadNotifications={0}
       currentAccountAvatar="U"
     />
-  ), [navigation, peopleTabTitle]);
+  ), [navigation]);
 
   // Memoize tab options to ensure they update when activeAccount changes
+  // Pagar: the QR scanner. Personal accounts get it as the raised center
+  // button (Inicio · Pagar · Perfil). Business keeps Cobrar in the center and
+  // Pagar sits beside it as a regular tab — paying a supplier's Pix QR is a
+  // business errand too.
   const scanTabOptions = useMemo(() => ({
-    header: () => <ScanHeader />,
+    // Full-bleed camera: the scanner draws its own controls.
+    headerShown: false,
     freezeOnBlur: true,
     tabBarLabel: ({ color }: any) => (
-      <Text style={{ color, fontSize: 12 }}>
-        Escanear
+      // The raised button is emerald, so its label is too (the global active
+      // tint is violet, which read as a second brand colour under it).
+      <Text style={{ color: isBusinessAccount ? color : '#10B981', fontSize: 12, fontWeight: isBusinessAccount ? '400' : '600' }}>
+        Pagar
       </Text>
     ),
     tabBarIcon: ({ color, size }: any) => (
-      <View style={styles.scanButton}>
-        <Icon name="maximize" size={32} color="#fff" />
-      </View>
+      isBusinessAccount ? (
+        <QrPayIcon size={size} color={color} />
+      ) : (
+        <View style={styles.payButton}>
+          <QrPayIcon size={32} color="#fff" />
+        </View>
+      )
     ),
+    tabBarAccessibilityLabel: 'Pagar con QR',
     tabBarButton: (isEmployee && !permissions.sendFunds) ? () => null : undefined, // Hide for employees without sendFunds permission
-  }), [ScanHeader, isBusinessAccount, isEmployee, permissions.sendFunds]);
+  }), [isBusinessAccount, isEmployee, permissions.sendFunds]);
 
   // Charge tab options - only show for business accounts
   const chargeTabOptions = useMemo(() => ({
@@ -260,49 +200,28 @@ export const BottomTabNavigator = () => {
             tabBarIcon: ({ color, size }: any) => <Icon name="home" size={size} color={color} />
           }}
         />
-        {isBusinessAccount ? (
-          <Tabs.Screen 
-            name="Employees" 
+        {isBusinessAccount && (
+          <Tabs.Screen
+            name="Employees"
             component={EmployeesScreen}
             options={{
-              header: () => <PeopleTabHeader />, // reuse header style
+              header: () => <PeopleTabHeader />,
               tabBarLabel: 'Empleados',
               tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
             }}
           />
-        ) : (
+        )}
+        {isBusinessAccount && (
           <Tabs.Screen
-            name="Transfer"
-            component={TransferScreen}
-            options={{
-              header: () => <PeopleTabHeader />,
-              tabBarLabel: 'Transferir',
-              tabBarIcon: ({ color, size }: any) => <Icon name="repeat" size={size} color={color} />
-            }}
+            name="Charge"
+            component={ChargeScreen}
+            options={{ ...chargeTabOptions, freezeOnBlur: true }}
           />
         )}
-        {!isBusinessAccount && (
-          <Tabs.Screen 
-            name="Scan" 
-            component={ScanTab}
-          options={scanTabOptions}
-        />
-      )}
-      {isBusinessAccount && (
-        <Tabs.Screen 
-          name="Charge" 
-          component={ChargeScreen}
-          options={{ ...chargeTabOptions, freezeOnBlur: true }}
-        />
-      )}
         <Tabs.Screen
-          name="Discover"
-          component={DiscoverScreen}
-          options={{
-            header: () => <DiscoverHeader />,
-            tabBarLabel: 'Descubrir',
-            tabBarIcon: ({ color, size }: any) => <Icon name="compass" size={size} color={color} />
-          }}
+          name="Scan"
+          component={ScanTab}
+          options={scanTabOptions}
         />
         <Tabs.Screen 
           name="Profile" 
@@ -332,6 +251,28 @@ const styles = StyleSheet.create({
   headerIconButtonActive: {
     backgroundColor: '#111827',
     borderColor: '#111827',
+  },
+  payButton: {
+    width: 60,
+    height: 60,
+    // Rounded square, not a circle: it echoes the scanner frame drawn inside
+    // and sets Pagar apart from Cobrar's round button on business accounts.
+    borderRadius: 18,
+    backgroundColor: '#34d399',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 40,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      },
+      android: {
+        elevation: 5,
+      },
+    }),
   },
   scanButton: {
     width: 56,

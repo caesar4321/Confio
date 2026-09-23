@@ -8,13 +8,26 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useQuery } from '@apollo/client';
+import { gql, useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../config/theme';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
+
+// Tickers only (~6 KB) — just enough to count the U.S. assets on offer.
+// Fetched no-cache on purpose: writing a tickers-only `assets` array into the
+// cache would replace the explorer's full market rows (no keyFields here).
+const GM_ASSET_COUNT = gql`
+  query GmAssetCount {
+    gmMarket {
+      assets {
+        ticker
+      }
+    }
+  }
+`;
 
 type StatsSummary = {
   totalUsers?: number | null;
@@ -91,6 +104,12 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     nextFetchPolicy: 'network-only',
     pollInterval: 300_000, // follows the server's marked-to-market stock snapshot cadence
   });
+  const { data: assetCountData, refetch: refetchAssetCount } = useQuery(GM_ASSET_COUNT, {
+    skip: !showStocks,
+    fetchPolicy: 'no-cache',
+    errorPolicy: 'all',
+  });
+  const stockAssetCount: number | null = assetCountData?.gmMarket?.assets?.length ?? null;
   const previousRefreshNonce = useRef(refreshNonce);
   const previousAppState = useRef<AppStateStatus | null>(AppState.currentState);
 
@@ -98,7 +117,10 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     if (refreshNonce === previousRefreshNonce.current) return;
     previousRefreshNonce.current = refreshNonce;
     refetch().catch(() => {});
-  }, [refreshNonce, refetch]);
+    // The count is no-cache, so a failed first read stays "—" unless it is
+    // re-read on the same refreshes as the stats.
+    if (showStocks) refetchAssetCount().catch(() => {});
+  }, [refreshNonce, refetch, refetchAssetCount, showStocks]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -109,10 +131,11 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       previousAppState.current = nextState;
       if (returningToForeground) {
         refetch().catch(() => {});
+        if (showStocks) refetchAssetCount().catch(() => {});
       }
     });
     return () => subscription.remove();
-  }, [refetch]);
+  }, [refetch, refetchAssetCount, showStocks]);
 
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = currency.thousandsSeparator;
@@ -161,15 +184,17 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         descriptor: backingDescriptor,
         onPress: () => navigation.navigate('ProtectedSavings'),
       };
+      // What the network OFFERS, not what it holds: the invested total was
+      // tiny (US$60) and read as evidence against the product inside the
+      // proof strip. The asset count is just as verifiable and it invites.
+      // It opens the explorer — the "¿Cómo funciona?" page is one tap in.
       const stocks: Tile = {
         key: 'stocks',
         icon: 'trending-up',
-        value: fmt(s?.ondoStocksTvl),
-        unit: 'USD',
+        value: fmt(stockAssetCount),
         label: 'Acciones',
-        // This is marked to market every background refresh, not cost basis.
-        descriptor: 'Valor total invertido',
-        onPress: () => navigation.navigate('OndoStocksInfo'),
+        descriptor: 'S&P 500, Apple, oro…',
+        onPress: () => navigation.navigate('StocksList'),
       };
       const presale: Tile = {
         key: 'presale',
@@ -198,7 +223,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         ? [users, savings, stocks, presale]
         : [users, savings, presale];
     },
-    [s?.totalUsers, verified, tvl, backingDescriptor, s?.ondoStocksTvl,
+    [s?.totalUsers, verified, tvl, backingDescriptor, stockAssetCount,
      s?.presaleCusdRaised, showStocks,
      thousandsSeparator, decimalSeparator, navigation]
   );

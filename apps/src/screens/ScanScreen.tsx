@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking, AppState, AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking, AppState, AppStateStatus, Modal, StatusBar } from 'react-native';
 import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -11,13 +11,20 @@ import { Button } from '../components/common/Button';
 import { useAccount } from '../contexts/AccountContext';
 import { useRoute, RouteProp, useNavigation, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
-import { useApolloClient, useMutation } from '@apollo/client';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { parseInstitutionLink } from '../utils/institutionLinks';
 import { localPaymentQrRoute } from '../utils/localPaymentQr';
 import { LOCAL_MONEY_METHODS, LocalMethod } from '../services/localMoney';
+import { countryFlag, countryName } from '../config/localRails';
 
 type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
+
+// The payable QR networks, by the method ids the scan handler routes to.
+const QR_RAILS: Record<string, string> = {
+  br_qr: 'Pix',
+  ar_qr: 'QR Argentina',
+};
 
 export const ScanScreen = () => {
   const insets = useSafeAreaInsets();
@@ -43,6 +50,49 @@ export const ScanScreen = () => {
   const [getInvoice] = useMutation(GET_INVOICE);
   const client = useApolloClient();
   const localScanInFlight = useRef(false);
+
+  // Readiness BEFORE the scan. The scanner used to explain a rail only after
+  // a failed scan — at the counter, with the cashier waiting. These chips say
+  // up front which QR networks work and, for one that needs a document, take
+  // the user to fix it now. The scan handler still re-reads the methods with
+  // network-only; this read is for display and decides nothing.
+  // Local QR payments are owner-only server-side, so employees get no chips.
+  const { data: qrMethodsData, refetch: refetchQrMethods } = useQuery(LOCAL_MONEY_METHODS, {
+    variables: { direction: 'send' },
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    skip: scanMode === 'cobrar' || !!activeAccount?.isEmployee,
+  });
+  // A chip sends the user off to verify a document; the tab stays mounted,
+  // so re-read on every return or the chip keeps asking after it is done.
+  useFocusEffect(
+    useCallback(() => {
+      if (scanMode === 'cobrar' || activeAccount?.isEmployee) return;
+      refetchQrMethods().catch(() => {});
+    }, [scanMode, activeAccount?.isEmployee, refetchQrMethods]),
+  );
+  const qrRails = ((qrMethodsData?.localMoneyMethods || []) as LocalMethod[])
+    .filter(m => QR_RAILS[m.id] && ['live', 'needs_verification', 'needs_document'].includes(m.status));
+  const liveQrRails = qrRails.filter(m => m.status === 'live');
+  const [showRailsSheet, setShowRailsSheet] = useState(false);
+  // Read by the scan callback, which can fire in the frame before the camera
+  // deactivates.
+  const railsSheetOpenRef = useRef(false);
+  railsSheetOpenRef.current = showRailsSheet;
+  // Pagar tab or the stack screen of the same name (Cobrar, Membresías)?
+  const isStackScreen = (navigation as any).getState?.()?.type === 'stack';
+  const handleRailChip = (method: LocalMethod) => {
+    setShowRailsSheet(false);
+    if (method.status === 'needs_verification') {
+      (navigation as any).navigate('Verification');
+    } else if (method.status === 'needs_document') {
+      (navigation as any).navigate('AdditionalDocument', {
+        idCountry: method.documentCountry,
+        documentTypes: method.documentTypes,
+        reason: `Para pagar con ${QR_RAILS[method.id]} en ${countryName(method.country)} necesitamos un documento distinto al que ya verificaste.`,
+      });
+    }
+  };
   const scanSession = useRef(0);
 
   // Debug logging
@@ -92,7 +142,7 @@ export const ScanScreen = () => {
   };
 
   const handleQRCodeScanned = async (scannedData: string) => {
-    if (isProcessing || localScanInFlight.current) return;
+    if (isProcessing || localScanInFlight.current || railsSheetOpenRef.current) return;
     const localQr = localPaymentQrRoute(scannedData);
     // EMV payment payloads must never fall through to embedded Confío links.
     if (localQr || scannedData.trim().startsWith('000201')) {
@@ -118,6 +168,12 @@ export const ScanScreen = () => {
         }
         if (scanMode === 'cobrar') {
           showScanError('QR para pagar', 'Este QR es para enviar un pago. Abre Escanear en modo pagar.');
+          return;
+        }
+        // Local rails are owner-only server-side; stop here rather than walk
+        // an employee into LocalSend to fail at the final mutation.
+        if (activeAccount?.isEmployee) {
+          showScanError('Solo para el dueño', 'Pagar un QR local con dinero del negocio es exclusivo del dueño. Puedes pagar QR de Confío.');
           return;
         }
         const {data} = await client.query({query: LOCAL_MONEY_METHODS,
@@ -342,10 +398,16 @@ export const ScanScreen = () => {
   // Calculate if camera should be active
   // STRICT RULE: Only active if screen is focused AND app is in foreground AND not processing a scan
   // This prevents background scanning when payment modal is up
-  const isActive = isFocused && isAppActive && !isProcessing;
+  // The help sheet covers the camera: stop scanning under it, or a QR caught
+  // while reading would open a payment behind the sheet.
+  const isActive = isFocused && isAppActive && !isProcessing && !showRailsSheet;
+
+  const showRails = scanMode !== 'cobrar' && !activeAccount?.isEmployee;
 
   return (
     <View style={styles.container}>
+      {/* Scoped to focus: the tab stays mounted after leaving it. */}
+      {isFocused && <StatusBar barStyle="light-content" backgroundColor="#000000" />}
       <Camera
         style={styles.camera}
         device={device}
@@ -355,69 +417,135 @@ export const ScanScreen = () => {
         enableZoomGesture
       />
 
-      {/* Move overlay outside Camera component */}
       <View style={styles.overlayAbsolute}>
-        {/* Top overlay area with integrated header */}
-        <View style={[styles.topOverlay, { paddingTop: insets.top + 8 }]}>
+        {/* Top: one pill that says WHERE a QR works (only rails live for
+            this user), plus help. Full-bleed camera: as the Pagar tab there
+            is nothing to close; the same screen pushed on the stack (from
+            Cobrar or Membresías) has no header and no tabs, so it gets a
+            back arrow. */}
+        <View style={[styles.topOverlay, { paddingTop: insets.top + 12 }]}>
           <View style={styles.headerControls}>
-            <TouchableOpacity style={styles.closeButton} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Cerrar escáner">
-              <Icon name="x" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            {isBusinessAccount && scanMode && (
+            {isStackScreen ? (
+              <TouchableOpacity style={styles.roundButton} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Volver">
+                <Icon name="arrow-left" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : <View style={styles.roundButtonSpacer} />}
+            {isBusinessAccount && scanMode ? (
               <View style={styles.modeIndicator}>
                 <Text style={styles.modeIndicatorText}>
                   {scanMode === 'cobrar' ? 'Cobrar' : 'Pagar'}
                 </Text>
               </View>
-            )}
+            ) : null}
+            {showRails ? (
+              <TouchableOpacity style={styles.roundButton} onPress={() => setShowRailsSheet(true)} accessibilityRole="button" accessibilityLabel="Qué QR puedo pagar">
+                <Icon name="help-circle" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : <View style={styles.roundButtonSpacer} />}
           </View>
+          {showRails && (
+            <TouchableOpacity
+              style={styles.railsPill}
+              onPress={() => setShowRailsSheet(true)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={liveQrRails.length > 0
+                ? `Paga QR en ${liveQrRails.map(m => countryName(m.country)).join(', ')}`
+                : 'Qué QR puedo pagar'}
+            >
+              <Text style={styles.railsPillText}>
+                {liveQrRails.length > 0 ? 'Paga QR en' : 'Paga QR con tus dólares'}
+              </Text>
+              {liveQrRails.map(m => (
+                <Text key={m.id} style={styles.railsPillFlag}>{countryFlag(m.country)}</Text>
+              ))}
+              <Icon name="info" size={15} color="rgba(255,255,255,0.8)" />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Middle area with scan frame */}
         <View style={styles.middleRow}>
           <View style={styles.sideOverlay} />
-
           <View style={styles.scanFrame}>
-            {/* Corner brackets for better visual indication */}
-            <View style={styles.cornerBracket} />
-            <View style={styles.cornerBracketTopRight} />
-            <View style={styles.cornerBracketBottomLeft} />
-            <View style={styles.cornerBracketBottomRight} />
-
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
             {scannedSuccessfully && (
               <View style={styles.successOverlay}>
-                <Icon name="check-circle" size={60} color={colors.primaryDark} />
+                <Icon name="check-circle" size={56} color={colors.primary} />
                 <Text style={styles.successText}>Código QR detectado</Text>
               </View>
             )}
           </View>
-
           <View style={styles.sideOverlay} />
         </View>
 
-        {/* Bottom overlay area: ONE instruction line + the two tools */}
         <View style={styles.bottomOverlay}>
           <Text style={styles.instructions}>
             {isProcessing
               ? 'Procesando código QR…'
-              : isBusinessAccount
-                ? scanMode === 'cobrar'
-                  ? 'Escanea el código QR del cliente para cobrar'
-                  : 'Escanea un QR de Confío, Pix o Argentina para pagar'
-                : 'Escanea un QR de Confío, Pix o Argentina'
-            }
+              : scanMode === 'cobrar'
+                ? 'Escanea el código QR del cliente para cobrar'
+                : 'Apunta al QR del comercio'}
           </Text>
+          {scanMode !== 'cobrar' && !isProcessing && (
+            <Text style={styles.instructionsSub}>Verás el monto en tu moneda antes de confirmar</Text>
+          )}
 
           <View style={styles.toolsRow}>
-            <TouchableOpacity style={styles.toolButton} onPress={toggleFlash} accessibilityRole="button" accessibilityLabel={isFlashOn ? "Apagar linterna" : "Encender linterna"}>
-              <Icon name={isFlashOn ? "zap-off" : "zap"} size={22} color={colors.white} />
+            <TouchableOpacity style={styles.tool} onPress={toggleFlash} accessibilityRole="button" accessibilityLabel={isFlashOn ? 'Apagar linterna' : 'Encender linterna'}>
+              <View style={[styles.toolButton, isFlashOn && styles.toolButtonOn]}>
+                <Icon name={isFlashOn ? 'zap-off' : 'zap'} size={22} color={isFlashOn ? colors.primaryDeep : colors.white} />
+              </View>
+              <Text style={styles.toolLabel}>Linterna</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.toolButton} onPress={handleGallery} accessibilityRole="button" accessibilityLabel="Elegir un código QR desde la galería">
-              <Icon name="image" size={22} color={colors.white} />
+            <TouchableOpacity style={styles.tool} onPress={handleGallery} accessibilityRole="button" accessibilityLabel="Elegir un código QR desde la galería">
+              <View style={styles.toolButton}>
+                <Icon name="image" size={22} color={colors.white} />
+              </View>
+              <Text style={styles.toolLabel}>Galería</Text>
             </TouchableOpacity>
           </View>
         </View>
       </View>
+
+      {/* What this scanner pays, per country, with the next step for any
+          rail still waiting on a document. Replaces the chips that used to
+          crowd the camera. */}
+      <Modal visible={showRailsSheet} transparent animationType="slide" onRequestClose={() => setShowRailsSheet(false)}>
+        <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setShowRailsSheet(false)}>
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 20) }]} onStartShouldSetResponder={() => true}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Paga QR con tus dólares</Text>
+            {qrRails.map(method => (
+              <TouchableOpacity
+                key={method.id}
+                style={styles.sheetRow}
+                disabled={method.status === 'live'}
+                onPress={() => handleRailChip(method)}
+                accessibilityRole={method.status === 'live' ? 'text' : 'button'}
+                accessibilityLabel={`${QR_RAILS[method.id]}, ${countryName(method.country)}: ${method.status === 'live' ? 'listo' : 'verifica tu documento para pagar'}`}
+              >
+                <Text style={styles.sheetFlag}>{countryFlag(method.country)}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sheetRowTitle}>{QR_RAILS[method.id]}</Text>
+                  <Text style={styles.sheetRowSub}>{countryName(method.country)}</Text>
+                </View>
+                {method.status === 'live' ? (
+                  <Text style={styles.sheetReady}>Listo</Text>
+                ) : (
+                  <Text style={styles.sheetPending}>Verificar ›</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+            <Text style={styles.sheetNote}>
+              Tu saldo se convierte a moneda local al pagar. Ves el tipo de cambio final antes de confirmar.
+            </Text>
+            <Text style={styles.sheetNote}>También lee los QR de cobro de Confío.</Text>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -425,37 +553,46 @@ export const ScanScreen = () => {
 const { width } = Dimensions.get('window');
 const scanFrameSize = width * 0.7;
 
+const DIM = 'rgba(0,0,0,0.55)';
+const CORNER = 34;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
   },
   camera: {
-    flex: 1,
-    width: '100%',
+    ...StyleSheet.absoluteFillObject,
   },
   overlayAbsolute: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flex: 1,
-    width: '100%',
-    height: '100%',
+    ...StyleSheet.absoluteFillObject,
   },
-  closeButton: {
+  topOverlay: {
+    flex: 1,
+    backgroundColor: DIM,
+    paddingHorizontal: 16,
+  },
+  headerControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  roundButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roundButtonSpacer: {
+    width: 40,
+    height: 40,
   },
   modeIndicator: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -465,103 +602,95 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  topOverlay: {
-    flex: 0.7,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-start',
-  },
-  headerControls: {
-    padding: 16,
+  railsPill: {
+    alignSelf: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
+    marginTop: 'auto',
+    marginBottom: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 22,
+    backgroundColor: 'rgba(17,24,39,0.85)',
+  },
+  railsPillText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 2,
+  },
+  railsPillFlag: {
+    fontSize: 18,
   },
   middleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
   },
   sideOverlay: {
     flex: 1,
     height: scanFrameSize,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-  },
-  bottomOverlay: {
-    flex: 1.3,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 15,
-    paddingBottom: 20,
+    backgroundColor: DIM,
   },
   scanFrame: {
     width: scanFrameSize,
     height: scanFrameSize,
-    position: 'relative',
-    justifyContent: 'center',
     alignItems: 'center',
-  },
-  cornerBracket: {
-    position: 'absolute',
-    width: 35,
-    height: 35,
-    borderTopWidth: 4,
-    borderLeftWidth: 4,
-    borderTopColor: colors.primary,
-    borderLeftColor: colors.primary,
-    top: -2,
-    left: -2,
-  },
-  cornerBracketTopRight: {
-    position: 'absolute',
-    width: 35,
-    height: 35,
-    borderTopWidth: 4,
-    borderRightWidth: 4,
-    borderTopColor: colors.primary,
-    borderRightColor: colors.primary,
-    top: -2,
-    right: -2,
-  },
-  cornerBracketBottomLeft: {
-    position: 'absolute',
-    width: 35,
-    height: 35,
-    borderBottomWidth: 4,
-    borderLeftWidth: 4,
-    borderBottomColor: colors.primary,
-    borderLeftColor: colors.primary,
-    bottom: -2,
-    left: -2,
-  },
-  cornerBracketBottomRight: {
-    position: 'absolute',
-    width: 35,
-    height: 35,
-    borderBottomWidth: 4,
-    borderRightWidth: 4,
-    borderBottomColor: colors.primary,
-    borderRightColor: colors.primary,
-    bottom: -2,
-    right: -2,
-  },
-  toolsRow: {
-    flexDirection: 'row',
-    gap: 20,
-    marginTop: 20,
-  },
-  toolButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
+  },
+  corner: {
+    position: 'absolute',
+    width: CORNER,
+    height: CORNER,
+    borderColor: colors.primary,
+  },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 22 },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 22 },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 22 },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 22 },
+  bottomOverlay: {
+    flex: 1.3,
+    backgroundColor: DIM,
     alignItems: 'center',
+    paddingTop: 20,
   },
   instructions: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 17,
+    fontWeight: '600',
     textAlign: 'center',
     paddingHorizontal: 20,
+  },
+  instructionsSub: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+    paddingHorizontal: 20,
+  },
+  toolsRow: {
+    flexDirection: 'row',
+    gap: 64,
+    marginTop: 'auto',
+    marginBottom: 20,
+  },
+  tool: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  toolButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolButtonOn: {
+    backgroundColor: colors.white,
+  },
+  toolLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
   },
   text: {
     color: colors.white,
@@ -570,25 +699,80 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 16,
   },
-
   successOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 16,
-    justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 22,
+    padding: 20,
   },
   successText: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
     marginTop: 10,
     textAlign: 'center',
   },
-
-}); 
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: 14,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 8,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  sheetFlag: {
+    fontSize: 24,
+  },
+  sheetRowTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  sheetRowSub: {
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  sheetReady: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
+  sheetPending: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.warning.text,
+  },
+  sheetNote: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.text.secondary,
+    marginTop: 12,
+  },
+});
