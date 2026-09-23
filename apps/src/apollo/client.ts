@@ -56,7 +56,13 @@ const INVALID_REFRESH_MESSAGES = new Set([
   'User account is inactive',
 ]);
 
-function refreshAccessToken(tokens: SessionTokens): Promise<string> {
+// Below the 20s query deadline so a query that waited on a hung refresh can
+// succeed on retry: the timed-out refresh rejects, leaves refreshPromises, and
+// the next attempt starts a fresh request. A timeout is a transport failure —
+// retryable, never a sign-out.
+export const REFRESH_TIMEOUT_MS = 15_000;
+
+export function refreshAccessToken(tokens: SessionTokens): Promise<string> {
   const key = JSON.stringify(tokens);
   let promise = refreshPromises.get(key);
   if (!promise) {
@@ -112,29 +118,39 @@ async function performRefreshWithFetch(tokens: SessionTokens): Promise<string> {
       businessId: decoded.business_id,
     },
   };
-  const res = await fetch(getApiUrl(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, // no Authorization
-    body: JSON.stringify(body),
-  } as any);
-  if (res.status === 403) {
-    // Raw fetch bypasses the error link; catch the security middleware's
-    // ban response here too (it 403s token refresh like everything else).
-    const text = await res.text();
-    import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
-      if (looksLikeBanResponse(403, text)) {
-        // Same decoupling as the error link: route first (screen-aware, so
-        // it never yanks a user already on the ban surface), persist after.
-        const { routeToBlockedAccount } = await import('../navigation/RootNavigation');
-        routeToBlockedAccount();
-        const { emergencyStore } = await import('../services/emergencyExit/store');
-        await markBanSignal(emergencyStore);
-      }
-    }).catch(() => {});
-    throw new Error('Failed to refresh token');
+  // The deadline covers the network exchange only; the keychain write below
+  // must never be interrupted halfway.
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+  let json: any;
+  try {
+    const res = await fetch(getApiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, // no Authorization
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    } as any);
+    if (res.status === 403) {
+      // Raw fetch bypasses the error link; catch the security middleware's
+      // ban response here too (it 403s token refresh like everything else).
+      const text = await res.text();
+      import('../services/emergencyExit/banSignal').then(async ({ looksLikeBanResponse, markBanSignal }) => {
+        if (looksLikeBanResponse(403, text)) {
+          // Same decoupling as the error link: route first (screen-aware, so
+          // it never yanks a user already on the ban surface), persist after.
+          const { routeToBlockedAccount } = await import('../navigation/RootNavigation');
+          routeToBlockedAccount();
+          const { emergencyStore } = await import('../services/emergencyExit/store');
+          await markBanSignal(emergencyStore);
+        }
+      }).catch(() => {});
+      throw new Error('Failed to refresh token');
+    }
+    if (!res.ok) throw new Error('Failed to refresh token');
+    json = await res.json();
+  } finally {
+    clearTimeout(deadline);
   }
-  if (!res.ok) throw new Error('Failed to refresh token');
-  const json = await res.json();
   const newAccess = json?.data?.refreshToken?.token;
   if (typeof newAccess !== 'string' || !newAccess) {
     const rejected = json?.errors?.some((error: { message?: string }) =>
