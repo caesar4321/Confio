@@ -481,7 +481,9 @@ const authLink = setContext(async (operation, previousContext) => {
 });
 
 export const apolloClient = new ApolloClient({
-  link: from([requestLifetimeLink, authLink, errorLink, banClearLink, createQueryTimeoutLink(), httpLink]),
+  // The query deadline wraps the whole chain, so a read stuck waiting on a
+  // token refresh or an expired-token replay also ends in an error.
+  link: from([createQueryTimeoutLink(), requestLifetimeLink, authLink, errorLink, banClearLink, httpLink]),
   cache: new InMemoryCache({
     typePolicies: {
       ContentPollOptionType: { keyFields: false },

@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { colors } from '../config/theme';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { NetworkStatus, useMutation, useQuery } from '@apollo/client';
+import { NetworkStatus, useApolloClient, useMutation, useQuery } from '@apollo/client';
 
 import { DISCOVER_SECTIONS, DiscoverFeed, DiscoverItem, DiscoverSectionKey } from '../components/DiscoverFeed';
 import { OfferCardSkeleton } from '../components/SkeletonLoader';
@@ -42,6 +42,7 @@ const OLD_SECTIONS_SERVER = /Unknown Discover section/i;
 
 export const DiscoverScreen = () => {
   const navigation = useNavigation<Navigation>();
+  const client = useApolloClient();
   const [reactToMessageContent] = useMutation(REACT_TO_MESSAGE_CONTENT);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   // Oficial first: Descubrir keeps its "news you can trust" footing, and the
@@ -62,7 +63,7 @@ export const DiscoverScreen = () => {
   });
   const feedDocument = legacyServer ? GET_DISCOVER_FEED : GET_DISCOVER_FEED_SECTIONED;
   const feedVariables = legacyServer ? {} : { section };
-  const { data, refetch, fetchMore, networkStatus } = legacyServer ? legacy : sectioned;
+  const { data, refetch, updateQuery, networkStatus } = legacyServer ? legacy : sectioned;
   const loading = legacyServer ? legacy.loading : sectioned.loading;
   const feedError = legacyServer ? legacy.error : sectioned.error;
 
@@ -138,35 +139,38 @@ export const DiscoverScreen = () => {
   };
 
   const handleLoadMore = async () => {
-    // Never alongside a refresh: whichever lands last replaces the list.
-    if (isFetchingMore || isRefreshing || focusRefreshing.current || !hasMore) {
+    // Never alongside a refresh or a first-page load (a section switch):
+    // whichever lands last replaces the list, and an offset taken from a list
+    // that is about to be replaced skips posts.
+    if (isFetchingMore || isRefreshing || loading || focusRefreshing.current || !hasMore) {
       return;
     }
     const requestedGeneration = feedGeneration.current;
     setIsFetchingMore(true);
     try {
-      await fetchMore({
-        variables: {
-          offset: items.length,
-          limit: PAGE_SIZE,
-        },
-        updateQuery: (previousResult, { fetchMoreResult }) => {
-          if (!fetchMoreResult?.discoverFeed || feedGeneration.current !== requestedGeneration) {
-            return previousResult;
-          }
-
-          return {
-            discoverFeed: {
-              __typename: fetchMoreResult.discoverFeed.__typename,
-              hasMore: fetchMoreResult.discoverFeed.hasMore,
-              items: [
-                ...(previousResult?.discoverFeed?.items || []),
-                ...fetchMoreResult.discoverFeed.items,
-              ],
-            },
-          };
-        },
+      // Fetched on its own, not via fetchMore: fetchMore re-reads the active
+      // query when it settles even if its page is rejected, which would wipe
+      // a newer section's error and show "nothing here" instead of the failure.
+      const { data: nextPage } = await client.query({
+        query: feedDocument,
+        variables: { ...feedVariables, offset: items.length, limit: PAGE_SIZE },
+        fetchPolicy: 'network-only',
       });
+      if (!nextPage?.discoverFeed || feedGeneration.current !== requestedGeneration) {
+        return;
+      }
+      updateQuery((previousResult: any) => ({
+        discoverFeed: {
+          __typename: nextPage.discoverFeed.__typename,
+          hasMore: nextPage.discoverFeed.hasMore,
+          items: [
+            ...(previousResult?.discoverFeed?.items || []),
+            ...nextPage.discoverFeed.items,
+          ],
+        },
+      }));
+    } catch {
+      // A failed next page keeps the list; reaching the end again retries.
     } finally {
       setIsFetchingMore(false);
     }

@@ -4,20 +4,22 @@ import renderer, { act } from 'react-test-renderer';
 type FeedState = { data?: any; loading: boolean; error?: any };
 
 let mockFeed: FeedState;
-const mockFetchMore = jest.fn();
+const mockClientQuery = jest.fn();
+const mockUpdateQuery = jest.fn();
 const mockRefetch = jest.fn(() => Promise.resolve());
 let mockFeedProps: any;
 
 jest.mock('@apollo/client', () => ({
   NetworkStatus: { refetch: 4, ready: 7 },
   useMutation: () => [jest.fn()],
+  useApolloClient: () => ({ query: mockClientQuery }),
   useQuery: (document: string, options: { skip?: boolean }) => {
     if (document === 'LEGACY' && options?.skip) return { data: undefined, loading: false };
     return {
       ...mockFeed,
       networkStatus: 7,
       refetch: mockRefetch,
-      fetchMore: mockFetchMore,
+      updateQuery: mockUpdateQuery,
     };
   },
 }));
@@ -63,30 +65,40 @@ const render = () => {
 };
 
 describe('DiscoverScreen feed', () => {
+  let resolvePage: (value: any) => void;
+
   beforeEach(() => {
-    mockFetchMore.mockReset().mockResolvedValue(undefined);
+    mockClientQuery.mockReset().mockImplementation(() => new Promise((resolve) => { resolvePage = resolve; }));
+    mockUpdateQuery.mockReset();
     mockRefetch.mockClear();
     mockFeed = { data: page(1, 10), loading: false };
   });
 
   it('drops a late page from an earlier visit to the same section', async () => {
     render();
-    await act(async () => { mockFeedProps.onEndReached(); });
-    const { updateQuery } = mockFetchMore.mock.calls[0][0];
+    act(() => { mockFeedProps.onEndReached(); });
+    expect(mockClientQuery.mock.calls[0][0].variables).toMatchObject({ offset: 10, section: 'official' });
     // Oficial → Comunidad → Oficial while page two is in flight.
     act(() => mockFeedProps.onSelectSection('community'));
     act(() => mockFeedProps.onSelectSection('official'));
-    const previous = page(1, 10);
-    expect(updateQuery(previous, { fetchMoreResult: page(21, 10) })).toBe(previous);
+    await act(async () => { resolvePage({ data: page(21, 10) }); });
+    expect(mockUpdateQuery).not.toHaveBeenCalled();
   });
 
   it('appends a page that belongs to the list on screen', async () => {
     render();
-    await act(async () => { mockFeedProps.onEndReached(); });
-    const { updateQuery } = mockFetchMore.mock.calls[0][0];
-    const merged = updateQuery(page(1, 10), { fetchMoreResult: page(11, 10, false) });
+    act(() => { mockFeedProps.onEndReached(); });
+    await act(async () => { resolvePage({ data: page(11, 10, false) }); });
+    const merged = mockUpdateQuery.mock.calls[0][0](page(1, 10));
     expect(merged.discoverFeed.items).toHaveLength(20);
     expect(merged.discoverFeed.hasMore).toBe(false);
+  });
+
+  it('does not page while the list is being replaced', () => {
+    mockFeed = { data: page(1, 20), loading: true };
+    render();
+    act(() => { mockFeedProps.onEndReached(); });
+    expect(mockClientQuery).not.toHaveBeenCalled();
   });
 
   it('shows the failure state when a refresh fails over an empty feed', () => {
