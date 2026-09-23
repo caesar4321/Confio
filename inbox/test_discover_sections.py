@@ -86,6 +86,9 @@ class DiscoverSectionTests(TestCase):
         self.assertFalse(by_title['Member post'].is_official)
         self.assertTrue(by_title['Founder post'].is_official)
 
+    def test_retired_sections_field_still_answers_for_older_builds(self):
+        self.assertEqual(Query().resolve_discover_sections(self.info), [])
+
     def test_unknown_section_is_rejected_not_widened(self):
         for section in ('confio', 'oficial', 'everything'):
             with self.subTest(section=section), self.assertRaises(GraphQLError):

@@ -1,4 +1,5 @@
 import { ApolloClient, InMemoryCache, createHttpLink, from, FetchResult, ApolloLink } from '@apollo/client';
+import { createQueryTimeoutLink } from './queryTimeoutLink';
 import { onError, ErrorResponse } from '@apollo/client/link/error';
 import { setContext } from '@apollo/client/link/context';
 import * as Keychain from 'react-native-keychain';
@@ -480,7 +481,7 @@ const authLink = setContext(async (operation, previousContext) => {
 });
 
 export const apolloClient = new ApolloClient({
-  link: from([requestLifetimeLink, authLink, errorLink, banClearLink, httpLink]),
+  link: from([requestLifetimeLink, authLink, errorLink, banClearLink, createQueryTimeoutLink(), httpLink]),
   cache: new InMemoryCache({
     typePolicies: {
       ContentPollOptionType: { keyFields: false },
