@@ -213,8 +213,8 @@ export const ConfioTokenomicsScreen = () => {
             <Text style={styles.lifecycleText}>
               Ningún bloque circula solo por estar asignado. La preventa y las recompensas se
               reclaman cuando $CONFIO salga al mercado, es decir, con su lanzamiento oficial en
-              un exchange descentralizado (DEX), donde cualquiera puede comprar y vender sin
-              intermediarios. Cada vesting empieza con su propia transacción de activación, que
+              un mercado abierto en blockchain (un DEX), donde cualquiera puede comprar y vender
+              sin intermediarios. Cada vesting empieza con su propia transacción de activación, que
               se publica en blockchain.
             </Text>
           </View>
