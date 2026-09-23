@@ -668,6 +668,13 @@ export const ProfileScreen = () => {
             </View>
           </View>
           <View style={styles.cardOptions}>
+            {activeAccount?.type.toLowerCase() === 'business' && (
+              <TouchableOpacity style={styles.cardOption} accessibilityRole="button" onPress={() => navigation.navigate('Employees')}>
+                <Icon name="users" size={18} color={colors.text.secondary} />
+                <Text style={styles.cardOptionText}>Empleados</Text>
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.cardOption}
               onPress={() => navigation.navigate('Verification')}
@@ -719,7 +726,7 @@ export const ProfileScreen = () => {
                   onPress={() => navigation.navigate('PayoutMethods')}
                 >
                   <Icon name="credit-card" size={18} color={colors.text.secondary} />
-                  <Text style={styles.cardOptionText}>Formas de cobro</Text>
+                  <Text style={styles.cardOptionText}>Mis cuentas</Text>
                   <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </TouchableOpacity>
               )}

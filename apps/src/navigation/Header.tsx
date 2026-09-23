@@ -68,7 +68,9 @@ export const Header: React.FC<HeaderProps> = ({
           alignItems: 'center',
         }}
       >
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {/* Shrinks (the title truncates) so a long title at large text sizes
+          can never push the right-hand controls off the screen. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, flexShrink: 1, marginRight: 12 }}>
         {showBackButton && !isHomeScreen && (
           <TouchableOpacity
             onPress={() => { if (onBackPress) { onBackPress(); } else { navigation.goBack(); } }}
@@ -100,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
       </View>
       {isHomeScreen && (
-        <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ flexDirection: 'row', gap: 12, flexShrink: 0 }}>
           <TouchableOpacity 
             style={{ 
               width: 40,
@@ -211,7 +213,7 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
       )}
       {!isHomeScreen && rightAccessory ? (
-        <View style={{ minWidth: 40, alignItems: 'flex-end' }}>
+        <View style={{ minWidth: 40, alignItems: 'flex-end', flexShrink: 0 }}>
           {rightAccessory}
         </View>
       ) : null}

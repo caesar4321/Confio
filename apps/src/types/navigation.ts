@@ -20,7 +20,8 @@ export type AuthStackParamList = {
 // Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
-  Employees: undefined;
+  Invest: undefined;
+  Discover: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
   Exchange: {
@@ -32,6 +33,7 @@ export type BottomTabParamList = {
 
 // Main Stack - Handles main app navigation including modals
 export type MainStackParamList = {
+  Employees: undefined;
   BottomTabs: NavigatorScreenParams<BottomTabParamList>;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;

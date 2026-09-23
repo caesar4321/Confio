@@ -1258,10 +1258,10 @@ export const TransferScreen = () => {
                   primary={sendPrimary}
                   more={sendMore}
                   moreTitle="¿A dónde quieres enviar?"
-                  trailing={isRampBlocked ? [] : [{
-                    // The old Retirar: sending to your OWN bank is still
-                    // sending. Hidden where no ramp provider operates — the
-                    // cash card below is the way out there.
+                  // Mirrors Recibir: the own-money row (the old Retirar)
+                  // always leads, then rails to other people. Hidden where no
+                  // ramp provider operates — the cash card is the way out.
+                  leading={isRampBlocked ? [] : [{
                     id: 'own_account',
                     icon: 'download',
                     title: 'A mi propia cuenta',

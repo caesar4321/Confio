@@ -78,6 +78,8 @@ export interface SavingsPortfolio {
   };
   stocks: {
     enabled: boolean;
+    /** True once the server answered and the phone country is known. */
+    eligibilityKnown: boolean;
     tradingEnabled: boolean;
     buyEnabled: boolean;
     totalUsd: number;
@@ -164,6 +166,10 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
     }));
     const stocks = {
       enabled: stocksEnabled,
+      // `enabled` is false both before the server answers (or when it
+      // fails) and when the user is genuinely ineligible. Surfaces that
+      // explain UNavailability must wait for this to be true.
+      eligibilityKnown: Boolean(summary) && Boolean(userProfile?.phoneCountry),
       tradingEnabled: stocksEnabled && Boolean(summary?.stocksTradingEnabled),
       buyEnabled: stocksEnabled && Boolean(summary?.stocksBuyEnabled),
       totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
@@ -195,5 +201,6 @@ export const useSavingsPortfolio = (): SavingsPortfolio => {
       // that is still "not loaded yet", not "loaded and empty".
       loading: !isAuthReady || (loading && !data),
     };
-  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch, loading, isAuthReady]);
+  }, [data, savingsEnabled, stocksEnabled, cusdDepositsPaused, summary, refetch, loading, isAuthReady,
+      userProfile?.phoneCountry]);
 };

@@ -36,6 +36,11 @@ describe('local transfer menu boundaries', () => {
     expect(screen('ReceiveScreen')).toContain('<AdvancedCard');
     // Avanzado lists tokens inline in both directions — no sheet on one side.
     expect(screen('TransferScreen')).not.toContain('¿Qué moneda quieres enviar?');
+    // The own-money row (Recargar ahora / A mi propia cuenta) leads on both.
+    expect(screen('TransferScreen')).toMatch(/leading=\{isRampBlocked \? \[\] : \[\{/);
+    expect(screen('ReceiveScreen')).toContain('leading={rechargeRow ? [rechargeRow] : []}');
+    expect(screen('TransferScreen')).not.toContain('trailing=');
+    expect(screen('ReceiveScreen')).not.toContain('trailing=');
   });
 
   it('preserves transfer status and pending confirmation access', () => {

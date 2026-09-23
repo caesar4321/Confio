@@ -4,9 +4,11 @@ import Icon from 'react-native-vector-icons/Feather';
 import { View, StyleSheet, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
-import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../types/navigation';
+import { BottomTabParamList, RootStackParamList } from '../types/navigation';
+import DiscoverScreen from '../screens/DiscoverScreen';
+import { InvestScreen } from '../screens/InvestScreen';
+import { DiscoverStackHeader } from './StackScreenHeaders';
 import { HomeScreen } from '../screens/HomeScreen';
-import EmployeesScreen from '../screens/EmployeesScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -40,9 +42,8 @@ export const BottomTabNavigator = () => {
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
-  const isBusiness = accountType === 'business';
   const isEmployee = activeAccount?.isEmployee || false;
-  const permissions = activeAccount?.employeePermissions || {};
+  const canSendFunds = !isEmployee || activeAccount?.employeePermissions?.sendFunds === true;
 
   //
   const handleNotificationPress = useCallback(() => {
@@ -100,51 +101,21 @@ export const BottomTabNavigator = () => {
   // Check if account is business (using normalized type)
   const isBusinessAccount = accountType === 'business';
 
-  // Business-only roster tab. The personal "Transferir" tab is gone: sending
-  // is the Enviar screen, pushed from Home's Enviar button.
-  const PeopleTabHeader = useCallback(() => (
-    <Header
-      navigation={navigation}
-      isHomeScreen={false}
-      title="Empleados"
-      onProfilePress={undefined}
-      onNotificationPress={undefined}
-      backgroundColor="#fff"
-      showBackButton={false}
-      isLight={false}
-      unreadNotifications={0}
-      currentAccountAvatar="U"
-    />
-  ), [navigation]);
-
-  // Memoize tab options to ensure they update when activeAccount changes
-  // Pagar: the QR scanner. Personal accounts get it as the raised center
-  // button (Inicio · Pagar · Perfil). Business keeps Cobrar in the center and
-  // Pagar sits beside it as a regular tab — paying a supplier's Pix QR is a
-  // business errand too.
+  // Personal accounts pay from the center tab; businesses use Cobrar → Pagar.
   const scanTabOptions = useMemo(() => ({
-    // Full-bleed camera: the scanner draws its own controls.
     headerShown: false,
     freezeOnBlur: true,
-    tabBarLabel: ({ color }: any) => (
-      // The raised button is emerald, so its label is too (the global active
-      // tint is violet, which read as a second brand colour under it).
-      <Text style={{ color: isBusinessAccount ? color : '#10B981', fontSize: 12, fontWeight: isBusinessAccount ? '400' : '600' }}>
-        Pagar
-      </Text>
+    tabBarLabel: () => (
+      <Text style={{ color: '#10B981', fontSize: 12, fontWeight: '600' }}>Pagar</Text>
     ),
-    tabBarIcon: ({ color, size }: any) => (
-      isBusinessAccount ? (
-        <QrPayIcon size={size} color={color} />
-      ) : (
-        <View style={styles.payButton}>
-          <QrPayIcon size={32} color="#fff" />
-        </View>
-      )
+    tabBarIcon: () => (
+      <View style={styles.payButton}>
+        <QrPayIcon size={32} color="#fff" />
+      </View>
     ),
     tabBarAccessibilityLabel: 'Pagar con QR',
-    tabBarButton: (isEmployee && !permissions.sendFunds) ? () => null : undefined, // Hide for employees without sendFunds permission
-  }), [isBusinessAccount, isEmployee, permissions.sendFunds]);
+    tabBarButton: !canSendFunds ? () => null : undefined,
+  }), [canSendFunds]);
 
   // Charge tab options - only show for business accounts
   const chargeTabOptions = useMemo(() => ({
@@ -175,7 +146,7 @@ export const BottomTabNavigator = () => {
   return (
     <>
       <Tabs.Navigator
-        // Removed key prop to prevent re-renders
+        detachInactiveScreens
         screenOptions={{
           tabBarActiveTintColor: '#8B5CF6',
           tabBarInactiveTintColor: '#6B7280',
@@ -187,7 +158,6 @@ export const BottomTabNavigator = () => {
             paddingBottom: 8,
             paddingTop: 8,
           },
-          detachInactiveScreens: true,
         }}
       >
         <Tabs.Screen 
@@ -200,17 +170,28 @@ export const BottomTabNavigator = () => {
             tabBarIcon: ({ color, size }: any) => <Icon name="home" size={size} color={color} />
           }}
         />
-        {isBusinessAccount && (
-          <Tabs.Screen
-            name="Employees"
-            component={EmployeesScreen}
-            options={{
-              header: () => <PeopleTabHeader />,
-              tabBarLabel: 'Empleados',
-              tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
-            }}
-          />
-        )}
+        <Tabs.Screen
+          name="Invest"
+          component={InvestScreen}
+          options={{
+            // The shared Header, like every main tab: same title size and
+            // position everywhere. The screen's hero continues its green.
+            header: () => (
+              <Header
+                navigation={navigation}
+                isHomeScreen={false}
+                title="Invertir"
+                backgroundColor="#34d399"
+                showBackButton={false}
+                isLight
+                unreadNotifications={0}
+                currentAccountAvatar="U"
+              />
+            ),
+            tabBarLabel: 'Invertir',
+            tabBarIcon: ({ color, size }) => <Icon name="trending-up" size={size} color={color} />,
+          }}
+        />
         {isBusinessAccount && (
           <Tabs.Screen
             name="Charge"
@@ -218,10 +199,21 @@ export const BottomTabNavigator = () => {
             options={{ ...chargeTabOptions, freezeOnBlur: true }}
           />
         )}
+        {!isBusinessAccount && (
+          <Tabs.Screen
+            name="Scan"
+            component={ScanTab}
+            options={scanTabOptions}
+          />
+        )}
         <Tabs.Screen
-          name="Scan"
-          component={ScanTab}
-          options={scanTabOptions}
+          name="Discover"
+          component={DiscoverScreen}
+          options={{
+            header: () => <DiscoverStackHeader showBackButton={false} />,
+            tabBarLabel: 'Descubrir',
+            tabBarIcon: ({ color, size }) => <Icon name="compass" size={size} color={color} />,
+          }}
         />
         <Tabs.Screen 
           name="Profile" 

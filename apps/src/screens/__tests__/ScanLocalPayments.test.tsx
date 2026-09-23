@@ -171,6 +171,18 @@ it('shows only live rails in the pill, and routes a pending rail from the sheet'
   await act(async () => tree.unmount());
 });
 
+it('groups live country flags without spaces in the QR pill', async () => {
+  mockChipMethods = [
+    {id: 'br_qr', status: 'live', country: 'BR'},
+    {id: 'co_qr', status: 'live', country: 'CO'},
+  ];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<ScanScreen />);});
+  const pill = tree.root.findByProps({accessibilityLabel: 'Paga QR en Brasil, Colombia'});
+  expect(pill.findAll(node => node.props.children === '🇧🇷🇨🇴').length).toBeGreaterThan(0);
+  await act(async () => tree.unmount());
+});
+
 it('stops an employee at a local QR before any server lookup (owner-only rail)', async () => {
   mockAccount = {id: 'emp-1', type: 'business', isEmployee: true, employeePermissions: {sendFunds: true}};
   mockQuery.mockResolvedValue({data: {localMoneyMethods: [{id: 'br_qr', status: 'live'}]}});

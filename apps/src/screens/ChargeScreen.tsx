@@ -705,7 +705,7 @@ const ChargeScreen = () => {
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Escanear Código QR para Pagar</Text>
                   <Text style={styles.cardSubtitle}>
-                    Escanea el código QR de un negocio para realizar un pago de forma rápida y segura
+                    Escanea un QR de Confío o de una red de pagos disponible para tu cuenta.
                   </Text>
 
                   <TouchableOpacity
