@@ -25,6 +25,7 @@
 
 import { useMemo } from 'react';
 import { gql, useQuery } from '@apollo/client';
+import { STOCK_PRESENTATION } from '../config/stockPresentation';
 
 export type GmSession = 'core' | 'extended' | 'off-hours' | 'closed';
 export type Tradability = 'open' | 'reduced' | 'closed';
@@ -226,7 +227,7 @@ export const useGmMarket = (enabled = true) => {
     const stocks: GmStock[] = (market?.assets || []).map((a: any) => ({
       symbol: a.symbol,
       ticker: a.ticker,
-      name: a.name,
+      name: STOCK_PRESENTATION[a.ticker]?.name || a.name,
       priceUsd: a.priceUsd,
       dayChangePct: a.dayChangePct,
       color: colorFor(a.ticker),

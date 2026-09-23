@@ -24,6 +24,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { STOCK_PRESENTATION } from '../config/stockPresentation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
   useGmMarket,
@@ -259,6 +260,15 @@ export const StockDetailScreen = () => {
           </View>
         )}
 
+        {STOCK_PRESENTATION[stock.ticker] && (
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>Sobre {stock.name}</Text>
+            <Text style={styles.assetDescription}>
+              {STOCK_PRESENTATION[stock.ticker].description}
+            </Text>
+          </View>
+        )}
+
         {/* How it works */}
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>Cómo funciona</Text>
@@ -297,6 +307,7 @@ const styles = StyleSheet.create({
 
 
   scrollContent: { padding: 16, paddingBottom: 40 },
+  assetDescription: { fontSize: 13, color: colors.text.secondary, lineHeight: 19 },
 
   card: {
     backgroundColor: '#fff',
