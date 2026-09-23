@@ -392,7 +392,12 @@ the intent-binding client ships.**
 > **no funds, no assigned credits, and locked claims**, so nothing had to
 > be migrated. Fixes in commit `9f9cdbf2`.
 
-## ConfioPresaleVault — deployed 2026-07-31
+## ConfioPresaleVault — deployed 2026-07-31 (SUPERSEDED 2026-08-31)
+
+> Paused by Safe nonce 15 and replaced by the cUSD-denominated vault
+> `0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358` in the 2026-08-31 fee-perimeter
+> release above; its outstanding allocations were imported there. Kept as a
+> historical record — not an official place to buy.
 
 $CONFIO presale on curve "A" (0–4M @ $0.20→0.30, 4–24M @ $0.30→0.70,
 24–74M @ $0.70→1.30; full sale $61M), USDT-denominated, sponsor-gated

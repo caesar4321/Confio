@@ -52,7 +52,7 @@ Todo el sistema de producto de Confío se liquida en BNB Smart Chain:
 | USDT | Entrada, liquidez y salida universal. | BSC-USDT llega por proveedores locales e internacionales, puede mantenerse o transferirse y es el activo de entrada y salida de cUSD+. |
 | cUSD+ | Saldo principal de ahorro y transacciones. | Participaciones acumulativas respaldadas por USDY que pueden ahorrarse, enviarse, gastarse, pagarse por nómina o redimirse a USDT. |
 | Ondo Stocks | Acceso elegible a mercados tokenizados. | El usuario compra desde cUSD+ y reinvierte en cUSD+ los ingresos de venta mediante un router dedicado y con código verificado. Cada compra y venta completada lleva una comisión explícita de Confío de 0,30%. |
-| $CONFIO | Token comunitario y del ecosistema. | BEP-20 de oferta fija con preventa on-chain denominada en USDT. No respalda los saldos en dólares de los usuarios. |
+| $CONFIO | Token comunitario y del ecosistema. | BEP-20 de oferta fija con preventa on-chain pagada en cUSD. No respalda los saldos en dólares de los usuarios. |
 
 La arquitectura de una sola red sigue el centro económico del producto: Ondo hizo disponibles en BNB Smart Chain USDY, InstantManager, el oráculo y la ruta USDT de suscripción/redención. Confío consolidó pagos, nómina, transferencias y $CONFIO en esa misma red para eliminar cambios de cadena y liquidez fragmentada. <sup>[7, 8, 10]</sup>
 
@@ -100,7 +100,7 @@ Congelamientos bancarios, controles, fintechs fallidas, brokers informales, spre
 | Pagar | cUSD+ o $CONFIO, fondeado con cUSD+ o USDT | El comercio cobra en cUSD+ o $CONFIO; el contrato paga al comercio, aplica 0,9% y registra la comisión on-chain. |
 | Nómina | cUSD+ con salida opcional a USDT | La empresa fondea un escrow y delegados autorizados firman pagos. |
 | Comprar o vender una Ondo Stock | cUSD+, token de Ondo Stock y router de acciones | Una transacción patrocinada liquida mediante Ondo Global Markets. La compra redime el cUSD+ necesario a USDT y entrega el token al usuario; la venta devuelve el importe neto a cUSD+. |
-| Preventa $CONFIO | USDT | Una transacción patrocinada compra asignación sobre una curva inmutable. |
+| Preventa $CONFIO | cUSD | Una transacción patrocinada compra asignación sobre una curva inmutable. |
 | Recompensas | RewardVault | Derechos acumulativos se registran off-chain y se reclaman on-chain tras el desbloqueo DEX. |
 
 ### 3.1 Despliegues públicos en BNB Smart Chain
@@ -109,16 +109,17 @@ Todos están activos en mainnet y tienen código verificado.
 
 | Contrato | Dirección |
 | --- | --- |
+| Proxy de bóveda cUSD | [`0x6101cC370635cF2c7f2725EaB010aC407A8d543F`](https://bscscan.com/address/0x6101cC370635cF2c7f2725EaB010aC407A8d543F#code) |
 | Proxy de bóveda cUSD+ | [`0x3C29417eb4314155e63d4C7D4507852b87763Ed1`](https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code) |
 | Router de Ondo Stocks (proxy UUPS) | [`0x40c8e134BCAf44EEf9e7D184846F36c9862329c3`](https://bscscan.com/address/0x40c8e134BCAf44EEf9e7D184846F36c9862329c3#code) |
 | Delegado de lotes patrocinados | [`0xC06BD197b34a587026615C6AEd21301F5E99bc00`](https://bscscan.com/address/0xC06BD197b34a587026615C6AEd21301F5E99bc00#code) |
 | Token $CONFIO | [`0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8`](https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8) |
-| Bóveda de preventa | [`0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c`](https://bscscan.com/address/0x1a2dD9b49987DE86dC96fC86c715b62aaDFf095c#code) |
+| Bóveda de preventa | [`0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358`](https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code) |
 | Bóveda de recompensas | [`0x812b8d86952123bED0a33E92a76211cbbACDe730`](https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code) |
 | Bóveda de vesting | [`0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A`](https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code) |
-| Escrow de invitaciones | [`0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6`](https://bscscan.com/address/0xeFF0Af29FcB8f010f3B1e58bd5bbA36AEad4D0d6#code) |
-| Pagos a comercios | [`0x039Ebe91283c686F23F4C751600a39567967736D`](https://bscscan.com/address/0x039Ebe91283c686F23F4C751600a39567967736D#code) |
-| Nómina | [`0x851cA801c3028D4C0e651d29803f8e35D86d7299`](https://bscscan.com/address/0x851cA801c3028D4C0e651d29803f8e35D86d7299#code) |
+| Escrow de invitaciones | [`0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59`](https://bscscan.com/address/0xe6c49CcEb57b86dfE2F597053f8f475F18AcDb59#code) |
+| Pagos a comercios | [`0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
+| Nómina | [`0x851e1a56De5c0ADBB75e904B2E7325e132692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
 
 ### 3.2 Por qué importa una sola red
 
@@ -199,7 +200,7 @@ $CONFIO es un BEP-20 no actualizable de 1.000.000.000 de unidades. No tiene owne
 
 ### 7.2 Preventa on-chain
 
-La preventa usa USDT y una curva continua e inmutable: 0–4M CONFIO, US$0,20→0,30; 4–24M, US$0,30→0,70; 24–74M, US$0,70→1,30. El contrato integra el costo bajo la curva, impide descuentos por dividir compras y abre reclamos solo con respaldo suficiente. La elegibilidad y los términos siguen aplicando. <sup>[17]</sup>
+La preventa se paga en cUSD y usa una curva continua e inmutable: 0–4M CONFIO, US$0,20→0,30; 4–24M, US$0,30→0,70; 24–74M, US$0,70→1,30. El contrato integra el costo bajo la curva, impide descuentos por dividir compras y abre reclamos solo con respaldo suficiente. La elegibilidad y los términos siguen aplicando. <sup>[17]</sup>
 
 ### 7.3 Recompensas y reclamos bloqueados hasta DEX
 
