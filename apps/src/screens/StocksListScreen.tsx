@@ -27,7 +27,7 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { FEATURED_STOCK_TICKERS, STOCK_TAGLINES } from '../config/stockPresentation';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useGmMarket, GmStock } from '../hooks/useGmMarket';
+import { useGmMarket, useGmHighlights, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
@@ -41,6 +41,7 @@ export const StocksListScreen = () => {
   const { formatNumber } = useNumberFormat();
   const { savings, stocks: myStocks } = useSavingsPortfolio();
   const { session, stocks, loading } = useGmMarket(myStocks.enabled);
+  const highlights = useGmHighlights(myStocks.enabled);
   const [search, setSearch] = useState('');
 
   // Every row carries BOTH numbers with the app-wide hierarchy: the big
@@ -133,9 +134,51 @@ export const StocksListScreen = () => {
     );
   }
 
+  // One horizontal shelf of cards, each with one factual line.
+  const renderShelf = (
+    key: string,
+    title: string,
+    subtitle: string | null,
+    items: { stock: GmStock; tagline: string }[],
+  ) => {
+    if (items.length === 0) return null;
+    return (
+      <View key={key} style={styles.shelf}>
+        <Text style={[styles.shelfTitle, !!subtitle && styles.shelfTitleWithSub]} accessibilityRole="header">{title}</Text>
+        {!!subtitle && <Text style={styles.shelfSubtitle}>{subtitle}</Text>}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelfRow}>
+          {items.map(({ stock, tagline }) => {
+            const up = stock.dayChangePct >= 0;
+            return (
+              <TouchableOpacity
+                key={stock.ticker}
+                style={styles.shelfCard}
+                activeOpacity={0.85}
+                onPress={() => navigation.navigate('StockDetail', { ticker: stock.ticker })}
+                accessibilityRole="button"
+                accessibilityLabel={`${stock.name}. ${tagline}`}
+              >
+                <TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={32} />
+                <Text style={styles.shelfName} numberOfLines={1}>{stock.name}</Text>
+                <Text style={styles.shelfTagline} numberOfLines={2}>{tagline}</Text>
+                <View style={styles.shelfPriceRow}>
+                  <Text style={styles.rowMarketPrice}>{fmtUsd(stock.priceUsd)}</Text>
+                  <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
+                    {up ? '▲' : '▼'} {formatNumber(Math.abs(stock.dayChangePct), { maximumFractionDigits: 2 })}%
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
+
   const renderRow = ({ item }: { item: GmStock }) => {
     const up = item.dayChangePct >= 0;
     const positionValue = positionByTicker[item.ticker] || 0;
+    const warning = highlights.warningFor(item.ticker);
     return (
       <TouchableOpacity
         style={styles.row}
@@ -144,7 +187,14 @@ export const StocksListScreen = () => {
       >
         <TickerLogo ticker={item.ticker} color={item.color} logoUrl={item.logoUrl} size={42} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.rowTicker}>{item.ticker}</Text>
+          <View style={styles.rowTickerLine}>
+            <Text style={styles.rowTicker}>{item.ticker}</Text>
+            {warning && (
+              <View style={styles.riskBadge}>
+                <Text style={styles.riskBadgeText}>{warning.badge}</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.rowName} numberOfLines={1}>
             {item.name}
           </Text>
@@ -320,40 +370,26 @@ export const StocksListScreen = () => {
               <Image source={OndoLogo} style={styles.partnerLogo} />
               <Text style={styles.partnerBrand}>Ondo Finance</Text>
             </View>
-            {/* Starter shelf: the four broad, low-effort places to begin,
-                each with one factual line. Replaces the "¿No sabes por dónde
-                empezar?" box, which framed the user as lost and ended on a
-                warning. Hidden while searching. */}
-            {!query && starters.length > 0 && (
-              <View style={styles.shelf}>
-                <Text style={styles.shelfTitle} accessibilityRole="header">Empieza por aquí</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelfRow}>
-                  {starters.map(stock => {
-                    const up = stock.dayChangePct >= 0;
-                    return (
-                      <TouchableOpacity
-                        key={stock.ticker}
-                        style={styles.shelfCard}
-                        activeOpacity={0.85}
-                        onPress={() => navigation.navigate('StockDetail', { ticker: stock.ticker })}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${stock.name}. ${STOCK_TAGLINES[stock.ticker] || ''}`}
-                      >
-                        <TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={32} />
-                        <Text style={styles.shelfName} numberOfLines={1}>{stock.name}</Text>
-                        <Text style={styles.shelfTagline} numberOfLines={2}>{STOCK_TAGLINES[stock.ticker] || stock.ticker}</Text>
-                        <View style={styles.shelfPriceRow}>
-                          <Text style={styles.rowMarketPrice}>{fmtUsd(stock.priceUsd)}</Text>
-                          <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
-                            {up ? '▲' : '▼'} {formatNumber(Math.abs(stock.dayChangePct), { maximumFractionDigits: 2 })}%
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+            {/* Starter shelf: the four broad, low-effort places to begin.
+                Replaces the "¿No sabes por dónde empezar?" box, which framed
+                the user as lost and ended on a warning. Hidden while searching. */}
+            {!query && starters.length > 0 && renderShelf(
+              'starters',
+              'Empieza por aquí',
+              null,
+              starters.map(stock => ({ stock, tagline: STOCK_TAGLINES[stock.ticker] || stock.ticker })),
             )}
+            {/* Server-curated shelves (LatAm, crypto trackers). A shelf
+                shows only the assets live in the market payload. */}
+            {!query && highlights.shelves.map(shelf => renderShelf(
+              shelf.key,
+              shelf.title,
+              shelf.subtitle,
+              shelf.items.flatMap(item => {
+                const stock = stocks.find(candidate => candidate.ticker === item.ticker);
+                return stock ? [{ stock, tagline: item.tagline }] : [];
+              }),
+            ))}
             <View style={styles.searchBox}>
               <Icon name="search" size={18} color={colors.text.light} />
               <TextInput
@@ -486,7 +522,17 @@ const styles = StyleSheet.create({
   inviteSub: { fontSize: 14, lineHeight: 20, color: colors.white, opacity: 0.9, marginTop: 4 },
   shelf: { marginTop: 4, marginBottom: 8 },
   shelfTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary, marginBottom: 10 },
+  shelfTitleWithSub: { marginBottom: 2 },
+  shelfSubtitle: { fontSize: 12, lineHeight: 16, color: colors.text.secondary, marginBottom: 10 },
   shelfRow: { gap: 10, paddingRight: 16 },
+  rowTickerLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  riskBadge: {
+    backgroundColor: colors.warning.background,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  riskBadgeText: { fontSize: 10, fontWeight: '700', color: colors.warning.text },
   shelfCard: {
     width: 148,
     backgroundColor: colors.white,

@@ -1,0 +1,49 @@
+{
+  "shelves": [
+    {
+      "key": "latam",
+      "title": "Empresas de nuestra región",
+      "subtitle": "Nombres que ya conoces de América Latina.",
+      "items": [
+        {"ticker": "MELI", "tagline": "Compras y pagos en línea"},
+        {"ticker": "PBR", "tagline": "La petrolera de Brasil"},
+        {"ticker": "SCCO", "tagline": "Cobre de Perú y México"},
+        {"ticker": "EWZ", "tagline": "Grandes empresas de Brasil"},
+        {"ticker": "ECH", "tagline": "Grandes empresas de Chile"},
+        {"ticker": "ARGT", "tagline": "Empresas de Argentina"}
+      ]
+    },
+    {
+      "key": "crypto",
+      "title": "Bitcoin y cripto",
+      "subtitle": "Sigue su precio sin abrir cuenta en un exchange. Puede subir o bajar mucho en poco tiempo.",
+      "items": [
+        {"ticker": "IBIT", "tagline": "Sigue el precio de bitcoin"},
+        {"ticker": "ETHA", "tagline": "Sigue el precio de ether"},
+        {"ticker": "FSOL", "tagline": "Sigue el precio de Solana"}
+      ]
+    }
+  ],
+  "warnings": {
+    "TQQQ": {
+      "badge": "Riesgo alto",
+      "message": "Pensado para operaciones de un solo día. Si lo mantienes más tiempo, puede perder valor incluso cuando el mercado sube."
+    },
+    "SOXL": {
+      "badge": "Riesgo alto",
+      "message": "Pensado para operaciones de un solo día. Si lo mantienes más tiempo, puede perder valor incluso cuando las empresas de chips suben."
+    },
+    "SQQQ": {
+      "badge": "Riesgo alto",
+      "message": "Gana cuando el mercado baja y está pensado para un solo día. Si lo mantienes más tiempo, puede perder gran parte de su valor."
+    },
+    "SOXS": {
+      "badge": "Riesgo alto",
+      "message": "Gana cuando las empresas de chips bajan y está pensado para un solo día. Si lo mantienes más tiempo, puede perder gran parte de su valor."
+    },
+    "PSQ": {
+      "badge": "Plazo corto",
+      "message": "Gana cuando el mercado baja y está pensado para plazos cortos. Si lo mantienes mucho tiempo, su resultado puede alejarse bastante de lo que esperas."
+    }
+  }
+}

@@ -4,6 +4,8 @@ import renderer, {ReactTestRenderer, act} from 'react-test-renderer';
 let mockCloses: number[];
 let mockChartLoading: boolean;
 let mockChartFailed: boolean;
+let mockDescription: string | null;
+let mockWarning: {ticker: string; badge: string; message: string} | undefined;
 
 const mockStock = {
   symbol: 'NVDAon',
@@ -65,6 +67,8 @@ jest.mock('../../hooks/useGmMarket', () => ({
     loading: mockChartLoading,
     failed: mockChartFailed,
   }),
+  useGmAssetDescription: () => mockDescription,
+  useGmHighlights: () => ({shelves: [], warningFor: () => mockWarning}),
   sparklineFor: () => [178, 180],
 }));
 
@@ -93,6 +97,8 @@ beforeEach(() => {
   mockCloses = [];
   mockChartLoading = false;
   mockChartFailed = false;
+  mockDescription = null;
+  mockWarning = undefined;
 });
 
 describe('StockDetailScreen intraday chart states', () => {
@@ -140,5 +146,33 @@ describe('StockDetailScreen intraday chart states', () => {
     expect(tree.root.findAllByType('Polyline' as any)).toHaveLength(1);
     expect(text).not.toContain('Cargando gráfico…');
     expect(text).not.toContain('Aún no hay suficientes datos');
+  });
+});
+
+describe('StockDetailScreen server description', () => {
+  const render = () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<StockDetailScreen />);
+    });
+    return collectText(tree.toJSON()).join(' ');
+  };
+
+  it('shows the server-provided explanation', () => {
+    mockDescription = 'Nvidia diseña chips gráficos.';
+    const text = render();
+    expect(text).toContain('¿Qué es NVIDIA?');
+    expect(text).toContain('Nvidia diseña chips gráficos.');
+  });
+
+  it('hides the card when the server has no explanation', () => {
+    expect(render()).not.toContain('¿Qué es');
+  });
+
+  it('states a leveraged fund warning before the price', () => {
+    mockWarning = {ticker: 'NVDA', badge: 'Riesgo alto', message: 'Pensado para un solo día.'};
+    const text = render();
+    expect(text.indexOf('Pensado para un solo día.')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('Riesgo alto')).toBeLessThan(text.indexOf('$180'));
   });
 });

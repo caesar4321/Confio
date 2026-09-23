@@ -334,6 +334,40 @@ class GmApiTradingTests(SimpleTestCase):
             self.assertEqual(gm_holdings.holdings_units(holder), {'TSLAon': 1.0})
         registry.assert_not_called()
 
+    def test_asset_description_is_served_per_ticker(self):
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, id=34), META={}))
+        query = Query()
+        with mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=True):
+            self.assertIn('500', query.resolve_gm_asset_description(info, 'spy'))
+            self.assertIsNone(query.resolve_gm_asset_description(info, 'NOPE'))
+
+    def test_highlights_serve_shelves_and_warnings(self):
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, id=35), META={}))
+        with mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=True):
+            highlights = Query().resolve_gm_highlights(info)
+        shelves = {shelf.key: [item.ticker for item in shelf.items] for shelf in highlights.shelves}
+        self.assertIn('MELI', shelves['latam'])
+        self.assertIn('IBIT', shelves['crypto'])
+        warned = {warning.ticker for warning in highlights.warnings}
+        self.assertTrue({'TQQQ', 'SQQQ', 'SOXL', 'SOXS'} <= warned)
+
+    def test_highlighted_tickers_have_descriptions(self):
+        from cusd_plus.schema import _gm_descriptions, _gm_highlights
+        descriptions = _gm_descriptions()
+        data = _gm_highlights()
+        tickers = [item['ticker'] for shelf in data['shelves'] for item in shelf['items']]
+        tickers += list(data['warnings'])
+        self.assertEqual([t for t in tickers if not descriptions.get(t)], [])
+
+    def test_featured_tickers_always_have_a_description(self):
+        from cusd_plus.schema import _gm_descriptions
+        descriptions = _gm_descriptions()
+        for ticker in ('SPY', 'QQQ', 'GLD', 'SLV'):
+            self.assertTrue(descriptions.get(ticker), ticker)
+        self.assertTrue(all(isinstance(v, str) and v.strip() for v in descriptions.values()))
+
     def test_empty_registry_outage_is_unknown_not_empty_portfolio(self):
         with mock.patch('cusd_plus.gm_holdings.Path.read_text', return_value='{}'), \
              mock.patch('cusd_plus.gm_api.all_addresses', side_effect=RuntimeError('down')):
@@ -358,6 +392,8 @@ class GmApiTradingTests(SimpleTestCase):
             self.assertIsNone(query.resolve_gm_community(info))
             self.assertEqual(query.resolve_gm_holdings(info), [])
             self.assertEqual(query.resolve_gm_ohlc(info, 'TSLAon'), [])
+            self.assertIsNone(query.resolve_gm_asset_description(info, 'SPY'))
+            self.assertIsNone(query.resolve_gm_highlights(info))
         market.assert_not_called()
         ohlc.assert_not_called()
         community.assert_not_called()

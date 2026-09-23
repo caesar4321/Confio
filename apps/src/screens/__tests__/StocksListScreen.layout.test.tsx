@@ -4,6 +4,8 @@ import renderer, {act} from 'react-test-renderer';
 const mockNavigate = jest.fn();
 let mockPositions: {ticker: string; name?: string; valueUsd: number}[] = [];
 const mockStocks = [
+  {ticker: 'IBIT', symbol: 'IBITon', name: 'iShares Bitcoin Trust ETF', priceUsd: 60, dayChangePct: 2.1, color: '#000', logoUrl: '', offHours: false, sparkline24h: []},
+  {ticker: 'TQQQ', symbol: 'TQQQon', name: 'ProShares UltraPro QQQ', priceUsd: 90, dayChangePct: 3.3, color: '#000', logoUrl: '', offHours: false, sparkline24h: []},
   {ticker: 'NVDA', symbol: 'NVDAon', name: 'NVIDIA', priceUsd: 181, dayChangePct: 1.3, color: '#000', logoUrl: '', offHours: false, sparkline24h: []},
   {ticker: 'AAPL', symbol: 'AAPLon', name: 'Apple', priceUsd: 231, dayChangePct: -0.4, color: '#000', logoUrl: '', offHours: false, sparkline24h: []},
   {ticker: 'SPY', symbol: 'SPYon', name: 'S&P 500', priceUsd: 662, dayChangePct: 0.8, color: '#000', logoUrl: '', offHours: false, sparkline24h: []},
@@ -17,7 +19,12 @@ jest.mock('react-native-svg', () => ({
 }));
 jest.mock('@react-navigation/native', () => ({useNavigation: () => ({navigate: mockNavigate, goBack: jest.fn()})}));
 jest.mock('../../components/TickerLogo', () => ({TickerLogo: 'TickerLogo'}));
-jest.mock('../../hooks/useGmMarket', () => ({useGmMarket: () => ({session: 'core', stocks: mockStocks, loading: false})}));
+let mockShelves: any[] = [];
+let mockWarnings: Record<string, {ticker: string; badge: string; message: string}> = {};
+jest.mock('../../hooks/useGmMarket', () => ({
+  useGmMarket: () => ({session: 'core', stocks: mockStocks, loading: false}),
+  useGmHighlights: () => ({shelves: mockShelves, warningFor: (t: string) => mockWarnings[t]}),
+}));
 jest.mock('../../hooks/useSavingsPortfolio', () => ({
   useSavingsPortfolio: () => ({
     savings: {balanceUsd: 120},
@@ -41,6 +48,8 @@ const texts = (tree: renderer.ReactTestRenderer) =>
 beforeEach(() => {
   jest.clearAllMocks();
   mockPositions = [];
+  mockShelves = [];
+  mockWarnings = {};
 });
 
 it('invites a first-time investor, with a factual starter shelf and no warning box', async () => {
@@ -52,7 +61,7 @@ it('invites a first-time investor, with a factual starter shelf and no warning b
   expect(t).toContain('500 grandes empresas en una compra');
   expect(t.join('|')).not.toMatch(/No sabes por dónde empezar|pueden bajar de valor\. Explora/);
   expect(t).not.toContain('Tus acciones');
-  expect(t).toContain('Todas · 4');
+  expect(t).toContain('Todas · 6');
   await act(async () => tree.unmount());
 });
 
@@ -67,7 +76,7 @@ it('leads with what the user owns, largest first', async () => {
   expect(t).toContain('Apple 20%');
   expect(t).not.toContain('Invierte en las empresas que usas');
   const mine = t.indexOf('Tus acciones');
-  const all = t.indexOf('Todas · 4');
+  const all = t.indexOf('Todas · 6');
   expect(mine).toBeGreaterThan(-1);
   expect(mine).toBeLessThan(all);
   const firstOwned = t.indexOf('NVDA', mine);
@@ -100,5 +109,23 @@ it('rounds the allocation legend to exactly 100%', async () => {
     .map(m => Number(m![2]));
   expect(pcts).toHaveLength(3);
   expect(pcts.reduce((a, b) => a + b, 0)).toBe(100);
+  await act(async () => tree.unmount());
+});
+
+it('renders server shelves with only live assets, and badges risky funds', async () => {
+  mockShelves = [{
+    key: 'crypto',
+    title: 'Bitcoin y cripto',
+    subtitle: 'Sigue su precio sin abrir cuenta en un exchange.',
+    items: [{ticker: 'IBIT', tagline: 'Sigue el precio de bitcoin'}, {ticker: 'ETHA', tagline: 'Sigue el precio de ether'}],
+  }];
+  mockWarnings = {TQQQ: {ticker: 'TQQQ', badge: 'Riesgo alto', message: 'Un solo día.'}};
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  const t = texts(tree);
+  expect(t).toContain('Bitcoin y cripto');
+  expect(t).toContain('Sigue el precio de bitcoin');
+  expect(t).not.toContain('Sigue el precio de ether');
+  expect(t.filter(x => x === 'Riesgo alto')).toHaveLength(1);
   await act(async () => tree.unmount());
 });

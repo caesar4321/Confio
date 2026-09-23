@@ -24,11 +24,12 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
-import { STOCK_PRESENTATION } from '../config/stockPresentation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
   useGmMarket,
   useGmOhlc,
+  useGmAssetDescription,
+  useGmHighlights,
   sparklineFor,
   GM_RANGES,
   GM_RANGE_ACCESSIBILITY_LABELS,
@@ -60,6 +61,13 @@ export const StockDetailScreen = () => {
     stock?.symbol,
     range,
     stockHoldings.enabled,
+  );
+  const description = useGmAssetDescription(
+    route.params.ticker,
+    stockHoldings.enabled,
+  );
+  const warning = useGmHighlights(stockHoldings.enabled).warningFor(
+    route.params.ticker,
   );
 
   // Range chart from gmOhlc closes. On 1D the market sparkline stands in
@@ -125,6 +133,18 @@ export const StockDetailScreen = () => {
       />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Leveraged/inverse funds: stated before the price, not buried in
+            the description — holding them like a normal stock loses money. */}
+        {warning && (
+          <View style={styles.riskBanner} accessibilityRole="alert">
+            <Icon name="alert-triangle" size={16} color={colors.warning.icon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.riskBannerTitle}>{warning.badge}</Text>
+              <Text style={styles.riskBannerText}>{warning.message}</Text>
+            </View>
+          </View>
+        )}
+
         {/* Price + chart */}
         <View style={styles.card}>
           <Text style={styles.price}>{fmtUsd(stock.priceUsd)}</Text>
@@ -260,12 +280,10 @@ export const StockDetailScreen = () => {
           </View>
         )}
 
-        {STOCK_PRESENTATION[stock.ticker] && (
+        {description && (
           <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Sobre {stock.name}</Text>
-            <Text style={styles.assetDescription}>
-              {STOCK_PRESENTATION[stock.ticker].description}
-            </Text>
+            <Text style={styles.sectionLabel}>{`¿Qué es ${stock.name}?`}</Text>
+            <Text style={styles.assetDescription}>{description}</Text>
           </View>
         )}
 
@@ -374,6 +392,20 @@ const styles = StyleSheet.create({
   fundingLogo: { width: 30, height: 30, borderRadius: 15 },
   fundingTitle: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
   fundingSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
+
+  riskBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: colors.warning.background,
+    borderWidth: 1,
+    borderColor: colors.warning.border,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  riskBannerTitle: { fontSize: 13, fontWeight: '700', color: colors.warning.text },
+  riskBannerText: { fontSize: 12, color: colors.warning.text, marginTop: 1, lineHeight: 17 },
 
   comingSoon: {
     flexDirection: 'row',

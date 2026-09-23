@@ -15,10 +15,13 @@
 #   with ported pool math; cusdPlusConvertParams supplies threshold/fee/kill
 #   switch. `paused` maps to the amber state in ConvertAhorroScreen.
 
+import functools
+import json
 import logging
 import re
 import secrets
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from pathlib import Path
 
 import graphene
 from django.utils import timezone
@@ -294,6 +297,29 @@ class GmAssetType(graphene.ObjectType):
     logo_url = graphene.String(description="Served from OUR S3 mirror — the app never hotlinks third parties")
 
 
+class GmShelfItemType(graphene.ObjectType):
+    ticker = graphene.String()
+    tagline = graphene.String()
+
+
+class GmShelfType(graphene.ObjectType):
+    key = graphene.String()
+    title = graphene.String()
+    subtitle = graphene.String()
+    items = graphene.List(graphene.NonNull(GmShelfItemType))
+
+
+class GmAssetWarningType(graphene.ObjectType):
+    ticker = graphene.String()
+    badge = graphene.String(description="Short label for list rows, e.g. 'Riesgo alto'")
+    message = graphene.String(description="Plain-language banner shown on the asset's detail screen")
+
+
+class GmHighlightsType(graphene.ObjectType):
+    shelves = graphene.List(graphene.NonNull(GmShelfType))
+    warnings = graphene.List(graphene.NonNull(GmAssetWarningType))
+
+
 class GmMarketType(graphene.ObjectType):
     session = graphene.String(description="core | extended | off-hours | closed")
     assets = graphene.List(graphene.NonNull(GmAssetType))
@@ -375,6 +401,27 @@ def _display_name(raw: str) -> str:
     return name.strip(' ,')
 
 
+@functools.lru_cache(maxsize=1)
+def _gm_descriptions() -> dict:
+    """Curated plain-Spanish 'what is this' copy per underlying ticker.
+
+    Written for people who have never bought a stock: what the company does
+    or what the fund holds, in neutral words — no forecasts, no "seguro".
+    Tickers without an entry get null and the app hides the card.
+    """
+    path = Path(__file__).parent / 'gm_descriptions.json'
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+@functools.lru_cache(maxsize=1)
+def _gm_highlights() -> dict:
+    """Curated discovery shelves (LatAm names, crypto trackers) and the
+    warnings for products that behave unlike a normal stock (leveraged and
+    inverse funds). Server-side so a new listing needs no app release."""
+    path = Path(__file__).parent / 'gm_highlights.json'
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
 def _sparkline(history: list, points: int = 24) -> list:
     if not history:
         return []
@@ -410,6 +457,14 @@ class Query(graphene.ObjectType):
     gm_holdings = graphene.List(
         graphene.NonNull(GmHoldingType),
         description="The JWT account's tokenized-stock positions (Multicall3 universe scan — chain is the registry)",
+    )
+    gm_highlights = graphene.Field(
+        GmHighlightsType,
+        description="Curated discovery shelves and per-asset risk warnings for the stocks explorer",
+    )
+    gm_asset_description = graphene.String(
+        ticker=graphene.String(required=True),
+        description="Plain-language explanation of the underlying company or fund; null when not curated",
     )
     gm_ohlc = graphene.List(
         graphene.NonNull(GmCandleType),
@@ -624,6 +679,37 @@ class Query(graphene.ObjectType):
             ))
         holdings.sort(key=lambda h: h.value_usd, reverse=True)
         return holdings
+
+    def resolve_gm_highlights(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        data = _gm_highlights()
+        return GmHighlightsType(
+            shelves=[
+                GmShelfType(
+                    key=shelf['key'],
+                    title=shelf['title'],
+                    subtitle=shelf.get('subtitle'),
+                    items=[GmShelfItemType(**item) for item in shelf['items']],
+                )
+                for shelf in data.get('shelves', [])
+            ],
+            warnings=[
+                GmAssetWarningType(ticker=ticker, **warning)
+                for ticker, warning in data.get('warnings', {}).items()
+            ],
+        )
+
+    def resolve_gm_asset_description(self, info, ticker):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        return _gm_descriptions().get((ticker or '').strip().upper())
 
     def resolve_gm_ohlc(self, info, symbol, range='3M'):
         user = getattr(info.context, 'user', None)
