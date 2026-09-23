@@ -198,9 +198,9 @@ def reject_review_candidate(candidate_id: int, *, reason: str = '') -> Canonical
 
 def _extract_candidates(turns: list[CanonicalMemoryTurn]) -> list[dict]:
     model = getattr(
-        settings, 'CONFIO_AI_CANONICAL_PROMOTION_MODEL', 'gpt-5.6-luna'
+        settings, 'CONFIO_AI_CANONICAL_PROMOTION_MODEL', 'gpt-6-luna'
     ) or getattr(
-        settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-5.6-luna'
+        settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-6-luna'
     )
     user_query = '\n'.join(turn.user_text for turn in turns)
     current_memory = render_retrieved_knowledge(
