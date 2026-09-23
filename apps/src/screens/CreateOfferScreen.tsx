@@ -171,7 +171,7 @@ export const CreateOfferScreen = () => {
       return false;
     }
     if (selectedPaymentMethods.length === 0) {
-      setBanner({ variant: 'error', message: 'Por favor selecciona al menos una forma de cobro' });
+      setBanner({ variant: 'error', message: 'Por favor selecciona al menos una cuenta' });
       return false;
     }
     // Ensure only registered payment methods are selected
@@ -179,11 +179,11 @@ export const CreateOfferScreen = () => {
       registeredPaymentMethodIds.has(id)
     );
     if (selectedRegisteredMethods.length === 0) {
-      setBanner({ variant: 'error', message: 'Debes seleccionar al menos una forma de cobro que tengas registrada' });
+      setBanner({ variant: 'error', message: 'Debes seleccionar al menos una cuenta que tengas registrada' });
       return false;
     }
     if (selectedRegisteredMethods.length !== selectedPaymentMethods.length) {
-      setBanner({ variant: 'error', message: 'Solo puedes incluir formas de cobro que tengas registradas' });
+      setBanner({ variant: 'error', message: 'Solo puedes incluir cuentas que tengas registradas' });
       return false;
     }
     if (!selectedCountry) {
@@ -469,13 +469,13 @@ export const CreateOfferScreen = () => {
 
         {/* Payment Methods */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Formas de cobro</Text>
+          <Text style={styles.sectionTitle}>Mis cuentas</Text>
           {paymentMethodsLoading || userBankAccountsLoading ? (
-            <Text style={styles.helpText}>Cargando formas de cobro...</Text>
+            <Text style={styles.helpText}>Cargando cuentas...</Text>
           ) : paymentMethodsError ? (
-            <Text style={styles.helpText}>Error cargando formas de cobro: {paymentMethodsError.message}</Text>
+            <Text style={styles.helpText}>Error cargando cuentas: {paymentMethodsError.message}</Text>
           ) : allPaymentMethods.length === 0 ? (
-            <Text style={styles.helpText}>No hay formas de cobro disponibles</Text>
+            <Text style={styles.helpText}>No hay cuentas disponibles</Text>
           ) : (
             <>
               {/* Registered Payment Methods */}
@@ -530,7 +530,7 @@ export const CreateOfferScreen = () => {
                             [
                               { text: 'Cancelar', style: 'cancel' },
                               {
-                                text: 'Ir a Formas de cobro',
+                                text: 'Ir a Mis cuentas',
                                 onPress: () => navigation.navigate('PayoutMethods')
                               }
                             ]
@@ -556,16 +556,16 @@ export const CreateOfferScreen = () => {
               {registeredPaymentMethods.length === 0 && (
                 <View style={styles.noMethodsContainer}>
                   <Icon name="alert-circle" size={48} color={colors.warning} />
-                  <Text style={styles.noMethodsTitle}>No tienes formas de cobro registradas</Text>
+                  <Text style={styles.noMethodsTitle}>No tienes cuentas registradas</Text>
                   <Text style={styles.noMethodsText}>
-                    Debes registrar al menos una forma de cobro antes de crear una oferta.
+                    Debes registrar al menos una cuenta antes de crear una oferta.
                   </Text>
                   <TouchableOpacity
                     style={styles.registerButton}
                     onPress={() => navigation.navigate('PayoutMethods')}
                   >
                     <Icon name="credit-card" size={20} color="#fff" />
-                    <Text style={styles.registerButtonText}>Registrar formas de cobro</Text>
+                    <Text style={styles.registerButtonText}>Registrar cuentas</Text>
                   </TouchableOpacity>
                 </View>
               )}

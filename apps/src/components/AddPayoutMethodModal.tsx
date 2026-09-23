@@ -31,6 +31,8 @@ import { InlineBanner } from './common/InlineBanner';
 // Colors matching app design
 const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE'];
 const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'SIP-QR', 'QRI-PE', 'LIGO']);
+// Provider fields that describe the person, not the account, render with the holder.
+const HOLDER_FIELD_KEYS = new Set(['beneficiaryRut', 'firstName', 'lastName', 'documentType', 'documentNumber']);
 const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'WIREAR',
   'SULPAYMENTS',
@@ -814,16 +816,41 @@ export const AddPayoutMethodModal = ({
     return [];
   }, [countryCode, methodCode, selectedPaymentMethod, serverFieldSchema]);
 
+  const bankFieldConfig = providerFieldConfigs.find(field => field.key === 'bankName');
+  const accountProviderFields = providerFieldConfigs.filter(field => field.key !== 'bankName' && !HOLDER_FIELD_KEYS.has(field.key));
+  const holderProviderFields = providerFieldConfigs.filter(field => HOLDER_FIELD_KEYS.has(field.key));
+  // PSE asks for first and last name separately; a combined name field would ask twice.
+  const holderNameFromParts = holderProviderFields.some(field => field.key === 'firstName')
+    && holderProviderFields.some(field => field.key === 'lastName');
+
+  const validateProviderFields = (fields: ProviderFieldConfig[]) => {
+    for (const field of fields) {
+      const value = formData.providerMetadata[field.key];
+      if (field.required && !value?.trim()) {
+        setFormError(field.key === 'bankName'
+          ? `Por favor selecciona ${field.label.toLowerCase()}`
+          : `Por favor completa ${field.label.toLowerCase()}`);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Checks run in the order the fields render, so the first error names the first gap.
   const validateForm = () => {
     setFormError(null);
     if (!selectedPaymentMethod) {
-      setFormError('Por favor selecciona una forma de cobro');
+      setFormError('Selecciona un banco o billetera');
       return false;
     }
 
 
-    if (!formData.accountHolderName.trim()) {
-      setFormError('Por favor ingresa el nombre del titular');
+    if (bankFieldConfig && !validateProviderFields([bankFieldConfig])) {
+      return false;
+    }
+
+    if (accountTypeRequired && !String(formData.accountType || '').trim()) {
+      setFormError('Por favor selecciona el tipo de cuenta');
       return false;
     }
 
@@ -861,22 +888,22 @@ export const AddPayoutMethodModal = ({
       return false;
     }
 
+    if (!validateProviderFields(accountProviderFields)) {
+      return false;
+    }
+
+    if (!holderNameFromParts && !formData.accountHolderName.trim()) {
+      setFormError('Por favor ingresa el nombre del titular');
+      return false;
+    }
+
     // For bank payments, validate ID requirements
     if (selectedPaymentMethod.bank?.country?.requiresIdentification && !formData.identificationNumber.trim()) {
       setFormError(`Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`);
       return false;
     }
 
-    for (const field of providerFieldConfigs) {
-      const value = formData.providerMetadata[field.key];
-      if (field.required && !value?.trim()) {
-        setFormError(`Por favor completa ${field.label.toLowerCase()}`);
-        return false;
-      }
-    }
-
-    if (accountTypeRequired && !String(formData.accountType || '').trim()) {
-      setFormError('Por favor selecciona el tipo de cuenta');
+    if (!validateProviderFields(holderProviderFields)) {
       return false;
     }
 
@@ -969,7 +996,7 @@ export const AddPayoutMethodModal = ({
         // Frictionless: the new card on the list is the confirmation.
         onSuccess();
       } else {
-        setFormError(data?.error || 'Error al guardar la forma de cobro');
+        setFormError(data?.error || 'Error al guardar la cuenta');
       }
     } catch (error) {
       setFormError('Error de conexión');
@@ -1033,7 +1060,7 @@ export const AddPayoutMethodModal = ({
             <TouchableOpacity onPress={() => setShowPaymentMethodPicker(false)}>
               <Text style={styles.pickerCancel}>Cancelar</Text>
             </TouchableOpacity>
-            <Text style={styles.pickerTitle}>Forma de cobro</Text>
+            <Text style={styles.pickerTitle}>Banco o billetera</Text>
             <View style={{ width: 70 }} />
           </View>
 
@@ -1202,6 +1229,184 @@ export const AddPayoutMethodModal = ({
 
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
+  const withDividers = (nodes: React.ReactElement[]) => nodes.map((node, idx) => (
+    <React.Fragment key={String(node.key)}>
+      {idx > 0 && <View style={styles.cardDivider} />}
+      {node}
+    </React.Fragment>
+  ));
+
+  const renderProviderField = (field: ProviderFieldConfig) => {
+    if (field.key === 'bankName') {
+      return (
+        <View key={field.key} style={styles.fieldInCard}>
+          <Text style={styles.label}>{field.label}{field.required ? ' *' : ''}</Text>
+          {koyweBankOptions.length > 0 ? (
+            <TouchableOpacity style={styles.picker} onPress={() => setShowProviderBankPicker(true)}>
+              <View style={styles.pickerContent}>
+                {formData.providerMetadata.bankName ? (
+                  <Text style={styles.pickerText}>{formData.providerMetadata.bankName}</Text>
+                ) : (
+                  <Text style={styles.pickerPlaceholder}>{field.placeholder}</Text>
+                )}
+              </View>
+              <Icon name="chevron-down" size={16} color={colors.text.light} />
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.textInput, styles.textInputDisabled]}>
+              <Text style={styles.disabledInputText}>
+                No pudimos cargar el catálogo de bancos de Koywe. Intenta de nuevo en unos segundos.
+              </Text>
+            </View>
+          )}
+          {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+        </View>
+      );
+    }
+    return (
+      <View key={field.key} style={styles.fieldInCard}>
+        <Text style={styles.label}>{field.label}{field.required ? ' *' : ''}</Text>
+        <TextInput
+          style={[styles.textInput, focusedField === field.key && styles.textInputFocused]}
+          value={formData.providerMetadata[field.key] || ''}
+          onChangeText={(value) => setFormData(prev => ({ ...prev, providerMetadata: { ...prev.providerMetadata, [field.key]: value } }))}
+          placeholder={field.placeholder}
+          placeholderTextColor={colors.text.light}
+          keyboardType={field.keyboardType || 'default'}
+          autoCapitalize="none"
+          onFocus={() => setFocusedField(field.key)}
+          onBlur={() => setFocusedField(null)}
+        />
+        {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+      </View>
+    );
+  };
+
+  const accountCardFields: React.ReactElement[] = [];
+  if (bankFieldConfig) {
+    accountCardFields.push(renderProviderField(bankFieldConfig));
+  }
+  if (showAccountTypeField) {
+    accountCardFields.push(
+      <View key="accountType" style={styles.fieldInCard}>
+        <Text style={styles.label}>Tipo de cuenta{accountTypeRequired ? ' *' : ''}</Text>
+        {getAccountTypeOptions().map(option => (
+          <TouchableOpacity
+            key={option.value}
+            style={[styles.radioRow, styles.radioRowInField]}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: formData.accountType === option.value }}
+            onPress={() => setFormData(prev => ({ ...prev, accountType: option.value }))}
+          >
+            <View style={[styles.radioCircle, formData.accountType === option.value && styles.radioCircleSelected]}>
+              {formData.accountType === option.value && <View style={styles.radioInner} />}
+            </View>
+            <Text style={styles.radioLabel}>{option.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  }
+  if (fieldCopy.account.show) {
+    accountCardFields.push(
+      <View key="account" style={styles.fieldInCard}>
+        <Text style={styles.label}>{fieldCopy.account.label}{fieldCopy.account.required ? ' *' : ''}</Text>
+        <TextInput
+          style={[styles.textInput, focusedField === 'account' && styles.textInputFocused]}
+          value={formData.accountNumber}
+          onChangeText={(value) => setFormData(prev => ({ ...prev, accountNumber: value }))}
+          placeholder={fieldCopy.account.placeholder}
+          placeholderTextColor={colors.text.light}
+          autoCapitalize={isBreb ? "none" : undefined}
+          autoCorrect={isBreb ? false : undefined}
+          keyboardType={fieldCopy.account.keyboardType}
+          maxLength={fieldCopy.account.maxLength}
+          onFocus={() => setFocusedField('account')}
+          onBlur={() => setFocusedField(null)}
+        />
+      </View>
+    );
+  }
+  if (fieldCopy.phone.show) {
+    accountCardFields.push(
+      <View key="phone" style={styles.fieldInCard}>
+        <Text style={styles.label}>{fieldCopy.phone.label}{fieldCopy.phone.required ? ' *' : ''}</Text>
+        <TextInput
+          style={[styles.textInput, focusedField === 'phone' && styles.textInputFocused]}
+          value={formData.phoneNumber}
+          onChangeText={(value) => setFormData(prev => ({ ...prev, phoneNumber: value }))}
+          placeholder={fieldCopy.phone.placeholder}
+          placeholderTextColor={colors.text.light}
+          keyboardType={fieldCopy.phone.keyboardType}
+          onFocus={() => setFocusedField('phone')}
+          onBlur={() => setFocusedField(null)}
+        />
+      </View>
+    );
+  }
+  if (payoutEmailField.show) {
+    accountCardFields.push(
+      <View key="email" style={styles.fieldInCard}>
+        <Text style={styles.label}>{payoutEmailField.label}{payoutEmailField.required ? ' *' : ''}</Text>
+        <TextInput
+          style={[styles.textInput, focusedField === 'email' && styles.textInputFocused]}
+          value={formData.email}
+          onChangeText={(value) => setFormData(prev => ({ ...prev, email: value }))}
+          placeholder={payoutEmailField.placeholder}
+          placeholderTextColor={colors.text.light}
+          keyboardType={payoutEmailField.keyboardType}
+          autoCapitalize="none"
+          onFocus={() => setFocusedField('email')}
+          onBlur={() => setFocusedField(null)}
+        />
+      </View>
+    );
+  }
+  accountCardFields.push(...accountProviderFields.map(renderProviderField));
+
+  const holderCardFields: React.ReactElement[] = [];
+  if (!holderNameFromParts) {
+    holderCardFields.push(
+      <View key="holder" style={styles.fieldInCard}>
+        <Text style={styles.label}>{fieldCopy.holderLabel} *</Text>
+        <TextInput
+          style={[styles.textInput, focusedField === 'holder' && styles.textInputFocused]}
+          value={formData.accountHolderName}
+          onChangeText={(value) => setFormData(prev => ({ ...prev, accountHolderName: value }))}
+          placeholder="Como aparece en tu banco"
+          placeholderTextColor={colors.text.light}
+          accessibilityLabel={fieldCopy.holderLabel}
+          autoCapitalize="words"
+          onFocus={() => setFocusedField('holder')}
+          onBlur={() => setFocusedField(null)}
+        />
+      </View>
+    );
+  }
+  if (selectedPaymentMethod?.bank?.country?.requiresIdentification) {
+    const identificationName = selectedPaymentMethod.bank.country.identificationName;
+    const identificationFormat = selectedPaymentMethod.bank.country.identificationFormat;
+    holderCardFields.push(
+      <View key="id" style={styles.fieldInCard}>
+        <Text style={styles.label}>{identificationName} *</Text>
+        <TextInput
+          style={[styles.textInput, focusedField === 'id' && styles.textInputFocused]}
+          value={formData.identificationNumber}
+          onChangeText={(value) => setFormData(prev => ({ ...prev, identificationNumber: value }))}
+          placeholder={`Ingresa tu ${identificationName}`}
+          placeholderTextColor={colors.text.light}
+          keyboardType="numeric"
+          onFocus={() => setFocusedField('id')}
+          onBlur={() => setFocusedField(null)}
+        />
+        {identificationFormat && (
+          <Text style={styles.helpText}>Formato: {identificationFormat}</Text>
+        )}
+      </View>
+    );
+  }
+  holderCardFields.push(...holderProviderFields.map(renderProviderField));
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Gradient header with curved bottom */}
@@ -1221,7 +1426,7 @@ export const AddPayoutMethodModal = ({
             <Icon name="x" size={22} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
-            {isEditing ? 'Editar forma de cobro' : 'Agregar forma de cobro'}
+            {isEditing ? 'Editar cuenta' : 'Agregar cuenta'}
           </Text>
           {/* Save button in header still shown, but primary CTA is at bottom */}
           <View style={{ width: 40 }} />
@@ -1265,7 +1470,7 @@ export const AddPayoutMethodModal = ({
 
           {/* Payment Method */}
           <View style={styles.fieldInCard}>
-            <Text style={styles.label}>Forma de cobro *</Text>
+            <Text style={styles.label}>Banco o billetera *</Text>
             <TouchableOpacity
               style={[styles.picker, (!selectedCountry || lockPaymentMethod) && styles.pickerDisabled]}
               onPress={() => selectedCountry && !lockPaymentMethod && setShowPaymentMethodPicker(true)}
@@ -1280,7 +1485,7 @@ export const AddPayoutMethodModal = ({
                 ) : (
                   <Text style={styles.pickerPlaceholder}>
                     {selectedCountry
-                      ? (paymentMethodsLoading ? 'Cargando métodos...' : 'Seleccionar forma de cobro')
+                      ? (paymentMethodsLoading ? 'Cargando métodos...' : 'Seleccionar banco o billetera')
                       : 'Primero selecciona un país'}
                   </Text>
                 )}
@@ -1303,48 +1508,7 @@ export const AddPayoutMethodModal = ({
           )}
         </View>
 
-        {/* ── Section: Datos del titular ── */}
-        <Text style={styles.sectionHeader}>Datos del titular</Text>
-        <View style={styles.card}>
-          {/* Account Holder Name */}
-          <View style={styles.fieldInCard}>
-            <Text style={styles.label}>{fieldCopy.holderLabel} *</Text>
-            <TextInput
-              style={[styles.textInput, focusedField === 'holder' && styles.textInputFocused]}
-              value={formData.accountHolderName}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, accountHolderName: value }))}
-              placeholder={fieldCopy.holderLabel}
-              placeholderTextColor={colors.text.light}
-              autoCapitalize="words"
-              onFocus={() => setFocusedField('holder')}
-              onBlur={() => setFocusedField(null)}
-            />
-          </View>
-
-          {/* Identification Number */}
-          {selectedPaymentMethod?.bank?.country?.requiresIdentification && (
-            <>
-              <View style={styles.cardDivider} />
-              <View style={styles.fieldInCard}>
-                <Text style={styles.label}>{selectedPaymentMethod.bank.country.identificationName} *</Text>
-                <TextInput
-                  style={[styles.textInput, focusedField === 'id' && styles.textInputFocused]}
-                  value={formData.identificationNumber}
-                  onChangeText={(value) => setFormData(prev => ({ ...prev, identificationNumber: value }))}
-                  placeholder={`Ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`}
-                  placeholderTextColor={colors.text.light}
-                  keyboardType="numeric"
-                  onFocus={() => setFocusedField('id')}
-                  onBlur={() => setFocusedField(null)}
-                />
-                {selectedPaymentMethod.bank.country.identificationFormat && (
-                  <Text style={styles.helpText}>Formato: {selectedPaymentMethod.bank.country.identificationFormat}</Text>
-                )}
-              </View>
-            </>
-          )}
-        </View>
-
+        {/* ── Section: Cómo recibir (decides which account fields follow) ── */}
         {supportsBreb && (
           <>
             <Text style={styles.sectionHeader}>Cómo recibir el retiro</Text>
@@ -1385,150 +1549,19 @@ export const AddPayoutMethodModal = ({
           />
         )}
 
-        {/* ── Section: Datos de la cuenta ── */}
-        {(fieldCopy.account.show || fieldCopy.phone.show || payoutEmailField.show || providerFieldConfigs.length > 0) && (
+        {/* ── Section: Datos de la cuenta — banco, tipo, número: the order banks print them ── */}
+        {accountCardFields.length > 0 && (
           <>
             <Text style={styles.sectionHeader}>Datos de la cuenta</Text>
-            <View style={styles.card}>
-              {/* Account Number */}
-              {fieldCopy.account.show && (
-                <View style={styles.fieldInCard}>
-                  <Text style={styles.label}>{fieldCopy.account.label}{fieldCopy.account.required ? ' *' : ''}</Text>
-                  <TextInput
-                    style={[styles.textInput, focusedField === 'account' && styles.textInputFocused]}
-                    value={formData.accountNumber}
-                    onChangeText={(value) => setFormData(prev => ({ ...prev, accountNumber: value }))}
-                    placeholder={fieldCopy.account.placeholder}
-                    placeholderTextColor={colors.text.light}
-                    autoCapitalize={isBreb ? "none" : undefined}
-                    autoCorrect={isBreb ? false : undefined}
-                    keyboardType={fieldCopy.account.keyboardType}
-                    maxLength={fieldCopy.account.maxLength}
-                    onFocus={() => setFocusedField('account')}
-                    onBlur={() => setFocusedField(null)}
-                  />
-                </View>
-              )}
-
-              {/* Phone */}
-              {fieldCopy.phone.show && (
-                <>
-                  {fieldCopy.account.show && <View style={styles.cardDivider} />}
-                  <View style={styles.fieldInCard}>
-                    <Text style={styles.label}>{fieldCopy.phone.label}{fieldCopy.phone.required ? ' *' : ''}</Text>
-                    <TextInput
-                      style={[styles.textInput, focusedField === 'phone' && styles.textInputFocused]}
-                      value={formData.phoneNumber}
-                      onChangeText={(value) => setFormData(prev => ({ ...prev, phoneNumber: value }))}
-                      placeholder={fieldCopy.phone.placeholder}
-                      placeholderTextColor={colors.text.light}
-                      keyboardType={fieldCopy.phone.keyboardType}
-                      onFocus={() => setFocusedField('phone')}
-                      onBlur={() => setFocusedField(null)}
-                    />
-                  </View>
-                </>
-              )}
-
-              {/* Email */}
-              {payoutEmailField.show && (
-                <>
-                  {(fieldCopy.account.show || fieldCopy.phone.show) && <View style={styles.cardDivider} />}
-                  <View style={styles.fieldInCard}>
-                    <Text style={styles.label}>{payoutEmailField.label}{payoutEmailField.required ? ' *' : ''}</Text>
-                    <TextInput
-                      style={[styles.textInput, focusedField === 'email' && styles.textInputFocused]}
-                      value={formData.email}
-                      onChangeText={(value) => setFormData(prev => ({ ...prev, email: value }))}
-                      placeholder={payoutEmailField.placeholder}
-                      placeholderTextColor={colors.text.light}
-                      keyboardType={payoutEmailField.keyboardType}
-                      autoCapitalize="none"
-                      onFocus={() => setFocusedField('email')}
-                      onBlur={() => setFocusedField(null)}
-                    />
-                  </View>
-                </>
-              )}
-
-              {/* Provider fields */}
-              {providerFieldConfigs.map((field, idx) => {
-                const hasPrev = fieldCopy.account.show || fieldCopy.phone.show || payoutEmailField.show || idx > 0;
-                if (field.key === 'bankName') {
-                  const canUseBankPicker = koyweBankOptions.length > 0;
-                  return (
-                    <React.Fragment key={field.key}>
-                      {hasPrev && <View style={styles.cardDivider} />}
-                      <View style={styles.fieldInCard}>
-                        <Text style={styles.label}>{field.label}{field.required ? ' *' : ''}</Text>
-                        {canUseBankPicker ? (
-                          <TouchableOpacity style={styles.picker} onPress={() => setShowProviderBankPicker(true)}>
-                            <View style={styles.pickerContent}>
-                              {formData.providerMetadata.bankName ? (
-                                <Text style={styles.pickerText}>{formData.providerMetadata.bankName}</Text>
-                              ) : (
-                                <Text style={styles.pickerPlaceholder}>{field.placeholder}</Text>
-                              )}
-                            </View>
-                            <Icon name="chevron-down" size={16} color={colors.text.light} />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={[styles.textInput, styles.textInputDisabled]}>
-                            <Text style={styles.disabledInputText}>
-                              No pudimos cargar el catálogo de bancos de Koywe. Intenta de nuevo en unos segundos.
-                            </Text>
-                          </View>
-                        )}
-                        {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
-                      </View>
-                    </React.Fragment>
-                  );
-                }
-                return (
-                  <React.Fragment key={field.key}>
-                    {hasPrev && <View style={styles.cardDivider} />}
-                    <View style={styles.fieldInCard}>
-                      <Text style={styles.label}>{field.label}{field.required ? ' *' : ''}</Text>
-                      <TextInput
-                        style={[styles.textInput, focusedField === field.key && styles.textInputFocused]}
-                        value={formData.providerMetadata[field.key] || ''}
-                        onChangeText={(value) => setFormData(prev => ({ ...prev, providerMetadata: { ...prev.providerMetadata, [field.key]: value } }))}
-                        placeholder={field.placeholder}
-                        placeholderTextColor={colors.text.light}
-                        keyboardType={field.keyboardType || 'default'}
-                        autoCapitalize="none"
-                        onFocus={() => setFocusedField(field.key)}
-                        onBlur={() => setFocusedField(null)}
-                      />
-                      {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
-                    </View>
-                  </React.Fragment>
-                );
-              })}
-            </View>
+            <View style={styles.card}>{withDividers(accountCardFields)}</View>
           </>
         )}
 
-        {/* ── Section: Tipo de cuenta ── */}
-        {showAccountTypeField && (
+        {/* ── Section: Datos del titular ── */}
+        {holderCardFields.length > 0 && (
           <>
-            <Text style={styles.sectionHeader}>Tipo de cuenta{accountTypeRequired ? ' *' : ''}</Text>
-            <View style={styles.card}>
-              {getAccountTypeOptions().map((option, idx) => (
-                <React.Fragment key={option.value}>
-                  {idx > 0 && <View style={styles.cardDivider} />}
-                  <TouchableOpacity
-                    style={styles.radioRow}
-                    onPress={() => setFormData(prev => ({ ...prev, accountType: option.value }))}
-                  >
-                    <View style={[styles.radioCircle, formData.accountType === option.value && styles.radioCircleSelected]}>
-                      {formData.accountType === option.value && <View style={styles.radioInner} />}
-                    </View>
-                    <Text style={styles.radioLabel}>{option.label}</Text>
-                  </TouchableOpacity>
-                </React.Fragment>
-              ))}
-            </View>
+            <Text style={styles.sectionHeader}>Datos del titular</Text>
+            <View style={styles.card}>{withDividers(holderCardFields)}</View>
           </>
         )}
 
@@ -1541,7 +1574,7 @@ export const AddPayoutMethodModal = ({
             <View style={[styles.checkbox, formData.isDefault && styles.checkboxSelected]}>
               {formData.isDefault && <Icon name="check" size={13} color="white" />}
             </View>
-            <Text style={styles.checkboxLabel}>Marcar como forma de cobro predeterminada</Text>
+            <Text style={styles.checkboxLabel}>Marcar como cuenta predeterminada</Text>
           </TouchableOpacity>
         </View>
 
@@ -1568,7 +1601,7 @@ export const AddPayoutMethodModal = ({
             <ActivityIndicator size="small" color="white" />
           ) : (
             <Text style={styles.saveButtonText}>
-              {isEditing ? 'Guardar cambios' : 'Agregar forma de cobro'}
+              {isEditing ? 'Guardar cambios' : 'Agregar cuenta'}
             </Text>
           )}
         </TouchableOpacity>
@@ -1753,6 +1786,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 14,
+  },
+  radioRowInField: {
+    paddingHorizontal: 0,
+    paddingVertical: 8,
   },
   radioCircle: {
     width: 20,

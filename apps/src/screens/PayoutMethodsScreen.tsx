@@ -170,7 +170,7 @@ const PayoutMethodCard = ({
     DIGITAL_WALLET: 'Billetera Digital',
     MOBILE_PAYMENT: 'Pago Móvil',
   };
-  const typeLabel = providerLabel[providerType] ?? 'Forma de cobro';
+  const typeLabel = providerLabel[providerType] ?? 'Cuenta';
 
   const flagEmoji =
     payoutMethod.paymentMethod?.bank?.country?.flagEmoji ||
@@ -187,7 +187,7 @@ const PayoutMethodCard = ({
     payoutMethod.fullBankName ||
     payoutMethod.paymentMethod?.displayName ||
     payoutMethod.bank?.name ||
-    'Forma de cobro';
+    'Cuenta';
 
   const countryName =
     payoutMethod.paymentMethod?.bank?.country?.name ||
@@ -213,7 +213,7 @@ const PayoutMethodCard = ({
             <Icon name="check-circle" size={13} color={colors.success} style={styles.verifiedIcon} />
           )}
           <View style={styles.cardActions}>
-            <TouchableOpacity onPress={onEdit} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Editar forma de cobro">
+            <TouchableOpacity onPress={onEdit} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Editar cuenta">
               <Icon name="edit-2" size={14} color={colors.accent} />
             </TouchableOpacity>
             {!payoutMethod.isDefault && (
@@ -221,7 +221,7 @@ const PayoutMethodCard = ({
                 <Icon name="star" size={14} color={colors.warning.icon} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={onDelete} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Eliminar forma de cobro">
+            <TouchableOpacity onPress={onDelete} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Eliminar cuenta">
               <Icon name="trash-2" size={14} color={colors.error.icon} />
             </TouchableOpacity>
           </View>
@@ -349,7 +349,7 @@ export const PayoutMethodsScreen = () => {
       <View style={styles.container}>
         <Header
           navigation={navigation as any}
-          title="Formas de cobro"
+          title="Mis cuentas"
           backgroundColor={colors.primary}
           isLight
           showBackButton
@@ -360,7 +360,7 @@ export const PayoutMethodsScreen = () => {
           </View>
           <Text style={styles.permissionDeniedTitle}>Información del Negocio</Text>
           <Text style={styles.permissionDeniedText}>
-            Las formas de cobro de {activeAccount?.business?.name || 'la empresa'} son gestionadas
+            Las cuentas de {activeAccount?.business?.name || 'la empresa'} son gestionadas
             por el equipo administrativo.
           </Text>
           <Text style={styles.permissionDeniedSubtext}>
@@ -386,7 +386,7 @@ export const PayoutMethodsScreen = () => {
       return (
         <EmptyState
           icon="wifi-off"
-          title="No se pudieron cargar las formas de cobro"
+          title="No se pudieron cargar tus cuentas"
           subtitle="Revisa tu conexión e intenta de nuevo."
           actionLabel="Reintentar"
           onAction={onRefresh}
@@ -398,9 +398,9 @@ export const PayoutMethodsScreen = () => {
       return (
         <EmptyState
           icon="credit-card"
-          title="Sin formas de cobro"
+          title="Aún no tienes cuentas"
           subtitle="Agrega tu cuenta bancaria o billetera para recibir retiros y cobros en la app."
-          actionLabel="Agregar forma de cobro"
+          actionLabel="Agregar cuenta"
           onAction={handleAddNew}
         />
       );
@@ -439,7 +439,7 @@ export const PayoutMethodsScreen = () => {
         ListFooterComponent={
           <TouchableOpacity style={styles.addMoreButton} onPress={handleAddNew}>
             <Icon name="plus-circle" size={18} color={colors.primary} />
-            <Text style={styles.addMoreText}>Agregar otra forma de cobro</Text>
+            <Text style={styles.addMoreText}>Agregar otra cuenta</Text>
           </TouchableOpacity>
         }
         initialNumToRender={10}
@@ -464,12 +464,12 @@ export const PayoutMethodsScreen = () => {
     <View style={styles.container}>
       <Header
         navigation={navigation as any}
-        title="Formas de cobro"
+        title="Mis cuentas"
         backgroundColor={colors.primary}
         isLight
         showBackButton
         rightAccessory={(
-          <TouchableOpacity onPress={handleAddNew} style={styles.addHeaderButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Agregar forma de cobro">
+          <TouchableOpacity onPress={handleAddNew} style={styles.addHeaderButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Agregar cuenta">
             <Icon name="plus" size={20} color={colors.white} />
           </TouchableOpacity>
         )}
@@ -490,12 +490,12 @@ export const PayoutMethodsScreen = () => {
           <Circle cx="105%" cy="18%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
         </Svg>
         <View style={styles.fieldInner}>
-          <Text style={styles.fieldEyebrow}>RETIROS Y COBROS</Text>
+          <Text style={styles.fieldEyebrow}>A TU NOMBRE</Text>
           <Text style={styles.fieldTitle}>¿Dónde recibes tu dinero?</Text>
           <Text style={styles.fieldSubtitle}>
             {!bankAccountsLoading && payoutMethods.length > 0
-              ? `${payoutMethods.length} ${payoutMethods.length === 1 ? 'forma de cobro guardada' : 'formas de cobro guardadas'} · la predeterminada se usa al retirar`
-              : 'Guarda cuentas bancarias o billeteras para recibir retiros y cobros.'}
+              ? `${payoutMethods.length} ${payoutMethods.length === 1 ? 'cuenta guardada' : 'cuentas guardadas'} · la predeterminada se usa al retirar`
+              : 'Guarda tus cuentas bancarias o billeteras a tu nombre para recibir tus retiros.'}
           </Text>
         </View>
       </View>

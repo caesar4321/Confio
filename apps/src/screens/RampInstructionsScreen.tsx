@@ -339,7 +339,7 @@ export const RampInstructionsScreen = () => {
             </View>
           ) : null}
           <View style={styles.row}>
-            <Text style={styles.label}>{direction === 'ON_RAMP' ? 'Medio de pago' : 'Forma de cobro'}</Text>
+            <Text style={styles.label}>{direction === 'ON_RAMP' ? 'Medio de pago' : 'Cuenta de destino'}</Text>
             <Text style={styles.value}>{paymentMethodDisplay || paymentMethodCode || '--'}</Text>
           </View>
           <View style={styles.row}>
