@@ -457,9 +457,9 @@ export const ScanScreen = () => {
               <Text style={styles.railsPillText}>
                 {liveQrRails.length > 0 ? 'Paga QR en' : 'Paga QR con tus dólares'}
               </Text>
-              {liveQrRails.map(m => (
-                <Text key={m.id} style={styles.railsPillFlag}>{countryFlag(m.country)}</Text>
-              ))}
+              {liveQrRails.length > 0 && (
+                <Text style={styles.railsPillFlag}>{liveQrRails.map(m => countryFlag(m.country)).join('')}</Text>
+              )}
               <Icon name="info" size={15} color="rgba(255,255,255,0.8)" />
             </TouchableOpacity>
           )}

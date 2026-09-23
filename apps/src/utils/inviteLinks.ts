@@ -33,20 +33,23 @@ export const buildReferralShareMessage = (username?: string | null): string => {
   });
 
   return [
-    'En Latinoamérica, la desconfianza es el impuesto invisible que pagamos todos los días.',
+    'En Latinoamérica, la confianza entre personas ya existe. Lo que falta es un sistema que la merezca.',
     '',
     'Yo ya estoy usando Confío para guardar y mover dólares digitales entre personas, sin depender de bancos ni intermediarios.',
     '',
     '👇 Únete para recuperar el control de tu dinero:',
     inviteLink,
     '',
-    'Mirá por qué nació Confío:',
+    'Conoce a Julian, el fundador, y por qué creó Confío:',
+    '',
+    '▶️ ¡La confianza ya existe!',
+    'https://youtube.com/shorts/Ut01b5Z0NDQ?feature=share',
+    '',
+    '▶️ Latinoamérica vive sin barandas',
+    'https://youtu.be/uWTB-SiGyNM',
     '',
     '▶️ De vividor a fundador',
     'https://youtu.be/HteVcIVJFbI',
-    '',
-    '▶️ Corea, América Latina y la confianza',
-    'https://youtu.be/g_amw6WAQfY',
     '',
     `Código: ${cleanUsername}`,
   ].join('\n');

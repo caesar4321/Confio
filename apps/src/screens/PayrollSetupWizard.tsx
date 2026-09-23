@@ -102,8 +102,9 @@ export const PayrollSetupWizard = () => {
           text: 'Ir a nómina',
           onPress: () => {
             navigation.reset({
-              index: 0,
-              routes: [{ name: 'BottomTabs', params: { screen: 'Employees' } }] as any,
+              // Empleados is a stack screen now (reached from Perfil).
+              index: 1,
+              routes: [{ name: 'BottomTabs', params: { screen: 'Home' } }, { name: 'Employees' }] as any,
             });
           },
         },

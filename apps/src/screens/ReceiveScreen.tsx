@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,12 +8,10 @@ import { useQuery } from '@apollo/client';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { RouteOption, RouteOptionRow } from '../components/RouteSheet';
 import { AdvancedCard, LocalRailsCard, RouteCard } from '../components/RouteCard';
-import { RampHero } from '../components/ramps/RampHero';
 import { colors } from '../config/theme';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCryptoReceiveOptions } from '../hooks/useCryptoReceiveOptions';
-import { useLocalPaymentAccounts } from '../hooks/useLocalPaymentAccounts';
 import { useLocalRailOptions } from '../hooks/useLocalRailOptions';
 import { useRampFlows } from '../hooks/useRampFlows';
 import { MainStackParamList } from '../types/navigation';
@@ -56,7 +54,6 @@ export default function ReceiveScreen() {
 
   const { openRechargeFlow, sheets, isRampBlocked } = useRampFlows({ legacyCusdBalance });
   const { receivePrimary, receiveMore } = useLocalRailOptions();
-  const { receivable: ownLocalAccounts } = useLocalPaymentAccounts();
   const cryptoOptions = useCryptoReceiveOptions();
 
   const phoneDisplay = useMemo(() => {
@@ -97,38 +94,27 @@ export default function ReceiveScreen() {
     onPress: () => navigation.navigate('Financieras'),
   };
 
-  // Someone who already has their own account reaches for it first; the
-  // one-off recharge drops below it as the fallback.
-  const hasOwnAccount = ownLocalAccounts.length > 0;
 
   // Every row below is the owner's alone (bank rails are owner_only server-
   // side, CreateRampOrder refuses employees). Home never offers employees
   // Recibir, but an account switch can leave this screen mounted under them.
   if (activeAccount?.isEmployee) {
     return (
-      <View style={styles.container}>
-        <RampHero
-          eyebrow="Recibir"
-          title="Solo para el dueño"
-          subtitle="Recibir desde bancos y billeteras es exclusivo del dueño del negocio. Para cobrar a clientes usa Cobrar."
-          onBack={() => navigation.goBack()}
-          compact
-        />
+      <View style={[styles.container, styles.body]}>
+        <RouteCard label="SOLO PARA EL DUEÑO">
+          <Text style={styles.phoneHint}>
+            Recibir desde bancos y billeteras es exclusivo del dueño del negocio. Para cobrar a clientes usa Cobrar.
+          </Text>
+        </RouteCard>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      {/* Header: the same stack header as Enviar (ReceiveStackHeader) —
+          mirror screens start from the same chrome. */}
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <RampHero
-          eyebrow="Recibir"
-          title="¿Cómo te van a pagar?"
-          subtitle="Elige cómo te llega el dinero."
-          onBack={() => navigation.goBack()}
-          compact
-        />
 
         <View style={styles.body}>
           {isBusiness ? (
@@ -169,14 +155,13 @@ export default function ReceiveScreen() {
             </RouteCard>
           ) : null}
 
-          {/* Same card as Enviar's, mirrored: the one-off recharge leads
-              until the user has an account of their own, then drops to the
-              end as the fallback. Other countries sit behind "Más países". */}
+          {/* Same card as Enviar's, mirrored: the own-money row (the old
+              Recargar) always leads, as "A mi propia cuenta" does there.
+              Other countries sit behind "Más países". */}
           <LocalRailsCard
             label="DESDE UN BANCO O BILLETERA"
-            leading={!hasOwnAccount && rechargeRow ? [rechargeRow] : []}
+            leading={rechargeRow ? [rechargeRow] : []}
             primary={receivePrimary}
-            trailing={hasOwnAccount && rechargeRow ? [rechargeRow] : []}
             more={receiveMore}
             moreTitle="¿Dónde quieres recibir?"
           />
@@ -196,7 +181,8 @@ export default function ReceiveScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface,
+    // Enviar's background, so the two verbs read as one pair.
+    backgroundColor: colors.white,
   },
   content: {
     paddingBottom: 40,

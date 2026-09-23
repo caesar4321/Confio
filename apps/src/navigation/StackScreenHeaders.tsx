@@ -10,10 +10,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { RootStackParamList } from '../types/navigation';
 import { Header } from './Header';
 
-// Headers for screens that used to be bottom tabs (Descubrir, Transferir) and
-// are now pushed onto the stack. Same look as their tab headers, plus back.
+// Descubrir shares its announcement controls between tab and stack entry.
 
-export const DiscoverStackHeader = () => {
+export const DiscoverStackHeader = ({ showBackButton = true }: { showBackButton?: boolean }) => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { data } = useQuery(GET_NOTIFICATION_PREFERENCES, {
@@ -31,7 +30,7 @@ export const DiscoverStackHeader = () => {
       isHomeScreen={false}
       title="Descubrir"
       backgroundColor="#fff"
-      showBackButton
+      showBackButton={showBackButton}
       isLight={false}
       unreadNotifications={0}
       currentAccountAvatar="U"
@@ -57,6 +56,23 @@ export const SendStackHeader = () => {
       navigation={navigation}
       isHomeScreen={false}
       title="Enviar"
+      backgroundColor="#fff"
+      showBackButton
+      isLight={false}
+      unreadNotifications={0}
+      currentAccountAvatar="U"
+    />
+  );
+};
+
+// Recibir mirrors Enviar exactly: same header, only the title differs.
+export const ReceiveStackHeader = () => {
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  return (
+    <Header
+      navigation={navigation}
+      isHomeScreen={false}
+      title="Recibir"
       backgroundColor="#fff"
       showBackButton
       isLight={false}
