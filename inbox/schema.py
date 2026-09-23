@@ -32,20 +32,28 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
-from .official import official_channel_ids
+from .official import all_official_channel_ids, official_channel_ids
 from .push_service import send_support_reply_push, send_support_staff_push
 
 logger = logging.getLogger(__name__)
 
-# Descubrir groups posts by who published them, not by topic: the reader's
-# question is "can I trust this source", and the topic already rides on `tag`.
-DISCOVER_SECTIONS = (
-    ('confio', 'Confío', (ChannelKind.FOUNDER, ChannelKind.NEWS, ChannelKind.SYSTEM)),
-    ('institutions', 'Instituciones', (ChannelKind.INSTITUTION,)),
-    ('businesses', 'Negocios', (ChannelKind.BUSINESS,)),
-)
-DISCOVER_SECTION_KINDS = {key: kinds for key, _, kinds in DISCOVER_SECTIONS}
-DISCOVER_KIND_SECTION = {kind: key for key, _, kinds in DISCOVER_SECTIONS for kind in kinds}
+# Descubrir's three feeds (Para ti / Oficial / Comunidad). "for_you" mixes
+# everything; "official" is institutional posts in channels passing the live
+# Oficial rule (inbox.official); "community" is anything a user wrote — empty
+# until user posting ships.
+DISCOVER_FEED_SECTIONS = ('for_you', 'official', 'community')
+# A user's post never borrows its channel's verification, even inside an
+# Oficial channel (e.g. a member post on an institution's board).
+USER_AUTHORED = Q(owner_type=OwnerType.USER) | Q(channel__owner_type=OwnerType.USER)
+
+# Publisher type on each item, independent of which feed it was read from.
+DISCOVER_KIND_SECTION = {
+    ChannelKind.FOUNDER: 'confio',
+    ChannelKind.NEWS: 'confio',
+    ChannelKind.SYSTEM: 'confio',
+    ChannelKind.INSTITUTION: 'institutions',
+    ChannelKind.BUSINESS: 'businesses',
+}
 
 DISCOVER_TAG_COLOR_MAP = {
     'producto': '#1DB587',
@@ -285,11 +293,6 @@ class DiscoverFeedPageType(graphene.ObjectType):
     has_more = graphene.Boolean(required=True)
 
 
-class DiscoverSectionType(graphene.ObjectType):
-    key = graphene.String(required=True)
-    label = graphene.String(required=True)
-
-
 class PortalContentItemType(graphene.ObjectType):
     poll = graphene.Field(ContentPollType)
     id = graphene.ID(required=True)
@@ -484,7 +487,7 @@ def build_discover_feed_item_payload(item: ContentItem, user, account, business,
         can_react=True,
         source_name=item.channel.title or '',
         source_section=DISCOVER_KIND_SECTION.get(item.channel.kind, 'confio'),
-        is_official=item.channel_id in official_ids,
+        is_official=item.channel_id in official_ids and item.owner_type != OwnerType.USER,
     )
 
 
@@ -842,7 +845,6 @@ class Query(graphene.ObjectType):
         limit=graphene.Int(required=False),
         section=graphene.String(required=False),
     )
-    discover_sections = graphene.List(graphene.NonNull(DiscoverSectionType), required=True)
     portal_support_conversations = graphene.List(
         PortalSupportConversationType,
         status=graphene.String(required=False),
@@ -909,11 +911,13 @@ class Query(graphene.ObjectType):
             .distinct()
             .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
         )
-        if section:
-            kinds = DISCOVER_SECTION_KINDS.get(section)
-            if kinds is None:
-                raise GraphQLError('Unknown Discover section')
-            queryset = queryset.filter(channel__kind__in=kinds)
+        section = section or 'for_you'
+        if section not in DISCOVER_FEED_SECTIONS:
+            raise GraphQLError('Unknown Discover section')
+        if section == 'official':
+            queryset = queryset.filter(channel_id__in=all_official_channel_ids()).exclude(USER_AUTHORED)
+        elif section == 'community':
+            queryset = queryset.filter(USER_AUTHORED)
         page_items = list(queryset[offset:offset + limit + 1])
         has_more = len(page_items) > limit
         if has_more:
@@ -928,16 +932,6 @@ class Query(graphene.ObjectType):
             ],
             has_more=has_more,
         )
-
-    @login_required
-    def resolve_discover_sections(self, info):
-        """Sections that have something to read; empty ones are never offered."""
-        kinds = set(published_discover_items().order_by().values_list('channel__kind', flat=True).distinct())
-        return [
-            DiscoverSectionType(key=key, label=label)
-            for key, label, section_kinds in DISCOVER_SECTIONS
-            if kinds.intersection(section_kinds)
-        ]
 
     @login_required
     def resolve_portal_support_conversations(self, info, status=None, search=None):

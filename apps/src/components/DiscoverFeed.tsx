@@ -45,9 +45,36 @@ export type DiscoverItem = {
   isOfficial?: boolean;
 };
 
+export type DiscoverSectionKey = 'for_you' | 'official' | 'community';
+
 export type DiscoverSection = {
-  key: string;
+  key: DiscoverSectionKey;
   label: string;
+};
+
+/** Descubrir's feeds: everything, verified sources only, and people. */
+export const DISCOVER_SECTIONS: DiscoverSection[] = [
+  { key: 'for_you', label: 'Para ti' },
+  { key: 'official', label: 'Oficial' },
+  { key: 'community', label: 'Comunidad' },
+];
+
+const sectionEmptyStates: Record<DiscoverSectionKey, { icon: string; title: string; subtitle: string }> = {
+  for_you: {
+    icon: 'compass',
+    title: 'Nada por aquí todavía',
+    subtitle: 'Vuelve pronto — aquí publicamos novedades de Confío y la comunidad.',
+  },
+  official: {
+    icon: 'check-circle',
+    title: 'Sin publicaciones oficiales todavía',
+    subtitle: 'Aquí verás solo fuentes verificadas: Confío, instituciones y negocios con identidad verificada.',
+  },
+  community: {
+    icon: 'users',
+    title: 'Comunidad llega pronto',
+    subtitle: 'Aquí podrás leer y publicar con otras personas verificadas en Confío. Mientras tanto, mira Para ti.',
+  },
 };
 
 const tagIcons: Record<DiscoverItem['type'], string> = {
@@ -73,9 +100,11 @@ type DiscoverFeedProps = {
   onEndReached?: () => void;
   onReact?: (itemId: number, emoji: string) => Promise<void>;
   loading?: boolean;
+  loadFailed?: boolean;
+  onRetry?: () => void;
   sections?: DiscoverSection[];
-  activeSection?: string | null;
-  onSelectSection?: (key: string | null) => void;
+  activeSection?: DiscoverSectionKey;
+  onSelectSection?: (key: DiscoverSectionKey) => void;
 };
 
 export function DiscoverFeed({
@@ -88,8 +117,10 @@ export function DiscoverFeed({
   onEndReached,
   onReact,
   loading = false,
+  loadFailed = false,
+  onRetry,
   sections = [],
-  activeSection = null,
+  activeSection = 'for_you',
   onSelectSection,
 }: DiscoverFeedProps) {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState<number | null>(null);
@@ -213,28 +244,27 @@ export function DiscoverFeed({
     );
   };
 
-  // Only worth a filter once a second kind of source has published: a lone
-  // "Confío" chip beside "Todo" is noise, and an empty section is a dead end.
-  const sectionChips = sections.length > 1 || (sections.length === 1 && activeSection)
-    ? [{ key: null as string | null, label: 'Todo' }, ...sections]
-    : [];
-  const sectionHeader = sectionChips.length ? (
+  const emptyState = sectionEmptyStates[activeSection];
+  const sectionHeader = sections.length ? (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.sectionRow}
       style={styles.sectionScroller}
     >
-      {sectionChips.map(({ key, label }) => {
+      {sections.map(({ key, label }) => {
         const selected = key === activeSection;
         return (
           <Pressable
-            key={key ?? 'all'}
+            key={key}
             onPress={() => onSelectSection?.(key)}
             style={[styles.sectionChip, selected && styles.sectionChipActive]}
             accessibilityRole="tab"
             accessibilityState={{ selected }}
           >
+            {key === 'official' && (
+              <Icon name="check-circle" size={13} color={selected ? '#FFFFFF' : colors.primaryDeep} />
+            )}
             <Text style={[styles.sectionChipText, selected && styles.sectionChipTextActive]}>{label}</Text>
           </Pressable>
         );
@@ -259,12 +289,16 @@ export function DiscoverFeed({
           <View style={styles.footerLoader}>
             <ActivityIndicator size="small" color={colors.primary} />
           </View>
+        ) : loadFailed ? (
+          <EmptyState
+            icon="wifi-off"
+            title="No pudimos cargar Descubrir"
+            subtitle="Revisa tu conexión e inténtalo de nuevo."
+            actionLabel="Reintentar"
+            onAction={onRetry}
+          />
         ) : (
-        <EmptyState
-          icon="compass"
-          title="Nada por aquí todavía"
-          subtitle="Vuelve pronto — aquí publicamos novedades de Confío y la comunidad."
-        />
+          <EmptyState icon={emptyState.icon} title={emptyState.title} subtitle={emptyState.subtitle} />
         )
       }
       onEndReachedThreshold={0.35}
@@ -317,6 +351,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sectionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 7,

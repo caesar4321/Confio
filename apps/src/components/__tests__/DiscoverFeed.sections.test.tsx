@@ -7,7 +7,7 @@ jest.mock('../ResponsiveImage', () => ({ ResponsiveImage: 'ResponsiveImage' }));
 jest.mock('../ContentPoll', () => ({ ContentPoll: () => null }));
 jest.mock('../EmptyState', () => ({ EmptyState: 'EmptyState' }));
 
-import { DiscoverFeed, DiscoverItem } from '../DiscoverFeed';
+import { DISCOVER_SECTIONS, DiscoverFeed, DiscoverItem } from '../DiscoverFeed';
 
 const item = (overrides: Partial<DiscoverItem>): DiscoverItem => ({
   id: 1, type: 'news', tag: 'Producto', tagColor: '#1DB587', title: 'Hola', body: 'Cuerpo', time: '2h',
@@ -48,21 +48,32 @@ describe('DiscoverFeed sections', () => {
     alert.mockRestore();
   });
 
-  it('hides the filter while Confío is the only source', () => {
-    const tree = render({ sections: [{ key: 'confio', label: 'Confío' }] });
-    expect(texts(tree)).not.toContain('Todo');
+  it('offers Para ti, Oficial and Comunidad and reports the pick', () => {
+    const onSelectSection = jest.fn();
+    const tree = render({ sections: DISCOVER_SECTIONS, activeSection: 'official', onSelectSection });
+    const chips = tree.root.findAll((node) => node.type === Pressable && node.props.accessibilityRole === 'tab');
+    expect(chips.map((chip) => chip.findByType(Text).props.children)).toEqual(['Para ti', 'Oficial', 'Comunidad']);
+    expect(chips.map((chip) => chip.props.accessibilityState.selected)).toEqual([false, true, false]);
+    act(() => chips[2].props.onPress());
+    expect(onSelectSection).toHaveBeenCalledWith('community');
   });
 
-  it('offers Todo plus each section and reports the pick', () => {
-    const onSelectSection = jest.fn();
-    const tree = render({
-      sections: [{ key: 'confio', label: 'Confío' }, { key: 'institutions', label: 'Instituciones' }],
-      onSelectSection,
-    });
-    const chips = tree.root.findAll((node) => node.type === Pressable && node.props.accessibilityRole === 'tab');
-    expect(chips.map((chip) => chip.findByType(Text).props.children)).toEqual(['Todo', 'Confío', 'Instituciones']);
-    expect(chips[0].props.accessibilityState).toEqual({ selected: true });
-    act(() => chips[2].props.onPress());
-    expect(onSelectSection).toHaveBeenCalledWith('institutions');
+  it('tells Comunidad readers it is coming, not that the app is empty', () => {
+    const tree = render({ sections: DISCOVER_SECTIONS, activeSection: 'community' });
+    expect(tree.root.findByType('EmptyState' as any).props.title).toBe('Comunidad llega pronto');
+  });
+
+  it('says the load failed instead of claiming there is nothing', () => {
+    const onRetry = jest.fn();
+    const tree = render({ sections: DISCOVER_SECTIONS, activeSection: 'official', loadFailed: true, onRetry });
+    const empty = tree.root.findByType('EmptyState' as any);
+    expect(empty.props.title).toBe('No pudimos cargar Descubrir');
+    empty.props.onAction();
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it('shows no chips on a server without sections', () => {
+    const tree = render({ items: [item({})] });
+    expect(tree.root.findAll((node) => node.type === Pressable && node.props.accessibilityRole === 'tab')).toHaveLength(0);
   });
 });
