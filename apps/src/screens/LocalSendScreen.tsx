@@ -85,6 +85,10 @@ const COPY: Record<string, {
     hero: 'Paga con QR', field: 'Código QR', placeholder: 'Escanea el QR del comercio',
     helper: 'Por ahora solo QR sin monto fijo: tú eliges cuánto pagar.',
   },
+  br_qr: {
+    hero: 'Paga con QR Pix', field: 'Código QR Pix', placeholder: 'Escanea o importa el QR Pix',
+    helper: 'Por ahora solo QR Pix estáticos y sin monto fijo: tú eliges cuánto pagar.',
+  },
 };
 
 const AMOUNT_PATTERN = /^\d+([.,]\d{1,2})?$/;
@@ -110,7 +114,7 @@ const LOOKUP_TIMEOUT_MS = 20000;
 // for: the review would otherwise show a name the key may no longer have.
 const unverifiedCopy = (row: LocalDestination): LocalDestination => ({
   ...row, verification: 'unverified', holderName: '', holderDocument: '', institution: '',
-  label: row.methodId === 'ar_qr' ? 'QR' : row.label,
+  label: row.methodId?.endsWith('_qr') ? 'QR' : row.label,
 });
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -126,7 +130,7 @@ const initialsOf = (name: string) =>
 
 export default function LocalSendScreen() {
   const navigation = useNavigation<Nav>();
-  const { methodId } = useRoute<Route>().params;
+  const { methodId, scannedQr: initialQr } = useRoute<Route>().params;
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
   const copy = COPY[methodId] || COPY.co_breb;
@@ -337,6 +341,19 @@ export default function LocalSendScreen() {
     // isCurrent only reads refs, so the first render's copy stays correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, methodId, resetReview, savedQuery, followUntilSettled]);
+
+  // Main Scan gateway handoff: retain through verification/opening, then
+  // resolve exactly once. Never auto-quote, sign or send from a scanned code.
+  const consumedQr = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialQr || !methodId.endsWith('_qr') || method?.status !== 'live'
+        || method.accountStatus !== 'active' || locked) return;
+    const key = `${methodId}:${initialQr}`;
+    if (consumedQr.current === key) return;
+    consumedQr.current = key;
+    setScannedQr({payload: initialQr, methodId});
+    void resolve(initialQr, methodId);
+  }, [initialQr, methodId, method?.status, method?.accountStatus, locked, resolve]);
 
   // A pasted key is a finished entry: fill the field and prepare it at once.
   const paste = useCallback(async () => {
@@ -744,7 +761,7 @@ export default function LocalSendScreen() {
                 })}
                 <View style={[styles.inputCard, saved.length ? { marginTop: 12 } : null]}>
                   <Text style={styles.inputLabel}>{saved.length ? 'Nuevo destinatario' : copy.field}</Text>
-                  {methodId === 'ar_qr' ? (
+                  {methodId.endsWith('_qr') ? (
                     <TouchableOpacity style={styles.smallPrimary} onPress={() => { if (!locked) setScannerOpen(true); }}>
                       <Icon name="maximize" size={18} color={colors.white} />
                       <Text style={styles.smallPrimaryText}>{scannedQr ? 'Escanear otro QR' : 'Escanear QR'}</Text>
@@ -784,6 +801,7 @@ export default function LocalSendScreen() {
                         <TouchableOpacity style={[styles.addButton, { marginLeft: 8 }]} onPress={() => { if (!locked) setScannerOpen(true); }}
                           accessibilityLabel="Escanear QR">
                           <Icon name="maximize" size={18} color={colors.primaryDark} />
+                          <Text style={styles.addButtonText}>QR</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>

@@ -138,8 +138,8 @@ def _validate_infinia_destination(*, kind, country, details):
         raise PaymentAccountError('Bre-B destination requires BREB_KEY type')
     if destination_type == 'QR_CODE' and kind != 'qr':
         raise PaymentAccountError('QR_CODE destination must use qr kind')
-    if kind == 'qr' and destination_type != 'QR_CODE':
-        raise PaymentAccountError('QR destination requires QR_CODE type')
+    if kind == 'qr' and destination_type not in {'QR_CODE', 'BR_CODE'}:
+        raise PaymentAccountError('QR destination requires QR_CODE or BR_CODE type')
     if kind == 'bank_account' and destination_type in crypto_types | {'BREB_KEY', 'QR_CODE'}:
         raise PaymentAccountError('Bank account kind does not match destination type')
     if destination_type in {'ACCOUNT_COLOMBIA', 'ACCOUNT_PARAGUAY'}:

@@ -47,6 +47,8 @@ class Method:
 METHODS = {m.id: m for m in (
     Method('br_pix', 'send', 'BRA', 'BR', 'BRL', 'Pix', 'Chave Pix: CPF, celular, e-mail o aleatoria',
            kind='bank_account', destination_type='CHAVE PIX', field='chavePix'),
+    Method('br_qr', 'send', 'BRA', 'BR', 'BRL', 'QR Pix', 'Escanea o importa un QR Pix sin monto fijo',
+           kind='qr', destination_type='BR_CODE', field='brCode'),
     Method('co_breb', 'send', 'COL', 'CO', 'COP', 'Llave Bre-B', 'Nequi, Bancolombia, Daviplata y más',
            kind='breb_key', destination_type='BREB_KEY', field='brebKey'),
     # Infinia requires a CLABE reference: it is the SPEI concept the recipient sees.
@@ -103,7 +105,7 @@ def emv_fields(payload):
     fields, index = {}, 0
     while index < len(payload):
         tag, size = payload[index:index + 2], payload[index + 2:index + 4]
-        if len(tag) < 2 or not size.isdigit():
+        if not re.fullmatch(r'[0-9]{2}', tag) or tag in fields or not re.fullmatch(r'[0-9]{2}', size):
             return None
         value = payload[index + 4:index + 4 + int(size)]
         if len(value) != int(size):
@@ -162,11 +164,26 @@ def normalize_value(method, raw):
             raise PaymentAccountError(str(exc)) from exc
     elif method.id == 'br_pix':
         value = _pix_key(value)
-    elif method.id == 'ar_qr':
+    elif method.kind == 'qr':
+        if len(value) > 4096:
+            raise PaymentAccountError('Este código QR es demasiado largo.')
         fields = emv_fields(value)
-        if (not fields or fields.get('00') != '01' or fields.get('58', 'AR') != 'AR'
+        if (not fields or fields.get('00') != '01' or fields.get('58') != method.iso2
+                or not value[-8:].startswith('6304')
                 or value[-4:].upper() != emv_crc(value[:-4])):
-            raise PaymentAccountError('Este código no es un QR de pago de Argentina.')
+            raise PaymentAccountError('Este código no es un QR de pago válido para este país.')
+        if method.id == 'br_qr':
+            templates = [emv_fields(v) or {} for k, v in fields.items() if k.isdigit() and 26 <= int(k) <= 51]
+            pix = [t for t in templates if t.get('00', '').lower() == 'br.gov.bcb.pix']
+            if fields.get('53') != '986' or len(pix) != 1:
+                raise PaymentAccountError('Este código no es un QR Pix en reales.')
+            if fields.get('01') == '12' or '25' in pix[0]:
+                raise PaymentAccountError('Por ahora solo puedes pagar QR Pix estáticos y sin monto.')
+            key = pix[0].get('01', '')
+            # Validate the very key sent inside the untouched QR. Do not
+            # verify a cleaned CPF/CNPJ while paying a different raw value.
+            if _pix_key(key) != key and not _EVP.fullmatch(key):
+                raise PaymentAccountError('Este QR contiene una chave Pix con formato inválido.')
         # The journey is dollar-driven, so an exact peso amount cannot be
         # guaranteed; a fixed-amount QR would be underpaid or rejected.
         if '54' in fields:
@@ -431,6 +448,16 @@ _VALIDATION_TYPES = {
 
 
 def _validation_request(method, value):
+    if method.id == 'br_qr':
+        # Static Pix QR embeds the registered key; the live validation API
+        # accepts PIX_KEY, not a BR_CODE/QR_CODE validation request.
+        fields = emv_fields(value) or {}
+        for tag, raw in fields.items():
+            if tag.isdigit() and 26 <= int(tag) <= 51:
+                nested = emv_fields(raw) or {}
+                if nested.get('00', '').lower() == 'br.gov.bcb.pix':
+                    return {'country': 'BR', 'account': {'dataType': 'PIX_KEY', 'pixKey': _pix_key(nested.get('01', ''))}}
+        raise PaymentAccountError('Este código no contiene una chave Pix válida.')
     if method.id == 'ar_cvu':
         data_type, field = ('CVU', 'cvu') if value.startswith('000') else ('CBU', 'cbu')
     else:
@@ -494,7 +521,7 @@ def verification_state(validation):
 
 
 def _label(method, value, validation):
-    if method.id == 'ar_qr':
+    if method.kind == 'qr':
         # Merchant text comes from the QR itself, not an owner lookup. Include
         # a stable reference so two saved codes with the same name differ.
         fields = emv_fields(value) or {}

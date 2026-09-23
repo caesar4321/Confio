@@ -11,9 +11,11 @@ import { Button } from '../components/common/Button';
 import { useAccount } from '../contexts/AccountContext';
 import { useRoute, RouteProp, useNavigation, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
-import { useMutation } from '@apollo/client';
+import { useApolloClient, useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { parseInstitutionLink } from '../utils/institutionLinks';
+import { localPaymentQrRoute } from '../utils/localPaymentQr';
+import { LOCAL_MONEY_METHODS, LocalMethod } from '../services/localMoney';
 
 type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
 
@@ -39,6 +41,9 @@ export const ScanScreen = () => {
 
   // GraphQL mutations
   const [getInvoice] = useMutation(GET_INVOICE);
+  const client = useApolloClient();
+  const localScanInFlight = useRef(false);
+  const scanSession = useRef(0);
 
   // Debug logging
 
@@ -87,7 +92,58 @@ export const ScanScreen = () => {
   };
 
   const handleQRCodeScanned = async (scannedData: string) => {
-    if (isProcessing) return; // Prevent multiple processing
+    if (isProcessing || localScanInFlight.current) return;
+    const localQr = localPaymentQrRoute(scannedData);
+    // EMV payment payloads must never fall through to embedded Confío links.
+    if (localQr || scannedData.trim().startsWith('000201')) {
+      localScanInFlight.current = true;
+      setIsProcessing(true);
+      const session = scanSession.current;
+      let routed = false;
+      let awaitingDismiss = false;
+      const showScanError = (title: string, message: string) => {
+        awaitingDismiss = true;
+        const resume = () => {
+          if (scanSession.current !== session) return;
+          localScanInFlight.current = false;
+          setIsProcessing(false);
+          setScannedSuccessfully(false);
+        };
+        Alert.alert(title, message, [{text: 'Entendido', onPress: resume}], {cancelable: false});
+      };
+      try {
+        if (!localQr) {
+          showScanError('Código QR no compatible', 'Este QR de pago no es válido o su país todavía no está disponible.');
+          return;
+        }
+        if (scanMode === 'cobrar') {
+          showScanError('QR para pagar', 'Este QR es para enviar un pago. Abre Escanear en modo pagar.');
+          return;
+        }
+        const {data} = await client.query({query: LOCAL_MONEY_METHODS,
+          variables: {direction: 'send'}, fetchPolicy: 'network-only'});
+        if (scanSession.current !== session) return;
+        const method: LocalMethod | undefined = data?.localMoneyMethods?.find((m: LocalMethod) => m.id === localQr.methodId);
+        if (!['ar_qr', 'br_qr'].includes(localQr.methodId) || !method
+          || !['live', 'needs_verification', 'needs_document'].includes(method.status)) {
+          showScanError('Medio no disponible', 'Este tipo de QR todavía no está habilitado para tu cuenta.');
+          return;
+        }
+        // LocalSend retains the payload through KYC/account-opening steps and
+        // submits it to server validation. Scanning never authorizes a payment.
+        (navigation as any).navigate('LocalSend', {methodId: method.id, scannedQr: scannedData.trim()});
+        routed = true;
+      } catch {
+        if (scanSession.current === session) showScanError('No pudimos revisar este QR', 'Verifica tu conexión e intenta de nuevo.');
+      } finally {
+        if (scanSession.current === session && !routed && !awaitingDismiss) {
+          localScanInFlight.current = false;
+          setIsProcessing(false);
+          setScannedSuccessfully(false);
+        }
+      }
+      return;
+    }
     const institutionLink = parseInstitutionLink(scannedData);
     if (institutionLink) {
       setIsProcessing(true);
@@ -125,7 +181,7 @@ export const ScanScreen = () => {
     if (!validMatch || !validMatch[1]) {
       Alert.alert(
         'Código QR inválido',
-        'Este código QR no es un código de pago válido de Confío.',
+        'Escanea un QR de Confío o un QR de pago local compatible.',
         [{ text: 'Entendido', style: 'default' }]
       );
       setScannedSuccessfully(false);
@@ -182,9 +238,12 @@ export const ScanScreen = () => {
   };
 
   useFocusEffect(useCallback(() => {
+    scanSession.current += 1;
+    localScanInFlight.current = false;
     setIsProcessing(false);
     setScannedSuccessfully(false);
-  }, []));
+    return () => { scanSession.current += 1; localScanInFlight.current = false; };
+  }, [activeAccount?.id]));
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
@@ -207,8 +266,10 @@ export const ScanScreen = () => {
   // the common real-world case). Same pipeline as a live scan.
   const handleGallery = useCallback(async () => {
     if (isProcessing) return;
+    const session = scanSession.current;
     try {
       const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      if (session !== scanSession.current) return;
       if (result.didCancel) return;
       if (result.errorCode) {
         Alert.alert('No se pudo abrir la galería', result.errorMessage || result.errorCode, [{ text: 'Entendido' }]);
@@ -217,6 +278,7 @@ export const ScanScreen = () => {
       const uri = result.assets?.[0]?.uri;
       if (!uri) return;
       const detected = await RNQRGenerator.detect({ uri });
+      if (session !== scanSession.current) return;
       const value = detected?.values?.[0];
       if (value) {
         handleQRCodeScanned(value);
@@ -224,6 +286,7 @@ export const ScanScreen = () => {
         Alert.alert('Sin código QR', 'No se encontró un código QR en la imagen.', [{ text: 'Entendido' }]);
       }
     } catch (e: any) {
+      if (session !== scanSession.current) return;
       const msg = String(e?.message || e);
       if (msg.includes('undefined') || msg.includes('null')) {
         // Native module missing from this binary — needs a full rebuild.
@@ -236,7 +299,7 @@ export const ScanScreen = () => {
         Alert.alert('Sin código QR', 'No se pudo leer un código QR de la imagen.', [{ text: 'Entendido' }]);
       }
     }
-  }, [isProcessing]);
+  }, [isProcessing, client, navigation, scanMode, activeAccount?.id]);
 
   // Removed prewarm HEAD /health pings
 
@@ -340,8 +403,8 @@ export const ScanScreen = () => {
               : isBusinessAccount
                 ? scanMode === 'cobrar'
                   ? 'Escanea el código QR del cliente para cobrar'
-                  : 'Escanea el código QR del proveedor para pagar'
-                : 'Escanea un código QR de pago'
+                  : 'Escanea un QR de Confío, Pix o Argentina para pagar'
+                : 'Escanea un QR de Confío, Pix o Argentina'
             }
           </Text>
 

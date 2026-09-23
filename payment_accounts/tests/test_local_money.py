@@ -29,6 +29,17 @@ def qr(*fields):
 
 
 class IdentifierTests(SimpleTestCase):
+    def test_malformed_emv_headers_fail_closed(self):
+        for payload in ('000', '000201991', '00020199²²', '000201９９00'):
+            with self.subTest(payload=payload):
+                self.assertIsNone(local_money.emv_fields(payload))
+                with self.assertRaises(PaymentAccountError):
+                    local_money.normalize_value(local_money.METHODS['br_qr'], payload)
+
+    def test_oversized_qr_is_rejected(self):
+        with self.assertRaises(PaymentAccountError):
+            local_money.normalize_value(local_money.METHODS['br_qr'], '000201' + 'x' * 4096)
+
     def test_fx_precision_never_rounds_up_or_allows_a_zero_conversion(self):
         from payment_accounts.infinia_journeys import fx_source_amount
         for raw, expected in [('1.958795', '1.95'), ('1.999999', '1.99'), ('1.95', '1.95'),
@@ -63,6 +74,35 @@ class IdentifierTests(SimpleTestCase):
         payload = qr(('01', '12'), ('53', '032'), ('54', '1500.00'), ('58', 'AR'))
         with self.assertRaisesRegex(PaymentAccountError, 'monto fijo'):
             local_money.normalize_value(local_money.METHODS['ar_qr'], payload)
+
+    def test_brazil_static_qr_and_pix_key_validation(self):
+        method = local_money.METHODS['br_qr']
+        payload = qr(('26', tlv('00', 'br.gov.bcb.pix') + tlv('01', 'ana@example.com')),
+                     ('53', '986'), ('58', 'BR'), ('59', 'Loja'))
+        self.assertEqual(local_money.normalize_value(method, payload), payload)
+        self.assertEqual(local_money._validation_request(method, payload),
+                         {'country': 'BR', 'account': {'dataType': 'PIX_KEY', 'pixKey': 'ana@example.com'}})
+        from payment_accounts.services import _validate_infinia_destination
+        _validate_infinia_destination(kind='qr', country='BRA', details={'type': 'BR_CODE', 'brCode': payload})
+
+    def test_brazil_qr_rejects_unsafe_or_wrong_rail_payloads(self):
+        pix = tlv('00', 'br.gov.bcb.pix') + tlv('01', 'ana@example.com')
+        for fields in [
+                (('26', pix), ('53', '032'), ('58', 'BR')),
+                (('26', pix), ('53', '986'), ('58', 'AR')),
+                (('26', pix), ('53', '986'), ('58', 'BR'), ('54', '10')),
+                (('01', '12'), ('26', pix), ('53', '986'), ('58', 'BR')),
+                (('26', pix + tlv('25', 'example.com')), ('53', '986'), ('58', 'BR')),
+                (('26', pix), ('26', pix), ('53', '986'), ('58', 'BR')),
+                (('26', tlv('00', 'other.network')), ('53', '986'), ('58', 'BR'))]:
+            with self.subTest(fields=fields), self.assertRaises(PaymentAccountError):
+                local_money.normalize_value(local_money.METHODS['br_qr'], qr(*fields))
+
+    def test_qr_does_not_validate_a_different_normalized_pix_key(self):
+        payload = qr(('26', tlv('00', 'br.gov.bcb.pix') + tlv('01', 'abc12345678901')),
+                     ('53', '986'), ('58', 'BR'))
+        with self.assertRaises(PaymentAccountError):
+            local_money.normalize_value(local_money.METHODS['br_qr'], payload)
 
     def test_tampered_or_foreign_qr_is_rejected(self):
         payload = qr(('01', '11'), ('58', 'AR'))
@@ -135,7 +175,7 @@ class LocalMoneyTests(TestCase):
 
     def test_rails_are_unavailable_until_both_flags_are_on(self):
         rows = local_money.methods(self.owner, self.identity, 'send')
-        self.assertEqual({row['method'].id for row in rows}, {'br_pix', 'co_breb', 'mx_clabe', 'ar_cvu', 'ar_qr'})
+        self.assertEqual({row['method'].id for row in rows}, {'br_pix', 'br_qr', 'co_breb', 'mx_clabe', 'ar_cvu', 'ar_qr'})
         self.assertEqual({row['status'] for row in rows}, {'unavailable'})
 
     @override_settings(**FLAGS)
