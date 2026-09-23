@@ -12,7 +12,7 @@ export const isSchemaMismatch = (error?: ApolloError, extra?: RegExp) => {
   if (!error) return false;
   const bodyErrors = (error.networkError as { result?: { errors?: Array<{ message?: string }> } } | null)
     ?.result?.errors ?? [];
-  const text = [error.message, ...error.graphQLErrors.map((e) => e.message), ...bodyErrors.map((e) => e.message)]
+  const text = [error.message, ...(error.graphQLErrors ?? []).map((e) => e.message), ...bodyErrors.map((e) => e.message)]
     .join(' ');
   return /Cannot query field|Unknown (field|argument|type)/i.test(text) || Boolean(extra?.test(text));
 };
