@@ -15,6 +15,7 @@ class ChannelKind(models.TextChoices):
     FOUNDER = 'FOUNDER', 'Founder'
     NEWS = 'NEWS', 'News'
     BUSINESS = 'BUSINESS', 'Business'
+    INSTITUTION = 'INSTITUTION', 'Institution'
     SYSTEM = 'SYSTEM', 'System'
 
 
@@ -125,6 +126,22 @@ class Channel(models.Model):
         related_name='owned_inbox_channels',
     )
     is_active = models.BooleanField(default=True)
+    # The "Oficial" badge in Descubrir. A staff grant is necessary but not
+    # sufficient: see inbox.official for the live rule (owner KYB included).
+    # Granted in the admin only — never requested or set by the owner.
+    official_granted_at = models.DateTimeField(null=True, blank=True)
+    official_granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+    )
+    official_note = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='How staff confirmed who controls this channel (required to grant Oficial).',
+    )
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
