@@ -85,13 +85,13 @@ const FriendlyHowItWorks = () => {
               <img
                 src={confioAhorrosDemo}
                 alt={t(
-                  'App Confío — Ahorros e Inversiones (pantalla real)',
-                  'Confío app — Savings & Investments (real screen)',
-                  'Confío 앱 — 저축 및 투자 (실제 화면)'
+                  'App Confío — Acciones de EE. UU. (pantalla real)',
+                  'Confío app — U.S. stocks (real screen)',
+                  'Confío 앱 — 미국 주식 (실제 화면)'
                 )}
                 className={styles.mockup}
-                width={640}
-                height={1422}
+                width={576}
+                height={1280}
                 loading="lazy"
                 decoding="async"
               />
