@@ -79,7 +79,7 @@ const authLink = setContext((_, { headers }) => {
 // Create the Apollo Client
 const client = new ApolloClient({
   link: from([errorLink, authLink, httpLink]),
-  cache: new InMemoryCache(),
+  cache: new InMemoryCache({ typePolicies: { ContentPollOptionType: { keyFields: false } } }),
   defaultOptions: {
     watchQuery: {
       fetchPolicy: 'cache-and-network',

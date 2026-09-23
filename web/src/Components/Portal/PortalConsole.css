@@ -1033,3 +1033,26 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+.portal-poll-editor {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 16px;
+  min-width: 0;
+}
+.portal-poll-editor legend { padding: 0 6px; font-weight: 700; }
+.portal-poll-editor p { margin: 0; font-size: 13px; color: #475467; }
+.portal-poll-editor button {
+  padding: 10px 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+}
+.portal-poll-editor button:disabled { opacity: .5; cursor: default; }
+.portal-form .portal-poll-toggle { flex-direction: row; align-items: center; }
+.portal-poll-toggle input { width: auto; }

@@ -1,3 +1,4 @@
+import type { ContentPollData } from './ContentPoll';
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -28,6 +29,7 @@ export type VideoMessage = {
   }>;
   reactionSummary?: MessageReactionSummary[];
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean;
   title: string;
   time: string;
@@ -42,6 +44,7 @@ export type TextMessage = {
   tag?: string;
   reactionSummary?: MessageReactionSummary[];
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean;
   text: string;
   time: string;
@@ -55,6 +58,7 @@ export type NewsMessage = {
   occurredAt?: string;
   reactionSummary?: MessageReactionSummary[];
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean;
   tag: string;
   title: string;
@@ -70,6 +74,7 @@ export type SupportMessage = {
   occurredAt?: string;
   reactionSummary?: MessageReactionSummary[];
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean;
   senderType?: 'USER' | 'AGENT' | 'SYSTEM' | null;
   senderName?: string | null;

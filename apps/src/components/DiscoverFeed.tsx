@@ -1,3 +1,4 @@
+import { ContentPoll, ContentPollData } from './ContentPoll';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -35,6 +36,7 @@ export type DiscoverItem = {
   }>;
   reactionSummary?: DiscoverReaction[];
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean;
   imageUrl?: string | null;
 };
@@ -131,6 +133,7 @@ export function DiscoverFeed({
           ) : null}
         </Pressable>
 
+        <ContentPoll poll={item.poll} />
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = item.viewerReaction === emoji;

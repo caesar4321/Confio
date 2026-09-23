@@ -505,3 +505,16 @@ class SupportConversationState(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['conversation', 'user'], name='support_state_conversation_user_uniq'),
         ]
+
+
+class ContentPollVote(models.Model):
+    """A person's answer is shared across accounts and publication surfaces."""
+    content_item = models.ForeignKey(ContentItem, on_delete=models.CASCADE, related_name='poll_votes')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='content_poll_votes')
+    option_id = models.CharField(max_length=64)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['content_item', 'user'], name='inbox_poll_item_user_uniq'),
+        ]
