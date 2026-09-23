@@ -216,7 +216,9 @@ def _destination_details(value):
 def _breb_key_hidden(instruction, info):
     """A Bre-B key is shown only after a recent location check from an allowed
     IP, like every other Bre-B operation."""
-    if instruction.kind != 'breb_key':
+    if instruction.kind != 'breb_key' and not (
+            instruction.kind == 'qr' and instruction.financial_account.country in {'CO', 'COL'}
+            and instruction.financial_account.asset == 'COP'):
         return False
     from .breb_location import require_location_pass
     try:

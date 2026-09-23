@@ -54,6 +54,9 @@ class LocalMethodType(graphene.ObjectType):
 
 
 class LocalDestinationType(graphene.ObjectType):
+    qr_amount = graphene.String()
+    qr_merchant_name = graphene.String()
+    qr_merchant_city = graphene.String()
     id = graphene.UUID(required=True)
     method_id = graphene.String(required=True)
     label = graphene.String(required=True)
@@ -101,6 +104,7 @@ class LocalLimitsType(graphene.ObjectType):
 
 
 class LocalReceiveAccountType(graphene.ObjectType):
+    qr_value = graphene.String()
     method_id = graphene.String(required=True)
     status = graphene.String(required=True)
     local_account_id = graphene.UUID()
@@ -218,7 +222,8 @@ class LocalMoneyQuery(graphene.ObjectType):
             local_account_id=view['local'].internal_id if view['local'] else None,
             crypto_account_id=view['crypto'].internal_id if view['crypto'] else None,
             country=method.iso2, asset=method.asset, instruction_kind=view['instruction_kind'],
-            value=value, holder_name=holder_name, institution=view['institution'],
+            value=value, qr_value=view.get('qr_value', '') if value else '',
+            holder_name=holder_name, institution=view['institution'],
             receive_same_name=view['receive_same_name'], receive_third_party=view['receive_third_party'])
 
     def resolve_local_saved_destinations(self, info, method_id):

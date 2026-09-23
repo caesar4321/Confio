@@ -13,6 +13,6 @@ export function localPaymentQrRoute(raw: string): {methodId: string; country: st
     fields[tag] = value.slice(offset + 4, end);
     offset = end;
   }
-  const methodId = ({AR: 'ar_qr', BR: 'br_qr', PE: 'pe_qr'} as Record<string, string>)[fields['58']];
+  const methodId = ({AR: 'ar_qr', BR: 'br_qr', CO: 'co_qr', PE: 'pe_qr'} as Record<string, string>)[fields['58']];
   return methodId ? {methodId, country: fields['58']} : null;
 }

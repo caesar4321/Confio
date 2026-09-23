@@ -72,6 +72,9 @@ export interface LocalMethod {
 }
 
 export interface LocalDestination {
+  qrAmount?: string;
+  qrMerchantName?: string;
+  qrMerchantCity?: string;
   id: string;
   methodId: string;
   label: string;
@@ -114,6 +117,7 @@ export interface LocalLimits {
 }
 
 export interface LocalReceiveAccount {
+  qrValue?: string;
   methodId: string;
   status: LocalPairStatus;
   localAccountId: string | null;
@@ -219,6 +223,9 @@ export const LOCAL_MONEY_ACCOUNTS = gql`
 export const LOCAL_SAVED_DESTINATIONS = gql`
   query LocalSavedDestinations($methodId: String!) {
     localSavedDestinations(methodId: $methodId) {
+      qrAmount
+      qrMerchantName
+      qrMerchantCity
       id
       methodId
       label
@@ -235,6 +242,9 @@ export const LOCAL_SAVED_DESTINATIONS = gql`
 const LOCAL_DESTINATION = gql`
   query LocalDestination($id: UUID!) {
     localDestination(id: $id) {
+      qrAmount
+      qrMerchantName
+      qrMerchantCity
       id
       methodId
       label
@@ -278,6 +288,7 @@ const LOCAL_DEPOSIT_QUOTE = gql`
 export const LOCAL_RECEIVE_ACCOUNT = gql`
   query LocalReceiveAccount($methodId: String!) {
     localReceiveAccount(methodId: $methodId) {
+      qrValue
       methodId
       status
       localAccountId
@@ -399,6 +410,9 @@ const RESOLVE_LOCAL_DESTINATION = gql`
       success
       errors
       destination {
+        qrAmount
+        qrMerchantName
+        qrMerchantCity
         id
         methodId
         label
@@ -420,6 +434,9 @@ const RECHECK_LOCAL_DESTINATION = gql`
       success
       errors
       destination {
+        qrAmount
+        qrMerchantName
+        qrMerchantCity
         id
         methodId
         label

@@ -342,12 +342,30 @@ class BrebLocationTests(SimpleTestCase):
             self.assertEqual(FundingInstructionType.resolve_holder_display_name(key, colombia), 'Ana')
             self.assertEqual(FundingInstructionType.resolve_display_value(key, venezuela), '')
 
+    def test_generic_account_api_hides_colombian_qr_without_location_pass(self):
+        from payment_accounts.schema import FundingInstructionType
+        account = SimpleNamespace(country='COL', asset='COP',
+            provider_profile=SimpleNamespace(confio_account=self.owner))
+        code = SimpleNamespace(kind='qr', display_value='embedded-llave', holder_display_name='Ana',
+                               financial_account=account)
+        colombia = SimpleNamespace(context=SimpleNamespace(META={'HTTP_CF_IPCOUNTRY': 'CO'}))
+        venezuela = SimpleNamespace(context=SimpleNamespace(META={'HTTP_CF_IPCOUNTRY': 'VE'}))
+        with patch('payment_accounts.activation.usable', return_value=True):
+            self.assertEqual(FundingInstructionType.resolve_display_value(code, colombia), '')
+            self.assertEqual(FundingInstructionType.resolve_holder_display_name(code, colombia), '')
+            gate.grant_pass(self.owner)
+            self.assertEqual(FundingInstructionType.resolve_display_value(code, colombia), 'embedded-llave')
+            self.assertEqual(FundingInstructionType.resolve_display_value(code, venezuela), '')
+            account.country, account.asset = 'BRA', 'BRL'
+            self.assertEqual(FundingInstructionType.resolve_display_value(code, venezuela), 'embedded-llave')
+
     def test_the_receive_account_hides_a_bre_b_key_without_a_pass(self):
         from payment_accounts import local_money_schema as schema
         method = schema.local_money.Method('co_breb_receive', 'receive', 'COL', 'CO', 'COP', 'Bre-B', 'Key',
                                            instruction_kind='breb_key')
         view = dict(method=method, status='active', local=None, crypto=None, value='@ana', holder_name='Ana',
-                    institution='', receive_same_name='', receive_third_party='', instruction_kind='breb_key')
+                    institution='', receive_same_name='', receive_third_party='', instruction_kind='breb_key',
+                    qr_value='provider-qr')
         info = SimpleNamespace(context=SimpleNamespace(META={'HTTP_CF_IPCOUNTRY': 'CO'}))
         with patch.object(schema, '_owner', return_value=self.owner), \
                 patch.object(schema.local_money, 'receive_account', return_value=view):
@@ -356,6 +374,7 @@ class BrebLocationTests(SimpleTestCase):
             shown = schema.LocalMoneyQuery.resolve_local_receive_account(None, info, 'co_breb_receive')
         self.assertEqual((hidden.status, hidden.value, hidden.holder_name), ('active', '', ''))
         self.assertEqual((shown.value, shown.holder_name), ('@ana', 'Ana'))
+        self.assertEqual((hidden.qr_value, shown.qr_value), ('', 'provider-qr'))
 
 
 class BrebConfigurationTests(SimpleTestCase):

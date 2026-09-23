@@ -343,6 +343,11 @@ def sync_embedded_funding_instructions(account):
         # must not remain available for receiving or unlock an opening payment.
         account.funding_instructions.filter(kind__in=['pix_key', 'qr'], status__in=['pending', 'active']).update(
             status='closed', updated_at=timezone.now())
+    elif account.country == 'COL' and account.asset == 'COP':
+        # A removed key can carry an embedded QR too. Retire the whole prior
+        # receiving snapshot before applying the provider's replacement.
+        account.funding_instructions.filter(kind__in=['breb_key', 'qr'], status__in=['pending', 'active']).update(
+            status='closed', updated_at=timezone.now())
     if isinstance(instructions, dict):
         instructions = [instructions]
     for item in instructions:

@@ -26,6 +26,7 @@ import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
+import StocksMark from '../components/svg/StocksMark';
 import { colors } from '../config/theme';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import InviteClaimBanner from '../components/InviteClaimBanner';
@@ -1641,16 +1642,16 @@ export const HomeScreen = () => {
                 >
                   <View style={styles.walletCardContent}>
                     {/* NOT a token logo: this slot holds 400+ tickers, not one
-                        asset, so there is nothing to put in the white coin
-                        circle the dollar rows use — it wore the cUSD+ mark and
-                        read as a second Confío Dollar+ row. Same trending-up
-                        glyph the Acciones stat tile uses, on the emerald fill,
-                        so the row is legibly a CATEGORY next to the coins.
-                        Ondo's logo is deliberately not it: they issue the
-                        shares, they don't own the slot (attribution stays the
-                        "En alianza con" line inside the hub). */}
-                    <View style={styles.walletLogoContainer}>
-                      <Icon name="trending-up" size={22} color={colors.white} />
+                        asset — it once wore the cUSD+ mark and read as a
+                        second Confío Dollar+ row. It is a category mark drawn
+                        in the coins' own language (mint disc, heavy off-white
+                        glyph), so it belongs in the column without posing as
+                        a coin; the plain Feather arrow it replaced read as a
+                        button. Ondo's logo is deliberately not it: they issue
+                        the shares, they don't own the slot (attribution stays
+                        the "En alianza con" line inside the hub). */}
+                    <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
+                      <StocksMark size={44} />
                     </View>
                     {/* Nothing invested yet: an invitation, not a "$0.00"
                         dead end. The balance slot holds no market data — it

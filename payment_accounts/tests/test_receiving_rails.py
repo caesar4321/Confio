@@ -4,6 +4,23 @@ from payment_accounts.receiving_rails import CANDIDATES, detect_receiving_rail
 
 
 class ReceivingRailTests(SimpleTestCase):
+    def test_colombian_provider_qr_identifies_breb_without_exposing_the_key(self):
+        from payment_accounts.local_money import emv_crc
+        def tlv(tag, value):
+            return f'{tag}{len(value):02d}{value}'
+        body = '000201010211' + tlv('26', tlv('00', 'CO.COM.CRB.LLA') + tlv('04', '@private'))
+        body += '53031705802CO6304'
+        payload = body + emv_crc(body)
+        for item in [{'type': 'qr', 'qr_code': payload}, {'type': 'qr', 'value': payload},
+                     {'type': 'fiat', 'breb_key': '@private', 'qr_code': payload}]:
+            result = self.detect('COL', 'COP', item)
+            self.assertEqual(result['verified_rail'], 'BREB')
+            self.assertNotIn('@private', str(result))
+        for item in [{'type': 'qr', 'qr_code': payload[:-4] + '0000'},
+                     {'type': 'fiat', 'breb_key': '@other', 'qr_code': payload},
+                     {'type': 'qr', 'qr_code': payload, 'value': 'conflicting'}]:
+            self.assertEqual(self.detect('COL', 'COP', item)['verified_rail'], '')
+
     def detect(self, country, asset, instructions):
         return detect_receiving_rail(SimpleNamespace(country=country, asset=asset,
             provider_data={'latest': {'funding_instructions': instructions}}))
