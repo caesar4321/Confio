@@ -3143,15 +3143,6 @@ export const GET_DISCOVER_FEED_SECTIONED = gql`
   }
 `;
 
-export const GET_DISCOVER_SECTIONS = gql`
-  query GetDiscoverSections {
-    discoverSections {
-      key
-      label
-    }
-  }
-`;
-
 // Its own document: an older server without these fields fails only the
 // source line, never the post itself.
 export const GET_DISCOVER_POST_SOURCE = gql`

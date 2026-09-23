@@ -68,3 +68,10 @@ def official_channel_ids(channels):
         if channel.official_granted_at is not None and channel.owner_type == OwnerType.BUSINESS
     )
     return {channel.id for channel in channels if official_status(channel, verified_ids) == OFFICIAL}
+
+
+def all_official_channel_ids():
+    """Every Oficial channel right now, for filtering the Descubrir feed."""
+    from .models import Channel
+
+    return official_channel_ids(Channel.objects.filter(official_granted_at__isnull=False))

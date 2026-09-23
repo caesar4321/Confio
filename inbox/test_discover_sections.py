@@ -48,18 +48,48 @@ class DiscoverSectionTests(TestCase):
     def feed(self, **kwargs):
         return Query().resolve_discover_feed(self.info, limit=20, **kwargs)
 
-    def test_unfiltered_feed_keeps_every_source(self):
-        titles = {item.title for item in self.feed().items}
-        self.assertEqual(titles, {'Founder post', 'Institution post'})
+    def titles(self, **kwargs):
+        return {item.title for item in self.feed(**kwargs).items}
 
-    def test_section_filters_by_channel_kind(self):
-        self.assertEqual([item.title for item in self.feed(section='institutions').items], ['Institution post'])
-        self.assertEqual([item.title for item in self.feed(section='confio').items], ['Founder post'])
-        self.assertEqual(self.feed(section='businesses').items, [])
+    def test_para_ti_keeps_every_source(self):
+        self.assertEqual(self.titles(), {'Founder post', 'Institution post'})
+        self.assertEqual(self.titles(section='for_you'), {'Founder post', 'Institution post'})
+
+    def test_oficial_follows_the_live_rule(self):
+        self.assertEqual(self.titles(section='official'), {'Founder post'})
+        self.institution.official_granted_at = timezone.now()
+        self.institution.save()
+        # Granted but no KYB yet: still out.
+        self.assertEqual(self.titles(section='official'), {'Founder post'})
+        kyb = self.verify_kyb(self.business)
+        self.assertEqual(self.titles(section='official'), {'Founder post', 'Institution post'})
+        kyb.delete()
+        self.assertEqual(self.titles(section='official'), {'Founder post'})
+
+    def test_comunidad_is_user_owned_channels_only(self):
+        self.assertEqual(self.titles(section='community'), set())
+        member = User.objects.create_user(username='member', email='m@example.com', firebase_uid='member')
+        user_channel = Channel.objects.create(slug='t-user', kind='SYSTEM', title='LunaVerde',
+                                              owner_type='USER', owner_user=member)
+        self.publish(user_channel, 'User post')
+        self.assertEqual(self.titles(section='community'), {'User post'})
+        self.assertNotIn('User post', self.titles(section='official'))
+
+    def test_member_post_on_an_official_board_is_community_not_official(self):
+        member = User.objects.create_user(username='colegiado', email='c@example.com', firebase_uid='colegiado')
+        item = self.publish(self.founder, 'Member post')
+        item.owner_type, item.owner_user = 'USER', member
+        item.save()
+        self.assertNotIn('Member post', self.titles(section='official'))
+        self.assertIn('Member post', self.titles(section='community'))
+        by_title = {entry.title: entry for entry in self.feed().items}
+        self.assertFalse(by_title['Member post'].is_official)
+        self.assertTrue(by_title['Founder post'].is_official)
 
     def test_unknown_section_is_rejected_not_widened(self):
-        with self.assertRaises(GraphQLError):
-            self.feed(section='comunidad')
+        for section in ('confio', 'oficial', 'everything'):
+            with self.subTest(section=section), self.assertRaises(GraphQLError):
+                self.feed(section=section)
 
     def test_items_carry_source_and_official_flag(self):
         by_title = {item.title: item for item in self.feed().items}
@@ -70,13 +100,6 @@ class DiscoverSectionTests(TestCase):
             (institution.source_name, institution.source_section, institution.is_official),
             ('CIP Lima', 'institutions', False),
         )
-
-    def test_sections_list_only_those_with_published_posts(self):
-        # A draft alone must not surface an empty section.
-        business_channel = Channel.objects.create(slug='t-shop', kind='BUSINESS', title='Shop')
-        self.publish(business_channel, 'Draft', status='DRAFT')
-        sections = Query().resolve_discover_sections(self.info)
-        self.assertEqual([(s.key, s.label) for s in sections], [('confio', 'Confío'), ('institutions', 'Instituciones')])
 
     def verify_kyb(self, business, status='verified'):
         return IdentityVerification.objects.create(
