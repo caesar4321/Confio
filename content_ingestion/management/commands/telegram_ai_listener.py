@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_COMMANDS = {
     '/chatgpt': 'openai',
     '/gpt': 'openai',
+    '/astra': 'openai',
     '/claude': 'claude',
     '/grok': 'grok',
     '/gemini': 'gemini',
@@ -75,7 +76,7 @@ ANSWER_TIMEOUT_SECONDS = getattr(settings, 'CONFIO_AI_TELEGRAM_ANSWER_TIMEOUT_SE
 class Command(BaseCommand):
     help = (
         'Run a Telethon listener that replies to every message in configured Telegram '
-        'chats. Slash commands (/chatgpt, /claude, /grok, /gemini, /deepseek) route to a '
+        'chats. Slash commands (/chatgpt, /astra, /claude, /grok, /gemini, /deepseek) route to a '
         'single model; /debate asks every configured model and synthesizes the discussion.'
     )
 
@@ -387,13 +388,23 @@ class Command(BaseCommand):
         request_text = request_text or user_prompt
         routing_text = routing_text or request_text
         youtube_urls = extract_youtube_urls(routing_text)
+        command, _ = _split_command(getattr(event, 'raw_text', '') or '')
+        escalation = force_backend == 'openai' and command == '/astra'
+        openai_model = (
+            getattr(settings, 'CONFIO_AI_ESCALATION_MODEL', 'gpt-6-astra')
+            if escalation else getattr(settings, 'OPENAI_MODEL', 'gpt-6-sol')
+        )
+        openai_effort = (
+            getattr(settings, 'CONFIO_AI_ESCALATION_REASONING_EFFORT', 'high')
+            if escalation else getattr(settings, 'OPENAI_REASONING_EFFORT', 'high')
+        )
         image_provider = force_backend if force_backend in {'openai', 'gemini'} else None
         image_model = (
-            getattr(settings, 'OPENAI_MODEL', 'gpt-5.6-sol')
+            openai_model
             if force_backend == 'openai' else None
         )
         image_reasoning_effort = (
-            getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+            openai_effort
             if force_backend == 'openai' else None
         )
         # Write turn = explicit /memory command OR a clearly-worded save/push/update intent
@@ -418,6 +429,8 @@ class Command(BaseCommand):
                 complete_script,
                 _script_writer_prompt(user_prompt),
                 system=script_system,
+                model=openai_model,
+                reasoning_effort=openai_effort,
             )
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
@@ -498,8 +511,8 @@ class Command(BaseCommand):
             if force_backend == 'openai':
                 # Explicit /gpt uses the frontier model. Ambient and memory-write
                 # OpenAI turns intentionally stay on the cheaper daily Luna model.
-                agent_model = getattr(settings, 'OPENAI_MODEL', 'gpt-5.6-sol')
-                reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+                agent_model = openai_model
+                reasoning_effort = openai_effort
             return await asyncio.to_thread(
                 run_with_tools,
                 user_prompt,

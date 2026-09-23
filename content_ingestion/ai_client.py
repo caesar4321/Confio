@@ -109,7 +109,10 @@ def complete_text(prompt: str, provider: str | None = None, *, system: str | Non
     return _DISPATCH[provider](prompt, _system_text(system))
 
 
-def complete_script(prompt: str, *, system: str | None = None) -> str:
+def complete_script(
+    prompt: str, *, system: str | None = None,
+    model: str | None = None, reasoning_effort: str | None = None,
+) -> str:
     """Use the configured OpenAI model for long-form creator scripts.
 
     The normal Telegram agent is optimized for cheap tool use and concise answers.
@@ -119,7 +122,7 @@ def complete_script(prompt: str, *, system: str | None = None) -> str:
     if not api_key:
         raise AIClientError('OpenAI script writer requires OPENAI_API_KEY.')
 
-    model = getattr(settings, 'OPENAI_MODEL', 'gpt-5.5')
+    model = model or getattr(settings, 'OPENAI_MODEL', 'gpt-6-sol')
     max_tokens = getattr(settings, 'CONFIO_AI_SCRIPT_MAX_TOKENS', 7000)
     payload = {
         'model': model,
@@ -127,7 +130,7 @@ def complete_script(prompt: str, *, system: str | None = None) -> str:
         'input': prompt,
         'max_output_tokens': max_tokens,
     }
-    reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+    reasoning_effort = reasoning_effort or getattr(settings, 'OPENAI_REASONING_EFFORT', 'high')
     if reasoning_effort:
         payload['reasoning'] = {'effort': reasoning_effort}
     response = requests.post(
@@ -318,7 +321,7 @@ def _complete_openai_images(
 
     api_key = _provider_api_key('openai')
     model = model or getattr(settings, 'CONFIO_AI_IMAGE_MODEL', '') or getattr(
-        settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-5.6-luna'
+        settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-6-luna'
     )
     content = [{'type': 'input_text', 'text': prompt}]
     for mime_type, image_bytes in images:
@@ -362,13 +365,13 @@ def _complete_openai(prompt: str, system: str = '') -> str:
     if not api_key:
         raise AIClientError('OpenAI is selected, but OPENAI_API_KEY is not configured.')
 
-    model = getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+    model = getattr(settings, 'OPENAI_MODEL', 'gpt-6-sol')
     payload = {
         'model': model,
         'instructions': system,
         'input': prompt,
     }
-    reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'medium')
+    reasoning_effort = getattr(settings, 'OPENAI_REASONING_EFFORT', 'high')
     if reasoning_effort:
         payload['reasoning'] = {'effort': reasoning_effort}
     response = requests.post(

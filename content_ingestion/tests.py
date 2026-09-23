@@ -1022,6 +1022,43 @@ class TelegramImageRoutingTests(SimpleTestCase):
         self.assertIn('Análisis real de la imagen vía modelo visual', agent_prompt)
 
 
+@override_settings(
+    OPENAI_MODEL='gpt-6-sol', OPENAI_REASONING_EFFORT='high',
+    CONFIO_AI_ESCALATION_MODEL='gpt-6-astra',
+    CONFIO_AI_ESCALATION_REASONING_EFFORT='high',
+)
+class TelegramEscalationRoutingTests(SimpleTestCase):
+    def test_explicit_models_reach_text_image_and_script_routes(self):
+        import asyncio
+        import types
+        from contextlib import ExitStack
+        from content_ingestion.management.commands.telegram_ai_listener import Command, PROVIDER_COMMANDS
+
+        module = 'content_ingestion.management.commands.telegram_ai_listener.'
+        for command, model in [('/gpt', 'gpt-6-sol'), ('/astra', 'gpt-6-astra')]:
+            self.assertEqual(PROVIDER_COMMANDS[command], 'openai')
+            for route in ['text', 'image', 'script']:
+                with self.subTest(command=command, route=route), ExitStack() as stack:
+                    stack.enter_context(patch(module + '_collect_image_inputs', new=AsyncMock(
+                        return_value=[('image/jpeg', b'image')] if route == 'image' else [],
+                    )))
+                    stack.enter_context(patch(module + '_collect_video_inputs', new=AsyncMock(return_value=[])))
+                    stack.enter_context(patch(module + '_build_tools', return_value={}))
+                    stack.enter_context(patch(module + 'build_media_system_prompt', return_value='MEDIA'))
+                    stack.enter_context(patch(module + 'build_script_system_prompt', return_value='SCRIPT'))
+                    stack.enter_context(patch(module + '_is_longform_script_request', return_value=route == 'script'))
+                    target = {'text': 'run_with_tools', 'image': 'complete_with_images', 'script': 'complete_script'}[route]
+                    complete = stack.enter_context(patch(module + target, return_value='Answer'))
+                    result = asyncio.run(Command()._generate_answer(
+                        types.SimpleNamespace(raw_text=command + ' explain this', chat_id=-100),
+                        None, 'explain this', 'openai', 'SYSTEM', 'owner', False,
+                        force_backend='openai',
+                    ))
+                    self.assertEqual(result, 'Answer')
+                    self.assertEqual(complete.call_args.kwargs['model'], model)
+                    self.assertEqual(complete.call_args.kwargs['reasoning_effort'], 'high')
+
+
 class TelegramAnswerTimeoutTests(SimpleTestCase):
     def test_timeout_message_is_actionable(self):
         from content_ingestion.management.commands.telegram_ai_listener import _telegram_chunks

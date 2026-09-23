@@ -287,7 +287,7 @@ def _run_native_openai(
     model = (
         model
         or getattr(settings, 'CONFIO_AI_AGENT_MODEL', '')
-        or getattr(settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-5.6-luna')
+        or getattr(settings, 'CONFIO_AI_DAILY_MODEL', 'gpt-6-luna')
     )
     reasoning_effort = (
         reasoning_effort
