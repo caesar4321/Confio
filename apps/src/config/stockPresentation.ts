@@ -20,8 +20,8 @@ export const STOCK_PRESENTATION: Record<string, {name: string}> = {
 export const STOCK_TAGLINES: Record<string, string> = {
   SPY: '500 grandes empresas en una compra',
   QQQ: '100 grandes empresas, muchas de tecnología',
-  GLD: 'Sigue el precio del oro',
-  SLV: 'Sigue el precio de la plata',
+  GLD: 'Sube y baja con el oro',
+  SLV: 'Sube y baja con la plata',
 };
 
 /** Input is already ranked by market capitalization by gmMarket. */

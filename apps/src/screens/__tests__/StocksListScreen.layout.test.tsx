@@ -117,15 +117,15 @@ it('renders server shelves with only live assets, and badges risky funds', async
     key: 'crypto',
     title: 'Bitcoin y cripto',
     subtitle: 'Sigue su precio sin abrir cuenta en un exchange.',
-    items: [{ticker: 'IBIT', tagline: 'Sigue el precio de bitcoin'}, {ticker: 'ETHA', tagline: 'Sigue el precio de ether'}],
+    items: [{ticker: 'IBIT', tagline: 'Sube y baja con bitcoin'}, {ticker: 'ETHA', tagline: 'Sube y baja con ether'}],
   }];
   mockWarnings = {TQQQ: {ticker: 'TQQQ', badge: 'Riesgo alto', message: 'Un solo día.'}};
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {tree = renderer.create(<StocksListScreen />);});
   const t = texts(tree);
   expect(t).toContain('Bitcoin y cripto');
-  expect(t).toContain('Sigue el precio de bitcoin');
-  expect(t).not.toContain('Sigue el precio de ether');
+  expect(t).toContain('Sube y baja con bitcoin');
+  expect(t).not.toContain('Sube y baja con ether');
   expect(t.filter(x => x === 'Riesgo alto')).toHaveLength(1);
   await act(async () => tree.unmount());
 });
