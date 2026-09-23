@@ -2017,6 +2017,18 @@ export const AccountDetailScreen = () => {
         backgroundColor={account.color}
         isLight={true}
         showBackButton={true}
+        // Same convention as Acciones de EE.UU.: "¿Cómo funciona?" is the ?
+        // in the header — a row above the history was easy to scroll past.
+        rightAccessory={isSavingsAccount && savingsIsYield ? (
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate('ProtectedSavings')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Cómo funciona tu ahorro"
+          >
+            <Icon name="help-circle" size={22} color={colors.white} />
+          </TouchableOpacity>
+        ) : undefined}
       />
 
       {/* Balance Section — instrument brand field: same gradient + coin-ring
@@ -2589,39 +2601,15 @@ export const AccountDetailScreen = () => {
               </View>
             )}
 
-            {/* Savings education + partnership (merged from SavingsScreen).
-                ONE education door rather than inline sections: respaldo,
-                tasa, costos and retiros all live in ProtectedSavings. */}
+            {/* Savings partnership. The ONE education door (respaldo, tasa,
+                costos, retiros → ProtectedSavings) is the ? in the header. */}
+            {/* Partnership: real logo, nominative use. */}
             {isSavingsAccount && savingsIsYield && (
-              <>
-                <TouchableOpacity
-                  style={styles.howItWorksRow}
-                  onPress={() => (navigation as any).navigate('ProtectedSavings')}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cómo funciona tu ahorro"
-                >
-                  <View style={styles.howItWorksIconWrap}>
-                    <Icon name="shield" size={16} color={colors.primaryDark} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.howItWorksTitle}>¿Cómo funciona?</Text>
-                    <Text style={styles.howItWorksSub}>
-                      Respaldo, rendimiento y costos — sin letra chica
-                    </Text>
-                  </View>
-                  <Icon name="chevron-right" size={18} color={colors.text.light} />
-                </TouchableOpacity>
-
-                {/* Partnership: real logo, nominative use. */}
-                {savingsIsYield && (
-                  <View style={styles.partnerRow}>
-                    <Text style={styles.partnerText}>En alianza con</Text>
-                    <Image source={OndoLogo} style={styles.partnerLogo} />
-                    <Text style={styles.partnerBrand}>Ondo Finance</Text>
-                  </View>
-                )}
-              </>
+              <View style={styles.partnerRow}>
+                <Text style={styles.partnerText}>En alianza con</Text>
+                <Image source={OndoLogo} style={styles.partnerLogo} />
+                <Text style={styles.partnerBrand}>Ondo Finance</Text>
+              </View>
             )}
 
             {/* Enhanced Transactions Section */}
@@ -2932,25 +2920,6 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     marginBottom: 4,
   },
-  howItWorksRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-  },
-  howItWorksIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primarySoft,
-  },
-  howItWorksTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
-  howItWorksSub: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   partnerRow: {
     flexDirection: 'row',
     alignItems: 'center',

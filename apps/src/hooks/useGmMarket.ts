@@ -183,6 +183,92 @@ export const useGmOhlc = (
   );
 };
 
+// Plain-language "what is this" copy, curated server-side per ticker
+// (cusd_plus/gm_descriptions.json). Its own query on purpose: an older server
+// without the field fails only this request — never the shared market poll —
+// and the 60s gmMarket payload doesn't carry ~200 paragraphs. Null (not
+// curated, loading or unsupported) means the screen simply hides the card.
+const GM_ASSET_DESCRIPTION = gql`
+  query GmAssetDescription($ticker: String!) {
+    gmAssetDescription(ticker: $ticker)
+  }
+`;
+
+export const useGmAssetDescription = (
+  ticker: string | undefined,
+  enabled = true,
+): string | null => {
+  const { data, error } = useQuery(GM_ASSET_DESCRIPTION, {
+    variables: { ticker },
+    skip: !enabled || !ticker,
+    fetchPolicy: 'cache-first',
+  });
+  if (!enabled || error) return null;
+  return data?.gmAssetDescription || null;
+};
+
+// Curated discovery shelves (LatAm names, crypto trackers) and warnings for
+// assets that don't behave like a normal stock (leveraged/inverse funds).
+// Served by cusd_plus/gm_highlights.json; isolated query for the same reason
+// as the description. Empty on loading/unsupported server — no shelves, no
+// badges, never a crash.
+export interface GmShelf {
+  key: string;
+  title: string;
+  subtitle: string | null;
+  items: { ticker: string; tagline: string }[];
+}
+export interface GmAssetWarning {
+  ticker: string;
+  badge: string;
+  message: string;
+}
+
+const GM_HIGHLIGHTS = gql`
+  query GmHighlights {
+    gmHighlights {
+      shelves {
+        key
+        title
+        subtitle
+        items {
+          ticker
+          tagline
+        }
+      }
+      warnings {
+        ticker
+        badge
+        message
+      }
+    }
+  }
+`;
+
+export const useGmHighlights = (enabled = true) => {
+  const { data, previousData } = useQuery(GM_HIGHLIGHTS, {
+    skip: !enabled,
+    fetchPolicy: 'cache-and-network',
+  });
+  return useMemo(() => {
+    // A failed background refresh must not drop highlights already shown:
+    // the leveraged/inverse warnings would vanish while the stocks stay
+    // listed. An older server without the field never had data, so it still
+    // renders no shelves and no badges.
+    const highlights = enabled ? (data ?? previousData)?.gmHighlights : null;
+    const shelves: GmShelf[] = highlights?.shelves || [];
+    const warnings: GmAssetWarning[] = highlights?.warnings || [];
+    const byTicker: Record<string, GmAssetWarning> = {};
+    warnings.forEach((warning) => {
+      byTicker[warning.ticker] = warning;
+    });
+    return {
+      shelves,
+      warningFor: (ticker: string): GmAssetWarning | undefined => byTicker[ticker],
+    };
+  }, [data, previousData, enabled]);
+};
+
 // Deterministic fallback sparkline so charts render when the 24h series is
 // missing for an asset (never used as a price display).
 export const sparklineFor = (ticker: string, points = 24): number[] => {
