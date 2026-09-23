@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib import messages
 from django import forms
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
@@ -32,6 +33,20 @@ DISCOVER_TAG_COLOR_CHOICES = (
     ('#FF4444', 'Rojo Video'),
     ('#2563EB', 'Azul'),
 )
+
+
+@transaction.atomic
+def save_content_item_preserving_poll(item):
+    """Admin edits do not own polls; serialize with Portal edits and voting."""
+    if item.pk:
+        current = ContentItem.objects.select_for_update().get(pk=item.pk)
+        metadata = dict(item.metadata or {})
+        if 'poll' in (current.metadata or {}):
+            metadata['poll'] = current.metadata['poll']
+        else:
+            metadata.pop('poll', None)
+        item.metadata = metadata
+    item.save()
 
 
 class ContentItemAdminForm(forms.ModelForm):
@@ -181,6 +196,17 @@ class ContentItemInline(admin.TabularInline):
 
 @admin.register(Channel)
 class ChannelAdmin(admin.ModelAdmin):
+    @transaction.atomic
+    def save_formset(self, request, form, formset, change):
+        if formset.model is not ContentItem:
+            return super().save_formset(request, form, formset, change)
+        instances = formset.save(commit=False)
+        for instance in formset.deleted_objects:
+            instance.delete()
+        for instance in instances:
+            save_content_item_preserving_poll(instance)
+        formset.save_m2m()
+
     list_display = (
         'title',
         'slug',
@@ -258,6 +284,10 @@ class ChannelAdmin(admin.ModelAdmin):
 @admin.register(ContentItem)
 class ContentItemAdmin(admin.ModelAdmin):
     form = ContentItemAdminForm
+
+    def save_model(self, request, obj, form, change):
+        save_content_item_preserving_poll(obj)
+
     list_display = (
         'id',
         'title_or_body',

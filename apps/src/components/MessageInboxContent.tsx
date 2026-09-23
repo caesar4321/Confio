@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import type { ContentPollData } from './ContentPoll';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from 'react-native';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
 
@@ -22,6 +23,7 @@ type MessageInboxContentProps = {
 };
 
 const SUPPORT_POLL_INTERVAL_MS = 5000;
+const getThreadPageSize = (channelId: Channel['id']) => (channelId === 'soporte' ? 50 : 20);
 
 type InboxMessageDto = {
   id: string;
@@ -45,6 +47,7 @@ type InboxMessageDto = {
     count: number;
   }> | null;
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean | null;
   senderType?: 'USER' | 'AGENT' | 'SYSTEM' | null;
   senderName?: string | null;
@@ -102,6 +105,7 @@ function mapInboxMessage(message: InboxMessageDto) {
       platforms: (message.platforms || []) as Array<'TikTok' | 'Instagram' | 'YouTube'>,
       platformLinks: (message.platformLinks || []).filter((item) => item.url),
       reactionSummary: message.reactionSummary || [],
+      poll: message.poll,
       viewerReaction: message.viewerReaction,
       canReact: message.canReact ?? true,
       title: message.title || '',
@@ -117,6 +121,7 @@ function mapInboxMessage(message: InboxMessageDto) {
       isPinned: message.isPinned ?? false,
       occurredAt: message.occurredAt || '',
       reactionSummary: message.reactionSummary || [],
+      poll: message.poll,
       viewerReaction: message.viewerReaction,
       canReact: message.canReact ?? true,
       tag: message.tag || '',
@@ -134,6 +139,7 @@ function mapInboxMessage(message: InboxMessageDto) {
       isPinned: false,
       occurredAt: message.occurredAt || '',
       reactionSummary: message.reactionSummary || [],
+      poll: message.poll,
       viewerReaction: message.viewerReaction,
       canReact: message.canReact ?? false,
       senderType: message.senderType,
@@ -150,6 +156,7 @@ function mapInboxMessage(message: InboxMessageDto) {
     occurredAt: message.occurredAt || '',
     tag: message.tag || '',
     reactionSummary: message.reactionSummary || [],
+    poll: message.poll,
     viewerReaction: message.viewerReaction,
     canReact: message.canReact ?? true,
     text: message.text || message.body || '',
@@ -194,6 +201,8 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [pendingInitialChannelId, setPendingInitialChannelId] = useState(initialChannelId);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const threadPageGeneration = useRef(0);
+  const [hasMoreThreadMessages, setHasMoreThreadMessages] = useState<boolean | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Record<Channel['id'], number>>({
     julian: 0,
     confio: 0,
@@ -212,8 +221,24 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     variables: { contextKey },
     fetchPolicy: 'network-only',
     nextFetchPolicy: 'cache-first',
+    notifyOnNetworkStatusChange: true,
     pollInterval: shouldPollInbox ? SUPPORT_POLL_INTERVAL_MS : 0,
     skip: !canQuery,
+    onCompleted: result => {
+      // Only network completions replace the page. Poll votes update normalized
+      // fragments independently, so they must not roll back local reactions or
+      // discard older messages. A real refresh must discard stale older pages,
+      // even when the first page's message IDs have not changed.
+      const nextChannels = mapChannels(result.messageInbox?.channels);
+      threadPageGeneration.current += 1;
+      setChannels(nextChannels);
+      setHasMoreThreadMessages(null);
+      setUnreadCounts({
+        julian: result.messageInbox?.channels?.find((channel: InboxChannelDto) => normalizeChannelId(channel.id) === 'julian')?.unreadCount || 0,
+        confio: result.messageInbox?.channels?.find((channel: InboxChannelDto) => normalizeChannelId(channel.id) === 'confio')?.unreadCount || 0,
+        soporte: result.messageInbox?.channels?.find((channel: InboxChannelDto) => normalizeChannelId(channel.id) === 'soporte')?.unreadCount || 0,
+      });
+    },
   });
   const [markChannelSeen] = useMutation(MARK_MESSAGE_CHANNEL_SEEN, {
     refetchQueries: [{ query: GET_MESSAGE_INBOX_UNREAD_COUNT, variables: { contextKey } }],
@@ -221,7 +246,6 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   const [reactToMessageContent] = useMutation(REACT_TO_MESSAGE_CONTENT);
   const [updateChannelMute] = useMutation(UPDATE_MESSAGE_CHANNEL_MUTE);
   const [sendSupportMessage] = useMutation(SEND_SUPPORT_MESSAGE);
-  const [hasMoreThreadMessages, setHasMoreThreadMessages] = useState(false);
   const [loadThreadPage, { loading: isLoadingMoreThread }] = useLazyQuery(GET_MESSAGE_CHANNEL_THREAD, {
     fetchPolicy: 'network-only',
   });
@@ -250,18 +274,13 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   }, [accountContextTick, canQuery, refetch, contextKey]);
 
   useEffect(() => {
-    const nextChannels = mapChannels(data?.messageInbox?.channels);
-    if (!nextChannels.length) {
-      return;
-    }
-
-    setChannels(nextChannels);
-    setUnreadCounts({
-      julian: data?.messageInbox?.channels?.find((channel: InboxChannelDto) => normalizeChannelId(channel.id) === 'julian')?.unreadCount || 0,
-      confio: data?.messageInbox?.channels?.find((channel: InboxChannelDto) => normalizeChannelId(channel.id) === 'confio')?.unreadCount || 0,
-      soporte: data?.messageInbox?.channels?.find((channel: InboxChannelDto) => normalizeChannelId(channel.id) === 'soporte')?.unreadCount || 0,
-    });
-  }, [data]);
+    threadPageGeneration.current += 1;
+    setChannels([]);
+    setActiveChannel(null);
+    setScreen('inbox');
+    setHasMoreThreadMessages(false);
+    setUnreadCounts({ julian: 0, confio: 0, soporte: 0 });
+  }, [contextKey]);
 
   useEffect(() => {
     setPendingInitialChannelId(initialChannelId);
@@ -274,6 +293,9 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     const nextChannel = channels.find((channel) => channel.serverId === activeChannel.serverId);
     if (nextChannel) {
       setActiveChannel(nextChannel);
+    } else {
+      setActiveChannel(null);
+      setScreen('inbox');
     }
   }, [channels, activeChannel]);
 
@@ -294,6 +316,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     }
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      threadPageGeneration.current += 1;
       setActiveChannel(null);
       setScreen('inbox');
       return true;
@@ -303,6 +326,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   }, [screen]);
 
   const openChannel = (channel: Channel) => {
+    threadPageGeneration.current += 1;
     setActiveChannel(channel);
     setUnreadCounts((prev) => ({ ...prev, [channel.id]: 0 }));
     setChannels((prev) =>
@@ -314,12 +338,15 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   };
 
   const closeChannel = () => {
+    threadPageGeneration.current += 1;
     setActiveChannel(null);
     setScreen('inbox');
     setHasMoreThreadMessages(false);
   };
 
-  const getThreadPageSize = (channelId: Channel['id']) => (channelId === 'soporte' ? 50 : 20);
+  const canLoadMoreThreadMessages = hasMoreThreadMessages ?? Boolean(
+    activeChannel && activeChannel.messages.length >= getThreadPageSize(activeChannel.id)
+  );
 
   const handleReactToMessage = async (messageId: number, emoji: string) => {
     const response = await reactToMessageContent({
@@ -411,10 +438,11 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   };
 
   const handleLoadOlderMessages = async () => {
-    if (!activeChannel || isLoadingMoreThread || !hasMoreThreadMessages) {
+    if (!activeChannel || isLoadingMoreThread || !canLoadMoreThreadMessages) {
       return;
     }
 
+    const requestGeneration = threadPageGeneration.current;
     const response = await loadThreadPage({
       variables: {
         channelId: activeChannel.id,
@@ -423,6 +451,10 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
         contextKey,
       },
     });
+
+    // A refresh, channel change, or account switch invalidates this offset and
+    // its response. Never merge an old account's page into the current inbox.
+    if (requestGeneration !== threadPageGeneration.current) return;
 
     const page = response.data?.messageChannelThread;
     const nextMessages = (page?.channel?.messages || []).map(mapInboxMessage);
@@ -451,7 +483,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
         onReact={handleReactToMessage}
         onToggleMute={handleToggleChannelMute}
         onSendSupportMessage={handleSendSupportMessage}
-        hasMore={hasMoreThreadMessages}
+        hasMore={canLoadMoreThreadMessages}
         loadingMore={isLoadingMoreThread}
         onLoadMore={() => {
           void handleLoadOlderMessages();

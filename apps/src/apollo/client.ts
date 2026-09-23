@@ -483,6 +483,7 @@ export const apolloClient = new ApolloClient({
   link: from([requestLifetimeLink, authLink, errorLink, banClearLink, httpLink]),
   cache: new InMemoryCache({
     typePolicies: {
+      ContentPollOptionType: { keyFields: false },
       // cusdPlusSummary is an id-less singleton queried with DIFFERENT field
       // subsets (portfolio hub vs the APY split card). Without merge, the
       // smaller result REPLACES the cached object, the hub loses

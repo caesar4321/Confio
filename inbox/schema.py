@@ -1,7 +1,9 @@
 import graphene
 import logging
 import os
-from django.db.models import Case, IntegerField, Q, Value, When
+from django.db import transaction
+from .polls import validate_poll_metadata
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.conf import settings
 from django.utils import timezone
 from graphql import GraphQLError
@@ -16,6 +18,7 @@ from .models import (
     ChannelScope,
     ChannelMembership,
     ContentReaction,
+    ContentPollVote,
     ContentPlatformClick,
     ContentItem,
     ContentPlatformType,
@@ -142,7 +145,57 @@ def get_or_create_support_conversation(user, account, business):
     return conversation
 
 
+class ContentPollOptionType(graphene.ObjectType):
+    id = graphene.ID(required=True)
+    label = graphene.String(required=True)
+    count = graphene.Int(required=True)
+
+
+class ContentPollType(graphene.ObjectType):
+    id = graphene.ID(required=True)
+    question = graphene.String(required=True)
+    options = graphene.List(ContentPollOptionType, required=True)
+    total_votes = graphene.Int(required=True)
+    viewer_option_id = graphene.ID()
+    closed = graphene.Boolean(required=True)
+
+
+def build_poll_payloads(items, user_id=None):
+    """Read totals and the viewer's answers in one database snapshot per page."""
+    polls = {item.id: item.metadata['poll'] for item in items if (item.metadata or {}).get('poll')}
+    if not polls:
+        return {}
+    counts = {item_id: {} for item_id in polls}
+    viewer_options = {}
+    votes = ContentPollVote.objects.filter(content_item_id__in=polls).values(
+        'content_item_id', 'option_id', 'content_item__metadata__poll',
+    ).annotate(count=Count('id'), viewer_count=Count('id', filter=Q(user_id=user_id)))
+    for vote in votes:
+        item_id, option_id = vote['content_item_id'], vote['option_id']
+        # A first vote may arrive after an editor changes an unvoted poll.
+        # Read its configuration in the same snapshot as its counted answers.
+        polls[item_id] = vote['content_item__metadata__poll']
+        counts[item_id][option_id] = vote['count']
+        if vote['viewer_count']:
+            viewer_options[item_id] = option_id
+    return {
+        item_id: ContentPollType(
+            id=str(item_id), question=poll['question'],
+            options=[ContentPollOptionType(id=option['id'], label=option['label'], count=counts[item_id].get(option['id'], 0))
+                     for option in poll['options']],
+            total_votes=sum(counts[item_id].values()), viewer_option_id=viewer_options.get(item_id),
+            closed=poll.get('closed', False),
+        )
+        for item_id, poll in polls.items()
+    }
+
+
+def build_poll_payload(item, user_id=None):
+    return build_poll_payloads([item], user_id).get(item.id)
+
+
 class MessageThreadItemType(graphene.ObjectType):
+    poll = graphene.Field(ContentPollType)
     id = graphene.ID(required=True)
     type = graphene.String(required=True)
     is_pinned = graphene.Boolean(required=True)
@@ -195,6 +248,7 @@ class MessageReactionType(graphene.ObjectType):
 
 
 class DiscoverFeedItemType(graphene.ObjectType):
+    poll = graphene.Field(ContentPollType)
     id = graphene.ID(required=True)
     type = graphene.String(required=True)
     tag = graphene.String(required=True)
@@ -217,6 +271,7 @@ class DiscoverFeedPageType(graphene.ObjectType):
 
 
 class PortalContentItemType(graphene.ObjectType):
+    poll = graphene.Field(ContentPollType)
     id = graphene.ID(required=True)
     channel_slug = graphene.String(required=True)
     channel_title = graphene.String(required=True)
@@ -321,7 +376,7 @@ def build_portal_support_conversation_payload(conversation: SupportConversation)
     )
 
 
-def build_portal_content_payload(item: ContentItem):
+def build_portal_content_payload(item: ContentItem, poll_payloads=None):
     return PortalContentItemType(
         id=str(item.id),
         channel_slug=item.channel.slug,
@@ -338,10 +393,11 @@ def build_portal_content_payload(item: ContentItem):
         push_sent_at=item.push_sent_at,
         surfaces=list(item.surfaces.values_list('surface', flat=True)),
         metadata=item.metadata or {},
+        poll=build_poll_payload(item) if poll_payloads is None else poll_payloads.get(item.id),
     )
 
 
-def build_discover_feed_item_payload(item: ContentItem, user, account, business):
+def build_discover_feed_item_payload(item: ContentItem, user, account, business, poll_payloads=None):
     metadata = item.metadata or {}
     blocks = metadata.get('blocks') or []
     preview_image = metadata.get('image') or next(
@@ -397,6 +453,7 @@ def build_discover_feed_item_payload(item: ContentItem, user, account, business)
         ],
         image_url=preview_image.get('url') or '',
         blocks=blocks,
+        poll=build_poll_payload(item, user.id) if poll_payloads is None else poll_payloads.get(item.id),
         reaction_summary=[
             MessageReactionType(emoji=emoji, count=count)
             for emoji, count in sorted(reaction_counts.items(), key=lambda reaction_item: reaction_item[1], reverse=True)
@@ -454,6 +511,7 @@ def build_editorial_channel_payload(membership: ChannelMembership):
     else:
         unread_count = get_visible_content_queryset(membership).count()
 
+    poll_payloads = build_poll_payloads(visible_items, membership.user_id)
     messages = []
     for item in visible_items:
         metadata = item.metadata or {}
@@ -504,6 +562,7 @@ def build_editorial_channel_payload(membership: ChannelMembership):
             MessageReactionType(emoji=emoji, count=count)
             for emoji, count in sorted(reaction_counts.items(), key=lambda item: item[1], reverse=True)
         ]
+        message_payload['poll'] = poll_payloads.get(item.id)
         message_payload['viewer_reaction'] = viewer_reaction
         messages.append(MessageThreadItemType(**message_payload))
 
@@ -519,7 +578,7 @@ def build_editorial_channel_payload(membership: ChannelMembership):
     )
 
 
-def build_editorial_message_payload(item: ContentItem, membership: ChannelMembership):
+def build_editorial_message_payload(item: ContentItem, membership: ChannelMembership, poll_payloads=None):
     metadata = item.metadata or {}
     blocks = metadata.get('blocks') or []
     preview_image = metadata.get('image') or next(
@@ -568,6 +627,8 @@ def build_editorial_message_payload(item: ContentItem, membership: ChannelMember
         MessageReactionType(emoji=emoji, count=count)
         for emoji, count in sorted(reaction_counts.items(), key=lambda item: item[1], reverse=True)
     ]
+    message_payload['poll'] = (build_poll_payload(item, membership.user_id)
+                               if poll_payloads is None else poll_payloads.get(item.id))
     message_payload['viewer_reaction'] = viewer_reaction
     return MessageThreadItemType(**message_payload)
 
@@ -581,6 +642,7 @@ def build_editorial_channel_thread_page(membership: ChannelMembership, offset=0,
     if has_more:
         page_items = page_items[:limit]
 
+    poll_payloads = build_poll_payloads(page_items, membership.user_id)
     base_channel = build_editorial_channel_payload(membership)
     return MessageChannelThreadPageType(
         channel=MessageChannelType(
@@ -591,7 +653,7 @@ def build_editorial_channel_thread_page(membership: ChannelMembership, offset=0,
             time=base_channel.time,
             unread_count=base_channel.unread_count,
             is_muted=base_channel.is_muted,
-            messages=[build_editorial_message_payload(item, membership) for item in page_items],
+            messages=[build_editorial_message_payload(item, membership, poll_payloads) for item in page_items],
         ),
         has_more=has_more,
     )
@@ -821,8 +883,9 @@ class Query(graphene.ObjectType):
         if has_more:
             page_items = page_items[:limit]
 
+        poll_payloads = build_poll_payloads(page_items, user.id)
         return DiscoverFeedPageType(
-            items=[build_discover_feed_item_payload(item, user, account, business) for item in page_items],
+            items=[build_discover_feed_item_payload(item, user, account, business, poll_payloads) for item in page_items],
             has_more=has_more,
         )
 
@@ -874,7 +937,9 @@ class Query(graphene.ObjectType):
             queryset = queryset.filter(channel__slug=channel_slug)
         if status:
             queryset = queryset.filter(status=status)
-        return [build_portal_content_payload(item) for item in queryset[:200]]
+        items = list(queryset[:200])
+        poll_payloads = build_poll_payloads(items)
+        return [build_portal_content_payload(item, poll_payloads) for item in items]
 
 
 class MarkMessageChannelSeen(graphene.Mutation):
@@ -918,6 +983,47 @@ class MarkMessageChannelSeen(graphene.Mutation):
 
         inbox = build_message_inbox_payload(info)
         return MarkMessageChannelSeen(success=True, total_unread_count=inbox.total_unread_count)
+
+
+class VoteOnContentPoll(graphene.Mutation):
+    class Arguments:
+        content_item_id = graphene.ID(required=True)
+        option_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    poll = graphene.Field(ContentPollType, required=True)
+
+    @classmethod
+    @login_required
+    @transaction.atomic
+    def mutate(cls, root, info, content_item_id, option_id):
+        # Serialize votes with Portal edits/closure and reject inaccessible content.
+        locked = ContentItem.objects.select_for_update().filter(id=content_item_id).first()
+        if locked is None:
+            raise GraphQLError('Publicación no encontrada')
+        item, user, account, business = get_accessible_content_item(info, content_item_id)
+        now = timezone.now()
+        if item.published_at > now or not item.channel.is_active:
+            raise GraphQLError('Encuesta no disponible')
+        # An expired/future Discover placement does not authorize voting on its own.
+        discover_available = item.surfaces.filter(surface=ContentSurfaceType.DISCOVER).filter(
+            Q(starts_at__isnull=True) | Q(starts_at__lte=now)
+        ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).exists()
+        if not discover_available:
+            membership = ChannelMembership.objects.filter(
+                channel=item.channel, user=user, account=account, business=business, is_subscribed=True,
+            ).first()
+            if membership is None or not get_visible_content_queryset(membership).filter(pk=item.pk).exists():
+                raise GraphQLError('Encuesta no disponible')
+        poll = (locked.metadata or {}).get('poll')
+        if not poll or poll.get('closed', False):
+            raise GraphQLError('La encuesta está cerrada o no está disponible')
+        if option_id not in [option['id'] for option in poll['options']]:
+            raise GraphQLError('Opción inválida')
+        ContentPollVote.objects.update_or_create(
+            content_item=locked, user=user, defaults={'option_id': option_id},
+        )
+        return VoteOnContentPoll(success=True, poll=build_poll_payload(locked, user.id))
 
 
 class ReactToMessageContent(graphene.Mutation):
@@ -1234,6 +1340,7 @@ class PortalSaveContentItem(graphene.Mutation):
 
     @classmethod
     @login_required
+    @transaction.atomic
     def mutate(
         cls,
         root,
@@ -1268,11 +1375,13 @@ class PortalSaveContentItem(graphene.Mutation):
             raise GraphQLError('Invalid visibility policy')
 
         if content_item_id:
-            item = ContentItem.objects.select_related('channel').prefetch_related('surfaces').filter(id=content_item_id).first()
+            item = ContentItem.objects.select_for_update().filter(id=content_item_id).first()
             if item is None:
                 raise GraphQLError('Content item not found')
         else:
             item = ContentItem(channel=channel, author_user=staff_user)
+
+        validate_poll_metadata(metadata if metadata is not None else {}, item.metadata, bool(item.pk and item.poll_votes.exists()))
 
         item.channel = channel
         item.author_user = staff_user
@@ -1396,6 +1505,7 @@ class RequestPublicationImageUpload(graphene.Mutation):
 
 
 class Mutation(graphene.ObjectType):
+    vote_on_content_poll = VoteOnContentPoll.Field()
     mark_message_channel_seen = MarkMessageChannelSeen.Field()
     react_to_message_content = ReactToMessageContent.Field()
     track_content_platform_click = TrackContentPlatformClick.Field()

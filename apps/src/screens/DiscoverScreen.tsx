@@ -1,3 +1,4 @@
+import type { ContentPollData } from '../components/ContentPoll';
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { colors } from '../config/theme';
@@ -28,6 +29,7 @@ type DiscoverFeedDto = {
   imageUrl?: string | null;
   reactionSummary?: Array<{ emoji: string; count: number }> | null;
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean | null;
 };
 
@@ -56,6 +58,7 @@ export const DiscoverScreen = () => {
       imageUrl: item.imageUrl || undefined,
       reactionSummary: item.reactionSummary || [],
       viewerReaction: item.viewerReaction,
+      poll: item.poll,
       canReact: item.canReact ?? true,
     }));
   }, [data]);

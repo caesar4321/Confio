@@ -1,3 +1,4 @@
+import { ContentPoll, ContentPollData } from '../components/ContentPoll';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -46,6 +47,7 @@ type DiscoverPostDto = {
   > | string | null;
   reactionSummary?: Array<{ emoji: string; count: number }> | null;
   viewerReaction?: string | null;
+  poll?: ContentPollData | null;
   canReact?: boolean | null;
 };
 
@@ -362,6 +364,7 @@ export const DiscoverPostDetailScreen = () => {
             </View>
           )}
 
+          <ContentPoll poll={post.poll} />
           <View style={styles.reactionRow}>
             {topReactions.map(({ emoji, count }) => {
               const active = post.viewerReaction === emoji;

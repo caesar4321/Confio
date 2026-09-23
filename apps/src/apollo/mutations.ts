@@ -1118,3 +1118,12 @@ export const TRACK_FUNNEL_EVENT = gql`
     }
   }
 `;
+
+export const VOTE_ON_CONTENT_POLL = gql`
+  mutation VoteOnContentPoll($contentItemId: ID!, $optionId: ID!) {
+    voteOnContentPoll(contentItemId: $contentItemId, optionId: $optionId) {
+      success
+      poll { id question closed totalVotes viewerOptionId options { id label count } }
+    }
+  }
+`;

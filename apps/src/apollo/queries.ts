@@ -3012,6 +3012,7 @@ export const GET_MESSAGE_INBOX = gql`
             url
           }
           imageUrl
+          poll { id question closed totalVotes viewerOptionId options { id label count } }
           reactionSummary {
             emoji
             count
@@ -3055,6 +3056,7 @@ export const GET_MESSAGE_CHANNEL_THREAD = gql`
             url
           }
           imageUrl
+          poll { id question closed totalVotes viewerOptionId options { id label count } }
           reactionSummary {
             emoji
             count
@@ -3092,6 +3094,7 @@ export const GET_DISCOVER_FEED = gql`
           url
         }
         imageUrl
+        poll { id question closed totalVotes viewerOptionId options { id label count } }
         reactionSummary {
           emoji
           count
@@ -3121,6 +3124,7 @@ export const GET_DISCOVER_POST = gql`
       }
       imageUrl
       blocks
+      poll { id question closed totalVotes viewerOptionId options { id label count } }
       reactionSummary {
         emoji
         count

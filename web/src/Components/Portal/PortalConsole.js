@@ -84,6 +84,7 @@ const GET_PORTAL_CONTENT_ITEMS = gql`
       pushSentAt
       surfaces
       metadata
+      poll { id question closed totalVotes viewerOptionId options { id label count } }
     }
   }
 `;
@@ -206,6 +207,11 @@ function createEmptyDraft() {
     instagramUrl: '',
     youtubeUrl: '',
     metadataText: '{}',
+    pollEnabled: false,
+    pollQuestion: '',
+    pollOptions: [{ id: '1', label: '' }, { id: '2', label: '' }],
+    pollClosed: false,
+    pollResults: null,
   };
 }
 
@@ -494,6 +500,7 @@ function getWebDeviceId() {
 function isDraftDirty(draft) {
   const empty = createEmptyDraft();
   return (
+    draft.pollEnabled !== empty.pollEnabled ||
     draft.title !== empty.title ||
     draft.tag !== empty.tag ||
     draft.id !== null ||
@@ -633,6 +640,8 @@ export default function PortalConsole() {
     skip: !meQuery.data?.me?.isStaff || !isOtpVerified,
     fetchPolicy: 'network-only',
   });
+
+  const pollResults = contentQuery.data?.portalContentItems?.find(item => item.id === draft.id)?.poll || draft.pollResults;
 
   /* ─── Mutations ─── */
 
@@ -852,6 +861,11 @@ export default function PortalConsole() {
       instagramUrl: platformLinks.Instagram || '',
       youtubeUrl: platformLinks.YouTube || '',
       metadataText: JSON.stringify(metadata || {}, null, 2),
+      pollEnabled: Boolean(metadata.poll),
+      pollQuestion: metadata.poll?.question || '',
+      pollOptions: metadata.poll?.options || [{ id: '1', label: '' }, { id: '2', label: '' }],
+      pollClosed: Boolean(metadata.poll?.closed),
+      pollResults: item.poll || null,
     });
     setImageUploadError('');
   };
@@ -1047,6 +1061,21 @@ export default function PortalConsole() {
       addToast('Metadata debe ser JSON válido', 'error');
       return;
     }
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      addToast('Metadata debe ser un objeto JSON', 'error');
+      return;
+    }
+
+    if (draft.pollEnabled) {
+      const labels = draft.pollOptions.map(option => option.label.trim().toLocaleLowerCase());
+      if (!draft.pollQuestion.trim() || labels.length < 2 || labels.length > 10 || labels.some(label => !label) || new Set(labels).size !== labels.length) {
+        addToast('Escribe una pregunta y entre 2 y 10 opciones distintas.', 'error');
+        return;
+      }
+      metadata.poll = { question: draft.pollQuestion, options: draft.pollOptions, closed: draft.pollClosed };
+    } else {
+      delete metadata.poll;
+    }
 
     if (draft.tagColor) {
       metadata.tag_color = draft.tagColor;
@@ -1129,7 +1158,7 @@ export default function PortalConsole() {
       setDraft(createEmptyDraft());
       setImageUploadError('');
     } catch (error) {
-      addToast('Error guardando publicación', 'error');
+      addToast(error.message || 'Error guardando publicación', 'error');
     }
   };
 
@@ -1700,6 +1729,26 @@ export default function PortalConsole() {
                   </div>
                 </label>
               </div>
+              <fieldset className="portal-poll-editor">
+                <legend>Encuesta</legend>
+                <label className="portal-poll-toggle"><input type="checkbox" checked={draft.pollEnabled} disabled={Boolean(pollResults?.totalVotes)} onChange={event => setDraft(current => ({ ...current, pollEnabled: event.target.checked }))} /> Incluir encuesta</label>
+                {draft.pollEnabled && <>
+                  <label>Pregunta<input maxLength={255} value={draft.pollQuestion} disabled={Boolean(pollResults?.totalVotes)} onChange={event => setDraft(current => ({ ...current, pollQuestion: event.target.value }))} /></label>
+                  {draft.pollOptions.map((option, index) => <div className="portal-form-row" key={option.id}>
+                    <label>Opción {index + 1}<input maxLength={200} value={option.label} disabled={Boolean(pollResults?.totalVotes)} onChange={event => setDraft(current => ({ ...current, pollOptions: current.pollOptions.map(entry => entry.id === option.id ? { ...entry, label: event.target.value } : entry) }))} /></label>
+                    <button type="button" disabled={draft.pollOptions.length <= 2 || Boolean(pollResults?.totalVotes)} onClick={() => setDraft(current => ({ ...current, pollOptions: current.pollOptions.filter(entry => entry.id !== option.id) }))}>Quitar opción {index + 1}</button>
+                  </div>)}
+                  <button type="button" disabled={draft.pollOptions.length >= 10 || Boolean(pollResults?.totalVotes)} onClick={() => setDraft(current => ({ ...current, pollOptions: [...current.pollOptions, { id: window.crypto.randomUUID(), label: '' }] }))}>Agregar opción</button>
+                  <label className="portal-poll-toggle"><input type="checkbox" checked={draft.pollClosed} onChange={event => setDraft(current => ({ ...current, pollClosed: event.target.checked }))} /> Encuesta cerrada</label>
+                  <p>Una respuesta por persona. Se puede cambiar mientras la encuesta esté abierta.</p>
+                  {pollResults && <div aria-label="Resultados de la encuesta">
+                    <strong>{pollResults.totalVotes} votos</strong>
+                    <button type="button" disabled={contentQuery.loading} onClick={() => { contentQuery.refetch().catch(() => addToast('No se pudieron actualizar los resultados', 'error')); }}>Actualizar resultados</button>
+                    {pollResults.options.map(option => <p key={option.id}>{option.label}: {option.count} ({pollResults.totalVotes ? Math.round(option.count * 100 / pollResults.totalVotes) : 0}%)</p>)}
+                    {pollResults.totalVotes > 0 && <p>La pregunta y las opciones quedan bloqueadas después del primer voto.</p>}
+                  </div>}
+                </>}
+              </fieldset>
               {draft.itemType === 'VIDEO' && (
                 <div className="portal-form-video-grid">
                   <label>

@@ -1,3 +1,4 @@
+import { ContentPoll } from './ContentPoll';
 import React from 'react';
 import {
   Image,
@@ -138,6 +139,7 @@ function renderMessageContent(
             </Pressable>
           ))}
         </View>
+        <ContentPoll poll={message.poll} />
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = message.viewerReaction === emoji;
@@ -231,6 +233,7 @@ function renderMessageContent(
             <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
           ) : null}
         </Pressable>
+        <ContentPoll poll={message.poll} />
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = message.viewerReaction === emoji;
@@ -307,6 +310,7 @@ function renderMessageContent(
             <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
           ) : null}
         </Pressable>
+        <ContentPoll poll={message.poll} />
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = message.viewerReaction === emoji;
