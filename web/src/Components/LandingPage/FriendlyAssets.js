@@ -21,7 +21,7 @@ const FriendlyAssets = () => {
       color: '#10b981',
       details: [
         { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Tu ahorro en dólares que crece cada día, respaldado por USDY de Ondo Finance.', 'Your dollar savings growing every day, backed by Ondo Finance\'s USDY.', '매일 성장하는 달러 저축으로, Ondo Finance의 USDY로 담보됩니다.') },
-        { label: t('Respaldado por', 'Backed by', '지원'), value: t('100% USDY (bonos del Tesoro de EE.UU. tokenizados)', '100% USDY (tokenized U.S. Treasury bonds)', '100% USDY (토큰화된 미국 국채)') },
+        { label: t('Respaldado por', 'Backed by', '지원'), value: t('100% USDY de Ondo Finance, respaldado por bonos del Tesoro de EE. UU.', '100% Ondo Finance USDY, backed by U.S. Treasury bonds', '100% Ondo Finance USDY (미국 국채로 담보)') },
         { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Ahorro con rendimiento dentro de Confío.', 'Yield-bearing savings inside Confío.', 'Confío 안의 수익형 저축입니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Acumulativo — crece con el rendimiento', 'Accumulating — grows with the yield', '누적형 — 수익과 함께 성장') },
         { label: t('Red', 'Network', '네트워크'), value: 'BNB Smart Chain' },
@@ -53,9 +53,10 @@ const FriendlyAssets = () => {
       symbol: '$CONFIO',
       color: '#8b5cf6',
       details: [
-        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Token de gobernanza, recompensas y preventa.', 'Governance, rewards and presale token.', '거버넌스, 리워드 및 프리세일 토큰입니다.') },
-        { label: t('Respaldado por', 'Backed by', '지원'), value: t('Confianza y participación de la comunidad Confío.', 'Trust and participation from the Confío community.', 'Confío 커뮤니티의 신뢰와 참여.') },
-        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Refleja la participación y beneficios dentro de Confío.', 'Reflects engagement and benefits inside Confío.', 'Confío 내 참여와 혜택을 반영합니다.') },
+        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('La moneda de la comunidad Confío.', 'The Confío community token.', 'Confío 커뮤니티의 토큰입니다.') },
+        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Recompensas por invitar y usar Confío. Otras utilidades, solo cuando se publiquen.', 'Rewards for inviting and using Confío. Other utility only once it is published.', 'Confío 초대·사용 리워드. 다른 용도는 공개된 이후에만 적용됩니다.') },
+        { label: t('Qué no es', 'What it isn\'t', '아닌 것'), value: t('No son acciones de Confío, no respalda tus dólares y no promete ganancias.', 'Not Confío shares, not backing for your dollars, and no promise of gains.', 'Confío의 주식이 아니며, 당신의 달러를 담보하지 않고, 수익을 약속하지 않습니다.') },
+        { label: t('Suministro', 'Supply', '공급량'), value: t('1,000,000,000, fijo', '1,000,000,000, fixed', '1,000,000,000 (고정)') },
         { label: t('Valor', 'Value', '가치'), value: t('Variable', 'Variable', '변동') },
         { label: t('Red', 'Network', '네트워크'), value: 'BNB Smart Chain' },
         {
@@ -77,7 +78,7 @@ const FriendlyAssets = () => {
       ],
       highlight: {
         icon: '💡',
-        text: t('Confío($CONFIO) es para quienes creen en el futuro de esta comunidad.', 'Confío($CONFIO) is for those who believe in the future of this community.', 'Confío($CONFIO)는 이 커뮤니티의 미래를 믿는 사람들을 위한 것입니다.')
+        text: t('La confianza ya existe. $CONFIO es la moneda de la comunidad que construye Confío.', 'Trust already exists. $CONFIO is the token of the community building Confío.', '신뢰는 이미 존재합니다. $CONFIO는 Confío를 함께 만드는 커뮤니티의 토큰입니다.')
       }
     }
   ];
