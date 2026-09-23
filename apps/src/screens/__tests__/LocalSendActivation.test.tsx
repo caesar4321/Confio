@@ -14,9 +14,11 @@ let mockAccountStatus = 'none';
 let mockMethodId = 'co_breb';
 let mockAccounts: any[] = [];
 let mockLimits: any = undefined;
+let mockExtraMethods: any[] = [];
+let mockInitialQr: string | undefined;
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('@apollo/client', () => ({useQuery: (query: string) => ({
-  data: query === 'methods' ? {localMoneyMethods: [{id: mockMethodId, country: 'CO', asset: 'COP', status: 'live', accountStatus: mockAccountStatus}]}
+  data: query === 'methods' ? {localMoneyMethods: [{id: mockMethodId, country: 'CO', asset: 'COP', status: 'live', accountStatus: mockAccountStatus}, ...mockExtraMethods]}
     : query === 'saved' ? {localSavedDestinations: [{id: 'recipient', holderName: 'Ana', label: 'Llave', verification: 'verified'}]}
     : query === 'address' ? {myRampAddress: {isComplete: true}}
     : query === 'accounts' ? {myPaymentAccounts: mockAccounts}
@@ -25,7 +27,7 @@ jest.mock('@apollo/client', () => ({useQuery: (query: string) => ({
 })}));
 // useFocusEffect is a no-op here: the refresh-on-return is not what this test checks.
 jest.mock('@react-navigation/native', () => ({useNavigation: () => ({navigate: mockNavigate}),
-  useRoute: () => ({params: {methodId: mockMethodId}}), useFocusEffect: () => {}}));
+  useRoute: () => ({params: {methodId: mockMethodId, scannedQr: mockInitialQr}}), useFocusEffect: () => {}}));
 // The location gate has its own screen; here the person is already confirmed in Colombia.
 jest.mock('../../components/breb/BrebLocationGate', () => ({BrebLocationGate: ({children}: any) => children}));
 jest.mock('../../services/brebLocation', () => ({isBrebLocationFailure: (error: any) => Boolean(error?.brebLocation)}));
@@ -60,7 +62,50 @@ beforeEach(() => {
   mockPayoutQuote.mockReset();
   mockResolve.mockReset();
   mockAccounts = []; mockLimits = undefined;
+  mockExtraMethods = [];
+  mockInitialQr = undefined;
   mockRecheck.mockImplementation(async (id: string) => ({id, holderName: 'Ana', label: 'Llave', verification: 'verified'}));
+});
+
+it('retains the main scanner QR through account opening and resolves it only once', async () => {
+  mockMethodId = 'br_qr'; mockInitialQr = 'gateway-qr';
+  mockResolve.mockResolvedValue({id: 'qr', methodId: 'br_qr', verification: 'not_checked', label: 'QR'});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  expect(mockResolve).not.toHaveBeenCalled();
+  mockAccountStatus = 'active';
+  await act(async () => { tree.update(<Screen />); });
+  expect(mockResolve).toHaveBeenCalledWith('br_qr', 'gateway-qr', 20000);
+  await act(async () => { tree.update(<Screen />); });
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(mockPrepareBridge).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+it.each([['br_pix', 'br_qr'], ['ar_cvu', 'ar_qr']])('offers a labelled QR entry on %s and resolves through %s', async (methodId, qrId) => {
+  mockMethodId = methodId;
+  mockAccountStatus = 'active';
+  mockExtraMethods = [{id: qrId, country: 'CO', asset: 'COP', status: 'live'}];
+  mockResolve.mockResolvedValue({id: 'qr-recipient', methodId: qrId, verification: 'not_checked', label: 'QR · Loja'});
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  const button = tree.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === 'Escanear QR');
+  expect(button).toBeDefined();
+  expect(button!.findAllByType(Text).some(n => n.props.children === 'QR')).toBe(true);
+  await act(async () => { button!.props.onPress(); });
+  expect(tree.root.findByType('Scanner' as any).props.visible).toBe(true);
+  await act(async () => { tree.root.findByType('Scanner' as any).props.onScanned('raw-emv'); });
+  expect(mockResolve).toHaveBeenCalledWith(qrId, 'raw-emv', 20000);
+  await act(async () => tree.unmount());
+});
+
+it('does not expose a QR rail that the server marks unavailable', async () => {
+  mockMethodId = 'br_pix'; mockAccountStatus = 'active';
+  mockExtraMethods = [{id: 'br_qr', country: 'CO', status: 'unavailable'}];
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => { tree = renderer.create(<Screen />); });
+  expect(tree.root.findAllByType(TouchableOpacity).some(n => n.props.accessibilityLabel === 'Escanear QR')).toBe(false);
+  await act(async () => tree.unmount());
 });
 
 it('replaces a rejected fee quote but retains the request after network uncertainty', async () => {

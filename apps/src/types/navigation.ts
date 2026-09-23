@@ -41,7 +41,7 @@ export type MainStackParamList = {
   InfiniaPayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
   CobrePayment: { direction?: 'to_bank' | 'to_wallet' } | undefined;
   LocalAccountFunding: undefined;
-  LocalSend: { methodId: string };
+  LocalSend: { methodId: string; scannedQr?: string };
   LocalReceive: { methodId: string };
   LocalTransferStatus: { journeyId?: string } | undefined;
   LocalLimitIncrease: undefined;
