@@ -128,14 +128,8 @@ describe('membership checkout', () => {
     await act(async () => { tree.unmount(); });
   });
 
-  const pressLabel = (tree: renderer.ReactTestRenderer, label: string) => {
-    const button = tree.root.findAllByType(TouchableOpacity)
-      .find(node => node.props.accessibilityLabel === label);
-    if (!button) throw new Error(`no button labelled ${label}`);
-    return button;
-  };
 
-  it('offers both linking paths and makes no pricing claim when not linked', async () => {
+  it('makes no pricing claim on the unlinked screen', async () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
@@ -143,8 +137,6 @@ describe('membership checkout', () => {
     // Linking is paid on BOTH paths, and no charge is implemented yet, so a
     // discovery surface must not claim free or quote a price.
     expect(copy).not.toMatch(/no tiene costo|gratis|US\$/);
-    expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
-    expect(pressLabel(tree, 'Tengo un enlace o código')).toBeTruthy();
     await act(async () => { tree.unmount(); });
   });
 
@@ -171,32 +163,7 @@ describe('membership checkout', () => {
     await act(async () => { tree.unmount(); });
   });
 
-  it('routes a pasted institution link through the existing claim path', async () => {
-    let tree!: renderer.ReactTestRenderer;
-    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
-    await act(async () => { pressLabel(tree, 'Tengo un enlace o código').props.onPress(); });
-    await act(async () => {
-      tree.root.findByType(TextInput).props.onChangeText(
-        'confio://memberships?provider=cip&token=abc123');
-    });
-    await act(async () => { pressLabel(tree, 'Continuar').props.onPress(); });
-    expect(mockNavigation.setParams).toHaveBeenCalledWith({ provider: 'cip', token: 'abc123' });
-    await act(async () => { tree.unmount(); });
-  });
 
-  it('rejects an invalid pasted link without navigating', async () => {
-    let tree!: renderer.ReactTestRenderer;
-    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
-    await act(async () => { pressLabel(tree, 'Tengo un enlace o código').props.onPress(); });
-    await act(async () => {
-      tree.root.findByType(TextInput).props.onChangeText('https://evil.example/memberships?provider=cip&token=x');
-    });
-    await act(async () => { pressLabel(tree, 'Continuar').props.onPress(); });
-    expect(mockNavigation.setParams).not.toHaveBeenCalled();
-    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).toContain('Ese enlace no es válido');
-    await act(async () => { tree.unmount(); });
-  });
 
   it('groups institutions and puts the soonest due date first', async () => {
     mockRows = [
@@ -216,7 +183,7 @@ describe('membership checkout', () => {
     await act(async () => { tree.unmount(); });
   });
 
-  it('lists institutions with a not-yet-linkable one marked, and keeps scan/paste', async () => {
+  it('lists an institution and marks it not yet linkable', async () => {
     mockDirectory = { institutionDirectory: [
       { id: 'c1', name: 'Colegio de Ingenieros del Perú', provider: 'cip', linkingAvailable: false },
     ] };
@@ -225,9 +192,9 @@ describe('membership checkout', () => {
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
     expect(copy).toContain('Colegio de Ingenieros del Perú');
     expect(copy).toContain('Próximamente');
-    // The directory is additive: it must never replace the paths that work today.
-    expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
-    expect(pressLabel(tree, 'Tengo un enlace o código')).toBeTruthy();
+    // Linking itself happens through the institution's personal link, which
+    // linking.ts routes straight into the claim effect with no UI.
+    expect(copy).toContain('te enviará un enlace');
     await act(async () => { tree.unmount(); });
   });
 
@@ -243,14 +210,16 @@ describe('membership checkout', () => {
     await act(async () => { tree.unmount(); });
   });
 
-  it('a directory that fails to load never hides the working linking paths', async () => {
+  it('a directory that fails to load still renders the unlinked screen', async () => {
     mockDirectory = undefined; // server without institutionDirectory, errorPolicy: all
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
     expect(copy).toContain('Aún no tienes instituciones');
     expect(copy).not.toContain('Disponibles para vincular');
-    expect(pressLabel(tree, 'Escanear QR')).toBeTruthy();
+    // Linking does not depend on this query: the institution's personal link
+    // is routed into the claim effect by linking.ts with no UI at all.
+    expect(copy).toContain('te enviará un enlace');
     await act(async () => { tree.unmount(); });
   });
 
@@ -278,28 +247,8 @@ describe('membership checkout', () => {
     await act(async () => { tree.unmount(); });
   });
 
-  it('a linked member can still reach the directory to add another', async () => {
-    mockRows = [{ id: 'a', institutionName: 'CIP', memberReference: '••42',
-      amountMinor: 3500, amountRemainingMinor: 3500, currency: 'PEN', status: 'open',
-      dueAt: '2026-09-30T12:00:00Z' }];
-    mockDirectory = { institutionDirectory: [
-      { id: 'c1', name: 'Otro Colegio', provider: 'oc', linkingAvailable: false },
-    ] };
-    let tree!: renderer.ReactTestRenderer;
-    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
-    let copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    // Collapsed by default: owned dues stay the subject of the screen.
-    expect(copy).toContain('Tus cuotas por pagar');
-    expect(copy).not.toContain('Disponibles para vincular');
 
-    await act(async () => { pressLabel(tree, 'Agregar otra institución').props.onPress(); });
-    copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).toContain('Disponibles para vincular');
-    expect(copy).toContain('Otro Colegio');
-    await act(async () => { tree.unmount(); });
-  });
-
-  it('a linked member with no dues can also add another institution', async () => {
+  it('never shows the catalogue to a member who is already linked', async () => {
     mockSummary = { myBillingSummary: { linked: true } };
     mockDirectory = { institutionDirectory: [
       { id: 'c1', name: 'Otro Colegio', provider: 'oc', linkingAvailable: false },
@@ -308,7 +257,8 @@ describe('membership checkout', () => {
     await act(async () => { tree = renderer.create(<MembershipsScreen />); });
     const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
     expect(copy).toContain('Estás al día');
-    expect(copy).toContain('Disponibles para vincular');
+    // Offering CIP to someone already in CIP is noise, not discovery.
+    expect(copy).not.toContain('Disponibles para vincular');
     await act(async () => { tree.unmount(); });
   });
 
@@ -343,25 +293,32 @@ describe('membership checkout', () => {
     // RCTView's clamping; with overflow:hidden a 999 radius masks the label
     // away. Android clamps, so this only ever shows up on iPhone. Jest cannot
     // run iOS, so encode the rule: pills must be a View wrapping a Text.
-    mockRows = [{ id: 'late', institutionName: 'CIP', memberReference: '••42',
-      amountMinor: 3500, amountRemainingMinor: 3500, currency: 'PEN', status: 'past_due',
-      dueAt: '2026-08-31T12:00:00Z' }];
+    const offenders = (tree: renderer.ReactTestRenderer) => tree.root.findAllByType(Text)
+      .map(node => ({ text: node.props.children, style: StyleSheet.flatten(node.props.style) || {} }))
+      .filter(({ style }) => Number(style.borderRadius) > 0
+        && (style.overflow === 'hidden' || style.backgroundColor !== undefined))
+      .map(({ text }) => text);
+    const copyOf = (tree: renderer.ReactTestRenderer) =>
+      tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
+
+    // Unlinked: the Próximamente pill.
     mockDirectory = { institutionDirectory: [
       { id: 'c1', name: 'Otro Colegio', provider: 'oc', linkingAvailable: false },
     ] };
-    let tree!: renderer.ReactTestRenderer;
-    await act(async () => { tree = renderer.create(<MembershipsScreen />); });
-    await act(async () => { pressLabel(tree, 'Agregar otra institución').props.onPress(); });
+    let unlinked!: renderer.ReactTestRenderer;
+    await act(async () => { unlinked = renderer.create(<MembershipsScreen />); });
+    expect(copyOf(unlinked)).toContain('Próximamente');
+    expect(offenders(unlinked)).toEqual([]);
+    await act(async () => { unlinked.unmount(); });
 
-    const copy = tree.root.findAllByType(Text).map(node => node.props.children).join(' ');
-    expect(copy).toContain('Vencida');
-    expect(copy).toContain('Próximamente');
-
-    const offenders = tree.root.findAllByType(Text)
-      .map(node => ({ text: node.props.children, style: StyleSheet.flatten(node.props.style) || {} }))
-      .filter(({ style }) => Number(style.borderRadius) > 0
-        && (style.overflow === 'hidden' || style.backgroundColor !== undefined));
-    expect(offenders.map(({ text }) => text)).toEqual([]);
-    await act(async () => { tree.unmount(); });
+    // Linked and overdue: the Vencida status pill, the one that matters most.
+    mockRows = [{ id: 'late', institutionName: 'CIP', memberReference: '••42',
+      amountMinor: 3500, amountRemainingMinor: 3500, currency: 'PEN', status: 'past_due',
+      dueAt: '2026-08-31T12:00:00Z' }];
+    let linked!: renderer.ReactTestRenderer;
+    await act(async () => { linked = renderer.create(<MembershipsScreen />); });
+    expect(copyOf(linked)).toContain('Vencida');
+    expect(offenders(linked)).toEqual([]);
+    await act(async () => { linked.unmount(); });
   });
 });
