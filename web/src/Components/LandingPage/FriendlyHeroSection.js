@@ -147,8 +147,8 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
                   'Confío 앱 — 실제 홈 화면'
                 )}
                 className={styles.phoneShot}
-                width={640}
-                height={1422}
+                width={576}
+                height={1280}
                 fetchpriority="high"
               />
             </div>
