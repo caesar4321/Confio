@@ -353,6 +353,32 @@ class GmApiTradingTests(SimpleTestCase):
         warned = {warning.ticker for warning in highlights.warnings}
         self.assertTrue({'TQQQ', 'SQQQ', 'SOXL', 'SOXS'} <= warned)
 
+    def _home_tile(self, invested):
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, id=36), META={}))
+        market = [
+            {'primaryMarket': {'symbol': 'SPYon', 'price': '600'}},
+            {'primaryMarket': {'symbol': 'AAPLon', 'price': '230'}},
+            {'primaryMarket': {'symbol': 'NEWon', 'price': None}},
+        ]
+        with mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=True), \
+             mock.patch('cusd_plus.gm_api.all_market', return_value=market), \
+             mock.patch('cusd_plus.gm_tvl.value_usd', return_value=invested):
+            return Query().resolve_gm_home_tile(info)
+
+    @override_settings(GM_HOME_INVESTED_MIN_USD=10_000)
+    def test_home_tile_hides_invested_total_below_threshold(self):
+        tile = self._home_tile(60.0)
+        self.assertEqual(tile.asset_count, 2)
+        self.assertIsNone(tile.invested_usd)
+
+    @override_settings(GM_HOME_INVESTED_MIN_USD=10_000)
+    def test_home_tile_shows_invested_total_at_threshold(self):
+        self.assertEqual(self._home_tile(10_000.0).invested_usd, 10_000.0)
+
+    def test_home_tile_unknown_invested_is_not_zero(self):
+        self.assertIsNone(self._home_tile(None).invested_usd)
+
     def test_highlighted_tickers_have_descriptions(self):
         from cusd_plus.schema import _gm_descriptions, _gm_highlights
         descriptions = _gm_descriptions()
@@ -394,6 +420,7 @@ class GmApiTradingTests(SimpleTestCase):
             self.assertEqual(query.resolve_gm_ohlc(info, 'TSLAon'), [])
             self.assertIsNone(query.resolve_gm_asset_description(info, 'SPY'))
             self.assertIsNone(query.resolve_gm_highlights(info))
+            self.assertIsNone(query.resolve_gm_home_tile(info))
         market.assert_not_called()
         ohlc.assert_not_called()
         community.assert_not_called()
