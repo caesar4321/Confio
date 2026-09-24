@@ -212,6 +212,20 @@ class DiscoverSectionTests(TestCase):
             self.assertFalse(form.is_valid())
         self.assertIn('AWS_PUBLICATIONS_BUCKET', str(form.errors['avatar_upload']))
 
+    def test_admin_avatar_upload_keeps_phone_rotation(self):
+        from io import BytesIO
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        source = BytesIO()
+        exif = Image.Exif()
+        exif[0x0112] = 6  # Orientation: rotate 90° clockwise to display
+        Image.new('RGB', (40, 20), (16, 185, 129)).save(source, format='JPEG', exif=exif)
+        form = self.upload_form(SimpleUploadedFile('me.jpg', source.getvalue(), content_type='image/jpeg'))
+        self.assertTrue(form.is_valid(), form.errors)
+        with Image.open(BytesIO(form.cleaned_data['avatar_upload'].confio_bytes)) as reopened:
+            self.assertEqual(reopened.size, (20, 40))
+            self.assertNotIn(0x0112, reopened.getexif())
+
     def test_admin_avatar_upload_is_reencoded_without_metadata(self):
         from io import BytesIO
         from django.core.files.uploadedfile import SimpleUploadedFile

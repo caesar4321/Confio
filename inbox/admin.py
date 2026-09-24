@@ -9,7 +9,7 @@ from django.db.models.functions import Coalesce
 from datetime import datetime, timedelta
 from io import BytesIO
 from django.conf import settings
-from PIL import Image
+from PIL import Image, ImageOps
 
 from security.s3_utils import build_s3_key, upload_object
 
@@ -272,6 +272,9 @@ class ChannelAdminForm(forms.ModelForm):
                 if image.width * image.height > CHANNEL_AVATAR_MAX_PIXELS:
                     raise forms.ValidationError('La imagen es demasiado grande (máx. 4096×4096).')
                 image.load()
+                # Phone photos often carry rotation as an EXIF tag, not pixels;
+                # bake it in before metadata is dropped, or the avatar lands sideways.
+                image = ImageOps.exif_transpose(image)
                 if image_format == 'JPEG' and image.mode not in ('RGB', 'L'):
                     image = image.convert('RGB')
                 encoded = BytesIO()
