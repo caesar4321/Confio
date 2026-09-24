@@ -116,6 +116,11 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
     ).first()
     if not instruction:
         raise PaymentAccountError('Funding instruction not found')
+    legacy_destination = direction == 'to_provider' and not destination_id
+    if legacy_destination:
+        from .infinia_legacy_fees import resolve
+        destination_id = resolve(confio_account, instruction, amount, request_id)
+        destination_id = uuid.UUID(str(destination_id)) if destination_id else None
     source = address(confio_account.bsc_address)
     if direction == 'to_provider':
         destination = verified_destination(instruction, confio_account)
@@ -215,6 +220,7 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
             target_asset='USDC_POL' if direction == 'to_provider' else 'USDT_BSC',
             metadata={'purpose': 'provider_bridge_funding', 'stage': 'quoted',
                       **({'local_destination_id': str(destination_id)} if destination_id else {}),
+                      **({'legacy_fee_review_required': True} if legacy_destination and fee_snapshot else {}),
                       **({'infinia_fee': fee_snapshot, 'infinia_fee_funding': fee_funding} if fee_snapshot else {}),
                       **({'gross_spend_units': gross_units} if direction == 'to_provider' else {})},
         )

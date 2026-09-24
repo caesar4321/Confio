@@ -50,3 +50,10 @@ class FeePolicyTests(SimpleTestCase):
         self.assertTrue(enabled('COL'))
         self.assertTrue(enabled(' eu '))
         self.assertFalse(enabled('BR'))
+
+
+    @override_settings(INFINIA_INCOMING_FEE_COLLECTION_ENABLED=False)
+    def test_server_only_rollout_preserves_old_app_incoming_mint(self):
+        self.assertIsNone(price(self.local, 'to_wallet'))
+        self.assertEqual(price(self.local, 'to_bank', destination=SimpleNamespace(
+            details={'type': 'BREB_KEY'}))['total_usd'], '1.250000')

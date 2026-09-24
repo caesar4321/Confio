@@ -7,7 +7,7 @@ from .infinia_fees import FeePricingError, iso_alpha2, route_cost
 
 
 def enabled(country):
-    # Roll out with the fee-capable app. No retroactive charges on old journeys.
+    # No retroactive charges on old journeys.
     countries = getattr(settings, 'INFINIA_PASS_THROUGH_FEE_COUNTRIES', ())
     if isinstance(countries, str):
         countries = countries.split(',')
@@ -21,6 +21,8 @@ def enabled(country):
 
 def price(local, direction, *, destination=None):
     if local.provider != 'infinia' or not enabled(local.country):
+        return None
+    if direction == 'to_wallet' and not getattr(settings, 'INFINIA_INCOMING_FEE_COLLECTION_ENABLED', True):
         return None
     # Applicable Argentina ITF is already deducted by the banks. Only the
     # separately invoiced processing fee belongs in our collector transfer.

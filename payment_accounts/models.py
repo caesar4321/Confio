@@ -868,3 +868,17 @@ class AccountActivation(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['confio_account', 'country', 'asset'],
                                                name='activation_owner_country_asset_uniq')]
+
+
+class InfiniaPayoutEstimateBinding(models.Model):
+    """Old-app routing context only; executable prices are always refreshed."""
+    confio_account = models.ForeignKey('users.Account', on_delete=models.CASCADE)
+    funding_instruction = models.ForeignKey(FundingInstruction, on_delete=models.CASCADE)
+    amount_units = models.CharField(max_length=78)
+    destination = models.ForeignKey(PayoutDestination, on_delete=models.CASCADE)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['confio_account', 'funding_instruction', 'amount_units'],
+            name='infinia_payout_estimate_binding_uniq')]

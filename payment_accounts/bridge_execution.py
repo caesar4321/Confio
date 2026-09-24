@@ -246,6 +246,8 @@ def submit_bridge(owner, transfer_id, signature, *, nonce='0', authorization=Non
         return t
     if t.quote.source_token_id == 'BSC:USDT' and _adopt_bsc_batch(t):
         return t
+    from .infinia_legacy_fees import require_review
+    require_review(t.quote.money_flow)
     execution_enabled(t.quote.source_token_id)
     current_provider(t.quote, owner)
     if int(time.time()) >= t.deadline - 30:

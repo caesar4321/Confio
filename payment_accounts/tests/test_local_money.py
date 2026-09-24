@@ -712,7 +712,7 @@ class LocalMoneyTests(TestCase):
         bridge = SimpleNamespace(amount_out_min='1958795', amount_out='1960000', quote=SimpleNamespace(
             confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
             funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
-            money_flow=SimpleNamespace(source_amount=Decimal('2'))))
+            money_flow=SimpleNamespace(metadata={}, source_amount=Decimal('2'))))
         review = local_money.payout_quote(self.owner, destination, bridge=bridge, client=self.client_api)
         for result in (estimate, review):
             self.assertEqual(result['source_amount'], Decimal('1.95'))
@@ -730,7 +730,7 @@ class LocalMoneyTests(TestCase):
         bridge = SimpleNamespace(amount_out_min='9999', amount_out='10000', quote=SimpleNamespace(
             confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
             funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
-            money_flow=SimpleNamespace(source_amount=Decimal('0.02'))))
+            money_flow=SimpleNamespace(metadata={}, source_amount=Decimal('0.02'))))
         with self.assertRaisesRegex(PaymentAccountError, '0.01'):
             local_money.payout_quote(self.owner, SimpleNamespace(country='COL', asset='COP'),
                                     bridge=bridge, client=self.client_api)
@@ -752,7 +752,7 @@ class LocalMoneyTests(TestCase):
         bridge = SimpleNamespace(amount_out_min='49000000', amount_out='49500000', quote=SimpleNamespace(
             confio_account_id=self.owner.pk, source_token_id='BSC:USDT',
             funding_instruction=SimpleNamespace(financial_account_id=crypto.pk),
-            money_flow=SimpleNamespace(source_amount=Decimal('50'))))
+            money_flow=SimpleNamespace(metadata={}, source_amount=Decimal('50'))))
         self.fx('980')
         result = local_money.payout_quote(self.owner, destination, bridge=bridge, client=self.client_api)
         self.assertEqual(result['rate'], Decimal('19.6000'))
