@@ -7,9 +7,21 @@ import { gql } from '@apollo/client';
 export const LANDING_STATS = gql`
   query LandingStats {
     landingStats {
-      depositedVolumeUsd
       presaleRaisedUsd
       registeredUsers
+    }
+  }
+`;
+
+// Money moved through Confío — the app's "Movido" stat, same server snapshot:
+// fiat deposits and withdrawals plus direct USDC transfers with on-chain
+// proof, each counted once, cumulative since September 2025. Its own query
+// so a server without it fails only this stat, never presale/users.
+export const FUND_FLOW_STATS = gql`
+  query FundFlowStats {
+    fundFlowStats {
+      totalUsd
+      operationCount
     }
   }
 `;

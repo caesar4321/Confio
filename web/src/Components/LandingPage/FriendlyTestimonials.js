@@ -4,7 +4,7 @@ import { useInView } from 'react-intersection-observer';
 import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyTestimonials.module.css';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { LANDING_STATS, fmtUsd, toStatValue } from './landingStats';
+import { FUND_FLOW_STATS, LANDING_STATS, fmtUsd, toStatValue } from './landingStats';
 
 const FriendlyTestimonials = () => {
   const [ref, inView] = useInView({
@@ -33,16 +33,17 @@ const FriendlyTestimonials = () => {
   ];
 
   const { data: statsData } = useQuery(LANDING_STATS, { fetchPolicy: 'cache-and-network' });
+  const { data: flowData } = useQuery(FUND_FLOW_STATS, { fetchPolicy: 'cache-and-network' });
   const live = statsData?.landingStats;
 
   // Live values only — no hardcoded fallbacks (DESIGN.md: real numbers or
   // nothing). Stats without finite positive data simply don't render.
-  const deposited = toStatValue(live?.depositedVolumeUsd);
+  const moved = toStatValue(flowData?.fundFlowStats?.totalUsd);
   const presale = toStatValue(live?.presaleRaisedUsd);
   const stats = [
-    deposited != null && {
-      number: fmtUsd(deposited),
-      label: t('Volumen depositado on-chain', 'On-chain deposited volume', '온체인 입금 총액')
+    moved != null && {
+      number: fmtUsd(moved),
+      label: t('Movidos en depósitos y retiros', 'Moved in deposits and withdrawals', '입출금 총액')
     },
     presale != null && {
       number: fmtUsd(presale),

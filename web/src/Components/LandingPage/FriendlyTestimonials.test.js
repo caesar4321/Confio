@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, act } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing';
 import FriendlyTestimonials from './FriendlyTestimonials';
-import { LANDING_STATS } from './landingStats';
+import { FUND_FLOW_STATS, LANDING_STATS } from './landingStats';
 import { LanguageProvider } from '../../contexts/LanguageContext';
 
 // jsdom's navigator.language is en-US → English copy.
@@ -26,6 +26,11 @@ const statsMock = (landingStats) => ({
   },
 });
 
+const flowMock = (totalUsd) => ({
+  request: { query: FUND_FLOW_STATS },
+  result: { data: { fundFlowStats: totalUsd == null ? null : { totalUsd, operationCount: 501 } } },
+});
+
 const flushQuery = async () => {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -34,24 +39,26 @@ const flushQuery = async () => {
 
 describe('FriendlyTestimonials stats', () => {
   it('renders only the static transfer-fee stat when there is no live data', async () => {
-    renderTestimonials([statsMock(null)]);
+    renderTestimonials([statsMock(null), flowMock(null)]);
     await flushQuery();
 
     expect(screen.getByText('0%')).toBeInTheDocument();
     expect(screen.getByText('Transfers between users')).toBeInTheDocument();
     // No fallbacks: entries without live data are filtered out entirely.
-    expect(screen.queryByText('On-chain deposited volume')).not.toBeInTheDocument();
+    expect(screen.queryByText('Moved in deposits and withdrawals')).not.toBeInTheDocument();
     expect(screen.queryByText('Raised in $CONFIO presale')).not.toBeInTheDocument();
   });
 
   it('renders live stats formatted via fmtUsd alongside the transfer-fee stat', async () => {
     renderTestimonials([
-      statsMock({ depositedVolumeUsd: '125430.75', presaleRaisedUsd: '3597.21' }),
+      statsMock({ presaleRaisedUsd: '3597.21' }),
+      flowMock(169651.26),
     ]);
     await flushQuery();
 
-    expect(await screen.findByText('US$125,430')).toBeInTheDocument();
-    expect(screen.getByText('On-chain deposited volume')).toBeInTheDocument();
+    expect(await screen.findByText('US$169,651')).toBeInTheDocument();
+    expect(screen.getByText('Moved in deposits and withdrawals')).toBeInTheDocument();
+    expect(screen.queryByText('On-chain deposited volume')).not.toBeInTheDocument();
     expect(screen.getByText('US$3,597')).toBeInTheDocument();
     expect(screen.getByText('Raised in $CONFIO presale')).toBeInTheDocument();
     expect(screen.getByText('0%')).toBeInTheDocument();
@@ -59,17 +66,18 @@ describe('FriendlyTestimonials stats', () => {
 
   it('keeps a partial live stat while filtering the missing one', async () => {
     renderTestimonials([
-      statsMock({ depositedVolumeUsd: null, presaleRaisedUsd: '3597.21' }),
+      statsMock({ presaleRaisedUsd: '3597.21' }),
+      flowMock(null),
     ]);
     await flushQuery();
 
     expect(await screen.findByText('US$3,597')).toBeInTheDocument();
-    expect(screen.queryByText('On-chain deposited volume')).not.toBeInTheDocument();
+    expect(screen.queryByText('Moved in deposits and withdrawals')).not.toBeInTheDocument();
     expect(screen.getByText('0%')).toBeInTheDocument();
   });
 
   it('always renders the three anonymized testimonials', async () => {
-    renderTestimonials([statsMock(null)]);
+    renderTestimonials([statsMock(null), flowMock(null)]);
     await flushQuery();
 
     expect(screen.getAllByText('Anonymous user')).toHaveLength(3);
