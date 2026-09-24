@@ -26,8 +26,10 @@ export const channelInitial = (name: string) =>
 
 /** Who published a post: avatar, name, the Oficial check, and one line of context. */
 export function PostByline({ name, isOfficial = false, avatarUrl, avatarEmoji, meta, size = 'card' }: Props) {
-  const [imageFailed, setImageFailed] = React.useState(false);
+  // Keyed to the URL that failed, so a replaced avatar gets a fresh attempt.
+  const [failedUrl, setFailedUrl] = React.useState<string | null>(null);
   if (!name) return null;
+  const imageFailed = Boolean(avatarUrl) && failedUrl === avatarUrl;
   const detail = size === 'detail';
   const avatarSize = detail ? 40 : 36;
   const avatarStyle = { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 };
@@ -38,7 +40,7 @@ export function PostByline({ name, isOfficial = false, avatarUrl, avatarEmoji, m
         <Image
           source={{ uri: avatarUrl }}
           style={[styles.avatarImage, avatarStyle]}
-          onError={() => setImageFailed(true)}
+          onError={() => setFailedUrl(avatarUrl)}
           accessibilityIgnoresInvertColors
         />
       ) : (

@@ -7,7 +7,9 @@ from django.utils import timezone
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from datetime import datetime, timedelta
+from io import BytesIO
 from django.conf import settings
+from PIL import Image
 
 from security.s3_utils import build_s3_key, upload_object
 
@@ -217,6 +219,7 @@ OFFICIAL_STATUS_DISPLAY = {
 
 
 CHANNEL_AVATAR_MAX_BYTES = 2 * 1024 * 1024
+CHANNEL_AVATAR_MAX_PIXELS = 4096 * 4096
 CHANNEL_AVATAR_CONTENT_TYPES = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
 
 
@@ -249,14 +252,36 @@ class ChannelAdminForm(forms.ModelForm):
         upload = self.cleaned_data.get('avatar_upload')
         if not upload:
             return upload
+        # No silent fallback to another bucket: the avatar URL must be the
+        # publicly readable publications path.
+        if not getattr(settings, 'AWS_PUBLICATIONS_BUCKET', None):
+            raise forms.ValidationError('AWS_PUBLICATIONS_BUCKET no está configurado.')
         if upload.size > CHANNEL_AVATAR_MAX_BYTES:
             raise forms.ValidationError('La imagen supera 2 MB.')
-        # ImageField already opened it with Pillow; trust the decoded format,
-        # not the client-sent content type or extension.
-        image_format = getattr(getattr(upload, 'image', None), 'format', None)
-        if image_format not in CHANNEL_AVATAR_CONTENT_TYPES:
-            raise forms.ValidationError('Usa una imagen JPG, PNG o WEBP.')
+        # ImageField only verifies the header. Decode every pixel (a truncated
+        # file passes verify() but not load()), then re-encode: what reaches
+        # S3 is freshly written pixels, never the uploaded bytes, which also
+        # drops metadata such as a photo's GPS location.
+        try:
+            upload.seek(0)
+            with Image.open(upload) as image:
+                image_format = image.format
+                if image_format not in CHANNEL_AVATAR_CONTENT_TYPES:
+                    raise forms.ValidationError('Usa una imagen JPG, PNG o WEBP.')
+                # A few KB can declare gigapixel dimensions; refuse before decoding.
+                if image.width * image.height > CHANNEL_AVATAR_MAX_PIXELS:
+                    raise forms.ValidationError('La imagen es demasiado grande (máx. 4096×4096).')
+                image.load()
+                if image_format == 'JPEG' and image.mode not in ('RGB', 'L'):
+                    image = image.convert('RGB')
+                encoded = BytesIO()
+                image.save(encoded, format=image_format)
+        except forms.ValidationError:
+            raise
+        except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
+            raise forms.ValidationError('La imagen está dañada o incompleta.')
         upload.confio_content_type = CHANNEL_AVATAR_CONTENT_TYPES[image_format]
+        upload.confio_bytes = encoded.getvalue()
         return upload
 
     def clean(self):
@@ -292,7 +317,6 @@ class ChannelAdmin(admin.ModelAdmin):
         if upload:
             content_type = upload.confio_content_type
             extension = {'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp'}[content_type]
-            upload.seek(0)
             obj.avatar_value = upload_object(
                 # Under the publications prefix: the same public-read path the
                 # app already loads publication images from.
@@ -300,7 +324,7 @@ class ChannelAdmin(admin.ModelAdmin):
                     f"{settings.AWS_S3_PUBLICATIONS_PREFIX.rstrip('/')}/channel-avatars",
                     f'avatar.{extension}',
                 ),
-                body=upload.read(),
+                body=upload.confio_bytes,
                 content_type=content_type,
                 metadata={'uploaded-by': str(request.user.id), 'uploaded-for': 'channel-avatar'},
                 bucket=settings.AWS_PUBLICATIONS_BUCKET,
