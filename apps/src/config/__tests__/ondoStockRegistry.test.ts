@@ -11,7 +11,7 @@ const { resolve } = require('path');
 
 describe('bundled Ondo Stocks registry', () => {
   it('contains the reviewed canonical BSC snapshot', () => {
-    expect(BUNDLED_ONDO_STOCK_COUNT).toBe(442);
+    expect(BUNDLED_ONDO_STOCK_COUNT).toBe(457);
     expect(BUNDLED_ONDO_STOCK_TOKENS).toHaveLength(BUNDLED_ONDO_STOCK_COUNT);
     expect(BUNDLED_ONDO_STOCK_SOURCE_SHA256).toMatch(/^[0-9a-f]{64}$/);
   });

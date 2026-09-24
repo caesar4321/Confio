@@ -31,12 +31,12 @@ describe('Ondo balance Multicall ABI', () => {
     )).toThrow('Ondo balance call failed');
   });
 
-  it('reads the 442-token release registry in exactly two chunks', async () => {
+  it('reads the 457-token release registry in exactly two chunks', async () => {
     jest.resetModules();
     jest.dontMock('../../config/ondoStockTokens.generated');
     let calls = 0;
     jest.doMock('../evmWallet', () => ({
-      bscEthCall: async () => multicallBalances(Array(calls++ === 0 ? 250 : 192).fill(0n)),
+      bscEthCall: async () => multicallBalances(Array(calls++ === 0 ? 250 : 207).fill(0n)),
       selector: (signature: string) =>
         signature === 'tryAggregate(bool,(address,bytes)[])' ? '0xbce38bd7' : '0x70a08231',
       encodeAddress: (address: string) => address.slice(2).padStart(64, '0'),
