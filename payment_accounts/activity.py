@@ -63,6 +63,10 @@ def display_stage(j):
     if j.direction == 'to_wallet' and j.stage == 'completed':
         if not j.wallet_conversion_id or j.wallet_conversion.status != 'COMPLETED':
             return 'awaiting_wallet_conversion'
+        if j.money_flow.metadata.get('infinia_fee'):
+            from .infinia_fee_collection import collection_evidence
+            if not collection_evidence(j):
+                return 'awaiting_wallet_conversion'
     return j.stage
 
 
@@ -134,7 +138,22 @@ def sync_activity(journey_id, *, notify=True):
     j = InfiniaJourney.objects.select_for_update(of=('self',)).select_related(
         'confio_account__user', 'confio_account__business', 'money_flow', 'bridge',
         'wallet_conversion', 'local_account', 'funding_credit').get(pk=journey_id)
+    # Fee finalization and receipt updates share the same metadata row. Read
+    # it under its lock so a concurrent refresh cannot be overwritten here.
+    j.money_flow = MoneyFlow.objects.select_for_update().get(pk=j.money_flow_id)
     _link_mint(j)
+    from .infinia_fee_collection import collection_evidence, wallet_received
+    fee_receipt = collection_evidence(j)
+    from .infinia_maintenance import reconcile as reconcile_maintenance
+    reconcile_maintenance(j, fee_receipt)
+    if fee_receipt and j.money_flow.metadata.get('infinia_fee_collection') != fee_receipt:
+        j.money_flow.metadata = dict(j.money_flow.metadata, infinia_fee_collection=fee_receipt)
+        MoneyFlow.objects.filter(pk=j.money_flow_id).update(metadata=j.money_flow.metadata)
+    elif not fee_receipt and j.money_flow.metadata.get('infinia_fee_collection', {}).get('status') == 'collected':
+        # A reorg must retract accounting evidence as well as the visible net.
+        j.money_flow.metadata = dict(j.money_flow.metadata, infinia_fee_collection=dict(
+            j.money_flow.metadata['infinia_fee_collection'], status='unconfirmed'))
+        MoneyFlow.objects.filter(pk=j.money_flow_id).update(metadata=j.money_flow.metadata)
     incoming = j.direction == 'to_wallet'
     bridge = j.bridge
     # A quote or unsigned instruction has not changed the wallet.
@@ -147,7 +166,7 @@ def sync_activity(journey_id, *, notify=True):
     token = 'CUSD_BSC'
     if incoming and j.wallet_conversion_id and j.wallet_conversion.status == 'COMPLETED':
         conversion = j.wallet_conversion
-        amount = conversion.net_amount_exact if conversion.net_amount_exact is not None else conversion.to_amount
+        amount = wallet_received(j) or Decimal(0)
         token = 'CUSD_PLUS' if conversion.conversion_type == 'to_savings' else 'CUSD_BSC'
     status = 'CONFIRMED' if stage == 'completed' else 'FAILED' if stage in ['failed', 'refunded'] else 'PENDING'
     label = 'Ingreso por cuenta local' if incoming else 'Envío reembolsado' if stage == 'refunded' else 'Envío a banco o billetera'
@@ -192,11 +211,11 @@ def sync_activity(journey_id, *, notify=True):
                 data__recipient_address__iexact=j.wallet_address,
                 notification_type__in=['SEND_FROM_EXTERNAL', 'CONVERSION_COMPLETED']):
             _retarget_notice(notice, j, label)
-    if incoming and j.wallet_conversion_id:
+    if (incoming and j.wallet_conversion_id) or (not incoming and tx_hash and j.money_flow.metadata.get('infinia_fee')):
         # The mint scanner can beat best-effort conversion history creation.
         # Only the explicitly linked mint hash and zero-address mint receipts
         # belong to this parent; ordinary token transfers remain visible.
-        mint_hash = j.wallet_conversion.to_transaction_hash
+        mint_hash = j.wallet_conversion.to_transaction_hash if incoming else tx_hash
         mint_receipts = SendTransaction.all_objects.filter(
             transaction_hash__iexact=mint_hash, recipient_address__iexact=j.wallet_address,
             sender_type='external', sender_address__in=['', '0x' + '0' * 40],
@@ -209,7 +228,9 @@ def sync_activity(journey_id, *, notify=True):
     conversions = Conversion.objects.none()
     if not incoming and tx_hash:
         conversions = Conversion.objects.filter(to_transaction_hash__iexact=tx_hash,
-            user_bsc_address__iexact=j.wallet_address, conversion_type__in=['cusd_to_usdt', 'from_savings'])
+            user_bsc_address__iexact=j.wallet_address, conversion_type__in=[
+                'cusd_to_usdt', 'from_savings',
+                *(['usdt_to_cusd'] if j.money_flow.metadata.get('infinia_fee') else [])])
     elif j.wallet_conversion_id:
         conversions = Conversion.objects.filter(pk=j.wallet_conversion_id)
     UnifiedTransactionTable.objects.filter(conversion__in=conversions).update(deleted_at=timezone.now())
@@ -306,3 +327,17 @@ def conversion_changed(sender, instance, **kwargs):
             if journey_id:
                 ids += list(InfiniaJourney.objects.filter(internal_id=journey_id).values_list('pk', flat=True))
     transaction.on_commit(lambda: _refresh(ids))
+
+
+@receiver(post_save, sender='blockchain.SponsoredBatch')
+def fee_batch_changed(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
+    ids = list(InfiniaJourney.objects.filter(bridge__batch=instance,
+        money_flow__metadata__has_key='infinia_fee').values_list('pk', flat=True))
+    journey_id = local_mint_journey_id(instance.client_request_id)
+    if journey_id:
+        ids += list(InfiniaJourney.objects.filter(internal_id=journey_id,
+            money_flow__metadata__has_key='infinia_fee').values_list('pk', flat=True))
+    if ids:
+        transaction.on_commit(lambda: _refresh(ids))

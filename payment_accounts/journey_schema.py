@@ -29,6 +29,20 @@ class InfiniaJourneyType(DjangoObjectType):
     stage = graphene.String(required=True)
     wallet_mint_units = graphene.String()
     wallet_mint_request_id = graphene.String()
+    wallet_fee_units = graphene.String()
+    wallet_fee_collector = graphene.String()
+    wallet_fee_minimum_net_units = graphene.String()
+
+    def resolve_wallet_fee_units(self, info):
+        from .infinia_fee_debt import finalize_incoming
+        return (finalize_incoming(self) or {}).get('units')
+
+    def resolve_wallet_fee_collector(self, info):
+        return self.money_flow.metadata.get('infinia_fee', {}).get('collector') if self.direction == 'to_wallet' else None
+
+    def resolve_wallet_fee_minimum_net_units(self, info):
+        from .infinia_fee_debt import finalize_incoming
+        return (finalize_incoming(self) or {}).get('minimum_net_units')
 
     def resolve_wallet_mint_request_id(self, info):
         from .activity import mint_request_id
@@ -37,10 +51,9 @@ class InfiniaJourneyType(DjangoObjectType):
     wallet_received_amount = graphene.String()
 
     def resolve_wallet_received_amount(self, info):
-        if self.direction == 'to_wallet' and self.wallet_conversion_id and self.wallet_conversion.status == 'COMPLETED':
-            c = self.wallet_conversion
-            return str(c.net_amount_exact if c.net_amount_exact is not None else c.to_amount)
-        return None
+        from .infinia_fee_collection import wallet_received
+        amount = wallet_received(self) if self.direction == 'to_wallet' else None
+        return str(amount) if amount is not None else None
 
     def resolve_refund_amount(self, info):
         from decimal import Decimal

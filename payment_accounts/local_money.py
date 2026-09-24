@@ -871,7 +871,13 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
         total = _positive(amount, USDC_UNIT)
         if exceeds_bridge_cap(total):
             raise PaymentAccountError('Amount exceeds the configured bridge limit')
-        units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
+        from .infinia_fee_policy import price as fee_price
+        fee = fee_price(local, 'to_bank', destination=destination)
+        if fee:
+            from .infinia_fee_funding import quote_funding
+            units = quote_funding(owner, int(to_units(total, 'BSC:USDT')), int(fee['units']))['bridge_units']
+        else:
+            units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
         instruction = FundingInstruction.objects.filter(financial_account=crypto,
             kind='crypto_address', status='active').first()
         if instruction is None:
@@ -929,8 +935,19 @@ def deposit_quote(owner, credit, *, client=None):
     bridge_minimum = Decimal(bridge_route_minimum(routes[0])) / Decimal(10 ** 18)
     wallet_minimum = (bridge_minimum * (1 - _tolerance('LOCAL_MONEY_BRIDGE_TOLERANCE_BPS', 150))).quantize(
         USDC_UNIT, rounding=ROUND_DOWN)
+    from .infinia_fee_policy import price as fee_price
+    fee = fee_price(local, 'to_wallet')
+    net_wallet_receipt = None
+    if fee:
+        from cusd_plus import cusd_vault
+        preview = cusd_vault.preview_mint_wei(int(wallet_minimum * 10**18))
+        net_units = max(0, preview.net_wei - int(fee['units']))
+        if not 0 <= preview.fee_bps <= 90 or preview.net_wei <= 0:
+            raise PaymentAccountError('El monto no alcanza para cubrir los costos de conversión.')
+        net_wallet_receipt = Decimal(net_units) / Decimal(10**18)
     return {'source_amount': source, 'asset': local.asset, 'target_amount': target,
             'minimum_fx_output': fx_minimum, 'minimum_wallet_output': wallet_minimum,
+            'minimum_net_wallet_receipt': net_wallet_receipt,
             'rate': (source / target).quantize(Decimal('0.0001')), 'expires_at': expires}
 
 

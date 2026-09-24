@@ -44,8 +44,9 @@ logger = logging.getLogger(__name__)
 
 
 def _public_error(exc):
+    from .infinia_fees import FeePricingError
     if isinstance(exc, (
-        PaymentAccountError, ComplianceHandoffError, NextError,
+        PaymentAccountError, ComplianceHandoffError, NextError, FeePricingError,
         EligibilityDenied, EligibilityPolicyNotConfigured,
     )):
         return str(exc)
@@ -407,19 +408,20 @@ class QuotePaymentBridge(graphene.Mutation):
         amount = graphene.Decimal(required=True)
         request_id = graphene.UUID(required=True)
         direction = graphene.String(default_value='to_provider')
+        destination_id = graphene.UUID()
 
     success = graphene.Boolean(required=True)
     quote = graphene.Field(PaymentBridgeQuoteType)
     errors = graphene.List(graphene.String, required=True)
 
     @classmethod
-    def mutate(cls, root, info, funding_instruction_id, amount, request_id, direction='to_provider'):
+    def mutate(cls, root, info, funding_instruction_id, amount, request_id, direction='to_provider', destination_id=None):
         try:
             account = _active_account(info, permission='send_funds', owner_only=True)
             quote = quote_provider_funding(
                 confio_account=account, funding_instruction_id=funding_instruction_id,
                 amount=amount, request_id=request_id,
-                direction=direction,
+                direction=direction, destination_id=destination_id,
             )
             return cls(success=True, quote=quote, errors=[])
         except Exception as exc:

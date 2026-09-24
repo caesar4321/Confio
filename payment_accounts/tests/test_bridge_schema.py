@@ -12,7 +12,7 @@ class BridgeSchemaTests(SimpleTestCase):
     def test_recipient_and_owner_cannot_be_supplied_by_client(self):
         schema = graphene.Schema(query=Query, mutation=Mutation)
         fields = schema.graphql_schema.mutation_type.fields['quotePaymentBridge'].args
-        self.assertEqual(set(fields), {'fundingInstructionId', 'amount', 'requestId', 'direction'})
+        self.assertEqual(set(fields), {'fundingInstructionId', 'amount', 'requestId', 'direction', 'destinationId'})
 
     @mock.patch('payment_accounts.schema.quote_provider_funding')
     @mock.patch('payment_accounts.schema._active_account')

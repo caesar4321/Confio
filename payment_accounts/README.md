@@ -195,8 +195,13 @@ semantic mapping with Cobre before production activation.
 # Third-party pay-in admission (Infinia)
 
 Confío's controls are independent of Infinia's capabilities. All third-party
-receiving is **off by default** (no switch rows are seeded). In Django admin,
-create three enabled `ThirdPartyPayinSwitch` rows to permit a recipient:
+receiving is **on by default outside Brazil**, for existing and new users, when
+Infinia supports it and sender evidence is present. Explicit country, rail, or
+recipient stops still take precedence. Brazil remains off by default.
+`INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED=False` restores explicit approval
+requirements everywhere. No user rows need to be seeded for the default.
+
+In Brazil, create three enabled `ThirdPartyPayinSwitch` rows in Django admin:
 
 | Scope | Country | Rail | Confío account |
 | --- | --- | --- | --- |
@@ -204,7 +209,7 @@ create three enabled `ThirdPartyPayinSwitch` rows to permit a recipient:
 | Rail | same country | verified rail code, e.g. `SPEI` | blank |
 | Recipient | same country | same rail | recipient account |
 
-All three must allow and Infinia's `receive_third_party` capability must be
+For explicit approval, all three must allow and Infinia's `receive_third_party` capability must be
 enabled. Approval evidence is required; user grants must reference completed
 enhanced KYC/KYB and compliance approval. This is an operator approval, not an
 automatic determination that a Didit session qualifies as enhanced KYC.

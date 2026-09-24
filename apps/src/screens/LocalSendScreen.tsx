@@ -468,7 +468,7 @@ export default function LocalSendScreen() {
     try {
       requestId.current ||= bridgeRequestId();
       const prepared = await preparePaymentBridge(cryptoInstruction.internalId, snapshot.amount, 'to_provider',
-        requestId.current);
+        requestId.current, snapshot.destinationId);
       bridgePrepared = true;
       if (run !== prepareRun.current) return;
       const priced = await fetchPayoutQuote(snapshot.destinationId, { bridgeId: prepared.internalId });

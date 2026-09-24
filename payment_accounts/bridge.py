@@ -87,16 +87,19 @@ def verified_destination(instruction, confio_account):
 
 
 def quote_provider_funding(*, confio_account, funding_instruction_id, amount, request_id, client=None,
-                           direction='to_provider'):
+                           direction='to_provider', destination_id=None):
     if not getattr(settings, 'PAYMENT_BRIDGE_QUOTES_ENABLED', False):
         raise PaymentAccountError('Payment bridge quotes are not enabled')
     try:
         request_id = uuid.UUID(str(request_id))
         instruction_id = uuid.UUID(str(funding_instruction_id))
+        destination_id = uuid.UUID(str(destination_id)) if destination_id else None
     except (ValueError, TypeError, AttributeError) as exc:
         raise PaymentAccountError('Valid request and instruction UUIDs are required') from exc
     if direction not in {'to_provider', 'to_wallet'}:
         raise PaymentAccountError('Invalid bridge direction')
+    if destination_id and direction != 'to_provider':
+        raise PaymentAccountError('A local destination applies only to outgoing transfers')
     source_token, destination_token = (
         ('BSC:USDT', 'POL:USDC') if direction == 'to_provider' else ('POL:USDC', 'BSC:USDT')
     )
@@ -131,6 +134,8 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
         ).first()
         if not row:
             return None
+        if row.money_flow.metadata.get('local_destination_id') != (str(destination_id) if destination_id else None):
+            raise PaymentAccountError('Request id was already used for a different local destination')
         # Compare the user's original amount, not a freshly priced net amount.
         # This also keeps pre-inclusive prepared transfers recoverable unchanged.
         original_units = row.money_flow.metadata.get('gross_spend_units', row.amount_units)
@@ -160,8 +165,24 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
     previous = existing()
     if previous:
         return previous
+    fee_snapshot, fee_funding = None, None
     if direction == 'to_provider':
-        units = net_funding_units(confio_account, int(gross_units))
+        if destination_id:
+            from .models import PayoutDestination
+            from .local_money import _active_pair, require_current_destination
+            from .infinia_fee_policy import freeze
+            destination_row = PayoutDestination.objects.get(internal_id=destination_id, confio_account=confio_account)
+            require_current_destination(destination_row)
+            local, crypto = _active_pair(confio_account, destination_row.country, destination_row.asset)
+            if crypto.pk != instruction.financial_account_id or destination_row.provider != 'infinia':
+                raise PaymentAccountError('Local destination does not match the funding account')
+            fee_snapshot = freeze(local, 'to_bank', destination=destination_row)
+        if fee_snapshot:
+            from .infinia_fee_funding import quote_funding
+            fee_funding = quote_funding(confio_account, int(gross_units), int(fee_snapshot['units']))
+            units = fee_funding['bridge_units']
+        else:
+            units = net_funding_units(confio_account, int(gross_units))
     # Timestamp before pricing; API latency must not extend the quote's lifetime.
     started = timezone.now()
     expires = started + timedelta(seconds=60)
@@ -193,8 +214,12 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
             source_asset='USDT_BSC' if direction == 'to_provider' else 'USDC_POL', source_amount=Decimal(str(amount)),
             target_asset='USDC_POL' if direction == 'to_provider' else 'USDT_BSC',
             metadata={'purpose': 'provider_bridge_funding', 'stage': 'quoted',
+                      **({'local_destination_id': str(destination_id)} if destination_id else {}),
+                      **({'infinia_fee': fee_snapshot, 'infinia_fee_funding': fee_funding} if fee_snapshot else {}),
                       **({'gross_spend_units': gross_units} if direction == 'to_provider' else {})},
         )
+        from .infinia_maintenance import reserve
+        reserve(fee_snapshot, flow)
         return PaymentBridgeQuote.objects.create(
             confio_account=confio_account, request_id=request_id, money_flow=flow,
             funding_instruction=instruction, source_address=source,

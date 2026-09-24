@@ -1417,7 +1417,7 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
                         actor_display_name=account.display_name or '',
                         actor_address=batch.user_bsc_address,
                         conversion_type=event['conversion_type'],
-                        source='external_deposit',
+                        source='convert' if batch_kind == 'payment_bridge' else 'external_deposit',
                         from_asset_id='USDT_BSC',
                         to_asset_id=(
                             'CUSD_PLUS_BSC' if event['conversion_type'] == 'to_savings'
@@ -1603,7 +1603,8 @@ def settle_savings_mint(tx_hash: str, outcome: str, receipt=None, batch=None) ->
         row = Conversion.objects.filter(
             conversion_type__in=('to_savings', 'usdt_to_cusd'),
             to_transaction_hash=tx_hash,
-            status='SUBMITTED', is_deleted=False,
+            status__in=('SUBMITTED', 'COMPLETED') if outcome == 'reorged' else ('SUBMITTED',),
+            is_deleted=False,
         ).first()
         if outcome == 'confirmed':
             if batch is not None and receipt is not None:
@@ -1616,11 +1617,16 @@ def settle_savings_mint(tx_hash: str, outcome: str, receipt=None, batch=None) ->
         if outcome == 'confirmed':
             row.status = 'COMPLETED'
             row.completed_at = _tz.now()
-            row.save(update_fields=['status', 'completed_at', 'updated_at'])
+            row.error_message = ''
+            row.save(update_fields=['status', 'completed_at', 'error_message', 'updated_at'])
         else:
-            row.status = 'FAILED'
+            # A reorg removes confirmation, not the signed transaction. Keep
+            # the original mint pending and its arrival reserved until that
+            # hash is confirmed again or proven not to have executed.
+            row.status = 'SUBMITTED' if outcome == 'reorged' else 'FAILED'
+            row.completed_at = None
             row.error_message = f'batch_{outcome}'
-            row.save(update_fields=['status', 'error_message', 'updated_at'])
+            row.save(update_fields=['status', 'completed_at', 'error_message', 'updated_at'])
         logger.info('savings mint %s settled %s -> %s', tx_hash, outcome, row.status)
     except Exception:  # noqa: BLE001 — settlement must not break the receipt task
         logger.exception('savings mint settlement failed for %s', tx_hash)

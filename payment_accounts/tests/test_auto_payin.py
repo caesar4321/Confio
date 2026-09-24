@@ -7,7 +7,7 @@ from payment_accounts.models import AutomaticPayin, InfiniaJourney, LedgerEntry
 from .test_infinia_journeys import JourneyTests
 
 
-@override_settings(INFINIA_JOURNEYS_ENABLED=True, INFINIA_PAYMENT_ACCOUNTS_ENABLED=True,
+@override_settings(INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED=False, INFINIA_JOURNEYS_ENABLED=True, INFINIA_PAYMENT_ACCOUNTS_ENABLED=True,
     PAYMENT_BRIDGE_QUOTES_ENABLED=True, PAYMENT_BRIDGE_BSC_ENABLED=True,
     PAYMENT_BRIDGE_POLYGON_ENABLED=True, CUSD_PLUS_7702_ENABLED=True)
 class AutomaticPayinTests(TestCase):
@@ -305,3 +305,21 @@ class AutomaticPayinTests(TestCase):
         self.assertEqual(row.status, 'pending')
         self.assertEqual(row.reason, 'waiting_for_safe_quote_or_account')
         self.assertFalse(InfiniaJourney.objects.exists())
+
+    @override_settings(INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED=True)
+    def test_non_brazil_third_party_deposit_starts_without_recipient_grants(self):
+        from payment_accounts.models import AccountCapability, ThirdPartyPayinSwitch
+        AccountCapability.objects.update_or_create(financial_account=self.local,
+            capability='receive_third_party', defaults={'status':'enabled'})
+        entry = self.credit(self.local,provider_data={'third_party':{
+            'type':'FIAT','full_name':'Different Sender'}})
+        row=enqueue(entry)
+        with mock.patch('payment_accounts.local_money._active_pair', return_value=(self.local,self.crypto)), \
+             mock.patch('payment_accounts.local_money.deposit_quote', return_value={
+                 'minimum_fx_output':'2','minimum_wallet_output':'2.4'}):
+            process(row.pk)
+            process(row.pk)
+        row.refresh_from_db()
+        self.assertEqual((row.status,row.reason),('started',''))
+        self.assertEqual(InfiniaJourney.objects.filter(funding_credit=entry).count(),1)
+        self.assertFalse(ThirdPartyPayinSwitch.objects.exists())

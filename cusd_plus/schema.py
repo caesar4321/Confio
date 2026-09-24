@@ -1587,7 +1587,9 @@ class SponsorBscBatch(graphene.Mutation):
         # may be reported to the client as a definitive failure.
         broadcast_tx_hash = None
         try:
-            sponsor_7702.validate_policy(norm_calls, user, user_addr)
+            from payment_accounts.infinia_fee_collection import mint_policy_calls, persist_local_fee
+            policy_calls = mint_policy_calls(norm_calls, user, user_addr, request_id)
+            sponsor_7702.validate_policy(policy_calls, user, user_addr)
 
             # The generic savings rail's kind (and thus the intentId the user
             # signed) is derived from the selectors; the client derives the
@@ -1718,7 +1720,8 @@ class SponsorBscBatch(graphene.Mutation):
             tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind,
-                client_request_id=request_id, intent_id=intent_id)
+                client_request_id=request_id, intent_id=intent_id,
+                persist_signed=persist_local_fee if request_id.startswith('local-mint-') else None)
             broadcast_tx_hash = tx_hash  # past the point of no return
             if kind in ('stock_buy', 'stock_sell'):
                 # Drop only fresh values. If the tx later reverts, the next

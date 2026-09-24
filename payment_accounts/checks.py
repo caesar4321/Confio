@@ -79,3 +79,22 @@ def payment_provider_configuration_checks(app_configs, **kwargs):
             id='payment_accounts.W001',
         ))
     return issues
+
+
+@register()
+def infinia_fee_configuration_checks(app_configs, **kwargs):
+    from .infinia_fees import FIAT_ASSETS
+    issues = []
+    countries = getattr(settings, 'INFINIA_PASS_THROUGH_FEE_COUNTRIES', '')
+    countries = countries.split(',') if isinstance(countries, str) else countries
+    countries = {c.strip().upper() for c in countries if c.strip()}
+    if countries - set(FIAT_ASSETS):
+        issues.append(Error('Infinia fee countries must use supported ISO2 codes.',
+                            id='payment_accounts.E012'))
+    for setting, maximum, code in [('INFINIA_PROCESSING_FEE_TIER', 5, 'E013'),
+                                   ('INFINIA_ACCOUNT_FEE_TIER', 2, 'E014')]:
+        tier = getattr(settings, setting, 0)
+        if type(tier) is not int or not 0 <= tier <= maximum:
+            issues.append(Error(f'{setting} must be an integer from 0 to {maximum}.',
+                                id='payment_accounts.' + code))
+    return issues
