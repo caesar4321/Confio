@@ -32,7 +32,8 @@ export const useExchangeRate = (
     notifyOnNetworkStatusChange: false
   });
 
-  const rate = data?.exchangeRateWithFallback ? parseFloat(data.exchangeRateWithFallback) : null;
+  const parsedRate = Number(data?.exchangeRateWithFallback);
+  const rate = Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : null;
 
   const formatRate = (decimals: number = 2): string => {
     if (rate === null) return 'N/A';

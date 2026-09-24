@@ -20,11 +20,10 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import Feather from 'react-native-vector-icons/Feather';
 import TelegramLogo from '../assets/svg/TelegramLogo.svg';
-import { Country, filterCountries } from '../utils/countries';
+import { Country, filterCountries, getCountryByIso } from '../utils/countries';
 import { useMutation } from '@apollo/client';
 import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, INITIATE_SMS_VERIFICATION, VERIFY_SMS_CODE, CONFIRM_PHONE_RELINK } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
-import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
@@ -45,7 +44,17 @@ const PhoneVerificationScreen = () => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
-  const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
+  // This is an unverified phone draft, not the user's wallet country.
+  const [selectedCountry, setSelectedCountry] = useState<Country>(() =>
+    getCountryByIso(userProfile?.phoneCountry?.trim().toUpperCase() || '') || getCountryByIso('AR')!
+  );
+  const [showCountryModal, setShowCountryModal] = useState(false);
+  const openCountryModal = () => setShowCountryModal(true);
+  const closeCountryModal = () => setShowCountryModal(false);
+  const selectCountry = (country: Country) => {
+    setSelectedCountry(country);
+    closeCountryModal();
+  };
   const [countrySearch, setCountrySearch] = useState('');
   const filteredCountries = React.useMemo(() => filterCountries(countrySearch), [countrySearch]);
   const countryListRef = useRef<FlatList<Country>>(null);
