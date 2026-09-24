@@ -532,6 +532,14 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
     )
     final_currency = RAW_USDT_BSC if is_bsc_dollar else 'CUSD'
     ramp_status, status_detail, completed_at = _derive_guardarian_ramp_outcome(guardarian_tx)
+    # First observed completion wins (see koywe_sync.upsert_koywe_ramp_transaction):
+    # a later re-sync must not restamp completed_at with "now".
+    if ramp_status == 'COMPLETED':
+        first_completed_at = (
+            RampTransaction.objects.filter(guardarian_transaction=guardarian_tx)
+            .values_list('completed_at', flat=True).first()
+        )
+        completed_at = first_completed_at or completed_at
     conversion = None
     if direction == 'on_ramp':
         existing_ramp = _safe_related(guardarian_tx, 'ramp_transaction')

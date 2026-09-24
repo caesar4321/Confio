@@ -184,6 +184,38 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
 
     @patch('ramps.signals.emit_event')
     @patch('ramps.signals.create_notification')
+    def test_resync_of_completed_guardarian_withdrawal_keeps_first_completion_time(self, *_):
+        from ramps.signals import sync_ramp_transaction_from_guardarian
+        withdrawal = USDCWithdrawal.objects.create(
+            actor_user=self.user,
+            actor_type='user',
+            actor_display_name='Ramp User',
+            actor_address=self.account.algorand_address,
+            amount=Decimal('50.000000'),
+            destination_address='G' * 58,
+            status='COMPLETED',
+        )
+        guardarian_tx = GuardarianTransaction.objects.create(
+            guardarian_id='sell-resync-1',
+            user=self.user,
+            from_currency='USDC',
+            from_amount=Decimal('50.000000'),
+            to_currency='EUR',
+            to_amount_estimated=Decimal('45.000000'),
+            to_amount_actual=Decimal('45.000000'),
+            network='ALGO',
+            status='finished',
+            onchain_withdrawal=withdrawal,
+        )
+        first = sync_ramp_transaction_from_guardarian(guardarian_tx)
+        self.assertEqual((first.direction, first.status), ('off_ramp', 'COMPLETED'))
+        with patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(hours=1)):
+            again = sync_ramp_transaction_from_guardarian(guardarian_tx)
+        self.assertEqual(again.pk, first.pk)
+        self.assertEqual(again.completed_at, first.completed_at)
+
+    @patch('ramps.signals.emit_event')
+    @patch('ramps.signals.create_notification')
     def test_failed_koywe_off_ramp_conversion_marks_ramp_and_withdrawal_failed(self, *_):
         conversion = Conversion.objects.create(
             actor_user=self.user,

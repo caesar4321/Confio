@@ -116,8 +116,10 @@ def deposit_volume_and_count() -> tuple[Decimal, int]:
     return sum((dollars for _, dollars, _ in rows), Decimal(0)), sum(n for _, _, n in rows)
 
 
-def withdrawn_volume_and_count() -> tuple[Decimal, int]:
-    """Dollars that left customer wallets for a completed local payout.
+def _withdrawal_sources():
+    """(queryset, dollar field, country field, user field, completed field)
+    for every withdrawal source. Shared by the total, the per-country counts
+    and the timing so all three describe the same set of withdrawals.
 
     Legacy ramps count their actual (never quoted) USDC/USDT amount; journeys
     count the dollar-denominated source of a succeeded payout. A payout whose
@@ -135,13 +137,95 @@ def withdrawn_volume_and_count() -> tuple[Decimal, int]:
         direction='off_ramp', status='COMPLETED', provider__in=LEGACY_PROVIDERS,
         crypto_amount_actual__gt=0,
     ).exclude(pk__in=_journey_mirrors())
-    row = legacy.aggregate(total=Sum('crypto_amount_actual'), n=Count('id'))
-    total, count = row['total'] or Decimal(0), row['n']
+    sources = [(legacy, 'crypto_amount_actual', 'country_code', 'actor_user_id', 'completed_at')]
     for journey in (InfiniaJourney, CobreJourney):
-        row = journey.objects.filter(
+        sources.append((journey.objects.filter(
             direction='to_bank', stage='completed', money_flow__status='succeeded',
             money_flow__source_asset='USDT_BSC', money_flow__source_amount__gt=0,
-        ).aggregate(total=Sum('money_flow__source_amount'), n=Count('id'))
+        ), 'money_flow__source_amount', 'local_account__country',
+            'confio_account__user_id', 'money_flow__completed_at'))
+    return sources
+
+
+def withdrawn_volume_and_count() -> tuple[Decimal, int]:
+    """Dollars that left customer wallets for a completed local payout."""
+    total, count = Decimal(0), 0
+    for queryset, amount, *_ in _withdrawal_sources():
+        row = queryset.aggregate(total=Sum(amount), n=Count('pk'))
         total += row['total'] or Decimal(0)
         count += row['n']
     return total, count
+
+
+# Same privacy floor as the Usuarios-by-country screen: a country with fewer
+# people could let its operation count be traced to individuals.
+FLOW_COUNTRY_MIN_USERS = 5
+# A median of a handful of withdrawals is an anecdote, not a typical time.
+WITHDRAWAL_TIMING_MIN_SAMPLES = 10
+
+
+def _iso2(value):
+    from payment_accounts.providers.common import iso_alpha2
+    try:
+        code = iso_alpha2(value)
+    except (ValueError, LookupError):
+        return None
+    return None if code == 'XX' else code
+
+
+def fund_flow_breakdown() -> dict:
+    """Everything the public "Dinero en movimiento" screen shows, from the
+    same operation sets as the Home tile. Aggregates only: countries are
+    operation COUNTS (never dollars, which would expose large holders) and
+    appear only with FLOW_COUNTRY_MIN_USERS distinct people."""
+    from statistics import median
+
+    ops_by_country, users_by_country = {}, {}
+    first_at = None
+
+    def record(country, user_id, created_at):
+        nonlocal first_at
+        if created_at is not None and (first_at is None or created_at < first_at):
+            first_at = created_at
+        code = _iso2(country)
+        if code is None:
+            return
+        ops_by_country[code] = ops_by_country.get(code, 0) + 1
+        if user_id is not None:
+            users_by_country.setdefault(code, set()).add(user_id)
+
+    deposits = []
+    for queryset, amount, _ in _deposit_sources():
+        delivered = queryset.annotate(_delivered=ExpressionWrapper(amount, output_field=DOLLARS)).filter(_delivered__gt=0)
+        if queryset.model.__name__ == 'RampTransaction':
+            fields = ('_delivered', 'country_code', 'actor_user_id', 'created_at')
+        else:
+            fields = ('_delivered', 'local_account__country', 'confio_account__user_id', 'created_at')
+        deposits += list(delivered.values_list(*fields))
+    for dollars, country, user_id, created_at in deposits:
+        record(country, user_id, created_at)
+
+    withdrawals = []
+    for queryset, amount, country, user, completed in _withdrawal_sources():
+        withdrawals += list(queryset.values_list(amount, country, user, 'created_at', completed))
+    minutes = []
+    for dollars, country, user_id, created_at, completed_at in withdrawals:
+        record(country, user_id, created_at)
+        if created_at and completed_at and completed_at >= created_at:
+            minutes.append((completed_at - created_at).total_seconds() / 60)
+
+    countries = sorted(
+        ((code, n) for code, n in ops_by_country.items()
+         if len(users_by_country.get(code, ())) >= FLOW_COUNTRY_MIN_USERS),
+        key=lambda row: (-row[1], row[0]),
+    )
+    return {
+        'deposited_usd': sum((row[0] for row in deposits), Decimal(0)),
+        'deposit_count': len(deposits),
+        'withdrawn_usd': sum((row[0] for row in withdrawals), Decimal(0)),
+        'withdrawal_count': len(withdrawals),
+        'median_withdrawal_minutes': median(minutes) if len(minutes) >= WITHDRAWAL_TIMING_MIN_SAMPLES else None,
+        'withdrawal_timing_samples': len(minutes),
+        'countries': countries,
+        'since': first_at,
+    }

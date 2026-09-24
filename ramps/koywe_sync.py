@@ -512,6 +512,12 @@ def upsert_koywe_ramp_transaction(
             external_id=external_id,
         ).order_by('created_at').first()
 
+    # First observed completion wins: re-syncing an already-completed order
+    # must not move completed_at to "now" — it is the payout time the public
+    # withdrawal-speed median (ramps/metrics.py) is measured from.
+    if ramp_status == 'COMPLETED' and existing is not None and existing.completed_at:
+        completed_at = existing.completed_at
+
     merged_metadata = _merge_koywe_metadata(
         existing_metadata=(existing.metadata if existing else None),
         payment_method_code=payment_method_code,

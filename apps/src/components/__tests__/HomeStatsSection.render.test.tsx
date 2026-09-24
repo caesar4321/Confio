@@ -16,6 +16,7 @@ const mockRefetch = jest.fn(() => Promise.resolve());
 const mockRemoveAppStateListener = jest.fn();
 const mockFlow = {totalUsd: 176000, operationCount: 337};
 const mockFlowRefetch = jest.fn(() => Promise.resolve());
+let mockStocksEnabled = true;
 let mockStockTile: {assetCount: number | null; investedUsd: number | null} | null = {assetCount: 458, investedUsd: null};
 const mockUseQuery = jest.fn(
   (query: any, _options: any): any => {
@@ -63,7 +64,7 @@ const tileLabels = (root: ReactTestInstance): string[] => {
 const render = (): ReactTestRenderer => {
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = renderer.create(<HomeStatsSection />);
+    tree = renderer.create(<HomeStatsSection stocksEnabled={mockStocksEnabled} />);
   });
   return tree;
 };
@@ -97,6 +98,13 @@ describe('HomeStatsSection layout', () => {
     expect(tree.root.findAll(n => n.props?.horizontal === true)).toHaveLength(0);
   });
 
+  it('hides Acciones until the portfolio confirms stocks, even with the count loaded', () => {
+    mockStocksEnabled = false;
+    const labels = tileLabels(render().root);
+    expect(labels.map(l => l.split(':')[0])).toEqual(['Usuarios', 'Ahorros', 'Movido', 'Preventa']);
+    mockStocksEnabled = true;
+  });
+
   it('drops Acciones (back to 2x2) for users outside stock eligibility', () => {
     mockStockTile = null;
     const labels = tileLabels(render().root);
@@ -112,14 +120,15 @@ describe('HomeStatsSection layout', () => {
     mockStockTile = {assetCount: 458, investedUsd: null};
   });
 
-  it('shows money moved both ways as a read-only stat', () => {
+  it('shows money moved both ways and opens its breakdown', () => {
     const root = render().root;
     const movido = tileLabels(root)[2];
     expect(movido).toContain('176.000 USD');
     expect(movido).toContain('337 depósitos y retiros');
     const node = root.findAll(n => n.props?.accessibilityLabel === movido)[0];
-    expect(node.props.accessibilityRole).toBe('text');
-    expect(node.props.disabled).toBe(true);
+    expect(node.props.accessibilityRole).toBe('button');
+    node.props.onPress();
+    expect(mockNavigate).toHaveBeenCalledWith('FundFlow');
   });
 
   it('formats values with the locale separator', () => {

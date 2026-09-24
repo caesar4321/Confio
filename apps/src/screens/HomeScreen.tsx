@@ -1438,7 +1438,10 @@ export const HomeScreen = () => {
         )}
 
         {/* Crecimiento Confío stats */}
-        <HomeStatsSection refreshNonce={statsRefreshNonce} />
+        <HomeStatsSection
+          refreshNonce={statsRefreshNonce}
+          stocksEnabled={savingsPortfolio.stocks.enabled}
+        />
 
         {/* Wallets Section */}
         <View style={styles.walletsSection}>

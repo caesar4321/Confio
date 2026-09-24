@@ -1562,6 +1562,12 @@ class LandingStatsType(graphene.ObjectType):
     registered_users = graphene.Int()
 
 
+class FundFlowCountryType(graphene.ObjectType):
+    country_iso = graphene.String(required=True)
+    country_name = graphene.String(required=True)
+    operation_count = graphene.Int(required=True)
+
+
 class FundFlowStatsType(graphene.ObjectType):
     """All-time money moved through Confío: deposits delivered to wallets
     plus withdrawals paid out locally, each counted once (ramps/metrics.py).
@@ -1570,6 +1576,27 @@ class FundFlowStatsType(graphene.ObjectType):
     withdrawn_usd = graphene.Float()
     total_usd = graphene.Float()
     operation_count = graphene.Int(description='Deposits plus withdrawals')
+    deposit_count = graphene.Int()
+    withdrawal_count = graphene.Int()
+    median_withdrawal_minutes = graphene.Float(
+        description='Median request-to-payout time; null below the sample floor, never a guess',
+    )
+    withdrawal_timing_samples = graphene.Int()
+    since = graphene.DateTime(description='First counted operation')
+    countries = graphene.List(
+        graphene.NonNull(FundFlowCountryType),
+        description='Operation counts (never dollars) for countries with at least 5 people',
+    )
+
+
+def _fund_flow_type(data):
+    """Cached dict -> GraphQL objects. Module-level on purpose: in graphene
+    the resolver's `self` is the root value (None), not the Query instance."""
+    from django.utils.dateparse import parse_datetime
+    values = dict(data)
+    values['since'] = parse_datetime(values['since']) if values.get('since') else None
+    values['countries'] = [FundFlowCountryType(**c) for c in values.get('countries', [])]
+    return FundFlowStatsType(**values)
 
 
 class Query(graphene.ObjectType):
@@ -1585,23 +1612,37 @@ class Query(graphene.ObjectType):
     def resolve_fund_flow_stats(self, info):
         from django.core.cache import cache
 
-        cached = cache.get('fund_flow_stats_v1')
+        cached = cache.get('fund_flow_stats_v2')
         if cached:
-            return FundFlowStatsType(**cached)
+            return _fund_flow_type(cached)
 
-        from ramps.metrics import deposit_volume_and_count, withdrawn_volume_and_count
-        # Each (volume, count) pair comes from the same queries, so the tile's
-        # "US$X · N depósitos y retiros" can't disagree with itself.
-        deposited, deposits = deposit_volume_and_count()
-        withdrawn, withdrawals = withdrawn_volume_and_count()
+        from ramps.metrics import fund_flow_breakdown
+        from users.country_codes import COUNTRY_CODES
+        from users.country_names_es import COUNTRY_NAMES_ES
+        # One snapshot for the tile and the screen: the total, the split, the
+        # countries and the timing all come from the same operation sets.
+        flow = fund_flow_breakdown()
+        iso_to_en = {row[2]: row[0] for row in COUNTRY_CODES}
         data = {
-            'deposited_usd': float(deposited),
-            'withdrawn_usd': float(withdrawn),
-            'total_usd': float(deposited + withdrawn),
-            'operation_count': deposits + withdrawals,
+            'deposited_usd': float(flow['deposited_usd']),
+            'withdrawn_usd': float(flow['withdrawn_usd']),
+            'total_usd': float(flow['deposited_usd'] + flow['withdrawn_usd']),
+            'deposit_count': flow['deposit_count'],
+            'withdrawal_count': flow['withdrawal_count'],
+            'operation_count': flow['deposit_count'] + flow['withdrawal_count'],
+            'median_withdrawal_minutes': flow['median_withdrawal_minutes'],
+            'withdrawal_timing_samples': flow['withdrawal_timing_samples'],
+            'since': flow['since'].isoformat() if flow['since'] else None,
+            'countries': [
+                {'country_iso': code,
+                 'country_name': COUNTRY_NAMES_ES.get(code) or iso_to_en.get(code) or code,
+                 'operation_count': n}
+                for code, n in flow['countries']
+            ],
         }
-        cache.set('fund_flow_stats_v1', data, 600)
-        return FundFlowStatsType(**data)
+        cache.set('fund_flow_stats_v2', data, 600)
+        return _fund_flow_type(data)
+
 
     def resolve_landing_stats(self, info):
         from django.core.cache import cache
