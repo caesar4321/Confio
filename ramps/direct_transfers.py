@@ -100,21 +100,42 @@ def _historical_actor_addresses() -> list[str]:
     """Wallets that ever acted AS a Confío account in our own records. Not
     every replacement path records the old address (legacy
     UpdateAccountAlgorandAddress overwrites it), so the history is the only
-    complete registry of former Confío wallets."""
+    complete registry of former Confío wallets.
+
+    Deliberately over-inclusive: marking an address internal can only make
+    the public metric smaller, never larger. Sources: the unified ledger's
+    non-external sides (sends, payments, payroll, conversions, ramps…), every
+    table that snapshots a Confío actor's wallet, and Confío's own vaults.
+    """
     from conversion.models import Conversion
+    from humanitarian.models import HumanitarianCampaign, HumanitarianDonation, HumanitarianRelease
+    from payments.models import PaymentTransaction
+    from payroll.models import PayrollItem
+    from presale.models import PresalePurchase
     from ramps.models import RampTransaction
     from send.models import SendTransaction
     from usdc_transactions.models import USDCDeposit, USDCWithdrawal
+    from users.models_unified import UnifiedTransactionTable
+
+    def column(queryset, field):
+        return list(queryset.exclude(**{field: ''}).exclude(**{f'{field}__isnull': True})
+                    .values_list(field, flat=True).distinct())
 
     found = []
     for model in (USDCDeposit, USDCWithdrawal, RampTransaction, Conversion):
-        found += model.objects.exclude(actor_address='').exclude(actor_address__isnull=True) \
-            .values_list('actor_address', flat=True).distinct()
-    found += SendTransaction.all_objects.exclude(sender_type='external') \
-        .values_list('sender_address', flat=True).distinct()
-    found += SendTransaction.all_objects.exclude(recipient_type='external') \
-        .values_list('recipient_address', flat=True).distinct()
-    return [a for a in found if a]
+        found += column(model.objects.all(), 'actor_address')
+    found += column(SendTransaction.all_objects.exclude(sender_type='external'), 'sender_address')
+    found += column(SendTransaction.all_objects.exclude(recipient_type='external'), 'recipient_address')
+    found += column(UnifiedTransactionTable.objects.exclude(sender_type='external'), 'sender_address')
+    found += column(UnifiedTransactionTable.objects.exclude(counterparty_type='external'), 'counterparty_address')
+    found += column(PaymentTransaction.all_objects.all(), 'payer_address')
+    found += column(PaymentTransaction.all_objects.all(), 'merchant_address')
+    found += column(PayrollItem.all_objects.all(), 'recipient_address')
+    found += column(HumanitarianCampaign.objects.all(), 'vault_address')
+    found += column(HumanitarianDonation.objects.all(), 'from_address')
+    found += column(HumanitarianRelease.objects.all(), 'recipient_address')
+    found += column(PresalePurchase.objects.all(), 'from_address')
+    return found
 
 
 def internal_algorand_addresses() -> set[str]:

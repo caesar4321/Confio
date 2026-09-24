@@ -473,6 +473,17 @@ class DirectTransferProofTests(TestCase):
         indexer = self.indexer(self.tx('TX1', self.other_confio, self.wallet, 40_000_000))
         self.assertEqual(self.run_verify(indexer).get('internal_counterparty'), 1)
 
+    def test_wallet_known_only_from_payment_history_is_internal(self):
+        from users.models import Account
+        Account.all_objects.filter(algorand_address=self.other_confio).update(algorand_address='R' * 58)  # replaced, unrecorded
+        self.deposit(source=self.other_confio)
+        indexer = self.indexer(self.tx('TX1', self.other_confio, self.wallet, 40_000_000))
+        # Its only surviving trace is a payment (building a real invoice is out of scope here).
+        with mock.patch('payments.models.PaymentTransaction.all_objects') as payments:
+            chain = payments.all.return_value.exclude.return_value.exclude.return_value
+            chain.values_list.return_value.distinct.return_value = [self.other_confio]
+            self.assertEqual(self.run_verify(indexer).get('internal_counterparty'), 1)
+
     def test_command_clears_the_public_cache_on_revocation_only_runs(self):
         from django.core.cache import cache
         from django.core.management import call_command
