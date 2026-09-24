@@ -17,7 +17,11 @@ type Props = {
 /** Reactions under a post, the same on Descubrir, Mensajes and the detail screen. */
 export function ReactionBar({ reactions = [], viewerReaction, canReact = true, onReact, limit = 3 }: Props) {
   const [pickerOpen, setPickerOpen] = React.useState(false);
-  const shown = reactions.slice(0, limit);
+  // The viewer's own reaction always stays visible: if it ranks below the
+  // cut, it takes the last slot so the bar still shows what they picked.
+  const top = reactions.slice(0, limit);
+  const own = viewerReaction ? reactions.find((reaction) => reaction.emoji === viewerReaction) : undefined;
+  const shown = own && !top.includes(own) ? [...top.slice(0, Math.max(limit - 1, 0)), own] : top;
   if (!shown.length && !canReact) return null;
 
   return (

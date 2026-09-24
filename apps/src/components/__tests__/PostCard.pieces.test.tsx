@@ -69,6 +69,19 @@ describe('ReactionBar', () => {
     expect(tree.root.findAll((n) => n.type === Pressable && n.props.accessibilityLabel === 'Reaccionar con 😍')).toHaveLength(0);
   });
 
+  it('keeps the viewer’s reaction visible even when it ranks below the top three', () => {
+    const tree = mount(
+      <ReactionBar
+        reactions={[{ emoji: '🔥', count: 10 }, { emoji: '🙌', count: 8 }, { emoji: '😍', count: 5 }, { emoji: '❤️', count: 1 }]}
+        viewerReaction="❤️"
+        onReact={jest.fn()}
+      />,
+    );
+    const chips = tree.root.findAll((n) => n.type === Pressable && /^Reaccionar con .+, \d+ reacci/.test(n.props.accessibilityLabel || ''));
+    expect(chips.map((c) => c.props.accessibilityLabel.split(' ')[2].replace(',', ''))).toEqual(['🔥', '🙌', '❤️']);
+    expect(chips[2].props.accessibilityState).toEqual({ selected: true });
+  });
+
   it('renders nothing when there are no reactions and reacting is off', () => {
     const tree = mount(<ReactionBar reactions={[]} canReact={false} onReact={jest.fn()} />);
     expect(tree.toJSON()).toBeNull();
