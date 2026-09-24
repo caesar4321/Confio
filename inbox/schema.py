@@ -14,6 +14,7 @@ from users.models import Account, Business
 from security.s3_utils import build_s3_key, generate_presigned_post, public_s3_url
 
 from .models import (
+    AvatarType,
     Channel,
     ChannelKind,
     ChannelScope,
@@ -293,6 +294,11 @@ class DiscoverFeedItemType(graphene.ObjectType):
     source_name = graphene.String(required=True)
     source_section = graphene.String(required=True)
     is_official = graphene.Boolean(required=True)
+    # Byline: the channel's uploaded logo/photo, else its emoji; the app
+    # falls back to an initial when both are empty.
+    source_avatar_url = graphene.String()
+    source_avatar_emoji = graphene.String()
+    published_at = graphene.DateTime()
 
 
 class DiscoverFeedPageType(graphene.ObjectType):
@@ -500,6 +506,9 @@ def build_discover_feed_item_payload(item: ContentItem, user, account, business,
         source_name=item.channel.title or '',
         source_section=DISCOVER_KIND_SECTION.get(item.channel.kind, 'confio'),
         is_official=item.channel_id in official_ids and item.owner_type != OwnerType.USER,
+        source_avatar_url=item.channel.avatar_value if item.channel.avatar_type == AvatarType.IMAGE_URL else None,
+        source_avatar_emoji=item.channel.avatar_value if item.channel.avatar_type == AvatarType.EMOJI else None,
+        published_at=item.published_at or item.created_at,
     )
 
 

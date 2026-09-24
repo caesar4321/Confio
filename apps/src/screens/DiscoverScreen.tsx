@@ -1,5 +1,5 @@
 import type { ContentPollData } from '../components/ContentPoll';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { colors } from '../config/theme';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -9,7 +9,7 @@ import { NetworkStatus, useApolloClient, useMutation, useQuery } from '@apollo/c
 import { DISCOVER_SECTIONS, DiscoverFeed, DiscoverItem, DiscoverSectionKey } from '../components/DiscoverFeed';
 import { OfferCardSkeleton } from '../components/SkeletonLoader';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
-import { GET_DISCOVER_FEED, GET_DISCOVER_FEED_SECTIONED } from '../apollo/queries';
+import { GET_DISCOVER_FEED, GET_DISCOVER_FEED_CARDS, GET_DISCOVER_FEED_SECTIONED } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 
@@ -34,11 +34,23 @@ type DiscoverFeedDto = {
   canReact?: boolean | null;
   sourceName?: string | null;
   isOfficial?: boolean | null;
+  sourceAvatarUrl?: string | null;
+  sourceAvatarEmoji?: string | null;
 };
 
 // A server with the earlier publisher-type sections rejects our keys this way:
 // an older server, not an outage.
 const OLD_SECTIONS_SERVER = /Unknown Discover section/i;
+
+// Newest first. A server that rejects a document's shape (it predates a field
+// or a section key) steps the screen down one rung; the legacy feed has no
+// sections, so no chips.
+const FEED_TIERS = [
+  { document: GET_DISCOVER_FEED_CARDS, sectioned: true },
+  { document: GET_DISCOVER_FEED_SECTIONED, sectioned: true },
+  { document: GET_DISCOVER_FEED, sectioned: false },
+] as const;
+const LAST_TIER = FEED_TIERS.length - 1;
 
 export const DiscoverScreen = () => {
   const navigation = useNavigation<Navigation>();
@@ -49,23 +61,21 @@ export const DiscoverScreen = () => {
   // mixed and community feeds are one tap away.
   const [section, setSection] = useState<DiscoverSectionKey>('official');
 
-  const sectioned = useQuery(GET_DISCOVER_FEED_SECTIONED, {
-    variables: { offset: 0, limit: PAGE_SIZE, section },
+  const [tier, setTier] = useState(0);
+  const feedTier = FEED_TIERS[tier];
+  const legacyServer = !feedTier.sectioned;
+  const feedDocument = feedTier.document;
+  const feedVariables = feedTier.sectioned ? { section } : {};
+  const { data, refetch, updateQuery, networkStatus, loading, error: feedError } = useQuery(feedDocument, {
+    variables: { offset: 0, limit: PAGE_SIZE, ...feedVariables },
     fetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
   });
-  const legacyServer = isSchemaMismatch(sectioned.error, OLD_SECTIONS_SERVER);
-  const legacy = useQuery(GET_DISCOVER_FEED, {
-    variables: { offset: 0, limit: PAGE_SIZE },
-    fetchPolicy: 'network-only',
-    notifyOnNetworkStatusChange: true,
-    skip: !legacyServer,
-  });
-  const feedDocument = legacyServer ? GET_DISCOVER_FEED : GET_DISCOVER_FEED_SECTIONED;
-  const feedVariables = legacyServer ? {} : { section };
-  const { data, refetch, updateQuery, networkStatus } = legacyServer ? legacy : sectioned;
-  const loading = legacyServer ? legacy.loading : sectioned.loading;
-  const feedError = legacyServer ? legacy.error : sectioned.error;
+  // Stepping down is not a failure: the next rung is already on its way.
+  const steppingDown = tier < LAST_TIER && isSchemaMismatch(feedError, OLD_SECTIONS_SERVER);
+  useEffect(() => {
+    if (steppingDown) setTier((current) => Math.min(current + 1, LAST_TIER));
+  }, [steppingDown]);
 
   const items = useMemo<DiscoverItem[]>(() => {
     return (data?.discoverFeed?.items || []).map((item: DiscoverFeedDto) => ({
@@ -85,12 +95,14 @@ export const DiscoverScreen = () => {
       canReact: item.canReact ?? true,
       sourceName: item.sourceName || undefined,
       isOfficial: Boolean(item.isOfficial),
+      sourceAvatarUrl: item.sourceAvatarUrl || null,
+      sourceAvatarEmoji: item.sourceAvatarEmoji || null,
     }));
   }, [data]);
 
   // "Couldn't load" must never read as "nothing here". Apollo keeps the last
   // good data when a refresh fails, so key off the error, not missing data.
-  const loadFailed = !loading && Boolean(feedError) && items.length === 0;
+  const loadFailed = !loading && !steppingDown && Boolean(feedError) && items.length === 0;
 
   // Every list replacement (section switch, refresh) starts a new generation.
   // A next page merges only into the generation it was requested from, so a
@@ -193,7 +205,7 @@ export const DiscoverScreen = () => {
 
   // With chips on screen, a section switch keeps them and spins in the list;
   // the full skeleton is only for the chipless legacy feed.
-  const waitingForItems = loading && items.length === 0;
+  const waitingForItems = (loading || steppingDown) && items.length === 0;
   if (waitingForItems && legacyServer) {
     return (
       <View style={{ flex: 1, paddingTop: 12 }}>

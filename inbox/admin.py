@@ -7,8 +7,12 @@ from django.utils import timezone
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from datetime import datetime, timedelta
+from django.conf import settings
+
+from security.s3_utils import build_s3_key, upload_object
 
 from .models import (
+    AvatarType,
     Channel,
     ChannelMembership,
     ContentItem,
@@ -203,6 +207,7 @@ class ContentItemInline(admin.TabularInline):
     ordering = ('-published_at', '-created_at')
 
 
+
 OFFICIAL_STATUS_DISPLAY = {
     OFFICIAL: ('#16A34A', 'Oficial'),
     OWNER_NOT_VERIFIED: ('#D97706', 'Concedido · KYB del negocio no verificado'),
@@ -211,7 +216,16 @@ OFFICIAL_STATUS_DISPLAY = {
 }
 
 
+CHANNEL_AVATAR_MAX_BYTES = 2 * 1024 * 1024
+CHANNEL_AVATAR_CONTENT_TYPES = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
+
+
 class ChannelAdminForm(forms.ModelForm):
+    avatar_upload = forms.ImageField(
+        required=False,
+        label='Subir logo o foto',
+        help_text='JPG, PNG o WEBP, cuadrada, hasta 2 MB. Reemplaza el avatar del canal en Descubrir.',
+    )
     grant_official = forms.BooleanField(
         required=False,
         label='Oficial',
@@ -230,6 +244,20 @@ class ChannelAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['grant_official'].initial = bool(self.instance.pk and self.instance.official_granted_at)
+
+    def clean_avatar_upload(self):
+        upload = self.cleaned_data.get('avatar_upload')
+        if not upload:
+            return upload
+        if upload.size > CHANNEL_AVATAR_MAX_BYTES:
+            raise forms.ValidationError('La imagen supera 2 MB.')
+        # ImageField already opened it with Pillow; trust the decoded format,
+        # not the client-sent content type or extension.
+        image_format = getattr(getattr(upload, 'image', None), 'format', None)
+        if image_format not in CHANNEL_AVATAR_CONTENT_TYPES:
+            raise forms.ValidationError('Usa una imagen JPG, PNG o WEBP.')
+        upload.confio_content_type = CHANNEL_AVATAR_CONTENT_TYPES[image_format]
+        return upload
 
     def clean(self):
         cleaned = super().clean()
@@ -260,6 +288,24 @@ class ChannelAdmin(admin.ModelAdmin):
     actions = ('revoke_official',)
 
     def save_model(self, request, obj, form, change):
+        upload = form.cleaned_data.get('avatar_upload')
+        if upload:
+            content_type = upload.confio_content_type
+            extension = {'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp'}[content_type]
+            upload.seek(0)
+            obj.avatar_value = upload_object(
+                # Under the publications prefix: the same public-read path the
+                # app already loads publication images from.
+                key=build_s3_key(
+                    f"{settings.AWS_S3_PUBLICATIONS_PREFIX.rstrip('/')}/channel-avatars",
+                    f'avatar.{extension}',
+                ),
+                body=upload.read(),
+                content_type=content_type,
+                metadata={'uploaded-by': str(request.user.id), 'uploaded-for': 'channel-avatar'},
+                bucket=settings.AWS_PUBLICATIONS_BUCKET,
+            )
+            obj.avatar_type = AvatarType.IMAGE_URL
         granted = form.cleaned_data.get('grant_official')
         if granted and obj.official_granted_at is None:
             obj.official_granted_at = timezone.now()
@@ -268,6 +314,15 @@ class ChannelAdmin(admin.ModelAdmin):
             obj.official_granted_at = None
             obj.official_granted_by = None
         super().save_model(request, obj, form, change)
+
+    @admin.display(description='Avatar actual')
+    def avatar_preview(self, obj):
+        if obj.avatar_type == AvatarType.IMAGE_URL and obj.avatar_value:
+            return format_html(
+                '<img src="{}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;" alt="">',
+                obj.avatar_value,
+            )
+        return obj.avatar_value or '—'
 
     @admin.display(description='Oficial')
     def official_badge(self, obj):
@@ -318,7 +373,9 @@ class ChannelAdmin(admin.ModelAdmin):
     )
     search_fields = ('title', 'slug', 'subtitle', 'avatar_value')
     autocomplete_fields = ('owner_user', 'owner_business')
-    readonly_fields = ('created_at', 'updated_at', 'official_badge', 'official_granted_at', 'official_granted_by')
+    readonly_fields = (
+        'created_at', 'updated_at', 'official_badge', 'official_granted_at', 'official_granted_by', 'avatar_preview',
+    )
     ordering = ('sort_order', 'title')
     inlines = [ContentItemInline]
     fieldsets = (
@@ -355,6 +412,8 @@ class ChannelAdmin(admin.ModelAdmin):
             'Branding',
             {
                 'fields': (
+                    'avatar_preview',
+                    'avatar_upload',
                     'avatar_type',
                     'avatar_value',
                 )

@@ -9,7 +9,6 @@ import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
 
 export const tealGreen = colors.primary;
 export const tealLight = colors.primarySoft;
-export const messageReactionOptions = ['🔥', '🙌', '😍', '🤯', '💡', '😎', '💪', '👀', '😢', '❤️'] as const;
 
 export type MessageReactionSummary = {
   emoji: string;
@@ -46,6 +45,7 @@ export type TextMessage = {
   viewerReaction?: string | null;
   poll?: ContentPollData | null;
   canReact?: boolean;
+  title?: string;
   text: string;
   time: string;
   imageUrl?: string;

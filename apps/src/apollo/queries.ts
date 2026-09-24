@@ -3110,6 +3110,44 @@ export const GET_DISCOVER_FEED = gql`
 // Source-sectioned Descubrir. Kept apart from GET_DISCOVER_FEED until every
 // server has `section`/`sourceName`/`isOfficial`: one unknown field fails the
 // whole query, so the screen falls back to the legacy query on error.
+// Byline fields (channel avatar, publish date) on top of the sectioned feed.
+// Its own document so a server without them falls back to the sectioned one.
+export const GET_DISCOVER_FEED_CARDS = gql`
+  query GetDiscoverFeedCards($offset: Int, $limit: Int, $section: String) {
+    discoverFeed(offset: $offset, limit: $limit, section: $section) {
+      items {
+        id
+        type
+        tag
+        tagColor
+        title
+        body
+        time
+        thumbnail
+        platformLinks {
+          platform
+          url
+        }
+        imageUrl
+        poll { id question closed totalVotes viewerOptionId options { id label count } }
+        reactionSummary {
+          emoji
+          count
+        }
+        viewerReaction
+        canReact
+        sourceName
+        sourceSection
+        isOfficial
+        sourceAvatarUrl
+        sourceAvatarEmoji
+        publishedAt
+      }
+      hasMore
+    }
+  }
+`;
+
 export const GET_DISCOVER_FEED_SECTIONED = gql`
   query GetDiscoverFeedSectioned($offset: Int, $limit: Int, $section: String) {
     discoverFeed(offset: $offset, limit: $limit, section: $section) {
@@ -3145,6 +3183,19 @@ export const GET_DISCOVER_FEED_SECTIONED = gql`
 
 // Its own document: an older server without these fields fails only the
 // source line, never the post itself.
+export const GET_DISCOVER_POST_BYLINE = gql`
+  query GetDiscoverPostByline($contentItemId: ID!) {
+    discoverPost(contentItemId: $contentItemId) {
+      id
+      sourceName
+      isOfficial
+      sourceAvatarUrl
+      sourceAvatarEmoji
+      publishedAt
+    }
+  }
+`;
+
 export const GET_DISCOVER_POST_SOURCE = gql`
   query GetDiscoverPostSource($contentItemId: ID!) {
     discoverPost(contentItemId: $contentItemId) {
