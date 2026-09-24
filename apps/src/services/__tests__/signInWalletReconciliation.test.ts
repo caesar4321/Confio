@@ -2,6 +2,8 @@ jest.mock('../secureDeterministicWallet', () => ({ createMissingSignInWalletCand
 import { createMissingSignInWalletCandidate, getSignInWalletCandidate, reportBackupStatus } from '../secureDeterministicWallet';
 import { reconcileSignInWallet } from '../signInWalletReconciliation';
 import { WalletRecoveryError } from '../walletRecoveryErrors';
+import { GoogleDriveStorageError } from '../googleDriveStorage';
+import { GoogleDriveAccountMismatchError } from '../googleDriveAuthPolicy';
 
 const recover = getSignInWalletCandidate as jest.Mock;
 const candidate = () => ({ algorandAddress: 'new-algo', bscAddress: '0xnew',
@@ -31,6 +33,94 @@ function fixture(provider: 'google' | 'apple' = 'google') {
   return args;
 }
 beforeEach(() => { jest.clearAllMocks(); recover.mockReset(); });
+
+it('retries Drive recovery with fresh authorization before committing once', async () => {
+  const wallet = candidate();
+  recover.mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new GoogleDriveStorageError('list', 401))
+    .mockResolvedValueOnce(wallet);
+  const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-drive-token') };
+  expect(await reconcileSignInWallet(args)).toBe(true);
+  expect(args.reauthorizeGoogleDrive).toHaveBeenCalledWith('drive-token');
+  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-drive-token');
+  expect(wallet.persist).toHaveBeenCalledTimes(1);
+  expect(args.client.mutate.mock.calls.filter(([call]) => 'wallets' in call.variables)).toHaveLength(1);
+  expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+});
+
+it.each([401, 403])('stops after one refresh if Drive still rejects authorization (%i)', async status => {
+  const rejected = new GoogleDriveStorageError('download', status);
+  recover.mockResolvedValueOnce(null).mockRejectedValue(rejected);
+  const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-token') };
+  await expect(reconcileSignInWallet(args)).rejects.toBe(rejected);
+  expect(args.reauthorizeGoogleDrive).toHaveBeenCalledTimes(1);
+  expect(recover).toHaveBeenCalledTimes(3); // Local, original Drive, refreshed Drive.
+  expect(args.client.mutate).toHaveBeenCalledTimes(1);
+  expect(args.beforeWalletChange).not.toHaveBeenCalled();
+  expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+});
+
+it.each(['cancel', 'different-account'])('does not change wallets when reauthorization ends with %s', async outcome => {
+  recover.mockResolvedValueOnce(null).mockRejectedValueOnce(new GoogleDriveStorageError('list', 401));
+  const refresh = jest.fn();
+  if (outcome === 'cancel') refresh.mockResolvedValue(null);
+  else refresh.mockRejectedValue(new GoogleDriveAccountMismatchError());
+  const args = { ...fixture(), reauthorizeGoogleDrive: refresh };
+  await expect(reconcileSignInWallet(args)).rejects.toMatchObject({
+    name: outcome === 'cancel' ? 'GoogleDriveReauthorizationCancelledError' : 'GoogleDriveAccountMismatchError',
+  });
+  expect(recover).toHaveBeenCalledTimes(2);
+  expect(args.client.mutate).toHaveBeenCalledTimes(1);
+  expect(args.beforeWalletChange).not.toHaveBeenCalled();
+  expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+});
+
+it.each([[0, 'network_error'], [403, 'storageQuotaExceeded'], [403, 'domainPolicy'],
+  [403, 'userRateLimitExceeded'], [429, null], [500, null]] as const)(
+  'does not open reauthorization for Drive %s/%s', async (status, reason) => {
+    const rejected = new GoogleDriveStorageError('list', status, reason);
+    recover.mockResolvedValueOnce(null).mockRejectedValueOnce(rejected);
+    const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn() };
+    await expect(reconcileSignInWallet(args)).rejects.toBe(rejected);
+    expect(args.reauthorizeGoogleDrive).not.toHaveBeenCalled();
+    expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+  });
+
+it('restarts canonical discovery if legacy backup lookup rejects the token', async () => {
+  recover.mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new GoogleDriveStorageError('download', 401))
+    .mockResolvedValueOnce(candidate());
+  const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-token') };
+  expect(await reconcileSignInWallet(args)).toBe(true);
+  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token');
+  expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+});
+
+it('resumes an interrupted missing-backup upload through canonical discovery', async () => {
+  recover.mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockResolvedValueOnce(candidate());
+  (createMissingSignInWalletCandidate as jest.Mock).mockRejectedValueOnce(new GoogleDriveStorageError('upload', 401));
+  const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn().mockResolvedValue('fresh-token') };
+  expect(await reconcileSignInWallet(args)).toBe(true);
+  expect(createMissingSignInWalletCandidate).toHaveBeenCalledTimes(1);
+  expect(recover).toHaveBeenLastCalledWith('subject', 'fresh-token');
+});
+
+it('does not retry the registration commit through the cloud recovery wrapper', async () => {
+  recover.mockResolvedValueOnce(null).mockResolvedValueOnce(candidate());
+  const args = { ...fixture(), reauthorizeGoogleDrive: jest.fn() };
+  const original = args.client.mutate.getMockImplementation()!;
+  args.client.mutate.mockImplementation(call => {
+    if ('wallets' in call.variables) throw new GoogleDriveStorageError('synthetic', 401);
+    return original(call);
+  });
+  await expect(reconcileSignInWallet(args)).rejects.toThrow();
+  expect(args.reauthorizeGoogleDrive).not.toHaveBeenCalled();
+  expect(args.client.mutate.mock.calls.filter(([call]) => 'wallets' in call.variables)).toHaveLength(1);
+});
 
 it('Google activates the canonical Drive wallet without checking old funds', async () => {
   const local = candidate();
