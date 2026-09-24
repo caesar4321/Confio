@@ -12,7 +12,7 @@ from django.core.cache import cache
 
 from security.models import normalize_brazilian_cpf
 from ramps.koywe import RAMP_NETWORK_DISPLAY, RAMP_USDC_ALGORAND_NOTE
-from ramps.breb import payout_rail, validate_breb_key
+from ramps.breb import payout_rail, validate_breb_key, validate_koywe_breb_payout_amount
 
 logger = logging.getLogger(__name__)
 
@@ -366,7 +366,7 @@ class KoyweClient:
         cache.set(cache_key, token, timeout=60 * 45)
         return token
 
-    def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True, ambiguous_on_transport: bool = False) -> dict[str, Any]:
+    def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True, ambiguous_on_transport: bool = False, accepted_response_codes: tuple[str, ...] = ()) -> dict[str, Any]:
         headers = {'Content-Type': 'application/json'}
         normalized_email = str(email or '').strip() or None
         response = None
@@ -416,6 +416,13 @@ class KoyweClient:
                     'Koywe order creation returned an unresolved response after '
                     f'the POST (HTTP {status_code})'
                 )
+        if accepted_response_codes:
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and body.get('code') in accepted_response_codes:
+                return body
         return self._parse_response(response, f'Koywe request failed: {method} {path}')
 
     @staticmethod
@@ -459,6 +466,19 @@ class KoyweClient:
                 maximum=match.group('maximum'),
             )
         raise KoyweError(message)
+
+    def request_offramp_refund(self, *, order_id: str, destination_address: str,
+                               email: str | None = None) -> dict[str, Any]:
+        """Request return of an invalid payout's crypto to its original wallet.
+
+        A transport error is inconclusive: callers must reconcile the order
+        before retrying. Koywe deduplicates refunds by order (004/005).
+        """
+        return self._request(
+            'POST', f'/rest/orders/offramp/{quote(order_id, safe="")}/refund',
+            email=email, json_payload={'destinationAddress': destination_address},
+            accepted_response_codes=tuple(f'REFUND_{n:03d}' for n in range(8)),
+        )
 
     def list_payment_providers(self, *, fiat_symbol: str, email: str | None = None) -> list[dict[str, Any]]:
         data = self._request('GET', '/rest/payment-providers', email=email, params={'symbol': fiat_symbol})
@@ -504,6 +524,23 @@ class KoyweClient:
             payload['paymentMethodId'] = payment_method_id
         return self._request('POST', '/rest/quotes', email=email, json_payload=payload)
 
+    @staticmethod
+    def _validate_breb_payout_quote(*, direction, fiat_symbol, payment_method_code, quote, bank_info=None):
+        destination_method = (getattr(bank_info, 'ramp_payment_method', None)
+                              or getattr(bank_info, 'payment_method', None))
+        destination_code = str(getattr(destination_method, 'code', None)
+                               or getattr(destination_method, 'name', '')).strip().upper()
+        is_breb = (
+            str(payment_method_code or '').strip().upper() == 'BREB'
+            or destination_code == 'BREB'
+            or payout_rail(getattr(bank_info, 'provider_metadata', None)) == 'BREB'
+        )
+        if direction == 'OFF_RAMP' and str(fiat_symbol).upper() == 'COP' and is_breb:
+            try:
+                validate_koywe_breb_payout_amount(quote.get('amountOut'))
+            except ValueError as exc:
+                raise KoyweError(str(exc)) from exc
+
     def get_ramp_quote(
         self,
         *,
@@ -527,6 +564,10 @@ class KoyweClient:
             fiat_symbol=fiat_symbol,
             payment_method_id=payment_method_id,
             email=email,
+        )
+        self._validate_breb_payout_quote(
+            direction=normalized_direction, fiat_symbol=fiat_symbol,
+            payment_method_code=payment_method_code, quote=quote,
         )
         amount_in = Decimal(str(quote.get('amountIn') or amount))
         amount_out = Decimal(str(quote.get('amountOut') or 0))
@@ -763,6 +804,10 @@ class KoyweClient:
             fiat_symbol=fiat_symbol,
             payment_method_id=payment_method_id,
             email=email,
+        )
+        self._validate_breb_payout_quote(
+            direction=normalized_direction, fiat_symbol=fiat_symbol,
+            payment_method_code=payment_method_code, quote=quote, bank_info=bank_info,
         )
         quote_id = str(quote.get('quoteId') or quote.get('_id') or quote.get('id') or '')
         if not quote_id:

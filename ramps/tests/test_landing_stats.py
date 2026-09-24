@@ -9,7 +9,7 @@ from ramps.schema import Query
 class LandingStatsTests(SimpleTestCase):
     def tearDown(self):
         cache.delete('landing_stats_v3')
-        cache.delete('fund_flow_stats_v2')
+        cache.delete('fund_flow_stats_v3')
         cache.delete('stats_summary_v13')
 
     def test_cached_public_stats_include_registered_users(self):
@@ -39,7 +39,7 @@ class LandingStatsTests(SimpleTestCase):
 
     def test_fund_flow_stats_is_public_and_cached(self):
         from datetime import datetime, timezone as tz
-        cache.delete('fund_flow_stats_v2')
+        cache.delete('fund_flow_stats_v3')
         flow = {
             'deposited_usd': Decimal('100.5'), 'deposit_count': 3,
             'withdrawn_usd': Decimal('40'), 'withdrawal_count': 2,
@@ -66,7 +66,7 @@ class LandingStatsTests(SimpleTestCase):
     def test_fund_flow_stats_executes_through_the_schema_anonymously(self):
         from types import SimpleNamespace
         from config.schema import schema
-        cache.set('fund_flow_stats_v2', {
+        cache.set('fund_flow_stats_v3', {
             'deposited_usd': 1.0, 'withdrawn_usd': 2.0, 'total_usd': 3.0,
             'deposit_count': 1, 'withdrawal_count': 1, 'operation_count': 2,
             'median_withdrawal_minutes': None, 'withdrawal_timing_samples': 1,

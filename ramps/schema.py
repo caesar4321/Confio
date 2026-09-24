@@ -1569,8 +1569,9 @@ class FundFlowCountryType(graphene.ObjectType):
 
 
 class FundFlowStatsType(graphene.ObjectType):
-    """All-time money moved through Confío: deposits delivered to wallets
-    plus withdrawals paid out locally, each counted once (ramps/metrics.py).
+    """All-time money moved through Confío: fiat deposits delivered to
+    wallets, fiat withdrawals paid out locally, and direct crypto transfers
+    to/from outside wallets — each counted once (ramps/metrics.py).
     Cumulative on purpose — it never shrinks when a large holder leaves."""
     deposited_usd = graphene.Float()
     withdrawn_usd = graphene.Float()
@@ -1581,7 +1582,7 @@ class FundFlowStatsType(graphene.ObjectType):
     median_withdrawal_minutes = graphene.Float(
         description='Median request-to-payout time; null below the sample floor, never a guess',
     )
-    withdrawal_timing_samples = graphene.Int()
+    withdrawal_timing_samples = graphene.Int(description='Fiat payouts behind the median; excludes crypto transfers')
     since = graphene.DateTime(description='First counted operation')
     countries = graphene.List(
         graphene.NonNull(FundFlowCountryType),
@@ -1612,7 +1613,7 @@ class Query(graphene.ObjectType):
     def resolve_fund_flow_stats(self, info):
         from django.core.cache import cache
 
-        cached = cache.get('fund_flow_stats_v2')
+        cached = cache.get('fund_flow_stats_v3')
         if cached:
             return _fund_flow_type(cached)
 
@@ -1640,7 +1641,7 @@ class Query(graphene.ObjectType):
                 for code, n in flow['countries']
             ],
         }
-        cache.set('fund_flow_stats_v2', data, 600)
+        cache.set('fund_flow_stats_v3', data, 600)
         return _fund_flow_type(data)
 
 

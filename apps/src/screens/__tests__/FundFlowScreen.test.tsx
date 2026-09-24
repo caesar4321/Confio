@@ -73,7 +73,7 @@ describe('FundFlowScreen', () => {
     expect(t).toContain('78.887 USD');
     expect(t).toContain('62.822 USD');
     expect(t).toContain('La mitad de los retiros llegó en menos de 10 minutos');
-    expect(t).toContain('Mediana de 29 retiros');
+    expect(t).toContain('Mediana de 29 retiros a cuentas locales');
     expect(t).toContain('Brasil');
     expect(t).toContain('168');
     // Countries are counts, never dollars.
