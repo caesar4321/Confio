@@ -15,6 +15,7 @@ import { ResponsiveImage } from './ResponsiveImage';
 import { EmptyState } from './EmptyState';
 import { PostByline } from './PostByline';
 import { ReactionBar } from './ReactionBar';
+import { VerifiedBadge } from './VerifiedBadge';
 import { colors } from '../config/theme';
 
 
@@ -210,7 +211,11 @@ export function DiscoverFeed({
             accessibilityState={{ selected }}
           >
             {key === 'official' && (
-              <Icon name="check-circle" size={13} color={selected ? '#FFFFFF' : colors.primaryDeep} />
+              <VerifiedBadge
+                size={14}
+                color={selected ? '#FFFFFF' : colors.primaryDark}
+                checkColor={selected ? colors.dark : '#FFFFFF'}
+              />
             )}
             <Text style={[styles.sectionChipText, selected && styles.sectionChipTextActive]}>{label}</Text>
           </Pressable>

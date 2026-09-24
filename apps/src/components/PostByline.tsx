@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { VerifiedBadge } from './VerifiedBadge';
 
 const OFFICIAL_EXPLAINER =
   'Esta fuente es un canal de Confío o una organización cuya identidad legal y ' +
@@ -62,7 +62,7 @@ export function PostByline({ name, isOfficial = false, avatarUrl, avatarEmoji, m
               accessibilityRole="button"
               accessibilityLabel="Fuente oficial verificada por Confío. Toca para saber más."
             >
-              <Icon name="check-circle" size={detail ? 15 : 14} color={colors.primaryDark} />
+              <VerifiedBadge size={detail ? 17 : 16} />
             </Pressable>
           )}
         </View>
