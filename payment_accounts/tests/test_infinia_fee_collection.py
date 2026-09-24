@@ -148,6 +148,28 @@ class FeeCollectionTests(TestCase):
         with self.assertRaisesRegex(PaymentAccountError, 'different local destination'):
             self.quote(destination_id=uuid.uuid4())
 
+    @override_settings(INFINIA_LEGACY_PAYOUT_FEES_ENABLED=True)
+    def test_released_app_without_destination_freezes_fee_from_owned_estimate(self):
+        from payment_accounts.infinia_legacy_fees import remember
+        self.request_id = uuid.uuid4()
+        remember(self.owner, self.instruction, '10', self.dest)
+        plan = funding_plan(budget=10*WAD, fee=WAD, wallet_usdt=0, wallet_cusd=10*WAD, fee_bps=90)
+        with mock.patch('payment_accounts.local_money._active_pair', return_value=(self.local, self.crypto)), \
+             mock.patch('payment_accounts.local_money.require_current_destination'), \
+             mock.patch('payment_accounts.infinia_fee_funding.quote_funding', return_value=plan):
+            quoted = self.quote()  # exact old-client call: no destination_id
+        self.assertEqual(quoted.money_flow.metadata['local_destination_id'], str(self.dest.internal_id))
+        self.assertEqual(quoted.money_flow.metadata['infinia_fee']['units'], str(WAD))
+        self.assertEqual(quoted.money_flow.source_amount, Decimal('10'))
+        from payment_accounts.infinia_legacy_fees import require_review, record_review
+        with self.assertRaises(PaymentAccountError):
+            require_review(quoted.money_flow)
+        record_review(quoted.money_flow, self.dest)
+        quoted.money_flow.refresh_from_db()
+        require_review(quoted.money_flow)
+        with mock.patch('payment_accounts.infinia_fee_policy.freeze', side_effect=AssertionError('repriced')):
+            self.assertEqual(self.quote().pk, quoted.pk)
+
     def test_small_deposit_collects_available_and_carries_residual_once(self):
         from payment_accounts.infinia_fee_debt import finalize_incoming, reconcile, quoted, reserve
         from payment_accounts.models import InfiniaFeeDebt, MoneyFlow

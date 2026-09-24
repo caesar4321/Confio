@@ -857,6 +857,9 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
                 or bridge.quote.source_token_id != 'BSC:USDT'
                 or bridge.quote.funding_instruction.financial_account_id != crypto.pk):
             raise PaymentAccountError('Este envío no corresponde a tu cuenta.')
+        frozen_destination = bridge.quote.money_flow.metadata.get('local_destination_id')
+        if frozen_destination and frozen_destination != str(destination.internal_id):
+            raise PaymentAccountError('Este envío no corresponde al destinatario. Solicita una nueva cotización.')
         source = (Decimal(int(bridge.amount_out_min)) / Decimal(10 ** 6)).quantize(USDC_UNIT, rounding=ROUND_DOWN)
         expected_source = (Decimal(int(bridge.amount_out)) / Decimal(10 ** 6)).quantize(USDC_UNIT, rounding=ROUND_DOWN)
         spend = bridge.quote.money_flow.source_amount
@@ -897,6 +900,12 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
     # blocking the send: target_amount is already priced off the minimum.
     expected_target = (target * expected_source / source).quantize(FIAT_CENT, rounding=ROUND_DOWN)
     cost = ((spend - expected_source) / spend * 100).quantize(FIAT_CENT, rounding=ROUND_UP)
+    if bridge is not None and bridge.quote.money_flow.metadata.get('legacy_fee_review_required'):
+        from .infinia_legacy_fees import record_review
+        record_review(bridge.quote.money_flow, destination)
+    if bridge is None and (fee or getattr(settings, 'INFINIA_LEGACY_PAYOUT_FEES_ENABLED', False)):
+        from .infinia_legacy_fees import remember
+        remember(owner, instruction, total, destination)
     return {'source_amount': source, 'target_amount': target, 'minimum_target': minimum,
             'expected_source_amount': expected_source, 'expected_target': expected_target,
             'total_cost_percent': cost,

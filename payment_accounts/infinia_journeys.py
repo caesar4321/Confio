@@ -120,7 +120,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     fee = None
     if direction == 'to_bank':
         fee = bridge.quote.money_flow.metadata.get('infinia_fee')
-        if fee or fee_enabled(local_account.country):
+        from .infinia_legacy_fees import predates_rollout
+        if fee or (fee_enabled(local_account.country) and not predates_rollout(bridge.quote)):
             if (not fee or fee['local_account_id'] != str(local_account.internal_id)
                     or bridge.quote.money_flow.metadata.get('local_destination_id') != str(destination.internal_id)):
                 raise PaymentAccountError('Solicita una nueva cotización para incluir los costos del envío.')
