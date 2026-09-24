@@ -14,12 +14,12 @@ const statsSummary = {
 const mockNavigate = jest.fn();
 const mockRefetch = jest.fn(() => Promise.resolve());
 const mockRemoveAppStateListener = jest.fn();
-const mockAssets = [{ticker: 'SPY'}, {ticker: 'AAPL'}, {ticker: 'GLD'}];
-const mockAssetRefetch = jest.fn(() => Promise.resolve());
+let mockStockTile: {assetCount: number | null; investedUsd: number | null} = {assetCount: 3, investedUsd: null};
+const mockStockTileRefetch = jest.fn(() => Promise.resolve());
 const mockUseQuery = jest.fn(
   (query: any, _options: any): any => (
-    String(query).includes('GmAssetCount')
-      ? {data: {gmMarket: {assets: mockAssets}}, refetch: mockAssetRefetch}
+    String(query).includes('GmHomeTile')
+      ? {data: {gmHomeTile: mockStockTile}, refetch: mockStockTileRefetch}
       : {data: {statsSummary}, refetch: mockRefetch}
   ),
 );
@@ -136,6 +136,22 @@ describe('HomeStatsSection layout', () => {
     expect(acciones).not.toContain('4.321');
     root.findByProps({accessibilityLabel: acciones}).props.onPress();
     expect(mockNavigate).toHaveBeenCalledWith('StocksList');
+  });
+
+  it('shows the invested total once the server says it is meaningful', () => {
+    mockStockTile = {assetCount: 3, investedUsd: 25000};
+    const acciones = tileLabels(render(true).root)[2];
+    expect(acciones).toContain('USD');
+    expect(acciones).toContain('Invertido en EE.UU.');
+    expect(acciones).not.toContain('Acciones: 3.');
+    mockStockTile = {assetCount: 3, investedUsd: null};
+  });
+
+  it('loads the stock tile in parallel and from cache, not behind showStocks', () => {
+    render(false);
+    const options = mockUseQuery.mock.calls.find(([q]) => String(q).includes('GmHomeTile'))?.[1];
+    expect(options.fetchPolicy).toBe('cache-and-network');
+    expect(options.skip).toBeUndefined();
   });
 
   it('refreshes marked-to-market stats on the server snapshot cadence', () => {

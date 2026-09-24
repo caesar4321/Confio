@@ -320,6 +320,13 @@ class GmHighlightsType(graphene.ObjectType):
     warnings = graphene.List(graphene.NonNull(GmAssetWarningType))
 
 
+class GmHomeTileType(graphene.ObjectType):
+    asset_count = graphene.Int(description="U.S. assets on offer (priced rows of the cached market)")
+    invested_usd = graphene.Float(
+        description="Marked-to-market total held by Confío users; null below GM_HOME_INVESTED_MIN_USD",
+    )
+
+
 class GmMarketType(graphene.ObjectType):
     session = graphene.String(description="core | extended | off-hours | closed")
     assets = graphene.List(graphene.NonNull(GmAssetType))
@@ -457,6 +464,10 @@ class Query(graphene.ObjectType):
     gm_holdings = graphene.List(
         graphene.NonNull(GmHoldingType),
         description="The JWT account's tokenized-stock positions (Multicall3 universe scan — chain is the registry)",
+    )
+    gm_home_tile = graphene.Field(
+        GmHomeTileType,
+        description="The Home stats tile for Acciones: invested total once it is meaningful, else assets on offer",
     )
     gm_highlights = graphene.Field(
         GmHighlightsType,
@@ -679,6 +690,35 @@ class Query(graphene.ObjectType):
             ))
         holdings.sort(key=lambda h: h.value_usd, reverse=True)
         return holdings
+
+    def resolve_gm_home_tile(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return None
+        if not _stock_surfaces_enabled(user, getattr(info.context, 'META', {})):
+            return None
+        from django.conf import settings
+        from . import gm_api, gm_tvl
+
+        try:
+            market = gm_api.all_market()
+        except Exception:
+            logging.getLogger(__name__).exception('gm_home_tile upstream failed')
+            market = None
+        asset_count = None if market is None else sum(
+            1 for item in market
+            if (item.get('primaryMarket') or {}).get('symbol')
+            and (item.get('primaryMarket') or {}).get('price') is not None
+        )
+        # An activity metric, not a reserve: shown only once it reads as
+        # traction (a US$60 total in the proof strip argued against the
+        # product). Reserves (Ahorros) are never gated like this.
+        invested = gm_tvl.value_usd()
+        threshold = float(getattr(settings, 'GM_HOME_INVESTED_MIN_USD', 10_000))
+        return GmHomeTileType(
+            asset_count=asset_count,
+            invested_usd=invested if invested is not None and invested >= threshold else None,
+        )
 
     def resolve_gm_highlights(self, info):
         user = getattr(info.context, 'user', None)

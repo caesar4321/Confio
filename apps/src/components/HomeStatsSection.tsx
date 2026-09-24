@@ -16,15 +16,15 @@ import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 
-// Tickers only (~6 KB) — just enough to count the U.S. assets on offer.
-// Fetched no-cache on purpose: writing a tickers-only `assets` array into the
-// cache would replace the explorer's full market rows (no keyFields here).
-const GM_ASSET_COUNT = gql`
-  query GmAssetCount {
-    gmMarket {
-      assets {
-        ticker
-      }
+// Scalars only, so it is safe to cache (a tickers-only `gmMarket.assets`
+// write would replace the explorer's full rows) and cheap to serve: the
+// server counts from its cached market instead of shipping every asset.
+// Own query per the new-field rule: an older server fails only this tile.
+const GM_HOME_TILE = gql`
+  query GmHomeTile {
+    gmHomeTile {
+      assetCount
+      investedUsd
     }
   }
 `;
@@ -104,12 +104,17 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     nextFetchPolicy: 'network-only',
     pollInterval: 300_000, // follows the server's marked-to-market stock snapshot cadence
   });
-  const { data: assetCountData, refetch: refetchAssetCount } = useQuery(GM_ASSET_COUNT, {
-    skip: !showStocks,
-    fetchPolicy: 'no-cache',
+  // Not skipped on showStocks: that flag waits for the portfolio query, and
+  // chaining behind it made this the last tile to fill. Ineligible users get
+  // null from the server and the tile stays hidden. Cached, so a reopen
+  // paints the last value at once.
+  const { data: stockTileData, refetch: refetchStockTile } = useQuery(GM_HOME_TILE, {
+    fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
   });
-  const stockAssetCount: number | null = assetCountData?.gmMarket?.assets?.length ?? null;
+  const stockAssetCount: number | null = stockTileData?.gmHomeTile?.assetCount ?? null;
+  // Server-gated: non-null only once the invested total reads as traction.
+  const stockInvestedUsd: number | null = stockTileData?.gmHomeTile?.investedUsd ?? null;
   const previousRefreshNonce = useRef(refreshNonce);
   const previousAppState = useRef<AppStateStatus | null>(AppState.currentState);
 
@@ -117,10 +122,8 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     if (refreshNonce === previousRefreshNonce.current) return;
     previousRefreshNonce.current = refreshNonce;
     refetch().catch(() => {});
-    // The count is no-cache, so a failed first read stays "—" unless it is
-    // re-read on the same refreshes as the stats.
-    if (showStocks) refetchAssetCount().catch(() => {});
-  }, [refreshNonce, refetch, refetchAssetCount, showStocks]);
+    if (showStocks) refetchStockTile().catch(() => {});
+  }, [refreshNonce, refetch, refetchStockTile, showStocks]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -131,11 +134,11 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       previousAppState.current = nextState;
       if (returningToForeground) {
         refetch().catch(() => {});
-        if (showStocks) refetchAssetCount().catch(() => {});
+        if (showStocks) refetchStockTile().catch(() => {});
       }
     });
     return () => subscription.remove();
-  }, [refetch, refetchAssetCount, showStocks]);
+  }, [refetch, refetchStockTile, showStocks]);
 
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = currency.thousandsSeparator;
@@ -184,18 +187,29 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         descriptor: backingDescriptor,
         onPress: () => navigation.navigate('ProtectedSavings'),
       };
-      // What the network OFFERS, not what it holds: the invested total was
-      // tiny (US$60) and read as evidence against the product inside the
-      // proof strip. The asset count is just as verifiable and it invites.
-      // It opens the explorer — the "¿Cómo funciona?" page is one tap in.
-      const stocks: Tile = {
-        key: 'stocks',
-        icon: 'trending-up',
-        value: fmt(stockAssetCount),
-        label: 'Acciones',
-        descriptor: 'S&P 500, Apple, oro…',
-        onPress: () => navigation.navigate('StocksList'),
-      };
+      // What the network HOLDS once that reads as traction, else what it
+      // OFFERS: a US$60 invested total read as evidence against the product
+      // inside the proof strip. The server owns the threshold. This gating
+      // is for an activity metric only — Ahorros is a reserve figure and is
+      // always shown as-is, small or not. Opens the explorer either way.
+      const stocks: Tile = stockInvestedUsd != null
+        ? {
+          key: 'stocks',
+          icon: 'trending-up',
+          value: fmt(stockInvestedUsd),
+          unit: 'USD',
+          label: 'Acciones',
+          descriptor: 'Invertido en EE.UU.',
+          onPress: () => navigation.navigate('StocksList'),
+        }
+        : {
+          key: 'stocks',
+          icon: 'trending-up',
+          value: fmt(stockAssetCount),
+          label: 'Acciones',
+          descriptor: 'S&P 500, Apple, oro…',
+          onPress: () => navigation.navigate('StocksList'),
+        };
       const presale: Tile = {
         key: 'presale',
         icon: 'zap',
@@ -223,7 +237,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         ? [users, savings, stocks, presale]
         : [users, savings, presale];
     },
-    [s?.totalUsers, verified, tvl, backingDescriptor, stockAssetCount,
+    [s?.totalUsers, verified, tvl, backingDescriptor, stockAssetCount, stockInvestedUsd,
      s?.presaleCusdRaised, showStocks,
      thousandsSeparator, decimalSeparator, navigation]
   );
