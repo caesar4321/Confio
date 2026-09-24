@@ -57,9 +57,9 @@ export const DiscoverScreen = () => {
   const client = useApolloClient();
   const [reactToMessageContent] = useMutation(REACT_TO_MESSAGE_CONTENT);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
-  // Oficial first: Descubrir keeps its "news you can trust" footing, and the
-  // mixed and community feeds are one tap away.
-  const [section, setSection] = useState<DiscoverSectionKey>('official');
+  // Para ti first: everything, with verified sources marked by the Oficial
+  // check; the Oficial-only and community feeds are one tap away.
+  const [section, setSection] = useState<DiscoverSectionKey>('for_you');
 
   const [tier, setTier] = useState(0);
   const feedTier = FEED_TIERS[tier];

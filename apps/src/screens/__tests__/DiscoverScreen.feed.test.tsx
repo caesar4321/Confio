@@ -83,6 +83,11 @@ describe('DiscoverScreen feed', () => {
     mockLoadFailedHistory.length = 0;
   });
 
+  it('opens on Para ti', () => {
+    render();
+    expect(mockFeedProps.activeSection).toBe('for_you');
+  });
+
   it('steps down to the sectioned feed on a server without byline fields, without a failure flash', () => {
     const { ApolloError } = jest.requireActual('@apollo/client');
     const rejected = new ApolloError({
@@ -106,10 +111,10 @@ describe('DiscoverScreen feed', () => {
   it('drops a late page from an earlier visit to the same section', async () => {
     render();
     act(() => { mockFeedProps.onEndReached(); });
-    expect(mockClientQuery.mock.calls[0][0].variables).toMatchObject({ offset: 10, section: 'official' });
-    // Oficial → Comunidad → Oficial while page two is in flight.
+    expect(mockClientQuery.mock.calls[0][0].variables).toMatchObject({ offset: 10, section: 'for_you' });
+    // Para ti → Comunidad → Para ti while page two is in flight.
     act(() => mockFeedProps.onSelectSection('community'));
-    act(() => mockFeedProps.onSelectSection('official'));
+    act(() => mockFeedProps.onSelectSection('for_you'));
     await act(async () => { resolvePage({ data: page(21, 10) }); });
     expect(mockUpdateQuery).not.toHaveBeenCalled();
   });
