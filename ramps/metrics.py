@@ -173,11 +173,81 @@ def _iso2(value):
     return None if code == 'XX' else code
 
 
+def _direct_crypto_sources():
+    """Direct USDC transfers to/from outside wallets on Algorand (Sept 2025
+    onward) — deposits and withdrawals with NO ramp behind them — that have
+    ON-CHAIN PROOF (ramps.DirectTransferProof, written by the
+    verify_direct_transfers command after matching the Algorand indexer).
+
+    A COMPLETED USDCDeposit/USDCWithdrawal alone is not evidence (legacy
+    mutations completed client-supplied amounts), so unproven rows never
+    count. Proof creation already excludes transfers between Confío wallets
+    and Dollar+ bridge arrivals. Ramp-linked rows are counted by their ramp.
+    The 26 pre-mirror Guardarian purchases (Dec 2025 - Mar 2026) have no ramp
+    row and count here, once, as the USDC deposit they delivered.
+
+    BSC-era transfers are deliberately NOT included: external USDT sends mix
+    provider deliveries (one sender pays 20 people's Koywe deposits) with
+    personal transfers, and there is no reliable way to tell them apart yet.
+    """
+    from ramps.direct_transfers import PROOF_CUTOFF
+    from usdc_transactions.models import USDCDeposit, USDCWithdrawal
+
+    # Historical rows only (see ramps.direct_transfers.PROOF_CUTOFF): wallet
+    # ownership on these legacy rows is unverified, so nothing created after
+    # the metric went public can count, proof or not.
+    common = dict(status='COMPLETED', is_deleted=False, ramp_transaction__isnull=True,
+                  direct_proof__isnull=False, created_at__lt=PROOF_CUTOFF)
+    return (
+        USDCDeposit.objects.filter(**common),
+        USDCWithdrawal.objects.filter(**common),
+    )
+
+
+def _proof_still_valid_filter():
+    """Read-time guard, so attribution that lands AFTER a proof can never
+    double-count before verify_direct_transfers revokes it: a proof is
+    ignored when its hash became a Dollar+ bridge arrival, when its
+    counterparty turned out to be a Confío address (live, deleted, retired
+    or the sponsor), or when a ramp-linked row describes the same transfer
+    (same wallet, counterparty and amount, within the proof window).
+    Database-only; no indexer."""
+    from conversion.models import Conversion
+    from ramps.direct_transfers import PROOF_WINDOW, USDC_UNITS, _norm, internal_algorand_addresses
+    from usdc_transactions.models import USDCDeposit, USDCWithdrawal
+
+    bridge = set(
+        Conversion.objects.filter(conversion_type='from_savings')
+        .exclude(bridge_arrival_tx__isnull=True).exclude(bridge_arrival_tx='')
+        .values_list('bridge_arrival_tx', flat=True)
+    )
+    ramp_rows = {}
+    for kind, model, other in (('deposit', USDCDeposit, 'source_address'),
+                               ('withdrawal', USDCWithdrawal, 'destination_address')):
+        for wallet, counterparty, amount, created_at in model.objects.filter(
+            ramp_transaction__isnull=False, amount__gt=0,
+        ).values_list('actor_address', other, 'amount', 'created_at'):
+            key = (kind, _norm(wallet), _norm(counterparty), int(Decimal(amount) * USDC_UNITS))
+            ramp_rows.setdefault(key, []).append(created_at)
+
+    internal = internal_algorand_addresses()
+
+    def valid(kind, wallet, counterparty, amount, txid, confirmed_at):
+        if txid in bridge or _norm(counterparty) in internal:
+            return False
+        key = (kind, _norm(wallet), _norm(counterparty), int(Decimal(amount) * USDC_UNITS))
+        return not any(abs(created - confirmed_at) <= PROOF_WINDOW for created in ramp_rows.get(key, ()))
+    return valid
+
+
 def fund_flow_breakdown() -> dict:
     """Everything the public "Dinero en movimiento" screen shows, from the
-    same operation sets as the Home tile. Aggregates only: countries are
-    operation COUNTS (never dollars, which would expose large holders) and
-    appear only with FLOW_COUNTRY_MIN_USERS distinct people."""
+    same operation sets as the Home tile: fiat ramps (the landing page's
+    delivered-deposit metric plus completed payouts) and direct crypto
+    transfers. Aggregates only: countries are operation COUNTS (never
+    dollars, which would expose large holders) and appear only with
+    FLOW_COUNTRY_MIN_USERS distinct people. The withdrawal median covers
+    fiat payouts only: a crypto transfer is not "a payout to your account".""" 
     from statistics import median
 
     ops_by_country, users_by_country = {}, {}
@@ -214,16 +284,33 @@ def fund_flow_breakdown() -> dict:
         if created_at and completed_at and completed_at >= created_at:
             minutes.append((completed_at - created_at).total_seconds() / 60)
 
+    # Direct crypto: the person's phone country (a wallet transfer has no
+    # payout country). No timing: they never enter the fiat-payout median.
+    crypto_in, crypto_out = _direct_crypto_sources()
+    still_valid = _proof_still_valid_filter()
+    # The proven on-chain amount, never the row's own (possibly client-set) one.
+    fields = ('direct_proof__amount', 'actor_user__phone_country', 'actor_user_id', 'created_at')
+    proof = ('actor_address', 'direct_proof__counterparty_address', 'direct_proof__transaction_hash',
+             'direct_proof__confirmed_at')
+    crypto_deposits = [row[:4] for row in crypto_in.values_list(*fields, *proof)
+                       if still_valid('deposit', row[4], row[5], row[0], row[6], row[7])]
+    crypto_withdrawals = [row[:4] for row in crypto_out.values_list(*fields, *proof)
+                          if still_valid('withdrawal', row[4], row[5], row[0], row[6], row[7])]
+    for dollars, country, user_id, created_at in crypto_deposits + crypto_withdrawals:
+        record(country, user_id, created_at)
+
     countries = sorted(
         ((code, n) for code, n in ops_by_country.items()
          if len(users_by_country.get(code, ())) >= FLOW_COUNTRY_MIN_USERS),
         key=lambda row: (-row[1], row[0]),
     )
+    all_deposits = [row[0] for row in deposits] + [row[0] for row in crypto_deposits]
+    all_withdrawals = [row[0] for row in withdrawals] + [row[0] for row in crypto_withdrawals]
     return {
-        'deposited_usd': sum((row[0] for row in deposits), Decimal(0)),
-        'deposit_count': len(deposits),
-        'withdrawn_usd': sum((row[0] for row in withdrawals), Decimal(0)),
-        'withdrawal_count': len(withdrawals),
+        'deposited_usd': sum(all_deposits, Decimal(0)),
+        'deposit_count': len(all_deposits),
+        'withdrawn_usd': sum(all_withdrawals, Decimal(0)),
+        'withdrawal_count': len(all_withdrawals),
         'median_withdrawal_minutes': median(minutes) if len(minutes) >= WITHDRAWAL_TIMING_MIN_SAMPLES else None,
         'withdrawal_timing_samples': len(minutes),
         'countries': countries,

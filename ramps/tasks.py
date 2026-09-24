@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.utils import timezone
+from django.db.models import Q
 
 from ramps.koywe import COUNTRY_METHODS
 from ramps.koywe_client import KoyweClient, KoyweError
@@ -85,7 +86,7 @@ def sync_koywe_bank_info():
 @shared_task
 def poll_koywe_ramp_transactions():
     """
-    Poll Koywe for recent non-terminal ramp orders.
+    Poll recent active orders and all unresolved invalid-payout refunds.
     Webhooks are the primary source of truth; this is a reconciliation fallback.
     """
     client = KoyweClient()
@@ -96,9 +97,12 @@ def poll_koywe_ramp_transactions():
     threshold = timezone.now() - timedelta(days=7)
     pending_ramps = RampTransaction.objects.filter(
         provider='koywe',
-        created_at__gte=threshold,
-        status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'],
-    ).exclude(provider_order_id='').order_by('-created_at')
+    ).filter(
+        Q(created_at__gte=threshold, status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'])
+        | Q(direction='off_ramp', status='FAILED', status_detail__startswith='invalid_withdrawals_details')
+        | Q(direction='off_ramp', status='FAILED', status_detail__startswith='refund_')
+        | Q(koywe_refund__state__in=['pending', 'requesting', 'unknown', 'requested', 'started', 'in_progress'])
+    ).exclude(koywe_refund__state__in=['delivered', 'not_required']).exclude(provider_order_id='').order_by('updated_at')
 
     if not pending_ramps.exists():
         return 'No pending Koywe ramps'
@@ -121,6 +125,12 @@ def poll_koywe_ramp_transactions():
                 order_payload=result.raw_response,
                 next_action_url=result.next_action_url,
             )
+            if ramp_tx.direction == 'off_ramp' and (
+                ramp_tx.status_detail.startswith(('invalid_withdrawals_details', 'refund_'))
+                or hasattr(ramp_tx, 'koywe_refund')
+            ):
+                from ramps.koywe_refunds import reconcile_refund
+                reconcile_refund(ramp_id=ramp_tx.pk, client=client)
             ramp_tx.refresh_from_db(fields=['status', 'status_detail'])
             if ramp_tx.status != previous_status or ramp_tx.status_detail != previous_detail:
                 updated_count += 1

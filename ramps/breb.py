@@ -1,5 +1,6 @@
 """Local Bre-B destination checks; these do not verify key ownership."""
 import re
+from decimal import Decimal, InvalidOperation
 
 BREB_RAIL = 'BREB'
 BREB_KEY_MAX_LENGTH = 254
@@ -51,3 +52,19 @@ def validate_saved_payout_rail(*, metadata, payment_method, account_number, acco
         raise ValueError('Selecciona el banco asociado a tu llave Bre-B.')
     metadata['rail'] = BREB_RAIL
     return metadata
+
+
+# Koywe support confirmed this per-transfer COP ceiling on 2026-09-24.
+KOYWE_BREB_MAX_PAYOUT_COP = Decimal('8000000')
+
+
+def validate_koywe_breb_payout_amount(amount_out):
+    """Validate the actual quoted COP output, never a fixed crypto equivalent."""
+    try:
+        amount = Decimal(str(amount_out))
+    except (InvalidOperation, TypeError, ValueError):
+        amount = Decimal('NaN')
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError('No se pudo validar el monto en COP del retiro Bre-B. Solicita una nueva cotización.')
+    if amount > KOYWE_BREB_MAX_PAYOUT_COP:
+        raise ValueError('El máximo por retiro Bre-B es de 8.000.000 COP. Reduce el monto para continuar.')

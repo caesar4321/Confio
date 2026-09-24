@@ -912,6 +912,7 @@ class KoyweReservationPollingTests(SimpleTestCase):
     @mock.patch('ramps.tasks.RampTransaction.objects.filter')
     def test_poller_excludes_reservations_without_provider_order(self, filter_mock, client_mock):
         queryset = mock.Mock()
+        queryset.filter.return_value = queryset
         queryset.exclude.return_value = queryset
         queryset.order_by.return_value = queryset
         queryset.exists.return_value = False
@@ -920,7 +921,7 @@ class KoyweReservationPollingTests(SimpleTestCase):
 
         result = poll_koywe_ramp_transactions()
 
-        queryset.exclude.assert_called_once_with(provider_order_id='')
+        queryset.exclude.assert_any_call(provider_order_id='')
         self.assertEqual(result, 'No pending Koywe ramps')
 
 

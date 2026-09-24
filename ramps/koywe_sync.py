@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from ramps.models import RampTransaction
@@ -20,6 +21,8 @@ _KOYWE_FAILED_STATUSES = {
     'FAILED',
     'CANCELLED',
     'REFUNDED',
+    'REFUND_STARTED',
+    'REFUND_IN_PROGRESS',
     'REFUND_DELIVERED',
     'INVALID_WITHDRAWALS_DETAILS',
 }
@@ -581,13 +584,34 @@ def upsert_koywe_ramp_transaction(
     return ramp_tx
 
 
-def sync_koywe_ramp_transaction_from_order(
+def sync_koywe_ramp_transaction_from_order(*, ramp_tx, order_payload, next_action_url=None):
+    # Serialize real rows with refund transitions. Signals must see the final
+    # payout status, never a stale completion repaired after post_save runs.
+    if isinstance(ramp_tx, RampTransaction) and ramp_tx.pk:
+        with transaction.atomic():
+            current = RampTransaction.objects.select_for_update().get(pk=ramp_tx.pk)
+            _sync_koywe_ramp_transaction_from_order(
+                ramp_tx=current, order_payload=order_payload, next_action_url=next_action_url,
+            )
+            ramp_tx.__dict__.update(current.__dict__)
+        return ramp_tx
+    return _sync_koywe_ramp_transaction_from_order(
+        ramp_tx=ramp_tx, order_payload=order_payload, next_action_url=next_action_url,
+    )
+
+
+def _sync_koywe_ramp_transaction_from_order(
     *,
     ramp_tx: RampTransaction,
     order_payload: dict[str, Any] | None,
     next_action_url: str | None = None,
 ) -> RampTransaction:
     order_payload = order_payload or {}
+    returned_id = order_payload.get('orderId') or order_payload.get('_id') or order_payload.get('id')
+    expected_id = getattr(ramp_tx, 'provider_order_id', None)
+    if returned_id and expected_id and str(returned_id) != str(expected_id):
+        from ramps.koywe_client import KoyweError
+        raise KoyweError('Koywe returned a different order; refusing to update the transaction')
     status_raw, status_details = _extract_order_status_payload(order_payload)
     ramp_status, normalized_detail = map_koywe_status(status_raw)
 
@@ -657,6 +681,10 @@ def sync_koywe_ramp_transaction_from_order(
         auth_email=existing_metadata.get('auth_email'),
         order_payload=order_payload,
     )
+    if ramp_tx.direction == 'off_ramp' and getattr(ramp_tx, 'pk', None):
+        from ramps.koywe_refunds import preserve_refund_progress
+        preserve_refund_progress(ramp_tx, status_raw)
+
     ramp_tx.save(
         update_fields=[
             'fiat_amount',

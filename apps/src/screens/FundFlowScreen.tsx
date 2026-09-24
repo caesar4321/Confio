@@ -192,7 +192,7 @@ export const FundFlowScreen = () => {
                   La mitad de los retiros llegó en {withdrawalTimeLabel(flow.medianWithdrawalMinutes)}
                 </Text>
                 <Text style={styles.timingSub}>
-                  Mediana de {whole(flow.withdrawalTimingSamples)} retiros, desde la solicitud hasta el pago.
+                  Mediana de {whole(flow.withdrawalTimingSamples)} retiros a cuentas locales, desde la solicitud hasta el pago.
                 </Text>
               </View>
             </View>
@@ -228,9 +228,9 @@ export const FundFlowScreen = () => {
             <Text style={styles.howTitle}>Cómo lo contamos</Text>
             <Text style={styles.howText}>
               Cada depósito y cada retiro cuenta una sola vez, cuando el dinero llega: a tu
-              billetera en un depósito, o a tu cuenta local en un retiro. No incluimos
-              conversiones internas ni envíos entre usuarios. El total es acumulado desde el
-              inicio.
+              billetera en un depósito, o a tu cuenta local en un retiro. También cuentan los
+              envíos de USDC desde y hacia otras billeteras. No incluimos conversiones internas
+              ni envíos entre usuarios de Confío. El total es acumulado desde el inicio.
             </Text>
           </View>
         </ScrollView>

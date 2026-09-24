@@ -279,3 +279,80 @@ class BrebSavedDestinationTests(SimpleTestCase):
                 payment_method_code='BREB', email='holder@example.com',
                 wallet_address=None, country_code='CO', bank_info=self.bank,
             )
+
+
+class BrebPayoutLimitTests(SimpleTestCase):
+    def setUp(self):
+        from decimal import Decimal
+        self.amount = Decimal('5836.99')
+        self.client = KoyweClient(crypto_symbol='USDT BSC')
+        self.client.ensure_account_profile = Mock(return_value='holder@example.com')
+        self.client.resolve_payment_provider = Mock(return_value=('method', 'Bre-B', None))
+        self.client.create_quote = Mock(return_value={
+            'quoteId': 'quote', 'amountIn': '5836.99', 'amountOut': '19411624',
+        })
+        self.client.create_bank_account = Mock(return_value={'id': 'bank'})
+        self.client.create_order = Mock(return_value={'id': 'order'})
+        self.bank = SimpleNamespace(
+            payment_method=SimpleNamespace(name='WIRECO'),
+            provider_metadata={'rail': 'BREB'},
+        )
+
+    def preview(self, direction='OFF_RAMP', method='BREB'):
+        return self.client.get_ramp_quote(direction=direction, amount=self.amount,
+                                          fiat_symbol='COP', payment_method_code=method)
+
+    def order(self, method='BREB'):
+        return self.client.create_ramp_order(
+            direction='OFF_RAMP', amount=self.amount, fiat_symbol='COP',
+            payment_method_code=method, email='holder@example.com', wallet_address=None,
+            country_code='CO', bank_info=self.bank,
+        )
+
+    def test_over_limit_preview_is_rejected_with_clear_cop_message(self):
+        with self.assertRaisesRegex(KoyweError, '8.000.000 COP'):
+            self.preview()
+
+    def test_order_rechecks_fresh_quote_before_registering_destination_or_creating_order(self):
+        self.client.create_quote.return_value['amountOut'] = '7999999'
+        self.preview()
+        self.client.create_quote.return_value['amountOut'] = '8000000.01'
+        with self.assertRaisesRegex(KoyweError, '8.000.000 COP'):
+            self.order()
+        self.client.create_bank_account.assert_not_called()
+        self.client.create_order.assert_not_called()
+
+    def test_saved_legacy_breb_destination_cannot_bypass_limit(self):
+        with self.assertRaises(KoyweError):
+            self.order(method='WIRECO')
+        self.client.create_order.assert_not_called()
+
+    def test_destination_method_alone_identifies_breb(self):
+        self.bank.provider_metadata = {}
+        self.bank.payment_method.name = 'BREB'
+        with self.assertRaises(KoyweError):
+            self.order(method='WIRECO')
+        self.client.create_order.assert_not_called()
+
+    def test_exact_limit_and_smaller_payouts_are_allowed(self):
+        for amount in ['8000000', '7999999.99', '1880983']:
+            with self.subTest(amount=amount):
+                self.client.create_quote.return_value['amountOut'] = amount
+                self.preview()
+                self.order()
+        self.assertEqual(self.client.create_order.call_count, 3)
+
+    def test_invalid_provider_amount_cannot_bypass_limit(self):
+        for amount in [None, '', 'NaN', 'Infinity', '-1', '0', 'invalid']:
+            with self.subTest(amount=amount):
+                self.client.create_quote.return_value['amountOut'] = amount
+                with self.assertRaises(KoyweError):
+                    self.order()
+        self.client.create_order.assert_not_called()
+
+    def test_traditional_payouts_and_payins_do_not_inherit_breb_cap(self):
+        self.preview(direction='ON_RAMP')
+        self.preview(method='WIRECO')
+        self.bank.provider_metadata = {}
+        self.order(method='WIRECO')
+        self.client.create_order.assert_called_once()
