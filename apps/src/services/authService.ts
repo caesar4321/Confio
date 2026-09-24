@@ -877,15 +877,20 @@ export class AuthService {
       console.log('[AuthService] Backup status reported for current user');
   }
 
-  private async clearRejectedDriveToken(): Promise<void> {
-    if (!this.driveAccessToken) return;
+  private async clearRejectedDriveToken(rejectedToken = this.driveAccessToken): Promise<void> {
+    if (!rejectedToken) return;
     try {
-      await GoogleSignin.clearCachedAccessToken(this.driveAccessToken);
+      await GoogleSignin.clearCachedAccessToken(rejectedToken);
     } catch (clearTokenError) {
       console.warn('[AuthService] Failed to clear rejected Drive token:', clearTokenError);
     } finally {
-      this.driveAccessToken = null;
+      if (this.driveAccessToken === rejectedToken) this.driveAccessToken = null;
     }
+  }
+
+  private async renewSignInDriveAccess(rejectedToken: string, subject: string): Promise<string | null> {
+    await this.clearRejectedDriveToken(rejectedToken);
+    return this.getDriveAccessTokenOnly({ forceFreshSignIn: true, expectedGoogleSubject: subject });
   }
 
   /**
@@ -1439,12 +1444,23 @@ export class AuthService {
             driveAccessToken = driveAccessToken || await this.getDriveAccessTokenOnly({ expectedGoogleSubject: googleSubject }) || undefined;
             return driveAccessToken || null;
           },
+          reauthorizeGoogleDrive: async rejectedToken => {
+            driveAccessToken = undefined;
+            onProgress?.('Renovando el acceso a Google Drive...');
+            const freshToken = await this.renewSignInDriveAccess(rejectedToken, googleSubject);
+            driveAccessToken = freshToken || undefined;
+            return freshToken;
+          },
         });
         // Inventory can revoke a legacy primary-only offer when owned
         // siblings exist. All later recovery closures must see that decision.
         walletReenrollmentOfferAvailable = !!authData.walletReenrollmentAllowed;
         if (reconciled || !walletReenrollmentOfferAvailable) await persistBackendTokens();
       } catch (error) {
+        if (isDriveAuthorizationFailure(error as any)) {
+          await this.clearRejectedDriveToken(driveAccessToken);
+          driveAccessToken = undefined;
+        }
         await invalidateBackendSession('after sign-in wallet reconciliation failure');
         throw error;
       }

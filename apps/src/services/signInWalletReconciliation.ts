@@ -1,5 +1,6 @@
 import { gql } from '@apollo/client';
 import { WalletRecoveryError } from './walletRecoveryErrors';
+import { runWithDriveAuthorizationRetry } from './googleDriveAuthPolicy';
 
 const PREPARE = gql`
   mutation PrepareWalletReconciliation($firebaseIdToken: String!, $bscAddress: String) {
@@ -77,6 +78,8 @@ export async function reconcileSignInWallet(options: {
   beforeWalletChange: () => Promise<void>;
   /** Read-only anchored V1 probe supplied by Google sign-in; never writes keys. */
   getLegacyV1Address?: (account: Registration) => Promise<string | null>;
+  /** Clear the rejected token and authorize the SAME Google subject. */
+  reauthorizeGoogleDrive?: (rejectedToken: string) => Promise<string | null>;
 }): Promise<boolean> {
   const { authData, provider, subject, client } = options;
   if (authData.isNewUser) return false;
@@ -171,35 +174,50 @@ export async function reconcileSignInWallet(options: {
   if (provider === 'google') {
     const token = await options.getGoogleDriveToken();
     if (!token) throw new Error('Autoriza Google Drive con la misma cuenta para recuperar tu billetera.');
-    try {
-      candidate = await getSignInWalletCandidate(subject, token);
-    } catch (error) {
-      if (error instanceof WalletRecoveryError && error.code === 'missing') {
-        try {
-          // Old subject-named backup formats can restore only an already
-          // registered wallet. The candidate reader validates every anchor;
-          // this is never permission to choose a replacement from history.
-          candidate = await getSignInWalletCandidate(subject, token, { legacyRegistrations: accounts });
-          restoredLegacyBackup = true;
-        } catch (legacyError) {
-          if (candidate === null && accounts.every(row => !row.isKeylessMigrated && !row.bscAddress)
-              && legacyError instanceof WalletRecoveryError && legacyError.code === 'missing') return false;
-          if (!(legacyError instanceof WalletRecoveryError) || legacyError.code !== 'missing') throw legacyError;
-          candidate = await createMissingSignInWalletCandidate(subject, token, accounts, async proposed => {
-            const response = await client.mutate({ mutation: RESERVE_RECOVERY, context,
-              variables: { firebaseIdToken: options.firebaseToken, recoveryFileIds: proposed } });
-            const result = response.data?.prepareWalletReconciliation;
-            if (!result?.success || !Array.isArray(result.recoveryFileIds)) {
-              throw new Error('No pudimos coordinar la recuperación. Intenta nuevamente. Código: RECOVERY-RESERVATION.');
-            }
-            return result.recoveryFileIds;
-          });
+    const localCandidate = candidate;
+    const recoverFromDrive = async (token: string): Promise<boolean> => {
+      // A retry starts cloud discovery from scratch, not from a partially read
+      // candidate. Durable missing-backup reservations remain reusable.
+      candidate = localCandidate;
+      restoredLegacyBackup = false;
+      try {
+        candidate = await getSignInWalletCandidate(subject, token);
+      } catch (error) {
+        if (error instanceof WalletRecoveryError && error.code === 'missing') {
+          try {
+            // Old subject-named backup formats can restore only an already
+            // registered wallet. The candidate reader validates every anchor;
+            // this is never permission to choose a replacement from history.
+            candidate = await getSignInWalletCandidate(subject, token, { legacyRegistrations: accounts });
+            restoredLegacyBackup = true;
+          } catch (legacyError) {
+            if (candidate === null && accounts.every(row => !row.isKeylessMigrated && !row.bscAddress)
+                && legacyError instanceof WalletRecoveryError && legacyError.code === 'missing') return false;
+            if (!(legacyError instanceof WalletRecoveryError) || legacyError.code !== 'missing') throw legacyError;
+            candidate = await createMissingSignInWalletCandidate(subject, token, accounts, async proposed => {
+              const response = await client.mutate({ mutation: RESERVE_RECOVERY, context,
+                variables: { firebaseIdToken: options.firebaseToken, recoveryFileIds: proposed } });
+              const result = response.data?.prepareWalletReconciliation;
+              if (!result?.success || !Array.isArray(result.recoveryFileIds)) {
+                throw new Error('No pudimos coordinar la recuperación. Intenta nuevamente. Código: RECOVERY-RESERVATION.');
+              }
+              return result.recoveryFileIds;
+            });
+          }
+        } else {
+          // Never fall back from an unreadable or unreachable canonical backup.
+          throw error;
         }
-      } else {
-        // Never fall back from an unreadable or unreachable canonical backup.
-        throw error;
       }
-    }
+      return true;
+    };
+    // Retry only the cloud phase. Keychain persistence and the signed server
+    // commit below must never be replayed by a Drive authorization retry.
+    const recovered = options.reauthorizeGoogleDrive
+      ? await runWithDriveAuthorizationRetry(token, recoverFromDrive,
+          () => options.reauthorizeGoogleDrive!(token))
+      : await recoverFromDrive(token);
+    if (!recovered) return false;
   }
   // An unmigrated Apple account may still use the reproducible V1 path.
   // No automatic Google authorization and no random replacement on missing keys.
