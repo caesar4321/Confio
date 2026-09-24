@@ -32,7 +32,8 @@ const IN_FLIGHT = gql`
 
 const LOCAL_MINTS = gql`
   query LocalTransferMints {
-    localTransferMints { internalId walletMintUnits walletMintRequestId }
+    localTransferMints { internalId walletMintUnits walletMintRequestId
+      walletFeeUnits walletFeeCollector walletFeeMinimumNetUnits }
   }
 `;
 
@@ -158,7 +159,18 @@ export const resumeSavingsMints = async (
       if (amount <= 0n) continue;
       if (!announced) { announced = true; setMinting(true); }
       try {
-        await mintArrivedUsdt(amount, local.walletMintRequestId || `local-mint-${local.internalId}`);
+        const requestId = local.walletMintRequestId || `local-mint-${local.internalId}`;
+        if (local.walletFeeUnits != null) {
+          if (!cusdAddress || !local.walletFeeCollector || !local.walletFeeMinimumNetUnits) {
+            throw new Error('Faltan los datos de la conversión; actualiza su estado.');
+          }
+          await mintUsdtToCusd({cusdAddress, usdtWei: amount, requestId, localFee: {
+            collector: local.walletFeeCollector, units: BigInt(local.walletFeeUnits),
+            minimumNetUnits: BigInt(local.walletFeeMinimumNetUnits),
+          }});
+        } else {
+          await mintArrivedUsdt(amount, requestId);
+        }
       } catch (e) {
         console.warn('[savingsLegC] local transfer mint pending', local.internalId, e);
       }

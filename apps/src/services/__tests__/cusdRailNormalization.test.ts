@@ -28,13 +28,42 @@ jest.mock('../evmWallet', () => ({
   isOutcomeUnknown: jest.fn(() => false),
 }));
 
-import { unwrapAllSavingsToCusd, wrapAllCusdToSavings } from '../cusdPlusVault';
+import { mintUsdtToCusd, unwrapAllSavingsToCusd, wrapAllCusdToSavings } from '../cusdPlusVault';
 import { resumeSavingsMints } from '../savingsLegC';
 
 describe('eligibility rail normalization', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockExecuteSponsoredBatch.mockResolvedValue({ txHash: `0x${'77'.repeat(32)}` });
+  });
+
+  it('signs the local fee transfer after minting and preserves the approved net', async () => {
+    mockEthCall.mockResolvedValue('0x0');
+    const collector = '0x'+'99'.repeat(20);
+    await mintUsdtToCusd({cusdAddress:CUSD, usdtWei:5n*WAD, minCusdOut:4955n*WAD/1000n,
+      requestId:'local-mint-00000000-0000-0000-0000-000000000001',
+      localFee:{collector, units:125n*WAD/100n, minimumNetUnits:35n*WAD/10n}});
+    const [{calls}] = mockExecuteSponsoredBatch.mock.calls[0];
+    expect(calls).toHaveLength(3);
+    expect(calls[1].data).toContain('mintWithFee(uint256,uint256,address)');
+    expect(calls[2]).toEqual({to:CUSD,valueWei:0n,
+      data:`0xtransfer(address,uint256)|${collector}|1250000000000000000`});
+  });
+
+  it('signs a partial fee collection with zero remaining user receipt', async () => {
+    mockEthCall.mockResolvedValue('0x0');
+    const units = 4955n*WAD/10000n;
+    await mintUsdtToCusd({cusdAddress:CUSD, usdtWei:WAD/2n, minCusdOut:units,
+      requestId:'local-mint-00000000-0000-0000-0000-000000000001',
+      localFee:{collector:'0x'+'99'.repeat(20), units, minimumNetUnits:0n}});
+    expect(mockExecuteSponsoredBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sign if the fee would reduce the receipt below its minimum', async () => {
+    await expect(mintUsdtToCusd({cusdAddress:CUSD, usdtWei:5n*WAD, minCusdOut:4n*WAD,
+      requestId:'local-mint-00000000-0000-0000-0000-000000000001',
+      localFee:{collector:'0x'+'99'.repeat(20), units:WAD, minimumNetUnits:4n*WAD}})).rejects.toThrow('monto neto');
+    expect(mockExecuteSponsoredBatch).not.toHaveBeenCalled();
   });
 
   it('wraps the whole cUSD balance into cUSD+ with no perimeter redemption', async () => {

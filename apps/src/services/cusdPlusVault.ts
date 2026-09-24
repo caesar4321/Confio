@@ -83,6 +83,7 @@ export interface MintCusdParams {
   usdtWei: bigint;
   /** Minimum net cUSD after the contract-authoritative 0.9% fee. */
   minCusdOut?: bigint;
+  localFee?: {collector: string; units: bigint; minimumNetUnits: bigint};
   wallet?: DerivedEvmWallet;
 }
 
@@ -193,9 +194,17 @@ export const mintUsdtToCusd = async (params: MintCusdParams): Promise<SubscribeR
   const preview = params.minCusdOut == null
     ? await previewCusdMint(cusdAddress, usdtWei)
     : null;
+  const minimum = params.minCusdOut ?? preview!.netWei;
+  if (params.localFee && (!params.requestId?.startsWith('local-mint-')
+      || params.localFee.units <= 0n || params.localFee.minimumNetUnits < 0n
+      || minimum < params.localFee.units + params.localFee.minimumNetUnits
+      || !/^0x[0-9a-fA-F]{40}$/.test(params.localFee.collector)
+      || /^0x0{40}$/i.test(params.localFee.collector))) {
+    throw new Error('La conversión no cubre el monto neto autorizado. Actualiza su estado.');
+  }
   const mintData = encodeCall('mintWithFee(uint256,uint256,address)', [
     { type: 'uint', value: usdtWei },
-    { type: 'uint', value: params.minCusdOut ?? preview!.netWei },
+    { type: 'uint', value: minimum },
     { type: 'address', value: from },
   ]);
   const needsApprove = (await getErc20Allowance(from, cusdAddress, USDT_BSC)) < usdtWei;
@@ -208,6 +217,12 @@ export const mintUsdtToCusd = async (params: MintCusdParams): Promise<SubscribeR
     ...(needsApprove ? [{ to: USDT_BSC, valueWei: 0n, data: approveData }] : []),
     { to: cusdAddress, valueWei: 0n, data: mintData },
   ];
+  if (params.localFee) {
+    calls.push({to: cusdAddress, valueWei: 0n, data: encodeCall('transfer(address,uint256)', [
+      {type: 'address', value: params.localFee.collector},
+      {type: 'uint', value: params.localFee.units},
+    ])});
+  }
   const rec = await executeSponsoredBatch({
     requestId: params.requestId,
     wallet,

@@ -83,6 +83,7 @@ class LocalPayoutQuoteType(graphene.ObjectType):
 
 
 class LocalDepositQuoteType(graphene.ObjectType):
+    minimum_net_wallet_receipt = graphene.String()
     source_amount = graphene.String(required=True)
     asset = graphene.String(required=True)
     target_amount = graphene.String(required=True)
@@ -271,7 +272,7 @@ class LocalMoneyQuery(graphene.ObjectType):
             raise GraphQLError('Depósito no encontrado')
         except Exception as exc:
             raise _query_error(exc)
-        return LocalDepositQuoteType(**{key: str(value) for key, value in quote.items()})
+        return LocalDepositQuoteType(**{key: str(value) if value is not None else None for key, value in quote.items()})
 
     def resolve_limit_increase_request(self, info):
         owner = _owner(info, 'manage_bank_accounts', owner_only=True)

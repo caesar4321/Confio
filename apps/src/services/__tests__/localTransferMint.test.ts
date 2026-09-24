@@ -46,3 +46,29 @@ it('finishes small local receipts as cUSD even for savings-eligible users', asyn
   await resumeSavingsMints('vault', 'cusd');
   expect(mockMint).toHaveBeenCalledWith({cusdAddress: 'cusd', usdtWei: 500000000000000000n, requestId: `local-mint-${id}`});
 });
+
+it('binds the collector fee to the exact local mint even with savings enabled', async () => {
+  mockQuery.mockImplementation(async ({query}: any) => {
+    const name = query.definitions[0].name.value;
+    if (name === 'LocalTransferMints') return {data: {localTransferMints: [{internalId: id,
+      walletMintUnits: '5000000000000000000', walletMintRequestId: `local-mint-${id}`,
+      walletFeeUnits: '1250000000000000000', walletFeeCollector: '0x'+'12'.repeat(20),
+      walletFeeMinimumNetUnits: '3000000000000000000'}]}};
+    if (name === 'CusdPlusConversionsInFlight') return {data: {cusdPlusConversionsInFlight: []}};
+    return {data: {cusdPlusSummary: {savingsEnabled: true, sweepableUsdtWei: '0', balanceUsd: 0, cusdBalanceWei: '0'}}};
+  });
+  await resumeSavingsMints('vault', 'cusd');
+  expect(mockMint).toHaveBeenCalledWith({cusdAddress: 'cusd', usdtWei: 5000000000000000000n,
+    requestId: `local-mint-${id}`, localFee: {collector: '0x'+'12'.repeat(20),
+      units: 1250000000000000000n, minimumNetUnits: 3000000000000000000n}});
+});
+
+it('does not fall back to a fee-free mint when collector details are missing', async () => {
+  mockQuery.mockImplementation(async ({query}: any) => {
+    if (query.definitions[0].name.value === 'LocalTransferMints') return {data: {localTransferMints: [{
+      internalId: id, walletMintUnits: '5000000000000000000', walletFeeUnits: '1250000000000000000'}]}};
+    return {data: {cusdPlusSummary: {savingsEnabled: false, sweepableUsdtWei: '0'}}};
+  });
+  await resumeSavingsMints('vault', 'cusd');
+  expect(mockMint).not.toHaveBeenCalled();
+});

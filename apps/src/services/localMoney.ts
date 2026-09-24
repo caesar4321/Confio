@@ -96,6 +96,7 @@ export interface LocalPayoutQuote {
 }
 
 export interface LocalDepositQuote {
+  minimumNetWalletReceipt: string | null;
   sourceAmount: string;
   asset: string;
   targetAmount: string;
@@ -279,6 +280,7 @@ const LOCAL_DEPOSIT_QUOTE = gql`
       targetAmount
       minimumFxOutput
       minimumWalletOutput
+      minimumNetWalletReceipt
       rate
       expiresAt
     }

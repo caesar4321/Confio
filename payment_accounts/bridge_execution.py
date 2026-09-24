@@ -184,8 +184,18 @@ def prepare_bridge(owner, quote_id, route_index=0, *, client=None, intents=None,
         funding = {'wallet_usdt_units': '0', 'fee_units': '0', 'gross_redeem_units': '0'}
         if source_chain == 'BSC':
             budget = q.money_flow.metadata.get('gross_spend_units')
-            prefix, funding = funding_calls(owner, int(q.amount_units),
-                                            max_spend=int(budget) if budget is not None else None)
+            fee = q.money_flow.metadata.get('infinia_fee')
+            if fee:
+                from .infinia_fee_funding import funding_calls as fee_funding_calls
+                from .infinia_maintenance import require_reservation
+                require_reservation(fee, q.money_flow)
+                plan = q.money_flow.metadata['infinia_fee_funding']
+                if plan['bridge_units'] != q.amount_units or plan['gross_spend_units'] != budget:
+                    raise NextError('Fee funding does not match this bridge')
+                prefix, funding = fee_funding_calls(owner, plan, fee)
+            else:
+                prefix, funding = funding_calls(owner, int(q.amount_units),
+                                                max_spend=int(budget) if budget is not None else None)
         elif infinia_journey is None:
             prefix = []
             if chain.token_balance(q.source_token_id, q.source_address) < int(q.amount_units):
@@ -256,6 +266,8 @@ def submit_bridge(owner, transfer_id, signature, *, nonce='0', authorization=Non
                 raise NextError('authorization_required')
             auth = sponsor.normalize_and_validate_authorization(authorization, t.quote.source_address, 56)
         def persist_signed(batch, raw):
+            from .infinia_fee_collection import persist_bridge_fee
+            persist_bridge_fee(owner, t.quote.money_flow_id, t.calls)
             persisted = PaymentBridgeTransfer.objects.filter(pk=t.pk, status='prepared', source_tx_hash='').update(
                 batch=batch, signed_raw_tx=raw, source_tx_hash=batch.tx_hash, status='submitted', updated_at=timezone.now())
             if persisted != 1:

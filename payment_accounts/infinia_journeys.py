@@ -116,6 +116,25 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
                 direction == 'to_wallet' and existing.funding_credit_id != credit.pk):
             raise PaymentAccountError('Request id already used for different journey details')
         return existing
+    from .infinia_fee_policy import enabled as fee_enabled, freeze as freeze_fee
+    fee = None
+    if direction == 'to_bank':
+        fee = bridge.quote.money_flow.metadata.get('infinia_fee')
+        if fee or fee_enabled(local_account.country):
+            if (not fee or fee['local_account_id'] != str(local_account.internal_id)
+                    or bridge.quote.money_flow.metadata.get('local_destination_id') != str(destination.internal_id)):
+                raise PaymentAccountError('Solicita una nueva cotización para incluir los costos del envío.')
+    else:
+        fee = freeze_fee(local_account, direction)
+        if fee:
+            from cusd_plus import cusd_vault
+            if wallet_minimum is None:
+                raise PaymentAccountError('A minimum wallet receipt is required')
+            preview = cusd_vault.preview_mint_wei(int(wallet_minimum * 10**18))
+            minimum_net = max(0, preview.net_wei - int(fee['units']))
+            if not 0 <= preview.fee_bps <= 90 or preview.net_wei <= 0:
+                raise PaymentAccountError('El monto no alcanza para cubrir los costos de conversión.')
+            fee = dict(fee, minimum_net_units=str(minimum_net), cap_on_arrival=True)
     if direction == 'to_wallet' and wallet_minimum is None:
         raise PaymentAccountError('A minimum BSC USDT receipt is required')
     if direction == 'to_bank' and wallet_minimum is not None:
@@ -136,7 +155,11 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         source_asset='USDT_BSC' if direction == 'to_bank' else local_account.asset,
         source_amount=bridge.quote.money_flow.source_amount if bridge else credit.amount,
         target_asset=local_account.asset if direction == 'to_bank' else 'USDT_BSC',
-        metadata={'orchestrator': 'infinia', 'minimum_fx_output': str(minimum)})
+        metadata={'orchestrator': 'infinia', 'minimum_fx_output': str(minimum),
+                  **({'infinia_fee': fee} if fee else {})})
+    if direction == 'to_wallet':
+        from .infinia_maintenance import reserve
+        reserve(fee, flow)
     return InfiniaJourney.objects.create(money_flow=flow, confio_account=owner, request_id=request_id,
         direction=direction, local_account=local_account, crypto_account=crypto_account,
         bridge=bridge, funding_credit=credit, minimum_fx_output=minimum,

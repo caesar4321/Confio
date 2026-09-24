@@ -67,9 +67,9 @@ code landed. For Infinia corridors this section overrides the older text below.
    Capabilities are fixed at creation, so an account opened for sending must
    request its receive capabilities in the same call. Confirm with Infinia that
    requesting an "upon approval" capability does not delay activation.
-2. **Third-party receiving is off for everyone at launch.** It needs all three
-   `ThirdPartyPayinSwitch` scopes, enhanced KYC/KYB and Infinia's
-   `receive_third_party` capability. A third-party deposit that fails admission
+2. **Third-party receiving defaults on outside Brazil.** Brazil still needs all
+   three `ThirdPartyPayinSwitch` approvals. Explicit stops and Infinia's
+   `receive_third_party` capability apply in every country. A third-party deposit that fails admission
    is **held**, not rejected or refunded — the money arrives and sits blocked.
 3. **No float, so no exact local amount.** Journeys are source-amount driven and
    FX is quoted on the amount actually credited. The product can promise

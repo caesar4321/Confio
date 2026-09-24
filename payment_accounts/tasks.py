@@ -13,6 +13,21 @@ from payment_accounts.webhooks import process_webhook_event
 logger = logging.getLogger(__name__)
 
 
+@shared_task(name='payment_accounts.accrue_infinia_maintenance')
+def accrue_infinia_maintenance():
+    from django.conf import settings
+    from users.models import Account
+    from .infinia_maintenance import accrue
+    if not getattr(settings, 'INFINIA_MAINTENANCE_FEES_ENABLED', False):
+        return 0
+    owners = Account.objects.filter(payment_provider_profiles__provider='infinia')
+    count = 0
+    for owner in owners.distinct().iterator():
+        accrue(owner)
+        count += 1
+    return count
+
+
 @shared_task(name='payment_accounts.reconcile_bridges')
 def reconcile_bridges():
     from .models import PaymentBridgeTransfer

@@ -117,7 +117,7 @@ class FinancialAccount(models.Model):
 
 
 class ThirdPartyPayinSwitch(models.Model):
-    """All three scopes must explicitly allow; no user override of a country stop."""
+    """Explicit admission overrides; no user override of a country stop."""
 
     provider = models.CharField(max_length=20, choices=Provider.choices)
     country = models.CharField(max_length=2, help_text='Receiving country, ISO-2; not phone country.')
@@ -676,6 +676,32 @@ class InfiniaJourney(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['confio_account', 'request_id'], name='infinia_journey_request_uniq')]
         indexes = [models.Index(fields=['stage', 'updated_at'], name='infinia_journey_stage_idx')]
+
+
+class InfiniaMaintenanceState(models.Model):
+    account = models.OneToOneField(FinancialAccount, on_delete=models.PROTECT)
+    next_period = models.DateField()
+    enabled = models.BooleanField(default=True)
+    monthly_usd = models.DecimalField(max_digits=12, decimal_places=6)
+
+
+class InfiniaMaintenanceCharge(models.Model):
+    account = models.ForeignKey(FinancialAccount, on_delete=models.PROTECT)
+    period = models.DateField()
+    amount_usd = models.DecimalField(max_digits=12, decimal_places=6)
+    reserved_flow = models.ForeignKey(MoneyFlow, null=True, blank=True, on_delete=models.PROTECT)
+    collected_tx_hash = models.CharField(max_length=66, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['account', 'period'], name='infinia_maintenance_month_uniq')]
+
+
+class InfiniaFeeDebt(models.Model):
+    """Unpaid portion of a settled deposit invoice, carried once to another flow."""
+    source_flow = models.OneToOneField(MoneyFlow, on_delete=models.PROTECT, related_name='infinia_fee_debt')
+    amount_usd = models.DecimalField(max_digits=36, decimal_places=18)
+    reserved_flow = models.ForeignKey(MoneyFlow, null=True, blank=True, on_delete=models.PROTECT, related_name='reserved_infinia_debts')
+    settled_tx_hash = models.CharField(max_length=66, blank=True)
 
 
 class AutomaticPayin(models.Model):

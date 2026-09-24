@@ -2,6 +2,7 @@
 import unicodedata
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import Q
 
 from .models import AccountCapability, MoneyOperation, PayinAdmission, ThirdPartyPayinSwitch
@@ -80,7 +81,11 @@ def decision(entry):
         country = iso_alpha2(account.country)
     except ValueError:
         return False, 'unknown_country', '', ''
+    if country == 'XX':
+        return False, 'unknown_country', '', ''
     rail = account.payin_rail.strip().upper()
+    if account.status != 'active':
+        return False, 'account_not_active', country, rail
     if entry.asset != account.asset:
         return False, 'asset_mismatch', country, rail
     identity = profile.identity_verification
@@ -111,6 +116,8 @@ def decision(entry):
 
 def third_party_grant_reason(profile, country, rail):
     """Shared country/rail/recipient permission for admission and receive UI."""
+    default_allowed = (profile.provider == 'infinia' and country != 'BR'
+        and getattr(settings, 'INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED', True))
     # One SQL snapshot: independent EXISTS calls could combine approvals that
     # were never enabled simultaneously while an operator changes the rollout.
     switches = {(row.rail, row.confio_account_id): row.enabled and bool(row.evidence.strip())
@@ -123,7 +130,9 @@ def third_party_grant_reason(profile, country, rail):
         exact = (rail_code, owner)
         if exact in switches:
             return switches[exact]
-        return bool(rail_code and switches.get(('*', owner), False))
+        if rail_code and ('*', owner) in switches:
+            return switches[('*', owner)]
+        return default_allowed
     scopes = (
         ('country_not_enabled', ('', None)),
         ('rail_not_enabled', (rail, None)),
@@ -145,7 +154,7 @@ def receiving_capabilities(account):
         country = iso_alpha2(account.country)
     except ValueError:
         return result
-    if (account.status != 'active' or profile.status != 'active'
+    if (country == 'XX' or account.status != 'active' or profile.status != 'active'
             or not identity or identity.status != 'verified' or rail in {'', '*'}):
         return result
     capabilities = {row.capability: row.status for row in account.capabilities.all()}

@@ -480,6 +480,8 @@ class SponsorBscBatchTests(SimpleTestCase):
 
         rpc = _rpc_factory(rpc_overrides, delegated=delegated, sent_raws=sent_raws)
         with mock.patch.object(sponsor_7702, '_rpc', side_effect=rpc), \
+             mock.patch('payment_accounts.infinia_fee_collection.mint_policy_calls',
+                        side_effect=lambda calls, *args: calls), \
              mock.patch('cusd_plus.schema._active_bsc_address', return_value=user_addr), \
              mock.patch('blockchain.models.SponsoredBatch.objects') as ledger, \
              mock.patch('cusd_plus.tasks.check_sponsored_batch_receipt') as receipt_task, \

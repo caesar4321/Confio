@@ -32,8 +32,8 @@ export const BRIDGE_HISTORY = gql`query MyPaymentBridges($offset: Int!, $limit: 
   myPaymentBridges(offset: $offset, limit: $limit) { ...PaymentBridgeFields }
 } ${FIELDS}`;
 
-const QUOTE = gql`mutation QuotePaymentBridge($instruction: UUID!, $amount: Decimal!, $request: UUID!, $direction: String!) {
-  quotePaymentBridge(fundingInstructionId: $instruction, amount: $amount, requestId: $request, direction: $direction) {
+const QUOTE = gql`mutation QuotePaymentBridge($instruction: UUID!, $amount: Decimal!, $request: UUID!, $direction: String!, $destination: UUID) {
+  quotePaymentBridge(fundingInstructionId: $instruction, amount: $amount, requestId: $request, direction: $direction, destinationId: $destination) {
     success errors quote { internalId }
   }
 }`;
@@ -97,13 +97,18 @@ function preparationError(message: string): Error {
     'Bridge price changed; request a fresh quote',
     'Funding exceeds the reviewed total; request a fresh quote',
     'Conversion fee changed; request a fresh quote within your total',
+    'Conversion fee changed; request a new quote',
+    'Wallet balance changed; request a new quote',
+    'Savings balance changed; request a new quote',
+    'Fee token or amount changed; request a new quote',
+    'Account fees changed; request a new quote',
   ]);
   return Object.assign(new Error(message), {quoteRefreshRequired: refreshable.has(message)});
 }
 
-export async function preparePaymentBridge(instruction: string, amount: string, direction: string, request: string): Promise<BridgeTransfer> {
+export async function preparePaymentBridge(instruction: string, amount: string, direction: string, request: string, destination?: string): Promise<BridgeTransfer> {
   const { apolloClient } = await import('../apollo/client');
-  const quoted = await apolloClient.mutate({ mutation: QUOTE, variables: { instruction, amount, direction, request } });
+  const quoted = await apolloClient.mutate({ mutation: QUOTE, variables: { instruction, amount, direction, request, destination } });
   const q = quoted.data?.quotePaymentBridge;
   if (!q?.success) throw preparationError(q?.errors?.[0] || 'No se pudo calcular el envío');
   const prepared = await apolloClient.mutate({ mutation: PREPARE, variables: { quote: q.quote.internalId } });

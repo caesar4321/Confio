@@ -28,8 +28,10 @@ field is retained but no longer gates admission.
 
 A name match bypasses third-party grants, while verified identity, active profile,
 known receiving rail, and enabled `receive_same_name` capability remain required.
-Different names require all existing third-party grants and provider capability;
-a nonempty sender name is required, but document fields are optional. Business
+Different names are allowed by default outside Brazil, unless an explicit country,
+rail, or recipient stop applies. Brazil still requires all three approval scopes.
+Provider capability and a nonempty sender name remain required; document fields
+are optional. The receiving account country determines the Brazil exception. Business
 representative names never establish first-party business ownership. Name matching
 cannot distinguish unrelated people with identical names. These rules do not add
 automatic refunds or a historical sweep. Existing pending automatic-pay-in jobs

@@ -1,7 +1,7 @@
 from decimal import Decimal
 from unittest import mock
 
-from django.test import TestCase, SimpleTestCase
+from django.test import TestCase, SimpleTestCase, override_settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -49,6 +49,7 @@ class SenderTests(SimpleTestCase):
             self.assertFalse(sender_matches({'type': 'FIAT', 'full_name': 'Owner'}, identity))
 
 
+@override_settings(INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED=False)
 class AdmissionTests(TestCase):
     def setUp(self):
         BridgeQuoteTests.setUp(self)
@@ -312,3 +313,83 @@ class AdmissionTests(TestCase):
         self.profile.owner_type = 'business'
         self.entry.provider_data['third_party'].update(full_name='Owner', document_number='123')
         self.assertFalse(assess(self.entry).allowed)
+
+
+@override_settings(INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED=True)
+class DefaultAdmissionTests(TestCase):
+    setUp = AdmissionTests.setUp
+
+    def test_non_brazil_receiving_accounts_allow_without_any_user_switch(self):
+        for country, asset in [('PER','PEN'),('MEX','MXN'),('COL','COP'),('ARG','ARS'),
+                               ('BOL','BOB'),('CHL','CLP'),('PRY','PYG'),('USA','USD')]:
+            with self.subTest(country=country):
+                self.account.country,self.account.asset=country,asset
+                self.account.save()
+                self.entry.asset=asset
+                self.assertTrue(assess(self.entry).allowed)
+                self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'enabled')
+        self.assertFalse(ThirdPartyPayinSwitch.objects.exists())
+
+    def test_brazil_still_requires_all_three_approvals(self):
+        self.account.country,self.account.asset,self.account.payin_rail='BRA','BRL','PIX'
+        self.account.save()
+        self.entry.asset='BRL'
+        for rail, owner, reason in [('',None,'country_not_enabled'),('PIX',None,'rail_not_enabled'),
+                                    ('PIX',self.owner,'user_not_enabled')]:
+            self.assertEqual(assess(self.entry).reason,reason)
+            self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'disabled')
+            ThirdPartyPayinSwitch.objects.create(provider='infinia',country='BR',rail=rail,
+                confio_account=owner,enabled=True,evidence='Approved')
+        self.assertTrue(assess(self.entry).allowed)
+        self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'enabled')
+
+    def test_explicit_stops_still_override_non_brazil_defaults(self):
+        for rail, owner, reason in [('',None,'country_not_enabled'),('BANK',None,'rail_not_enabled'),
+                                    ('BANK',self.owner,'user_not_enabled'),('*',self.owner,'user_not_enabled')]:
+            with self.subTest(rail=rail,owner=owner):
+                stop=ThirdPartyPayinSwitch.objects.create(provider='infinia',country='PE',rail=rail,
+                    confio_account=owner,enabled=False,evidence='Explicit stop')
+                self.assertEqual(assess(self.entry).reason,reason)
+                self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'disabled')
+                stop.delete()
+
+    def test_default_does_not_override_provider_or_missing_sender_evidence(self):
+        AccountCapability.objects.filter(capability='receive_third_party').update(status='disabled')
+        self.assertEqual(assess(self.entry).reason,'provider_third_party_not_enabled')
+        self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'disabled')
+        AccountCapability.objects.filter(capability='receive_third_party').update(status='enabled')
+        self.entry.provider_data={'third_party':{'type':'FIAT','full_name':''}}
+        self.assertEqual(assess(self.entry).reason,'sender_identity_missing')
+
+    def test_inactive_accounts_are_refused_for_both_first_and_third_party(self):
+        for status in ('pending','suspended','closed'):
+            for sender in ('Owner','Other'):
+                with self.subTest(status=status,sender=sender):
+                    self.account.status=status
+                    self.entry.provider_data={'third_party':{'type':'FIAT','full_name':sender}}
+                    self.assertEqual(assess(self.entry).reason,'account_not_active')
+                    self.assertEqual(receiving_capabilities(self.account),
+                        {'receive_same_name':'disabled','receive_third_party':'disabled'})
+
+    def test_placeholder_country_never_inherits_non_brazil_default(self):
+        for country in ('XX','XXX','invalid'):
+            for sender in ('Owner','Other'):
+                with self.subTest(country=country,sender=sender):
+                    self.account.country=country
+                    self.entry.provider_data={'third_party':{'type':'FIAT','full_name':sender}}
+                    self.assertEqual(assess(self.entry).reason,'unknown_country')
+                    self.assertEqual(receiving_capabilities(self.account),
+                        {'receive_same_name':'disabled','receive_third_party':'disabled'})
+
+    def test_approval_for_one_brazil_recipient_does_not_approve_another(self):
+        from django.contrib.auth import get_user_model
+        from users.models import Account
+        user=get_user_model().objects.create_user(username='other-recipient',email='other-recipient@example.test')
+        other=Account.objects.create(user=user,account_type='personal',account_index=0)
+        self.account.country,self.account.asset,self.account.payin_rail='BRA','BRL','PIX'
+        self.entry.asset='BRL'
+        for rail,owner in [('',None),('PIX',None),('PIX',other)]:
+            ThirdPartyPayinSwitch.objects.create(provider='infinia',country='BR',rail=rail,
+                confio_account=owner,enabled=True,evidence='Approved')
+        self.assertEqual(assess(self.entry).reason,'user_not_enabled')
+        self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'disabled')
