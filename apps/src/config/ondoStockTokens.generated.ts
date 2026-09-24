@@ -1,6 +1,6 @@
 // GENERATED FILE — do not edit by hand.
 // Source: cusd_plus/gm_tokens.json plus the previously shipped address history
-// Source SHA-256: 82ddfb124f50a32288ff44ed72be83933b3236a634653c0503596040f53d1f96
+// Source SHA-256: c79b7e896c234b70d286bf1f9da35e3ccc94fa7bfdbdd971f60d122f00b877e7
 // Regenerate: npm run generate:ondo-registry
 
 export interface BundledOndoStockToken {
@@ -27,6 +27,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'AEHRon', address: '0xdce0957e22f7baf2aa1a50d854e03cee6f215004' },
   { symbol: 'AGGon', address: '0x08ce97f3d5cf11e577d091ab048bc5e2eae3fabb' },
   { symbol: 'AGon', address: '0xa2a97e3d6140e8ccd058f3b84230f3e1a349b1a3' },
+  { symbol: 'AIon', address: '0xbb8c10f7e828e3279df8cc3397a5212f845c509b' },
   { symbol: 'AIPon', address: '0xae922b6cc2371b6dce592a82fac15ef890a7d467' },
   { symbol: 'AIQon', address: '0x333932f15e6e14f4a630163d3224548a721ddfa4' },
   { symbol: 'ALABon', address: '0x573e11cc667a8e5be0c7af2410403371088d3d0d' },
@@ -67,12 +68,16 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'BINCon', address: '0x940f442746d9ae699e63c378d52c4494ea02684f' },
   { symbol: 'BKCHon', address: '0x2291e5361f4ef7bb0d6703377bf497bfe4325152' },
   { symbol: 'BLCRon', address: '0x398ae5b33505f121c359f22b300fbcfa81db79ae' },
+  { symbol: 'BLKDIGon', address: '0xe658c62195f32bc53226e7e2642e3d76b4382fb8' },
+  { symbol: 'BLKGRWon', address: '0xe4bd77247671746caa3119e9feaa146f8a4ee237' },
+  { symbol: 'BLKHIon', address: '0xf78155dc15b838b7577002bc53bbe1041ca48622' },
   { symbol: 'BLKon', address: '0x24f5471183ea549987f245d6ce236b6108869c92' },
   { symbol: 'BLSHon', address: '0xfbe22d27b6e153244882fd7bdfe7c6109918281b' },
   { symbol: 'BMNRon', address: '0x52ad57a7ea642e99a892afc79e937b383f1b59e9' },
   { symbol: 'BNOon', address: '0x5f2d37192576a6804f44722eb828e280d5fb43dc' },
   { symbol: 'BOTon', address: '0xc43ae29afe58bf90da6fe3edd570c2e735fb2850' },
   { symbol: 'BOTZon', address: '0xb42f5597eadd424de67b46fe5d1ec4b61367a4e5' },
+  { symbol: 'BRAINon', address: '0x0574e53f8214d0402c8388b4402113a74354d1b0' },
   { symbol: 'BRHYon', address: '0x6860a2f969a8133a23421ddce21397995139d7e8' },
   { symbol: 'BRLNon', address: '0xd41829dec8b51119176ee0a6b73bc8b2718546a9' },
   { symbol: 'BRTRon', address: '0x463196cc72cbad2d1ac1896cde0766bfbbd64443' },
@@ -179,6 +184,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'GMEon', address: '0xdabb9aff4cf02f26d2014e4ca9f94ac6fe6572a3' },
   { symbol: 'GNRCon', address: '0x237c9f794edaaa0071cdf64a41c25eb76771754b' },
   { symbol: 'GOOGLon', address: '0x091fc7778e6932d4009b087b191d1ee3bac5729a' },
+  { symbol: 'GOOGon', address: '0x817f1f6780f99bcaac394a59cb0261962df5da8b' },
   { symbol: 'GRABon', address: '0xab2f74804c022c5249d52e743af4340e42f5f3b6' },
   { symbol: 'GRNDon', address: '0x20cce48d767ed68cbba7727c4c504efe5bcb626c' },
   { symbol: 'GSon', address: '0x0d4f9b25f81163fb4840ba4f434672543823000c' },
@@ -192,8 +198,10 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'HOODon', address: '0x19601179a60f55ff6636f5d1a8b6671053bd60a8' },
   { symbol: 'HPEon', address: '0x492e678c1ea048c70edc635047cdbb87ff5362a2' },
   { symbol: 'HSAIon', address: '0x847ef23a3f99af79a185ce033e1664165b846eea' },
+  { symbol: 'HTZon', address: '0xb18c6a83490dddbc9a83b011173b5b2fb5dc1272' },
   { symbol: 'HUBBon', address: '0x1c42c07257f936a7c4f84b8d756c95817e23631a' },
   { symbol: 'HUTon', address: '0x3a82f1c847cc55e52e597fd81c63a812c6722541' },
+  { symbol: 'HYDBon', address: '0x97b2fd5fc2f3e0dfd72d45734e360961528b6c63' },
   { symbol: 'HYGon', address: '0x0dae81a905b645a3d1e67129b89cd0acda224e9a' },
   { symbol: 'HYGWon', address: '0x85b53a9344884ae428e0e15f05a1819d280d4be7' },
   { symbol: 'HYSon', address: '0x75e9d68e99e76714ed1a7663ab48ba3aabd7a6c5' },
@@ -255,6 +263,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'LSCCon', address: '0x80f03abcb2bd85237740dd69f87d2f5de3909012' },
   { symbol: 'LUNRon', address: '0xa3b7b7cfeb023a6c4f444f5ca9a3fc85809ece15' },
   { symbol: 'LWLGon', address: '0x8ac67002282eea816afa0160d22a8d27f05ba07b' },
+  { symbol: 'MAG7Xon', address: '0x50436ec45316a98e72b03ead5752e8543f11ec09' },
   { symbol: 'MAon', address: '0x25ffda07f585c39848db6573e533d7585679c52d' },
   { symbol: 'MARAon', address: '0xd226d8170ee38793430c7dec6903df4b818bb74c' },
   { symbol: 'MBLYon', address: '0xcc977b493f52b4b6b6a0c3594530f2baee565e96' },
@@ -276,6 +285,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'MYRGon', address: '0x93b83111c54aa3993b2de5fccd4c70b26c522d5d' },
   { symbol: 'NATon', address: '0x33f3df3cea2a8c4828e88f30be932850cf749739' },
   { symbol: 'NBISon', address: '0xee268780473e7a0e47bac41547c6e01512555a16' },
+  { symbol: 'NEARon', address: '0x031d85943ba7ca0304323195e7086a76c35366fb' },
   { symbol: 'NEEon', address: '0xe9d43f7e6b2237e8873a7003b3f43c6b03160be5' },
   { symbol: 'NEMon', address: '0x5e63232993789601ce362e0240a299c1dfcbfbec' },
   { symbol: 'NETon', address: '0xfeb0793eea97585eb3a541f3fd53450d225b2b87' },
@@ -348,6 +358,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'RMBSon', address: '0x49ccb157c77afe5f264c35f0e9178a98d77815ab' },
   { symbol: 'ROKon', address: '0x95f7423c51eab71cbd00ca855b0b2b2153f14184' },
   { symbol: 'RTXon', address: '0x44fde2c6bc2c2b54962c69fcef57a2a50121dbd7' },
+  { symbol: 'RXRXon', address: '0xcb6d74aff24afc94514727ee0fcda6bb6b64f3f9' },
   { symbol: 'SAPon', address: '0x111f6f2b9f1c5f3ec841690e1deec606086727da' },
   { symbol: 'SATAon', address: '0x732823512ba98d1bcde471ca023ee2a0c9f117b7' },
   { symbol: 'SBETon', address: '0x99e01f02d66455bb106d91d469c9eaf6ab4904f6' },
@@ -421,6 +432,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'URNMon', address: '0xca626a74420aaaf285987da23d829f9159ab867c' },
   { symbol: 'USARon', address: '0x2206e07410a8fe9ef595e7184b2e9d160fdb7211' },
   { symbol: 'USFRon', address: '0xf4fd75764a5c086fb12f822be2ca318b3a362dc3' },
+  { symbol: 'USHYon', address: '0xc992e5f8da1b99cb941b0a259be9014cffe89ccf' },
   { symbol: 'USOon', address: '0x94174e3d1335db402dd03a092f7aa7ac2cb32be4' },
   { symbol: 'UUUUon', address: '0xd2c06fef2ca2375a9c7ceb4abca9dbc2ab6af981' },
   { symbol: 'VCXon', address: '0xc8206bb42ec019f7e7ea060ed887e9f5bb53cbb0' },
@@ -440,6 +452,7 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'VZon', address: '0xa3b089c886e6d721f49def8e050f3b9d4362560b' },
   { symbol: 'WCCon', address: '0x82436bae31ae373258ba567f32087eefc32189f2' },
   { symbol: 'WDCon', address: '0xceb29848d04ad3cb46e1fe8e45b82ffac39d797d' },
+  { symbol: 'WENon', address: '0x79ed7f4d9668e8e7aaadd12a711d19064840b9a5' },
   { symbol: 'WFCon', address: '0x629520dee1620def11596f84e85de9f1ff653012' },
   { symbol: 'WLKon', address: '0xb3d1a5f9bf92f18da643f2ada2f2cdfdae67e9d1' },
   { symbol: 'WMBon', address: '0x7b7abd762a400c9768cdeeef3c01dae39e0b8427' },
@@ -453,7 +466,9 @@ export const BUNDLED_ONDO_STOCK_TOKENS: readonly BundledOndoStockToken[] = [
   { symbol: 'XYLDon', address: '0x1fe12abdf560c753acbc63533519d74801e04958' },
   { symbol: 'XYZon', address: '0xe778a2e5d953c82eb9475cf3b87654226a867344' },
   { symbol: 'YEARon', address: '0x4277d20430e901092e259ba9cf7164c37077aaf1' },
+  { symbol: 'YLD5on', address: '0x0cfd1030e2431e0fa15d4cc3f3e43076fe93f8f9' },
+  { symbol: 'YLD8on', address: '0x2f20d5dfbaffa3e6351e06b8b18059747cd7ee72' },
 ] as const;
 
-export const BUNDLED_ONDO_STOCK_COUNT = 442;
-export const BUNDLED_ONDO_STOCK_SOURCE_SHA256 = '82ddfb124f50a32288ff44ed72be83933b3236a634653c0503596040f53d1f96';
+export const BUNDLED_ONDO_STOCK_COUNT = 457;
+export const BUNDLED_ONDO_STOCK_SOURCE_SHA256 = 'c79b7e896c234b70d286bf1f9da35e3ccc94fa7bfdbdd971f60d122f00b877e7';

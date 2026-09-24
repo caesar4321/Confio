@@ -71,6 +71,10 @@
     "address": "0x333932f15e6e14f4a630163d3224548a721ddfa4",
     "decimals": 18
   },
+  "AIon": {
+    "address": "0xbb8c10f7e828e3279df8cc3397a5212f845c509b",
+    "decimals": 18
+  },
   "ALABon": {
     "address": "0x573e11cc667a8e5be0c7af2410403371088d3d0d",
     "decimals": 18
@@ -223,6 +227,18 @@
     "address": "0x398ae5b33505f121c359f22b300fbcfa81db79ae",
     "decimals": 18
   },
+  "BLKDIGon": {
+    "address": "0xe658c62195f32bc53226e7e2642e3d76b4382fb8",
+    "decimals": 18
+  },
+  "BLKGRWon": {
+    "address": "0xe4bd77247671746caa3119e9feaa146f8a4ee237",
+    "decimals": 18
+  },
+  "BLKHIon": {
+    "address": "0xf78155dc15b838b7577002bc53bbe1041ca48622",
+    "decimals": 18
+  },
   "BLKon": {
     "address": "0x24f5471183ea549987f245d6ce236b6108869c92",
     "decimals": 18
@@ -245,6 +261,10 @@
   },
   "BOTon": {
     "address": "0xc43ae29afe58bf90da6fe3edd570c2e735fb2850",
+    "decimals": 18
+  },
+  "BRAINon": {
+    "address": "0x0574e53f8214d0402c8388b4402113a74354d1b0",
     "decimals": 18
   },
   "BRHYon": {
@@ -671,6 +691,10 @@
     "address": "0x091fc7778e6932d4009b087b191d1ee3bac5729a",
     "decimals": 18
   },
+  "GOOGon": {
+    "address": "0x817f1f6780f99bcaac394a59cb0261962df5da8b",
+    "decimals": 18
+  },
   "GRABon": {
     "address": "0xab2f74804c022c5249d52e743af4340e42f5f3b6",
     "decimals": 18
@@ -723,12 +747,20 @@
     "address": "0x847ef23a3f99af79a185ce033e1664165b846eea",
     "decimals": 18
   },
+  "HTZon": {
+    "address": "0xb18c6a83490dddbc9a83b011173b5b2fb5dc1272",
+    "decimals": 18
+  },
   "HUBBon": {
     "address": "0x1c42c07257f936a7c4f84b8d756c95817e23631a",
     "decimals": 18
   },
   "HUTon": {
     "address": "0x3a82f1c847cc55e52e597fd81c63a812c6722541",
+    "decimals": 18
+  },
+  "HYDBon": {
+    "address": "0x97b2fd5fc2f3e0dfd72d45734e360961528b6c63",
     "decimals": 18
   },
   "HYGWon": {
@@ -975,6 +1007,10 @@
     "address": "0x8ac67002282eea816afa0160d22a8d27f05ba07b",
     "decimals": 18
   },
+  "MAG7Xon": {
+    "address": "0x50436ec45316a98e72b03ead5752e8543f11ec09",
+    "decimals": 18
+  },
   "MARAon": {
     "address": "0xd226d8170ee38793430c7dec6903df4b818bb74c",
     "decimals": 18
@@ -1057,6 +1093,10 @@
   },
   "NBISon": {
     "address": "0xee268780473e7a0e47bac41547c6e01512555a16",
+    "decimals": 18
+  },
+  "NEARon": {
+    "address": "0x031d85943ba7ca0304323195e7086a76c35366fb",
     "decimals": 18
   },
   "NEEon": {
@@ -1345,6 +1385,10 @@
   },
   "RTXon": {
     "address": "0x44fde2c6bc2c2b54962c69fcef57a2a50121dbd7",
+    "decimals": 18
+  },
+  "RXRXon": {
+    "address": "0xcb6d74aff24afc94514727ee0fcda6bb6b64f3f9",
     "decimals": 18
   },
   "SAPon": {
@@ -1639,6 +1683,10 @@
     "address": "0xf4fd75764a5c086fb12f822be2ca318b3a362dc3",
     "decimals": 18
   },
+  "USHYon": {
+    "address": "0xc992e5f8da1b99cb941b0a259be9014cffe89ccf",
+    "decimals": 18
+  },
   "USOon": {
     "address": "0x94174e3d1335db402dd03a092f7aa7ac2cb32be4",
     "decimals": 18
@@ -1715,6 +1763,10 @@
     "address": "0xceb29848d04ad3cb46e1fe8e45b82ffac39d797d",
     "decimals": 18
   },
+  "WENon": {
+    "address": "0x79ed7f4d9668e8e7aaadd12a711d19064840b9a5",
+    "decimals": 18
+  },
   "WFCon": {
     "address": "0x629520dee1620def11596f84e85de9f1ff653012",
     "decimals": 18
@@ -1765,6 +1817,14 @@
   },
   "YEARon": {
     "address": "0x4277d20430e901092e259ba9cf7164c37077aaf1",
+    "decimals": 18
+  },
+  "YLD5on": {
+    "address": "0x0cfd1030e2431e0fa15d4cc3f3e43076fe93f8f9",
+    "decimals": 18
+  },
+  "YLD8on": {
+    "address": "0x2f20d5dfbaffa3e6351e06b8b18059747cd7ee72",
     "decimals": 18
   }
 }
