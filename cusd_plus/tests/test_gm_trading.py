@@ -357,8 +357,10 @@ class GmApiTradingTests(SimpleTestCase):
         info = SimpleNamespace(context=SimpleNamespace(
             user=SimpleNamespace(is_authenticated=True, id=36), META={}))
         market = [
-            {'primaryMarket': {'symbol': 'SPYon', 'price': '600'}},
-            {'primaryMarket': {'symbol': 'AAPLon', 'price': '230'}},
+            {'primaryMarket': {'symbol': 'SPYon', 'price': '600'},
+             'underlyingMarket': {'ticker': 'SPY', 'name': 'SPDR S&P 500 ETF'}},
+            {'primaryMarket': {'symbol': 'AAPLon', 'price': '230'},
+             'underlyingMarket': {'ticker': 'AAPL', 'name': 'Apple Inc.'}},
             {'primaryMarket': {'symbol': 'NEWon', 'price': None}},
         ]
         with mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=True), \
@@ -378,6 +380,39 @@ class GmApiTradingTests(SimpleTestCase):
 
     def test_home_tile_unknown_invested_is_not_zero(self):
         self.assertIsNone(self._home_tile(None).invested_usd)
+
+    def test_unidentified_assets_are_hidden_and_curated_portfolios_listed(self):
+        info = SimpleNamespace(context=SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True, id=37), META={}))
+        market = [
+            {'primaryMarket': {'symbol': 'AAPLon', 'price': '230'},
+             'underlyingMarket': {'ticker': 'AAPL', 'name': 'Apple Inc.', 'marketCap': '3'}},
+            # Ondo Intelligent Portfolios arrive with no underlying data at all.
+            {'primaryMarket': {'symbol': 'BLKHIon', 'price': '4.94'}, 'underlyingMarket': None},
+            {'primaryMarket': {'symbol': 'YLD8on', 'price': '5.01'}, 'underlyingMarket': None},
+        ]
+        with mock.patch('cusd_plus.schema._stock_surfaces_enabled', return_value=True), \
+             mock.patch('cusd_plus.gm_api.all_market', return_value=market), \
+             mock.patch('cusd_plus.gm_api.market_status', return_value={}), \
+             mock.patch('cusd_plus.gm_api.session_from_status', return_value='core'), \
+             mock.patch('cusd_plus.gm_tvl.value_usd', return_value=None):
+            listed = Query().resolve_gm_market(info).assets
+            tile = Query().resolve_gm_home_tile(info)
+        self.assertEqual([(a.ticker, a.name) for a in listed],
+                         [('AAPL', 'Apple'), ('BLKHI', 'Ondo Ingreso Alto')])
+        self.assertTrue(all(a.name for a in listed))       # never a blank row
+        self.assertEqual(tile.asset_count, len(listed))    # Home counts what the list shows
+
+    def test_blackrock_shelf_explains_blackrock_and_its_limited_role(self):
+        from cusd_plus.schema import _gm_descriptions, _gm_highlights
+        shelf = next(s for s in _gm_highlights()['shelves'] if s['key'] == 'blackrock')
+        self.assertIn('BlackRock es', shelf['subtitle'])
+        self.assertIn('no los emite, administra ni supervisa', shelf['subtitle'])
+        for item in shelf['items']:
+            self.assertIn(item['ticker'], _gm_highlights()['names'])
+            # Never "fondo de BlackRock": it is Ondo's product on a BlackRock strategy.
+            self.assertNotIn('fondo de BlackRock', _gm_descriptions()[item['ticker']])
+            self.assertIn('no lo emite, administra ni supervisa', _gm_descriptions()[item['ticker']])
 
     def test_highlighted_tickers_have_descriptions(self):
         from cusd_plus.schema import _gm_descriptions, _gm_highlights

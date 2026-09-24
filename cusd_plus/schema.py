@@ -429,6 +429,25 @@ def _gm_highlights() -> dict:
     return json.loads(path.read_text(encoding='utf-8'))
 
 
+def _gm_listing(item) -> tuple[str, str, str] | None:
+    """(symbol, ticker, display name) for an asset the explorer may list, or
+    None. Ondo can publish a product before its data (Intelligent Portfolios
+    arrived with no name, underlying ticker or market cap): never list a
+    blank row — use Ondo's name, else its underlying ticker, else a curated
+    name from gm_highlights.json, else hide it until one exists."""
+    pm = item.get('primaryMarket') or {}
+    um = item.get('underlyingMarket') or {}
+    if not pm.get('symbol') or pm.get('price') is None:
+        return None
+    ticker = um.get('ticker') or pm['symbol'].removesuffix('on')
+    name = _display_name(um.get('name') or um.get('ticker') or '')
+    if not name:
+        name = (_gm_highlights().get('names') or {}).get(ticker, '')
+    if not name:
+        return None
+    return pm['symbol'], ticker, name
+
+
 def _sparkline(history: list, points: int = 24) -> list:
     if not history:
         return []
@@ -595,15 +614,16 @@ class Query(graphene.ObjectType):
 
         ranked = []  # (market cap, asset) — famous names first
         for item in market:
+            listing = _gm_listing(item)
+            if listing is None:
+                continue
+            symbol, ticker, name = listing
             pm = item.get('primaryMarket') or {}
             um = item.get('underlyingMarket') or {}
-            if not pm.get('symbol') or pm.get('price') is None:
-                continue
-            ticker = um.get('ticker') or pm['symbol'].removesuffix('on')
             asset = GmAssetType(
-                symbol=pm['symbol'],
+                symbol=symbol,
                 ticker=ticker,
-                name=_display_name(um.get('name') or um.get('ticker') or ''),
+                name=name,
                 price_usd=float(pm['price']),
                 day_change_pct=float(pm.get('priceChangePct24h') or 0),
                 off_hours='offhours' in (pm.get('tradableSessions') or []),
@@ -705,10 +725,10 @@ class Query(graphene.ObjectType):
         except Exception:
             logging.getLogger(__name__).exception('gm_home_tile upstream failed')
             market = None
+        # Same rule as the explorer, so the Home count never includes rows
+        # the list itself hides.
         asset_count = None if market is None else sum(
-            1 for item in market
-            if (item.get('primaryMarket') or {}).get('symbol')
-            and (item.get('primaryMarket') or {}).get('price') is not None
+            1 for item in market if _gm_listing(item) is not None
         )
         # An activity metric, not a reserve: shown only once it reads as
         # traction (a US$60 total in the proof strip argued against the
