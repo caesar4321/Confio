@@ -169,19 +169,69 @@ class DiscoverSectionTests(TestCase):
         }
         return ChannelAdminForm(data=data, instance=channel)
 
-    def avatar_file(self, name='logo.png', fmt='PNG'):
+    def avatar_file(self, name='logo.png', fmt='PNG', size=(8, 8), mode='RGB'):
         from io import BytesIO
         from django.core.files.uploadedfile import SimpleUploadedFile
         from PIL import Image
         buffer = BytesIO()
-        Image.new('RGB', (8, 8), (16, 185, 129)).save(buffer, format=fmt)
+        Image.new(mode, size, 128 if mode == 'L' else (16, 185, 129)).save(buffer, format=fmt)
         return SimpleUploadedFile(name, buffer.getvalue(), content_type='image/png')
+
+    @patch('inbox.admin.settings.AWS_PUBLICATIONS_BUCKET', 'test-publications')
+    def upload_form(self, upload):
+        form = ChannelAdminForm(data=self.admin_form(self.institution).data, instance=self.institution,
+                                files={'avatar_upload': upload})
+        form.is_valid()
+        return form
+
+    def test_admin_avatar_upload_rejects_a_truncated_image(self):
+        import random
+        from io import BytesIO
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        # Detailed pixels so the cut lands in scan data: the header stays valid
+        # (passes ImageField's verify) and only a full decode notices.
+        rng = random.Random(1)
+        image = Image.new('RGB', (64, 64))
+        image.putdata([(rng.randint(0, 255),) * 3 for _ in range(64 * 64)])
+        buffer = BytesIO()
+        image.save(buffer, format='JPEG')
+        data = buffer.getvalue()
+        truncated = SimpleUploadedFile('logo.jpg', data[: int(len(data) * 0.7)], content_type='image/jpeg')
+        form = self.upload_form(truncated)
+        self.assertIn('avatar_upload', form.errors)
+
+    def test_admin_avatar_upload_rejects_huge_dimensions(self):
+        form = self.upload_form(self.avatar_file(size=(4097, 4097), mode='L'))
+        self.assertIn('avatar_upload', form.errors)
+
+    def test_admin_avatar_upload_needs_the_publications_bucket(self):
+        with patch('inbox.admin.settings.AWS_PUBLICATIONS_BUCKET', None):
+            form = ChannelAdminForm(data=self.admin_form(self.institution).data, instance=self.institution,
+                                    files={'avatar_upload': self.avatar_file()})
+            self.assertFalse(form.is_valid())
+        self.assertIn('AWS_PUBLICATIONS_BUCKET', str(form.errors['avatar_upload']))
+
+    def test_admin_avatar_upload_is_reencoded_without_metadata(self):
+        from io import BytesIO
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        source = BytesIO()
+        exif = Image.Exif()
+        exif[0x010F] = 'PhoneMaker'  # Make; stands in for GPS and other metadata
+        Image.new('RGB', (8, 8), (16, 185, 129)).save(source, format='JPEG', exif=exif)
+        form = self.upload_form(SimpleUploadedFile('me.jpg', source.getvalue(), content_type='image/jpeg'))
+        self.assertTrue(form.is_valid(), form.errors)
+        encoded = form.cleaned_data['avatar_upload'].confio_bytes
+        self.assertNotEqual(encoded, source.getvalue())
+        with Image.open(BytesIO(encoded)) as reopened:
+            self.assertEqual(reopened.format, 'JPEG')
+            self.assertEqual(dict(reopened.getexif()), {})
 
     def test_admin_avatar_upload_becomes_the_channel_image(self):
         from django.contrib.admin.sites import AdminSite
         from .admin import ChannelAdmin
-        form = ChannelAdminForm(data=self.admin_form(self.institution).data, instance=self.institution,
-                                files={'avatar_upload': self.avatar_file()})
+        form = self.upload_form(self.avatar_file())
         self.assertTrue(form.is_valid(), form.errors)
         request = SimpleNamespace(user=self.user)
         with patch('inbox.admin.upload_object', return_value='https://cdn.example/cip.png') as upload:

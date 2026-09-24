@@ -45,6 +45,13 @@ describe('PostByline', () => {
     expect(tree.root.findAllByType(Image)).toHaveLength(0);
     expect(texts(tree)).toContain('C');
   });
+
+  it('tries a replaced avatar URL after the previous one failed', () => {
+    const tree = mount(<PostByline name="CIP Lima" avatarUrl="https://cdn/broken.png" />);
+    act(() => tree.root.findByType(Image).props.onError());
+    act(() => tree.update(<PostByline name="CIP Lima" avatarUrl="https://cdn/new-logo.png" />));
+    expect(tree.root.findByType(Image).props.source).toEqual({ uri: 'https://cdn/new-logo.png' });
+  });
 });
 
 describe('ReactionBar', () => {
