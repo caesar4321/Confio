@@ -1,4 +1,4 @@
-import { fmtUsd, LANDING_STATS } from './landingStats';
+import { fmtUsd, FUND_FLOW_STATS, LANDING_STATS } from './landingStats';
 
 // fmtUsd is the single money formatter for landing stats: "US$" prefix
 // (a bare "$" is ambiguous across LATAM pesos), en-US grouping, and
@@ -33,12 +33,18 @@ describe('fmtUsd', () => {
   });
 });
 
-describe('LANDING_STATS query', () => {
-  it('requests all public traction fields from landingStats', () => {
-    const selections = LANDING_STATS.definitions[0].selectionSet.selections[0]
-      .selectionSet.selections.map((s) => s.name.value);
-    expect(selections).toEqual(
-      expect.arrayContaining(['depositedVolumeUsd', 'presaleRaisedUsd', 'registeredUsers'])
+const fieldsOf = (query) => query.definitions[0].selectionSet.selections[0]
+  .selectionSet.selections.map((s) => s.name.value);
+
+describe('landing stat queries', () => {
+  it('reads presale and users from landingStats', () => {
+    expect(fieldsOf(LANDING_STATS)).toEqual(
+      expect.arrayContaining(['presaleRaisedUsd', 'registeredUsers'])
     );
+  });
+
+  it('reads money moved from its own fundFlowStats query (the app\'s Movido)', () => {
+    expect(FUND_FLOW_STATS.definitions[0].selectionSet.selections[0].name.value).toBe('fundFlowStats');
+    expect(fieldsOf(FUND_FLOW_STATS)).toEqual(expect.arrayContaining(['totalUsd']));
   });
 });

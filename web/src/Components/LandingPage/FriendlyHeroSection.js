@@ -4,7 +4,7 @@ import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyHeroSection.module.css';
 import confioHomeDemo from '../../images/ConfioHomeDemo.jpeg';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { LANDING_STATS, toStatValue } from './landingStats';
+import { FUND_FLOW_STATS, LANDING_STATS, toStatValue } from './landingStats';
 import TickerNumber from './TickerNumber';
 
 // «Radicalmente Normal» hero (DESIGN.md): calm declarative headline,
@@ -13,12 +13,15 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
   const { t } = useLanguage();
 
   const { data: statsData } = useQuery(LANDING_STATS, { fetchPolicy: 'cache-and-network' });
+  const { data: flowData } = useQuery(FUND_FLOW_STATS, { fetchPolicy: 'cache-and-network' });
   const live = statsData?.landingStats;
   // Live values only — no hardcoded fallbacks (DESIGN.md: real numbers or
   // nothing). Whole dollars only (floored, never rounded up): decimals
   // reintroduce the "," vs "." ambiguity across LATAM locales, and a money
   // site must not advertise more than reality. Zero/NaN don't render.
-  const deposited = toStatValue(live?.depositedVolumeUsd);
+  // Deposits AND withdrawals: money that gets out is the proof LATAM users
+  // look for, and the figure no longer shrinks when a large holder leaves.
+  const moved = toStatValue(flowData?.fundFlowStats?.totalUsd);
   const presale = toStatValue(live?.presaleRaisedUsd);
   const registeredUsers = toStatValue(live?.registeredUsers);
 
@@ -95,18 +98,18 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
             )}
 
             {/* Live traction — real numbers styled like app balances */}
-            {!title && (deposited != null || presale != null || registeredUsers != null) && (
+            {!title && (moved != null || presale != null || registeredUsers != null) && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: 0.35 }}
                 className={styles.statRow}
               >
-                {deposited != null && (
+                {moved != null && (
                   <div className={styles.statBlock}>
-                    <TickerNumber value={deposited} className={styles.statValue} />
+                    <TickerNumber value={moved} className={styles.statValue} />
                     <span className={styles.statLabel}>
-                      {t('depositados on-chain', 'deposited on-chain', '온체인 입금 총액')}
+                      {t('movidos en depósitos y retiros', 'moved in deposits and withdrawals', '입출금 총액')}
                     </span>
                   </div>
                 )}
