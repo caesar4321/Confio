@@ -15,16 +15,16 @@ import { colors } from '../config/theme';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
+import { useGmHomeTile } from '../hooks/useGmMarket';
 
-// Scalars only, so it is safe to cache (a tickers-only `gmMarket.assets`
-// write would replace the explorer's full rows) and cheap to serve: the
-// server counts from its cached market instead of shipping every asset.
-// Own query per the new-field rule: an older server fails only this tile.
-const GM_HOME_TILE = gql`
-  query GmHomeTile {
-    gmHomeTile {
-      assetCount
-      investedUsd
+// All-time deposits + withdrawals, each counted once at the delivery
+// boundary (ramps/metrics.py). Own query per the new-field rule: an older
+// server fails only this tile, never the shared stats snapshot.
+const FUND_FLOW_STATS = gql`
+  query FundFlowStats {
+    fundFlowStats {
+      totalUsd
+      operationCount
     }
   }
 `;
@@ -67,7 +67,11 @@ const formatLocale = (
 const CONTAINER_PADDING = 16;
 const GRID_COLUMNS = 2;
 
+// Five tiles: proof row of three (Usuarios · Ahorros · Movido) over the
+// offers row of two (Acciones · Preventa) — still two rows, so the block
+// keeps its height instead of growing a third row with a lonely cell.
 const chunkIntoRows = <T,>(items: T[]): T[][] => {
+  if (items.length === 5) return [items.slice(0, 3), items.slice(3)];
   const rows: T[][] = [];
   for (let i = 0; i < items.length; i += GRID_COLUMNS) {
     rows.push(items.slice(i, i + GRID_COLUMNS));
@@ -83,17 +87,16 @@ type Tile = {
   label: string;
   descriptor: string;
   descriptorColor?: string;
-  onPress: () => void;
+  /** Omitted for a read-only stat: no chevron, not announced as a button. */
+  onPress?: () => void;
 };
 
 type HomeStatsSectionProps = {
   refreshNonce?: number;
-  showStocks?: boolean;
 };
 
 export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   refreshNonce = 0,
-  showStocks = false,
 }) => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
@@ -104,17 +107,20 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     nextFetchPolicy: 'network-only',
     pollInterval: 300_000, // follows the server's marked-to-market stock snapshot cadence
   });
-  // Not skipped on showStocks: that flag waits for the portfolio query, and
-  // chaining behind it made this the last tile to fill. Ineligible users get
-  // null from the server and the tile stays hidden. Cached, so a reopen
-  // paints the last value at once.
-  const { data: stockTileData, refetch: refetchStockTile } = useQuery(GM_HOME_TILE, {
+  // Cumulative and cached: it only grows, so the last value painted on a
+  // reopen is never an overstatement of anything that has since shrunk.
+  const { data: flowData, refetch: refetchFlow } = useQuery(FUND_FLOW_STATS, {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
+    // Home stays mounted while the user navigates, so mount/refresh/foreground
+    // alone could leave it stale; follow the server's 10-minute cache.
+    pollInterval: 600_000,
   });
-  const stockAssetCount: number | null = stockTileData?.gmHomeTile?.assetCount ?? null;
-  // Server-gated: non-null only once the invested total reads as traction.
-  const stockInvestedUsd: number | null = stockTileData?.gmHomeTile?.investedUsd ?? null;
+  // Shared with Home's Acciones row through Apollo's cache. Null for users
+  // outside Ondo's eligibility — then the tile is simply absent.
+  const { assetCount: stockAssetCount, investedUsd: stockInvestedUsd, refetch: refetchStockTile } = useGmHomeTile();
+  const flowTotalUsd: number | null = flowData?.fundFlowStats?.totalUsd ?? null;
+  const flowOperations: number | null = flowData?.fundFlowStats?.operationCount ?? null;
   const previousRefreshNonce = useRef(refreshNonce);
   const previousAppState = useRef<AppStateStatus | null>(AppState.currentState);
 
@@ -122,8 +128,9 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     if (refreshNonce === previousRefreshNonce.current) return;
     previousRefreshNonce.current = refreshNonce;
     refetch().catch(() => {});
-    if (showStocks) refetchStockTile().catch(() => {});
-  }, [refreshNonce, refetch, refetchStockTile, showStocks]);
+    refetchFlow().catch(() => {});
+    refetchStockTile().catch(() => {});
+  }, [refreshNonce, refetch, refetchFlow, refetchStockTile]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -134,11 +141,12 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       previousAppState.current = nextState;
       if (returningToForeground) {
         refetch().catch(() => {});
-        if (showStocks) refetchStockTile().catch(() => {});
+        refetchFlow().catch(() => {});
+        refetchStockTile().catch(() => {});
       }
     });
     return () => subscription.remove();
-  }, [refetch, refetchStockTile, showStocks]);
+  }, [refetch, refetchFlow, refetchStockTile]);
 
   const s: StatsSummary | undefined = data?.statsSummary;
   const thousandsSeparator = currency.thousandsSeparator;
@@ -187,12 +195,24 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         descriptor: backingDescriptor,
         onPress: () => navigation.navigate('ProtectedSavings'),
       };
-      // What the network HOLDS once that reads as traction, else what it
-      // OFFERS: a US$60 invested total read as evidence against the product
-      // inside the proof strip. The server owns the threshold. This gating
-      // is for an activity metric only — Ahorros is a reserve figure and is
-      // always shown as-is, small or not. Opens the explorer either way.
-      const stocks: Tile = stockInvestedUsd != null
+      // Money that actually moved through Confío, both ways. "Retiros" is
+      // deliberate: proof that money gets OUT is what LATAM users check.
+      // Cumulative, so it never drops when a large holder leaves — the
+      // reserves figure (Ahorros) is the one that honestly moves with them.
+      const flow: Tile = {
+        key: 'flow',
+        icon: 'repeat',
+        value: fmt(flowTotalUsd),
+        unit: 'USD',
+        label: 'Movido',
+        descriptor: flowOperations != null
+          ? `${fmt(flowOperations)} depósitos y retiros`
+          : 'Depósitos y retiros',
+      };
+      // An offer, so it sits in the offers row next to Preventa: the catalog
+      // size until the invested total is meaningful (server-gated at
+      // GM_HOME_INVESTED_MIN_USD), then what users actually hold.
+      const stocks: Tile | null = stockInvestedUsd != null
         ? {
           key: 'stocks',
           icon: 'trending-up',
@@ -202,14 +222,17 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           descriptor: 'Invertido en EE.UU.',
           onPress: () => navigation.navigate('StocksList'),
         }
-        : {
-          key: 'stocks',
-          icon: 'trending-up',
-          value: fmt(stockAssetCount),
-          label: 'Acciones',
-          descriptor: 'S&P 500, Apple, oro…',
-          onPress: () => navigation.navigate('StocksList'),
-        };
+        : stockAssetCount != null
+          ? {
+            key: 'stocks',
+            icon: 'trending-up',
+            value: fmt(stockAssetCount),
+            label: 'Acciones',
+            // No trailing "…": in a one-line cell it read as truncated.
+            descriptor: 'S&P 500, Apple, oro y más',
+            onPress: () => navigation.navigate('StocksList'),
+          }
+          : null;
       const presale: Tile = {
         key: 'presale',
         icon: 'zap',
@@ -233,13 +256,13 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       // numbers costs more credibility than the extra taps are worth. If the
       // raise needs a louder surface, it gets its OWN affordance; it does not
       // get to outrank the proof inside the proof strip.
-      return showStocks
-        ? [users, savings, stocks, presale]
-        : [users, savings, presale];
+      return stocks
+        ? [users, savings, flow, stocks, presale]
+        : [users, savings, flow, presale];
     },
-    [s?.totalUsers, verified, tvl, backingDescriptor, stockAssetCount, stockInvestedUsd,
-     s?.presaleCusdRaised, showStocks,
-     thousandsSeparator, decimalSeparator, navigation]
+    [s?.totalUsers, verified, tvl, backingDescriptor, flowTotalUsd, flowOperations,
+     stockAssetCount, stockInvestedUsd,
+     s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 
   const accessibilityLabelFor = (tile: Tile) =>
@@ -252,12 +275,13 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
       style={styles.tile}
       activeOpacity={0.7}
       onPress={tile.onPress}
-      accessibilityRole="button"
+      disabled={!tile.onPress}
+      accessibilityRole={tile.onPress ? 'button' : 'text'}
       accessibilityLabel={accessibilityLabelFor(tile)}
     >
       <View style={styles.tileTopRow}>
         <Icon name={tile.icon} size={13} color={colors.primary} />
-        <Icon name="chevron-right" size={14} color="#9CA3AF" />
+        {tile.onPress && <Icon name="chevron-right" size={14} color="#9CA3AF" />}
       </View>
       <Text
         style={styles.tileValue}
@@ -299,13 +323,18 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   // share one line, label and descriptor share the next. Two lines ≈ 56pt,
   // so the whole grid lands near 128pt — every stat full size, nothing
   // hidden, nothing scrolling.
-  const renderGridCell = (tile: Tile) => (
+  // `compact` = a third-width cell (the five-tile proof row): the merged
+  // "label · descriptor" line doesn't fit there, so it splits in two. That
+  // row grows ~13pt; the offers row keeps the two-line cell. It also drops
+  // the chevron and may shrink further so a value never ends in "…".
+  const renderGridCell = (tile: Tile, compact = false) => (
     <TouchableOpacity
       key={tile.key}
       style={styles.cell}
       activeOpacity={0.7}
       onPress={tile.onPress}
-      accessibilityRole="button"
+      disabled={!tile.onPress}
+      accessibilityRole={tile.onPress ? 'button' : 'text'}
       accessibilityLabel={accessibilityLabelFor(tile)}
     >
       <View style={styles.cellValueRow}>
@@ -314,30 +343,49 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
           style={styles.cellValue}
           numberOfLines={1}
           adjustsFontSizeToFit
-          minimumFontScale={0.7}
+          minimumFontScale={compact ? 0.6 : 0.7}
         >
           {tile.value}
           {tile.unit ? <Text style={styles.tileUnit}> {tile.unit}</Text> : null}
         </Text>
-        <Icon name="chevron-right" size={14} color="#9CA3AF" />
+        {/* Third-width cells drop the chevron: icon + chevron + padding left
+            ~58pt for "6.789 USD" on a 375pt iPhone and iOS truncated it to
+            "6.789…". The whole cell stays tappable. */}
+        {tile.onPress && !compact && <Icon name="chevron-right" size={14} color="#9CA3AF" />}
       </View>
       {/* Label and descriptor merged onto one line. Sentence case, no
           letter-spacing: the strip's uppercase treatment is ~15% wider and
           "Usuarios · Didit: 1.234" does not survive it at half-container
           width. The descriptor keeps its own color so Preventa's violet
           accent still reads. */}
-      <Text
-        style={styles.cellMeta}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.75}
-      >
-        {tile.label}
-        <Text style={styles.cellMetaSeparator}> · </Text>
-        <Text style={tile.descriptorColor ? { color: tile.descriptorColor } : undefined}>
-          {tile.descriptor}
+      {compact ? (
+        <>
+          <Text style={styles.cellMeta} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+            {tile.label}
+          </Text>
+          <Text
+            style={[styles.cellDescriptor, tile.descriptorColor ? { color: tile.descriptorColor } : null]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.75}
+          >
+            {tile.descriptor}
+          </Text>
+        </>
+      ) : (
+        <Text
+          style={styles.cellMeta}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          {tile.label}
+          <Text style={styles.cellMetaSeparator}> · </Text>
+          <Text style={tile.descriptorColor ? { color: tile.descriptorColor } : undefined}>
+            {tile.descriptor}
+          </Text>
         </Text>
-      </Text>
+      )}
     </TouchableOpacity>
   );
 
@@ -356,7 +404,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
                 {row.map((tile, idx) => (
                   <React.Fragment key={tile.key}>
                     {idx > 0 && <View style={styles.divider} />}
-                    {renderGridCell(tile)}
+                    {renderGridCell(tile, row.length > GRID_COLUMNS)}
                   </React.Fragment>
                 ))}
                 {/* Odd tile count would leave a half-width cell stretched
@@ -439,6 +487,12 @@ const styles = StyleSheet.create({
     color: colors.dark,
     marginTop: 3,
     fontWeight: '700',
+  },
+  cellDescriptor: {
+    fontSize: 10,
+    color: '#6B7280',
+    marginTop: 1,
+    fontWeight: '600',
   },
   cellMetaSeparator: {
     color: '#9CA3AF',
