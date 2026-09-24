@@ -11,7 +11,7 @@ from payment_accounts.monitoring import delivered_usd, dashboard_context, journe
 from payment_accounts.admin import InfiniaJourneyAdmin, AutomaticPayinAdmin
 from payment_accounts.models import AutomaticPayin, InfiniaJourney
 from ramps.models import RampTransaction
-from ramps.metrics import deposited_volume_by_provider
+from ramps.metrics import deposit_volume_and_count, deposited_volume_by_provider, withdrawn_volume_and_count
 from . import test_activity
 
 
@@ -187,6 +187,42 @@ class MonitoringTests(TestCase):
         j.money_flow.legacy_ramp_transaction = records[0]
         j.money_flow.save(update_fields=['legacy_ramp_transaction'])
         self.assertEqual(sum(deposited_volume_by_provider().values()), Decimal('21.982'))
+
+    def test_deposit_count_follows_delivered_journeys(self):
+        j = self.complete()
+        self.assertEqual(deposit_volume_and_count(), (Decimal('1.982'), 1))
+        type(j.wallet_conversion).objects.filter(pk=j.wallet_conversion_id).update(is_deleted=True)
+        self.assertEqual(deposit_volume_and_count(), (Decimal(0), 0))
+
+    def succeeded_payout(self, source_asset='USDT_BSC', amount=Decimal('25')):
+        j, _ = self.outgoing()
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='completed')
+        type(j.money_flow).objects.filter(pk=j.money_flow_id).update(
+            status='succeeded', source_asset=source_asset, source_amount=amount)
+        return j
+
+    def test_withdrawals_count_succeeded_dollar_payouts_once(self):
+        j = self.succeeded_payout()
+        self.assertEqual(withdrawn_volume_and_count(), (Decimal('25'), 1))
+        # The legacy ramp mirrored by this journey is the same withdrawal.
+        mirror = RampTransaction.objects.create(provider='koywe', direction='off_ramp',
+            status='COMPLETED', crypto_currency='USDT BSC', crypto_amount_actual=Decimal('25'))
+        type(j.money_flow).objects.filter(pk=j.money_flow_id).update(legacy_ramp_transaction=mirror)
+        self.assertEqual(withdrawn_volume_and_count(), (Decimal('25'), 1))
+        # Deposits are untouched by a payout.
+        self.assertEqual(deposit_volume_and_count(), (Decimal(0), 0))
+
+    def test_withdrawals_skip_unfinished_and_non_dollar_payouts(self):
+        j = self.succeeded_payout()
+        flows = type(j.money_flow).objects.filter(pk=j.money_flow_id)
+        for field, value in (('status', 'needs_review'), ('source_asset', 'COP')):
+            with self.subTest(**{field: value}):
+                flows.update(status='succeeded', source_asset='USDT_BSC')
+                flows.update(**{field: value})
+                self.assertEqual(withdrawn_volume_and_count(), (Decimal(0), 0))
+        flows.update(status='succeeded', source_asset='USDT_BSC')
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review')
+        self.assertEqual(withdrawn_volume_and_count(), (Decimal(0), 0))
 
     def test_deleted_conversion_is_not_counted(self):
         j = self.complete()

@@ -14,14 +14,15 @@ const statsSummary = {
 const mockNavigate = jest.fn();
 const mockRefetch = jest.fn(() => Promise.resolve());
 const mockRemoveAppStateListener = jest.fn();
-let mockStockTile: {assetCount: number | null; investedUsd: number | null} = {assetCount: 3, investedUsd: null};
-const mockStockTileRefetch = jest.fn(() => Promise.resolve());
+const mockFlow = {totalUsd: 176000, operationCount: 337};
+const mockFlowRefetch = jest.fn(() => Promise.resolve());
+let mockStockTile: {assetCount: number | null; investedUsd: number | null} | null = {assetCount: 458, investedUsd: null};
 const mockUseQuery = jest.fn(
-  (query: any, _options: any): any => (
-    String(query).includes('GmHomeTile')
-      ? {data: {gmHomeTile: mockStockTile}, refetch: mockStockTileRefetch}
-      : {data: {statsSummary}, refetch: mockRefetch}
-  ),
+  (query: any, _options: any): any => {
+    if (String(query).includes('FundFlowStats')) return {data: {fundFlowStats: mockFlow}, refetch: mockFlowRefetch};
+    if (String(query).includes('GmHomeTile')) return {data: {gmHomeTile: mockStockTile}, refetch: jest.fn(() => Promise.resolve())};
+    return {data: {statsSummary}, refetch: mockRefetch};
+  },
 );
 let appStateHandler: ((state: AppStateStatus) => void) | undefined;
 jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, handler) => {
@@ -50,7 +51,7 @@ import { HomeStatsSection } from '../HomeStatsSection';
 const tileLabels = (root: ReactTestInstance): string[] => {
   const seen = new Set<string>();
   const ordered: string[] = [];
-  for (const node of root.findAll(n => n.props?.accessibilityRole === 'button')) {
+  for (const node of root.findAll(n => ['button', 'text'].includes(n.props?.accessibilityRole) && !!n.props?.accessibilityLabel)) {
     const label = node.props.accessibilityLabel as string | undefined;
     if (!label || seen.has(label)) continue;
     seen.add(label);
@@ -59,10 +60,10 @@ const tileLabels = (root: ReactTestInstance): string[] => {
   return ordered;
 };
 
-const render = (showStocks: boolean): ReactTestRenderer => {
+const render = (): ReactTestRenderer => {
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = renderer.create(<HomeStatsSection showStocks={showStocks} />);
+    tree = renderer.create(<HomeStatsSection />);
   });
   return tree;
 };
@@ -74,28 +75,55 @@ describe('HomeStatsSection layout', () => {
     appStateHandler = undefined;
   });
 
-  it('lays 4 tiles out as 2 rows of 2, all rendered', () => {
-    const tree = render(true);
+  it('lays 5 tiles out as a proof row of 3 over an offers row of 2', () => {
+    const tree = render();
     // Every tile is really in the tree — nothing clipped or scrolled away.
     const labels = tileLabels(tree.root);
-    expect(labels).toHaveLength(4);
-    expect(labels[0]).toMatch(/^Usuarios/);
-    expect(labels[1]).toMatch(/^Ahorros/);
-    expect(labels[2]).toMatch(/^Acciones/);
-    // Proof before offer: the ask must not outrank the trust numbers.
-    expect(labels[3]).toMatch(/^Preventa/);
+    expect(labels.map(l => l.split(':')[0])).toEqual(
+      ['Usuarios', 'Ahorros', 'Movido', 'Acciones', 'Preventa']);
+    expect(labels[3]).toContain('Acciones: 458.');
+    // Third-width proof cells split label and descriptor onto two lines;
+    // the half-width offers row keeps them merged on one.
+    const texts = tree.root.findAllByType('Text' as any).map(t => [].concat(t.props.children).join(''));
+    expect(texts).toContain('Movido');
+    expect(texts).toContain('337 depósitos y retiros');
+    expect(texts.some(t => t.startsWith('Preventa'))).toBe(true);
+    // Chevrons only in the half-width offers row: in third-width cells they
+    // cost the room that kept "6.789 USD" from truncating to "6.789…".
+    const chevrons = tree.root.findAll(n => n.type === ('Icon' as any) && n.props.name === 'chevron-right');
+    expect(chevrons).toHaveLength(2);
 
     // No horizontally scrolling container anywhere in the grid.
     expect(tree.root.findAll(n => n.props?.horizontal === true)).toHaveLength(0);
   });
 
-  it('keeps the single-row strip when stocks are off', () => {
-    const tree = render(false);
-    expect(tileLabels(tree.root)).toHaveLength(3);
+  it('drops Acciones (back to 2x2) for users outside stock eligibility', () => {
+    mockStockTile = null;
+    const labels = tileLabels(render().root);
+    expect(labels.map(l => l.split(':')[0])).toEqual(['Usuarios', 'Ahorros', 'Movido', 'Preventa']);
+    mockStockTile = {assetCount: 458, investedUsd: null};
+  });
+
+  it('shows the invested total once the server says it is meaningful', () => {
+    mockStockTile = {assetCount: 458, investedUsd: 25000};
+    const acciones = tileLabels(render().root)[3];
+    expect(acciones).toContain('25.000 USD');
+    expect(acciones).toContain('Invertido en EE.UU.');
+    mockStockTile = {assetCount: 458, investedUsd: null};
+  });
+
+  it('shows money moved both ways as a read-only stat', () => {
+    const root = render().root;
+    const movido = tileLabels(root)[2];
+    expect(movido).toContain('176.000 USD');
+    expect(movido).toContain('337 depósitos y retiros');
+    const node = root.findAll(n => n.props?.accessibilityLabel === movido)[0];
+    expect(node.props.accessibilityRole).toBe('text');
+    expect(node.props.disabled).toBe(true);
   });
 
   it('formats values with the locale separator', () => {
-    const tree = render(true);
+    const tree = render();
     const usuarios = tileLabels(tree.root)[0];
     expect(usuarios).toContain('12.345');
   });
@@ -106,7 +134,7 @@ describe('HomeStatsSection layout', () => {
       refetch: mockRefetch,
     }));
 
-    const ahorros = tileLabels(render(true).root)[1];
+    const ahorros = tileLabels(render().root)[1];
     expect(ahorros).toContain('— USD');
     expect(ahorros).not.toContain('0 USD');
   });
@@ -122,40 +150,20 @@ describe('HomeStatsSection layout', () => {
       refetch: mockRefetch,
     } as any));
 
-    const ahorros = tileLabels(render(true).root)[1];
+    const ahorros = tileLabels(render().root)[1];
     expect(ahorros).toContain('— USD');
     expect(ahorros).not.toContain('54.821 USD');
   });
 
-  it('shows what the network offers (asset count) and opens the explorer', () => {
-    const root = render(true).root;
-    const acciones = tileLabels(root)[2];
-    // The invested total (US$60 in production) read as evidence against the
-    // product inside a proof strip; the offer is just as verifiable.
-    expect(acciones).toContain('Acciones: 3.');
-    expect(acciones).not.toContain('4.321');
-    root.findByProps({accessibilityLabel: acciones}).props.onPress();
-    expect(mockNavigate).toHaveBeenCalledWith('StocksList');
-  });
-
-  it('shows the invested total once the server says it is meaningful', () => {
-    mockStockTile = {assetCount: 3, investedUsd: 25000};
-    const acciones = tileLabels(render(true).root)[2];
-    expect(acciones).toContain('USD');
-    expect(acciones).toContain('Invertido en EE.UU.');
-    expect(acciones).not.toContain('Acciones: 3.');
-    mockStockTile = {assetCount: 3, investedUsd: null};
-  });
-
-  it('loads the stock tile in parallel and from cache, not behind showStocks', () => {
-    render(false);
-    const options = mockUseQuery.mock.calls.find(([q]) => String(q).includes('GmHomeTile'))?.[1];
+  it('reads the cumulative flow from cache, then the network', () => {
+    render();
+    const options = mockUseQuery.mock.calls.find(([q]) => String(q).includes('FundFlowStats'))?.[1];
     expect(options.fetchPolicy).toBe('cache-and-network');
-    expect(options.skip).toBeUndefined();
+    expect(options.pollInterval).toBe(600_000);
   });
 
   it('refreshes marked-to-market stats on the server snapshot cadence', () => {
-    render(true);
+    render();
     expect(mockUseQuery).toHaveBeenCalledWith(
       'GET_STATS_SUMMARY',
       expect.objectContaining({
@@ -167,7 +175,7 @@ describe('HomeStatsSection layout', () => {
   });
 
   it('refetches the universal snapshot after returning to the foreground', async () => {
-    render(true);
+    render();
 
     await act(async () => {
       appStateHandler?.('background');
@@ -178,7 +186,7 @@ describe('HomeStatsSection layout', () => {
   });
 
   it('removes the foreground listener when the section unmounts', () => {
-    const tree = render(true);
+    const tree = render();
 
     act(() => tree.unmount());
 

@@ -1562,11 +1562,46 @@ class LandingStatsType(graphene.ObjectType):
     registered_users = graphene.Int()
 
 
+class FundFlowStatsType(graphene.ObjectType):
+    """All-time money moved through Confío: deposits delivered to wallets
+    plus withdrawals paid out locally, each counted once (ramps/metrics.py).
+    Cumulative on purpose — it never shrinks when a large holder leaves."""
+    deposited_usd = graphene.Float()
+    withdrawn_usd = graphene.Float()
+    total_usd = graphene.Float()
+    operation_count = graphene.Int(description='Deposits plus withdrawals')
+
+
 class Query(graphene.ObjectType):
     landing_stats = graphene.Field(
         LandingStatsType,
         description='Public, unauthenticated; cached 10 min',
     )
+    fund_flow_stats = graphene.Field(
+        FundFlowStatsType,
+        description='Public aggregate, unauthenticated; cached 10 min',
+    )
+
+    def resolve_fund_flow_stats(self, info):
+        from django.core.cache import cache
+
+        cached = cache.get('fund_flow_stats_v1')
+        if cached:
+            return FundFlowStatsType(**cached)
+
+        from ramps.metrics import deposit_volume_and_count, withdrawn_volume_and_count
+        # Each (volume, count) pair comes from the same queries, so the tile's
+        # "US$X · N depósitos y retiros" can't disagree with itself.
+        deposited, deposits = deposit_volume_and_count()
+        withdrawn, withdrawals = withdrawn_volume_and_count()
+        data = {
+            'deposited_usd': float(deposited),
+            'withdrawn_usd': float(withdrawn),
+            'total_usd': float(deposited + withdrawn),
+            'operation_count': deposits + withdrawals,
+        }
+        cache.set('fund_flow_stats_v1', data, 600)
+        return FundFlowStatsType(**data)
 
     def resolve_landing_stats(self, info):
         from django.core.cache import cache

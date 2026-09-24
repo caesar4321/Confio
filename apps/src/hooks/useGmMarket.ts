@@ -207,6 +207,33 @@ export const useGmAssetDescription = (
   return data?.gmAssetDescription || null;
 };
 
+// Scalars for Home: assets on offer, and the invested total once the server
+// deems it meaningful (GM_HOME_INVESTED_MIN_USD). Safe to cache — unlike a
+// tickers-only gmMarket.assets write, it can't clobber the explorer's rows.
+// Not gated on the portfolio flag: waiting for it made the count paint last;
+// ineligible users simply get null.
+const GM_HOME_TILE = gql`
+  query GmHomeTile {
+    gmHomeTile {
+      assetCount
+      investedUsd
+    }
+  }
+`;
+
+export const useGmHomeTile = () => {
+  const { data, refetch } = useQuery(GM_HOME_TILE, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    pollInterval: 300_000, // the invested total follows the 5-min holdings snapshot
+  });
+  return {
+    assetCount: (data?.gmHomeTile?.assetCount ?? null) as number | null,
+    investedUsd: (data?.gmHomeTile?.investedUsd ?? null) as number | null,
+    refetch,
+  };
+};
+
 // Curated discovery shelves (LatAm names, crypto trackers) and warnings for
 // assets that don't behave like a normal stock (leveraged/inverse funds).
 // Served by cusd_plus/gm_highlights.json; isolated query for the same reason

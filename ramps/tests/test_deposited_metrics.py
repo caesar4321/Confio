@@ -3,7 +3,11 @@ from decimal import Decimal
 from django.test import TestCase
 
 from conversion.models import Conversion
-from ramps.metrics import deposited_volume_by_provider
+from ramps.metrics import (
+    deposit_operation_count,
+    deposited_volume_by_provider,
+    withdrawn_volume_and_count,
+)
 from ramps.models import RampTransaction
 
 
@@ -123,3 +127,31 @@ class DepositedMetricsTests(TestCase):
             cached = schema.execute('{ landingStats { depositedVolumeUsd } }')
         self.assertIsNone(cached.errors)
         self.assertEqual(cached.data, result.data)
+
+
+class FundFlowMetricsTests(TestCase):
+    """Withdrawals and the shared operation count."""
+
+    ramp = DepositedMetricsTests.ramp
+
+    def test_operation_count_matches_what_the_volume_counts(self):
+        self.ramp()  # provider completion alone: not a deposit
+        self.ramp(final_currency='USDT BSC', metadata={
+            'bsc_arrival_tx_hash': '0x' + 'b' * 64,
+            'bsc_arrival_log_index': 2, 'bsc_arrival_amount': '50'})
+        self.assertEqual(deposited_volume_by_provider()['koywe'], 50)
+        self.assertEqual(deposit_operation_count(), 1)
+
+    def test_withdrawal_counts_actual_amount_once(self):
+        self.ramp(direction='off_ramp', crypto_currency='USDC Algorand',
+                  crypto_amount_estimated=120, crypto_amount_actual=100)
+        self.ramp(direction='off_ramp', crypto_currency='USDT BSC', status='FAILED', crypto_amount_actual=500)
+        self.ramp(direction='off_ramp', crypto_currency='USDT BSC',
+                  crypto_amount_estimated=80, crypto_amount_actual=None)
+        self.assertEqual(withdrawn_volume_and_count(), (Decimal('100'), 1))
+
+    def test_non_dollar_withdrawal_is_not_counted_as_dollars(self):
+        self.ramp(direction='off_ramp', provider='guardarian', crypto_currency='ALGO', crypto_amount_actual=1000)
+        self.ramp(direction='off_ramp', provider='guardarian', crypto_currency='BTC', crypto_amount_actual=2)
+        self.ramp(direction='off_ramp', crypto_currency='USDT BSC', crypto_amount_actual=10)
+        self.assertEqual(withdrawn_volume_and_count(), (Decimal('10'), 1))
