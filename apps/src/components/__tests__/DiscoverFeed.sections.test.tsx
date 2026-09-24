@@ -36,7 +36,12 @@ describe('DiscoverFeed sections', () => {
     const shown = texts(tree);
     expect(shown).toContain('Confío News');
     expect(shown).toContain('Café Juan');
-    expect(shown.filter((t) => t === 'Oficial')).toHaveLength(1);
+    const badges = tree.root.findAll((node) => node.type === Pressable && /Fuente oficial/.test(node.props.accessibilityLabel || ''));
+    expect(badges).toHaveLength(1);
+    // One byline line: topic and time, no emoji prefix.
+    expect(shown).toContain('Producto · 2h');
+    // No avatar configured: the channel's initial, skipping emoji and accents' case.
+    expect(shown).toContain('C');
   });
 
   it('explains what Oficial means when the badge is tapped', () => {

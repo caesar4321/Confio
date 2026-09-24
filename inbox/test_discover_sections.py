@@ -91,6 +91,17 @@ class DiscoverSectionTests(TestCase):
         self.assertEqual(self.titles(section='institutions'), {'Institution post'})
         self.assertEqual(self.titles(section='businesses'), set())
 
+    def test_byline_carries_channel_avatar_and_publish_date(self):
+        self.founder.avatar_type, self.founder.avatar_value = 'IMAGE_URL', 'https://cdn.example/julian.jpg'
+        self.founder.save()
+        self.institution.avatar_type, self.institution.avatar_value = 'EMOJI', '🏛️'
+        self.institution.save()
+        by_title = {item.title: item for item in self.feed().items}
+        founder, institution = by_title['Founder post'], by_title['Institution post']
+        self.assertEqual((founder.source_avatar_url, founder.source_avatar_emoji), ('https://cdn.example/julian.jpg', None))
+        self.assertEqual((institution.source_avatar_url, institution.source_avatar_emoji), (None, '🏛️'))
+        self.assertEqual(founder.published_at, self.founder_item.published_at)
+
     def test_retired_sections_field_still_answers_for_older_builds(self):
         self.assertEqual(Query().resolve_discover_sections(self.info), [])
 
@@ -157,6 +168,37 @@ class DiscoverSectionTests(TestCase):
             'sort_order': 0, 'is_active': 'on', 'official_note': '', **changes,
         }
         return ChannelAdminForm(data=data, instance=channel)
+
+    def avatar_file(self, name='logo.png', fmt='PNG'):
+        from io import BytesIO
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        buffer = BytesIO()
+        Image.new('RGB', (8, 8), (16, 185, 129)).save(buffer, format=fmt)
+        return SimpleUploadedFile(name, buffer.getvalue(), content_type='image/png')
+
+    def test_admin_avatar_upload_becomes_the_channel_image(self):
+        from django.contrib.admin.sites import AdminSite
+        from .admin import ChannelAdmin
+        form = ChannelAdminForm(data=self.admin_form(self.institution).data, instance=self.institution,
+                                files={'avatar_upload': self.avatar_file()})
+        self.assertTrue(form.is_valid(), form.errors)
+        request = SimpleNamespace(user=self.user)
+        with patch('inbox.admin.upload_object', return_value='https://cdn.example/cip.png') as upload:
+            ChannelAdmin(Channel, AdminSite()).save_model(request, form.save(commit=False), form, True)
+        self.institution.refresh_from_db()
+        self.assertEqual((self.institution.avatar_type, self.institution.avatar_value), ('IMAGE_URL', 'https://cdn.example/cip.png'))
+        kwargs = upload.call_args.kwargs
+        self.assertEqual(kwargs['content_type'], 'image/png')
+        self.assertIn('/channel-avatars/', kwargs['key'])
+
+    def test_admin_avatar_upload_rejects_a_non_image(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        fake = SimpleUploadedFile('logo.png', b'<svg onload=alert(1)>', content_type='image/png')
+        form = ChannelAdminForm(data=self.admin_form(self.institution).data, instance=self.institution,
+                                files={'avatar_upload': fake})
+        self.assertFalse(form.is_valid())
+        self.assertIn('avatar_upload', form.errors)
 
     def test_admin_grant_requires_note_and_verified_owner(self):
         form = self.admin_form(self.institution, grant_official='on', official_note='')

@@ -4,26 +4,31 @@ import renderer, { act } from 'react-test-renderer';
 type FeedState = { data?: any; loading: boolean; error?: any };
 
 let mockFeed: FeedState;
+let mockFeedFor: ((document: string) => FeedState) | null = null;
+const mockDocuments: string[] = [];
 const mockClientQuery = jest.fn();
 const mockUpdateQuery = jest.fn();
 const mockRefetch = jest.fn(() => Promise.resolve());
 let mockFeedProps: any;
+const mockLoadFailedHistory: boolean[] = [];
 
 jest.mock('@apollo/client', () => ({
   NetworkStatus: { refetch: 4, ready: 7 },
   useMutation: () => [jest.fn()],
   useApolloClient: () => ({ query: mockClientQuery }),
-  useQuery: (document: string, options: { skip?: boolean }) => {
-    if (document === 'LEGACY' && options?.skip) return { data: undefined, loading: false };
+  useQuery: (document: string) => {
+    mockDocuments.push(document);
     return {
-      ...mockFeed,
+      ...(mockFeedFor ? mockFeedFor(document) : mockFeed),
       networkStatus: 7,
       refetch: mockRefetch,
       updateQuery: mockUpdateQuery,
     };
   },
 }));
-jest.mock('../../apollo/queries', () => ({ GET_DISCOVER_FEED: 'LEGACY', GET_DISCOVER_FEED_SECTIONED: 'SECTIONED' }));
+jest.mock('../../apollo/queries', () => ({
+  GET_DISCOVER_FEED: 'LEGACY', GET_DISCOVER_FEED_SECTIONED: 'SECTIONED', GET_DISCOVER_FEED_CARDS: 'CARDS',
+}));
 jest.mock('../../apollo/mutations', () => ({ REACT_TO_MESSAGE_CONTENT: 'REACT' }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: jest.fn() }),
@@ -38,6 +43,7 @@ jest.mock('../../components/DiscoverFeed', () => ({
   ],
   DiscoverFeed: (props: any) => {
     mockFeedProps = props;
+    mockLoadFailedHistory.push(props.loadFailed);
     return null;
   },
 }));
@@ -72,6 +78,29 @@ describe('DiscoverScreen feed', () => {
     mockUpdateQuery.mockReset();
     mockRefetch.mockClear();
     mockFeed = { data: page(1, 10), loading: false };
+    mockFeedFor = null;
+    mockDocuments.length = 0;
+    mockLoadFailedHistory.length = 0;
+  });
+
+  it('steps down to the sectioned feed on a server without byline fields, without a failure flash', () => {
+    const { ApolloError } = jest.requireActual('@apollo/client');
+    const rejected = new ApolloError({
+      networkError: Object.assign(new Error('Response not successful: Received status code 400'), {
+        result: { errors: [{ message: 'Cannot query field "sourceAvatarUrl" on type "DiscoverFeedItemType".' }] },
+      }),
+    });
+    mockFeedFor = (document) => (document === 'CARDS'
+      ? { data: undefined, loading: false, error: rejected }
+      : { data: page(1, 5, false), loading: false });
+    render();
+    expect(mockDocuments[0]).toBe('CARDS');
+    expect(mockDocuments[mockDocuments.length - 1]).toBe('SECTIONED');
+    // Every render along the way, including the one holding the rejection.
+    expect(mockLoadFailedHistory.length).toBeGreaterThan(1);
+    expect(mockLoadFailedHistory.every((failed) => failed === false)).toBe(true);
+    expect(mockFeedProps.items).toHaveLength(5);
+    expect(mockFeedProps.sections).toHaveLength(3);
   });
 
   it('drops a late page from an earlier visit to the same section', async () => {

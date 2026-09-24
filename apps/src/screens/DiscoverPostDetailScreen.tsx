@@ -19,11 +19,14 @@ import { colors } from '../config/theme';
 
 import { Header } from '../navigation/Header';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
-import { GET_DISCOVER_POST, GET_DISCOVER_POST_SOURCE } from '../apollo/queries';
+import { GET_DISCOVER_POST, GET_DISCOVER_POST_BYLINE, GET_DISCOVER_POST_SOURCE } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from '../components/ResponsiveImage';
 import { EmptyState } from '../components/EmptyState';
-import { DiscoverSource } from '../components/DiscoverSource';
+import { PostByline } from '../components/PostByline';
+import { ReactionBar } from '../components/ReactionBar';
+import { formatLocalDate } from '../utils/dateUtils';
+import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
@@ -52,13 +55,18 @@ type DiscoverPostDto = {
   canReact?: boolean | null;
 };
 
-const tagIcons = {
-  product: '🚀',
-  video: '▶',
-  news: '📊',
-} as const;
+const WORDS_PER_MINUTE = 200;
 
-const emojiOptions = ['🔥', '🙌', '😍', '🤯', '💡', '😎', '💪', '👀', '😢', '❤️'];
+/** "2 min de lectura" from the post's text, never under a minute. */
+export function readingTimeLabel(blocks: Array<{ type: string; text?: string }>): string {
+  const words = blocks
+    .map((block) => (block.type === 'image' ? '' : block.text || ''))
+    .join(' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return `${Math.max(1, Math.round(words / WORDS_PER_MINUTE))} min de lectura`;
+}
+
 const platformButtonStyles: Record<'TikTok' | 'Instagram' | 'YouTube', { bg: string; fg: string }> = {
   TikTok: { bg: '#111111', fg: '#FFFFFF' },
   Instagram: { bg: '#C13584', fg: '#FFFFFF' },
@@ -172,7 +180,6 @@ export const DiscoverPostDetailScreen = () => {
   const navigation = useNavigation<Navigation>();
   const route = useRoute<RouteProps>();
   const { contentItemId } = route.params;
-  const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
   const [reactToMessageContent] = useMutation(REACT_TO_MESSAGE_CONTENT);
 
   const { data, loading, refetch } = useQuery(GET_DISCOVER_POST, {
@@ -181,11 +188,27 @@ export const DiscoverPostDetailScreen = () => {
   });
 
   const post = data?.discoverPost as DiscoverPostDto | undefined;
-  const { data: sourceData } = useQuery(GET_DISCOVER_POST_SOURCE, {
+  // Byline in its own query, stepping down to the name-only one on a server
+  // without avatars, so an older server never fails the post itself.
+  const [bylineDocument, setBylineDocument] = React.useState(GET_DISCOVER_POST_BYLINE);
+  const { data: sourceData, error: sourceError } = useQuery(bylineDocument, {
     variables: { contentItemId: String(contentItemId) },
     fetchPolicy: 'network-only',
   });
-  const source = sourceData?.discoverPost as { sourceName?: string; isOfficial?: boolean } | undefined;
+  React.useEffect(() => {
+    if (bylineDocument === GET_DISCOVER_POST_BYLINE && isSchemaMismatch(sourceError)) {
+      setBylineDocument(GET_DISCOVER_POST_SOURCE);
+    }
+  }, [bylineDocument, sourceError]);
+  const source = sourceData?.discoverPost as
+    | {
+        sourceName?: string;
+        isOfficial?: boolean;
+        sourceAvatarUrl?: string | null;
+        sourceAvatarEmoji?: string | null;
+        publishedAt?: string | null;
+      }
+    | undefined;
 
   const handleOpenLink = async (
     url: string,
@@ -215,7 +238,6 @@ export const DiscoverPostDetailScreen = () => {
         emoji,
       },
     });
-    setShowEmojiPicker(false);
     await refetch();
   };
 
@@ -258,7 +280,6 @@ export const DiscoverPostDetailScreen = () => {
     );
   }
 
-  const topReactions = (post.reactionSummary || []).slice(0, 3);
   const detailBlocks = normalizeDetailBlocks(post.blocks, post.body, post.imageUrl);
   const availablePlatformLinks = platformOrder
     .map((platform) => post.platformLinks?.find((item) => item.platform === platform))
@@ -275,27 +296,38 @@ export const DiscoverPostDetailScreen = () => {
       />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
-          <DiscoverSource name={source?.sourceName} isOfficial={source?.isOfficial} size="detail" />
-          <View style={styles.headerRow}>
-            <View style={[styles.tagPill, { backgroundColor: `${post.tagColor}18` }]}>
-              <Text style={[styles.tagText, { color: post.tagColor }]}>
-                {tagIcons[post.type]} {post.tag}
-              </Text>
-            </View>
-            <Text style={styles.timeText}>{post.time}</Text>
-          </View>
-
+          {post.tag ? <Text style={styles.topic}>{post.tag}</Text> : null}
           <Text style={styles.title}>{post.title}</Text>
+          {source?.sourceName ? (
+            <View style={styles.byline}>
+              <PostByline
+                name={source.sourceName}
+                isOfficial={source.isOfficial}
+                avatarUrl={source.sourceAvatarUrl}
+                avatarEmoji={source.sourceAvatarEmoji}
+                meta={[
+                  source.publishedAt && !Number.isNaN(Date.parse(source.publishedAt))
+                    ? formatLocalDate(source.publishedAt)
+                    : post.time,
+                  readingTimeLabel(detailBlocks),
+                ].filter(Boolean).join(' · ')}
+                size="detail"
+              />
+            </View>
+          ) : (
+            <Text style={styles.metaOnly}>{post.time}</Text>
+          )}
           <View style={styles.blocksWrap}>
             {detailBlocks.map((block, index) => {
-              if (block.type === 'image' && block.image?.url) {
-                return (
+              if (block.type === 'image') {
+                // An image block without a URL renders nothing, not an empty paragraph.
+                return block.image?.url ? (
                   <ResponsiveImage
                     key={block.id || `image-${index}`}
                     uri={block.image.url}
                     style={styles.postImage}
                   />
-                );
+                ) : null;
               }
               if (block.type === 'title') {
                 return (
@@ -372,57 +404,16 @@ export const DiscoverPostDetailScreen = () => {
           )}
 
           <ContentPoll poll={post.poll} />
-          <View style={styles.reactionRow}>
-            {topReactions.map(({ emoji, count }) => {
-              const active = post.viewerReaction === emoji;
-              return (
-                <Pressable
-                  key={emoji}
-                  onPress={() => {
-                    void handleReact(emoji);
-                  }}
-                  style={[styles.reactionButton, active && styles.reactionButtonActive]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Reaccionar con ${emoji}, ${count} ${count === 1 ? 'reacción' : 'reacciones'}`}
-                  accessibilityState={{ selected: active }}
-                >
-                  <Text style={styles.reactionEmoji}>{emoji}</Text>
-                  <Text style={styles.reactionCount}>{count}</Text>
-                </Pressable>
-              );
-            })}
-            {post.canReact !== false && (
-              <Pressable
-                onPress={() => setShowEmojiPicker((current) => !current)}
-                style={styles.addReactionButton}
-                accessibilityRole="button"
-                accessibilityLabel="Agregar una reacción"
-              >
-                <Text style={styles.addReactionText}>+ 😊</Text>
-              </Pressable>
-            )}
+          <View style={styles.reactions}>
+            <ReactionBar
+              reactions={post.reactionSummary || []}
+              viewerReaction={post.viewerReaction}
+              canReact={post.canReact !== false}
+              onReact={(emoji) => {
+                void handleReact(emoji);
+              }}
+            />
           </View>
-
-          {showEmojiPicker && post.canReact !== false && (
-            <View style={styles.emojiPicker}>
-              {emojiOptions.map((emoji) => {
-                const active = post.viewerReaction === emoji;
-                return (
-                  <Pressable
-                    key={emoji}
-                    onPress={() => {
-                      void handleReact(emoji);
-                    }}
-                    style={[styles.emojiOption, active && styles.emojiOptionActive]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Reaccionar con ${emoji}`}
-                  >
-                    <Text style={styles.emojiOptionText}>{emoji}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
         </View>
       </ScrollView>
     </View>
@@ -450,32 +441,29 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 12,
-  },
-  tagPill: {
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tagText: {
-    fontSize: 11,
+  topic: {
+    marginBottom: 6,
+    fontSize: 12,
     fontWeight: '700',
+    color: colors.primaryDark,
   },
-  timeText: {
-    fontSize: 11,
+  byline: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  metaOnly: {
+    marginBottom: 16,
+    fontSize: 12,
     color: colors.text.light,
   },
   title: {
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: 22,
+    lineHeight: 29,
     fontWeight: '700',
     color: colors.dark,
-    marginBottom: 10,
+    marginBottom: 14,
   },
   body: {
     fontSize: 15,
@@ -615,73 +603,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  reactionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    flexWrap: 'wrap',
+  reactions: {
     marginTop: 16,
-  },
-  reactionButton: {
-    backgroundColor: colors.neutralDark,
-    borderRadius: 20,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  reactionButtonActive: {
-    backgroundColor: colors.primarySoft,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  reactionEmoji: {
-    fontSize: 13,
-  },
-  reactionCount: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.text.secondary,
-  },
-  addReactionButton: {
-    backgroundColor: colors.neutralDark,
-    borderRadius: 20,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-  },
-  addReactionText: {
-    fontSize: 12,
-    color: colors.text.secondary,
-  },
-  emojiPicker: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 10,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 2,
-  },
-  emojiOption: {
-    borderRadius: 8,
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emojiOptionActive: {
-    backgroundColor: colors.primarySoft,
-  },
-  emojiOptionText: {
-    fontSize: 17,
   },
   stateWrap: {
     flex: 1,

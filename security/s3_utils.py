@@ -105,6 +105,28 @@ def generate_presigned_put(
     }
 
 
+def upload_object(
+    *,
+    key: str,
+    body: bytes,
+    content_type: str,
+    metadata: Optional[Dict[str, str]] = None,
+    bucket: Optional[str] = None,
+) -> str:
+    """Upload bytes from the server (admin uploads) and return the object's public URL."""
+    _ensure_bucket(bucket)
+    region = settings.AWS_S3_REGION or 'eu-central-2'
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
+    s3.put_object(
+        Bucket=_resolve_bucket(bucket),
+        Key=key,
+        Body=body,
+        ContentType=content_type,
+        Metadata=metadata or {},
+    )
+    return public_s3_url(key, bucket=bucket)
+
+
 def public_s3_url(key: str, bucket: Optional[str] = None) -> str:
     """Return a direct HTTPS URL for the object (assuming public or signed retrieval elsewhere)."""
     region = settings.AWS_S3_REGION or 'eu-central-2'

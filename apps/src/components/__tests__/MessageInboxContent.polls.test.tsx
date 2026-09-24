@@ -103,3 +103,25 @@ test('a late pagination response cannot append the previous account messages aft
   expect(tree.root.findByType(MessageInboxList).props.channels[0].messages.map((entry: any) => entry.id)).toEqual([99]);
   act(() => tree.unmount());
 });
+
+test('founder posts carry their title once: body stays the body, a title-only post has no body', async () => {
+  mockAccountId = 'account-1';
+  const withTitle = { ...message(1), title: 'Abrimos Bre-B', body: 'Les cuento por qué tardamos.', text: 'Les cuento por qué tardamos.' };
+  // The server's `text` falls back to the title when there is no body.
+  const titleOnly = { ...message(2), title: 'Solo título', body: '', text: 'Solo título' };
+  const plain = { ...message(3), title: '', body: '', text: 'Sin título' };
+  const cache = new InMemoryCache({ typePolicies: { ContentPollOptionType: { keyFields: false }, MessageInboxType: { keyFields: false }, MessageChannelType: { keyFields: false }, MessageThreadItemType: { keyFields: false } } });
+  const mocks = [inboxMock(inbox([withTitle, titleOnly, plain])), ...sharedMocks()];
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<MockedProvider mocks={mocks} cache={cache}><MessageInboxContent /></MockedProvider>); });
+  await flush();
+  const list = tree.root.findByType(MessageInboxList);
+  act(() => list.props.onOpenChannel(list.props.channels[0]));
+  await flush();
+  const mapped = thread(tree).props.channel.messages.map((m: any) => [m.title, m.text]);
+  expect(mapped).toEqual([
+    ['Abrimos Bre-B', 'Les cuento por qué tardamos.'],
+    ['Solo título', ''],
+    ['', 'Sin título'],
+  ]);
+});

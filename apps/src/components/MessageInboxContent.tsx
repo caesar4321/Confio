@@ -159,7 +159,10 @@ function mapInboxMessage(message: InboxMessageDto) {
     poll: message.poll,
     viewerReaction: message.viewerReaction,
     canReact: message.canReact ?? true,
-    text: message.text || message.body || '',
+    title: message.title || '',
+    // The server's `text` falls back to the title when there is no body;
+    // with a title shown, take the body alone so it isn't printed twice.
+    text: message.title ? message.body || '' : message.text || message.body || '',
     time: message.time,
     imageUrl: message.imageUrl || '',
   };

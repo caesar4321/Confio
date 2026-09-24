@@ -20,8 +20,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 
 
-import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
-import { Channel, ChannelMessage, ChannelAvatar, channelMeta, messageReactionOptions, tealLight, tealGreen } from './MessageInboxShared';
+import { Channel, ChannelMessage, ChannelAvatar, channelMeta, tealLight, tealGreen } from './MessageInboxShared';
+import { ReactionBar } from './ReactionBar';
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from './ResponsiveImage';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
@@ -69,293 +69,110 @@ function getDateGroupLabel(time: string) {
   return 'Esta semana';
 }
 
-function renderMessageContent(
-  channel: Channel,
-  message: ChannelMessage,
-  openLink: (messageId: number, platform: 'TikTok' | 'Instagram' | 'YouTube', link: string) => Promise<void>,
-  onReact: (messageId: number, emoji: string) => Promise<void>,
-  onOpenDetail: (messageId: number) => void,
-  showEmojiPicker: number | null,
-  setShowEmojiPicker: React.Dispatch<React.SetStateAction<number | null>>
-) {
-  const topReactions = (message.reactionSummary || []).slice(0, 3);
-
-  if (message.type === 'video') {
-    const availablePlatformLinks = platformOrder
+function EditorialMessageCard({
+  message,
+  openLink,
+  onReact,
+  onOpenDetail,
+}: {
+  message: Exclude<ChannelMessage, { type: 'support' }>;
+  openLink: (messageId: number, platform: 'TikTok' | 'Instagram' | 'YouTube', link: string) => Promise<void>;
+  onReact: (messageId: number, emoji: string) => Promise<void>;
+  onOpenDetail: (messageId: number) => void;
+}) {
+  // One layout for every editorial post; the channel header already says who
+  // wrote it, so each message carries only its topic and time.
+  const topic = message.type === 'video' ? 'Video' : message.tag;
+  const title = message.title || '';
+  const bodyText = message.type === 'news' ? message.body : message.type === 'text' ? message.text : '';
+  const body = bodyText && bodyText !== title ? bodyText : '';
+  const platformLinks = message.type === 'video'
+    ? platformOrder
       .map((platform) => message.platformLinks?.find((item) => item.platform === platform))
-      .filter((item): item is NonNullable<typeof item> => Boolean(item?.url));
+      .filter((item): item is NonNullable<typeof item> => Boolean(item?.url))
+    : [];
 
-    return (
-      <View style={[styles.messageCard, styles.videoMessageCard, message.isPinned && styles.pinnedMessageCard]}>
-        <Pressable onPress={() => onOpenDetail(message.id)} style={styles.messageContentPressable}>
-          <View style={styles.messageMetaRow}>
-            <View style={styles.messageMetaTagsRow}>
-              {message.isPinned ? (
-                <View style={styles.pinnedPill}>
-                  <Icon name="bookmark" size={11} color="#B54708" />
-                  <Text style={styles.pinnedPillText}>Fijado</Text>
-                </View>
-              ) : null}
-              <View style={[styles.messageTag, styles.videoTag]}>
-                <Text style={[styles.messageTagText, styles.videoTagText]}>▶ Video</Text>
+  return (
+    <View style={[styles.messageCard, message.isPinned && styles.pinnedMessageCard]}>
+      <Pressable
+        onPress={() => onOpenDetail(message.id)}
+        style={({ pressed }) => [styles.messageContentPressable, pressed && styles.messagePressed]}
+        accessibilityRole="button"
+        accessibilityHint="Abre la publicación"
+      >
+        <View style={styles.messageMetaRow}>
+          <View style={styles.messageMetaTagsRow}>
+            {message.isPinned ? (
+              <View style={styles.pinnedPill}>
+                <Icon name="bookmark" size={11} color="#B54708" />
+                <Text style={styles.pinnedPillText}>Fijado</Text>
               </View>
-            </View>
-            <Text style={styles.messageTime}>{message.time}</Text>
+            ) : null}
+            {topic ? <Text style={styles.messageTopic} numberOfLines={1}>{topic}</Text> : null}
           </View>
-          <Text style={styles.videoTitle} numberOfLines={2}>
-            {message.title}
-          </Text>
-          {message.imageUrl ? (
+          <Text style={styles.messageTime}>{message.time}</Text>
+        </View>
+        {title ? <Text style={styles.messageTitle} numberOfLines={3}>{title}</Text> : null}
+        {body ? <Text style={styles.messageBody} numberOfLines={4}>{body}</Text> : null}
+        {message.imageUrl ? (
+          <View style={styles.messageMedia}>
             <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
-          ) : null}
-        </Pressable>
+            {message.type === 'video' ? (
+              <View style={styles.playOverlay} pointerEvents="none">
+                <View style={styles.playButton}>
+                  <Icon name="play" size={16} color={colors.dark} />
+                </View>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </Pressable>
+      {platformLinks.length ? (
         <View style={styles.videoPlatformsRow}>
-          {availablePlatformLinks.map(({ platform, url }) => (
+          {platformLinks.map(({ platform, url }) => (
             <Pressable
               key={platform}
               onPress={() => {
                 void openLink(message.id, platform, url);
               }}
-              style={[
-                styles.videoPlatformButton,
-                { backgroundColor: platformButtonStyles[platform].bg },
-              ]}
+              style={[styles.videoPlatformButton, { backgroundColor: platformButtonStyles[platform].bg }]}
+              accessibilityRole="link"
+              accessibilityLabel={`Ver en ${platform}`}
             >
               <View style={styles.videoPlatformButtonInner}>
-                <Text
-                  style={[
-                    styles.videoPlatformButtonText,
-                    { color: platformButtonStyles[platform].fg },
-                  ]}
-                >
+                <Text style={[styles.videoPlatformButtonText, { color: platformButtonStyles[platform].fg }]}>
                   {platform}
                 </Text>
-                <Icon
-                  name="external-link"
-                  size={12}
-                  color={platformButtonStyles[platform].fg}
-                />
+                <Icon name="external-link" size={12} color={platformButtonStyles[platform].fg} />
               </View>
             </Pressable>
           ))}
         </View>
-        <ContentPoll poll={message.poll} />
-        <View style={styles.reactionRow}>
-          {topReactions.map(({ emoji, count }) => {
-            const active = message.viewerReaction === emoji;
-            return (
-              <Pressable
-                key={emoji}
-                onPress={() => {
-                  void onReact(message.id, emoji);
-                }}
-                style={[styles.reactionButton, active && styles.reactionButtonActive]}
-              >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-                <Text style={styles.reactionCount}>{count}</Text>
-              </Pressable>
-            );
-          })}
-          {message.canReact && (
-            <Pressable
-              onPress={() => setShowEmojiPicker(showEmojiPicker === message.id ? null : message.id)}
-              style={styles.addReactionButton}
-            >
-              <Text style={styles.addReactionText}>+ 😊</Text>
-            </Pressable>
-          )}
-        </View>
-        {showEmojiPicker === message.id && message.canReact && (
-          <View style={styles.emojiPicker}>
-            {messageReactionOptions.map((emoji) => {
-              const active = message.viewerReaction === emoji;
-              return (
-                <Pressable
-                  key={emoji}
-                  onPress={() => {
-                    setShowEmojiPicker(null);
-                    void onReact(message.id, emoji);
-                  }}
-                  style={[styles.emojiOption, active && styles.emojiOptionActive]}
-                >
-                  <Text style={styles.emojiOptionText}>{emoji}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
+      ) : null}
+      <ContentPoll poll={message.poll} />
+      <View style={styles.messageReactions}>
+        <ReactionBar
+          reactions={message.reactionSummary}
+          viewerReaction={message.viewerReaction}
+          canReact={Boolean(message.canReact)}
+          onReact={(emoji) => {
+            void onReact(message.id, emoji);
+          }}
+        />
       </View>
-    );
-  }
+    </View>
+  );
+}
 
-  if (message.type === 'text') {
-    const isFounderChannel = channel.id === 'julian';
-
+function renderMessageContent(
+  message: ChannelMessage,
+  openLink: (messageId: number, platform: 'TikTok' | 'Instagram' | 'YouTube', link: string) => Promise<void>,
+  onReact: (messageId: number, emoji: string) => Promise<void>,
+  onOpenDetail: (messageId: number) => void,
+) {
+  if (message.type !== 'support') {
     return (
-      <View style={[styles.messageCard, styles.founderMessageCard, message.isPinned && styles.pinnedMessageCard]}>
-        <Pressable onPress={() => onOpenDetail(message.id)} style={styles.messageContentPressable}>
-          {message.isPinned ? (
-            <View style={styles.pinnedRow}>
-              <View style={styles.pinnedPill}>
-                <Icon name="bookmark" size={11} color="#B54708" />
-                <Text style={styles.pinnedPillText}>Fijado</Text>
-              </View>
-            </View>
-          ) : null}
-          {isFounderChannel ? (
-            <View style={styles.founderAuthorRow}>
-              <Image source={founderImage} style={styles.founderAuthorAvatar} />
-              <View style={styles.founderAuthorCopy}>
-                <Text style={styles.founderAuthorName}>🇰🇷 Julian Moon 🌙</Text>
-                <Text style={styles.founderAuthorRole}>Founder</Text>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.messageMetaRow}>
-              <View style={[styles.messageTag, styles.newsTag]}>
-                <Text style={[styles.messageTagText, styles.newsTagText]}>
-                  {message.tag || channel.name}
-                </Text>
-              </View>
-              <Text style={styles.messageTime}>{message.time}</Text>
-            </View>
-          )}
-          <View style={styles.founderTextHeader}>
-            <Text style={styles.founderTextLabel}>
-              {isFounderChannel ? 'Actualización' : 'Publicación'}
-            </Text>
-            {isFounderChannel ? <Text style={styles.messageTime}>{message.time}</Text> : null}
-          </View>
-          <Text style={styles.textMessageBody} numberOfLines={4}>
-            {message.text}
-          </Text>
-          {message.imageUrl ? (
-            <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
-          ) : null}
-        </Pressable>
-        <ContentPoll poll={message.poll} />
-        <View style={styles.reactionRow}>
-          {topReactions.map(({ emoji, count }) => {
-            const active = message.viewerReaction === emoji;
-            return (
-              <Pressable
-                key={emoji}
-                onPress={() => {
-                  void onReact(message.id, emoji);
-                }}
-                style={[styles.reactionButton, active && styles.reactionButtonActive]}
-              >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-                <Text style={styles.reactionCount}>{count}</Text>
-              </Pressable>
-            );
-          })}
-          {message.canReact && (
-            <Pressable
-              onPress={() => setShowEmojiPicker(showEmojiPicker === message.id ? null : message.id)}
-              style={styles.addReactionButton}
-            >
-              <Text style={styles.addReactionText}>+ 😊</Text>
-            </Pressable>
-          )}
-        </View>
-        {showEmojiPicker === message.id && message.canReact && (
-          <View style={styles.emojiPicker}>
-            {messageReactionOptions.map((emoji) => {
-              const active = message.viewerReaction === emoji;
-              return (
-                <Pressable
-                  key={emoji}
-                  onPress={() => {
-                    setShowEmojiPicker(null);
-                    void onReact(message.id, emoji);
-                  }}
-                  style={[styles.emojiOption, active && styles.emojiOptionActive]}
-                >
-                  <Text style={styles.emojiOptionText}>{emoji}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </View>
-    );
-  }
-
-  if (message.type === 'news') {
-    return (
-      <View style={[styles.messageCard, styles.newsMessageCard, message.isPinned && styles.pinnedMessageCard]}>
-        <Pressable onPress={() => onOpenDetail(message.id)} style={styles.messageContentPressable}>
-          <View style={styles.messageMetaRow}>
-            <View style={styles.messageMetaTagsRow}>
-              {message.isPinned ? (
-                <View style={styles.pinnedPill}>
-                  <Icon name="bookmark" size={11} color="#B54708" />
-                  <Text style={styles.pinnedPillText}>Fijado</Text>
-                </View>
-              ) : null}
-              <View style={[styles.messageTag, styles.newsTag]}>
-                <Text style={[styles.messageTagText, styles.newsTagText]}>{message.tag}</Text>
-              </View>
-            </View>
-            <Text style={styles.messageTime}>{message.time}</Text>
-          </View>
-          <Text style={styles.newsTitle} numberOfLines={2}>
-            {message.title}
-          </Text>
-          <Text style={styles.newsBody} numberOfLines={4}>
-            {message.body}
-          </Text>
-          {message.imageUrl ? (
-            <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
-          ) : null}
-        </Pressable>
-        <ContentPoll poll={message.poll} />
-        <View style={styles.reactionRow}>
-          {topReactions.map(({ emoji, count }) => {
-            const active = message.viewerReaction === emoji;
-            return (
-              <Pressable
-                key={emoji}
-                onPress={() => {
-                  void onReact(message.id, emoji);
-                }}
-                style={[styles.reactionButton, active && styles.reactionButtonActive]}
-              >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-                <Text style={styles.reactionCount}>{count}</Text>
-              </Pressable>
-            );
-          })}
-          {message.canReact && (
-            <Pressable
-              onPress={() => setShowEmojiPicker(showEmojiPicker === message.id ? null : message.id)}
-              style={styles.addReactionButton}
-            >
-              <Text style={styles.addReactionText}>+ 😊</Text>
-            </Pressable>
-          )}
-        </View>
-        {showEmojiPicker === message.id && message.canReact && (
-          <View style={styles.emojiPicker}>
-            {messageReactionOptions.map((emoji) => {
-              const active = message.viewerReaction === emoji;
-              return (
-                <Pressable
-                  key={emoji}
-                  onPress={() => {
-                    setShowEmojiPicker(null);
-                    void onReact(message.id, emoji);
-                  }}
-                  style={[styles.emojiOption, active && styles.emojiOptionActive]}
-                >
-                  <Text style={styles.emojiOptionText}>{emoji}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </View>
+      <EditorialMessageCard message={message} openLink={openLink} onReact={onReact} onOpenDetail={onOpenDetail} />
     );
   }
 
@@ -405,7 +222,6 @@ export function MessageChannelThread({
   onRefresh,
 }: MessageChannelThreadProps) {
   const navigation = useNavigation<Navigation>();
-  const [showEmojiPicker, setShowEmojiPicker] = React.useState<number | null>(null);
   const [draftMessage, setDraftMessage] = React.useState('');
   const [isSending, setIsSending] = React.useState(false);
   const scrollViewRef = React.useRef<ScrollView | null>(null);
@@ -602,15 +418,7 @@ export function MessageChannelThread({
               </View>
               {pinnedMessages.map((message) => (
                 <View key={message.id}>
-                  {renderMessageContent(
-                    channel,
-                    message,
-                    openLink,
-                    onReact,
-                    openDiscoverDetail,
-                    showEmojiPicker,
-                    setShowEmojiPicker
-                  )}
+                  {renderMessageContent(message, openLink, onReact, openDiscoverDetail)}
                 </View>
               ))}
             </View>
@@ -631,15 +439,7 @@ export function MessageChannelThread({
                     <View style={styles.dateGroupLine} />
                   </View>
                 )}
-                {renderMessageContent(
-                  channel,
-                  message,
-                  openLink,
-                  onReact,
-                  openDiscoverDetail,
-                  showEmojiPicker,
-                  setShowEmojiPicker
-                )}
+                {renderMessageContent(message, openLink, onReact, openDiscoverDetail)}
               </View>
             );
           })}
@@ -679,6 +479,48 @@ export function MessageChannelThread({
 }
 
 const styles = StyleSheet.create({
+  messagePressed: {
+    opacity: 0.85,
+  },
+  messageTopic: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  messageTitle: {
+    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 21,
+    color: colors.dark,
+  },
+  messageBody: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.gray700,
+  },
+  messageMedia: {
+    marginTop: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.94)',
+  },
+  messageReactions: {
+    marginTop: 10,
+  },
   channelScreen: {
     flex: 1,
   },
@@ -796,41 +638,8 @@ const styles = StyleSheet.create({
     borderColor: '#F7D9A4',
     shadowOpacity: 0.08,
   },
-  videoMessageCard: {
-    borderColor: '#F2E7E7',
-  },
-  newsMessageCard: {
-    borderColor: colors.primarySoft,
-  },
-  founderMessageCard: {
-    borderColor: colors.border,
-  },
   messageContentPressable: {
     width: '100%',
-  },
-  founderAuthorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  founderAuthorAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 10,
-  },
-  founderAuthorCopy: {
-    flex: 1,
-  },
-  founderAuthorName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  founderAuthorRole: {
-    marginTop: 1,
-    fontSize: 11,
-    color: colors.text.light,
   },
   messageMetaRow: {
     flexDirection: 'row',
@@ -843,9 +652,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flexShrink: 1,
-  },
-  pinnedRow: {
-    marginBottom: 8,
   },
   pinnedPill: {
     alignSelf: 'flex-start',
@@ -864,37 +670,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#B54708',
   },
-  messageTag: {
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  messageTagText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  videoTag: {
-    backgroundColor: '#FF444418',
-  },
-  videoTagText: {
-    color: colors.danger,
-  },
-  newsTag: {
-    backgroundColor: tealLight,
-  },
-  newsTagText: {
-    color: tealGreen,
-  },
   messageTime: {
     fontSize: 11,
     color: colors.text.light,
-  },
-  videoTitle: {
-    marginBottom: 10,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-    color: colors.text.primary,
   },
   videoPlatformsRow: {
     flexDirection: 'row',
@@ -921,100 +699,6 @@ const styles = StyleSheet.create({
   videoPlatformButtonText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  reactionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
-    marginTop: 2,
-  },
-  reactionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.neutralDark,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  reactionButtonActive: {
-    backgroundColor: colors.primarySoft,
-    borderColor: tealGreen,
-  },
-  reactionEmoji: {
-    fontSize: 13,
-  },
-  reactionCount: {
-    fontSize: 11,
-    color: colors.text.secondary,
-    fontWeight: '600',
-  },
-  addReactionButton: {
-    backgroundColor: colors.neutralDark,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  addReactionText: {
-    fontSize: 12,
-    color: colors.text.secondary,
-    fontWeight: '600',
-  },
-  emojiPicker: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8,
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 8,
-  },
-  emojiOption: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emojiOptionActive: {
-    backgroundColor: colors.primarySoft,
-  },
-  emojiOptionText: {
-    fontSize: 17,
-  },
-  founderTextHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  founderTextLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.text.secondary,
-    letterSpacing: 0.1,
-  },
-  textMessageBody: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.text.primary,
-  },
-  newsTitle: {
-    marginBottom: 5,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  newsBody: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.text.secondary,
   },
   supportRow: {
     flexDirection: 'row',

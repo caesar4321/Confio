@@ -13,10 +13,10 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { ResponsiveImage } from './ResponsiveImage';
 import { EmptyState } from './EmptyState';
-import { DiscoverSource } from './DiscoverSource';
+import { PostByline } from './PostByline';
+import { ReactionBar } from './ReactionBar';
 import { colors } from '../config/theme';
 
-const emojiOptions = ['🔥', '🙌', '😍', '🤯', '💡', '😎', '💪', '👀', '😢', '❤️'];
 
 export type DiscoverReaction = {
   emoji: string;
@@ -43,6 +43,8 @@ export type DiscoverItem = {
   imageUrl?: string | null;
   sourceName?: string;
   isOfficial?: boolean;
+  sourceAvatarUrl?: string | null;
+  sourceAvatarEmoji?: string | null;
 };
 
 export type DiscoverSectionKey = 'for_you' | 'official' | 'community';
@@ -77,18 +79,11 @@ const sectionEmptyStates: Record<DiscoverSectionKey, { icon: string; title: stri
   },
 };
 
-const tagIcons: Record<DiscoverItem['type'], string> = {
-  product: '🚀',
-  video: '▶',
-  news: '📊',
-};
-
 const platformOrder: Array<'TikTok' | 'Instagram' | 'YouTube'> = ['TikTok', 'Instagram', 'YouTube'];
-const platformStyles: Record<'TikTok' | 'Instagram' | 'YouTube', { bg: string; fg: string }> = {
-  TikTok: { bg: '#111111', fg: '#FFFFFF' },
-  Instagram: { bg: '#C13584', fg: '#FFFFFF' },
-  YouTube: { bg: '#DC2626', fg: '#FFFFFF' },
-};
+
+/** Topic and time, e.g. "Actualización · hace 2 h". */
+export const postMeta = (tag: string | undefined, time: string) =>
+  [tag?.trim(), time].filter(Boolean).join(' · ');
 
 type DiscoverFeedProps = {
   items: DiscoverItem[];
@@ -123,123 +118,75 @@ export function DiscoverFeed({
   activeSection = 'for_you',
   onSelectSection,
 }: DiscoverFeedProps) {
-  const [showEmojiPicker, setShowEmojiPicker] = React.useState<number | null>(null);
-
   const renderItem = ({ item }: { item: DiscoverItem }) => {
-    const topReactions = (item.reactionSummary || []).slice(0, 3);
-    const availablePlatformLinks = platformOrder.filter((platform) =>
+    const platforms = platformOrder.filter((platform) =>
       item.platformLinks?.some((entry) => entry.platform === platform && entry.url)
     );
+    const isVideo = item.type === 'video' || Boolean(item.thumbnail);
 
     return (
       <View style={styles.card}>
-        <Pressable onPress={() => onOpenItem?.(item)} style={styles.cardPressable}>
-          <DiscoverSource name={item.sourceName} isOfficial={item.isOfficial} />
-          <View style={styles.cardHeader}>
-            <View style={[styles.tagPill, { backgroundColor: `${item.tagColor}18` }]}>
-              <Text style={[styles.tagText, { color: item.tagColor }]}>
-                {tagIcons[item.type]} {item.tag}
-              </Text>
+        <Pressable
+          onPress={() => onOpenItem?.(item)}
+          style={({ pressed }) => [styles.cardPressable, pressed && styles.cardPressed]}
+          accessibilityRole="button"
+          accessibilityHint="Abre la publicación"
+        >
+          {item.sourceName ? (
+            <View style={styles.byline}>
+              <PostByline
+                name={item.sourceName}
+                isOfficial={item.isOfficial}
+                avatarUrl={item.sourceAvatarUrl}
+                avatarEmoji={item.sourceAvatarEmoji}
+                meta={postMeta(item.tag, item.time)}
+              />
             </View>
-            <Text style={styles.timeText}>{item.time}</Text>
-          </View>
-
-          <Text style={styles.cardTitle}>{item.title}</Text>
-          <Text style={styles.cardBody} numberOfLines={3}>
-            {item.body}
-          </Text>
-
-          {item.thumbnail && (
-            <View style={styles.videoPanel}>
-              <View style={styles.videoPanelGlowOne} />
-              <View style={styles.videoPanelGlowTwo} />
-              <View style={styles.videoPanelTopRow}>
-                <View style={styles.videoPanelBadge}>
-                  <Icon name="play" size={12} color="#FFFFFF" />
-                  <Text style={styles.videoPanelBadgeText}>Video</Text>
-                </View>
-              </View>
-              <View style={styles.videoPanelCenter}>
-                <View style={styles.videoPanelPlayButton}>
-                  <Icon name="play" size={16} color="#111827" />
-                </View>
-              </View>
-              <View style={styles.videoPanelBottomRow}>
-                <Text style={styles.videoPanelLabel}>Disponible en</Text>
-                <View style={styles.videoPanelPlatforms}>
-                {availablePlatformLinks.map((platform) => (
-                    <Text key={platform} style={[styles.videoPanelPlatformText, { color: platformStyles[platform].fg }]}>
-                      {platform}
-                    </Text>
-                ))}
-                </View>
-              </View>
-            </View>
+          ) : (
+            <Text style={styles.metaOnly}>{postMeta(item.tag, item.time)}</Text>
           )}
 
+          {item.title ? <Text style={styles.cardTitle}>{item.title}</Text> : null}
+          {item.body ? (
+            <Text style={styles.cardBody} numberOfLines={3}>
+              {item.body}
+            </Text>
+          ) : null}
+
           {item.imageUrl ? (
-            <ResponsiveImage uri={item.imageUrl} style={styles.postImage} />
+            <View style={styles.media}>
+              <ResponsiveImage uri={item.imageUrl} style={styles.postImage} />
+              {isVideo && (
+                <View style={styles.playOverlay} pointerEvents="none">
+                  <View style={styles.playButton}>
+                    <Icon name="play" size={18} color={colors.dark} />
+                  </View>
+                </View>
+              )}
+            </View>
+          ) : isVideo ? (
+            <View style={styles.videoPlaceholder}>
+              <View style={styles.playButton}>
+                <Icon name="play" size={18} color={colors.dark} />
+              </View>
+              {platforms.length ? (
+                <Text style={styles.videoPlaceholderText}>Disponible en {platforms.join(' · ')}</Text>
+              ) : null}
+            </View>
           ) : null}
         </Pressable>
 
         <ContentPoll poll={item.poll} />
-        <View style={styles.reactionRow}>
-          {topReactions.map(({ emoji, count }) => {
-            const active = item.viewerReaction === emoji;
-            return (
-              <Pressable
-                key={emoji}
-                onPress={() => {
-                  if (onReact) {
-                    void onReact(item.id, emoji);
-                  }
-                }}
-                style={[styles.reactionButton, active && styles.reactionButtonActive]}
-                accessibilityRole="button"
-                accessibilityLabel={`Reaccionar con ${emoji}, ${count} ${count === 1 ? 'reacción' : 'reacciones'}`}
-                accessibilityState={{ selected: active }}
-              >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-                <Text style={styles.reactionCount}>{count}</Text>
-              </Pressable>
-            );
-          })}
-
-          {item.canReact !== false && (
-            <Pressable
-              onPress={() => setShowEmojiPicker(showEmojiPicker === item.id ? null : item.id)}
-              style={styles.addReactionButton}
-              accessibilityRole="button"
-              accessibilityLabel="Agregar una reacción"
-            >
-              <Text style={styles.addReactionText}>+ 😊</Text>
-            </Pressable>
-          )}
+        <View style={styles.reactions}>
+          <ReactionBar
+            reactions={item.reactionSummary}
+            viewerReaction={item.viewerReaction}
+            canReact={item.canReact !== false && Boolean(onReact)}
+            onReact={(emoji) => {
+              void onReact?.(item.id, emoji);
+            }}
+          />
         </View>
-
-        {showEmojiPicker === item.id && item.canReact !== false && (
-          <View style={styles.emojiPicker}>
-            {emojiOptions.map((emoji) => {
-              const active = item.viewerReaction === emoji;
-              return (
-                <Pressable
-                  key={emoji}
-                  onPress={() => {
-                    setShowEmojiPicker(null);
-                    if (onReact) {
-                      void onReact(item.id, emoji);
-                    }
-                  }}
-                  style={[styles.emojiOption, active && styles.emojiOptionActive]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Reaccionar con ${emoji}`}
-                >
-                  <Text style={styles.emojiOptionText}>{emoji}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
       </View>
     );
   };
@@ -329,8 +276,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderRadius: 16,
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 12,
+    paddingTop: 16,
+    paddingBottom: 14,
     marginBottom: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
@@ -373,186 +320,68 @@ const styles = StyleSheet.create({
   sectionChipTextActive: {
     color: '#FFFFFF',
   },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  cardPressed: {
+    opacity: 0.85,
+  },
+  byline: {
+    marginBottom: 12,
+  },
+  metaOnly: {
     marginBottom: 8,
-  },
-  tagPill: {
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tagText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  timeText: {
-    fontSize: 11,
+    fontSize: 12,
     color: colors.text.light,
   },
   cardTitle: {
-    marginBottom: 5,
-    fontSize: 15,
+    marginBottom: 4,
+    fontSize: 16,
     fontWeight: '700',
-    lineHeight: 21,
+    lineHeight: 22,
     color: colors.dark,
   },
   cardBody: {
-    marginBottom: 10,
     fontSize: 14,
     lineHeight: 21,
     color: colors.gray700,
   },
-  videoPanel: {
-    height: 112,
-    borderRadius: 14,
-    marginBottom: 10,
+  media: {
+    marginTop: 12,
+    borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: colors.dark,
-    position: 'relative',
-  },
-  videoPanelGlowOne: {
-    position: 'absolute',
-    top: -24,
-    right: -8,
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  videoPanelGlowTwo: {
-    position: 'absolute',
-    bottom: -30,
-    left: -18,
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: 'rgba(52, 211, 153, 0.20)', // colors.primary glow
-  },
-  videoPanelTopRow: {
-    paddingHorizontal: 12,
-    paddingTop: 12,
-  },
-  videoPanelBadge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  videoPanelBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  videoPanelCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoPanelPlayButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoPanelBottomRow: {
-    paddingHorizontal: 12,
-    paddingBottom: 10,
-  },
-  videoPanelLabel: {
-    marginBottom: 5,
-    fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.68)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  videoPanelPlatforms: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  videoPanelPlatformText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
   postImage: {
     width: '100%',
     borderRadius: 12,
-    marginTop: 12,
     backgroundColor: colors.border,
   },
-  reactionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 5,
-  },
-  reactionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.neutralDark,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-  },
-  reactionButtonActive: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-  },
-  reactionEmoji: {
-    fontSize: 13,
-  },
-  reactionCount: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.text.secondary,
-  },
-  addReactionButton: {
-    backgroundColor: colors.neutralDark,
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  addReactionText: {
-    fontSize: 12,
-    color: colors.text.secondary,
-  },
-  emojiPicker: {
-    marginTop: 8,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-    padding: 8,
-  },
-  emojiOption: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emojiOptionActive: {
-    backgroundColor: colors.primarySoft,
+  playButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.94)',
   },
-  emojiOptionText: {
-    fontSize: 17,
+  videoPlaceholder: {
+    marginTop: 12,
+    height: 120,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: colors.dark,
+  },
+  videoPlaceholderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.72)',
+  },
+  reactions: {
+    marginTop: 12,
   },
   footerLoader: {
     paddingVertical: 8,
