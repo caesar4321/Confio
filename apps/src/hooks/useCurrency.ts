@@ -1,7 +1,5 @@
 import { useMemo } from 'react';
 import { useCountry } from '../contexts/CountryContext';
-import { useAuth } from '../contexts/AuthContext';
-import { getCountryByIso } from '../utils/countries';
 import { 
   getCurrencyByCountry, 
   formatCurrencyAmount, 
@@ -13,16 +11,13 @@ import {
 } from '../utils/currencies';
 
 /**
- * Hook for currency operations based on selected country
+ * Wallet currency follows the user's profile, never a recipient or phone draft.
  */
 export const useCurrency = () => {
-  const { selectedCountry, userCountry } = useCountry();
-  const { userProfile } = useAuth() as any;
+  const { userCountry } = useCountry();
   
-  // Get currency for selected country or fallback to user's country
   const currency = useMemo(() => {
-    const profileCountry = userProfile?.phoneCountry ? getCountryByIso(userProfile.phoneCountry) : null;
-    const countryToUse = selectedCountry || userCountry || profileCountry;
+    const countryToUse = userCountry;
     if (!countryToUse) {
       // Avoid showing a misleading local currency before the user's country is known.
       return currencies.USD;
@@ -30,7 +25,7 @@ export const useCurrency = () => {
     
     const countryCurrency = getCurrencyByCountry(countryToUse[2]); // Use ISO code
     return countryCurrency || currencies.USD;
-  }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
+  }, [userCountry]);
   
   // Currency formatting functions
   const formatAmount = useMemo(() => ({

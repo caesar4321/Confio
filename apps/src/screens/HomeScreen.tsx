@@ -55,7 +55,7 @@ import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
 import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { useCurrency } from '../hooks/useCurrency';
-import { useSelectedCountryRate } from '../hooks/useExchangeRate';
+import { useExchangeRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
 import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -129,10 +129,10 @@ export const HomeScreen = () => {
   const { signOut, userProfile, isAuthenticated, profileData } = useAuth() as any;
   const isAuthReady = useAuthReady();
   const { currency, formatAmount, exchangeRate } = useCurrency();
-  const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
+  const { rate: marketRate, loading: rateLoading } = useExchangeRate(currency.code, 'USD');
   const [algorandAddress, setAlgorandAddress] = React.useState<string>('');
-  // Show local currency by default if not in US and rate is available
-  const [showLocalCurrency, setShowLocalCurrency] = useState(false);
+  // Start in USD; a local display requires both user preference and a valid rate.
+  const [preferLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [statsRefreshNonce, setStatsRefreshNonce] = useState(0);
   const [showBalance, setShowBalance] = useState(true);
@@ -566,7 +566,8 @@ export const HomeScreen = () => {
   const totalLocalValue = totalUSDValue * localExchangeRate;
 
   // Don't show local currency option if exchange rate is not available
-  const canShowLocalCurrency = marketRate !== null && marketRate !== 1 && currency.code !== 'USD';
+  const canShowLocalCurrency = marketRate !== null && Number.isFinite(marketRate) && marketRate > 0 && currency.code !== 'USD';
+  const showLocalCurrency = preferLocalCurrency && canShowLocalCurrency;
 
   // Track initialization state — wait for essential data before showing content
   const [isInitialized, setIsInitialized] = useState(false);
@@ -889,10 +890,10 @@ export const HomeScreen = () => {
 
   // Reset to USD if exchange rate is not available
   React.useEffect(() => {
-    if (!canShowLocalCurrency && showLocalCurrency) {
+    if (!canShowLocalCurrency && preferLocalCurrency) {
       setShowLocalCurrency(false);
     }
-  }, [canShowLocalCurrency, showLocalCurrency]);
+  }, [canShowLocalCurrency, preferLocalCurrency]);
 
   // Surface self-claim card only when pending invites exist
   React.useEffect(() => {

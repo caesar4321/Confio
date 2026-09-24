@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_ME } from '../apollo/queries';
-import { Country, countries, getCountryByIso } from '../utils/countries';
+import { Country, getCountryByIso } from '../utils/countries';
+import { useAuth } from './AuthContext';
 
 interface CountryContextType {
   userCountry: Country | null;
@@ -17,28 +18,29 @@ interface CountryProviderProps {
 }
 
 export const CountryProvider: React.FC<CountryProviderProps> = ({ children }) => {
-  const { data: userData, loading } = useQuery(GET_ME);
-  const [userCountry, setUserCountry] = useState<Country | null>(null);
+  const { userProfile, isAuthenticated } = useAuth();
+  const { data: userData, loading } = useQuery(GET_ME, {skip: !isAuthenticated});
+  const resolveCountry = (iso?: string) => iso ? getCountryByIso(iso.trim().toUpperCase()) || null : null;
+  // Auth owns the current profile. Ignore a cached query belonging to another user.
+  const queryMatchesUser = !!userProfile?.id && userProfile.id === userData?.me?.id;
+  const userCountry = isAuthenticated
+    ? resolveCountry(userProfile?.phoneCountry)
+      || (queryMatchesUser ? resolveCountry(userData?.me?.phoneCountry) : null)
+    : null;
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const previousUserCountryIsoRef = useRef<string | null>(null);
+  const userId = isAuthenticated ? userProfile?.id || null : null;
+  const previousUserIdRef = useRef(userId);
 
   // Determine user's country from their phone country (ISO code)
   useEffect(() => {
-    if (loading) {
-      return;
-    }
-
-    const resolvedCountry = userData?.me?.phoneCountry
-      ? getCountryByIso(userData.me.phoneCountry)
-      : null;
-    const fallbackCountry = countries.find(c => c[0] === 'Argentina') || null;
-    const nextUserCountry = resolvedCountry || fallbackCountry;
+    const nextUserCountry = userCountry;
     const nextUserCountryIso = nextUserCountry?.[2] || null;
     const previousUserCountryIso = previousUserCountryIsoRef.current;
+    const userChanged = previousUserIdRef.current !== userId;
 
-    setUserCountry(prev => (prev?.[2] === nextUserCountryIso ? prev : nextUserCountry));
     setSelectedCountry(prev => {
-      if (!prev) {
+      if (!prev || userChanged) {
         return nextUserCountry;
       }
 
@@ -50,7 +52,8 @@ export const CountryProvider: React.FC<CountryProviderProps> = ({ children }) =>
     });
 
     previousUserCountryIsoRef.current = nextUserCountryIso;
-  }, [loading, userData?.me?.phoneCountry]);
+    previousUserIdRef.current = userId;
+  }, [userCountry, userId]);
 
   const value: CountryContextType = {
     userCountry,
