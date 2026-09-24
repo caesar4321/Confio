@@ -433,16 +433,16 @@ def _gm_listing(item) -> tuple[str, str, str] | None:
     """(symbol, ticker, display name) for an asset the explorer may list, or
     None. Ondo can publish a product before its data (Intelligent Portfolios
     arrived with no name, underlying ticker or market cap): never list a
-    blank row — use Ondo's name, else its underlying ticker, else a curated
-    name from gm_highlights.json, else hide it until one exists."""
+    blank row. A curated name from gm_highlights.json wins (it also fixes
+    Ondo's casing, e.g. "Blackrock"); else Ondo's name, else its underlying
+    ticker; else hide it until one exists."""
     pm = item.get('primaryMarket') or {}
     um = item.get('underlyingMarket') or {}
     if not pm.get('symbol') or pm.get('price') is None:
         return None
     ticker = um.get('ticker') or pm['symbol'].removesuffix('on')
-    name = _display_name(um.get('name') or um.get('ticker') or '')
-    if not name:
-        name = (_gm_highlights().get('names') or {}).get(ticker, '')
+    name = (_gm_highlights().get('names') or {}).get(ticker) \
+        or _display_name(um.get('name') or um.get('ticker') or '')
     if not name:
         return None
     return pm['symbol'], ticker, name

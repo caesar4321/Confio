@@ -408,7 +408,9 @@ class GmApiTradingTests(SimpleTestCase):
         shelf = next(s for s in _gm_highlights()['shelves'] if s['key'] == 'blackrock')
         self.assertIn('BlackRock es', shelf['subtitle'])
         self.assertIn('no los emite, administra ni supervisa', shelf['subtitle'])
-        for item in shelf['items']:
+        self.assertIn('BLK', [item['ticker'] for item in shelf['items']])  # the company itself
+        self.assertEqual(_gm_highlights()['names']['BLK'], 'BlackRock')
+        for item in (i for i in shelf['items'] if i['ticker'] != 'BLK'):
             self.assertIn(item['ticker'], _gm_highlights()['names'])
             # Never "fondo de BlackRock": it is Ondo's product on a BlackRock strategy.
             self.assertNotIn('fondo de BlackRock', _gm_descriptions()[item['ticker']])
