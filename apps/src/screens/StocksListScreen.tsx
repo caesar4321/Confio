@@ -39,7 +39,7 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 export const StocksListScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
-  const { savings, stocks: myStocks } = useSavingsPortfolio();
+  const { savings, stocks: myStocks, loading: portfolioLoading, refetch: refetchPortfolio } = useSavingsPortfolio();
   const { session, stocks, loading } = useGmMarket(myStocks.enabled);
   const highlights = useGmHighlights(myStocks.enabled);
   const [search, setSearch] = useState('');
@@ -122,6 +122,31 @@ export const StocksListScreen = () => {
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // `enabled` is also false before the portfolio answers. Saying "no
+  // disponibles" then turned eligible users away when they tapped in early
+  // (Home's Acciones tile); only say it once eligibility is actually known.
+  if (!myStocks.enabled && !myStocks.eligibilityKnown) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
+        {portfolioLoading ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <>
+            <Text style={{ color: colors.text.secondary, textAlign: 'center' }}>
+              No pudimos cargar las acciones.
+            </Text>
+            <TouchableOpacity onPress={() => { refetchPortfolio().catch(() => {}); }} style={{ marginTop: 16 }}>
+              <Text style={{ color: colors.primaryDark, fontWeight: '600' }}>Reintentar</Text>
+            </TouchableOpacity>
+          </>
+        )}
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
+          <Text style={{ color: colors.text.secondary }}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!myStocks.enabled) {
     return (

@@ -4,6 +4,8 @@ from django.test import TestCase
 
 from conversion.models import Conversion
 from ramps.metrics import (
+    deposit_volume_and_count,
+    fund_flow_breakdown,
     deposit_operation_count,
     deposited_volume_by_provider,
     withdrawn_volume_and_count,
@@ -155,3 +157,56 @@ class FundFlowMetricsTests(TestCase):
         self.ramp(direction='off_ramp', provider='guardarian', crypto_currency='BTC', crypto_amount_actual=2)
         self.ramp(direction='off_ramp', crypto_currency='USDT BSC', crypto_amount_actual=10)
         self.assertEqual(withdrawn_volume_and_count(), (Decimal('10'), 1))
+
+
+class FundFlowBreakdownTests(TestCase):
+    """The public screen: country privacy floor, timing floor, and agreement
+    with the Home tile's totals."""
+
+    ramp = DepositedMetricsTests.ramp
+
+    def users(self, n, prefix):
+        from users.models import User
+        return [User.objects.create(username=f'{prefix}{i}', firebase_uid=f'{prefix}-uid-{i}') for i in range(n)]
+
+    def withdrawal(self, user, country, minutes=10, amount=10):
+        from datetime import timedelta
+        from django.utils import timezone
+        ramp = self.ramp(direction='off_ramp', crypto_currency='USDT BSC', crypto_amount_actual=amount,
+                         country_code=country, actor_user=user)
+        RampTransaction.objects.filter(pk=ramp.pk).update(
+            completed_at=ramp.created_at + timedelta(minutes=minutes) if ramp.created_at else timezone.now())
+        return ramp
+
+    def test_countries_need_five_people_and_show_counts_not_dollars(self):
+        for user in self.users(5, 'br'):
+            self.withdrawal(user, 'BR')
+        whale = self.users(1, 'cl')[0]
+        for _ in range(4):
+            self.withdrawal(whale, 'CL', amount=5000)
+        flow = fund_flow_breakdown()
+        self.assertEqual(flow['countries'], [('BR', 5)])
+        self.assertEqual(flow['withdrawal_count'], 9)
+        self.assertEqual(flow['withdrawn_usd'], Decimal('20050'))
+
+    def test_median_needs_ten_withdrawals(self):
+        users = self.users(10, 'u')
+        for user, minutes in zip(users[:9], range(1, 10)):
+            self.withdrawal(user, 'PE', minutes=minutes)
+        self.assertIsNone(fund_flow_breakdown()['median_withdrawal_minutes'])
+        self.withdrawal(users[9], 'PE', minutes=100)
+        flow = fund_flow_breakdown()
+        self.assertEqual(flow['withdrawal_timing_samples'], 10)
+        self.assertAlmostEqual(flow['median_withdrawal_minutes'], 5.5, places=3)
+
+    def test_breakdown_matches_the_tile_totals(self):
+        self.ramp(final_currency='USDT BSC', country_code='MX', metadata={
+            'bsc_arrival_tx_hash': '0x' + 'c' * 64,
+            'bsc_arrival_log_index': 3, 'bsc_arrival_amount': '70'})
+        self.ramp()  # provider completion alone: not counted anywhere
+        self.withdrawal(None, 'MX', amount=30)
+        flow = fund_flow_breakdown()
+        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), deposit_volume_and_count())
+        self.assertEqual((flow['withdrawn_usd'], flow['withdrawal_count']), withdrawn_volume_and_count())
+        self.assertEqual(flow['countries'], [])  # one anonymous user is below the floor
+        self.assertIsNotNone(flow['since'])

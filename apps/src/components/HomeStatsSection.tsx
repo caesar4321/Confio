@@ -93,10 +93,14 @@ type Tile = {
 
 type HomeStatsSectionProps = {
   refreshNonce?: number;
+  /** The portfolio's stocks.enabled — the same flag the explorer checks.
+   * The tile must never offer a screen that will answer "no disponibles". */
+  stocksEnabled?: boolean;
 };
 
 export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   refreshNonce = 0,
+  stocksEnabled = false,
 }) => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
@@ -208,11 +212,17 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         descriptor: flowOperations != null
           ? `${fmt(flowOperations)} depósitos y retiros`
           : 'Depósitos y retiros',
+        // The breakdown: split, typical withdrawal time, countries, method.
+        onPress: () => navigation.navigate('FundFlow'),
       };
       // An offer, so it sits in the offers row next to Preventa: the catalog
       // size until the invested total is meaningful (server-gated at
       // GM_HOME_INVESTED_MIN_USD), then what users actually hold.
-      const stocks: Tile | null = stockInvestedUsd != null
+      // Visibility follows stocksEnabled (the explorer's own gate); the
+      // count query still starts in parallel, so it is ready when shown.
+      const stocks: Tile | null = !stocksEnabled
+        ? null
+        : stockInvestedUsd != null
         ? {
           key: 'stocks',
           icon: 'trending-up',
@@ -261,7 +271,7 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
         : [users, savings, flow, presale];
     },
     [s?.totalUsers, verified, tvl, backingDescriptor, flowTotalUsd, flowOperations,
-     stockAssetCount, stockInvestedUsd,
+     stockAssetCount, stockInvestedUsd, stocksEnabled,
      s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 

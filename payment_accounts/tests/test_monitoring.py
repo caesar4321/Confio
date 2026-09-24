@@ -11,7 +11,7 @@ from payment_accounts.monitoring import delivered_usd, dashboard_context, journe
 from payment_accounts.admin import InfiniaJourneyAdmin, AutomaticPayinAdmin
 from payment_accounts.models import AutomaticPayin, InfiniaJourney
 from ramps.models import RampTransaction
-from ramps.metrics import deposit_volume_and_count, deposited_volume_by_provider, withdrawn_volume_and_count
+from ramps.metrics import deposit_volume_and_count, deposited_volume_by_provider, fund_flow_breakdown, withdrawn_volume_and_count
 from . import test_activity
 
 
@@ -223,6 +223,35 @@ class MonitoringTests(TestCase):
         flows.update(status='succeeded', source_asset='USDT_BSC')
         InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review')
         self.assertEqual(withdrawn_volume_and_count(), (Decimal(0), 0))
+
+    def test_breakdown_merges_journeys_legacy_mirrors_and_iso3_countries(self):
+        from users.models import User
+        # One bridge per test with these fixtures: the journey side is a payout
+        # (ISO-3 "PER"); the deposit is a legacy ramp (ISO-2 "PE").
+        payout = self.succeeded_payout()        # Infinia payout, PER, 25
+        RampTransaction.objects.bulk_create([RampTransaction(provider='koywe', direction='on_ramp',
+            status='COMPLETED', destination='cusd_plus', final_currency='USDT BSC', final_amount=7,
+            country_code='PE', actor_user=self.owner.user, metadata={
+                'bsc_arrival_tx_hash': '0x' + 'e' * 64, 'bsc_arrival_log_index': 1,
+                'bsc_arrival_amount': '7'})])
+        mirror = RampTransaction.objects.create(provider='koywe', direction='off_ramp', status='COMPLETED',
+            crypto_currency='USDT BSC', crypto_amount_actual=Decimal('25'), country_code='PE',
+            actor_user=self.owner.user)
+        type(payout.money_flow).objects.filter(pk=payout.money_flow_id).update(legacy_ramp_transaction=mirror)
+        other = User.objects.create(username='flow-other', firebase_uid='flow-other-uid')
+        RampTransaction.objects.create(provider='koywe', direction='off_ramp', status='COMPLETED',
+            crypto_currency='USDC Algorand', crypto_amount_actual=Decimal('10'), country_code='PE',
+            actor_user=other)
+        with mock.patch('ramps.metrics.FLOW_COUNTRY_MIN_USERS', 2):
+            flow = fund_flow_breakdown()
+        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('7'), 1))
+        # The mirror is the payout itself: 25 + 10, two withdrawals, not three.
+        self.assertEqual((flow['withdrawn_usd'], flow['withdrawal_count']), (Decimal('35'), 2))
+        # PER (journey) and PE (legacy) are one country; two distinct people.
+        self.assertEqual(flow['countries'], [('PE', 3)])
+        self.assertEqual((flow['withdrawn_usd'], flow['withdrawal_count']), withdrawn_volume_and_count())
+        with mock.patch('ramps.metrics.FLOW_COUNTRY_MIN_USERS', 3):
+            self.assertEqual(fund_flow_breakdown()['countries'], [])
 
     def test_deleted_conversion_is_not_counted(self):
         j = self.complete()

@@ -576,6 +576,25 @@ class KoyweAddressReservationTests(TestCase):
         self.assertIsNotNone(ramp.pk)
         _notify_mock.assert_called_once()
 
+    def test_resync_of_completed_withdrawal_keeps_first_completion_time(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        kwargs = dict(
+            actor_user=None, actor_business=None, actor_type='user',
+            actor_display_name='Test User', actor_address='0x' + ('2' * 40),
+            direction='OFF_RAMP', destination='cusd', country_code='CO',
+            fiat_currency='COP', payment_method_code='NEQUI', payment_method_display='Nequi',
+            order_id='koywe-order-resync', external_id='confio-ramp-resync',
+            amount_in='200', amount_out='637257', next_action_url=None,
+            auth_email='user@example.com', order_payload={'status': 'DELIVERED'},
+        )
+        first = upsert_koywe_ramp_transaction(**kwargs)
+        self.assertEqual(first.status, 'COMPLETED')
+        with mock.patch('django.utils.timezone.now', return_value=timezone.now() + timedelta(hours=1)):
+            again = upsert_koywe_ramp_transaction(**kwargs)
+        self.assertEqual(again.pk, first.pk)
+        self.assertEqual(again.completed_at, first.completed_at)
+
     def test_provider_response_reuses_precreated_address_reservation(self):
         reservation = RampTransaction.objects.create(
             provider='koywe',

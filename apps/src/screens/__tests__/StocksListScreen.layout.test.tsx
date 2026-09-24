@@ -25,11 +25,17 @@ jest.mock('../../hooks/useGmMarket', () => ({
   useGmMarket: () => ({session: 'core', stocks: mockStocks, loading: false}),
   useGmHighlights: () => ({shelves: mockShelves, warningFor: (t: string) => mockWarnings[t]}),
 }));
+let mockEnabled = true;
+let mockKnown = true;
+let mockPortfolioLoading = false;
 jest.mock('../../hooks/useSavingsPortfolio', () => ({
   useSavingsPortfolio: () => ({
     savings: {balanceUsd: 120},
+    loading: mockPortfolioLoading,
+    refetch: jest.fn(() => Promise.resolve()),
     stocks: {
-      enabled: true,
+      enabled: mockEnabled,
+      eligibilityKnown: mockKnown,
       positions: mockPositions,
       totalUsd: mockPositions.reduce((sum, p) => sum + p.valueUsd, 0),
       earnedTodayUsd: 0,
@@ -50,6 +56,9 @@ beforeEach(() => {
   mockPositions = [];
   mockShelves = [];
   mockWarnings = {};
+  mockEnabled = true;
+  mockKnown = true;
+  mockPortfolioLoading = false;
 });
 
 it('invites a first-time investor, with a factual starter shelf and no warning box', async () => {
@@ -127,5 +136,22 @@ it('renders server shelves with only live assets, and badges risky funds', async
   expect(t).toContain('Sube y baja con bitcoin');
   expect(t).not.toContain('Sube y baja con ether');
   expect(t.filter(x => x === 'Riesgo alto')).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
+it('waits instead of saying "no disponibles" before eligibility is known', async () => {
+  mockEnabled = false;
+  mockKnown = false;
+  mockPortfolioLoading = true;
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {tree = renderer.create(<StocksListScreen />);});
+  expect(texts(tree)).not.toContain('Acciones no disponibles');
+  mockPortfolioLoading = false;
+  await act(async () => {tree.update(<StocksListScreen />);});
+  expect(texts(tree)).toContain('No pudimos cargar las acciones.');
+  expect(texts(tree)).not.toContain('Acciones no disponibles');
+  mockKnown = true;
+  await act(async () => {tree.update(<StocksListScreen />);});
+  expect(texts(tree)).toContain('Acciones no disponibles');
   await act(async () => tree.unmount());
 });
