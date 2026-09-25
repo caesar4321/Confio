@@ -111,8 +111,14 @@ class DepositReceiptTests(SimpleTestCase):
     def _run(self, existing_row):
         made = []
         notified = []
+        # Not an Infinia arrival (81004699 made the receipt skip those).
         with mock.patch('send.models.SendTransaction.all_objects') as sends, \
-             mock.patch('notifications.utils.create_notification') as notify:
+             mock.patch('notifications.utils.create_notification') as notify, \
+             mock.patch('payment_accounts.activity.arrival_owned', return_value=False), \
+             mock.patch('payment_accounts.models.PaymentBridgeTransfer.objects') as bridges:
+            # No outbound bridge in flight from this wallet, so the push goes out.
+            bridges.filter.return_value.exclude.return_value.exclude.return_value \
+                .values_list.return_value = []
             sends.filter.return_value.exists.return_value = existing_row
             sends.create.side_effect = lambda **kw: made.append(kw) or SimpleNamespace(
                 internal_id='r1')
@@ -135,6 +141,7 @@ class DepositReceiptTests(SimpleTestCase):
         self.assertEqual(len(made), 1)
         self.assertEqual(made[0]['token_type'], 'USDT')
         self.assertEqual(len(notified), 1)
+        self.assertTrue(notified[0]['send_push'])
         # Ineligible deposits auto-convert to non-yield cUSD.
         self.assertIn('Confío Dollar', notified[0]['message'])
         self.assertTrue(notified[0]['data']['pending_auto_mint'])
@@ -158,10 +165,19 @@ class SavingsMintSettlementTests(SimpleTestCase):
         self.assertIsNotNone(row.completed_at)
 
     def test_every_terminal_failure_fails_the_row(self):
-        for outcome in ('reverted', 'noop_failed', 'reorged', 'dropped'):
+        for outcome in ('reverted', 'noop_failed', 'dropped'):
             row = self._settle(outcome)
             self.assertEqual(row.status, 'FAILED', outcome)
             self.assertEqual(row.error_message, f'batch_{outcome}')
+
+    def test_reorg_returns_the_mint_to_pending_not_failed(self):
+        # 86bdef68: a reorg removes confirmation, not the signed transaction;
+        # the mint stays pending (its arrival reserved) until re-confirmed.
+        for status in ('SUBMITTED', 'COMPLETED'):
+            row = self._settle('reorged', status=status)
+            self.assertEqual(row.status, 'SUBMITTED', status)
+            self.assertIsNone(row.completed_at)
+            self.assertEqual(row.error_message, 'batch_reorged')
 
     def test_no_row_is_a_noop(self):
         with mock.patch('conversion.models.Conversion.objects') as convs:

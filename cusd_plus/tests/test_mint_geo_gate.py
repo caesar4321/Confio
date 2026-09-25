@@ -264,8 +264,12 @@ class SponsoredRailGateTests(SimpleTestCase):
             mock.patch('cusd_plus.sponsor_7702.recover_intent_signer', return_value=USER)
             if valid_signature else nullcontext()
         )
+        # No pending Infinia fee arrivals: the fee policy (86bdef68) passes
+        # the batch through unchanged, exactly as in production.
         with mock.patch('cusd_plus.schema._active_bsc_address', return_value=USER), \
              mock.patch('cusd_plus.sponsor_7702.is_delegated', return_value=False), \
+             mock.patch('payment_accounts.infinia_fee_collection.mint_policy_calls',
+                        side_effect=lambda calls, *args, **kwargs: calls), \
              signature:
             return SponsorBscBatch.mutate(
                 None, _info(user), gql_calls, '0', self.deadline,
