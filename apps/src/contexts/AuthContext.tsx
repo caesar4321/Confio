@@ -104,6 +104,10 @@ interface AuthContextType {
   handleSuccessfulLogin: (isPhoneVerified: boolean, requiresBackupCompletion?: boolean) => Promise<void>;
   completePhoneVerification: () => Promise<void>;
   completeBiometricAndEnter: () => Promise<boolean>;
+  // Set when the device-auth unlock failed or was cancelled. The session is
+  // kept; the lock screen retries the unlock instead of forcing a re-login.
+  isLocked: boolean;
+  unlockApp: () => Promise<boolean>;
   profileData: ProfileData | null;
   isProfileLoading: boolean;
   refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
@@ -141,6 +145,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastInactiveAtRef = useRef<number | null>(null);
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
+  const [isLocked, setIsLocked] = useState(false);
+  // Failed/cancelled device-auth unlock: unmount Main (which also dismisses
+  // any open modal) but KEEP the stored session, so the lock screen can retry
+  // instead of forcing a Google/Apple re-login.
+  const lockApp = () => {
+    resetAuthReady();
+    setIsAuthenticated(false);
+    setProfileData(null);
+    setIsLocked(true);
+  };
   const deferredBootstrapOnActiveRef = useRef(false);
 
   // Derive contact normalization only from the profile currently rendered by
@@ -619,13 +633,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               isAuthenticating = false;
 
               if (!ok) {
-                Alert.alert(
-                  'Confirma con biometría',
-                  Platform.OS === 'ios' ? 'Usa Face ID o Touch ID para continuar.' : 'Usa tu huella digital para continuar.'
-                );
-                setIsAuthenticated(false);
-                setProfileData(null);
-                navigateToScreen('Auth');
+                lockApp();
                 return;
               }
               if (ok) {
@@ -643,8 +651,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   }, [apolloClient, isAuthenticated]);
 
   // Enforce biometric enrollment on supported devices; returns if enrollment is ready
-  const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
+  const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean; silent?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
     const skipRevalidate = options?.skipRevalidate === true;
+    const silent = options?.silent === true;
     try {
       const supported = await biometricAuthService.isSupported();
       if (!supported) return { ok: true, alreadyEnabled: true, didAuthenticate: false };
@@ -679,7 +688,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
       const enabledNow = await biometricAuthService.enable();
       if (!enabledNow) {
-        Alert.alert(
+        if (!silent) Alert.alert(
           'Autenticación requerida',
           Platform.OS === 'ios' ? 'Necesitamos tu autenticación (Biometría o Código) para proteger tus operaciones críticas.' : 'Necesitamos tu autenticación (Biometría, PIN o Patrón) para proteger tus operaciones críticas.',
           [{ text: 'OK' }]
@@ -691,7 +700,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       return { ok: true, alreadyEnabled: false, didAuthenticate: true };
     } catch (error) {
       console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
-      Alert.alert(
+      if (!silent) Alert.alert(
         'Seguridad requerida',
         'No pudimos activar la seguridad. Inténtalo nuevamente.',
         [{ text: 'OK' }]
@@ -863,7 +872,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
   };
 
-  const checkAuthState = async () => {
+  // `unlocked`: the caller (the lock screen) just passed the device-auth gate,
+  // so don't prompt again.
+  const checkAuthState = async (options?: { unlocked?: boolean }) => {
+    const unlocked = options?.unlocked === true;
     const checkAuthStateStart = Date.now();
     let shouldKeepLoading = false;
     try {
@@ -903,7 +915,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             perfLog('biometricAuthService.isEnabled on startup', biometricStateStart, {
               bioEnabled,
             });
-            if (bioEnabled) {
+            if (bioEnabled && !unlocked) {
               const waitActiveStart = Date.now();
               const appIsActive = await waitForAppToBeActive();
               perfLog('waitForAppToBeActive before startup biometric prompt', waitActiveStart, {
@@ -987,16 +999,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
             // Run biometric auth and token refresh in parallel
             try {
-              if (bioEnabled) {
+              if (bioEnabled && !unlocked) {
                 const startupBiometricStart = Date.now();
                 const bioOk = await biometricAuthService.authenticate('Desbloquea Confío');
                 perfLog('Startup biometricAuthService.authenticate', startupBiometricStart, {
                   bioOk,
                 });
                 if (!bioOk) {
-                  setIsAuthenticated(false);
-                  setProfileData(null);
-                  navigateToScreen('Auth');
+                  lockApp();
                   return;
                 }
                 lastBiometricSuccessRef.current = Date.now();
@@ -1055,14 +1065,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               didAuthenticate: enrollmentResult.didAuthenticate,
             });
             if (!enrollmentResult.ok) {
-              setIsAuthenticated(false);
-              navigateToScreen('Auth');
+              lockApp();
               setIsLoading(false);
               return;
             }
 
             const unlockPromptStart = Date.now();
-            const biometricOk = bioEnabled
+            const biometricOk = bioEnabled || unlocked
               ? true
               : enrollmentResult.didAuthenticate
                 ? true
@@ -1073,13 +1082,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               skippedBecauseEnrollmentAuthenticated: enrollmentResult.didAuthenticate,
             });
             if (!biometricOk) {
-              Alert.alert(
-                'Confirma con biometría',
-                Platform.OS === 'ios' ? 'Usa Face ID o Touch ID para continuar.' : 'Usa tu huella digital para continuar.',
-                [{ text: 'OK' }]
-              );
-              setIsAuthenticated(false);
-              navigateToScreen('Auth');
+              lockApp();
               setIsLoading(false);
               return;
             }
@@ -1254,7 +1257,23 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
   };
 
+  // Retry the device-auth gate from the lock screen. Goes through the full
+  // (non-skip) enrollment check so a permanently invalidated key (biometrics
+  // changed in device settings) is re-enrolled behind a fresh device-auth
+  // prompt rather than leaving the user stuck on the lock screen.
+  // The lock screen shows its own inline error, so enrollment runs silently.
+  const unlockApp = async (): Promise<boolean> => {
+    const result = await enforceBiometricEnrollment({ silent: true });
+    if (!result.ok) return false;
+    lastBiometricSuccessRef.current = Date.now();
+    setIsLocked(false);
+    setIsLoading(true);
+    await checkAuthState({ unlocked: true });
+    return true;
+  };
+
   const signOut = async () => {
+    setIsLocked(false);
     try {
       resetAuthReady();
       const authService = AuthService.getInstance();
@@ -1303,6 +1322,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       handleSuccessfulLogin,
       completePhoneVerification,
       completeBiometricAndEnter,
+      isLocked,
+      unlockApp,
       profileData,
       isProfileLoading,
       refreshProfile,

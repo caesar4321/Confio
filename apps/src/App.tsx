@@ -24,6 +24,7 @@ import linking from './navigation/linking'; // Import linking config
 import { deepLinkHandler } from './utils/deepLinkHandler';
 import { PushNotificationProvider } from './hooks/usePushNotificationContext';
 import { BrandSplash } from './components/BrandSplash';
+import { AppLockScreen } from './components/AppLockScreen';
 import { logBreadcrumb } from './services/crashLog';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
@@ -44,7 +45,7 @@ initializeNotifee().catch(error => {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const Navigation: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, isLocked, unlockApp, signOut } = useAuth();
   console.log('Navigation render:', { isAuthenticated, isLoading });
 
   useEffect(() => {
@@ -87,6 +88,7 @@ const Navigation: React.FC = () => {
           <ActivityIndicator size="large" />
         </View>
       )}
+      <AppLockScreen visible={isLocked} onUnlock={unlockApp} onSignOut={signOut} />
     </View>
   );
 };
