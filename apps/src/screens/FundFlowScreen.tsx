@@ -227,10 +227,10 @@ export const FundFlowScreen = () => {
           <View style={styles.card}>
             <Text style={styles.howTitle}>Cómo lo contamos</Text>
             <Text style={styles.howText}>
-              Cada depósito y cada retiro cuenta una sola vez, cuando el dinero llega: a tu
-              billetera en un depósito, o a tu cuenta local en un retiro. También cuentan los
-              envíos de USDC desde y hacia otras billeteras. No incluimos conversiones internas
-              ni envíos entre usuarios de Confío. El total es acumulado desde el inicio.
+              Contamos el dinero cuando entra a los dólares de Confío (cuando USDC o USDT se
+              convierte en Confío Dollar o Dollar+) y cuando sale (cuando se convierte de vuelta
+              para retirarlo), sea por banco, efectivo o cripto. Mover dinero entre Confío Dollar y
+              Dollar+, o enviarlo a otro usuario, no cuenta. El total es acumulado desde el inicio.
             </Text>
           </View>
         </ScrollView>

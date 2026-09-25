@@ -1569,9 +1569,9 @@ class FundFlowCountryType(graphene.ObjectType):
 
 
 class FundFlowStatsType(graphene.ObjectType):
-    """All-time money moved through Confío: fiat deposits delivered to
-    wallets, fiat withdrawals paid out locally, and direct crypto transfers
-    to/from outside wallets — each counted once (ramps/metrics.py).
+    """All-time money that crossed the Confío-dollar perimeter: conversions
+    from USDC/USDT into cUSD/cUSD+ (entries) and back (exits), whatever the
+    channel; cUSD <-> cUSD+ moves excluded (ramps/metrics.py).
     Cumulative on purpose — it never shrinks when a large holder leaves."""
     deposited_usd = graphene.Float()
     withdrawn_usd = graphene.Float()
@@ -1613,7 +1613,7 @@ class Query(graphene.ObjectType):
     def resolve_fund_flow_stats(self, info):
         from django.core.cache import cache
 
-        cached = cache.get('fund_flow_stats_v3')
+        cached = cache.get('fund_flow_stats_v4')
         if cached:
             return _fund_flow_type(cached)
 
@@ -1641,7 +1641,7 @@ class Query(graphene.ObjectType):
                 for code, n in flow['countries']
             ],
         }
-        cache.set('fund_flow_stats_v3', data, 600)
+        cache.set('fund_flow_stats_v4', data, 600)
         return _fund_flow_type(data)
 
 

@@ -24,5 +24,5 @@ class Command(BaseCommand):
         if not dry_run and (outcome.get('verified') or outcome.get('proofs_revoked')):
             # The public figure is cached for 10 minutes: show added AND
             # revoked proofs now, never serve volume that was just removed.
-            cache.delete('fund_flow_stats_v3')
+            cache.delete('fund_flow_stats_v4')
             self.stdout.write('fund_flow_stats cache cleared')

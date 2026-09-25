@@ -160,59 +160,6 @@ class FundFlowMetricsTests(TestCase):
         self.assertEqual(withdrawn_volume_and_count(), (Decimal('10'), 1))
 
 
-class FundFlowBreakdownTests(TestCase):
-    """The public screen: country privacy floor, timing floor, and agreement
-    with the Home tile's totals."""
-
-    ramp = DepositedMetricsTests.ramp
-
-    def users(self, n, prefix):
-        from users.models import User
-        return [User.objects.create(username=f'{prefix}{i}', firebase_uid=f'{prefix}-uid-{i}') for i in range(n)]
-
-    def withdrawal(self, user, country, minutes=10, amount=10):
-        from datetime import timedelta
-        from django.utils import timezone
-        ramp = self.ramp(direction='off_ramp', crypto_currency='USDT BSC', crypto_amount_actual=amount,
-                         country_code=country, actor_user=user)
-        RampTransaction.objects.filter(pk=ramp.pk).update(
-            completed_at=ramp.created_at + timedelta(minutes=minutes) if ramp.created_at else timezone.now())
-        return ramp
-
-    def test_countries_need_five_people_and_show_counts_not_dollars(self):
-        for user in self.users(5, 'br'):
-            self.withdrawal(user, 'BR')
-        whale = self.users(1, 'cl')[0]
-        for _ in range(4):
-            self.withdrawal(whale, 'CL', amount=5000)
-        flow = fund_flow_breakdown()
-        self.assertEqual(flow['countries'], [('BR', 5)])
-        self.assertEqual(flow['withdrawal_count'], 9)
-        self.assertEqual(flow['withdrawn_usd'], Decimal('20050'))
-
-    def test_median_needs_ten_withdrawals(self):
-        users = self.users(10, 'u')
-        for user, minutes in zip(users[:9], range(1, 10)):
-            self.withdrawal(user, 'PE', minutes=minutes)
-        self.assertIsNone(fund_flow_breakdown()['median_withdrawal_minutes'])
-        self.withdrawal(users[9], 'PE', minutes=100)
-        flow = fund_flow_breakdown()
-        self.assertEqual(flow['withdrawal_timing_samples'], 10)
-        self.assertAlmostEqual(flow['median_withdrawal_minutes'], 5.5, places=3)
-
-    def test_breakdown_matches_the_tile_totals(self):
-        self.ramp(final_currency='USDT BSC', country_code='MX', metadata={
-            'bsc_arrival_tx_hash': '0x' + 'c' * 64,
-            'bsc_arrival_log_index': 3, 'bsc_arrival_amount': '70'})
-        self.ramp()  # provider completion alone: not counted anywhere
-        self.withdrawal(None, 'MX', amount=30)
-        flow = fund_flow_breakdown()
-        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), deposit_volume_and_count())
-        self.assertEqual((flow['withdrawn_usd'], flow['withdrawal_count']), withdrawn_volume_and_count())
-        self.assertEqual(flow['countries'], [])  # one anonymous user is below the floor
-        self.assertIsNotNone(flow['since'])
-
-
 def pin_future_cutoff(test):
     """Rows in these tests are created "now"; pin the historical cutoff far
     ahead so they stay before it whatever day the suite runs."""
@@ -220,76 +167,6 @@ def pin_future_cutoff(test):
     patcher = mock.patch('ramps.direct_transfers.PROOF_CUTOFF', datetime(2100, 1, 1, tzinfo=tz.utc))
     patcher.start()
     test.addCleanup(patcher.stop)
-
-
-class DirectCryptoFlowTests(TestCase):
-    """Direct USDC transfers count in Movido only with on-chain proof, at the
-    proven amount, and never on top of a ramp."""
-
-    ramp = DepositedMetricsTests.ramp
-
-    def setUp(self):
-        from users.models import User
-        pin_future_cutoff(self)
-        self.user = User.objects.create(username='crypto-user', firebase_uid='crypto-uid', phone_country='AR')
-
-    def deposit(self, **overrides):
-        from usdc_transactions.models import USDCDeposit
-        values = dict(actor_user=self.user, actor_type='user', amount=Decimal('40'),
-                      actor_address='W' * 58, source_address='X' * 58, status='COMPLETED')
-        values.update(overrides)
-        return USDCDeposit.objects.create(**values)
-
-    def withdrawal(self, **overrides):
-        from usdc_transactions.models import USDCWithdrawal
-        values = dict(actor_user=self.user, actor_type='user', amount=Decimal('15'),
-                      actor_address='W' * 58, destination_address='Y' * 58, status='COMPLETED')
-        values.update(overrides)
-        return USDCWithdrawal.objects.create(**values)
-
-    def prove(self, row, amount=None, txid=None):
-        from django.utils import timezone
-        from ramps.models import DirectTransferProof
-        kind = 'deposit' if type(row).__name__ == 'USDCDeposit' else 'withdrawal'
-        link = {'usdc_deposit': row} if kind == 'deposit' else {'usdc_withdrawal': row}
-        return DirectTransferProof.objects.create(
-            kind=kind, **link, transaction_hash=txid or f'TX{kind}{row.pk}',
-            amount=amount if amount is not None else row.amount,
-            counterparty_address='Z' * 58, confirmed_at=timezone.now())
-
-    def test_only_proven_transfers_count_at_the_proven_amount(self):
-        self.prove(self.deposit(), amount=Decimal('39.5'))  # on-chain amount wins
-        self.deposit(amount=Decimal('999'))                 # completed but unproven
-        self.prove(self.withdrawal())
-        with mock.patch('ramps.metrics.FLOW_COUNTRY_MIN_USERS', 1):
-            flow = fund_flow_breakdown()
-        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('39.5'), 1))
-        self.assertEqual((flow['withdrawn_usd'], flow['withdrawal_count']), (Decimal('15'), 1))
-        self.assertEqual(flow['withdrawal_timing_samples'], 0)  # crypto never enters the median
-        self.assertEqual(flow['countries'], [('AR', 2)])        # phone country for wallet transfers
-        # The public landing metric stays fiat-only.
-        self.assertEqual(sum(deposited_volume_by_provider().values()), 0)
-
-    def test_deleted_or_pending_rows_do_not_count_even_with_proof(self):
-        self.prove(self.deposit(status='PENDING'))
-        self.prove(self.deposit(is_deleted=True))
-        flow = fund_flow_breakdown()
-        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal(0), 0))
-
-    def test_ramp_linked_deposit_is_counted_by_its_ramp_not_again(self):
-        deposit = self.deposit(amount=Decimal('73'))
-        self.prove(deposit)
-        self.ramp(usdc_deposit=deposit, final_currency='CUSD', final_amount=999)
-        flow = fund_flow_breakdown()
-        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('73'), 1))
-
-    def test_older_proven_transfer_moves_since_back(self):
-        from datetime import datetime, timezone as tz
-        from usdc_transactions.models import USDCDeposit
-        deposit = self.deposit()
-        USDCDeposit.objects.filter(pk=deposit.pk).update(created_at=datetime(2025, 9, 11, tzinfo=tz.utc))
-        self.prove(USDCDeposit.objects.get(pk=deposit.pk))
-        self.assertEqual(fund_flow_breakdown()['since'].year, 2025)
 
 
 class DirectTransferProofTests(TestCase):
@@ -337,7 +214,6 @@ class DirectTransferProofTests(TestCase):
         self.assertEqual(outcome, {'verified': 1})
         proof = DirectTransferProof.objects.get()
         self.assertEqual((proof.usdc_deposit_id, proof.transaction_hash, proof.amount), (deposit.pk, 'TX1', Decimal('40')))
-        self.assertEqual(fund_flow_breakdown()['deposit_count'], 1)
 
     def test_wrong_amount_wrong_sender_or_outside_window_is_not_proof(self):
         from datetime import timedelta
@@ -397,24 +273,9 @@ class DirectTransferProofTests(TestCase):
             self.tx('TX1', self.other_confio, self.wallet, 40_000_000))), {'verified': 1})
         Account.all_objects.filter(algorand_address='Z' * 58).update(algorand_address=self.other_confio)
         self.retire(self.other_confio)
-        # Before any rerun, the metric already stops counting it.
-        self.assertEqual(fund_flow_breakdown()['deposit_count'], 0)
         outcome = self.run_verify(self.indexer())
         self.assertEqual(outcome['proofs_revoked'], 1)
         self.assertFalse(DirectTransferProof.objects.exists())
-
-    def test_withdrawal_to_a_later_known_confio_wallet_stops_counting_before_rerun(self):
-        from django.utils import timezone
-        from ramps.models import DirectTransferProof
-        from usdc_transactions.models import USDCWithdrawal
-        row = USDCWithdrawal.objects.create(actor_user=self.user, actor_type='user', amount=Decimal('5'),
-            actor_address=self.wallet, destination_address='N' * 58, status='COMPLETED')
-        DirectTransferProof.objects.create(kind='withdrawal', usdc_withdrawal=row, transaction_hash='TXW',
-            amount=Decimal('5'), counterparty_address='N' * 58, confirmed_at=timezone.now())
-        self.assertEqual(fund_flow_breakdown()['withdrawal_count'], 1)
-        from users.models import Account
-        Account.all_objects.filter(algorand_address=self.other_confio).update(algorand_address='N' * 58)
-        self.assertEqual(fund_flow_breakdown()['withdrawal_count'], 0)
 
     def test_transfers_to_confio_contracts_are_internal(self):
         from algosdk.logic import get_application_address
@@ -455,10 +316,6 @@ class DirectTransferProofTests(TestCase):
         late = int((PROOF_CUTOFF + timedelta(days=1, minutes=5)).timestamp())
         self.assertEqual(self.run_verify(self.indexer(self.tx('TXF', 'X' * 58, self.wallet, 40_000_000, round_time=late))), {})
         self.assertFalse(DirectTransferProof.objects.exists())
-        # Even a proof written some other way does not count.
-        DirectTransferProof.objects.create(kind='deposit', usdc_deposit=row, transaction_hash='TXF',
-            amount=Decimal('40'), counterparty_address='X' * 58, confirmed_at=timezone.now())
-        self.assertEqual(fund_flow_breakdown()['deposit_count'], 0)
 
     def test_replaced_wallet_without_retirement_record_is_still_internal(self):
         from usdc_transactions.models import USDCWithdrawal
@@ -487,11 +344,11 @@ class DirectTransferProofTests(TestCase):
     def test_command_clears_the_public_cache_on_revocation_only_runs(self):
         from django.core.cache import cache
         from django.core.management import call_command
-        cache.set('fund_flow_stats_v3', {'total_usd': 1}, 600)
+        cache.set('fund_flow_stats_v4', {'total_usd': 1}, 600)
         with mock.patch('ramps.direct_transfers.verify_direct_transfers', return_value={'proofs_revoked': 1}), \
              mock.patch('blockchain.algorand_client.AlgorandClient'):
             call_command('verify_direct_transfers', stdout=mock.Mock())
-        self.assertIsNone(cache.get('fund_flow_stats_v3'))
+        self.assertIsNone(cache.get('fund_flow_stats_v4'))
 
     def test_transfer_behind_a_ramp_cannot_prove_a_duplicate_row(self):
         from ramps.models import DirectTransferProof
@@ -533,16 +390,11 @@ class DirectTransferProofTests(TestCase):
         duplicate = self.deposit()  # attributed to a ramp only after the first run
         RampTransaction.objects.bulk_create([RampTransaction(provider='koywe', direction='on_ramp',
             status='COMPLETED', usdc_deposit=duplicate)])
-        # Before any rerun, the metric already refuses to count it twice.
-        flow = fund_flow_breakdown()
-        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('40'), 1))
         self.assertEqual(self.run_verify(indexer, dry_run=True)['proofs_revoked'], 1)
         self.assertTrue(DirectTransferProof.objects.filter(usdc_deposit=orphan).exists())  # dry run keeps it
         outcome = self.run_verify(indexer)
         self.assertEqual(outcome['proofs_revoked'], 1)
         self.assertFalse(DirectTransferProof.objects.exists())
-        flow = fund_flow_breakdown()  # counted once, by the ramp — not twice
-        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('40'), 1))
 
     def test_admin_cannot_add_change_or_delete_proofs(self):
         from django.contrib.admin.sites import AdminSite
@@ -581,15 +433,6 @@ class DirectTransferProofTests(TestCase):
         outcome = self.run_verify(self.indexer(self.tx('TXOUT', self.wallet, 'Y' * 58, 20_000_000)))
         self.assertEqual(outcome, {'ramp_transfers_reserved': 1, 'transfer_already_counted': 1})
         self.assertFalse(DirectTransferProof.objects.exists())
-
-    def test_late_bridge_attribution_stops_counting_before_any_rerun(self):
-        from conversion.models import Conversion
-        self.deposit()
-        self.assertEqual(self.run_verify(self.indexer(self.tx('TXB', 'X' * 58, self.wallet, 40_000_000))), {'verified': 1})
-        self.assertEqual(fund_flow_breakdown()['deposit_count'], 1)
-        Conversion.objects.bulk_create([Conversion(conversion_type='from_savings', status='COMPLETED',
-            from_amount=40, to_amount=40, bridge_arrival_tx='TXB')])
-        self.assertEqual(fund_flow_breakdown()['deposit_count'], 0)
 
     def test_clawback_is_never_proof(self):
         self.deposit()
@@ -639,3 +482,72 @@ class DirectTransferProofTests(TestCase):
         self.assertEqual(DirectTransferProof.objects.count(), 1)
         # Rerunnable: the proven row is skipped; the other's transfer is taken.
         self.assertEqual(self.run_verify(indexer), {'transfer_already_counted': 1})
+
+
+class PerimeterFlowTests(TestCase):
+    """Movido = conversions across the Confío-dollar perimeter; cUSD <-> cUSD+ excluded."""
+
+    def setUp(self):
+        from users.models import User
+        self.people = [User.objects.create(username=f'flow{i}', firebase_uid=f'flow-uid-{i}', phone_country='BR')
+                       for i in range(5)]
+
+    def conversion(self, conversion_type, amount_in, amount_out=None, *, direction='', user=None, **overrides):
+        values = dict(conversion_type=conversion_type, status='COMPLETED', from_amount=Decimal(amount_in),
+                      to_amount=Decimal(amount_out if amount_out is not None else amount_in),
+                      perimeter_direction=direction, actor_user=user or self.people[0], actor_type='user')
+        values.update(overrides)
+        return Conversion.objects.bulk_create([Conversion(**values)])[0]
+
+    def test_entries_and_exits_from_every_era(self):
+        self.conversion('usdc_to_cusd', '10')                                   # Algorand, unlabeled
+        self.conversion('usdt_to_cusd', '20', '19.8', direction='entry')        # BSC
+        self.conversion('to_savings', '5', direction='entry')                   # straight into Dollar+
+        self.conversion('cusd_to_usdc', '7')                                    # Algorand exit
+        self.conversion('cusd_to_usdt', '12', '11.9', direction='exit')         # BSC exit, after fee
+        self.conversion('from_savings', '3', direction='exit')
+        flow = fund_flow_breakdown()
+        # Entries at what came in; exits at what went out.
+        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('35'), 3))
+        self.assertEqual((flow['withdrawn_usd'], flow['withdrawal_count']), (Decimal('21.9'), 3))
+
+    def test_only_cusd_cusd_plus_moves_are_excluded(self):
+        self.conversion('to_savings', '50', direction='internal')
+        self.conversion('from_savings', '50', direction='internal')
+        self.conversion('usdc_to_algo', '9')                                     # never crosses
+        self.conversion('usdt_to_cusd', '99', status='FAILED', direction='entry')
+        self.conversion('usdt_to_cusd', '99', is_deleted=True, direction='entry')
+        flow = fund_flow_breakdown()
+        self.assertEqual((flow['deposit_count'], flow['withdrawal_count']), (0, 0))
+
+    def test_every_channel_counts_once(self):
+        # A ramp's deposit is counted by its conversion, never on top of it.
+        conv = self.conversion('usdt_to_cusd', '40', direction='entry')
+        RampTransaction.objects.bulk_create([RampTransaction(provider='koywe', direction='on_ramp',
+            status='COMPLETED', destination='cusd', final_amount=40, final_currency='CUSD_BSC', conversion=conv)])
+        flow = fund_flow_breakdown()
+        self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('40'), 1))
+
+    def test_countries_need_five_people_and_show_counts_not_dollars(self):
+        for person in self.people:
+            self.conversion('usdt_to_cusd', '10', direction='entry', user=person)
+        from users.models import User
+        whale = User.objects.create(username='whale', firebase_uid='whale-uid', phone_country='CL')
+        for _ in range(4):
+            self.conversion('cusd_to_usdt', '5000', direction='exit', user=whale)
+        flow = fund_flow_breakdown()
+        self.assertEqual(flow['countries'], [('BR', 5)])
+        self.assertEqual(flow['withdrawn_usd'], Decimal('20000'))
+        self.assertIsNotNone(flow['since'])
+
+    def test_withdrawal_median_still_comes_from_fiat_payouts(self):
+        from datetime import timedelta
+        self.conversion('cusd_to_usdt', '10', direction='exit')
+        for minutes in range(1, 11):
+            ramp = RampTransaction.objects.bulk_create([RampTransaction(provider='koywe', direction='off_ramp',
+                status='COMPLETED', crypto_currency='USDT BSC', crypto_amount_actual=Decimal('10'))])[0]
+            RampTransaction.objects.filter(pk=ramp.pk).update(completed_at=ramp.created_at + timedelta(minutes=minutes))
+        flow = fund_flow_breakdown()
+        self.assertEqual(flow['withdrawal_timing_samples'], 10)
+        self.assertAlmostEqual(flow['median_withdrawal_minutes'], 5.5, places=3)
+        self.assertEqual(flow['withdrawal_count'], 1)  # volume comes from conversions only
