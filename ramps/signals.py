@@ -295,6 +295,32 @@ def _find_guardarian_ramp_for_conversion(conversion: Conversion) -> RampTransact
     return query.order_by('created_at').first()
 
 
+PROVIDER_TX_HASH_KEYS = frozenset({
+    'bsc_provider_transfer_tx_hash', 'provider_transfer_tx_hash',
+    'txHash', 'tx_hash', 'transactionHash', 'transaction_hash',
+})
+
+
+def find_provider_tx_hash(value) -> str | None:
+    """The delivery transaction hash a provider reported anywhere in a ramp's
+    stored payloads (Koywe: provider_payload_latest.txHash), lowercased."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in PROVIDER_TX_HASH_KEYS and isinstance(item, str) \
+                    and re.fullmatch(r'0x[0-9a-fA-F]{64}', item):
+                return item.lower()
+        for item in value.values():
+            found = find_provider_tx_hash(item)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = find_provider_tx_hash(item)
+            if found:
+                return found
+    return None
+
+
 def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
                                tx_hash: str, log_index: int,
                                sender_address: str = '') -> RampTransaction | None:
@@ -303,25 +329,6 @@ def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
     if not address or not tx_hash or amount <= 0:
         return None
     tolerance = amount * Decimal('0.05')
-
-    def _provider_hash(value):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key in {
-                    'bsc_provider_transfer_tx_hash', 'provider_transfer_tx_hash',
-                    'txHash', 'tx_hash', 'transactionHash', 'transaction_hash',
-                } and isinstance(item, str) and re.fullmatch(r'0x[0-9a-fA-F]{64}', item):
-                    return item.lower()
-            for item in value.values():
-                found = _provider_hash(item)
-                if found:
-                    return found
-        elif isinstance(value, list):
-            for item in value:
-                found = _provider_hash(item)
-                if found:
-                    return found
-        return None
 
     def _allowed_senders(provider: str) -> set[str]:
         setting_name = (
@@ -348,7 +355,7 @@ def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
             metadata = dict(ramp.metadata or {})
             if metadata.get('bsc_arrival_tx_hash'):
                 continue
-            provider_hash = _provider_hash(metadata)
+            provider_hash = find_provider_tx_hash(metadata)
             if provider_hash:
                 # An explicit provider hash is authoritative. Never let the
                 # broad hot-wallet allowlist override a mismatch and steal a
