@@ -303,13 +303,17 @@ PROVIDER_TX_HASH_KEYS = frozenset({
 
 def find_provider_tx_hash(value) -> str | None:
     """The delivery transaction hash a provider reported anywhere in a ramp's
-    stored payloads (Koywe: provider_payload_latest.txHash), lowercased."""
+    stored payloads (Koywe: provider_payload_latest.txHash), lowercased.
+    The latest payload is searched before older snapshots, so a hash the
+    provider corrected wins over the one first recorded."""
     if isinstance(value, dict):
         for key, item in value.items():
             if key in PROVIDER_TX_HASH_KEYS and isinstance(item, str) \
                     and re.fullmatch(r'0x[0-9a-fA-F]{64}', item):
                 return item.lower()
-        for item in value.values():
+        ordered = sorted(value.items(), key=lambda kv: (
+            0 if 'latest' in str(kv[0]) else 2 if 'created' in str(kv[0]) else 1))
+        for _, item in ordered:
             found = find_provider_tx_hash(item)
             if found:
                 return found
@@ -341,6 +345,20 @@ def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
         return {str(value).strip().lower() for value in raw if str(value).strip()}
 
     with transaction.atomic():
+        # A transfer already proven for a ramp (e.g. from the provider's own
+        # reported hash, before this scan) IS that ramp's arrival — even once
+        # its conversion linked or the order aged out of the window below.
+        # Missing it would file the transfer as an external deposit with a
+        # duplicate receipt and push.
+        # One transaction can carry several Transfer logs (a provider batch),
+        # so a transfer is (hash, log index) — and it must be this wallet's.
+        already = RampTransaction.objects.filter(
+            metadata__bsc_arrival_tx_hash=tx_hash.lower(),
+            metadata__bsc_arrival_log_index=int(log_index),
+            actor_address__iexact=address,
+        ).first()
+        if already is not None:
+            return already
         # Overlapping scanners and rewind scans are normal. Lock every live
         # candidate through selection + claim so two workers cannot attach
         # different transfer logs to the same sender-only provider order.
@@ -943,6 +961,52 @@ def handle_ramp_withdrawal_link(sender, instance, **kwargs):
         ramp_tx.save(update_fields=['usdc_withdrawal', 'actor_address', 'status', 'status_detail', 'updated_at'])
 
 
+def link_attributed_bsc_ramps(instance: Conversion) -> bool:
+    """Link a completed BSC sweep conversion to the ramps whose proven
+    arrivals it swept exactly (see _attributed_bsc_ramps). Returns True when
+    it linked. Used by the conversion signal and by the provider-hash hook
+    when the hash arrives after the conversion already completed."""
+    attributed = _attributed_bsc_ramps(instance)
+    if not attributed:
+        return False
+    from ramps.currencies import bsc_final_currency
+
+    allocations = _bsc_ramp_net_allocations(instance, attributed)
+    final_currency = bsc_final_currency(instance.conversion_type)
+    for ramp_tx, allocated_net in zip(attributed, allocations):
+        ramp_tx.conversion = instance
+        ramp_tx.actor_address = (
+            instance.actor_address or instance.user_bsc_address
+            or ramp_tx.actor_address
+        )
+        ramp_tx.final_amount = allocated_net
+        ramp_tx.final_currency = final_currency
+        ramp_metadata = dict(ramp_tx.metadata or {})
+        ramp_metadata['conversion_allocation'] = {
+            'gross_amount': ramp_metadata['bsc_arrival_amount'],
+            'net_amount': format(allocated_net, 'f'),
+            'conversion_id': str(instance.internal_id),
+        }
+        ramp_tx.metadata = ramp_metadata
+        update_fields = [
+            'conversion', 'actor_address', 'final_amount',
+            'final_currency', 'metadata', 'updated_at',
+        ]
+        if ramp_tx.provider == 'guardarian':
+            ramp_tx.status = 'COMPLETED'
+            ramp_tx.status_detail = 'conversion_completed'
+            ramp_tx.completed_at = ramp_tx.completed_at or timezone.now()
+            update_fields.extend(['status', 'status_detail', 'completed_at'])
+        ramp_tx.save(update_fields=update_fields)
+    # The Conversion remains the exact fee ledger behind the ramp, but a
+    # second user-visible conversion card would double-count one deposit.
+    # Unified rows are derived mirrors, so retract the conversion mirror
+    # after the ramp rows have been materialized.
+    UnifiedTransactionTable.objects.filter(conversion=instance).delete()
+    Conversion.objects.filter(pk=instance.pk).update(source='ramp')
+    return True
+
+
 @receiver(post_save, sender=Conversion)
 @transaction.atomic
 def handle_ramp_conversion_link(sender, instance, **kwargs):
@@ -958,43 +1022,7 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
         ))
     except Exception:
         already_linked = False
-    attributed = [] if already_linked else _attributed_bsc_ramps(instance)
-    if attributed:
-        from ramps.currencies import bsc_final_currency
-
-        allocations = _bsc_ramp_net_allocations(instance, attributed)
-        final_currency = bsc_final_currency(instance.conversion_type)
-        for ramp_tx, allocated_net in zip(attributed, allocations):
-            ramp_tx.conversion = instance
-            ramp_tx.actor_address = (
-                instance.actor_address or instance.user_bsc_address
-                or ramp_tx.actor_address
-            )
-            ramp_tx.final_amount = allocated_net
-            ramp_tx.final_currency = final_currency
-            ramp_metadata = dict(ramp_tx.metadata or {})
-            ramp_metadata['conversion_allocation'] = {
-                'gross_amount': ramp_metadata['bsc_arrival_amount'],
-                'net_amount': format(allocated_net, 'f'),
-                'conversion_id': str(instance.internal_id),
-            }
-            ramp_tx.metadata = ramp_metadata
-            update_fields = [
-                'conversion', 'actor_address', 'final_amount',
-                'final_currency', 'metadata', 'updated_at',
-            ]
-            if ramp_tx.provider == 'guardarian':
-                ramp_tx.status = 'COMPLETED'
-                ramp_tx.status_detail = 'conversion_completed'
-                ramp_tx.completed_at = ramp_tx.completed_at or timezone.now()
-                update_fields.extend(['status', 'status_detail', 'completed_at'])
-            ramp_tx.save(update_fields=update_fields)
-        # The Conversion remains the exact fee ledger behind the ramp, but a
-        # second user-visible conversion card would double-count one deposit.
-        # Unified rows are derived mirrors, so retract the conversion mirror
-        # after the ramp rows have been materialized.
-        UnifiedTransactionTable.objects.filter(conversion=instance).delete()
-        Conversion.objects.filter(pk=instance.pk).update(source='ramp')
+    if not already_linked and link_attributed_bsc_ramps(instance):
         return
 
     # ramp_transactions is now a reverse FK manager (was OneToOne). For the

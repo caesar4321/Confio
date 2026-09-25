@@ -4,14 +4,20 @@ from decimal import Decimal
 from django.test import TestCase
 
 from conversion.models import Conversion
-from ramps.metrics import (
-    deposit_volume_and_count,
-    fund_flow_breakdown,
-    deposit_operation_count,
-    deposited_volume_by_provider,
-    withdrawn_volume_and_count,
-)
+from ramps.metrics import deposited_volume_by_provider, fund_flow_breakdown
 from ramps.models import RampTransaction
+
+
+def payouts():
+    """(dollars, count) of completed fiat payouts: the withdrawal-time sample."""
+    from django.db.models import Count, Sum
+    from ramps.metrics import _withdrawal_sources
+    total, count = Decimal(0), 0
+    for queryset, amount, *_ in _withdrawal_sources():
+        row = queryset.aggregate(total=Sum(amount), n=Count('pk'))
+        total += row['total'] or Decimal(0)
+        count += row['n']
+    return total, count
 
 
 class DepositedMetricsTests(TestCase):
@@ -133,17 +139,16 @@ class DepositedMetricsTests(TestCase):
 
 
 class FundFlowMetricsTests(TestCase):
-    """Withdrawals and the shared operation count."""
+    """Withdrawals in the payout sample; deposits only count with proof."""
 
     ramp = DepositedMetricsTests.ramp
 
-    def test_operation_count_matches_what_the_volume_counts(self):
+    def test_only_proven_deposits_count(self):
         self.ramp()  # provider completion alone: not a deposit
         self.ramp(final_currency='USDT BSC', metadata={
             'bsc_arrival_tx_hash': '0x' + 'b' * 64,
             'bsc_arrival_log_index': 2, 'bsc_arrival_amount': '50'})
         self.assertEqual(deposited_volume_by_provider()['koywe'], 50)
-        self.assertEqual(deposit_operation_count(), 1)
 
     def test_withdrawal_counts_actual_amount_once(self):
         self.ramp(direction='off_ramp', crypto_currency='USDC Algorand',
@@ -151,13 +156,13 @@ class FundFlowMetricsTests(TestCase):
         self.ramp(direction='off_ramp', crypto_currency='USDT BSC', status='FAILED', crypto_amount_actual=500)
         self.ramp(direction='off_ramp', crypto_currency='USDT BSC',
                   crypto_amount_estimated=80, crypto_amount_actual=None)
-        self.assertEqual(withdrawn_volume_and_count(), (Decimal('100'), 1))
+        self.assertEqual(payouts(), (Decimal('100'), 1))
 
     def test_non_dollar_withdrawal_is_not_counted_as_dollars(self):
         self.ramp(direction='off_ramp', provider='guardarian', crypto_currency='ALGO', crypto_amount_actual=1000)
         self.ramp(direction='off_ramp', provider='guardarian', crypto_currency='BTC', crypto_amount_actual=2)
         self.ramp(direction='off_ramp', crypto_currency='USDT BSC', crypto_amount_actual=10)
-        self.assertEqual(withdrawn_volume_and_count(), (Decimal('10'), 1))
+        self.assertEqual(payouts(), (Decimal('10'), 1))
 
 
 class PerimeterFlowTests(TestCase):

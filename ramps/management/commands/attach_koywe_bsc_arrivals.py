@@ -23,6 +23,7 @@ class Command(BaseCommand):
 
         client = KoyweClient()
         outcome = Counter()
+        seen = set()  # one transfer proves one ramp, in dry runs too
         for ramp in eligible_ramps().order_by('created_at'):
             tx_hash = find_provider_tx_hash(ramp.metadata or {})
             if not tx_hash and ramp.provider_order_id:
@@ -33,13 +34,14 @@ class Command(BaseCommand):
                 except Exception as exc:  # noqa: BLE001
                     self.stderr.write(f'ramp {ramp.pk}: Koywe lookup failed ({type(exc).__name__})')
             try:
-                outcome[attach_arrival(ramp, _rpc, tx_hash=tx_hash, apply=apply)] += 1
+                outcome[attach_arrival(ramp, _rpc, tx_hash=tx_hash, apply=apply, seen=seen)] += 1
             except Exception as exc:  # noqa: BLE001 — one RPC failure must not stop the run
                 self.stderr.write(f'ramp {ramp.pk}: verification failed ({type(exc).__name__})')
                 outcome['error'] += 1
         for key, value in outcome.most_common():
             self.stdout.write(f'{key}: {value}')
         if apply and outcome.get('verified'):
-            for key in ('landing_stats_v3', 'fund_flow_stats_v4'):
-                cache.delete(key)
+            # Arrival proof feeds the provider deposit metric (landing stats);
+            # Movido is measured from conversions and is unaffected.
+            cache.delete('landing_stats_v3')
             self.stdout.write('public stat caches cleared')

@@ -4,7 +4,7 @@ proven to have left it for a completed local payout (withdrawals). Internal
 conversion/bridge legs are never counted — one withdrawal writes a ramp, a
 conversion and a send row, and only the ramp is the customer's movement."""
 from decimal import Decimal
-from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, Q, Sum, Value, When
+from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce, Greatest, NullIf
 from django.db.models.fields.json import KeyTextTransform
 
@@ -82,44 +82,24 @@ def _deposit_sources():
     ]
 
 
-def _deposit_aggregates():
-    """[(provider, dollars, operations)] with each pair from ONE query, so a
-    deposit completing mid-read can never land in the count but not the
-    volume (or vice versa) — the two are cached and shown together."""
-    rows = []
-    for queryset, amount, provider in _deposit_sources():
-        delivered = queryset.annotate(_delivered=ExpressionWrapper(amount, output_field=DOLLARS))
-        totals = dict(total=Sum('_delivered'), n=Count('pk', filter=Q(_delivered__gt=0)))
-        if provider is None:
-            rows += [(r['provider'], r['total'] or Decimal(0), r['n'])
-                     for r in delivered.values('provider').annotate(**totals)]
-        else:
-            r = delivered.aggregate(**totals)
-            rows.append((provider, r['total'] or Decimal(0), r['n']))
-    return rows
-
-
 def deposited_volume_by_provider():
+    """Delivered deposit dollars per provider (admin/monitoring and landing
+    stats; the public Movido is measured from conversions instead)."""
     totals = dict.fromkeys(('koywe', 'guardarian', 'transak', 'infinia', 'cobre'), Decimal(0))
-    for provider, dollars, _ in _deposit_aggregates():
-        totals[provider] += dollars
+    for queryset, amount, provider in _deposit_sources():
+        total = Sum(amount, output_field=DOLLARS)
+        if provider is None:
+            for row in queryset.values('provider').annotate(total=total):
+                totals[row['provider']] += row['total'] or Decimal(0)
+        else:
+            totals[provider] = queryset.aggregate(total=total)['total'] or Decimal(0)
     return totals
-
-
-def deposit_operation_count() -> int:
-    """Deposits that delivered a positive, proven dollar amount."""
-    return sum(n for _, _, n in _deposit_aggregates())
-
-
-def deposit_volume_and_count() -> tuple[Decimal, int]:
-    rows = _deposit_aggregates()
-    return sum((dollars for _, dollars, _ in rows), Decimal(0)), sum(n for _, _, n in rows)
 
 
 def _withdrawal_sources():
     """(queryset, dollar field, country field, user field, completed field)
-    for every withdrawal source. Shared by the total, the per-country counts
-    and the timing so all three describe the same set of withdrawals.
+    for every completed fiat payout — the sample behind the public
+    withdrawal-time median.
 
     Legacy ramps count their actual (never quoted) USDC/USDT amount; journeys
     count the dollar-denominated source of a succeeded payout. A payout whose
@@ -145,16 +125,6 @@ def _withdrawal_sources():
         ), 'money_flow__source_amount', 'local_account__country',
             'confio_account__user_id', 'money_flow__completed_at'))
     return sources
-
-
-def withdrawn_volume_and_count() -> tuple[Decimal, int]:
-    """Dollars that left customer wallets for a completed local payout."""
-    total, count = Decimal(0), 0
-    for queryset, amount, *_ in _withdrawal_sources():
-        row = queryset.aggregate(total=Sum(amount), n=Count('pk'))
-        total += row['total'] or Decimal(0)
-        count += row['n']
-    return total, count
 
 
 # Same privacy floor as the Usuarios-by-country screen: a country with fewer
