@@ -13,8 +13,14 @@ jest.mock('../../services/authService', () => ({
 }));
 jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn() }));
 jest.mock('jwt-decode', () => ({ jwtDecode: () => ({ exp: Date.now() / 1000 + 3600 }) }));
+const mockAuthenticate = jest.fn(async (..._args: unknown[]) => true);
 jest.mock('../../services/biometricAuthService', () => ({
-  biometricAuthService: { isEnabled: async () => true, isSupported: async () => true, authenticate: async () => true },
+  biometricAuthService: {
+    isEnabled: async () => true,
+    isSupported: async () => true,
+    authenticate: (...args: unknown[]) => mockAuthenticate(...args),
+    isPermanentInvalidation: () => false,
+  },
 }));
 jest.mock('../../services/pushNotificationService', () => ({ pushNotificationService: {} }));
 jest.mock('../../services/contactService', () => ({
@@ -54,6 +60,7 @@ describe('session loss after biometric unlock', () => {
     });
     mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: '123', phoneCountry: 'AR' } } });
     mockClient.mutate.mockResolvedValue({ data: {} });
+    mockAuthenticate.mockResolvedValue(true);
   });
 
   afterEach(async () => {
@@ -138,6 +145,70 @@ describe('session loss after biometric unlock', () => {
       index: 0, routes: [{ name: 'Auth', params: { screen: 'PhoneVerification', params: undefined } }],
     });
     expect(await Keychain.getGenericPassword()).toBeTruthy();
+  });
+
+  it('locks instead of ejecting to login when the startup unlock fails, then unlocks in place', async () => {
+    mockAuthenticate.mockResolvedValueOnce(false);
+    await mount();
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(authState!.isLocked).toBe(true);
+    expect(authState!.isLoading).toBe(false);
+    expect(await Keychain.getGenericPassword()).toBeTruthy();
+    expect(navigationRef.current.reset).not.toHaveBeenCalled();
+
+    let unlocked = false;
+    await act(async () => { unlocked = await authState!.unlockApp(); });
+    await act(async () => { jest.advanceTimersByTime(100); });
+    expect(unlocked).toBe(true);
+    expect(authState!.isLocked).toBe(false);
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(navigationRef.current.reset).toHaveBeenCalledWith(expect.objectContaining({ routes: [expect.objectContaining({ name: 'Main' })] }));
+  });
+
+  it('locks on a failed resume unlock without clearing the session, then re-enters Main', async () => {
+    const handlers: Array<(state: string) => unknown> = [];
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.push(handler);
+      return { remove: jest.fn() };
+    }) as any);
+    await mount();
+    expect(authState!.isAuthenticated).toBe(true);
+    navigationRef.current.reset.mockClear();
+
+    mockAuthenticate.mockResolvedValueOnce(false);
+    const nowSpy = jest.spyOn(Date, 'now');
+    const t0 = Date.now();
+    nowSpy.mockReturnValue(t0);
+    await act(async () => { await Promise.all(handlers.map(h => h('background'))); });
+    nowSpy.mockReturnValue(t0 + 60_000);
+    await act(async () => { await Promise.all(handlers.map(h => h('active'))); });
+    nowSpy.mockRestore();
+
+    expect(authState!.isLocked).toBe(true);
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(authState!.profileData).toBeNull();
+    expect(await Keychain.getGenericPassword()).toBeTruthy();
+    expect(navigationRef.current.reset).not.toHaveBeenCalledWith(
+      expect.objectContaining({ routes: [expect.objectContaining({ name: 'Auth' })] }),
+    );
+
+    const promptsBeforeUnlock = mockAuthenticate.mock.calls.length;
+    await act(async () => { await authState!.unlockApp(); });
+    await act(async () => { jest.advanceTimersByTime(100); });
+    // One prompt for the unlock itself; checkAuthState must not prompt again.
+    expect(mockAuthenticate.mock.calls.length - promptsBeforeUnlock).toBe(1);
+    expect(authState!.isLocked).toBe(false);
+    expect(authState!.isAuthenticated).toBe(true);
+  });
+
+  it('stays locked when the retry also fails', async () => {
+    mockAuthenticate.mockResolvedValue(false);
+    await mount();
+    let unlocked = true;
+    await act(async () => { unlocked = await authState!.unlockApp(); });
+    expect(unlocked).toBe(false);
+    expect(authState!.isLocked).toBe(true);
+    expect(authState!.isAuthenticated).toBe(false);
   });
 
   it('applies the backup-completion route after startup finishes loading', async () => {
