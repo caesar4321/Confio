@@ -587,6 +587,8 @@ def upsert_koywe_ramp_transaction(
 def sync_koywe_ramp_transaction_from_order(*, ramp_tx, order_payload, next_action_url=None):
     # Serialize real rows with refund transitions. Signals must see the final
     # payout status, never a stale completion repaired after post_save runs.
+    from ramps.bsc_provider_hash import attach_after_koywe_sync
+
     if isinstance(ramp_tx, RampTransaction) and ramp_tx.pk:
         with transaction.atomic():
             current = RampTransaction.objects.select_for_update().get(pk=ramp_tx.pk)
@@ -594,10 +596,14 @@ def sync_koywe_ramp_transaction_from_order(*, ramp_tx, order_payload, next_actio
                 ramp_tx=current, order_payload=order_payload, next_action_url=next_action_url,
             )
             ramp_tx.__dict__.update(current.__dict__)
-        return ramp_tx
-    return _sync_koywe_ramp_transaction_from_order(
-        ramp_tx=ramp_tx, order_payload=order_payload, next_action_url=next_action_url,
-    )
+    else:
+        ramp_tx = _sync_koywe_ramp_transaction_from_order(
+            ramp_tx=ramp_tx, order_payload=order_payload, next_action_url=next_action_url,
+        )
+    # Koywe often reports the delivery hash only in a later sync; prove the
+    # arrival now (outside the row lock — it makes an RPC call).
+    attach_after_koywe_sync(ramp_tx)
+    return ramp_tx
 
 
 def _sync_koywe_ramp_transaction_from_order(

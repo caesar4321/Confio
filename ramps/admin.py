@@ -2,7 +2,7 @@ import json
 
 from django.contrib import admin
 
-from ramps.models import DirectTransferProof, KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress, RampWebhookEvent
+from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress, RampWebhookEvent
 
 
 @admin.register(KoyweBankInfo)
@@ -237,22 +237,3 @@ class RampWebhookEventAdmin(admin.ModelAdmin):
         'payload',
         'processed_at',
     )
-
-
-class DirectTransferProofAdmin(admin.ModelAdmin):
-    """Read-only: proofs come from the verify_direct_transfers command."""
-    list_display = ('kind', 'amount', 'transaction_hash', 'counterparty_address', 'confirmed_at', 'verified_at')
-    list_filter = ('kind',)
-    search_fields = ('transaction_hash', 'counterparty_address')
-    readonly_fields = [f.name for f in DirectTransferProof._meta.fields]
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        # Deleting a proof would drop counted volume and free its hash for
-        # reassignment; only the command revokes proofs, with its checks.
-        return False

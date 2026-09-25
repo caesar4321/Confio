@@ -250,46 +250,6 @@ class RampWebhookEvent(models.Model):
     def __str__(self):
         return f'{self.provider}:{self.event_type or "event"}:{self.event_id}'
 
-
-class DirectTransferProof(models.Model):
-    """On-chain evidence that a direct USDC transfer (no ramp) really moved.
-
-    Written only by ramps.direct_transfers after matching the row against the
-    Algorand indexer; the public Movido metric counts a direct transfer only
-    through its proof, at the on-chain amount. One transaction proves one row.
-    """
-    KIND_CHOICES = [('deposit', 'Deposit'), ('withdrawal', 'Withdrawal')]
-
-    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
-    usdc_deposit = models.OneToOneField(
-        'usdc_transactions.USDCDeposit', on_delete=models.CASCADE,
-        null=True, blank=True, related_name='direct_proof',
-    )
-    usdc_withdrawal = models.OneToOneField(
-        'usdc_transactions.USDCWithdrawal', on_delete=models.CASCADE,
-        null=True, blank=True, related_name='direct_proof',
-    )
-    transaction_hash = models.CharField(max_length=64, unique=True)
-    amount = models.DecimalField(max_digits=19, decimal_places=6, help_text='On-chain USDC amount')
-    counterparty_address = models.CharField(max_length=66)
-    confirmed_at = models.DateTimeField()
-    verified_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=(
-                    models.Q(kind='deposit', usdc_deposit__isnull=False, usdc_withdrawal__isnull=True)
-                    | models.Q(kind='withdrawal', usdc_withdrawal__isnull=False, usdc_deposit__isnull=True)
-                ),
-                name='direct_proof_one_row_matching_kind',
-            ),
-        ]
-
-    def __str__(self):
-        return f'{self.kind} {self.amount} USDC ({self.transaction_hash[:10]}…)'
-
-
 class KoyweRefund(models.Model):
     """Durable, order-scoped refund claim; independent of payout accounting."""
 
