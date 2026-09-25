@@ -60,6 +60,7 @@ class BscRampAttributionTests(SimpleTestCase):
             crypto_amount_estimated=Decimal('99.500000'),
             save=mock.Mock(),
         )
+        objects.filter.return_value.first.return_value = None  # no ramp owns this hash yet
         objects.select_for_update.return_value.filter.return_value.exclude.return_value.order_by.return_value = [ramp]
 
         with mock.patch('ramps.signals.transaction.atomic', return_value=nullcontext()):
@@ -82,6 +83,7 @@ class BscRampAttributionTests(SimpleTestCase):
         now = timezone.now()
         first = SimpleNamespace(metadata={'bsc_arrival_amount': '10.000000'})
         second = SimpleNamespace(metadata={'bsc_arrival_amount': '20.000000'})
+        objects.filter.return_value.first.return_value = None  # no ramp owns this hash yet
         objects.select_for_update.return_value.filter.return_value.exclude.return_value.order_by.return_value = [first, second]
         conversion = SimpleNamespace(
             status='COMPLETED',
@@ -105,6 +107,7 @@ class BscRampAttributionTests(SimpleTestCase):
     @mock.patch('ramps.signals.RampTransaction.objects')
     def test_partial_prefix_is_not_misattributed_to_larger_conversion(self, objects):
         ramp = SimpleNamespace(metadata={'bsc_arrival_amount': '540.394125'})
+        objects.filter.return_value.first.return_value = None  # no ramp owns this hash yet
         objects.select_for_update.return_value.filter.return_value.exclude.return_value.order_by.return_value = [ramp]
         conversion = SimpleNamespace(
             status='COMPLETED', conversion_type='usdt_to_cusd',
@@ -120,6 +123,7 @@ class BscRampAttributionTests(SimpleTestCase):
             metadata={}, provider='koywe', crypto_amount_actual=None,
             crypto_amount_estimated=Decimal('100.000000'), save=mock.Mock(),
         )
+        objects.filter.return_value.first.return_value = None  # no ramp owns this hash yet
         objects.select_for_update.return_value.filter.return_value.exclude.return_value.order_by.return_value = [ramp]
 
         with mock.patch('ramps.signals.transaction.atomic', return_value=nullcontext()):
@@ -143,6 +147,7 @@ class BscRampAttributionTests(SimpleTestCase):
             provider='koywe', crypto_amount_actual=None,
             crypto_amount_estimated=Decimal('100'), save=mock.Mock(),
         )
+        objects.filter.return_value.first.return_value = None  # no ramp owns this hash yet
         objects.select_for_update.return_value.filter.return_value.exclude.return_value.order_by.return_value = [ramp]
         with mock.patch('ramps.signals.transaction.atomic', return_value=nullcontext()):
             found = attribute_bsc_ramp_arrival(
@@ -163,6 +168,7 @@ class BscRampAttributionTests(SimpleTestCase):
                 crypto_amount_estimated=Decimal('100'), save=mock.Mock(),
             ) for _ in range(2)
         ]
+        objects.filter.return_value.first.return_value = None  # no ramp owns this hash yet
         objects.select_for_update.return_value.filter.return_value.exclude.return_value.order_by.return_value = ramps
         with mock.patch('ramps.signals.transaction.atomic', return_value=nullcontext()):
             found = attribute_bsc_ramp_arrival(
