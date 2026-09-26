@@ -977,6 +977,92 @@ class CusdPlusConversionType(graphene.ObjectType):
     dest_tx_hash = graphene.String()
     user_bsc_address = graphene.String()
     created_at = graphene.DateTime()
+    mint_request_id = graphene.String()
+
+    def resolve_mint_request_id(self, info):
+        return _savings_mint_request_id(
+            self.conversion_id, info.context.user, self.user_bsc_address,
+        )
+
+
+def _savings_mint_request_id(conversion_id, user, bsc_address, *, exclude_batch_id=None):
+    """Keep uncertain attempts reserved; retry only proven non-execution."""
+    from blockchain.models import SponsoredBatch
+
+    base = f'savings-mint-{conversion_id}'
+    batches = SponsoredBatch.objects.filter(
+        user=user, user_bsc_address__iexact=bsc_address,
+        client_request_id__startswith=base,
+    ).exclude(pk=exclude_batch_id).values_list('client_request_id', 'status')
+    states_by_retry = {}
+    pattern = re.compile(re.escape(base) + r'(?:_r([1-9][0-9]*))?_a[01]')
+    for request_id, status in batches:
+        match = pattern.fullmatch(request_id)
+        if match:
+            states_by_retry.setdefault(int(match[1] or 0), []).append(status)
+    # A gap or any unknown/live outcome retains that attempt. At most one
+    # more iteration than recorded identities is needed to find a free slot.
+    for retry in range(len(states_by_retry) + 1):
+        states = states_by_retry.get(retry, [])
+        if not states or any(s not in ('reverted', 'noop_failed') for s in states):
+            return base + (f'_r{retry}' if retry else '')
+
+
+def _persist_savings_mint(batch, raw):
+    """Reserve one saga mint inside the batch insert, before any broadcast."""
+    from conversion.models import Conversion
+    from blockchain.models import SponsoredBatch
+    from . import sponsor_7702
+
+    match = re.fullmatch(
+        r'(savings-mint-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
+        r'[0-9a-f]{4}-[0-9a-f]{12})(?:_r[1-9][0-9]*)?)_a[01]',
+        batch.client_request_id,
+    )
+    if not match:
+        raise sponsor_7702.PolicyError('bad_savings_mint_identity')
+    # send_sponsored_batch owns the atomic block. The row lock serializes
+    # generations until the winning signed batch is durable.
+    saga = Conversion.objects.select_for_update().filter(
+        internal_id=match[2], user_bsc_address__iexact=batch.user_bsc_address,
+        conversion_type='to_savings', status='DEST_ARRIVED', is_deleted=False,
+    ).first()
+    if saga is None:
+        raise sponsor_7702.PolicyError('savings_mint_not_pending')
+    current = _savings_mint_request_id(
+        match[2], batch.user, batch.user_bsc_address, exclude_batch_id=batch.pk,
+    )
+    if match[1] != current:
+        # The original client's built-in no-op retry may race the next
+        # foreground generation. Either may win the lock, but never both.
+        prior_noop_retry = (
+            batch.client_request_id.endswith('_a1')
+            and SponsoredBatch.objects.filter(
+                user=batch.user, user_bsc_address__iexact=batch.user_bsc_address,
+                client_request_id=match[1] + '_a0', status='noop_failed',
+            ).exists()
+            and not SponsoredBatch.objects.filter(
+                user_bsc_address__iexact=batch.user_bsc_address,
+                client_request_id__startswith=f'savings-mint-{match[2]}',
+            ).exclude(pk=batch.pk).exclude(
+                client_request_id__in=[match[1] + '_a0', match[1] + '_a1'],
+            ).exists()
+        )
+        if not prior_noop_retry:
+            raise sponsor_7702.PolicyError('savings_mint_superseded')
+    siblings = SponsoredBatch.objects.filter(
+        user_bsc_address__iexact=batch.user_bsc_address,
+        client_request_id__startswith=f'savings-mint-{match[2]}',
+    ).exclude(pk=batch.pk).exclude(status__in=('reverted', 'noop_failed'))
+    if siblings.exists():
+        raise sponsor_7702.PolicyError('savings_mint_already_reserved')
+    calls = json.loads(batch.calls_json)
+    mints = [c for c in calls if c['data'][2:10] in (
+        sponsor_7702.SEL_SUBSCRIBE_AND_MINT, sponsor_7702.SEL_CUSD_MINT,
+    )]
+    if (len(mints) != 1 or
+            Decimal(int(mints[0]['data'][10:74], 16)) / Decimal(10 ** 18) != saga.to_amount):
+        raise sponsor_7702.PolicyError('savings_mint_amount_mismatch')
 
 
 def _serialize(conv):
@@ -1083,9 +1169,11 @@ class StartCusdPlusConversion(graphene.Mutation):
 
 
 class AdvanceCusdPlusConversion(graphene.Mutation):
-    """Client reports a leg it signed. Transitions are monotonic and
-    validated; the bridge poller independently verifies SRC_COMMITTED ->
-    DEST_ARRIVED, so a lying client cannot fake delivery."""
+    """Client reports a signed source leg or acknowledges settled history.
+
+    Only server-observed settlement may complete a conversion. A destination
+    arrival proves raw stablecoins arrived, not that the final mint executed.
+    """
     class Arguments:
         conversion_id = graphene.ID(required=True)
         new_status = graphene.String(required=True)
@@ -1118,6 +1206,24 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
         conv = Conversion.objects.filter(**lookup).first()
         if conv is None:
             return AdvanceCusdPlusConversion(success=False, errors=['not found'])
+        if new_status == 'COMPLETED':
+            # Released clients report their mint hash after broadcast. Do not
+            # let that report promote quoted amounts into the public ledger or
+            # release referral rewards before authoritative settlement. The
+            # finalized receipt reconciler owns completion, including recovery
+            # of an arrived saga whose foreground history write was lost.
+            # Historical pre-fee sagas without this evidence need receipt-
+            # backed support reconciliation; a client retry cannot repair them.
+            if (conv.status == 'COMPLETED' and tx_ref
+                    and conv.to_transaction_hash
+                    and conv.to_transaction_hash.lower() == tx_ref.lower()):
+                return AdvanceCusdPlusConversion(
+                    conversion=_serialize(conv), success=True, errors=None,
+                )
+            return AdvanceCusdPlusConversion(
+                conversion=_serialize(conv), success=False,
+                errors=['awaiting verified conversion settlement'],
+            )
         if not conv.can_transition(new_status):
             return AdvanceCusdPlusConversion(
                 success=False, errors=[f'illegal transition {conv.status} -> {new_status}'],
@@ -1130,14 +1236,6 @@ class AdvanceCusdPlusConversion(graphene.Mutation):
             conv.from_transaction_hash = tx_ref or conv.from_transaction_hash
             conv.src_committed_at = now
             update += ['from_transaction_hash', 'src_committed_at']
-        elif new_status == 'COMPLETED':
-            conv.to_transaction_hash = tx_ref or conv.to_transaction_hash
-            conv.completed_at = now
-            update += ['to_transaction_hash', 'completed_at']
-            # Balance just changed on chain — drop the fresh-read cache so
-            # the next summary shows the new position, not a 30s-old one.
-            from . import vault
-            vault.invalidate_position(conv.user_bsc_address)
         conv.save(update_fields=update)
         from .unified import sync_unified_from_cusd_plus_conversion
         sync_unified_from_cusd_plus_conversion(conv)
@@ -1741,7 +1839,9 @@ class SponsorBscBatch(graphene.Mutation):
                 user, user_addr, norm_calls, nonce_i, deadline_i,
                 intent_signature, auth_dict, kind,
                 client_request_id=request_id, intent_id=intent_id,
-                persist_signed=persist_local_fee if request_id.startswith('local-mint-') else None)
+                persist_signed=(persist_local_fee if request_id.startswith('local-mint-')
+                                else _persist_savings_mint if request_id.startswith('savings-mint-')
+                                else None))
             broadcast_tx_hash = tx_hash  # past the point of no return
             if kind in ('stock_buy', 'stock_sell'):
                 # Drop only fresh values. If the tx later reverts, the next
@@ -1790,6 +1890,7 @@ class SponsorBscBatch(graphene.Mutation):
                         amount_wei=int(cusd_mint['data'][10:74], 16),
                         tx_hash=tx_hash,
                         bsc_address=user_addr,
+                        request_id=request_id,
                     )
         except sponsor_7702.ExistingSponsoredBatch as exc:
             existing = exc.batch

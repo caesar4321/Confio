@@ -1,8 +1,7 @@
-"""Public money-movement metrics, each counted once at the customer
-delivery boundary: dollars proven to have reached the wallet (deposits) or
-proven to have left it for a completed local payout (withdrawals). Internal
-conversion/bridge legs are never counted — one withdrawal writes a ramp, a
-conversion and a send row, and only the ramp is the customer's movement."""
+"""Public Movido counts completed Confío-dollar perimeter conversions once.
+Provider delivery totals and fiat payout timing retain their separate ramp
+and journey evidence; neither is added to the perimeter total.
+"""
 from decimal import Decimal
 from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce, Greatest, NullIf
@@ -171,8 +170,9 @@ def _perimeter_conversions():
 def fund_flow_breakdown() -> dict:
     """Everything the public "Dinero en movimiento" screen and the Home
     "Movido" tile show. Volume is measured at the perimeter (see above):
-    entries at the USDC/USDT amount that came in (from_amount), exits at the
-    amount that went out (to_amount, after fees). Countries are operation
+    entries at the USDC/USDT amount that came in, exits at the amount that
+    went out after fees. Prefer the exact ledger, falling back to historical
+    from_amount/to_amount projections. Countries are operation
     COUNTS by the person's phone country (never dollars, which would expose
     large holders), shown only with FLOW_COUNTRY_MIN_USERS distinct people.
     The withdrawal-time median comes from completed fiat payouts: a
@@ -183,8 +183,10 @@ def fund_flow_breakdown() -> dict:
     first_at = None
     entries, exits = _perimeter_conversions()
     fields = ('actor_user__phone_country', 'actor_user_id', 'actor_business_id', 'created_at')
-    entry_rows = list(entries.values_list('from_amount', *fields))
-    exit_rows = list(exits.values_list('to_amount', *fields))
+    entry_rows = list(entries.values_list(
+        Coalesce('gross_amount_exact', 'from_amount', output_field=DOLLARS), *fields))
+    exit_rows = list(exits.values_list(
+        Coalesce('net_amount_exact', 'to_amount', output_field=DOLLARS), *fields))
     for _, country, user_id, business_id, created_at in entry_rows + exit_rows:
         if created_at is not None and (first_at is None or created_at < first_at):
             first_at = created_at
