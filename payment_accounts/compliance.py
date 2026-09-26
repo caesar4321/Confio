@@ -17,19 +17,28 @@ from payment_accounts.clients import ComplianceHandoffError
 MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 SUPPORTED_CONTENT_TYPES = {'image/jpeg', 'image/png', 'application/pdf'}
 
-# These IDs identify the reviewed questionnaire *versions*, not their titles.
+# These IDs identify the approved questionnaire *versions*, not their titles.
 # Updating a workflow preserves its ID, but publishing a questionnaire version
 # requires explicitly reviewing and updating this mapping.
 BUSINESS_WORKFLOW_ID = '8513abf3-95b2-4740-8dda-2d629d0c5d77'
 PERSON_WORKFLOW_ID = 'f3c80006-d551-4fab-9317-46ce9a5236dc'
 BUSINESS_QUESTIONNAIRE_ID = '4290ba59-8631-45c6-9afb-54e1bc586858'
 PERSON_QUESTIONNAIRE_ID = 'd3ad7c27-3561-4db0-9fba-cfd3a3361c01'
+QUESTIONNAIRE_VERSIONS = {
+    BUSINESS_QUESTIONNAIRE_ID: frozenset({
+        BUSINESS_QUESTIONNAIRE_ID, '7eab4806-3bcf-472d-a082-0722a340cd00',
+    }),
+    PERSON_QUESTIONNAIRE_ID: frozenset({
+        PERSON_QUESTIONNAIRE_ID, '1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb',
+    }),
+}
 
 
 def _reviewed_answers(decision, questionnaire_id, workflow_id):
     responses = decision.get('questionnaire_responses') or []
+    accepted_versions = QUESTIONNAIRE_VERSIONS.get(questionnaire_id, {questionnaire_id})
     matches = [r for r in responses if isinstance(r, dict)
-               and r.get('questionnaire_id') == questionnaire_id]
+               and r.get('questionnaire_id') in accepted_versions]
     if not matches:
         if decision.get('workflow_id') == workflow_id or responses:
             raise ComplianceHandoffError('The required reviewed KYB questionnaire is missing')
