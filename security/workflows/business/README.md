@@ -1,6 +1,6 @@
-# Confío business verification — provisional KYB v3
+# Confío business verification — provisional KYB v4
 
-Created and published in Didit on 2026-09-15; audited business workflow version 3. This is a best-effort policy based
+Created on 2026-09-15; updated on 2026-09-26 to business workflow v4 and person v2. This is a best-effort policy based
 on public provider documentation, not confirmation of partner acceptance.
 The user authorized proceeding without a partner-specific checklist and revising
 this workflow later.
@@ -11,16 +11,17 @@ this workflow later.
 | --- | --- |
 | Business KYB workflow | `8513abf3-95b2-4740-8dda-2d629d0c5d77` |
 | Owner / representative KYC workflow | `f3c80006-d551-4fab-9317-46ce9a5236dc` |
-| Business evidence questionnaire | `4290ba59-8631-45c6-9afb-54e1bc586858` |
-| Person details questionnaire | `d3ad7c27-3561-4db0-9fba-cfd3a3361c01` |
+| Business evidence questionnaire v2 | `7eab4806-3bcf-472d-a082-0722a340cd00` |
+| Person details questionnaire v2 | `1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb` |
 
 The four request JSON files are the reproducible **current policy** definitions
-with draft status for safe initial creation. The parent incorporates v3 fixes.
+with draft status for safe initial creation. The parent incorporates the v4 policy below.
 Replace `$person_workflow`, `$person_questionnaire`, and
-`$business_questionnaire` with the corresponding IDs before submitting.
-`published-resources.json` records the published versions (business v3, person
-and questionnaires v1).
-Neither workflow is the application default. Existing workflows were unchanged.
+`$business_questionnaire` with the corresponding questionnaire version IDs and the person workflow version UUID
+`142a0b57-94b2-4b93-b535-8fb18ccd1006` before submitting.
+`published-resources.json` records the published versions (business v4, person
+and questionnaires v2), with previous versions retained in the manifest.
+Neither workflow is the application default. Personal account KYC workflows were unchanged.
 Confío's `DIDIT_BUSINESS_WORKFLOW_ID` defaults to the stable business ID above.
 An explicit empty environment override disables business verification safely.
 
@@ -33,7 +34,7 @@ Do not use that generic link as the in-app launch path.
 | Area | Collection | Basis |
 | --- | --- | --- |
 | Legal company identity | Registry lookup; required registration number, incorporation date, legal address, company type, tax number, activity, email and phone | Infinia organization fields; Koywe entity identification |
-| Incorporation | KYB legal-presence documents; incorporation certificate enabled; registry excerpt alone disabled | Infinia requires a certificate of incorporation |
+| Incorporation | KYB legal-presence documents accept incorporation, tax registration or registry excerpt; Infinia still requires an actual incorporation certificate | Infinia requires a certificate of incorporation |
 | Funds | Required questionnaire upload: audited financial statements, company bank statements or tax returns | Infinia organization source-of-funds requirement |
 | Company address | Required questionnaire upload: utility bill, bank statement, corporate tax notice or lease; structured address fields | Infinia organization proof-of-address requirement |
 | Tax identity | Explicit company `tax_number` plus required tax-registration upload | Koywe company identifiers; Infinia `tax_id` |
@@ -41,7 +42,7 @@ Do not use that generic link as the in-app launch path.
 | Representative authority | Required authorization document group, representative declaration, linked person verification | Provisional Confío policy |
 | Each declared UBO / officer | ID, passive liveness, face match, AML, verified email/phone, proof of address and person questionnaire | Infinia UBO identity requirement plus current Confío adapter and conservative policy |
 | Business activity and risk | Business description, operating countries, expected monthly USD volume, source of funds, PEP relationships and regulated activity | Koywe activity/transaction-monitoring needs; provisional risk review |
-| Review | Both questionnaires require manual review; document discrepancies route to review; parent waits for UBO checks | Provisional policy pending provider feedback |
+| Review | Clean completed questionnaires proceed automatically; explicit risk rules and document discrepancies route to review; parent waits for UBO checks | Provisional policy pending provider feedback |
 
 Infinia's [Required Documents](https://docs.infiniaweb.com/docs/required-documents)
 page specifically marks incorporation, company source of funds and company
@@ -81,12 +82,15 @@ Neither approval has been confirmed for this business flow.
 - Person IDs: passports where supported by Didit, plus national IDs in the nine
   listed countries. Provider nationality/document eligibility remains a separate
   check. A passport number must not be substituted for a required local tax ID.
-- AML approve threshold `0`, review threshold `100`, for business and people.
+- AML approve threshold `1`, review threshold `100`, for business and people.
+  Didit uses a strict less-than approval comparison: `0` previously sent even
+  score-zero, no-hit screenings to review.
   Potential matches need analyst adjudication; a PEP declaration is not an
   automatic rejection. No ongoing-monitoring subscription was enabled.
 - Key-person automatic invitation emails are disabled. No messages were sent.
   The hosted KYB flow exposes linked-person verification steps.
-- Manual review must check missing conditional evidence, including Argentine
+- Supplementary tax-ID answers and Argentine tax jurisdiction route to manual
+  review. That review must check conditional evidence, including Argentine
   CUIL, tax IDs absent from the photo ID, authority, ownership completeness,
   document dates, licenses and account ownership.
 
@@ -102,7 +106,8 @@ Neither approval has been confirmed for this business flow.
 - The installed native SDK predates the current KYB flow. **A new mobile build
   is required for the hosted launch and screen changes**; restarting EC2 only
   deploys backend behavior. No mobile-store release is implied by this deploy.
-- Infinia mapping requires the exact approved questionnaire version. Required
+- Infinia mapping accepts only explicitly allowlisted v1/v2 questionnaire IDs
+  and requires both the questionnaire and session to be Approved. Required
   company files, structured address and numeric monthly volume are mapped;
   verified email/phone and approved UBO proof of address are used. Bare tax-ID
   answers never replace verified IDs; supplementary Argentine CUIL requires
@@ -117,7 +122,7 @@ Neither approval has been confirmed for this business flow.
   provider approval gates remain authoritative. No real applicant documents or
   provider account submission were used for this audit.
 
-## Audit corrections
+## Original v3 audit corrections (2026-09-15)
 
 Didit's API accepts unknown nested fields, so saved JSON alone was insufficient.
 The public workflow-editor implementation confirmed these corrections:
@@ -126,15 +131,16 @@ The public workflow-editor implementation confirmed these corrections:
   Omitted officer roles default to no KYC, so all collected roles are explicit.
 - Document-group codes are uppercase. Each required group now has enabled
   subtypes; the original company-details group had none.
-- Only the incorporation certificate can satisfy legal presence. Registry
-  excerpts, business licenses, tax registration and incumbency certificates
-  cannot silently substitute for it. Tax evidence is collected separately.
+- V3 restricted legal presence to incorporation certificates. V4 deliberately
+  accepts tax registrations and registry excerpts as local legal-presence
+  evidence. The Infinia handoff still separately requires incorporation; it
+  never relabels tax or registry documents as incorporation certificates.
 - Null document ages use Didit's group default (currently 730 days), rather
   than unlimited age. Reviewers must check jurisdiction-specific freshness.
 
 These policy invariants have regression tests in `security/test_business_workflow.py`.
 
-## Verification performed
+## Original verification performed (2026-09-15)
 
 - Created all four resources as drafts, then read back their saved configuration.
 - Compared requested workflow feature order, required registry fields,
@@ -166,3 +172,38 @@ and [workflow feature configuration](https://docs.didit.me/management-api/workfl
 Linked questionnaires also have their own IDs and versions. Verify the parent
 and child graph bindings after changing them. Retain this policy's data-field
 IDs so downstream evidence mappings do not silently break.
+
+## V4 automatic decision policy (2026-09-26)
+
+- Required structured choices cover PEP exposure, regulated activity and direct
+  natural-person ownership. Missing, unknown or non-clean selections route to
+  `In Review`. Existing PEP/regulated free text must also be an explicit negative
+  (`None`, `Ninguno`, `No aplica`, etc.); ambiguous narrative still needs review.
+- All required non-file questionnaire answers have missing-value review rules;
+  uploads remain required in the form. Required consent and verified contact,
+  registry, corporate-document and linked-person checks remain enabled.
+- Questionnaire approval establishes completeness and risk-declaration checks.
+  It does **not** certify the authenticity of bank statements or source-of-funds
+  uploads. Provider review and country eligibility remain separate gates.
+- Every custom status rule only escalates to review. No rule forces approval of
+  another failed check. Both questionnaire blanket-review flags are disabled.
+- Company document retries explicitly remain 3; exhaustion routes to review.
+  Increasing retries is not a remedy for an unsupported document subtype.
+- Published updates retain the stable workflow IDs. The parent explicitly binds
+  the new person version UUID. Publishing a questionnaire also automatically
+  repoints workflow questionnaire references in Didit; this was observed and
+  checked before workflow publication. Old answer versions remain allowlisted.
+- The existing pending application still needs its linked-person KYC and review
+  of its old document result. No existing decision was approved, no evidence was
+  deleted, and no customer notification was sent. Didit's update-status API
+  refuses resubmission while the session is `Awaiting User`; after the owner
+  completes KYC, an analyst can handle the existing document review. Do not
+  change overall status merely to bypass this constraint.
+- Read-back validation covered all feature settings and graph order. Didit adds
+  default ID-document subtypes and drops disabled phone channels during save;
+  enabled country/channel choices were verified unchanged.
+- Local verification: 33 policy and provider-handoff tests passed. The old
+  handoff rejected a new approved questionnaire fixture; the updated code
+  accepted it. EC2 compatibility was deployed and all six services were active.
+- Runtime limitation: no real applicant journey was submitted to prove the new
+  rules end to end. Saved rules and forms were checked through the live API.

@@ -116,6 +116,38 @@
         "es": "Confirmo que los datos de contacto, domicilio e identidad proporcionados son míos."
       },
       "is_required": true
+    },
+    {
+      "id": "pep_risk",
+      "element_type": "multiple_choice",
+      "label": {
+        "en": "Are you a politically exposed person, or a close relative or associate of one?",
+        "es": "¿Eres una persona políticamente expuesta, familiar o colaborador cercano de una?"
+      },
+      "is_required": true,
+      "options": [
+        {
+          "value": "no",
+          "label": {
+            "en": "No",
+            "es": "No"
+          }
+        },
+        {
+          "value": "yes",
+          "label": {
+            "en": "Yes",
+            "es": "Sí"
+          }
+        },
+        {
+          "value": "unsure",
+          "label": {
+            "en": "Not sure",
+            "es": "No estoy seguro"
+          }
+        }
+      ]
     }
   ]
 }
