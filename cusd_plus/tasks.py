@@ -994,7 +994,7 @@ def record_savings_mint(*, user, business, actor_type, display_name,
 
 
 def record_cusd_mint(*, user, business, actor_type, display_name,
-                     amount_wei, tx_hash, bsc_address):
+                     amount_wei, tx_hash, bsc_address, request_id=None):
     """Record a sponsor-authorized USDT -> cUSD perimeter entry.
 
     The gross amount comes from policy-validated calldata and the fee triplet
@@ -1004,11 +1004,22 @@ def record_cusd_mint(*, user, business, actor_type, display_name,
     """
     from decimal import Decimal, ROUND_DOWN
     from conversion.models import Conversion
+    from payment_accounts.activity import local_mint_journey_id
 
     try:
         if Conversion.objects.filter(
             conversion_type='usdt_to_cusd', to_transaction_hash=tx_hash,
             is_deleted=False,
+        ).exists():
+            return None
+        # An arrived savings saga may settle into universal cUSD after an
+        # eligibility change. Its finalized event must complete that same
+        # operation, not create a second conversion and leave it retryable.
+        if not local_mint_journey_id(request_id) and Conversion.objects.filter(
+            conversion_type='to_savings', status='DEST_ARRIVED',
+            user_bsc_address__iexact=bsc_address or '', is_deleted=False,
+            to_amount=(Decimal(int(amount_wei)) / Decimal(10 ** 18)).quantize(
+                Decimal('0.000001'), rounding=ROUND_DOWN),
         ).exists():
             return None
         from .cusd_vault import preview_mint_wei
@@ -1383,31 +1394,50 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
             gross = Decimal(event['gross_wei']) / scale
             fee = Decimal(event['fee_wei']) / scale
             net = Decimal(event['net_wei']) / scale
-            row = Conversion.objects.select_for_update().filter(
-                to_transaction_hash=batch.tx_hash,
+            candidates = Conversion.objects.select_for_update().filter(
+                to_transaction_hash__iexact=batch.tx_hash,
                 conversion_type=event['conversion_type'],
                 is_deleted=False,
-            ).filter(
-                models.Q(contract_event_index=event['log_index'])
-                | models.Q(contract_event_index__isnull=True)
-            ).first()
+            )
+            # Replays must prefer the already bound event over a newer
+            # unbound foreground row for the same transaction.
+            row = candidates.filter(contract_event_index=event['log_index']).first()
+            if row is None:
+                row = candidates.filter(contract_event_index__isnull=True).first()
             if row is None and event['direction'] == 'entry' and account is not None:
                 # Recover a foreground mint whose best-effort history write
-                # was lost after broadcast. For cUSD+ first claim the oldest
-                # matching arrived saga; for direct cUSD create the event row.
-                if event['conversion_type'] == 'to_savings' and not local_mint_journey_id(getattr(batch, 'client_request_id', None)):
+                # was lost after broadcast. New clients identify the saga;
+                # only legacy batches need the oldest matching arrival.
+                request_id = getattr(batch, 'client_request_id', None) or ''
+                if not local_mint_journey_id(request_id):
                     actor_filter = (
                         {'actor_business': account.business}
                         if account.account_type == 'business'
                         else {'actor_user': account.user}
                     )
-                    row = Conversion.objects.select_for_update().filter(
+                    sagas = Conversion.objects.select_for_update().filter(
                         conversion_type='to_savings', status='DEST_ARRIVED',
+                        user_bsc_address__iexact=batch.user_bsc_address,
                         to_amount=display(gross), is_deleted=False,
                         **actor_filter,
-                    ).order_by('created_at').first()
+                    )
+                    if request_id.startswith('savings-mint-'):
+                        import re
+                        match = re.fullmatch(
+                            r'savings-mint-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
+                            r'[0-9a-f]{4}-[0-9a-f]{12})(?:_r[1-9][0-9]*)?_a[01]',
+                            request_id,
+                        )
+                        # Never let a named mint consume another equal-sized
+                        # arrival. Its stable replay ID belongs to this saga.
+                        sagas = sagas.filter(internal_id=match[1]) if match else sagas.none()
+                    row = sagas.order_by('created_at').first()
                     if row is not None:
-                        row.to_transaction_hash = batch.tx_hash
+                        row.to_transaction_hash = batch.tx_hash.lower()
+                        row.conversion_type = event['conversion_type']
+                        row.from_asset_id = 'USDT_BSC'
+                        row.to_asset_id = ('CUSD_PLUS_BSC' if event['conversion_type'] == 'to_savings'
+                                           else 'CUSD_BSC')
                 if row is None:
                     is_business = account.account_type == 'business'
                     row = Conversion(
@@ -1424,7 +1454,7 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
                             else 'CUSD_BSC'),
                         perimeter_direction='entry',
                         user_bsc_address=batch.user_bsc_address,
-                        to_transaction_hash=batch.tx_hash,
+                        to_transaction_hash=batch.tx_hash.lower(),
                         status='SUBMITTED',
                     )
             if row is None:
@@ -1443,8 +1473,8 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
                         else 'CUSD_BSC'),
                     to_asset_id='USDT_BSC', perimeter_direction='exit',
                     user_bsc_address=batch.user_bsc_address,
-                    from_transaction_hash=batch.tx_hash,
-                    to_transaction_hash=batch.tx_hash,
+                    from_transaction_hash=batch.tx_hash.lower(),
+                    to_transaction_hash=batch.tx_hash.lower(),
                     status='SUBMITTED',
                 )
             row.gross_amount_exact = gross
@@ -1456,9 +1486,14 @@ def _reconcile_cusd_fee_event(*, batch, receipt):
             row.fee_amount = display(fee)
             row.to_amount = display(net)
             row.contract_event_index = event['log_index']
-            if event['direction'] == 'exit':
-                row.status = 'COMPLETED'
-                row.completed_at = timezone.now()
+            # Both callers supply finalized chain evidence. The scanner may
+            # be the only recovery path after a lost foreground write, so it
+            # must settle entries too, without waiting for a client callback
+            # or another batch poll. Replays preserve the original completion.
+            row.perimeter_direction = event['direction']
+            row.status = 'COMPLETED'
+            row.completed_at = row.completed_at or timezone.now()
+            row.error_message = ''
             row.save()
             if send_tx is not None:
                 import json
@@ -1546,10 +1581,10 @@ def monitor_cusd_fee_events(self):
     try:
         for lo in range(start, finalized + 1, 2_000):
             hi = min(finalized, lo + 1_999)
-            logs = _rpc('eth_getLogs', [{
-                'address': cusd, 'fromBlock': hex(lo), 'toBlock': hex(hi),
-                'topics': [topic0],
-            }]) or []
+            # Share the deposit scanner's endpoint-range fallback. Public
+            # BSC nodes may cap logs at 50 blocks; retrying the same 2,000
+            # block request forever otherwise strands the ledger cursor.
+            logs = _get_logs_chunked(lo, hi, [topic0], address=cusd)
             by_tx = defaultdict(list)
             for log in logs:
                 tx_hash = log.get('transactionHash')
@@ -1602,7 +1637,7 @@ def settle_savings_mint(tx_hash: str, outcome: str, receipt=None, batch=None) ->
     try:
         row = Conversion.objects.filter(
             conversion_type__in=('to_savings', 'usdt_to_cusd'),
-            to_transaction_hash=tx_hash,
+            to_transaction_hash__iexact=tx_hash,
             status__in=('SUBMITTED', 'COMPLETED') if outcome == 'reorged' else ('SUBMITTED',),
             is_deleted=False,
         ).first()
