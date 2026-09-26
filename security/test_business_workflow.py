@@ -86,7 +86,8 @@ class BusinessWorkflowPolicyTests(SimpleTestCase):
                                'status': 'In Review', 'value_type': 'literal'}, rules)
                 element = next(e for e in form['form_elements'] if e['id'] == field)
                 self.assertTrue(element['is_required'])
-                self.assertEqual(element['element_type'], 'multiple_choice')
+                # Didit MULTIPLE_CHOICE returns an array; these rules compare scalars.
+                self.assertEqual(element['element_type'], 'single_choice')
                 self.assertIn('unsure', {o['value'] for o in element['options']})
             if kind == 'person':
                 self.assertTrue(any(r['field'].endswith('.additional_tax_id') and

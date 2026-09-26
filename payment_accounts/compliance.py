@@ -27,9 +27,11 @@ PERSON_QUESTIONNAIRE_ID = 'd3ad7c27-3561-4db0-9fba-cfd3a3361c01'
 QUESTIONNAIRE_VERSIONS = {
     BUSINESS_QUESTIONNAIRE_ID: frozenset({
         BUSINESS_QUESTIONNAIRE_ID, '7eab4806-3bcf-472d-a082-0722a340cd00',
+        'c8adbe87-a226-4093-81e2-6f98803d1213',
     }),
     PERSON_QUESTIONNAIRE_ID: frozenset({
         PERSON_QUESTIONNAIRE_ID, '1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb',
+        '75717c86-c42d-40e3-8652-91dfd438fc3e',
     }),
 }
 
@@ -612,6 +614,26 @@ def _company(decision):
     return _required(registry.get('company'), 'approved business registry result')
 
 
+def _company_tax_id(company, country):
+    value = _required(company.get('tax_number'), 'company tax ID (registration number is not a substitute)')
+    if country != 'BR':
+        return value
+    # Receita Federal's modulo-11 algorithm supports numeric and alphanumeric
+    # CNPJs: the first 12 characters use ASCII minus 48; the last two are digits.
+    # https://www.gov.br/receitafederal/pt-br/centrais-de-conteudo/publicacoes/documentos-tecnicos/cnpj/manual-dv-cnpj.pdf
+    number = re.sub(r'[./\s-]', '', str(value)).upper()
+    if not re.fullmatch(r'[A-Z0-9]{12}[0-9]{2}', number) or len(set(number)) == 1:
+        raise ComplianceHandoffError('A valid company CNPJ is required before Infinia onboarding')
+    digits = number[:12]
+    for weights in ((5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2),
+                    (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)):
+        remainder = sum((ord(char) - 48) * weight for char, weight in zip(digits, weights)) % 11
+        digits += str(0 if remainder < 2 else 11 - remainder)
+    if number != digits:
+        raise ComplianceHandoffError('A valid company CNPJ is required before Infinia onboarding')
+    return number
+
+
 def _organization_payload(*, decision, identity, user, client, child_decisions):
     if decision.get('session_kind') != 'business':
         raise ComplianceHandoffError('A business Infinia owner requires a Didit KYB session')
@@ -628,8 +650,8 @@ def _organization_payload(*, decision, identity, user, client, child_decisions):
     )
     name = _required(company.get('company_name'), 'company name')
     incorporated = _required(company.get('incorporation_date'), 'incorporation date')
-    tax_id = _required(company.get('tax_number'), 'company tax ID (registration number is not a substitute)')
     tax_country = iso_alpha2(_required(company.get('country_code'), 'company country'))
+    tax_id = _company_tax_id(company, tax_country)
     volume = _volume_fields(decision)
     for check in decision.get('key_people_checks') or []:
         if answers and str(check.get('status') or '').lower() != 'approved':

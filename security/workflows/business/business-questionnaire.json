@@ -170,7 +170,7 @@
     },
     {
       "id": "pep_risk",
-      "element_type": "multiple_choice",
+      "element_type": "single_choice",
       "label": {
         "en": "Are any owners, controllers or representatives politically exposed, or close relatives/associates of a PEP?",
         "es": "¿Algún propietario, controlador o representante es una PEP, familiar o colaborador cercano de una PEP?"
@@ -202,7 +202,7 @@
     },
     {
       "id": "regulated_risk",
-      "element_type": "multiple_choice",
+      "element_type": "single_choice",
       "label": {
         "en": "Does the business perform activities requiring a financial, gambling, crypto, or other sector-specific license?",
         "es": "¿El negocio realiza actividades que requieren una licencia financiera, de apuestas, cripto u otra licencia sectorial?"
@@ -234,7 +234,7 @@
     },
     {
       "id": "ownership_structure_type",
-      "element_type": "multiple_choice",
+      "element_type": "single_choice",
       "label": {
         "en": "Which best describes the ownership and control structure?",
         "es": "¿Cómo se compone la estructura de propiedad y control?"

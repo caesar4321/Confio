@@ -1,40 +1,62 @@
 {
   "checked_at": "2026-09-26",
   "checks": [
-    "Questionnaire v2 required fields, types and structured choices read back from Didit",
-    "Business v4 and person v2 published; stable workflow IDs preserved; non-default",
-    "All requested feature settings and graph order matched; only default subtype expansion and omitted disabled phone channels normalized",
-    "Questionnaire rules only escalate to In Review; manual blanket review disabled",
-    "AML approve threshold 1 / review threshold 100; document retry limit 3 / exhausted action REVIEW",
-    "Tax registration and registry excerpt enabled; all document groups and all non-skippable owner roles preserved",
-    "33 local policy/provider handoff tests pass; old backend fails new-version fixture, updated backend passes",
-    "EC2 compatibility deployed before parent activation; six services active"
+    "Questionnaire v3: four mutually exclusive risk fields persisted as SINGLE_CHOICE, scalar rules preserved",
+    "Business v4 and person v2 workflow graphs unchanged except automatic questionnaire v3 rebinding; stable IDs preserved",
+    "34 policy/provider-handoff tests passed; both defects reproduced before fixes",
+    "Brazilian company CNPJ format and checksum checked before uploads, including alphanumeric CNPJ",
+    "Independent post-fix review found no further concrete scoped findings"
   ],
   "saved_graph_sha256": {
-    "business_questionnaire": "486b0ed6c695f95da3404e15afd77076a0403f7214c4ef9dd030699311c3e28b",
-    "person_questionnaire": "be0aa280b27c54e34e1da52b29b831c8484b92bd95c4ea10171e4bd35b1f83e5",
-    "person_workflow": "7016a2db00d29b3a61144384301de47a82a9207420dc11f4b2846820c7bcd765",
-    "business_workflow": "aa6af58604e7e92ea8bc512c8295ac3dd69878a7fd1bc231fb44418fc94bdfcc"
+    "business_workflow": "d861f536d791259b522f0fb472d5512538aae6e34d642a9e3942d3c551697ef2",
+    "business_questionnaire": "0bfae0a7d6b76b0e01ea8ba06dabdff4b52582c948d48710487588bfbbf81591",
+    "person_workflow": "0f3079ea7e22509cdc2558f58edcb59a2f9769f456bf973022bbbceb39ee56c8",
+    "person_questionnaire": "79ea3aeb026c2b2a212a8e2cbf4469c5372676f01f36de26f3253045a39bf084"
   },
   "hash_encoding": "SHA-256 of UTF-8 json.dumps(graph, sort_keys=True, separators=(comma,colon))",
+  "limitations": [
+    "No end-to-end applicant submission or partner approval exercised",
+    "Claude outside review unavailable: authentication failure",
+    "Document replacement after retry exhaustion remains unverified in the mobile console"
+  ],
   "previous_verification": {
-    "checked_at": "2026-09-15",
+    "checked_at": "2026-09-26",
     "checks": [
-      "business_questionnaire: 17 saved field types, labels and required flags matched",
-      "person_questionnaire: 12 saved field types, labels and required flags matched",
-      "business_workflow: published, non-default, manual questionnaire review",
-      "person_workflow: published, non-default, manual questionnaire review",
-      "Hosted KYB entry: Verifica tu empresa; six expected applicant steps; no submission",
-      "Business v3: require_kyc on all collected roles, no applicant skip, no person reuse",
-      "Business v3: uppercase document groups, every group satisfiable, incorporation cannot be substituted",
-      "Enabled production webhook: status.updated and data.updated"
+      "Questionnaire v2 required fields, types and structured choices read back from Didit",
+      "Business v4 and person v2 published; stable workflow IDs preserved; non-default",
+      "All requested feature settings and graph order matched; only default subtype expansion and omitted disabled phone channels normalized",
+      "Questionnaire rules only escalate to In Review; manual blanket review disabled",
+      "AML approve threshold 1 / review threshold 100; document retry limit 3 / exhausted action REVIEW",
+      "Tax registration and registry excerpt enabled; all document groups and all non-skippable owner roles preserved",
+      "33 local policy/provider handoff tests pass; old backend fails new-version fixture, updated backend passes",
+      "EC2 compatibility deployed before parent activation; six services active"
     ],
     "saved_graph_sha256": {
-      "business_questionnaire": "f0829ff5da443d2b01a1876a23a5a6bbace35dc569d98d31c40f2cc898184723",
-      "person_questionnaire": "c0707f76d3f743afeb5188e549440d4c138f3c171f9b17de4c0ac74cc67c99a5",
-      "business_workflow": "27c69281bc0c884835b38b6486cb2b10ce108c5bbb46b973baff837fc92d5504",
-      "person_workflow": "2ffe95af89dcaebc2e4b323c72f36e6180e0a82953586feea58d3f667e5f26bc"
+      "business_questionnaire": "486b0ed6c695f95da3404e15afd77076a0403f7214c4ef9dd030699311c3e28b",
+      "person_questionnaire": "be0aa280b27c54e34e1da52b29b831c8484b92bd95c4ea10171e4bd35b1f83e5",
+      "person_workflow": "7016a2db00d29b3a61144384301de47a82a9207420dc11f4b2846820c7bcd765",
+      "business_workflow": "aa6af58604e7e92ea8bc512c8295ac3dd69878a7fd1bc231fb44418fc94bdfcc"
     },
-    "hash_encoding": "SHA-256 of UTF-8 json.dumps(graph, sort_keys=True, separators=(comma,colon))"
+    "hash_encoding": "SHA-256 of UTF-8 json.dumps(graph, sort_keys=True, separators=(comma,colon))",
+    "previous_verification": {
+      "checked_at": "2026-09-15",
+      "checks": [
+        "business_questionnaire: 17 saved field types, labels and required flags matched",
+        "person_questionnaire: 12 saved field types, labels and required flags matched",
+        "business_workflow: published, non-default, manual questionnaire review",
+        "person_workflow: published, non-default, manual questionnaire review",
+        "Hosted KYB entry: Verifica tu empresa; six expected applicant steps; no submission",
+        "Business v3: require_kyc on all collected roles, no applicant skip, no person reuse",
+        "Business v3: uppercase document groups, every group satisfiable, incorporation cannot be substituted",
+        "Enabled production webhook: status.updated and data.updated"
+      ],
+      "saved_graph_sha256": {
+        "business_questionnaire": "f0829ff5da443d2b01a1876a23a5a6bbace35dc569d98d31c40f2cc898184723",
+        "person_questionnaire": "c0707f76d3f743afeb5188e549440d4c138f3c171f9b17de4c0ac74cc67c99a5",
+        "business_workflow": "27c69281bc0c884835b38b6486cb2b10ce108c5bbb46b973baff837fc92d5504",
+        "person_workflow": "2ffe95af89dcaebc2e4b323c72f36e6180e0a82953586feea58d3f667e5f26bc"
+      },
+      "hash_encoding": "SHA-256 of UTF-8 json.dumps(graph, sort_keys=True, separators=(comma,colon))"
+    }
   }
 }
