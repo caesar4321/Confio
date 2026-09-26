@@ -457,6 +457,28 @@ class InfiniaComplianceHandoffTests(SimpleTestCase):
                 _business_documents(decision, self.client)
         self.client.initiate_owner_document.assert_not_called()
 
+    def test_questionnaire_version_upgrade_preserves_old_and_rejects_ambiguity(self):
+        from copy import deepcopy
+        from payment_accounts.compliance import QUESTIONNAIRE_VERSIONS
+        for original_id, workflow in ((BUSINESS_QUESTIONNAIRE_ID, BUSINESS_WORKFLOW_ID),
+                                      (PERSON_QUESTIONNAIRE_ID, PERSON_WORKFLOW_ID)):
+            forms = []
+            for version in QUESTIONNAIRE_VERSIONS[original_id]:
+                form = self.questionnaire(values={'expected_monthly_volume_usd': 1})
+                form['questionnaire_id'] = version
+                forms.append(form)
+                decision = {'status': 'Approved', 'workflow_id': workflow,
+                            'questionnaire_responses': [form]}
+                self.assertIn('expected_monthly_volume_usd',
+                              _reviewed_answers(decision, original_id, workflow))
+                pending = deepcopy(decision)
+                pending['questionnaire_responses'][0]['status'] = 'In Review'
+                with self.assertRaises(ComplianceHandoffError):
+                    _reviewed_answers(pending, original_id, workflow)
+            with self.assertRaises(ComplianceHandoffError):
+                _reviewed_answers({'status': 'Approved', 'workflow_id': workflow,
+                                   'questionnaire_responses': forms}, original_id, workflow)
+
     def test_reviewed_questionnaire_rejects_bad_volume_and_duplicate_answers(self):
         for amount in ('NaN', 'Infinity', '-1', 'abc', ''):
             decision = {'session_kind': 'business', 'status': 'Approved',
