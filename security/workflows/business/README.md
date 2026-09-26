@@ -1,6 +1,6 @@
 # Confío business verification — provisional KYB v4
 
-Created on 2026-09-15; updated on 2026-09-26 to business workflow v4 and person v2. This is a best-effort policy based
+Created on 2026-09-15; updated on 2026-09-26 to business workflow v4, person v2 and questionnaire v3. This is a best-effort policy based
 on public provider documentation, not confirmation of partner acceptance.
 The user authorized proceeding without a partner-specific checklist and revising
 this workflow later.
@@ -11,8 +11,8 @@ this workflow later.
 | --- | --- |
 | Business KYB workflow | `8513abf3-95b2-4740-8dda-2d629d0c5d77` |
 | Owner / representative KYC workflow | `f3c80006-d551-4fab-9317-46ce9a5236dc` |
-| Business evidence questionnaire v2 | `7eab4806-3bcf-472d-a082-0722a340cd00` |
-| Person details questionnaire v2 | `1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb` |
+| Business evidence questionnaire v3 | `c8adbe87-a226-4093-81e2-6f98803d1213` |
+| Person details questionnaire v3 | `75717c86-c42d-40e3-8652-91dfd438fc3e` |
 
 The four request JSON files are the reproducible **current policy** definitions
 with draft status for safe initial creation. The parent incorporates the v4 policy below.
@@ -20,7 +20,7 @@ Replace `$person_workflow`, `$person_questionnaire`, and
 `$business_questionnaire` with the corresponding questionnaire version IDs and the person workflow version UUID
 `142a0b57-94b2-4b93-b535-8fb18ccd1006` before submitting.
 `published-resources.json` records the published versions (business v4, person
-and questionnaires v2), with previous versions retained in the manifest.
+v2 and questionnaires v3), with previous versions retained in the manifest.
 Neither workflow is the application default. Personal account KYC workflows were unchanged.
 Confío's `DIDIT_BUSINESS_WORKFLOW_ID` defaults to the stable business ID above.
 An explicit empty environment override disables business verification safely.
@@ -106,7 +106,7 @@ Neither approval has been confirmed for this business flow.
 - The installed native SDK predates the current KYB flow. **A new mobile build
   is required for the hosted launch and screen changes**; restarting EC2 only
   deploys backend behavior. No mobile-store release is implied by this deploy.
-- Infinia mapping accepts only explicitly allowlisted v1/v2 questionnaire IDs
+- Infinia mapping accepts only explicitly allowlisted v1/v2/v3 questionnaire IDs
   and requires both the questionnaire and session to be Approved. Required
   company files, structured address and numeric monthly volume are mapped;
   verified email/phone and approved UBO proof of address are used. Bare tax-ID
@@ -207,3 +207,38 @@ IDs so downstream evidence mappings do not silently break.
   accepted it. EC2 compatibility was deployed and all six services were active.
 - Runtime limitation: no real applicant journey was submitted to prove the new
   rules end to end. Saved rules and forms were checked through the live API.
+
+
+## Audit corrections (2026-09-26, questionnaire v3)
+
+- PEP, regulated-activity and ownership choices use `single_choice`, matching
+  the scalar values compared by their status rules. Didit's `multiple_choice`
+  returns arrays and also permits contradictory selections. See the
+  [questionnaire answer contract](https://docs.didit.me/core-technology/questionnaires/report-questionnaire).
+- Questionnaire versions v1 and v2 remain accepted only when individually
+  approved; new sessions use v3. Stable workflow IDs are unchanged. Publishing
+  questionnaires repoints their workflow bindings; no applicant response or
+  document status is manually changed by this release.
+- Before Infinia evidence uploads, Brazilian company tax IDs must pass CNPJ
+  format and check-digit validation (numeric and alphanumeric). Activity codes
+  and personal CPFs are rejected. We never substitute the registration-number
+  field to silently repair bad tax data. This validates the identifier only,
+  not the company's active registration status.
+- Regression tests first reproduced both defects, then passed after correction.
+
+### Document review operations
+
+A Simples Nacional/SIMEI consultation describes tax-regime enrollment; it is not
+proof of current active CNPJ registration. Do not approve it as active-registration
+evidence solely because the company name and CNPJ match. A sole proprietor's
+legal name can be the proprietor's personal name.
+
+The available mobile console was reported to show only Approve/Reject for the
+individual document. Although Didit's public docs describe document requests,
+replacement/resubmission through those controls has **not been verified** for
+this session. Reject must not be assumed to reopen uploads after retry exhaustion.
+The generic feature-status API is not a document-item status API: a document may
+share `node_id=kyb_registry` with its registry check. Never change the parent or
+registry decision to work around unavailable document actions. A replacement
+received outside Didit still needs an authenticated attachment and review path;
+receiving a file does not itself satisfy the workflow.

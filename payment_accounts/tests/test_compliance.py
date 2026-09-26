@@ -14,6 +14,7 @@ from payment_accounts.compliance import (
     _volume_fields,
     _individual_payload,
     _company,
+    _company_tax_id,
     didit_ubo_parties,
     _business_documents,
     _reviewed_answers,
@@ -144,6 +145,21 @@ class InfiniaComplianceHandoffTests(SimpleTestCase):
     def test_registry_must_itself_be_approved(self):
         with self.assertRaisesRegex(ComplianceHandoffError, 'approved business registry'):
             _company({'status': 'Approved', 'registry_checks': [{'status': 'Rejected', 'company': {'name': 'Company'}}]})
+
+    def test_company_cnpj_validates_numeric_and_alphanumeric_check_digits(self):
+        # Alphanumeric example from Receita Federal's CNPJ DV manual.
+        for value, expected in [('11.222.333/0001-81', '11222333000181'),
+                                ('12.ABC.345/01DE-35', '12ABC34501DE35'),
+                                ('12.abc.345/01de-35', '12ABC34501DE35')]:
+            with self.subTest(value=value):
+                self.assertEqual(_company_tax_id({'tax_number': value}, 'BR'), expected)
+        for value in ('8299-7/07', '52998224725', '11222333000182',
+                      '12ABC34501DE34', '00000000000000', '１２ABC34501DE35'):
+            with self.subTest(value=value), self.assertRaisesRegex(ComplianceHandoffError, 'CNPJ'):
+                _company_tax_id({'tax_number': value}, 'BR')
+        with self.assertRaises(ComplianceHandoffError):
+            _company_tax_id({'registration_number': '11222333000181'}, 'BR')
+        self.assertEqual(_company_tax_id({'tax_number': '901234567'}, 'CO'), '901234567')
 
     def test_id_evidence_cannot_skip_first_normalized_check(self):
         decision = {'status': 'Approved', 'id_verifications': [
@@ -363,6 +379,19 @@ class InfiniaComplianceHandoffTests(SimpleTestCase):
         self.assertEqual(organization['tax_id_country'], 'CO')
         self.assertEqual(len(organization['ultimate_beneficial_owners']), 1)
         self.assertEqual(len(audit), 5)
+
+        # An approved registry can still contain an activity code in tax_number.
+        # Reject it before uploading evidence or creating an Infinia owner.
+        company = decision['registry_checks'][0]['company']
+        company.update(country_code='BR', tax_number='8299-7/07')
+        self.client.reset_mock()
+        with self.assertRaisesRegex(ComplianceHandoffError, 'CNPJ'):
+            build_infinia_self_declared_payload(
+                profile=self.profile('business'), client=self.client,
+                decision=decision, child_decisions={'ubo_1': child},
+            )
+        self.client.initiate_owner_document.assert_not_called()
+        company.update(country_code='COL', tax_number='901234567')
 
         # A company registration reference is not necessarily its tax ID.
         company = decision['registry_checks'][0]['company']

@@ -119,7 +119,7 @@
     },
     {
       "id": "pep_risk",
-      "element_type": "multiple_choice",
+      "element_type": "single_choice",
       "label": {
         "en": "Are you a politically exposed person, or a close relative or associate of one?",
         "es": "¿Eres una persona políticamente expuesta, familiar o colaborador cercano de una?"

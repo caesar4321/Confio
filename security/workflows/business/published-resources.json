@@ -1,10 +1,10 @@
 {
   "business_questionnaire": {
-    "id": "7eab4806-3bcf-472d-a082-0722a340cd00",
-    "version_uuid": "7eab4806-3bcf-472d-a082-0722a340cd00",
+    "id": "c8adbe87-a226-4093-81e2-6f98803d1213",
+    "version_uuid": "c8adbe87-a226-4093-81e2-6f98803d1213",
     "workflow_id": null,
     "status": "published",
-    "version": 2,
+    "version": 3,
     "label": "Confio KYB - Business evidence and activity",
     "previous_versions": [
       {
@@ -12,21 +12,33 @@
         "version_uuid": "4290ba59-8631-45c6-9afb-54e1bc586858",
         "version": 1,
         "manual_review": null
+      },
+      {
+        "id": "7eab4806-3bcf-472d-a082-0722a340cd00",
+        "version_uuid": "7eab4806-3bcf-472d-a082-0722a340cd00",
+        "version": 2,
+        "manual_review": null
       }
     ]
   },
   "person_questionnaire": {
-    "id": "1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb",
-    "version_uuid": "1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb",
+    "id": "75717c86-c42d-40e3-8652-91dfd438fc3e",
+    "version_uuid": "75717c86-c42d-40e3-8652-91dfd438fc3e",
     "workflow_id": null,
     "status": "published",
-    "version": 2,
+    "version": 3,
     "label": "Confio KYB - Owner and representative details",
     "previous_versions": [
       {
         "id": "d3ad7c27-3561-4db0-9fba-cfd3a3361c01",
         "version_uuid": "d3ad7c27-3561-4db0-9fba-cfd3a3361c01",
         "version": 1,
+        "manual_review": null
+      },
+      {
+        "id": "1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb",
+        "version_uuid": "1fcc0564-f5f4-46ed-b8e1-a6e8a0ecf0bb",
+        "version": 2,
         "manual_review": null
       }
     ]
