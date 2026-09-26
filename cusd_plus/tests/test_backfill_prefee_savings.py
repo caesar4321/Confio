@@ -80,3 +80,15 @@ class BackfillCommandTests(TestCase):
         self.assertEqual((row.conversion_type, row.perimeter_direction, row.status), ('from_savings', 'exit', 'COMPLETED'))
         self.assertEqual((row.to_amount, row.contract_event_index), (Decimal('20.000000'), 3))
         self.assertEqual(row.created_at, self.batch.created_at)
+
+    def test_failed_row_on_a_confirmed_batch_is_reported_not_hidden(self):
+        user = get_user_model().objects.get(username='prefee')
+        Conversion.objects.create(
+            actor_user=user, actor_type='user', conversion_type='from_savings',
+            from_amount=Decimal('20'), to_amount=Decimal('20'), exchange_rate=Decimal('1'),
+            fee_amount=Decimal('0'), status='FAILED', to_transaction_hash=HASH)
+        out = StringIO()
+        with mock.patch('cusd_plus.tasks._rpc', return_value=self.receipt):
+            call_command('backfill_prefee_savings_conversions', '--apply', stdout=out)
+        self.assertIn('row_failed', out.getvalue())
+        self.assertEqual(Conversion.objects.count(), 1)
