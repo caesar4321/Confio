@@ -30,6 +30,17 @@ const IN_FLIGHT = gql`
   }
 `;
 
+// Isolated so an older server lacking retry identities cannot invalidate the
+// existing in-flight query or abort the rest of the foreground sweep.
+const MINT_RETRY_IDENTITIES = gql`
+  query SavingsMintRetryIdentities {
+    cusdPlusConversionsInFlight {
+      conversionId
+      mintRequestId
+    }
+  }
+`;
+
 const LOCAL_MINTS = gql`
   query LocalTransferMints {
     localTransferMints { internalId walletMintUnits walletMintRequestId
@@ -137,7 +148,7 @@ export const resumeSavingsMints = async (
       // A dedicated local arrival cannot aggregate with a later deposit.
       // Below the savings floor, finish in universal cUSD instead of retrying
       // an impossible standalone cUSD+ mint forever.
-      if (savingsEnabled === false || (requestId && amountWei < INTERNAL_CUSD_MIN_WRAP_WEI)) {
+      if (savingsEnabled === false || (requestId?.startsWith('local-mint-') && amountWei < INTERNAL_CUSD_MIN_WRAP_WEI)) {
         if (!cusdAddress) throw new Error('cUSD vault not configured');
         return mintUsdtToCusd({ cusdAddress, usdtWei: amountWei, requestId });
       }
@@ -182,6 +193,21 @@ export const resumeSavingsMints = async (
     const rows = (data?.cusdPlusConversionsInFlight || []).filter(
       (r: any) => r.status === 'DEST_ARRIVED',
     );
+    const mintRequestIds: Record<string, string> = {};
+    if (rows.length) {
+      try {
+        const identities = await apolloClient.query({
+          query: MINT_RETRY_IDENTITIES,
+          fetchPolicy: 'network-only',
+        });
+        for (const row of identities.data?.cusdPlusConversionsInFlight || []) {
+          if (row.mintRequestId) mintRequestIds[row.conversionId] = row.mintRequestId;
+        }
+      } catch {
+        // Stable original identity is safe on older servers or an unknown
+        // query outcome; never invent a fresh retry identity on the client.
+      }
+    }
 
     // Eligibility can change after dollars have already been minted. The UI
     // immediately selects the new canonical rail, so normalize the old rail
@@ -221,6 +247,9 @@ export const resumeSavingsMints = async (
           // Once DEST_ARRIVED, the server replaces this quoted value with
           // the exact six-decimal amount observed in the USDT Transfer log.
           usdToWei(row.quotedReceiveUsd),
+          // Keep one economic identity while finality/history settlement is
+          // pending, including a foreground retry after an unknown outcome.
+          mintRequestIds[row.conversionId] || `savings-mint-${row.conversionId}`,
         );
         await apolloClient.mutate({
           mutation: ADVANCE,

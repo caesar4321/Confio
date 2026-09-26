@@ -1,6 +1,7 @@
 const mockQuery = jest.fn();
 const mockMint = jest.fn();
-jest.mock('../../apollo/client', () => ({apolloClient: {query: (...args: unknown[]) => mockQuery(...args), mutate: jest.fn()}}));
+const mockMutate = jest.fn();
+jest.mock('../../apollo/client', () => ({apolloClient: {query: (...args: unknown[]) => mockQuery(...args), mutate: (...args: unknown[]) => mockMutate(...args)}}));
 jest.mock('../cusdPlusVault', () => ({
   INTERNAL_CUSD_MIN_WRAP_WEI: 1000001000000000000n,
   mintUsdtToCusd: (...args: unknown[]) => mockMint(...args),
@@ -11,7 +12,7 @@ import {resumeSavingsMints} from '../savingsLegC';
 
 const id = 'f311c949-8876-4b53-b3f6-0d5faaf7a97a';
 beforeEach(() => {
-  mockQuery.mockReset(); mockMint.mockReset();
+  mockQuery.mockReset(); mockMint.mockReset(); mockMutate.mockReset();
   mockMint.mockResolvedValue({mintTx: '0x123'});
   mockQuery.mockImplementation(async ({query}: any) => {
     const name = query.definitions[0].name.value;
@@ -71,4 +72,67 @@ it('does not fall back to a fee-free mint when collector details are missing', a
   });
   await resumeSavingsMints('vault', 'cusd');
   expect(mockMint).not.toHaveBeenCalled();
+});
+
+describe('arrived savings saga settlement', () => {
+  const arrangeSaga = (savingsEnabled = true, mintRequestId?: string, legacyServer = false) => {
+    mockQuery.mockImplementation(async ({query}: any) => {
+      const name = query.definitions[0].name.value;
+      if (name === 'LocalTransferMints') return {data: {localTransferMints: []}};
+      if (name === 'CusdPlusConversionsInFlight') return {data: {cusdPlusConversionsInFlight: [
+        {conversionId: id, status: 'DEST_ARRIVED', quotedReceiveUsd: 2},
+      ]}};
+      if (name === 'SavingsMintRetryIdentities') {
+        if (legacyServer) throw new Error('Cannot query field "mintRequestId" on type "CusdPlusConversionType".');
+        return {data: {cusdPlusConversionsInFlight: [{conversionId: id, mintRequestId}]}};
+      }
+      return {data: {cusdPlusSummary: {savingsEnabled, sweepableUsdtWei: '0', balanceUsd: 0, cusdBalanceWei: '0'}}};
+    });
+  };
+
+  it('reuses one economic identity while authoritative settlement is pending', async () => {
+    arrangeSaga();
+    mockMutate.mockResolvedValue({data: {advanceCusdPlusConversion: {
+      success: false, errors: ['awaiting verified conversion settlement'],
+    }}});
+    await resumeSavingsMints('vault', 'cusd');
+    await resumeSavingsMints('vault', 'cusd');
+    expect(mockMint).toHaveBeenCalledTimes(2);
+    for (const [args] of mockMint.mock.calls) {
+      expect(args.requestId).toBe(`savings-mint-${id}`);
+    }
+  });
+
+  it('keeps the identity after an unknown broadcast outcome', async () => {
+    arrangeSaga();
+    mockMint.mockRejectedValueOnce(new Error('receipt timeout'));
+    await resumeSavingsMints('vault', 'cusd');
+    await resumeSavingsMints('vault', 'cusd');
+    expect(mockMint).toHaveBeenCalledTimes(2);
+    expect(mockMint.mock.calls[0][0].requestId).toBe(mockMint.mock.calls[1][0].requestId);
+  });
+
+  it('also identifies the saga when eligibility routes the mint to cUSD', async () => {
+    arrangeSaga(false);
+    await resumeSavingsMints('vault', 'cusd');
+    expect(mockMint).toHaveBeenCalledWith({
+      cusdAddress: 'cusd', usdtWei: 2000000000000000000n, requestId: `savings-mint-${id}`,
+    });
+  });
+
+  it('uses the server retry identity after proven non-execution', async () => {
+    arrangeSaga(true, `savings-mint-${id}_r2`);
+    await resumeSavingsMints('vault', 'cusd');
+    expect(mockMint.mock.calls[0][0].requestId).toBe(`savings-mint-${id}_r2`);
+  });
+
+  it('still resumes against an older server without the isolated identity field', async () => {
+    arrangeSaga(true, undefined, true);
+    await resumeSavingsMints('vault', 'cusd');
+    expect(mockMint).toHaveBeenCalledTimes(1);
+    expect(mockMint.mock.calls[0][0].requestId).toBe(`savings-mint-${id}`);
+    const originalQuery = mockQuery.mock.calls.find(([{query}]) =>
+      query.definitions[0].name.value === 'CusdPlusConversionsInFlight')[0].query;
+    expect(originalQuery.loc.source.body).not.toContain('mintRequestId');
+  });
 });

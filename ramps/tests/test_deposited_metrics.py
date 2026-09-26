@@ -209,6 +209,15 @@ class PerimeterFlowTests(TestCase):
         flow = fund_flow_breakdown()
         self.assertEqual((flow['deposited_usd'], flow['deposit_count']), (Decimal('40'), 1))
 
+    def test_exact_perimeter_amounts_take_precedence_over_display_projections(self):
+        self.conversion('usdt_to_cusd', '10', '9.91', direction='entry',
+                        gross_amount_exact=Decimal('10.000000999999999999'))
+        self.conversion('from_savings', '10', '9.91', direction='exit',
+                        net_amount_exact=Decimal('9.910000999999999999'))
+        flow = fund_flow_breakdown()
+        self.assertEqual(flow['deposited_usd'], Decimal('10.000000999999999999'))
+        self.assertEqual(flow['withdrawn_usd'], Decimal('9.910000999999999999'))
+
     def test_countries_need_five_people_and_show_counts_not_dollars(self):
         for person in self.people:
             self.conversion('usdt_to_cusd', '10', direction='entry', user=person)
