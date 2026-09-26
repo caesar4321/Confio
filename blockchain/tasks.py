@@ -1967,11 +1967,16 @@ def scan_outbound_confirmations(max_batch: int = 50):
         # Conversions (cUSD <> USDC)
         # Recovery: Look at SUBMITTED, and also FAILED/PROCESSING from the last 24h, 
         # to "recover" any that actually hit the chain but weren't recorded due to node errors or timeouts.
+        # ALGORAND ONLY, like payments and sends above: check_tx() asks algod,
+        # so a BSC 0x hash always looks "missing" and a confirmed BSC savings
+        # row got reaped to FAILED (conversion 961, 2026-08-14). BSC rows are
+        # confirmed by cusd_plus.tasks from their receipts.
         recovery_cutoff = timezone.now() - timedelta(hours=24)
         conv_qs = Conversion.objects.filter(
             status__in=['SUBMITTED', 'FAILED', 'PROCESSING'],
             updated_at__gte=recovery_cutoff
-        ).exclude(to_transaction_hash__isnull=True).exclude(to_transaction_hash='')[:max_batch]
+        ).exclude(to_transaction_hash__isnull=True).exclude(to_transaction_hash='').exclude(
+            to_transaction_hash__startswith='0x')[:max_batch]
 
         for c in conv_qs:
             cr, pe = check_tx(c.to_transaction_hash or '')

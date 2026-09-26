@@ -80,7 +80,16 @@ class Command(BaseCommand):
             status='confirmed', kind__in=EXIT_KINDS + ENTRY_KINDS,
         ).exclude(tx_hash='').order_by('created_at')
         for batch in batches:
-            if Conversion.objects.filter(to_transaction_hash__iexact=batch.tx_hash, is_deleted=False).exists():
+            existing = set(Conversion.objects.filter(
+                to_transaction_hash__iexact=batch.tx_hash, is_deleted=False,
+            ).values_list('status', flat=True))
+            if existing:
+                if 'COMPLETED' not in existing:
+                    # A row exists but never completed (e.g. reaped to FAILED
+                    # while the chain confirmed): surface it, don't hide it.
+                    reason = 'row_' + '_'.join(sorted(existing)).lower()
+                    skipped[reason] = skipped.get(reason, 0) + 1
+                    self.stdout.write(f'skip {batch.kind} {batch.tx_hash} ({reason})')
                 continue
             direction, amount, index = crossing(
                 batch, _rpc('eth_getTransactionReceipt', [batch.tx_hash]), vault=vault, usdt=usdt)
