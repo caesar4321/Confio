@@ -167,6 +167,109 @@
         "es": "Estoy autorizado para presentar esta información y confirmo que se han declarado correctamente todos los propietarios y controladores."
       },
       "is_required": true
+    },
+    {
+      "id": "pep_risk",
+      "element_type": "multiple_choice",
+      "label": {
+        "en": "Are any owners, controllers or representatives politically exposed, or close relatives/associates of a PEP?",
+        "es": "¿Algún propietario, controlador o representante es una PEP, familiar o colaborador cercano de una PEP?"
+      },
+      "is_required": true,
+      "options": [
+        {
+          "value": "no",
+          "label": {
+            "en": "No",
+            "es": "No"
+          }
+        },
+        {
+          "value": "yes",
+          "label": {
+            "en": "Yes",
+            "es": "Sí"
+          }
+        },
+        {
+          "value": "unsure",
+          "label": {
+            "en": "Not sure",
+            "es": "No estoy seguro"
+          }
+        }
+      ]
+    },
+    {
+      "id": "regulated_risk",
+      "element_type": "multiple_choice",
+      "label": {
+        "en": "Does the business perform activities requiring a financial, gambling, crypto, or other sector-specific license?",
+        "es": "¿El negocio realiza actividades que requieren una licencia financiera, de apuestas, cripto u otra licencia sectorial?"
+      },
+      "is_required": true,
+      "options": [
+        {
+          "value": "no",
+          "label": {
+            "en": "No",
+            "es": "No"
+          }
+        },
+        {
+          "value": "yes",
+          "label": {
+            "en": "Yes",
+            "es": "Sí"
+          }
+        },
+        {
+          "value": "unsure",
+          "label": {
+            "en": "Not sure",
+            "es": "No estoy seguro"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ownership_structure_type",
+      "element_type": "multiple_choice",
+      "label": {
+        "en": "Which best describes the ownership and control structure?",
+        "es": "¿Cómo se compone la estructura de propiedad y control?"
+      },
+      "is_required": true,
+      "options": [
+        {
+          "value": "direct_natural",
+          "label": {
+            "en": "All owners and controllers are disclosed natural persons, with no intermediate entities, trusts or nominees.",
+            "es": "Todos los propietarios y controladores declarados son personas físicas, sin empresas intermedias, fideicomisos ni testaferros."
+          }
+        },
+        {
+          "value": "complex",
+          "label": {
+            "en": "Includes companies, trusts, nominees, or other indirect control.",
+            "es": "Incluye empresas, fideicomisos, testaferros u otro control indirecto."
+          }
+        },
+        {
+          "value": "no_owner",
+          "label": {
+            "en": "No individual owner, or widely held entity.",
+            "es": "Sin propietario individual o con propiedad dispersa."
+          }
+        },
+        {
+          "value": "unsure",
+          "label": {
+            "en": "Not sure",
+            "es": "No estoy seguro"
+          }
+        }
+      ]
     }
   ]
 }

@@ -85,7 +85,7 @@
     {
       "feature": "AML",
       "config": {
-        "kyb_score_approve_threshold": 0,
+        "kyb_score_approve_threshold": 1,
         "kyb_score_review_threshold": 100
       }
     },
@@ -257,7 +257,7 @@
             "max_age_days": null
           },
           "REGISTRY_EXCERPT": {
-            "enabled": false,
+            "enabled": true,
             "max_age_days": null
           },
           "DIRECTOR_REGISTRY": {
@@ -305,23 +305,232 @@
             "max_age_days": null
           },
           "TAX_REGISTRATION": {
-            "enabled": false,
+            "enabled": true,
             "max_age_days": null
           }
-        }
+        },
+        "kyb_document_max_retry_attempts": 3,
+        "kyb_document_max_attempts_exceeded_action": "REVIEW"
       }
     },
     {
-      "feature": "EMAIL_VERIFICATION"
+      "feature": "EMAIL_VERIFICATION",
+      "config": {}
     },
     {
-      "feature": "PHONE_VERIFICATION"
+      "feature": "PHONE_VERIFICATION",
+      "config": {}
     },
     {
       "feature": "QUESTIONNAIRE",
       "config": {
         "questionnaire_uuid": "$business_questionnaire",
-        "review_questionnaire_manually": true
+        "review_questionnaire_manually": false,
+        "status_rules": [
+          {
+            "field": "questionnaire.answers.business_activity",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.expected_monthly_volume_usd",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.source_of_funds",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.company_address_line_1",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.company_address_city",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.company_address_state",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.company_address_postal_code",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.company_address_country",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.ownership_and_control",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.representative_authority",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.pep_relationships",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.regulated_activity",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.bank_account_ownership",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.complete_disclosure",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.pep_risk",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.regulated_risk",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.ownership_structure_type",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.pep_risk",
+            "operator": "not_equals",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": "no"
+          },
+          {
+            "field": "questionnaire.answers.regulated_risk",
+            "operator": "not_equals",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": "no"
+          },
+          {
+            "field": "questionnaire.answers.ownership_structure_type",
+            "operator": "not_equals",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": "direct_natural"
+          },
+          {
+            "field": "questionnaire.answers.expected_monthly_volume_usd",
+            "operator": "less_than_or_equals",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": 0
+          },
+          {
+            "field": "questionnaire.answers.pep_relationships",
+            "operator": "not_in",
+            "value": [
+              "None",
+              "none",
+              "NONE",
+              "No",
+              "no",
+              "NO",
+              "Ninguno",
+              "ninguno",
+              "Ninguna",
+              "ninguna",
+              "No aplica",
+              "no aplica",
+              "N/A",
+              "n/a",
+              "Not applicable",
+              "not applicable",
+              "Nenhum",
+              "nenhum",
+              "Não",
+              "não"
+            ],
+            "status": "In Review",
+            "value_type": "literal"
+          },
+          {
+            "field": "questionnaire.answers.regulated_activity",
+            "operator": "not_in",
+            "value": [
+              "None",
+              "none",
+              "NONE",
+              "No",
+              "no",
+              "NO",
+              "Ninguno",
+              "ninguno",
+              "Ninguna",
+              "ninguna",
+              "No aplica",
+              "no aplica",
+              "N/A",
+              "n/a",
+              "Not applicable",
+              "not applicable",
+              "Nenhum",
+              "nenhum",
+              "Não",
+              "não"
+            ],
+            "status": "In Review",
+            "value_type": "literal"
+          }
+        ]
       }
     }
   ]

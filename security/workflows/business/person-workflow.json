@@ -1136,20 +1136,23 @@
       }
     },
     {
-      "feature": "FACE_MATCH"
+      "feature": "FACE_MATCH",
+      "config": {}
     },
     {
       "feature": "AML",
       "config": {
-        "aml_score_approve_threshold": 0,
+        "aml_score_approve_threshold": 1,
         "aml_score_review_threshold": 100
       }
     },
     {
-      "feature": "EMAIL_VERIFICATION"
+      "feature": "EMAIL_VERIFICATION",
+      "config": {}
     },
     {
-      "feature": "PHONE_VERIFICATION"
+      "feature": "PHONE_VERIFICATION",
+      "config": {}
     },
     {
       "feature": "PROOF_OF_ADDRESS",
@@ -1162,7 +1165,138 @@
       "feature": "QUESTIONNAIRE",
       "config": {
         "questionnaire_uuid": "$person_questionnaire",
-        "review_questionnaire_manually": true
+        "review_questionnaire_manually": false,
+        "status_rules": [
+          {
+            "field": "questionnaire.answers.residential_address_line_1",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.residential_address_city",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.residential_address_state",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.residential_address_postal_code",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.residential_address_country",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.tax_id_country",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.tax_id",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.occupation",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.pep_declaration",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.truthful_details",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.pep_risk",
+            "operator": "is_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.pep_risk",
+            "operator": "not_equals",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": "no"
+          },
+          {
+            "field": "questionnaire.answers.additional_tax_id",
+            "operator": "is_not_empty",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": null
+          },
+          {
+            "field": "questionnaire.answers.tax_id_country",
+            "operator": "in",
+            "status": "In Review",
+            "value_type": "literal",
+            "value": [
+              "AR",
+              "ARG"
+            ]
+          },
+          {
+            "field": "questionnaire.answers.pep_declaration",
+            "operator": "not_in",
+            "value": [
+              "None",
+              "none",
+              "NONE",
+              "No",
+              "no",
+              "NO",
+              "Ninguno",
+              "ninguno",
+              "Ninguna",
+              "ninguna",
+              "No aplica",
+              "no aplica",
+              "N/A",
+              "n/a",
+              "Not applicable",
+              "not applicable",
+              "Nenhum",
+              "nenhum",
+              "Não",
+              "não"
+            ],
+            "status": "In Review",
+            "value_type": "literal"
+          }
+        ]
       }
     }
   ]

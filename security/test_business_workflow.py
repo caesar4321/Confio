@@ -33,7 +33,7 @@ class BusinessWorkflowPolicyTests(SimpleTestCase):
         self.assertFalse(settings['kyb_reuse_verified_individuals'])
         self.assertTrue(settings['kyb_wait_for_all_ubos'])
 
-    def test_required_document_groups_can_be_completed_and_require_incorporation(self):
+    def test_required_document_groups_accept_local_registration_evidence(self):
         settings = self.features['KYB_DOCUMENTS']
         catalog = {
             'LEGAL_PRESENCE': ['CERTIFICATE_OF_INCORPORATION', 'CERTIFICATE_OF_GOOD_STANDING',
@@ -48,8 +48,46 @@ class BusinessWorkflowPolicyTests(SimpleTestCase):
         for group, types in catalog.items():
             self.assertTrue(any(subtypes[k]['enabled'] for k in types), group)
         self.assertEqual([k for k in catalog['LEGAL_PRESENCE'] if subtypes[k]['enabled']],
-                         ['CERTIFICATE_OF_INCORPORATION'])
+                         ['CERTIFICATE_OF_INCORPORATION', 'REGISTRY_EXCERPT', 'TAX_REGISTRATION'])
+        self.assertEqual(settings['kyb_document_max_retry_attempts'], 3)
+        self.assertEqual(settings['kyb_document_max_attempts_exceeded_action'], 'REVIEW')
+        for key in ('tampering', 'critical_mismatch', 'non_critical_mismatch', 'age'):
+            self.assertEqual(settings[f'kyb_document_{key}_action'], 'REVIEW')
 
-    def test_business_evidence_requires_manual_review(self):
+    def test_questionnaire_only_escalates_risks_and_missing_answers(self):
         self.assertEqual(self.features['QUESTIONNAIRE']['questionnaire_uuid'], '$business_questionnaire')
-        self.assertTrue(self.features['QUESTIONNAIRE']['review_questionnaire_manually'])
+        root = Path(__file__).parent / 'workflows' / 'business'
+        for kind in ('business', 'person'):
+            workflow = json.loads((root / f'{kind}-workflow.json').read_text())
+            form = json.loads((root / f'{kind}-questionnaire.json').read_text())
+            config = next(f['config'] for f in workflow['features'] if f['feature'] == 'QUESTIONNAIRE')
+            aml = next(f['config'] for f in workflow['features'] if f['feature'] == 'AML')
+            prefix = 'kyb' if kind == 'business' else 'aml'
+            # Didit approves scores strictly BELOW the approval threshold.
+            # Zero made even no-hit, score-zero screenings require review.
+            self.assertEqual(aml[f'{prefix}_score_approve_threshold'], 1)
+            self.assertEqual(aml[f'{prefix}_score_review_threshold'], 100)
+            self.assertFalse(config['review_questionnaire_manually'])
+            rules = config['status_rules']
+            self.assertTrue(rules)
+            self.assertEqual({r['status'] for r in rules}, {'In Review'})
+            # No rule can override a failed upstream check with Approved.
+            required = {e['id'] for e in form['form_elements']
+                        if e.get('is_required') and e['element_type'] != 'file_upload'}
+            missing_guards = {r['field'].removeprefix('questionnaire.answers.')
+                              for r in rules if r['operator'] == 'is_empty'}
+            self.assertTrue(required <= missing_guards)
+            allowed = {'pep_risk': 'no'}
+            if kind == 'business':
+                allowed.update(regulated_risk='no', ownership_structure_type='direct_natural')
+            for field, value in allowed.items():
+                self.assertIn({'field': f'questionnaire.answers.{field}',
+                               'operator': 'not_equals', 'value': value,
+                               'status': 'In Review', 'value_type': 'literal'}, rules)
+                element = next(e for e in form['form_elements'] if e['id'] == field)
+                self.assertTrue(element['is_required'])
+                self.assertEqual(element['element_type'], 'multiple_choice')
+                self.assertIn('unsure', {o['value'] for o in element['options']})
+            if kind == 'person':
+                self.assertTrue(any(r['field'].endswith('.additional_tax_id') and
+                                    r['operator'] == 'is_not_empty' for r in rules))
