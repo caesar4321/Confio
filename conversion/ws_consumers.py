@@ -381,8 +381,27 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
             conv.save(update_fields=['status', 'error_message', 'updated_at'])
             return {"success": False, "error": err}
 
-        conv.status = 'SUBMITTED'
-        conv.to_transaction_hash = txid
-        conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
+        from django.db import connection, transaction as db_transaction
+        with db_transaction.atomic():
+            if txid and connection.vendor == 'postgresql':
+                with connection.cursor() as cursor:
+                    cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [txid])
+            twin = (Conversion.objects.filter(to_transaction_hash=txid, is_deleted=False)
+                    .exclude(pk=conv.pk).first()) if txid else None
+            if twin is not None:
+                # A double tap prepares twice; identical inputs build a
+                # byte-identical group, so this submit only re-sent the twin's
+                # transaction ("already in pool/ledger"). One mint is one
+                # conversion: retire this row (conversions 942/943, 2026-08-13).
+                logger.warning(f"Conversion {internal_id} duplicates {twin.internal_id} (tx {txid}); retiring it")
+                conv.status = 'FAILED'
+                conv.error_message = f'duplicate_of:{twin.internal_id}'
+                conv.is_deleted = True
+                conv.save(update_fields=['status', 'error_message', 'is_deleted', 'updated_at'])
+                return {"success": True, "txid": txid}
+
+            conv.status = 'SUBMITTED'
+            conv.to_transaction_hash = txid
+            conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
 
         return {"success": True, "txid": txid}
