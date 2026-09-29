@@ -1,0 +1,19 @@
+{
+  "name": "confio-outage-status",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Signed Confío reachability status for the emergency exit (independent of Confío's servers)",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "build": "tsc --noEmit",
+    "deploy": "npm run build && wrangler deploy",
+    "keygen": "node scripts/generate-key.mjs",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^4.34.0"
+  }
+}

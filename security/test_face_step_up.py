@@ -240,29 +240,32 @@ class FaceStepUpTests(TestCase):
             fsu.require_face_step_up(self.user, 'on_ramp')
 
 
-class ExternalSendStepUpTests(TestCase):
-    """Who must show a face before a BSC send leaves Confío."""
+class SendStepUpTests(TestCase):
+    """Who must show a face before a BSC send."""
 
     def setUp(self):
         self.user = get_user_model().objects.create(
             username='send-user', email='send@example.com', firebase_uid='send-user-uid')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
-    def test_personal_send_to_an_external_address_needs_a_face(self):
-        from send.bsc_flow import _external_send_step_up
-        self.assertEqual(_external_send_step_up(self.user, None, 'external', None), fsu.FACE_STEP_UP_MESSAGE)
+    def test_every_personal_send_needs_a_recent_face(self):
+        from send.bsc_flow import _send_step_up
+        # Confío recipients too: pooling into a ring's own accounts is the first hop.
+        self.assertEqual(_send_step_up(self.user, None, None), fsu.FACE_STEP_UP_MESSAGE)
         FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='w-1',
                                  status='passed', completed_at=timezone.now())
-        self.assertEqual(_external_send_step_up(self.user, None, 'external', None), '')
+        self.assertEqual(_send_step_up(self.user, None, None), '')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_exempt_sends(self):
-        from send.bsc_flow import _external_send_step_up
-        # To a Confío user (even by address), from a business, or the activation fee.
-        self.assertEqual(_external_send_step_up(self.user, None, 'user', None), '')
-        self.assertEqual(_external_send_step_up(self.user, None, 'business', None), '')
-        self.assertEqual(_external_send_step_up(self.user, object(), 'external', None), '')
-        self.assertEqual(_external_send_step_up(self.user, None, 'external', 'activation-1'), '')
+        from send.bsc_flow import _send_step_up
+        # From a business, or the server-only activation fee.
+        self.assertEqual(_send_step_up(self.user, object(), None), '')
+        self.assertEqual(_send_step_up(self.user, None, 'activation-1'), '')
+
+    def test_nothing_is_asked_while_enforcement_is_off(self):
+        from send.bsc_flow import _send_step_up
+        self.assertEqual(_send_step_up(self.user, None, None), '')
 
 
 class FaceStepUpStatusQueryTests(TestCase):

@@ -19,6 +19,7 @@ import {
 import Svg, { Circle, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
 import {
+  FaceCheckBackend,
   FaceCheckPurpose,
   registerFaceCheckPresenter,
   runFaceCapture,
@@ -88,37 +89,42 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   const [message, setMessage] = useState<string | undefined>();
   const settle = useRef<((passed: boolean) => void) | null>(null);
   const openPurpose = useRef<FaceCheckPurpose | null>(null);
-  const queue = useRef<{ purpose: FaceCheckPurpose; resolve: (passed: boolean) => void }[]>([]);
-  const presentRef = useRef<((purpose: FaceCheckPurpose) => Promise<boolean>) | null>(null);
+  const openBackend = useRef<FaceCheckBackend | undefined>(undefined);
+  type Waiting = { purpose: FaceCheckPurpose; backend?: FaceCheckBackend; resolve: (passed: boolean) => void };
+  const queue = useRef<Waiting[]>([]);
+  const presentRef = useRef<((purpose: FaceCheckPurpose, backend?: FaceCheckBackend) => Promise<boolean>) | null>(null);
 
   const close = useCallback((passed: boolean) => {
     const done = settle.current;
     settle.current = null;
     openPurpose.current = null;
+    openBackend.current = undefined;
     setPurpose(null);
     done?.(passed);
     const waiting = queue.current.shift();
     if (waiting && presentRef.current) {
       // Let the closing modal animate out before the next one opens.
-      setTimeout(() => presentRef.current?.(waiting.purpose).then(waiting.resolve), 350);
+      setTimeout(() => presentRef.current?.(waiting.purpose, waiting.backend).then(waiting.resolve), 350);
     }
   }, []);
 
   useEffect(() => {
-    const present = (next: FaceCheckPurpose) => new Promise<boolean>(resolve => {
-      // A second request for the same purpose joins the open check. The
-      // server grades purposes differently (a deposit spends its own check),
-      // so a different purpose waits its turn instead of sharing an outcome.
+    const present = (next: FaceCheckPurpose, backend?: FaceCheckBackend) => new Promise<boolean>(resolve => {
+      // A second request for the same purpose (and server) joins the open
+      // check. The server grades purposes differently (a deposit spends its
+      // own check), so anything else waits its turn instead of sharing an
+      // outcome.
       if (settle.current) {
-        if (openPurpose.current === next) {
+        if (openPurpose.current === next && openBackend.current === backend) {
           const previous = settle.current;
           settle.current = passed => { previous(passed); resolve(passed); };
         } else {
-          queue.current.push({ purpose: next, resolve });
+          queue.current.push({ purpose: next, backend, resolve });
         }
         return;
       }
       openPurpose.current = next;
+      openBackend.current = backend;
       settle.current = resolve;
       setMessage(undefined);
       setStage('intro');
@@ -133,7 +139,7 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
     if (!purpose) return;
     setMessage(undefined);
     setStage('capturing');
-    const result = await runFaceCapture(purpose, () => setStage('grading'));
+    const result = await runFaceCapture(purpose, () => setStage('grading'), openBackend.current);
     if (result.outcome === 'passed') {
       setStage('passed');
       setTimeout(() => close(true), 900);

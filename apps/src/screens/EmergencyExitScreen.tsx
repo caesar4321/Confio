@@ -55,6 +55,8 @@ import {
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ensureFaceCheck, fetchFaceStepUpStatus } from '../services/faceStepUp';
+import { confirmBannedExit } from '../services/emergencyExit/emergencyFace';
+import { clearBanSignal } from '../services/emergencyExit/banSignal';
 
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -296,19 +298,43 @@ export const EmergencyExitScreen: React.FC = () => {
   const runBsc = async () => {
     const ok = await biometricAuthService.authenticate('Confirmar salida de emergencia (BNB Smart Chain)');
     if (!ok) return;
-    // With Confío reachable, the exit also asks for Confío Face (while the
-    // server enforces it): a ring holding someone else's account must bring
-    // them back to move it out. Ban and outage exits never wait on the server.
-    // Never a veto: if the face check fails or can't run, the person may
-    // continue without it after a second full local wait.
-    if (es?.state === 'normal' && !(await hasFaceWaiver(emergencyStore, accountKey))) {
-      const status = await fetchFaceStepUpStatus();
-      // An unreadable status must use the same face-or-wait path; only an
-      // explicit disabled response skips it.
-      if (status?.enabled !== false && !(await ensureFaceCheck('emergency_exit'))) {
+    const exitCtx = selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined;
+    if (es?.state === 'banned') {
+      // The ban route: the server confirms the ban (a faked 403 cannot
+      // route here) and the exit runs only after Confío Face passes, with
+      // no waiting-period fallback.
+      const outcome = await confirmBannedExit(await getActiveEvmWallet(exitCtx), API_URL);
+      if (outcome.outcome === 'not_banned') {
+        await clearBanSignal(emergencyStore);
+        Alert.alert('Tu cuenta está activa', 'Confío confirmó que tu cuenta no está suspendida. Revisa de nuevo tu salida.');
+        await evaluate();
+        return;
+      }
+      if (outcome.outcome === 'failed') {
+        Alert.alert('No se puede continuar', outcome.message);
+        return;
+      }
+    } else if ((es?.state === 'normal' || es?.state === 'blocked') && !(await hasFaceWaiver(emergencyStore, accountKey))) {
+      // The normal route also asks for Confío Face (while the server
+      // enforces it): a ring holding someone else's account must bring them
+      // back to move it out. Never a veto: if the face check fails or can't
+      // run, the person may continue without it after a second full local
+      // wait. 'blocked' (Confío hidden from this phone, up per the outage
+      // Worker) cannot reach the face check at all, so it goes straight to
+      // that choice.
+      let faceOk = false;
+      if (es.state === 'normal') {
+        const status = await fetchFaceStepUpStatus();
+        // An unreadable status must use the same face-or-wait path; only an
+        // explicit disabled response skips it.
+        faceOk = status?.enabled === false || (await ensureFaceCheck('emergency_exit'));
+      }
+      if (!faceOk) {
         Alert.alert(
           'Salida sin Confío Face',
-          'Puedes continuar sin confirmar tu rostro: tu salida se habilitará después de una nueva espera de 72 horas.',
+          es.state === 'blocked'
+            ? 'Tu red no llega a Confío, así que no podemos confirmar tu rostro. Puedes continuar sin Confío Face: tu salida se habilitará después de una nueva espera de 72 horas.'
+            : 'Puedes continuar sin confirmar tu rostro: tu salida se habilitará después de una nueva espera de 72 horas.',
           [
             { text: 'Cancelar', style: 'cancel' },
             {
@@ -326,9 +352,7 @@ export const EmergencyExitScreen: React.FC = () => {
     const dest = bscDest.trim();
     setBscRunning(true); setBscError(null); setBscPending(false); setBscPendingTx(null); setBscPhase(null); setSentTo(dest);
     try {
-      const wallet = await getActiveEvmWallet(
-        selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined,
-      );
+      const wallet = await getActiveEvmWallet(exitCtx);
       const result = await executeBscExit({
         wallet,
         dest,
@@ -380,8 +404,14 @@ export const EmergencyExitScreen: React.FC = () => {
       case 'banned':
         return {
           label: 'Tu dinero sigue siendo tuyo',
-          sub: 'Confío bloqueó tu cuenta, pero no puede bloquear tus fondos. Puedes retirarlos ahora mismo.',
+          sub: 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Confirma con tu rostro que eres tú y podrás retirarlos ahora mismo.',
           tone: 'alert' as const,
+        };
+      case 'blocked':
+        return {
+          label: 'Tu red no llega a Confío',
+          sub: 'Confío sigue funcionando, pero no podemos conectarnos desde tu red. Tu dinero está en la blockchain, intacto, y la salida sigue disponible con la espera de seguridad.',
+          tone: 'warn' as const,
         };
       case 'outage':
         return es.immediate

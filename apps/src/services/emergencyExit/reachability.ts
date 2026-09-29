@@ -11,12 +11,21 @@
 //  - Faking death only accelerates: outage ≥ 72h ⇒ immediate exit. Both
 //    waits are 72h so blocking Confío's domain on the device is never a
 //    shorter way out than the normal path (72h + Confío Face).
+//  - An independent Worker (workers/outage-status, outageStatus.ts) signs
+//    whether IT can reach Confío. Confío hidden from this phone while the
+//    Worker sees it up is a local block (a ring, or a national block), not
+//    an outage: the normal rules apply. A signed "down since T" dates the
+//    outage from T. No verifiable Worker answer ⇒ the phone's own 72h rule.
+//  - A ban only counts while Confío answers: the ban route needs the
+//    server to confirm the ban and grade Confío Face. A ban flag with
+//    Confío unreachable is judged like any other unreachable state.
 //
 // RN-free by construction: probes take URLs, persistence is an injected
 // KV store, and the pure classifier is exported for jest. The screen
 // wires API_URL and the keychain-backed store.
 
 import { chainNow, CHAIN_ENDPOINTS } from './chainClock';
+import type { OutageStatus } from './outageStatus';
 
 export const OUTAGE_IMMEDIATE_SECONDS = 72 * 3600;
 export const NORMAL_COOLOFF_SECONDS = 72 * 3600;
@@ -44,7 +53,15 @@ export const NORMAL_COOLOFF_SECONDS = 72 * 3600;
  */
 export const COOLOFF_VALID_SECONDS = 72 * 3600;
 
-export type EmergencyState = 'normal' | 'outage' | 'offline' | 'banned';
+/**
+ * 'blocked': Confío unreachable from this phone while the Worker, from
+ * outside, sees it up. Same rules as 'normal' (cooloff, then face or a
+ * second wait), with the face check necessarily unavailable.
+ */
+export type EmergencyState = 'normal' | 'blocked' | 'outage' | 'offline' | 'banned';
+
+/** How stale a Worker statement may be, against chain time. */
+export const OUTAGE_STATUS_FRESH_SECONDS = 30 * 60;
 
 export interface KVStore {
   get(key: string): Promise<string | null>;
@@ -59,8 +76,10 @@ export interface ReachabilityInput {
   prevOutageStartSec: number | null;
   /** null when chains are unreachable (no window can advance). */
   chainNowSec: number | null;
-  /** Explicit ban response from a LIVE server (wired when backend ships it). */
+  /** Ban signal from the Apollo link (counts only while Confío answers). */
   banned?: boolean;
+  /** Verified Worker statement, when one could be fetched. */
+  outageStatus?: OutageStatus | null;
 }
 
 export interface ReachabilityResult {
@@ -78,9 +97,9 @@ export interface ReachabilityResult {
 export const classifyReachability = (input: ReachabilityInput): ReachabilityResult => {
   const { confioOk, chainOk, prevOutageStartSec, chainNowSec } = input;
 
-  if (input.banned) {
-    // Ban comes from a live server; any wait here would be a de-facto
-    // freeze and contradicts the published narrative. Immediate.
+  if (confioOk && input.banned) {
+    // The ban route: no wait, but the exit runs only after the server
+    // confirms the ban and Confío Face passes (emergencyFace.ts).
     return { state: 'banned', outageStartSec: null, outageSeconds: 0, immediate: true, prominent: true };
   }
 
@@ -102,7 +121,24 @@ export const classifyReachability = (input: ReachabilityInput): ReachabilityResu
     };
   }
 
-  // Confío unreachable, chains reachable: the outage window runs.
+  const worker = input.outageStatus;
+  if (worker && Math.abs(chainNowSec - worker.checkedAtSec) <= OUTAGE_STATUS_FRESH_SECONDS) {
+    if (worker.downSinceSec === null) {
+      // Confío is up; only this phone can't see it. No outage window runs.
+      return { state: 'blocked', outageStartSec: null, outageSeconds: 0, immediate: false, prominent: false };
+    }
+    // Confirmed from outside: the outage runs from when the Worker first saw it.
+    const since = Math.min(worker.downSinceSec, chainNowSec);
+    const seconds = chainNowSec - since;
+    const confirmedImmediate = seconds >= OUTAGE_IMMEDIATE_SECONDS;
+    return {
+      state: 'outage', outageStartSec: since, outageSeconds: seconds,
+      immediate: confirmedImmediate, prominent: confirmedImmediate,
+    };
+  }
+
+  // Confío unreachable, chains reachable, no word from the Worker: the
+  // phone's own outage window runs.
   const start = prevOutageStartSec ?? chainNowSec;
   const outageSeconds = Math.max(0, chainNowSec - start);
   const immediate = outageSeconds >= OUTAGE_IMMEDIATE_SECONDS;
@@ -165,11 +201,11 @@ const cooloffKey = (accountKey: string) => `confio_emergency_cooloff_v1_${accoun
 export const evaluateEmergencyState = async (
   store: KVStore,
   graphqlUrl: string,
-  opts: { banned?: boolean } = {},
+  opts: { banned?: boolean; fetchOutageStatus?: () => Promise<OutageStatus | null> } = {},
 ): Promise<ReachabilityResult & { chainNowSec: number | null }> => {
   // Ban signal: set by the Apollo error link when the security middleware
   // 403s an authenticated request, cleared by any later GraphQL success.
-  // Server-originated but safe to trust — it can only accelerate the exit.
+  // It only picks the ban route; the server still confirms the ban there.
   let banned = opts.banned;
   if (banned === undefined) {
     const { isBanSignaled } = await import('./banSignal');
@@ -188,7 +224,15 @@ export const evaluateEmergencyState = async (
   const prevRaw = await store.get(OUTAGE_KEY);
   const prevOutageStartSec = prevRaw ? parseInt(prevRaw, 10) || null : null;
 
-  const result = classifyReachability({ confioOk, chainOk, prevOutageStartSec, chainNowSec, banned });
+  let outageStatus: OutageStatus | null = null;
+  if (!confioOk && chainNowSec !== null) {
+    const fetchStatus = opts.fetchOutageStatus ?? (await import('./outageStatus')).fetchOutageStatus;
+    outageStatus = await fetchStatus();
+  }
+
+  const result = classifyReachability({
+    confioOk, chainOk, prevOutageStartSec, chainNowSec, banned, outageStatus,
+  });
 
   if (result.outageStartSec === null) {
     if (prevOutageStartSec !== null) await store.del(OUTAGE_KEY);
