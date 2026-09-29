@@ -292,6 +292,65 @@ def _enforce_document_capture_holder(
     return 'rejected', ''
 
 
+# Didit warnings the person can fix on a retry, with the copy the app shows.
+# Anything else stays behind the app's generic rejection copy: fraud signals
+# (face mismatch, screen capture, duplicates, liveness) must never be named,
+# or the message becomes instructions for passing the check.
+USER_FIXABLE_DECLINE_REASONS = {
+    'DOCUMENT_EXPIRED': 'Tu documento está vencido. Usa un documento de identidad vigente.',
+    'DOCUMENT_NOT_SUPPORTED_FOR_APPLICATION': (
+        'Este documento no es aceptado en esta verificación. Usa tu documento de identidad vigente.'),
+    'COULD_NOT_RECOGNIZE_DOCUMENT': (
+        'No pudimos reconocer tu documento. Usa tu documento de identidad original y vigente.'),
+    'COULD_NOT_DETECT_DOCUMENT_TYPE': (
+        'No pudimos reconocer tu documento. Usa tu documento de identidad original y vigente.'),
+    'DOCUMENT_NOT_FULLY_VISIBLE': (
+        'El documento no se ve completo. Toma la foto con las cuatro esquinas dentro del recuadro.'),
+    'DOCUMENT_OCCLUSION_DETECTED': (
+        'Parte del documento quedó tapada. Tómale la foto sin dedos ni objetos encima.'),
+    'CRITICAL_FIELD_OCCLUSION_DETECTED': (
+        'Parte del documento quedó tapada. Tómale la foto sin dedos ni objetos encima.'),
+    'IMAGE_TOO_BLURRY': 'La foto del documento salió borrosa. Mantén el teléfono quieto y enfocado.',
+    'IMAGE_TOO_DARK': 'La foto del documento salió muy oscura. Busca un lugar con más luz.',
+    'IMAGE_TOO_BRIGHT': 'La foto del documento tiene demasiado brillo o reflejo. Evita la luz directa.',
+    'IMAGE_RESOLUTION_TOO_LOW': (
+        'La foto del documento no tiene suficiente calidad. Acércate y toma la foto con buena luz.'),
+    'IMAGE_QUALITY_TOO_LOW': (
+        'La foto del documento no tiene suficiente calidad. Acércate y toma la foto con buena luz.'),
+    'PORTRAIT_IMAGE_NOT_DETECTED': (
+        'No pudimos ver la foto de tu documento. Toma la foto de frente, sin reflejos.'),
+    'NO_FACE_DETECTED': 'No detectamos tu rostro en la selfie. Mira de frente a la cámara con buena luz.',
+    'MULTIPLE_FACES_DETECTED': 'Aparece más de una persona en la selfie. Tómala a solas.',
+}
+# Informational notes that say nothing about fraud and never decide a decline.
+_BENIGN_DECLINE_NOTES = {
+    'BARCODE_NOT_DETECTED', 'QR_NOT_DETECTED', 'UNPARSED_ADDRESS', 'DOCUMENT_BACK_SIDE_NOT_AVAILABLE',
+}
+_DECLINE_SEVERITY = {'error': 0, 'warning': 1, 'information': 2}
+
+
+def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:
+    """The retry hint for a Didit decline, or '' for the generic copy."""
+    warnings = []
+    for key in ('id_verifications', 'liveness_checks', 'face_matches', 'aml_screenings',
+                'database_validations', 'ip_analyses'):
+        items = response_payload.get(key)
+        for item in items if isinstance(items, list) else []:
+            for warning in (item or {}).get('warnings') or []:
+                if isinstance(warning, dict) and warning.get('risk'):
+                    warnings.append(warning)
+    # Fail closed: any unlisted warning, at any level, may be the real reason
+    # (duplicated face arrives as "information"), so the copy stays generic.
+    if any(w['risk'] not in USER_FIXABLE_DECLINE_REASONS and w['risk'] not in _BENIGN_DECLINE_NOTES
+           for w in warnings):
+        return ''
+    fixable = sorted(
+        (w for w in warnings if w['risk'] in USER_FIXABLE_DECLINE_REASONS),
+        key=lambda w: _DECLINE_SEVERITY.get(w.get('log_type'), 3),
+    )
+    return USER_FIXABLE_DECLINE_REASONS[fixable[0]['risk']] if fixable else ''
+
+
 def _safe_json_loads(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -1326,6 +1385,8 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         response_payload=response_payload,
         risk_factors=risk_factors,
     )
+    if status == 'rejected' and not review_reason and 'document_capture_holder' not in risk_factors:
+        review_reason = user_facing_decline_reason(response_payload)
     from django.db import transaction
     # One per-user lock for everything that records a Didit result: extra
     # documents of different people can never both pass, and a registration

@@ -753,6 +753,46 @@ class DiditIntegrationTests(TestCase):
 
         self.assertEqual(verification.status, 'verified')
 
+    def _declined_payload(self, session_id, id_warnings=(), liveness_warnings=()):
+        payload = self._capture_holder_payload(session_id)
+        payload['status'] = 'Declined'
+        payload['id_verifications'][0]['warnings'] = [
+            {'risk': risk, 'log_type': level} for risk, level in id_warnings]
+        payload['liveness_checks'] = [{'warnings': [
+            {'risk': risk, 'log_type': level} for risk, level in liveness_warnings]}]
+        return payload
+
+    @patch('security.didit.requests.request')
+    def test_decline_shows_a_retry_hint_for_a_fixable_problem(self, mock_request):
+        mock_request.return_value = self._mock_response(self._declined_payload(
+            'sess_expired', id_warnings=[('DOCUMENT_EXPIRED', 'error'), ('QR_NOT_DETECTED', 'information')]))
+
+        verification, _ = sync_didit_session(session_id='sess_expired', expected_user=self.user)
+
+        self.assertEqual(verification.status, 'rejected')
+        self.assertIn('vencido', verification.rejected_reason)
+
+    @patch('security.didit.requests.request')
+    def test_decline_never_names_a_fraud_signal(self, mock_request):
+        mock_request.return_value = self._mock_response(self._declined_payload(
+            'sess_fraud', id_warnings=[('IMAGE_TOO_BLURRY', 'information')],
+            liveness_warnings=[('DUPLICATED_FACE', 'information')]))
+
+        verification, _ = sync_didit_session(session_id='sess_fraud', expected_user=self.user)
+
+        self.assertEqual(verification.status, 'rejected')
+        # A fixable note beside a fraud signal must not become the stated reason.
+        self.assertFalse(verification.rejected_reason)
+
+    @patch('security.didit.requests.request')
+    def test_decline_with_only_unknown_warnings_stays_generic(self, mock_request):
+        mock_request.return_value = self._mock_response(self._declined_payload(
+            'sess_unknown', id_warnings=[('SCREEN_CAPTURE_DETECTED', 'error')]))
+
+        verification, _ = sync_didit_session(session_id='sess_unknown', expected_user=self.user)
+
+        self.assertFalse(verification.rejected_reason)
+
     @patch('security.didit.requests.request')
     def test_sync_uses_authoritative_bra_cpf_database_match(self, mock_request):
         mock_request.return_value = self._mock_response({
