@@ -521,4 +521,12 @@ contract ConfioPresaleVault is Ownable2Step, Pausable, ReentrancyGuardTransient 
         emit TokenRescued(address(token), to, amount);
         token.safeTransfer(to, amount);
     }
+
+    /// Renouncing before unlock would permanently strand buyer allocations;
+    /// afterward it would strand remaining migration credits and paused buys.
+    /// Preserve two-step ownership transfer, but never abandon administration.
+    function renounceOwnership() public view override onlyOwner {
+        revert("renounce disabled");
+    }
+
 }

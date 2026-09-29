@@ -213,4 +213,58 @@ contract ConfioRewardVaultTest is Test {
         vault.renounceOwnership();
         assertEq(vault.owner(), safeOwner);
     }
+
+    function test_signature_cannot_replay_on_another_vault() public {
+        _unlock();
+        ConfioRewardVault other = new ConfioRewardVault(address(confio), signer, safeOwner);
+        confio.mint(address(other), 100e18);
+        vm.prank(safeOwner); other.unlockClaims();
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _sig(user, 100e18, deadline, signerKey);
+        vm.prank(user);
+        vm.expectRevert("bad signature");
+        other.claim(100e18, deadline, sig);
+        assertEq(other.totalClaimed(), 0);
+        assertEq(confio.balanceOf(address(other)), 100e18);
+    }
+
+    function test_signature_cannot_replay_after_chain_id_change() public {
+        _unlock();
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _sig(user, 100e18, deadline, signerKey);
+        vm.chainId(block.chainid + 1);
+        vm.prank(user);
+        vm.expectRevert("bad signature");
+        vault.claim(100e18, deadline, sig);
+        assertEq(vault.totalClaimed(), 0);
+    }
+
+    function test_underfunded_claim_rolls_back_and_can_retry_after_topup() public {
+        _unlock();
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _sig(user, 100e18, deadline, signerKey);
+        vm.prank(safeOwner); vault.withdraw(safeOwner, 1_000_000e18);
+        vm.prank(user);
+        vm.expectRevert(); vault.claim(100e18, deadline, sig);
+        assertEq(vault.claimed(user), 0);
+        assertEq(vault.totalClaimed(), 0);
+        confio.mint(address(vault), 100e18);
+        vm.prank(user); assertEq(vault.claim(100e18, deadline, sig), 100e18);
+    }
+
+    function testFuzz_cumulative_claims_never_pay_twice(uint96 firstSeed, uint96 incrementSeed) public {
+        _unlock();
+        uint256 first = bound(firstSeed, 1, 500_000e18);
+        uint256 increment = bound(incrementSeed, 1, 500_000e18);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig1 = _sig(user, first, deadline, signerKey);
+        bytes memory sig2 = _sig(user, first + increment, deadline, signerKey);
+        vm.prank(user); assertEq(vault.claim(first, deadline, sig1), first);
+        vm.prank(user); assertEq(vault.claim(first + increment, deadline, sig2), increment);
+        vm.prank(user);
+        vm.expectRevert("nothing to claim"); vault.claim(first, deadline, sig1);
+        assertEq(confio.balanceOf(user), first + increment);
+        assertEq(vault.totalClaimed(), first + increment);
+    }
+
 }

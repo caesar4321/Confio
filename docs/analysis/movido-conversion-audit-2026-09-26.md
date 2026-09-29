@@ -1,7 +1,7 @@
 # Movido conversion audit — 2026-09-26
 
-Status: local fixes verified; final independent review found no further
-substantiated counting defects in the reviewed paths. Not deployed.
+Status: deployed to production at commit `299ab8939` via PR #4. Final independent
+review found no further substantiated counting defects in the reviewed paths.
 
 ## Scope and context
 
@@ -84,3 +84,17 @@ App sources match the previously verified 29-test run byte-for-byte.
 
 The additional Claude Code outside review was unavailable: its authenticated
 run timed out after 180 seconds. It is not counted as a passing review.
+
+## Deployment result
+
+PR: https://github.com/caesar4321/Confio/pull/4
+
+Production dependencies and Django checks passed; no migrations were pending.
+Daphne, Celery, and Celery Beat were restarted and are active. Historical
+backfill ran with `--apply`: zero entries, zero exits, no skipped candidates.
+The public stats cache was refreshed. Live HTTPS GraphQL returned
+US$211,343.56705954403 across 721 operations (437 entries, 284 exits).
+The audit changes only precision, leaving the displayed total unchanged.
+
+Backend safeguards are live. Mobile retry changes are merged in source and
+will reach devices with the next mobile release; no app-store build was published.
