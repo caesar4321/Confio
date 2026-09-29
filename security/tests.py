@@ -694,6 +694,64 @@ class DiditIntegrationTests(TestCase):
         stored_session = verification.risk_factors['didit']['session']
         self.assertNotIn('front_image', stored_session['id_verifications'][0])
 
+    def _capture_holder_payload(self, session_id, **scores):
+        return {
+            'session_id': session_id,
+            'status': 'Approved',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
+            'first_name': 'Ana',
+            'last_name': 'Perez',
+            'date_of_birth': '1994-07-21',
+            'id_verifications': [{
+                'nationality': 'COL',
+                'document_type': 'Identity Card',
+                'document_number': '1065000001',
+                'issuing_state': 'COL',
+                **scores,
+            }],
+        }
+
+    @patch('security.didit.requests.request')
+    def test_sync_rejects_document_captured_by_someone_else(self, mock_request):
+        mock_request.return_value = self._mock_response(self._capture_holder_payload(
+            'sess_holder_other',
+            front_image_camera_front_face_match_score=None,
+            back_image_camera_front_face_match_score=0,
+        ))
+
+        verification, _ = sync_didit_session(session_id='sess_holder_other', expected_user=self.user)
+
+        verification.refresh_from_db()
+        self.assertEqual(verification.status, 'rejected')
+        self.assertIn('fotografió el documento', verification.rejected_reason)
+        self.assertEqual(verification.risk_factors['document_capture_holder']['best_similarity'], 0.0)
+        self.assertIsNone(verification.verified_at)
+
+    @patch('security.didit.requests.request')
+    def test_sync_keeps_approval_when_front_camera_saw_no_face(self, mock_request):
+        mock_request.return_value = self._mock_response(self._capture_holder_payload(
+            'sess_holder_none',
+            front_image_camera_front_face_match_score=None,
+            back_image_camera_front_face_match_score=None,
+        ))
+
+        verification, _ = sync_didit_session(session_id='sess_holder_none', expected_user=self.user)
+
+        self.assertEqual(verification.status, 'verified')
+        self.assertNotIn('document_capture_holder', verification.risk_factors)
+
+    @patch('security.didit.requests.request')
+    def test_sync_keeps_approval_when_any_capture_matches_the_selfie(self, mock_request):
+        mock_request.return_value = self._mock_response(self._capture_holder_payload(
+            'sess_holder_self',
+            front_image_camera_front_face_match_score=3,
+            back_image_camera_front_face_match_score=78,
+        ))
+
+        verification, _ = sync_didit_session(session_id='sess_holder_self', expected_user=self.user)
+
+        self.assertEqual(verification.status, 'verified')
+
     @patch('security.didit.requests.request')
     def test_sync_uses_authoritative_bra_cpf_database_match(self, mock_request):
         mock_request.return_value = self._mock_response({
