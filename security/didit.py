@@ -244,10 +244,6 @@ def _enforce_brazilian_cpf_database_validation(
 # the selfie — the account-opening-for-others pattern. Below this similarity
 # the person capturing the document is not the selfie's person.
 DOCUMENT_CAPTURE_HOLDER_MIN_SIMILARITY = 20.0
-DOCUMENT_CAPTURE_HOLDER_REJECTION = (
-    'La persona que fotografió el documento no coincide con la selfie. '
-    'Repite la verificación tú mismo, desde tu propio teléfono.'
-)
 
 
 def _document_capture_holder_scores(response_payload: dict[str, Any]) -> list[float]:
@@ -275,6 +271,8 @@ def _enforce_document_capture_holder(
 
     Only a score Didit actually computed counts: no face in the front-camera
     frame yields no score, which is common and not evidence of anything.
+    The reason stays internal (risk_factors + log): rejected_reason reaches
+    the app, and naming the check would teach how to pass it.
     """
     if status != 'verified':
         return status, ''
@@ -287,7 +285,11 @@ def _enforce_document_capture_holder(
         'threshold': DOCUMENT_CAPTURE_HOLDER_MIN_SIMILARITY,
         'rejected_at': timezone.now().isoformat(),
     }
-    return 'rejected', DOCUMENT_CAPTURE_HOLDER_REJECTION
+    logger.warning(
+        'Didit approval rejected: document capture holder mismatch session=%s best_similarity=%s',
+        response_payload.get('session_id'), max(scores),
+    )
+    return 'rejected', ''
 
 
 def _safe_json_loads(value: Any) -> dict[str, Any]:

@@ -723,7 +723,8 @@ class DiditIntegrationTests(TestCase):
 
         verification.refresh_from_db()
         self.assertEqual(verification.status, 'rejected')
-        self.assertIn('fotografió el documento', verification.rejected_reason)
+        # The app shows rejected_reason; the check must not be named there.
+        self.assertFalse(verification.rejected_reason)
         self.assertEqual(verification.risk_factors['document_capture_holder']['best_similarity'], 0.0)
         self.assertIsNone(verification.verified_at)
 
