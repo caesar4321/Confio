@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_DOWN
 
 from p2p_exchange.models import P2PPaymentMethod
-from ramps.models import RampPaymentMethod
+from ramps.models import RampPaymentMethod, RampTransaction
 from users.models import Country
 
 
@@ -343,6 +343,30 @@ def on_ramp_paused(country_code: str | None) -> bool:
     if paused is None:
         paused = config('KOYWE_ON_RAMP_PAUSED_COUNTRIES', default='CO', cast=Csv())
     return bool(country_code) and country_code.upper() in {str(c).strip().upper() for c in paused}
+
+
+ON_RAMP_REJECTION_LIMIT = 5
+ON_RAMP_REJECTION_WINDOW_HOURS = 24
+
+
+def on_ramp_rejection_locked(user) -> bool:
+    """Too many provider-rejected deposits in the window; clears on its own.
+
+    Rejected PSE attempts in bulk are how a recruited account gets probed
+    against victims' banks. Expired orders (never paid) do not count. No one
+    has to lift this: it lapses once the window holds fewer rejections.
+    """
+    from datetime import timedelta
+    from django.conf import settings
+    from django.utils import timezone
+
+    limit = int(getattr(settings, 'ON_RAMP_REJECTION_LIMIT', ON_RAMP_REJECTION_LIMIT))
+    hours = int(getattr(settings, 'ON_RAMP_REJECTION_WINDOW_HOURS', ON_RAMP_REJECTION_WINDOW_HOURS))
+    since = timezone.now() - timedelta(hours=hours)
+    return RampTransaction.objects.filter(
+        actor_user_id=user.id, direction='on_ramp', status='FAILED',
+        status_detail__startswith='rejected', created_at__gte=since,
+    ).count() >= limit
 
 
 def get_country_ramp_config(country_code: str | None):

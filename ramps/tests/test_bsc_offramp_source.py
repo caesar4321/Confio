@@ -18,6 +18,7 @@ class BscOfframpSourceTests(SimpleTestCase):
         with mock.patch('ramps.schema._employee_ramp_denial', return_value=None), \
              mock.patch('ramps.schema._resolve_ramp_country_code', return_value='BR'), \
              mock.patch('ramps.schema._get_ramp_account_for_user', return_value=account), \
+             mock.patch('ramps.schema.on_ramp_rejection_locked', return_value=False), \
              mock.patch('ramps.schema.KoyweClient', return_value=client):
             result = CreateRampOrder().mutate(
                 info,
