@@ -36,6 +36,7 @@ from ramps.koywe import (
     RAMP_USDC_ALGORAND_NOTE,
     RAMP_USDC_ALGORAND_SYMBOL,
     get_country_ramp_config,
+    on_ramp_paused,
     quote_ramp,
     sync_country_payment_methods,
 )
@@ -1518,6 +1519,8 @@ class CreateMockRampOrder(graphene.Mutation):
 
         if normalized_direction == "ON_RAMP" and not method["supports_on_ramp"]:
             return RampOrderType(success=False, error="Payment method does not support on-ramp")
+        if normalized_direction == "ON_RAMP" and on_ramp_paused(resolved_country_code):
+            return RampOrderType(success=False, error="Las recargas en este país no están disponibles por ahora.")
         if normalized_direction == "OFF_RAMP" and not method["supports_off_ramp"]:
             return RampOrderType(success=False, error="Payment method does not support off-ramp")
 
@@ -1810,7 +1813,7 @@ class Query(graphene.ObjectType):
                 definition=method,
                 limits=dynamic_limits,
             )
-            if method["supports_on_ramp"]:
+            if method["supports_on_ramp"] and not on_ramp_paused(resolved_country_code):
                 on_ramp_methods.append(payload)
             if method["supports_off_ramp"]:
                 off_ramp_methods.append(payload)
