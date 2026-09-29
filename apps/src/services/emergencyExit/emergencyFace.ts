@@ -40,7 +40,9 @@ export const apiOrigin = (graphqlUrl: string): string => graphqlUrl.replace(/\/g
 const defaultAppCheckToken = async (): Promise<string | null> => {
   try {
     const { appCheckService } = await import('../appCheckService');
-    return await appCheckService.getTokenForHeader();
+    // The server enforces App Check on these calls: wait for a real token
+    // rather than the cached-or-null header value.
+    return await appCheckService.waitForToken();
   } catch {
     return null;
   }
