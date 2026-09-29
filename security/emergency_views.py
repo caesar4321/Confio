@@ -41,9 +41,7 @@ def _error(message: str, status: int = 400) -> JsonResponse:
 @require_POST
 def emergency_exit_challenge(request):
     try:
-        from security.request_utils import extract_client_ip_from_meta
-        client_ip = extract_client_ip_from_meta(request.META) or ''
-        return JsonResponse({'success': True, **issue_challenge(_body(request).get('address'), client_ip)})
+        return JsonResponse({'success': True, **issue_challenge(_body(request).get('address'))})
     except EmergencyExitError as exc:
         return _error(str(exc))
 

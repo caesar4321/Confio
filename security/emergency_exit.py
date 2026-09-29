@@ -23,10 +23,12 @@ The exit itself is signed and broadcast by the app, so the app enforces the
 result; this module only answers "is this account banned" and grades the
 face.
 """
+import hashlib
 import logging
 import re
 import secrets
 
+from django.core import signing
 from django.core.cache import cache
 
 from .face_step_up import (
@@ -37,13 +39,12 @@ logger = logging.getLogger(__name__)
 
 CHALLENGE_TTL = 300
 SESSION_TTL = 15 * 60
-MAX_CHALLENGES_PER_HOUR = 10
+CHALLENGE_SALT = 'security.emergency_exit.challenge'
 APP_CHECK_ACTION = 'emergency_exit_face'
 ADDRESS_RE = re.compile(r'^0x[0-9a-fA-F]{40}$')
 
 INVALID_MESSAGE = 'No pudimos verificar tu cuenta. Intenta de nuevo.'
 DEVICE_MESSAGE = 'Dispositivo no verificado. Usa la app oficial de Confío.'
-TOO_MANY_MESSAGE = 'Demasiados intentos. Intenta de nuevo más tarde.'
 EXPIRED_MESSAGE = 'La verificación expiró. Vuelve a empezar.'
 
 
@@ -51,11 +52,8 @@ class EmergencyExitError(Exception):
     """The message is safe to show."""
 
 
-def _challenge_key(address: str, nonce: str) -> str:
-    # Keyed by nonce too: anyone can ask for a challenge for a public
-    # address, so a stranger's request must not replace (or, at the session
-    # step, burn) the one the owner is about to sign.
-    return f'emergency_exit:challenge:{address}:{nonce}'
+def _used_key(nonce: str) -> str:
+    return f'emergency_exit:used:{hashlib.sha256(nonce.encode()).hexdigest()}'
 
 
 def _session_key(token: str) -> str:
@@ -70,24 +68,27 @@ def challenge_message(address: str, nonce: str) -> str:
     return f'Confío · Salida de emergencia\nCuenta: {address}\nCódigo: {nonce}'
 
 
-def issue_challenge(address: str, client_ip: str = '') -> dict:
+def issue_challenge(address: str) -> dict:
+    """A signed, expiring challenge: issuing one stores nothing.
+
+    The endpoint is unauthenticated and addresses are public, so a challenge
+    kept server-side would let anyone fill the cache or evict the owner's.
+    Only a challenge that comes back signed by the account's own key is
+    marked spent (open_session).
+    """
     if not isinstance(address, str) or not ADDRESS_RE.match(address):
         raise EmergencyExitError(INVALID_MESSAGE)
     address = address.lower()
-    # Counted per address AND caller: a per-address budget alone lets anyone
-    # who knows the (public) address spend it and lock the owner out.
-    count_key = f'emergency_exit:challenges:{address}:{client_ip}'
-    cache.add(count_key, 0, 3600)
-    try:
-        count = cache.incr(count_key)
-    except ValueError:  # expired between add and incr
-        cache.set(count_key, 1, 3600)
-        count = 1
-    if count > MAX_CHALLENGES_PER_HOUR:
-        raise EmergencyExitError(TOO_MANY_MESSAGE)
-    nonce = secrets.token_hex(16)
-    cache.set(_challenge_key(address, nonce), 1, CHALLENGE_TTL)
+    nonce = signing.dumps({'a': address, 'r': secrets.token_hex(8)}, salt=CHALLENGE_SALT, compress=True)
     return {'nonce': nonce, 'message': challenge_message(address, nonce)}
+
+
+def _challenge_address(nonce: str):
+    try:
+        data = signing.loads(nonce, salt=CHALLENGE_SALT, max_age=CHALLENGE_TTL)
+    except signing.BadSignature:  # includes SignatureExpired
+        return None
+    return data.get('a') if isinstance(data, dict) else None
 
 
 def _recover(message: str, signature: str) -> str:
@@ -129,15 +130,15 @@ def open_session(address: str, nonce: str, signature: str, app_check_token: str)
     if not isinstance(address, str) or not ADDRESS_RE.match(address):
         raise EmergencyExitError(INVALID_MESSAGE)
     address = address.lower()
-    if not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce):
-        raise EmergencyExitError(EXPIRED_MESSAGE)
-    # One signature, one session: the challenge is spent even on failure.
-    # delete() reports whether it removed the key, so two concurrent
-    # requests cannot both spend the same challenge.
-    if not cache.delete(_challenge_key(address, nonce)):
+    if not isinstance(nonce, str) or len(nonce) > 512 or _challenge_address(nonce) != address:
         raise EmergencyExitError(EXPIRED_MESSAGE)
     if _recover(challenge_message(address, nonce), signature or '') != address:
         raise EmergencyExitError(INVALID_MESSAGE)
+    # One signature, one session. Marked only after the owner's signature
+    # checks out, so nobody else can spend it; add() is atomic, so two
+    # concurrent requests cannot both use it.
+    if not cache.add(_used_key(nonce), 1, CHALLENGE_TTL):
+        raise EmergencyExitError(EXPIRED_MESSAGE)
     account = _account_for(address)
     if not account:
         raise EmergencyExitError(INVALID_MESSAGE)

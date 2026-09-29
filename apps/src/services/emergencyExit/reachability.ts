@@ -314,7 +314,13 @@ export const hasBanRouteWait = async (
   const raw = await store.get(banWaitKey(accountKey));
   if (raw === null) return false;
   const markedAt = parseInt(raw, 10);
-  if (nowSec === null || !markedAt) return true;
+  if (nowSec === null) return true;
+  if (!markedAt) {
+    // Marked while chain time was unknown: start the bound now, or the
+    // flag would never expire.
+    await store.set(banWaitKey(accountKey), String(nowSec));
+    return true;
+  }
   if (nowSec - markedAt < NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS) return true;
   await store.del(banWaitKey(accountKey));
   return false;
