@@ -330,11 +330,16 @@ _DECLINE_SEVERITY = {'error': 0, 'warning': 1, 'information': 2}
 
 
 def _store_face_reference(verification: IdentityVerification, response_payload: dict[str, Any]) -> None:
+    from .face_step_up import FaceStepUpError, store_face_reference_from_didit
     try:
-        from .face_step_up import store_face_reference_from_didit
         store_face_reference_from_didit(verification, response_payload)
-    except Exception:
-        logger.exception('Could not store face reference for verification %s', verification.pk)
+    except FaceStepUpError as exc:
+        # Sanitized at the media boundary: never carries the signed URL.
+        logger.error('Could not store face reference for verification %s: %s', verification.pk, exc)
+    except Exception as exc:
+        # Unknown errors may embed request details; log the type only.
+        logger.error('Could not store face reference for verification %s: %s',
+                     verification.pk, type(exc).__name__)
 
 
 def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:

@@ -1015,13 +1015,16 @@ class CreateRampOrder(graphene.Mutation):
                     success=False,
                     error='Alcanzaste el límite de intentos de recarga por ahora. Intenta de nuevo más tarde.',
                 )
-        from security.face_step_up import FACE_STEP_UP_NEXT_STEP, require_face_step_up
-        step_up = require_face_step_up(
-            user, 'on_ramp' if normalized_direction == 'ON_RAMP' else 'withdrawal',
-            consumed_by=f'ramp:{normalized_direction.lower()}:{resolved_country_code}',
+        from security.face_step_up import (
+            FACE_STEP_UP_MESSAGE, FACE_STEP_UP_NEXT_STEP, claim_on_ramp_check, missing_face_step_up,
+            release_on_ramp_check,
         )
+        # Checked here, spent only right before the provider order below, so a
+        # validation failure in between never costs the user another selfie.
+        step_up = missing_face_step_up(user, 'on_ramp' if normalized_direction == 'ON_RAMP' else 'withdrawal')
         if step_up:
             return RampOrderType(success=False, error=step_up, next_step=FACE_STEP_UP_NEXT_STEP)
+        face_claim_id = None
 
         # cUSD+ savings rail (Koywe 'USDT BSC' delivered to the account's own
         # BSC address). The address is client-derived and registered at
@@ -1325,6 +1328,14 @@ class CreateRampOrder(graphene.Mutation):
                             'reconcile_key': external_id,
                         },
                     )
+            if normalized_direction == 'ON_RAMP':
+                claimed, face_claim_id = claim_on_ramp_check(
+                    user, consumed_by=f'ramp:on_ramp:{external_id}')
+                if not claimed:
+                    _release_proven_empty_koywe_reservation(
+                        address_reservation, account_id=current_account.pk)
+                    return RampOrderType(
+                        success=False, error=FACE_STEP_UP_MESSAGE, next_step=FACE_STEP_UP_NEXT_STEP)
             result = client.create_ramp_order(
                 direction=normalized_direction,
                 amount=provider_order_amount,
@@ -1357,10 +1368,12 @@ class CreateRampOrder(graphene.Mutation):
         except KoyweConfigurationError as exc:
             _release_proven_empty_koywe_reservation(
                 address_reservation, account_id=current_account.pk)
+            release_on_ramp_check(face_claim_id)
             return RampOrderType(success=False, error=str(exc))
         except KoyweMinimumAmountError as exc:
             _release_proven_empty_koywe_reservation(
                 address_reservation, account_id=current_account.pk)
+            release_on_ramp_check(face_claim_id)
             logger.info('Koywe ramp order below minimum: %s', exc)
             return RampOrderType(
                 success=False,
@@ -1369,6 +1382,7 @@ class CreateRampOrder(graphene.Mutation):
         except KoyweMaximumAmountError as exc:
             _release_proven_empty_koywe_reservation(
                 address_reservation, account_id=current_account.pk)
+            release_on_ramp_check(face_claim_id)
             logger.info('Koywe ramp order above maximum: %s', exc)
             return RampOrderType(
                 success=False,
@@ -1377,6 +1391,7 @@ class CreateRampOrder(graphene.Mutation):
         except KoyweError as exc:
             _release_proven_empty_koywe_reservation(
                 address_reservation, account_id=current_account.pk)
+            release_on_ramp_check(face_claim_id)
             logger.warning('Koywe ramp order failed: %s', exc)
             return RampOrderType(success=False, error=str(exc))
         except Exception as exc:

@@ -11,7 +11,7 @@ import time
 from django.core.management.base import BaseCommand
 
 from security.didit import _didit_request
-from security.face_step_up import store_face_reference_from_didit
+from security.face_step_up import FaceStepUpError, store_face_reference_from_didit
 from security.models import FaceReference, IdentityVerification
 
 
@@ -48,8 +48,12 @@ class Command(BaseCommand):
                     stored += 1
                 else:
                     failed += 1
-            except Exception as exc:
+            except FaceStepUpError as exc:
                 failed += 1
                 self.stderr.write(f'verification {verification.pk}: {exc}')
+            except Exception as exc:
+                # Never print the message: it may embed a signed media URL.
+                failed += 1
+                self.stderr.write(f'verification {verification.pk}: {type(exc).__name__}')
             time.sleep(0.3)
         self.stdout.write(f'stored {stored}, failed {failed}')
