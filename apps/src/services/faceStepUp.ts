@@ -99,29 +99,69 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
     );
   });
 
+/** What the start call returns (the startFaceCheck mutation's fields). */
+export interface FaceCheckStart {
+  success: boolean;
+  error?: string | null;
+  sessionId?: string;
+  region?: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  sessionToken?: string;
+  expiration?: string;
+}
+
+export interface FaceCheckGrade {
+  success: boolean;
+  passed: boolean;
+  error?: string | null;
+}
+
+/**
+ * Where a face check is opened and graded. GraphQL for signed-in users; the
+ * banned-account emergency exit has its own wallet-signed endpoints
+ * (emergencyExit/emergencyFace.ts), since a banned user cannot use GraphQL.
+ */
+export interface FaceCheckBackend {
+  start(purpose: FaceCheckPurpose): Promise<FaceCheckStart | undefined>;
+  complete(sessionId: string): Promise<FaceCheckGrade | undefined>;
+}
+
+const graphqlBackend: FaceCheckBackend = {
+  async start(purpose) {
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.mutate({ mutation: START, variables: { purpose } });
+    return data?.startFaceCheck;
+  },
+  async complete(sessionId) {
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.mutate({ mutation: COMPLETE, variables: { sessionId } });
+    return data?.completeFaceCheck;
+  },
+};
+
 /** Server session → native capture → server grade. Never throws. */
 export const runFaceCapture = async (
   purpose: FaceCheckPurpose,
   onGrading?: () => void,
+  backend: FaceCheckBackend = graphqlBackend,
 ): Promise<{ outcome: FaceCaptureOutcome; message?: string }> => {
   const native = NativeModules.ConfioFaceLiveness;
   if (!native?.start) {
     return { outcome: 'unavailable', message: 'Actualiza Confío para confirmar tu identidad.' };
   }
-  const { apolloClient } = await import('../apollo/client');
-  let start;
+  let start: FaceCheckStart | undefined;
   try {
-    const { data } = await withTimeout(
-      apolloClient.mutate({ mutation: START, variables: { purpose } }), START_TIMEOUT_MS);
-    start = data?.startFaceCheck;
+    start = await withTimeout(backend.start(purpose), START_TIMEOUT_MS);
   } catch {
     return { outcome: 'unavailable', message: 'Revisa tu conexión e intenta de nuevo.' };
   }
-  if (!start?.success) {
+  if (!start?.success || !start.sessionId || !start.expiration) {
     return { outcome: 'unavailable', message: start?.error || 'No pudimos iniciar la verificación.' };
   }
+  const sessionId = start.sessionId;
   try {
-    await native.start(start.sessionId, start.region, {
+    await native.start(sessionId, start.region, {
       accessKeyId: start.accessKeyId,
       secretAccessKey: start.secretAccessKey,
       sessionToken: start.sessionToken,
@@ -137,11 +177,7 @@ export const runFaceCapture = async (
   // and the same call is safe to repeat.
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      const { data } = await withTimeout(apolloClient.mutate({
-        mutation: COMPLETE,
-        variables: { sessionId: start.sessionId },
-      }), COMPLETE_TIMEOUT_MS);
-      const result = data?.completeFaceCheck;
+      const result = await withTimeout(backend.complete(sessionId), COMPLETE_TIMEOUT_MS);
       if (result?.success) {
         return result.passed ? { outcome: 'passed' } : { outcome: 'failed', message: result.error };
       }
@@ -156,7 +192,7 @@ export const runFaceCapture = async (
   return { outcome: 'failed', message: 'No pudimos confirmar tu verificación. Intenta de nuevo.' };
 };
 
-type Presenter = (purpose: FaceCheckPurpose) => Promise<boolean>;
+type Presenter = (purpose: FaceCheckPurpose, backend?: FaceCheckBackend) => Promise<boolean>;
 let presenter: Presenter | null = null;
 
 /** Called once by FaceCheckProvider. */
@@ -165,9 +201,12 @@ export const registerFaceCheckPresenter = (fn: Presenter | null) => {
 };
 
 /** Show Confío Face and resolve true only when the server passed the check. */
-export const ensureFaceCheck = async (purpose: FaceCheckPurpose): Promise<boolean> => {
+export const ensureFaceCheck = async (
+  purpose: FaceCheckPurpose,
+  backend?: FaceCheckBackend,
+): Promise<boolean> => {
   if (!presenter) return false;
-  return presenter(purpose);
+  return presenter(purpose, backend);
 };
 
 /**

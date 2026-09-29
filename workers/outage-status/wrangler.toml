@@ -1,0 +1,17 @@
+# Confío outage status: an independent vantage point for the emergency exit.
+# No secrets here — the Ed25519 signing key is a Worker secret:
+#   wrangler secret put STATUS_SIGNING_KEY   (PKCS8, base64; see README.md)
+name = "confio-outage-status"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+CONFIO_GRAPHQL_URL = "https://confio.lat/graphql/"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[kv_namespaces]]
+binding = "STATUS"
+# Create with `wrangler kv namespace create STATUS` and paste the id here.
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

@@ -497,6 +497,16 @@ class StartFaceCheck(graphene.Mutation):
         user = getattr(info.context, 'user', None)
         if not (user and user.is_authenticated):
             return StartFaceCheck(success=False, error='Authentication required')
+        if purpose == 'emergency_exit':
+            # The exit is signed and broadcast by the app, so its face check is
+            # the last server-side gate: require a genuine app on a genuine
+            # device (Play Integrity / App Attest via App Check).
+            from .emergency_exit import APP_CHECK_ACTION, DEVICE_MESSAGE
+            from .integrity_service import app_check_service
+            app_check = app_check_service.verify_request_header(
+                info.context, APP_CHECK_ACTION, should_enforce=True)
+            if not app_check.get('success'):
+                return StartFaceCheck(success=False, error=DEVICE_MESSAGE)
         try:
             data = start_face_check(user, purpose)
         except FaceStepUpError as exc:

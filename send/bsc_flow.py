@@ -218,15 +218,16 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     return None, None, None, 'recipient_required'
 
 
-def _external_send_step_up(user, sender_business, recipient_type, activation_id) -> str:
-    """'' or the face step-up message for a send leaving Confío.
+def _send_step_up(user, sender_business, activation_id) -> str:
+    """'' or the face step-up message for a personal send.
 
-    Only personal senders paying an external address: a Confío recipient
-    faces the same check when they take the money out, business accounts are
-    governed by KYB and limits (cashiers, API payers), and the server-only
-    activation fee goes to Confío itself.
+    Every send, to a Confío user as much as to an external address: a ring
+    pools a recruited account's money into its own Confío accounts before
+    taking it out, so the holder's face is needed at the first hop. Business
+    accounts are governed by KYB and limits (cashiers, API payers), and the
+    server-only activation fee goes to Confío itself.
     """
-    if sender_business is not None or recipient_type != 'external' or activation_id:
+    if sender_business is not None or activation_id:
         return ''
     from security.face_step_up import require_face_step_up
     return require_face_step_up(user, 'withdrawal')
@@ -330,10 +331,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         if recipient_user is not None:
             _notify_recipient_needs_app(recipient_user, user)
         return {'success': False, 'error': 'recipient_no_bsc_address'}
-    step_up = _external_send_step_up(
-        user, sender_business,
-        'business' if recipient_business else 'user' if recipient_user else 'external',
-        activation_id)
+    step_up = _send_step_up(user, sender_business, activation_id)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -991,8 +989,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
 
     # Rechecked here: a send prepared earlier (or before enforcement) must
     # not leave once the face window has lapsed.
-    step_up = _external_send_step_up(
-        user, send_tx.sender_business, send_tx.recipient_type, meta.get('activation_id'))
+    step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'))
     if step_up:
         return {'success': False, 'error': step_up}
 

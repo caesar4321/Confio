@@ -212,6 +212,46 @@ State of the package:
   raw tokens. (No kit equivalent can exist for cUSD+ — its dependency is
   contractual, not tooling; that is what the vault timelock track is for.)
 
+## Phase 2: Confío Face, the ban route, the outage Worker (2026-09-29)
+
+Amends the timing matrix above (the 24h figures became 72h in the face
+step-up release). Decided by Julian on 2026-09-29.
+
+| Client-observed state | Route | Wait |
+|---|---|---|
+| Server-confirmed ban (Confío reachable) | **ban route** | Confío Face, then immediate. **No waiting-period fallback.** |
+| Normal (Confío reachable) | normal | 72h cooloff, then Confío Face or a second 72h wait |
+| `blocked`: Confío unreachable from the phone, up per the Worker | normal | same as normal; the face check cannot run, so the second wait |
+| Outage confirmed by the Worker (down since T) | outage | immediate once T is 72h old (chain time) |
+| Confío and the Worker both unreachable | outage | immediate after 72h of local observation |
+| No internet | — | execution disabled |
+
+- **Ban route** (`security/emergency_exit.py`, `emergencyExit/emergencyFace.ts`):
+  a banned user cannot use GraphQL, so the route uses plain endpoints
+  (`/api/emergency-exit/…`) with no JWT. The account is proved by an
+  EIP-191 signature over a one-time challenge with the account's own BSC
+  key. The server confirms the ban, so a faked 403 (MITM, a tampered
+  proxy) cannot route a healthy account here, and a ban flag while Confío
+  is unreachable unlocks nothing. This supersedes principle 2 for banned
+  accounts: the server can now withhold a banned account's exit (face
+  failed, no KYC selfie on file) — by decision, since the ban route is how
+  a ring would otherwise move a recruited account out.
+- **Device attestation on the exit only**: every ban-route call and the
+  normal route's `startFaceCheck(purpose: emergency_exit)` require a
+  Firebase App Check token (Play Integrity / App Attest), so the face
+  capture comes from the genuine app, not a script or an injected camera.
+- **Outage Worker** (`workers/outage-status`): Cloudflare cron probe of
+  Confío every 5 minutes; serves an Ed25519-signed `{checkedAt, lastUpAt,
+  downSince}`. The app ships the public key and accepts a statement only
+  if `checkedAt` is within 30 minutes of chain time. It closes the "block
+  Confío's domain for a faceless 72h exit" shortcut unless the Worker is
+  blocked too, and dates a real outage from when the Worker first saw it.
+  Until its URL and public key are set in `outageStatusConfig.ts` the app
+  keeps the local rule.
+- **Sends**: every personal BSC send, to a Confío user as much as to an
+  external address, needs a recent Confío Face (15-minute window). Business
+  senders and the server-only activation fee stay exempt.
+
 ## Rejected: raw key export (Exportar claves)
 
 **Cancelled 2026-08-03 (Julian). Confío does not export keys — at any

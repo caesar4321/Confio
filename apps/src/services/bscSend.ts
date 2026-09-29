@@ -127,7 +127,7 @@ export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResul
   const { data } = await apolloClient.mutate({ mutation: PREPARE, variables: prepareVariables });
   let prep = data?.prepareBscSend;
   if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
-    // Money leaving Confío for an external address: Confío Face, then once more.
+    // Every personal send needs a recent Confío Face: show it, then once more.
     if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
     const retry = await apolloClient.mutate({ mutation: PREPARE, variables: prepareVariables });
     prep = retry.data?.prepareBscSend;
