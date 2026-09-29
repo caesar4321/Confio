@@ -358,6 +358,14 @@ export const EmergencyExitScreen: React.FC = () => {
         // explicit disabled response skips it.
         // Nor is it asked of users who never did KYC (there is no face to
         // check): for them the waiting period is the whole normal route.
+        if (status?.enabled !== false && status?.required !== false) {
+          // startFaceCheck for the exit requires App Check, and the GraphQL
+          // link only attaches a token already cached: fetch one first.
+          try {
+            const { appCheckService } = await import('../services/appCheckService');
+            await appCheckService.waitForToken();
+          } catch { /* the server's answer says what failed */ }
+        }
         faceOk = status?.enabled === false || status?.required === false
           || (await ensureFaceCheck('emergency_exit'));
       }
