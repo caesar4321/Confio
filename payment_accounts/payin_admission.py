@@ -114,9 +114,23 @@ def decision(entry):
     return permitted, 'third_party_enabled' if permitted else 'provider_third_party_not_enabled', country, rail
 
 
+def explicit_grant_countries():
+    """Countries whose recipients stay closed until a user switch grants them.
+
+    Elsewhere a recipient without a user switch inherits the rollout default.
+    A Django setting of the same name wins (tests override it); otherwise the
+    env list applies, so a country can be added without a code change.
+    """
+    countries = getattr(settings, 'INFINIA_THIRD_PARTY_EXPLICIT_GRANT_COUNTRIES', None)
+    if countries is None:
+        from decouple import Csv, config
+        countries = config('INFINIA_THIRD_PARTY_EXPLICIT_GRANT_COUNTRIES', default='BR,CO', cast=Csv())
+    return {str(c).strip().upper() for c in countries if str(c).strip()}
+
+
 def third_party_grant_reason(profile, country, rail):
     """Shared country/rail/recipient permission for admission and receive UI."""
-    default_allowed = (profile.provider == 'infinia' and country != 'BR'
+    default_allowed = (profile.provider == 'infinia' and country not in explicit_grant_countries()
         and getattr(settings, 'INFINIA_THIRD_PARTY_PAYIN_DEFAULT_ENABLED', True))
     # One SQL snapshot: independent EXISTS calls could combine approvals that
     # were never enabled simultaneously while an operator changes the rollout.
