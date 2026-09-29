@@ -4,11 +4,13 @@
 // Principles enforced here, in code, not copy:
 //  - The feature's EXISTENCE is never server-gated: this module only
 //    decides prominence and wait times. A server faking health while
-//    refusing sends can, at worst, impose the normal-state 24h cooloff.
+//    refusing sends can, at worst, impose the normal-state 72h cooloff.
 //  - The server can never shorten, extend, or cancel a window: every
 //    judgment is client-local, and every duration is measured against
 //    chain block timestamps (chainClock), never the device clock.
-//  - Faking death only accelerates: outage ≥ 24h ⇒ immediate exit.
+//  - Faking death only accelerates: outage ≥ 72h ⇒ immediate exit. Both
+//    waits are 72h so blocking Confío's domain on the device is never a
+//    shorter way out than the normal path (72h + Confío Face).
 //
 // RN-free by construction: probes take URLs, persistence is an injected
 // KV store, and the pure classifier is exported for jest. The screen
@@ -16,8 +18,8 @@
 
 import { chainNow, CHAIN_ENDPOINTS } from './chainClock';
 
-export const OUTAGE_IMMEDIATE_SECONDS = 24 * 3600;
-export const NORMAL_COOLOFF_SECONDS = 24 * 3600;
+export const OUTAGE_IMMEDIATE_SECONDS = 72 * 3600;
+export const NORMAL_COOLOFF_SECONDS = 72 * 3600;
 
 /**
  * How long an elapsed cooloff stays usable before it re-arms.
@@ -29,10 +31,10 @@ export const NORMAL_COOLOFF_SECONDS = 24 * 3600;
  * come back next week". So an unlock is an INTENT with a shelf life: use
  * it within the window or serve the wait again.
  *
- * Costs a real emergency nothing: ban and 24h-outage set `immediate`,
+ * Costs a real emergency nothing: ban and 72h-outage set `immediate`,
  * which never reads the cooloff at all. Missing the window only bites in
  * the NORMAL state, where ordinary sends work — worst case is "re-arm and
- * wait a day", never "can't reach my money".
+ * wait again", never "can't reach my money".
  *
  * 72h, not a week: the thing this bounds is the pool of DORMANT armed
  * accounts (armed, forgotten, permanently drainable in one session), and a
@@ -231,6 +233,29 @@ export const cancelExitCooloff = async (store: KVStore, accountKey: string): Pro
  */
 export const consumeExitCooloff = async (store: KVStore, accountKey: string): Promise<void> =>
   store.del(cooloffKey(accountKey));
+
+const faceWaiverKey = (accountKey: string) => `confio_emergency_face_waiver_v1:${accountKey}`;
+
+/**
+ * The server can never veto an exit. When Confío Face fails or cannot run,
+ * the person may continue without it: that spends the current unlock and
+ * serves a second full wait, after which the exit needs no face. Local and
+ * chain-timed like every other window here.
+ */
+export const waiveFaceWithNewCooloff = async (store: KVStore, accountKey: string): Promise<void> => {
+  await store.del(cooloffKey(accountKey));
+  const { requestedAtSec } = await requestExitCooloff(store, accountKey);
+  await store.set(faceWaiverKey(accountKey), String(requestedAtSec));
+};
+
+/** True when the current unlock was served as a face waiver. */
+export const hasFaceWaiver = async (store: KVStore, accountKey: string): Promise<boolean> => {
+  const [waiver, cooloff] = await Promise.all([
+    store.get(faceWaiverKey(accountKey)),
+    store.get(cooloffKey(accountKey)),
+  ]);
+  return !!waiver && waiver === cooloff;
+};
 
 /** DEV-ONLY QA helper: backdate the pending cooloff so stage 2 renders
  * without waiting a day. No-op in release builds — the guard is inside

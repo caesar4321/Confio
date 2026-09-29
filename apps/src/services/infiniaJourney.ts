@@ -104,10 +104,16 @@ const ATTACH_BRIDGE = gql`
 export async function createInfiniaJourney(variables: Record<string, unknown>) {
   const {apolloClient} = await import('../apollo/client');
   const {withBrebLocationRetry} = await import('./brebLocation');
-  const result = await withBrebLocationRetry(async () => {
-    const response = await apolloClient.mutate({mutation: CREATE_JOURNEY, variables});
-    return response.data?.createInfiniaJourney;
-  });
+  const {isFaceStepUpRequired, withFaceStepUp} = await import('./faceStepUp');
+  // A new bank withdrawal needs Confío Face; show it and try once more.
+  const result = await withFaceStepUp(
+    'withdrawal',
+    () => withBrebLocationRetry(async () => {
+      const response = await apolloClient.mutate({mutation: CREATE_JOURNEY, variables});
+      return response.data?.createInfiniaJourney;
+    }),
+    (r: any) => !r?.success && isFaceStepUpRequired(r?.errors?.[0]),
+  );
   if (!result?.success)
     throw new Error(result?.errors?.[0] || 'No se pudo preparar el pago');
   return result.journey;

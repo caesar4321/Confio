@@ -23,6 +23,7 @@ import { initializeNotifee } from './services/notifeeConfig';
 import linking from './navigation/linking'; // Import linking config
 import { deepLinkHandler } from './utils/deepLinkHandler';
 import { PushNotificationProvider } from './hooks/usePushNotificationContext';
+import { FaceCheckProvider } from './components/FaceCheckProvider';
 import { BrandSplash } from './components/BrandSplash';
 import { AppLockScreen } from './components/AppLockScreen';
 import { logBreadcrumb } from './services/crashLog';
@@ -164,11 +165,13 @@ const AppContent: React.FC = () => {
                 <HeaderProvider>
                   <ScanProvider>
                     <PushNotificationProvider>
-                      <View style={{ flex: 1 }}>
+                      <FaceCheckProvider>
                         <View style={{ flex: 1 }}>
-                          <Navigation />
+                          <View style={{ flex: 1 }}>
+                            <Navigation />
+                          </View>
                         </View>
-                      </View>
+                      </FaceCheckProvider>
                     </PushNotificationProvider>
                   </ScanProvider>
                 </HeaderProvider>

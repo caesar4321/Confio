@@ -40,6 +40,13 @@
         android:name="com.google.firebase.messaging.default_notification_icon"
         android:resource="@drawable/ic_stat_ic_notification" />
 
+      <!-- AWS Face Liveness capture for the face step-up (FaceLivenessPackage.kt). -->
+      <activity
+        android:name=".FaceLivenessActivity"
+        android:exported="false"
+        android:screenOrientation="portrait"
+        android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+        android:theme="@style/AppTheme" />
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

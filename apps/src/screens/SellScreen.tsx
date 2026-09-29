@@ -60,6 +60,7 @@ import {
 } from '../utils/withdrawalRail';
 import { useSavingsResume } from '../hooks/useSavingsResume';
 import { resumeSavingsMints } from '../services/savingsLegC';
+import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -473,7 +474,7 @@ export const SellScreen = () => {
       // transferred on-chain. Deriving these separately — toFixed(6) here,
       // Math.round(x*1e6) there — is how the funded amount could differ from
       // the ordered one (audit [P1] #6).
-      const { data } = await createRampOrder({
+      const placeOrder = () => createRampOrder({
         variables: {
           direction: 'OFF_RAMP',
           amount: formatMicros(exactMicros),
@@ -484,8 +485,18 @@ export const SellScreen = () => {
           ...(isSavingsSell ? { destination: 'cusd_plus' } : {}),
         },
       });
+      let response;
+      try {
+        // One Confío Face check covers this withdrawal and its funding
+        // transfer (the server accepts a check from the last few minutes).
+        response = await withFaceStepUp('withdrawal', placeOrder,
+          r => isFaceStepUpRequired(r?.data?.createRampOrder?.nextStep));
+      } catch (faceError) {
+        if (faceError instanceof FaceCheckError) return;
+        throw faceError;
+      }
 
-      const result = data?.createRampOrder;
+      const result = response?.data?.createRampOrder;
       if (!result?.success || !result?.orderId) {
         Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
         return;
