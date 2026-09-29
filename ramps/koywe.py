@@ -328,6 +328,23 @@ COUNTRY_METHODS = {
 }
 
 
+def on_ramp_paused(country_code: str | None) -> bool:
+    """Operational pause for Koywe fiat deposits in a country (fraud response).
+
+    Read from the environment at call time so the pause can be lifted without
+    a code change (KOYWE_ON_RAMP_PAUSED_COUNTRIES='' re-enables); off-ramp
+    stays available so users can always withdraw. A Django setting of the same
+    name wins, which is what the tests override.
+    """
+    from decouple import Csv, config
+    from django.conf import settings
+
+    paused = getattr(settings, 'KOYWE_ON_RAMP_PAUSED_COUNTRIES', None)
+    if paused is None:
+        paused = config('KOYWE_ON_RAMP_PAUSED_COUNTRIES', default='CO', cast=Csv())
+    return bool(country_code) and country_code.upper() in {str(c).strip().upper() for c in paused}
+
+
 def get_country_ramp_config(country_code: str | None):
     if not country_code:
         return None
