@@ -107,11 +107,26 @@ class BannedEmergencyExitTests(TestCase):
             self._open()
         self.assertEqual(str(ctx.exception), ee.DEVICE_MESSAGE)
 
-    def test_challenges_are_rate_limited(self):
-        for _ in range(ee.MAX_CHALLENGES_PER_HOUR):
+    def test_issuing_a_challenge_stores_nothing(self):
+        # Unauthenticated and addresses are public: nothing to fill or evict.
+        with mock.patch.object(ee.cache, 'set') as cache_set, mock.patch.object(ee.cache, 'add') as cache_add:
             ee.issue_challenge(self.address)
+        cache_set.assert_not_called()
+        cache_add.assert_not_called()
+
+    def test_a_challenge_is_bound_to_its_address(self):
+        other = EthAccount.create()
+        issued = ee.issue_challenge(other.address.lower())
         with self.assertRaises(ee.EmergencyExitError):
-            ee.issue_challenge(self.address)
+            ee.open_session(self.address, issued['nonce'], _sign(issued['message'], self.wallet.key),
+                            'app-check-token')
+
+    def test_a_wrong_signature_does_not_spend_the_owners_challenge(self):
+        issued = ee.issue_challenge(self.address)
+        with self.assertRaises(ee.EmergencyExitError):
+            ee.open_session(self.address, issued['nonce'], _sign(issued['message'], EthAccount.create().key),
+                            'app-check-token')
+        ee.open_session(self.address, issued['nonce'], _sign(issued['message'], self.wallet.key), 'app-check-token')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_face_runs_for_the_session_user(self):
