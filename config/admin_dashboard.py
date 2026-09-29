@@ -1893,6 +1893,10 @@ confio_admin_site.register(DeviceFingerprint, DeviceFingerprintAdmin)
 confio_admin_site.register(UserDevice, UserDeviceAdmin)
 confio_admin_site.register(AMLCheck, AMLCheckAdmin)
 confio_admin_site.register(IntegrityVerdict, IntegrityVerdictAdmin)
+from security.models import FaceReference, FaceCheck
+from security.admin import FaceReferenceAdmin, FaceCheckAdmin
+confio_admin_site.register(FaceReference, FaceReferenceAdmin)
+confio_admin_site.register(FaceCheck, FaceCheckAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)

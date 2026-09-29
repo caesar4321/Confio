@@ -1286,3 +1286,59 @@ class IntegrityVerdict(models.Model):
             user=user,
             is_emulator=True
         ).exists()
+
+
+class FaceReference(models.Model):
+    """The KYC selfie a face step-up is compared against.
+
+    Didit media URLs are short-lived, so the liveness frame is copied into our
+    own verification bucket when the identity is approved. Only the S3 key is
+    kept here; the image itself never leaves the bucket except to be compared.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='face_references')
+    identity_verification = models.ForeignKey(
+        IdentityVerification, on_delete=models.SET_NULL, null=True, blank=True, related_name='face_references')
+    s3_key = models.CharField(max_length=255)
+    sha256 = models.CharField(max_length=64)
+    source = models.CharField(max_length=40)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'is_active'])]
+
+
+class FaceCheck(models.Model):
+    """One liveness + face-match step-up before moving money.
+
+    The outcome (scores, reason) stays internal: the app only learns pass/fail,
+    so a failure never explains how to pass.
+    """
+
+    PURPOSE_CHOICES = [
+        ('on_ramp', 'Deposit order'),
+        ('withdrawal', 'Withdrawal'),
+        ('emergency_exit', 'Emergency exit'),
+    ]
+    STATUS_CHOICES = [
+        ('created', 'Created'),
+        ('passed', 'Passed'),
+        ('failed', 'Failed'),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='face_checks')
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
+    liveness_session_id = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='created')
+    liveness_confidence = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
+    similarity = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
+    failure_reason = models.CharField(max_length=60, blank=True)
+    face_reference = models.ForeignKey(FaceReference, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    consumed_by = models.CharField(max_length=80, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'status', 'completed_at'])]

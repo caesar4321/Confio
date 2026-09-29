@@ -329,6 +329,14 @@ _BENIGN_DECLINE_NOTES = {
 _DECLINE_SEVERITY = {'error': 0, 'warning': 1, 'information': 2}
 
 
+def _store_face_reference(verification: IdentityVerification, response_payload: dict[str, Any]) -> None:
+    try:
+        from .face_step_up import store_face_reference_from_didit
+        store_face_reference_from_didit(verification, response_payload)
+    except Exception:
+        logger.exception('Could not store face reference for verification %s', verification.pk)
+
+
 def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:
     """The retry hint for a Didit decline, or '' for the generic copy."""
     warnings = []
@@ -1415,6 +1423,12 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         elif review_reason:
             verification.rejected_reason = review_reason
         verification.save()
+        if (status == 'verified' and not verification.is_additional_document
+                and (verification.risk_factors or {}).get('account_type') != 'business'):
+            # Didit's media links expire; keep the selfie the face step-up
+            # compares against. A failure here is logged, not raised: KYC
+            # stands, and the backfill command can copy it later.
+            transaction.on_commit(lambda: _store_face_reference(verification, response_payload))
     if not verification.is_additional_document:
         # An extra document is not "your account was verified"; the flow that
         # asked for it reads the result itself.

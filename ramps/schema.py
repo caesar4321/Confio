@@ -1015,6 +1015,13 @@ class CreateRampOrder(graphene.Mutation):
                     success=False,
                     error='Alcanzaste el límite de intentos de recarga por ahora. Intenta de nuevo más tarde.',
                 )
+        from security.face_step_up import FACE_STEP_UP_NEXT_STEP, require_face_step_up
+        step_up = require_face_step_up(
+            user, 'on_ramp' if normalized_direction == 'ON_RAMP' else 'withdrawal',
+            consumed_by=f'ramp:{normalized_direction.lower()}:{resolved_country_code}',
+        )
+        if step_up:
+            return RampOrderType(success=False, error=step_up, next_step=FACE_STEP_UP_NEXT_STEP)
 
         # cUSD+ savings rail (Koywe 'USDT BSC' delivered to the account's own
         # BSC address). The address is client-derived and registered at
