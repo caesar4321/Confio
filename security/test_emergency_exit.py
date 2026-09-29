@@ -125,6 +125,16 @@ class BannedEmergencyExitTests(TestCase):
         start.assert_called_once_with(self.user, 'emergency_exit')
         complete.assert_called_once_with(self.user, 's-1')
 
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_face_cannot_replay_an_older_passed_check(self):
+        self._ban()
+        self._kyc()
+        token = self._open()['token']
+        with mock.patch.object(ee, 'complete_face_check', return_value=True) as complete:
+            with self.assertRaises(ee.EmergencyExitError):
+                ee.complete_face(token, 'old-withdrawal-session')
+        complete.assert_not_called()
+
     def test_face_needs_a_live_session(self):
         with self.assertRaises(ee.EmergencyExitError):
             ee.start_face('not-a-token', 'app-check-token')
