@@ -668,4 +668,21 @@ contract ConfioPresaleVaultTest is Test {
         vm.prank(user);
         assertEq(v.claim(), 1_000e18);
     }
+    // Regression: a funded, locked buyer allocation must retain an owner
+    // capable of enabling its future claim. Other allocation vaults already
+    // disable renunciation for the same reason.
+    function test_owner_cannot_renounce_and_strand_locked_allocations() public {
+        _sponsoredBuy(user, 100e18, type(uint256).max);
+        confio.mint(address(vault), 100e18);
+        vm.startPrank(owner);
+        vault.setConfioToken(IERC20(address(confio)));
+        vm.expectRevert("renounce disabled");
+        vault.renounceOwnership();
+        assertEq(vault.owner(), owner);
+        vault.unlockClaims();
+        vm.stopPrank();
+        vm.prank(user);
+        assertEq(vault.claim(), 100e18);
+    }
+
 }

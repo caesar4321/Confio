@@ -70,4 +70,19 @@ contract ConfioTokenTest is Test {
         token.transferFrom(user, spender, 10e18);
         assertEq(token.balanceOf(spender), 10e18);
     }
+
+    function test_permit_cannot_be_replayed() public {
+        address spender = makeAddr("spender");
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+            user, spender, 10e18, token.nonces(user), deadline
+        ));
+        bytes32 digest = keccak256(abi.encodePacked(hex"1901", token.DOMAIN_SEPARATOR(), structHash));
+        (uint8 v, bytes32 r, bytes32 sigS) = vm.sign(userKey, digest);
+        token.permit(user, spender, 10e18, deadline, v, r, sigS);
+        vm.expectRevert(); token.permit(user, spender, 10e18, deadline, v, r, sigS);
+        assertEq(token.nonces(user), 1);
+    }
+
 }

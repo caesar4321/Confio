@@ -246,7 +246,10 @@ export const ConfioTokenomicsScreen = () => {
             <DocumentLink label="Whitepaper de Confío" url={CONFIO_DOCUMENTS.whitepaper} />
             <DocumentLink label="Token $CONFIO en BscScan" url={CONFIO_DOCUMENTS.token} />
             <DocumentLink label="Contrato de preventa en BscScan" url={CONFIO_DOCUMENTS.presaleVault} />
-            <DocumentLink label="Bóveda de vesting en BscScan" url={CONFIO_DOCUMENTS.vestingVault} />
+            <DocumentLink label="Vesting del fundador en BscScan" url={CONFIO_DOCUMENTS.founderVestingVault} />
+            <DocumentLink label="Vesting de la co-builder en BscScan" url={CONFIO_DOCUMENTS.coBuilderVestingVault} />
+            <DocumentLink label="Vesting del fondo cultural en BscScan" url={CONFIO_DOCUMENTS.culturalVestingVault} />
+            <DocumentLink label="Bóveda de recompensas en BscScan" url={CONFIO_DOCUMENTS.rewardsVault} />
           </View>
           <Text style={styles.sourcesNote}>
             La edición en inglés del tokenomics es la versión oficial; la versión en español es una traducción.

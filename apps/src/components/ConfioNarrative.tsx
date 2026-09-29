@@ -13,7 +13,11 @@ export const CONFIO_DOCUMENTS = {
   token: 'https://bscscan.com/token/0xCcEb3F6127FA9160a26A1B85857Ca4C9D56B3fa8',
   // Current cUSD vault since 2026-08-31 (BSC_PRESALE_VAULT_ADDRESS in .env.mainnet).
   presaleVault: 'https://bscscan.com/address/0x8c3A1fffcFfE1B07108486Be85C0dC42B4aC0358#code',
-  vestingVault: 'https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code',
+  // Separate allocation vaults, funded on 2026-09-28; vesting clocks remain unstarted.
+  founderVestingVault: 'https://bscscan.com/address/0xb873e4dbFdf25EcB0F663CA9154F7384d780bE7A#code',
+  coBuilderVestingVault: 'https://bscscan.com/address/0xF32ACF2933a51D89e4C6F3a22C432E43b518A129#code',
+  culturalVestingVault: 'https://bscscan.com/address/0x86c2051eb6e882888bd12417642C664D4A2fb4E7#code',
+  rewardsVault: 'https://bscscan.com/address/0x812b8d86952123bED0a33E92a76211cbbACDe730#code',
 };
 
 export const openConfioDocument = async (url: string) => {

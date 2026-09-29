@@ -230,6 +230,26 @@ class PerimeterFlowTests(TestCase):
         self.assertEqual(flow['withdrawn_usd'], Decimal('20000'))
         self.assertIsNotNone(flow['since'])
 
+    def test_country_counts_use_only_completed_live_perimeter_conversions(self):
+        for person in self.people:
+            self.conversion('usdt_to_cusd', '10', direction='entry', user=person)
+            self.conversion('cusd_to_usdt', '5', direction='exit', user=person)
+            for status, _ in Conversion.STATUS_CHOICES:
+                if status != 'COMPLETED':
+                    self.conversion('usdt_to_cusd', '99', direction='entry', user=person, status=status)
+                    self.conversion('cusd_to_usdt', '99', direction='exit', user=person, status=status)
+            self.conversion('usdt_to_cusd', '99', direction='entry', user=person, is_deleted=True)
+            self.conversion('to_savings', '99', direction='internal', user=person)
+        flow = fund_flow_breakdown()
+        self.assertEqual(flow['countries'], [('BR', 10)])
+        self.assertEqual(flow['deposit_count'] + flow['withdrawal_count'], 10)
+
+    def test_failed_users_do_not_qualify_country_for_public_display(self):
+        for person in self.people[:4]:
+            self.conversion('usdt_to_cusd', '10', direction='entry', user=person)
+        self.conversion('usdt_to_cusd', '99', direction='entry', user=self.people[4], status='FAILED')
+        self.assertEqual(fund_flow_breakdown()['countries'], [])
+
     def test_withdrawal_median_still_comes_from_fiat_payouts(self):
         from datetime import timedelta
         self.conversion('cusd_to_usdt', '10', direction='exit')
