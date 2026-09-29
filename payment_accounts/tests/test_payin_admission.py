@@ -320,7 +320,7 @@ class DefaultAdmissionTests(TestCase):
     setUp = AdmissionTests.setUp
 
     def test_non_brazil_receiving_accounts_allow_without_any_user_switch(self):
-        for country, asset in [('PER','PEN'),('MEX','MXN'),('COL','COP'),('ARG','ARS'),
+        for country, asset in [('PER','PEN'),('MEX','MXN'),('ARG','ARS'),
                                ('BOL','BOB'),('CHL','CLP'),('PRY','PYG'),('USA','USD')]:
             with self.subTest(country=country):
                 self.account.country,self.account.asset=country,asset
@@ -330,16 +330,27 @@ class DefaultAdmissionTests(TestCase):
                 self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'enabled')
         self.assertFalse(ThirdPartyPayinSwitch.objects.exists())
 
-    def test_brazil_still_requires_all_three_approvals(self):
-        self.account.country,self.account.asset,self.account.payin_rail='BRA','BRL','PIX'
+    def test_explicit_grant_countries_require_all_three_approvals(self):
+        for iso3, iso2, asset, payin_rail in [('BRA','BR','BRL','PIX'),('COL','CO','COP','BREB')]:
+            with self.subTest(country=iso2):
+                ThirdPartyPayinSwitch.objects.all().delete()
+                self.account.country,self.account.asset,self.account.payin_rail=iso3,asset,payin_rail
+                self.account.save()
+                self.entry.asset=asset
+                for rail, owner, reason in [('',None,'country_not_enabled'),(payin_rail,None,'rail_not_enabled'),
+                                            (payin_rail,self.owner,'user_not_enabled')]:
+                    self.assertEqual(assess(self.entry).reason,reason)
+                    self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'disabled')
+                    ThirdPartyPayinSwitch.objects.create(provider='infinia',country=iso2,rail=rail,
+                        confio_account=owner,enabled=True,evidence='Approved')
+                self.assertTrue(assess(self.entry).allowed)
+                self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'enabled')
+
+    @override_settings(INFINIA_THIRD_PARTY_EXPLICIT_GRANT_COUNTRIES=['BR'])
+    def test_explicit_grant_country_list_is_configurable(self):
+        self.account.country,self.account.asset,self.account.payin_rail='COL','COP','BREB'
         self.account.save()
-        self.entry.asset='BRL'
-        for rail, owner, reason in [('',None,'country_not_enabled'),('PIX',None,'rail_not_enabled'),
-                                    ('PIX',self.owner,'user_not_enabled')]:
-            self.assertEqual(assess(self.entry).reason,reason)
-            self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'disabled')
-            ThirdPartyPayinSwitch.objects.create(provider='infinia',country='BR',rail=rail,
-                confio_account=owner,enabled=True,evidence='Approved')
+        self.entry.asset='COP'
         self.assertTrue(assess(self.entry).allowed)
         self.assertEqual(receiving_capabilities(self.account)['receive_third_party'],'enabled')
 
