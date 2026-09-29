@@ -308,7 +308,13 @@ export const EmergencyExitScreen: React.FC = () => {
       // The ban route: the server confirms the ban (a faked 403 cannot
       // route here) and the exit runs only after Confío Face passes, with
       // no waiting-period fallback.
-      const outcome = await confirmBannedExit(await getActiveEvmWallet(exitCtx), API_URL);
+      let outcome: Awaited<ReturnType<typeof confirmBannedExit>>;
+      try {
+        outcome = await confirmBannedExit(await getActiveEvmWallet(exitCtx), API_URL);
+      } catch (e: any) {
+        Alert.alert('No se puede continuar', e?.message || String(e));
+        return;
+      }
       if (outcome.outcome === 'wait') {
         // No face to check: only an elapsed waiting period opens the exit.
         const waited = await getExitEligibility(emergencyStore, accountKey, { ...es, immediate: false });
@@ -316,7 +322,7 @@ export const EmergencyExitScreen: React.FC = () => {
           await markBanRouteWait(emergencyStore, accountKey);
           Alert.alert(
             'Espera de seguridad',
-            'Tu cuenta está suspendida y no tiene verificación de identidad, así que no podemos confirmar tu rostro. Tu salida se habilita 72 horas después de solicitarla.',
+            'Tu cuenta está suspendida y no tenemos una verificación de identidad con la que confirmar tu rostro. Tu salida se habilita 72 horas después de solicitarla.',
           );
           await evaluate();
           return;
@@ -428,7 +434,7 @@ export const EmergencyExitScreen: React.FC = () => {
           label: 'Tu dinero sigue siendo tuyo',
           sub: es.immediate
             ? 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Confirma con tu rostro que eres tú y podrás retirarlos ahora mismo.'
-            : 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Como tu cuenta no tiene verificación de identidad, la salida se habilita 72 horas después de solicitarla.',
+            : 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Como no podemos confirmar tu rostro, la salida se habilita 72 horas después de solicitarla.',
           tone: 'alert' as const,
         };
       case 'blocked':

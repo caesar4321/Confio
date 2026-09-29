@@ -18,7 +18,7 @@ export type BannedExitOutcome =
   | { outcome: 'passed' }
   /** The server says this account is not banned: use the normal route. */
   | { outcome: 'not_banned' }
-  /** Banned without KYC (no face to check): the normal waiting period applies. */
+  /** Banned with no KYC selfie to compare against: the normal waiting period applies. */
   | { outcome: 'wait' }
   | { outcome: 'failed'; message: string };
 

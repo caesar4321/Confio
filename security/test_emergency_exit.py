@@ -9,7 +9,7 @@ from eth_account import Account as EthAccount
 from eth_account.messages import encode_defunct
 
 from security import emergency_exit as ee
-from security.models import IdentityVerification, UserBan
+from security.models import FaceReference, IdentityVerification, UserBan
 from users.models import Account
 
 
@@ -41,13 +41,17 @@ class BannedEmergencyExitTests(TestCase):
     def _ban(self):
         UserBan.objects.create(user=self.user, ban_type='permanent', reason='ring')
 
-    def _kyc(self):
-        IdentityVerification.all_documents.create(
+    def _kyc(self, selfie=True):
+        verification = IdentityVerification.all_documents.create(
             user=self.user, verified_first_name='Ana', verified_last_name='Perez',
             verified_date_of_birth='1994-07-21', verified_nationality='COL', verified_address='-',
             verified_city='-', verified_state='-', verified_country='COL', document_type='national_id',
             document_number='1065000011', document_issuing_country='COL', status='verified',
             verified_at=timezone.now())
+        if selfie:
+            FaceReference.objects.create(user=self.user, identity_verification=verification,
+                                         s3_key='face-references/x.jpg', sha256='0' * 64,
+                                         source='didit_liveness')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_banned_account_must_show_its_face(self):
@@ -66,6 +70,14 @@ class BannedEmergencyExitTests(TestCase):
         session = self._open()
         self.assertEqual((session['banned'], session['face_required'], session['wait_required'], session['token']),
                          (True, False, True, ''))
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_kycd_banned_account_without_a_stored_selfie_waits_instead(self):
+        # It cannot verify again while banned; a lockout would freeze its funds.
+        self._ban()
+        self._kyc(selfie=False)
+        session = self._open()
+        self.assertEqual((session['face_required'], session['wait_required']), (False, True))
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_a_faked_ban_does_not_route_a_healthy_account(self):
