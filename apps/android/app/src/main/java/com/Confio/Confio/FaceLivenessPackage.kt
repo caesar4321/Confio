@@ -1,12 +1,16 @@
 package com.Confio.Confio
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.core.content.ContextCompat
 import com.amplifyframework.auth.AWSCredentials
 import com.amplifyframework.auth.AWSCredentialsProvider
 import com.amplifyframework.auth.AuthException
@@ -103,6 +107,19 @@ class FaceLivenessActivity : ComponentActivity() {
                 onSuccess.accept(credentials)
             }
         }
+        // The liveness view does not ask for the camera itself: without the
+        // grant it would fail as a capture error instead of explaining why.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            showDetector(sessionId, region, provider)
+        } else {
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                if (granted) showDetector(sessionId, region, provider)
+                else settle("camera_permission_denied", "Camera permission denied")
+            }.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun showDetector(sessionId: String, region: String, provider: AWSCredentialsProvider<AWSCredentials>) {
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF10B981), onPrimary = Color.White)) {
                 FaceLivenessDetector(

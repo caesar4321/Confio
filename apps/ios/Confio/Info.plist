@@ -88,7 +88,7 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>We need access to your camera to scan QR codes</string>
+	<string>Confío usa la cámara para escanear códigos QR y para confirmar con tu rostro que eres tú antes de mover tu dinero.</string>
 	<key>NFCReaderUsageDescription</key>
 	<string>Confío necesita usar NFC para leer chips de pasaportes o documentos compatibles durante la verificación.</string>
 	<key>NSMicrophoneUsageDescription</key>

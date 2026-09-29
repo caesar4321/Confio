@@ -81,6 +81,24 @@ export const isFaceStepUpRequired = (errorOrNextStep?: string | null): boolean =
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// A hung request must never leave the Confío Face modal spinning.
+const START_TIMEOUT_MS = 20000;
+const COMPLETE_TIMEOUT_MS = 15000;
+const CAMERA_DENIED_MESSAGE =
+  'Confío necesita acceso a la cámara para confirmar que eres tú. Actívalo en los ajustes de tu teléfono.';
+
+// Ours (the native modules), and the AWS view's own on Android.
+const CAMERA_DENIED_CODES = new Set(['camera_permission_denied', 'CameraPermissionDeniedException']);
+
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
+
 /** Server session → native capture → server grade. Never throws. */
 export const runFaceCapture = async (
   purpose: FaceCheckPurpose,
@@ -93,7 +111,8 @@ export const runFaceCapture = async (
   const { apolloClient } = await import('../apollo/client');
   let start;
   try {
-    const { data } = await apolloClient.mutate({ mutation: START, variables: { purpose } });
+    const { data } = await withTimeout(
+      apolloClient.mutate({ mutation: START, variables: { purpose } }), START_TIMEOUT_MS);
     start = data?.startFaceCheck;
   } catch {
     return { outcome: 'unavailable', message: 'Revisa tu conexión e intenta de nuevo.' };
@@ -110,6 +129,7 @@ export const runFaceCapture = async (
     });
   } catch (error: any) {
     if (error?.code === 'UserCancelledException') return { outcome: 'cancelled' };
+    if (CAMERA_DENIED_CODES.has(error?.code)) return { outcome: 'unavailable', message: CAMERA_DENIED_MESSAGE };
     // A capture error still lets the server record the session as failed.
   }
   onGrading?.();
@@ -117,10 +137,10 @@ export const runFaceCapture = async (
   // and the same call is safe to repeat.
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      const { data } = await apolloClient.mutate({
+      const { data } = await withTimeout(apolloClient.mutate({
         mutation: COMPLETE,
         variables: { sessionId: start.sessionId },
-      });
+      }), COMPLETE_TIMEOUT_MS);
       const result = data?.completeFaceCheck;
       if (result?.success) {
         return result.passed ? { outcome: 'passed' } : { outcome: 'failed', message: result.error };
@@ -129,7 +149,7 @@ export const runFaceCapture = async (
         return { outcome: 'failed', message: result?.error };
       }
     } catch {
-      // Network blip: retry below.
+      // Network blip or timeout: retry below.
     }
     await sleep(1500);
   }
