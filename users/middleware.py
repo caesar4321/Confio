@@ -28,7 +28,7 @@ class AuthTokenVersionMiddleware:
         # Skip for admin and static/media URLs
         # Skip for admin, account (2FA), and static/media URLs
         if (request.path.startswith('/admin/') or 
-            request.path.startswith('/confio-control-panel/') or 
+            request.path.startswith(f'/{settings.ADMIN_PATH}/') or
             request.path.startswith('/account/') or 
             request.path.startswith('/static/') or 
             request.path.startswith('/media/')):

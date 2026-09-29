@@ -1,15 +1,15 @@
 # Local payment monitoring
 
-Use `/confio-control-panel/payment_accounts/infiniajourney/` for end-to-end
+Use `/<ADMIN_PATH>/payment_accounts/infiniajourney/` for end-to-end
 incoming and outgoing Infinia transfers. The list is read-only: an operator must
 not mark a transfer complete by editing a state field. Related provider
 operations, bridge, original receipt and wallet conversion remain available on
 the detail page.
 
-Use `/confio-control-panel/payment_accounts/automaticpayin/` for received fiat
+Use `/<ADMIN_PATH>/payment_accounts/automaticpayin/` for received fiat
 that has not started a transfer, including review reasons. A started automatic
 pay-in is not proof of wallet delivery. Admission decisions remain under
-`/confio-control-panel/payment_accounts/payinadmission/`.
+`/<ADMIN_PATH>/payment_accounts/payinadmission/`.
 
 The main dashboard adds direction and **local account country** filters. These
 are not the user's phone country or nationality. Completion rate uses started

@@ -29,7 +29,12 @@ const forceAppCheckDebugOff =
   process.env.CONFIO_GRADLE_BUNDLE_RELEASE === 'true' ||
   /^CONFIO_GRADLE_BUNDLE_RELEASE=true$/m.test(gradleContext);
 
-if (forceAppCheckDebugOff) {
+const releaseConfig = envName === 'mainnet' || forceAppCheckDebugOff ||
+  process.env.NODE_ENV === 'production' || process.env.BABEL_ENV === 'production' ||
+  /release/i.test(process.env.CONFIGURATION || '');
+
+if (releaseConfig) {
+  process.env.ALLOW_APP_CHECK_DEBUG = 'false';
   resolvedDotenvContents = setEnvValue(
     resolvedDotenvContents,
     'ALLOW_APP_CHECK_DEBUG',
@@ -43,14 +48,24 @@ if (forceAppCheckDebugOff) {
   );
 }
 
+// A disabled debug provider does not make its credential safe to bundle.
+// Strip both tokens from every mainnet/release generated environment.
+if (releaseConfig) {
+  for (const key of ['FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID', 'FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS']) {
+    process.env[key] = ''; // react-native-dotenv also reads shell variables.
+    resolvedDotenvContents = setEnvValue(resolvedDotenvContents, key, '');
+  }
+}
+
 const generatedDir = path.resolve(__dirname, '.generated');
 const generatedDotenvPath = path.join(generatedDir, `.env.${envName}.generated`);
 
 fs.mkdirSync(generatedDir, { recursive: true });
-fs.writeFileSync(generatedDotenvPath, resolvedDotenvContents);
+fs.writeFileSync(generatedDotenvPath, resolvedDotenvContents, {mode: 0o600});
+fs.chmodSync(generatedDotenvPath, 0o600);
 
 console.log(
-  `[babel] Using ${path.basename(dotenvPath)} for react-native-dotenv (CONFIO_ENV=${envName}, ALLOW_APP_CHECK_DEBUG=${forceAppCheckDebugOff ? 'forced-false-for-bundleRelease' : process.env.ALLOW_APP_CHECK_DEBUG ?? 'file'})`
+  `[babel] Using ${path.basename(dotenvPath)} for react-native-dotenv (CONFIO_ENV=${envName}, ALLOW_APP_CHECK_DEBUG=${releaseConfig ? 'forced-false-for-release' : process.env.ALLOW_APP_CHECK_DEBUG ?? 'file'})`
 );
 
 module.exports = function babelConfig(api) {
