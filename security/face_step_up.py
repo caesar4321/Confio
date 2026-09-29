@@ -13,6 +13,11 @@ Region: Rekognition has no endpoint in eu-central-2, so the comparison runs in
 eu-central-1 (Frankfurt) on bytes sent per call; nothing is stored there
 (AuditImagesLimit=0, no OutputConfig). The selfie itself stays in the
 eu-central-2 verification bucket.
+
+Server enforcement covers the server-mediated money paths (ramp orders,
+sponsored BSC sends). The emergency exit is signed and broadcast by the app
+itself, by design without Confío's servers; there the app enforces the
+check, and no server can.
 """
 import hashlib
 import json
@@ -24,6 +29,7 @@ from decimal import Decimal
 import boto3
 import requests
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
@@ -38,24 +44,45 @@ FACE_MIN_SIMILARITY = Decimal('90')
 SESSION_MAX_AGE = timedelta(minutes=10)
 ON_RAMP_CHECK_MAX_AGE = timedelta(minutes=10)
 WITHDRAWAL_WINDOW = timedelta(minutes=15)
+MAX_OPEN_SESSIONS = 3
+FAILURE_WINDOW = timedelta(hours=1)
+MAX_FAILURES_PER_WINDOW = 5
 REFERENCE_PREFIX = 'face-references'
 MAX_REFERENCE_BYTES = 5 * 1024 * 1024
+LIVENESS_TERMINAL_STATUSES = {'SUCCEEDED', 'FAILED', 'EXPIRED'}
 
 FACE_STEP_UP_NEXT_STEP = 'face_check'
 FACE_STEP_UP_MESSAGE = 'Confirma que eres tú con tu rostro para continuar.'
 NO_REFERENCE_MESSAGE = 'Necesitamos actualizar tu verificación de identidad antes de continuar.'
+UNAVAILABLE_MESSAGE = 'La verificación con tu rostro no está disponible por ahora.'
+TOO_MANY_MESSAGE = 'Demasiados intentos. Intenta de nuevo más tarde.'
+PENDING_MESSAGE = 'Todavía estamos procesando tu verificación. Intenta de nuevo en unos segundos.'
 
 
 class FaceStepUpError(Exception):
     """A step-up could not start or finish; the message is safe to show."""
 
 
-def _setting(name, default):
-    return getattr(settings, name, default)
+class FaceStepUpPending(FaceStepUpError):
+    """The liveness session is not finished yet; the same call can be retried."""
+
+
+def _setting(name, default, cast=None):
+    """A Django setting when defined, else the environment (settings.py is
+    git-crypted, so these are read here, like other operational toggles)."""
+    if hasattr(settings, name):
+        return getattr(settings, name)
+    from decouple import config
+    return config(name, default=default, cast=cast) if cast else config(name, default=default)
 
 
 def step_up_enabled() -> bool:
-    return bool(_setting('FACE_STEP_UP_ENABLED', False))
+    return bool(_setting('FACE_STEP_UP_ENABLED', False, bool))
+
+
+def checks_available() -> bool:
+    """Sessions may be opened while enforcement is still off (app rollout)."""
+    return step_up_enabled() or bool(_setting('FACE_STEP_UP_AVAILABLE', False, bool))
 
 
 def _rekognition():
@@ -63,7 +90,11 @@ def _rekognition():
 
 
 def _s3():
-    return boto3.client('s3', **_build_s3_client_params(_setting('AWS_S3_REGION', None) or 'eu-central-2'))
+    return boto3.client('s3', **_build_s3_client_params(_setting('AWS_S3_REGION', 'eu-central-2') or 'eu-central-2'))
+
+
+def _lock_user(user_id):
+    get_user_model().objects.select_for_update().filter(pk=user_id).first()
 
 
 # ── Reference selfie ────────────────────────────────────────────────────────
@@ -78,37 +109,68 @@ def _didit_selfie_url(response_payload: dict) -> str:
     return ''
 
 
-def store_face_reference_from_didit(verification, response_payload: dict) -> FaceReference | None:
-    """Copy the approved KYC selfie into our bucket. Idempotent per verification."""
-    existing = FaceReference.objects.filter(identity_verification=verification, is_active=True).first()
-    if existing:
-        return existing
-    url = _didit_selfie_url(response_payload)
-    if not url:
-        logger.error('Face reference missing from Didit decision: verification=%s', verification.pk)
-        return None
-    response = requests.get(url, timeout=20)
-    response.raise_for_status()
+def _download_selfie(url: str) -> tuple[bytes, str]:
+    """Fetch a signed Didit media URL. Errors never carry the URL: it is a
+    live credential for a biometric image."""
+    try:
+        response = requests.get(url, timeout=20)
+    except requests.RequestException as exc:
+        raise FaceStepUpError(f'Selfie download failed ({type(exc).__name__})') from None
+    if response.status_code != 200:
+        raise FaceStepUpError(f'Selfie download failed (HTTP {response.status_code})')
     body = response.content
     content_type = response.headers.get('Content-Type', '')
     if not body or len(body) > MAX_REFERENCE_BYTES or not content_type.startswith('image/'):
         raise FaceStepUpError('Unexpected Didit selfie payload')
+    return body, content_type
+
+
+def _newer_reference_exists(verification) -> bool:
+    active = FaceReference.objects.filter(
+        user_id=verification.user_id, is_active=True).select_related('identity_verification').first()
+    if not active:
+        return False
+    if active.identity_verification_id == verification.pk:
+        return True
+    other = active.identity_verification
+    mine, theirs = verification.verified_at, getattr(other, 'verified_at', None)
+    # A replayed, older approval must not displace the current reference.
+    return bool(theirs and mine and theirs >= mine)
+
+
+def store_face_reference_from_didit(verification, response_payload: dict) -> FaceReference | None:
+    """Copy the approved KYC selfie into our bucket. Idempotent and replay-safe."""
+    if _newer_reference_exists(verification):
+        return FaceReference.objects.filter(user_id=verification.user_id, is_active=True).first()
+    url = _didit_selfie_url(response_payload)
+    if not url:
+        logger.error('Face reference missing from Didit decision: verification=%s', verification.pk)
+        return None
+    body, content_type = _download_selfie(url)
     extension = 'png' if 'png' in content_type else 'jpg'
     key = f'{REFERENCE_PREFIX}/{verification.user_id}/{uuid.uuid4().hex}.{extension}'
-    _s3().put_object(
-        Bucket=_resolve_bucket(None), Key=key, Body=body, ContentType=content_type,
-        ServerSideEncryption='AES256',
-    )
+    bucket = _resolve_bucket(None)
+    s3 = _s3()
+    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type, ServerSideEncryption='AES256')
     with transaction.atomic():
-        FaceReference.objects.filter(user_id=verification.user_id, is_active=True).update(is_active=False)
-        return FaceReference.objects.create(
-            user_id=verification.user_id, identity_verification=verification, s3_key=key,
-            sha256=hashlib.sha256(body).hexdigest(), source='didit_liveness',
-        )
+        _lock_user(verification.user_id)
+        if _newer_reference_exists(verification):
+            stored = None
+        else:
+            FaceReference.objects.filter(user_id=verification.user_id, is_active=True).update(is_active=False)
+            stored = FaceReference.objects.create(
+                user_id=verification.user_id, identity_verification=verification, s3_key=key,
+                sha256=hashlib.sha256(body).hexdigest(), source='didit_liveness',
+            )
+    if stored is None:
+        # Lost the race to a concurrent or newer approval: drop our copy.
+        s3.delete_object(Bucket=bucket, Key=key)
+        return FaceReference.objects.filter(user_id=verification.user_id, is_active=True).first()
+    return stored
 
 
 def _active_reference(user) -> FaceReference | None:
-    return FaceReference.objects.filter(user=user, is_active=True).order_by('-created_at').first()
+    return FaceReference.objects.filter(user=user, is_active=True).first()
 
 
 def _reference_bytes(reference: FaceReference) -> bytes:
@@ -119,14 +181,22 @@ def _reference_bytes(reference: FaceReference) -> bytes:
 # ── Liveness session ────────────────────────────────────────────────────────
 
 def _client_credentials(user_id: int) -> dict:
-    """Credentials that can do exactly one thing: stream a liveness video."""
+    """Credentials that can do exactly one thing: stream a liveness video.
+
+    StartFaceLivenessSession has no resource-level scoping, so '*' is the
+    narrowest resource AWS allows.
+    """
+    role_arn = _setting('FACE_LIVENESS_CLIENT_ROLE_ARN', '')
+    if not role_arn:
+        logger.error('FACE_LIVENESS_CLIENT_ROLE_ARN is not configured')
+        raise FaceStepUpError(UNAVAILABLE_MESSAGE)
     region = _setting('FACE_REKOGNITION_REGION', REKOGNITION_REGION)
     policy = {
         'Version': '2012-10-17',
         'Statement': [{'Effect': 'Allow', 'Action': 'rekognition:StartFaceLivenessSession', 'Resource': '*'}],
     }
     creds = boto3.client('sts', region_name=region).assume_role(
-        RoleArn=_setting('FACE_LIVENESS_CLIENT_ROLE_ARN', ''),
+        RoleArn=role_arn,
         RoleSessionName=f'face-liveness-{user_id}',
         DurationSeconds=900,
         Policy=json.dumps(policy),
@@ -143,18 +213,32 @@ def _client_credentials(user_id: int) -> dict:
 def start_face_check(user, purpose: str) -> dict:
     if purpose not in dict(FaceCheck.PURPOSE_CHOICES):
         raise FaceStepUpError('Propósito no válido.')
+    if not checks_available():
+        raise FaceStepUpError(UNAVAILABLE_MESSAGE)
     if not _active_reference(user):
         raise FaceStepUpError(NO_REFERENCE_MESSAGE)
-    session = _rekognition().create_face_liveness_session(
-        ClientRequestToken=uuid.uuid4().hex,
-        Settings={'AuditImagesLimit': 0},
-    )
-    check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'])
-    return {'session_id': check.liveness_session_id, **_client_credentials(user.id)}
+    now = timezone.now()
+    with transaction.atomic():
+        _lock_user(user.id)
+        checks = FaceCheck.objects.filter(user=user)
+        if checks.filter(status='failed', completed_at__gte=now - FAILURE_WINDOW).count() >= MAX_FAILURES_PER_WINDOW:
+            raise FaceStepUpError(TOO_MANY_MESSAGE)
+        if checks.filter(status='created', created_at__gte=now - SESSION_MAX_AGE).count() >= MAX_OPEN_SESSIONS:
+            raise FaceStepUpError(TOO_MANY_MESSAGE)
+        credentials = _client_credentials(user.id)
+        session = _rekognition().create_face_liveness_session(
+            ClientRequestToken=uuid.uuid4().hex,
+            Settings={'AuditImagesLimit': 0},
+        )
+        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'])
+    return {'session_id': check.liveness_session_id, **credentials}
 
 
 def complete_face_check(user, session_id: str) -> bool:
-    """Grade the liveness session against the KYC selfie. Returns pass/fail only."""
+    """Grade the liveness session against the KYC selfie. Returns pass/fail only.
+
+    Raises FaceStepUpPending while AWS is still processing the video.
+    """
     with transaction.atomic():
         check = FaceCheck.objects.select_for_update().filter(
             user=user, liveness_session_id=session_id).first()
@@ -162,14 +246,20 @@ def complete_face_check(user, session_id: str) -> bool:
             raise FaceStepUpError('Sesión no encontrada.')
         if check.status != 'created':
             return check.status == 'passed'
-        if timezone.now() - check.created_at > SESSION_MAX_AGE:
-            return _finish(check, False, 'session_expired')
+        expired = timezone.now() - check.created_at > SESSION_MAX_AGE
         reference = _active_reference(user)
         if not reference:
             return _finish(check, False, 'no_reference')
         result = _rekognition().get_face_liveness_session_results(SessionId=session_id)
-        if result.get('Status') != 'SUCCEEDED':
-            return _finish(check, False, f"liveness_{str(result.get('Status')).lower()}")
+        status = str(result.get('Status') or '').upper()
+        if status not in LIVENESS_TERMINAL_STATUSES:
+            if expired:
+                return _finish(check, False, 'session_expired')
+            raise FaceStepUpPending(PENDING_MESSAGE)
+        if status != 'SUCCEEDED':
+            return _finish(check, False, f'liveness_{status.lower()}')
+        if expired:
+            return _finish(check, False, 'session_expired')
         confidence = Decimal(str(result.get('Confidence') or 0))
         live_bytes = ((result.get('ReferenceImage') or {}).get('Bytes')) or b''
         check.liveness_confidence = confidence
@@ -201,32 +291,57 @@ def _finish(check: FaceCheck, passed: bool, reason: str) -> bool:
 
 
 # ── Enforcement ─────────────────────────────────────────────────────────────
+#
+# A deposit order spends its own fresh check (one face, one order). A
+# withdrawal accepts any passed check from the last few minutes, so a
+# deposit-then-withdraw sitting asks for the face once.
 
-def require_face_step_up(user, purpose: str, consumed_by: str = '') -> str:
-    """'' when the action may proceed, else the message to show.
+def _usable_on_ramp_checks(user, now):
+    return FaceCheck.objects.filter(
+        user=user, status='passed', purpose='on_ramp', consumed_at__isnull=True,
+        completed_at__gte=now - ON_RAMP_CHECK_MAX_AGE,
+    )
 
-    A deposit order spends its own fresh check (one face, one order). A
-    withdrawal accepts any passed check from the last few minutes, so a
-    deposit-then-withdraw sitting asks for the face once.
-    """
+
+def missing_face_step_up(user, purpose: str) -> str:
+    """'' when a usable check exists (nothing is spent), else the message."""
     if not step_up_enabled():
         return ''
     now = timezone.now()
-    passed = FaceCheck.objects.filter(user=user, status='passed')
     if purpose == 'on_ramp':
-        with transaction.atomic():
-            check = passed.select_for_update().filter(
-                purpose='on_ramp', consumed_at__isnull=True,
-                completed_at__gte=now - ON_RAMP_CHECK_MAX_AGE,
-            ).order_by('-completed_at').first()
-            if not check:
-                return FACE_STEP_UP_MESSAGE
-            check.consumed_at = now
-            check.consumed_by = consumed_by[:80]
-            check.save(update_fields=['consumed_at', 'consumed_by'])
-            return ''
+        return '' if _usable_on_ramp_checks(user, now).exists() else FACE_STEP_UP_MESSAGE
     if purpose == 'withdrawal':
-        if passed.filter(completed_at__gte=now - WITHDRAWAL_WINDOW).exists():
-            return ''
-        return FACE_STEP_UP_MESSAGE
+        recent = FaceCheck.objects.filter(user=user, status='passed', completed_at__gte=now - WITHDRAWAL_WINDOW)
+        return '' if recent.exists() else FACE_STEP_UP_MESSAGE
     raise ValueError(f'Unknown step-up purpose {purpose}')
+
+
+def claim_on_ramp_check(user, consumed_by: str):
+    """Spend one fresh deposit check right before the provider order.
+
+    Returns (ok, check_id). ok is True with check_id None when enforcement is
+    off. Release the claim only when the provider definitely made no order.
+    """
+    if not step_up_enabled():
+        return True, None
+    now = timezone.now()
+    with transaction.atomic():
+        check = _usable_on_ramp_checks(user, now).select_for_update().order_by('-completed_at').first()
+        if not check:
+            return False, None
+        check.consumed_at = now
+        check.consumed_by = consumed_by[:80]
+        check.save(update_fields=['consumed_at', 'consumed_by'])
+        return True, check.pk
+
+
+def release_on_ramp_check(check_id) -> None:
+    if check_id:
+        FaceCheck.objects.filter(pk=check_id).update(consumed_at=None, consumed_by='')
+
+
+def require_face_step_up(user, purpose: str) -> str:
+    """Gate for withdrawal-type actions that spend nothing."""
+    if purpose != 'withdrawal':
+        raise ValueError('Deposit orders must claim a check with claim_on_ramp_check')
+    return missing_face_step_up(user, purpose)

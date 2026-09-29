@@ -185,6 +185,9 @@ class CreateInfiniaJourney(graphene.Mutation):
             if is_new_send and destination is not None:
                 from .local_money import require_current_destination
                 require_current_destination(destination)
+            if is_new_send:
+                from .schema import _require_face_step_up
+                _require_face_step_up(owner)
             # The monthly allowance is checked inside create_journey, under the owner lock.
             row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
                                  bridge=bridge, credit=credit, destination=destination, **kwargs)

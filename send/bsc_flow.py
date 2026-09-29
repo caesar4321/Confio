@@ -218,6 +218,20 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     return None, None, None, 'recipient_required'
 
 
+def _external_send_step_up(user, sender_business, recipient_type, activation_id) -> str:
+    """'' or the face step-up message for a send leaving Confío.
+
+    Only personal senders paying an external address: a Confío recipient
+    faces the same check when they take the money out, business accounts are
+    governed by KYB and limits (cashiers, API payers), and the server-only
+    activation fee goes to Confío itself.
+    """
+    if sender_business is not None or recipient_type != 'external' or activation_id:
+        return ''
+    from security.face_step_up import require_face_step_up
+    return require_face_step_up(user, 'withdrawal')
+
+
 def _lock_internal_recipient_account(recipient_user, recipient_business):
     """Lock the account whose BSC address is about to be snapshotted.
 
@@ -316,6 +330,12 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         if recipient_user is not None:
             _notify_recipient_needs_app(recipient_user, user)
         return {'success': False, 'error': 'recipient_no_bsc_address'}
+    step_up = _external_send_step_up(
+        user, sender_business,
+        'business' if recipient_business else 'user' if recipient_user else 'external',
+        activation_id)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     # Server-only activation intent: collect cUSD at the snapshotted treasury
     # without treating it as an external USDT exit. Never exposed on generic GraphQL sends.
@@ -968,6 +988,13 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
     meta = json.loads(send_tx.bsc_calls_json or '{}')
     kind = meta.get('kind') or 'send_usdt'
     calls = meta.get('calls') or []
+
+    # Rechecked here: a send prepared earlier (or before enforcement) must
+    # not leave once the face window has lapsed.
+    step_up = _external_send_step_up(
+        user, send_tx.sender_business, send_tx.recipient_type, meta.get('activation_id'))
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     try:
         _validate_send_batch(calls, send_tx, meta)

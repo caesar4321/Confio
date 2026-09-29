@@ -1307,6 +1307,10 @@ class FaceReference(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['user', 'is_active'])]
+        constraints = [
+            models.UniqueConstraint(fields=['user'], condition=Q(is_active=True),
+                                    name='face_reference_one_active_per_user'),
+        ]
 
 
 class FaceCheck(models.Model):
