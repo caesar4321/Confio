@@ -238,6 +238,58 @@ def _enforce_brazilian_cpf_database_validation(
     return 'pending'
 
 
+# Didit snaps the front camera while the rear camera shoots the ID. Its
+# workflow only compares the ID portrait with the selfie, so it approves a
+# session where someone else holds the phone and the holder only appears for
+# the selfie — the account-opening-for-others pattern. Below this similarity
+# the person capturing the document is not the selfie's person.
+DOCUMENT_CAPTURE_HOLDER_MIN_SIMILARITY = 20.0
+DOCUMENT_CAPTURE_HOLDER_REJECTION = (
+    'La persona que fotografió el documento no coincide con la selfie. '
+    'Repite la verificación tú mismo, desde tu propio teléfono.'
+)
+
+
+def _document_capture_holder_scores(response_payload: dict[str, Any]) -> list[float]:
+    checks = response_payload.get('id_verifications')
+    id_check = checks[0] if isinstance(checks, list) and checks and isinstance(checks[0], dict) else {}
+    scores = []
+    for key in ('front_image_camera_front_face_match_score', 'back_image_camera_front_face_match_score'):
+        value = id_check.get(key)
+        if value is None:
+            continue
+        try:
+            scores.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return scores
+
+
+def _enforce_document_capture_holder(
+    *,
+    status: str,
+    response_payload: dict[str, Any],
+    risk_factors: dict[str, Any],
+) -> tuple[str, str]:
+    """Reject an approval whose document was captured by someone else.
+
+    Only a score Didit actually computed counts: no face in the front-camera
+    frame yields no score, which is common and not evidence of anything.
+    """
+    if status != 'verified':
+        return status, ''
+    scores = _document_capture_holder_scores(response_payload)
+    if not scores or max(scores) >= DOCUMENT_CAPTURE_HOLDER_MIN_SIMILARITY:
+        return status, ''
+    risk_factors['document_capture_holder'] = {
+        'result': 'mismatch',
+        'best_similarity': max(scores),
+        'threshold': DOCUMENT_CAPTURE_HOLDER_MIN_SIMILARITY,
+        'rejected_at': timezone.now().isoformat(),
+    }
+    return 'rejected', DOCUMENT_CAPTURE_HOLDER_REJECTION
+
+
 def _safe_json_loads(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -1267,7 +1319,11 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         extracted=extracted,
         risk_factors=risk_factors,
     )
-    review_reason = ''
+    status, review_reason = _enforce_document_capture_holder(
+        status=status,
+        response_payload=response_payload,
+        risk_factors=risk_factors,
+    )
     from django.db import transaction
     # One per-user lock for everything that records a Didit result: extra
     # documents of different people can never both pass, and a registration
