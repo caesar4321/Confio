@@ -4,11 +4,12 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from eth_account import Account as EthAccount
 from eth_account.messages import encode_defunct
 
 from security import emergency_exit as ee
-from security.models import UserBan
+from security.models import IdentityVerification, UserBan
 from users.models import Account
 
 
@@ -40,24 +41,42 @@ class BannedEmergencyExitTests(TestCase):
     def _ban(self):
         UserBan.objects.create(user=self.user, ban_type='permanent', reason='ring')
 
+    def _kyc(self):
+        IdentityVerification.all_documents.create(
+            user=self.user, verified_first_name='Ana', verified_last_name='Perez',
+            verified_date_of_birth='1994-07-21', verified_nationality='COL', verified_address='-',
+            verified_city='-', verified_state='-', verified_country='COL', document_type='national_id',
+            document_number='1065000011', document_issuing_country='COL', status='verified',
+            verified_at=timezone.now())
+
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_banned_account_must_show_its_face(self):
         self._ban()
+        self._kyc()
         session = self._open()
-        self.assertEqual((session['banned'], session['face_required']), (True, True))
+        self.assertEqual((session['banned'], session['face_required'], session['wait_required']), (True, True, False))
         self.assertTrue(session['token'])
         self.app_check.assert_called_with(
             user=self.user, token='app-check-token', action=ee.APP_CHECK_ACTION, should_enforce=True)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_banned_account_without_kyc_waits_instead(self):
+        # No face to check, and it is what a ring's pooling account looks like.
+        self._ban()
+        session = self._open()
+        self.assertEqual((session['banned'], session['face_required'], session['wait_required'], session['token']),
+                         (True, False, True, ''))
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_a_faked_ban_does_not_route_a_healthy_account(self):
         session = self._open()
         self.assertEqual((session['banned'], session['face_required'], session['token']), (False, False, ''))
 
-    def test_no_face_while_enforcement_is_off(self):
+    def test_nothing_is_asked_while_enforcement_is_off(self):
         self._ban()
+        self._kyc()
         session = self._open()
-        self.assertEqual((session['banned'], session['face_required']), (True, False))
+        self.assertEqual((session['banned'], session['face_required'], session['wait_required']), (True, False, False))
 
     def test_only_the_accounts_own_key_opens_a_session(self):
         with self.assertRaises(ee.EmergencyExitError):
@@ -85,6 +104,7 @@ class BannedEmergencyExitTests(TestCase):
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_face_runs_for_the_session_user(self):
         self._ban()
+        self._kyc()
         token = self._open()['token']
         with mock.patch.object(ee, 'start_face_check', return_value={'session_id': 's-1'}) as start, \
                 mock.patch.object(ee, 'complete_face_check', return_value=True) as complete:
@@ -100,6 +120,7 @@ class BannedEmergencyExitTests(TestCase):
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_endpoints_need_no_jwt(self):
         self._ban()
+        self._kyc()
         issued = self.client.post('/api/emergency-exit/challenge/', json.dumps({'address': self.address}),
                                   content_type='application/json').json()
         response = self.client.post('/api/emergency-exit/session/', json.dumps({

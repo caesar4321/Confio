@@ -292,6 +292,23 @@ export const waiveFaceWithNewCooloff = async (store: KVStore, accountKey: string
   await store.set(faceWaiverKey(accountKey), String(requestedAtSec));
 };
 
+const banWaitKey = (accountKey: string) => `confio_emergency_ban_wait_v1:${accountKey}`;
+
+/**
+ * A banned account that never did KYC has no face to check, so the server
+ * sends it through the normal waiting period instead of the immediate ban
+ * route. Remembered locally so the screen shows the wait; it can only slow
+ * the exit, and the server is asked again before anything is sent.
+ */
+export const markBanRouteWait = async (store: KVStore, accountKey: string): Promise<void> =>
+  store.set(banWaitKey(accountKey), '1');
+
+export const hasBanRouteWait = async (store: KVStore, accountKey: string): Promise<boolean> =>
+  (await store.get(banWaitKey(accountKey))) === '1';
+
+export const clearBanRouteWait = async (store: KVStore, accountKey: string): Promise<void> =>
+  store.del(banWaitKey(accountKey));
+
 /** True when the current unlock was served as a face waiver. */
 export const hasFaceWaiver = async (store: KVStore, accountKey: string): Promise<boolean> => {
   const [waiver, cooloff] = await Promise.all([

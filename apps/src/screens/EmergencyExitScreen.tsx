@@ -47,7 +47,8 @@ import {
 import {
   evaluateEmergencyState, getExitEligibility, requestExitCooloff, cancelExitCooloff,
   consumeExitCooloff, devElapseCooloff, ReachabilityResult, ExitEligibility,
-  NORMAL_COOLOFF_SECONDS, hasFaceWaiver, waiveFaceWithNewCooloff } from '../services/emergencyExit/reachability';
+  NORMAL_COOLOFF_SECONDS, hasFaceWaiver, waiveFaceWithNewCooloff,
+  markBanRouteWait, hasBanRouteWait, clearBanRouteWait } from '../services/emergencyExit/reachability';
 import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
   installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS, BscExitResult, BscExitStep,
@@ -172,7 +173,11 @@ export const EmergencyExitScreen: React.FC = () => {
   const evaluate = useCallback(async () => {
     setEvaluating(true);
     try {
-      const state = await evaluateEmergencyState(emergencyStore, API_URL);
+      let state = await evaluateEmergencyState(emergencyStore, API_URL);
+      if (state.state === 'banned' && accountKey && (await hasBanRouteWait(emergencyStore, accountKey))) {
+        // Banned without KYC: the normal waiting period, still prominent.
+        state = { ...state, immediate: false };
+      }
       setEs(state);
       // Immediate states (ban, 72h outage) don't touch the per-account
       // cooloff key, so don't gate them on the account being loaded — a
@@ -304,8 +309,22 @@ export const EmergencyExitScreen: React.FC = () => {
       // route here) and the exit runs only after Confío Face passes, with
       // no waiting-period fallback.
       const outcome = await confirmBannedExit(await getActiveEvmWallet(exitCtx), API_URL);
+      if (outcome.outcome === 'wait') {
+        // No face to check: only an elapsed waiting period opens the exit.
+        const waited = await getExitEligibility(emergencyStore, accountKey, { ...es, immediate: false });
+        if (!waited.eligible) {
+          await markBanRouteWait(emergencyStore, accountKey);
+          Alert.alert(
+            'Espera de seguridad',
+            'Tu cuenta está suspendida y no tiene verificación de identidad, así que no podemos confirmar tu rostro. Tu salida se habilita 72 horas después de solicitarla.',
+          );
+          await evaluate();
+          return;
+        }
+      }
       if (outcome.outcome === 'not_banned') {
         await clearBanSignal(emergencyStore);
+        await clearBanRouteWait(emergencyStore, accountKey);
         Alert.alert('Tu cuenta está activa', 'Confío confirmó que tu cuenta no está suspendida. Revisa de nuevo tu salida.');
         await evaluate();
         return;
@@ -327,7 +346,10 @@ export const EmergencyExitScreen: React.FC = () => {
         const status = await fetchFaceStepUpStatus();
         // An unreadable status must use the same face-or-wait path; only an
         // explicit disabled response skips it.
-        faceOk = status?.enabled === false || (await ensureFaceCheck('emergency_exit'));
+        // Nor is it asked of users who never did KYC (there is no face to
+        // check): for them the waiting period is the whole normal route.
+        faceOk = status?.enabled === false || status?.required === false
+          || (await ensureFaceCheck('emergency_exit'));
       }
       if (!faceOk) {
         Alert.alert(
@@ -404,7 +426,9 @@ export const EmergencyExitScreen: React.FC = () => {
       case 'banned':
         return {
           label: 'Tu dinero sigue siendo tuyo',
-          sub: 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Confirma con tu rostro que eres tú y podrás retirarlos ahora mismo.',
+          sub: es.immediate
+            ? 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Confirma con tu rostro que eres tú y podrás retirarlos ahora mismo.'
+            : 'Confío suspendió tu cuenta, pero tus fondos siguen siendo tuyos. Como tu cuenta no tiene verificación de identidad, la salida se habilita 72 horas después de solicitarla.',
           tone: 'alert' as const,
         };
       case 'blocked':
