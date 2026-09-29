@@ -37,6 +37,7 @@ from ramps.koywe import (
     RAMP_USDC_ALGORAND_SYMBOL,
     get_country_ramp_config,
     on_ramp_paused,
+    on_ramp_rejection_locked,
     quote_ramp,
     sync_country_payment_methods,
 )
@@ -1005,6 +1006,15 @@ class CreateRampOrder(graphene.Mutation):
                 success=False,
                 error='Las recargas y retiros con Koywe para negocios aún no están disponibles. Puedes completar la verificación de tu negocio.',
             )
+
+        if normalized_direction == 'ON_RAMP':
+            if on_ramp_paused(resolved_country_code):
+                return RampOrderType(success=False, error='Las recargas en este país no están disponibles por ahora.')
+            if on_ramp_rejection_locked(user):
+                return RampOrderType(
+                    success=False,
+                    error='Alcanzaste el límite de intentos de recarga por ahora. Intenta de nuevo más tarde.',
+                )
 
         # cUSD+ savings rail (Koywe 'USDT BSC' delivered to the account's own
         # BSC address). The address is client-derived and registered at
