@@ -41,7 +41,10 @@ def funnel_ingest(request):
     provided = request.headers.get('X-Funnel-Secret', '')
     # Constant-time compare
     import hmac
-    if not hmac.compare_digest(provided, expected_secret):
+    previous_secret = getattr(settings, 'FUNNEL_INGEST_PREVIOUS_SECRET', '')
+    valid_current = hmac.compare_digest(provided, expected_secret)
+    valid_previous = bool(previous_secret) and hmac.compare_digest(provided, previous_secret)
+    if not (valid_current or valid_previous):
         return JsonResponse({'error': 'unauthorized'}, status=401)
 
     try:

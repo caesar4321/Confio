@@ -4,6 +4,7 @@ The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/3.0/topics/http/urls/
 """
 from django.contrib import admin
+from django.http import HttpResponseNotFound
 from django.urls import path, include, re_path
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.admin.views.decorators import staff_member_required
@@ -151,14 +152,20 @@ sitemaps = {
     'discover': DiscoverSitemap,
 }
 
+def retired_admin_route(request):
+    """Do not redirect retired admin URLs or reveal the current route."""
+    return HttpResponseNotFound()
+
+
 urlpatterns = [
+    re_path(r'^(?:confio-control-panel|admin)(?:/.*)?$', retired_admin_route),
     # Ensure /admin (no trailing slash) redirects to /admin/
     # path('admin', RedirectView.as_view(url='/admin/', permanent=True)), # Disabled for security obfuscation
     path('', include(tf_urls)),
     path('robots.txt', robots_txt, name='robots_txt'),
     path('llms.txt', llms_txt, name='llms_txt'),
     path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
-    path('confio-control-panel/', confio_admin_site.urls),
+    path(f'{settings.ADMIN_PATH}/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('v1/', include('billing.api.urls')),
     path('portal/login/', portal_login_redirect, name='portal_login'),
