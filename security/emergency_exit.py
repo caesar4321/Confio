@@ -62,6 +62,10 @@ def _session_key(token: str) -> str:
     return f'emergency_exit:session:{token}'
 
 
+def _face_key(token: str) -> str:
+    return f'emergency_exit:face:{token}'
+
+
 def challenge_message(address: str, nonce: str) -> str:
     return f'Confío · Salida de emergencia\nCuenta: {address}\nCódigo: {nonce}'
 
@@ -171,12 +175,19 @@ def start_face(token: str, app_check_token: str) -> dict:
     user = _session_user(token)
     _require_app_check(user, app_check_token)
     try:
-        return start_face_check(user, 'emergency_exit')
+        data = start_face_check(user, 'emergency_exit')
     except FaceStepUpError as exc:
         raise EmergencyExitError(str(exc)) from None
+    # Only the liveness session opened here may be graded for this exit: an
+    # older passed check (a withdrawal the holder did weeks ago, whose id the
+    # device may have logged) must not stand in for a face shown now.
+    cache.set(_face_key(token), data['session_id'], SESSION_TTL)
+    return data
 
 
 def complete_face(token: str, session_id: str) -> bool:
     """Pass/fail; raises FaceStepUpPending while AWS is still processing."""
     user = _session_user(token)
+    if not isinstance(session_id, str) or not session_id or cache.get(_face_key(token)) != session_id:
+        raise EmergencyExitError(EXPIRED_MESSAGE)
     return complete_face_check(user, session_id)
