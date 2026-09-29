@@ -46,6 +46,7 @@ import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
+import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -270,7 +271,7 @@ const TopUpScreen = () => {
         return;
       }
 
-      const { data } = await createRampOrder({
+      const placeOrder = () => createRampOrder({
         variables: {
           direction: 'ON_RAMP',
           amount: String(parsedAmount),
@@ -281,7 +282,16 @@ const TopUpScreen = () => {
           ...(isSavingsRail ? { destination: 'cusd_plus' } : {}),
         },
       });
-      const result = data?.createRampOrder;
+      let response;
+      try {
+        // Each deposit order spends its own Confío Face check.
+        response = await withFaceStepUp('on_ramp', placeOrder,
+          r => isFaceStepUpRequired(r?.data?.createRampOrder?.nextStep));
+      } catch (faceError) {
+        if (faceError instanceof FaceCheckError) return;
+        throw faceError;
+      }
+      const result = response?.data?.createRampOrder;
       if (!result?.success || !result?.orderId) {
         Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
         return;

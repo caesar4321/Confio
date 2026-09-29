@@ -31,7 +31,7 @@ describe('classifyReachability', () => {
     expect(r.immediate).toBe(false);
   });
 
-  it('outage past 24h (chain time) unlocks immediate exit', () => {
+  it('outage past the 72h threshold (chain time) unlocks immediate exit', () => {
     const r = classifyReachability({
       confioOk: false, chainOk: true,
       prevOutageStartSec: T0, chainNowSec: T0 + OUTAGE_IMMEDIATE_SECONDS,
@@ -152,7 +152,7 @@ describe('planAlgorandExit', () => {
   });
 });
 
-// The 24h wait is per-episode anti-coercion. It used to be a one-time
+// The 72h wait is per-episode anti-coercion. It used to be a one-time
 // toll: `elapsed >= 24h` only ever becomes MORE true, and nothing spent
 // the unlock — so one served wait left an account permanently drainable
 // in a single session.
@@ -177,7 +177,7 @@ describe('cooloff lifecycle', () => {
   const normal = { state: 'normal', immediate: false, chainNowSec: NOW } as any;
   const at = (secondsAgo: number) => store({ [STORE_KEY]: String(NOW - secondsAgo) });
 
-  it('is pending before 24h and eligible after', async () => {
+  it('is pending before 72h and eligible after', async () => {
     expect((await getExitEligibility(store(), KEY, normal)).reason).toBe('no_request');
     expect((await getExitEligibility(at(3600), KEY, normal)).reason).toBe('cooloff_pending');
     expect((await getExitEligibility(at(NORMAL_COOLOFF_SECONDS), KEY, normal)).eligible).toBe(true);

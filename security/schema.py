@@ -304,7 +304,15 @@ def _local_countries(row):
     return sorted(country for country in countries if country)
 
 
+class FaceStepUpStatusType(graphene.ObjectType):
+    enabled = graphene.Boolean(required=True)
+    available = graphene.Boolean(required=True)
+
+
 class SecurityQuery(graphene.ObjectType):
+    # Lets the app decide whether a client-enforced step (the emergency exit)
+    # must ask for Confío Face: only while the server actually enforces it.
+    face_step_up_status = graphene.Field(FaceStepUpStatusType)
     my_devices = graphene.List(UserDeviceType)
     my_kyc_status = graphene.Field(IdentityVerificationType)
     my_personal_kyc_status = graphene.Field(IdentityVerificationType)
@@ -312,6 +320,10 @@ class SecurityQuery(graphene.ObjectType):
     my_identity_documents = graphene.List(graphene.NonNull(IdentityDocumentType), required=True)
     business_kyc_status = graphene.Field(IdentityVerificationType, business_id=graphene.ID(required=True))
     
+    def resolve_face_step_up_status(self, info):
+        from .face_step_up import checks_available, step_up_enabled
+        return FaceStepUpStatusType(enabled=step_up_enabled(), available=checks_available())
+
     def resolve_my_devices(self, info):
         user = info.context.user
         if not user.is_authenticated:

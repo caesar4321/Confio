@@ -263,3 +263,13 @@ class ExternalSendStepUpTests(TestCase):
         self.assertEqual(_external_send_step_up(self.user, None, 'business', None), '')
         self.assertEqual(_external_send_step_up(self.user, object(), 'external', None), '')
         self.assertEqual(_external_send_step_up(self.user, None, 'external', 'activation-1'), '')
+
+
+class FaceStepUpStatusQueryTests(TestCase):
+    def test_status_mirrors_the_flags(self):
+        from security.schema import SecurityQuery
+        status = SecurityQuery().resolve_face_step_up_status(None)
+        self.assertEqual((status.enabled, status.available), (False, False))
+        with override_settings(FACE_STEP_UP_ENABLED=True):
+            status = SecurityQuery().resolve_face_step_up_status(None)
+            self.assertEqual((status.enabled, status.available), (True, True))

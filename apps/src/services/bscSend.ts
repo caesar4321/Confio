@@ -13,6 +13,12 @@
 
 import { gql } from '@apollo/client';
 import {
+  ensureFaceCheck,
+  FACE_STEP_UP_MESSAGE,
+  FaceCheckError,
+  isFaceStepUpRequired,
+} from './faceStepUp';
+import {
   BatchCall,
   BscRevertedError,
   bscGetNonce,
@@ -109,19 +115,23 @@ export const BSC_SEND_ERRORS: Record<string, string> = {
 
 export const sendBscDollar = async (params: BscSendParams): Promise<BscSendResult> => {
   const { apolloClient } = await import('../apollo/client');
-  const { data } = await apolloClient.mutate({
-    mutation: PREPARE,
-    variables: {
-      amount: String(params.amount),
-      recipientUserId: params.recipientUserId,
-      recipientPhone: params.recipientPhone,
-      recipientAddress: params.recipientAddress,
-      memo: params.memo || '',
-      idempotencyKey: params.idempotencyKey || '',
-      tokenType: params.tokenType || null,
-    },
-  });
-  const prep = data?.prepareBscSend;
+  const prepareVariables = {
+    amount: String(params.amount),
+    recipientUserId: params.recipientUserId,
+    recipientPhone: params.recipientPhone,
+    recipientAddress: params.recipientAddress,
+    memo: params.memo || '',
+    idempotencyKey: params.idempotencyKey || '',
+    tokenType: params.tokenType || null,
+  };
+  const { data } = await apolloClient.mutate({ mutation: PREPARE, variables: prepareVariables });
+  let prep = data?.prepareBscSend;
+  if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
+    // Money leaving Confío for an external address: Confío Face, then once more.
+    if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+    const retry = await apolloClient.mutate({ mutation: PREPARE, variables: prepareVariables });
+    prep = retry.data?.prepareBscSend;
+  }
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
 
   return submitPreparedBscSend(prep);
@@ -176,6 +186,11 @@ export const submitPreparedBscSend = async (prep: any): Promise<BscSendResult> =
       },
     });
     const sub = res.data?.submitBscSend;
+    if (!sub?.success && isFaceStepUpRequired(sub?.error) && attempt === 0) {
+      // The face window lapsed between prepare and submit: confirm again.
+      if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+      continue;
+    }
     if (!sub?.success) {
       lastError = sub?.error || 'sponsor rejected';
       // Nonce races are retryable with fresh reads; policy errors are not.

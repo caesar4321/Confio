@@ -2,7 +2,7 @@
 // (docs/plans/salida-de-emergencia-design.md).
 //
 // Always reachable from Seguridad; server state only changes prominence
-// and wait: ban / 24h-persistent outage ⇒ immediate, normal ⇒ 24h local
+// and wait: ban / 72h-persistent outage ⇒ immediate, normal ⇒ 72h local
 // cooloff, full offline ⇒ visible but not executable. Every judgment is
 // client-local (reachability.ts) and chain-timed (chainClock.ts) — the
 // server can never delay, extend or cancel an exit.
@@ -27,8 +27,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking,
-} from 'react-native';
+  ActivityIndicator, StatusBar, Modal, KeyboardAvoidingView, Platform, Linking, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -48,14 +47,14 @@ import {
 import {
   evaluateEmergencyState, getExitEligibility, requestExitCooloff, cancelExitCooloff,
   consumeExitCooloff, devElapseCooloff, ReachabilityResult, ExitEligibility,
-  NORMAL_COOLOFF_SECONDS,
-} from '../services/emergencyExit/reachability';
+  NORMAL_COOLOFF_SECONDS, hasFaceWaiver, waiveFaceWithNewCooloff } from '../services/emergencyExit/reachability';
 import {
   executeBscExit, planBscExit, estimateBscExitGasWei,
   installEmergencyBscTransport, BUNDLED_VAULT_ADDRESS, BUNDLED_CUSD_ADDRESS, BscExitResult, BscExitStep,
 } from '../services/emergencyExit/bscExit';
 import { isOutcomeUnknown } from '../services/evmWallet';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { ensureFaceCheck, fetchFaceStepUpStatus } from '../services/faceStepUp';
 
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -173,7 +172,7 @@ export const EmergencyExitScreen: React.FC = () => {
     try {
       const state = await evaluateEmergencyState(emergencyStore, API_URL);
       setEs(state);
-      // Immediate states (ban, 24h outage) don't touch the per-account
+      // Immediate states (ban, 72h outage) don't touch the per-account
       // cooloff key, so don't gate them on the account being loaded — a
       // banned user's account hydration is best-effort and the exit must
       // not wait for it. Non-immediate paths still need the real key
@@ -297,6 +296,33 @@ export const EmergencyExitScreen: React.FC = () => {
   const runBsc = async () => {
     const ok = await biometricAuthService.authenticate('Confirmar salida de emergencia (BNB Smart Chain)');
     if (!ok) return;
+    // With Confío reachable, the exit also asks for Confío Face (while the
+    // server enforces it): a ring holding someone else's account must bring
+    // them back to move it out. Ban and outage exits never wait on the server.
+    // Never a veto: if the face check fails or can't run, the person may
+    // continue without it after a second full local wait.
+    if (es?.state === 'normal' && !(await hasFaceWaiver(emergencyStore, accountKey))) {
+      const status = await fetchFaceStepUpStatus();
+      // An unreadable status must use the same face-or-wait path; only an
+      // explicit disabled response skips it.
+      if (status?.enabled !== false && !(await ensureFaceCheck('emergency_exit'))) {
+        Alert.alert(
+          'Salida sin Confío Face',
+          'Puedes continuar sin confirmar tu rostro: tu salida se habilitará después de una nueva espera de 72 horas.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Continuar sin Confío Face',
+              onPress: async () => {
+                await waiveFaceWithNewCooloff(emergencyStore, accountKey);
+                await evaluate();
+              },
+            },
+          ],
+        );
+        return;
+      }
+    }
     const dest = bscDest.trim();
     setBscRunning(true); setBscError(null); setBscPending(false); setBscPendingTx(null); setBscPhase(null); setSentTo(dest);
     try {
@@ -314,7 +340,7 @@ export const EmergencyExitScreen: React.FC = () => {
         onStep: (step: BscExitStep) => setBscPhase(stepWait(step)),
       });
       setBscResult(result);
-      // An exit that actually broadcast SPENDS the 24h unlock: the wait is
+      // An exit that actually broadcast SPENDS the 72h unlock: the wait is
       // per-episode anti-coercion, not a one-time toll. Never on failure —
       // a half-moved exit must stay retryable now, not in a day.
       if (result.sentNow.length && !result.unresolved.length) {
@@ -361,12 +387,12 @@ export const EmergencyExitScreen: React.FC = () => {
         return es.immediate
           ? {
               label: 'Tu dinero está a salvo',
-              sub: 'Los servidores de Confío llevan más de 24 horas sin responder. Tu dinero nunca estuvo en ellos: está en la blockchain, y desde aquí puedes moverlo sin nosotros.',
+              sub: 'Los servidores de Confío llevan más de 72 horas sin responder. Tu dinero nunca estuvo en ellos: está en la blockchain, y desde aquí puedes moverlo sin nosotros.',
               tone: 'alert' as const,
             }
           : {
               label: 'Sin conexión con Confío',
-              sub: `Interrupción de ${fmtRemaining(es.outageSeconds)}. Si supera las 24 horas, la salida se habilita de inmediato. Tu dinero está en la blockchain, intacto.`,
+              sub: `Interrupción de ${fmtRemaining(es.outageSeconds)}. Si supera las 72 horas, la salida se habilita de inmediato. Tu dinero está en la blockchain, intacto.`,
               tone: 'warn' as const,
             };
       case 'offline':
@@ -416,13 +442,13 @@ export const EmergencyExitScreen: React.FC = () => {
             </Text>
           )}
           <Text style={styles.bodyText}>
-            Para protegerte de estafas, la salida completa se habilita 24 horas
+            Para protegerte de estafas, la salida completa se habilita 72 horas
             después de solicitarla. El tiempo se mide en la blockchain — ni
             Confío puede acortarlo, extenderlo ni cancelarlo.
           </Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={startCooloff}>
             <Icon name="clock" size={16} color={colors.white} />
-            <Text style={styles.primaryBtnText}>Iniciar espera de 24 horas</Text>
+            <Text style={styles.primaryBtnText}>Iniciar espera de 72 horas</Text>
           </TouchableOpacity>
         </View>
       );
@@ -816,7 +842,7 @@ export const EmergencyExitScreen: React.FC = () => {
               {[
                 ['map-pin', 'Eliges la billetera de destino — una que sea tuya.'],
                 ['send', 'Tu ahorro sale como USDT y tus acciones Ondo se transfieren directamente por la blockchain.'],
-                ['zap', 'En una emergencia real (Confío inaccesible por más de 24 horas), no hay espera: la salida es inmediata.'],
+                ['zap', 'En una emergencia real (Confío inaccesible por más de 72 horas), no hay espera: la salida es inmediata.'],
               ].map(([icon, text], i) => (
                 <View key={i} style={styles.howRow}>
                   <Icon name={icon as string} size={16} color={colors.primaryDark} />
