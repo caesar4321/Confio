@@ -73,7 +73,14 @@ final class ConfioFaceLiveness: NSObject {
         case .success:
           resolve?("complete")
         case .failure(let error):
-          let code = error == .userCancelled ? "UserCancelledException" : String(describing: error)
+          let code: String
+          if error == .userCancelled {
+            code = "UserCancelledException"
+          } else if error == .cameraPermissionDenied {
+            code = "camera_permission_denied"
+          } else {
+            code = String(describing: error)
+          }
           reject?(code, code, nil)
         }
       }

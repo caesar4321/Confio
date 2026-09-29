@@ -73,6 +73,32 @@ describe('faceStepUp', () => {
     expect(mockMutate).toHaveBeenCalledTimes(1);
   });
 
+  it('explains a denied camera instead of grading an empty session', async () => {
+    mockMutate.mockResolvedValueOnce(started);
+    start.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'camera_permission_denied' }));
+    const result = await runFaceCapture('withdrawal');
+    expect(result.outcome).toBe('unavailable');
+    expect(result.message).toMatch(/cámara/);
+    expect(mockMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up on a start request that never answers', async () => {
+    jest.useFakeTimers();
+    mockMutate.mockReturnValueOnce(new Promise(() => {}));
+    const result = runFaceCapture('on_ramp');
+    await jest.advanceTimersByTimeAsync(20001);
+    await expect(result).resolves.toMatchObject({ outcome: 'unavailable' });
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('stops grading after hung requests instead of spinning forever', async () => {
+    jest.useFakeTimers();
+    mockMutate.mockResolvedValueOnce(started).mockReturnValue(new Promise(() => {}));
+    const result = runFaceCapture('on_ramp');
+    await jest.advanceTimersByTimeAsync(8 * (15000 + 1500) + 100);
+    await expect(result).resolves.toMatchObject({ outcome: 'failed' });
+  });
+
   it('is unavailable on an app build without the native module', async () => {
     (NativeModules as any).ConfioFaceLiveness = undefined;
     const result = await runFaceCapture('on_ramp');

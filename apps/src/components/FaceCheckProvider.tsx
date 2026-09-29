@@ -87,27 +87,45 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   const [stage, setStage] = useState<Stage>('intro');
   const [message, setMessage] = useState<string | undefined>();
   const settle = useRef<((passed: boolean) => void) | null>(null);
+  const openPurpose = useRef<FaceCheckPurpose | null>(null);
+  const queue = useRef<{ purpose: FaceCheckPurpose; resolve: (passed: boolean) => void }[]>([]);
+  const presentRef = useRef<((purpose: FaceCheckPurpose) => Promise<boolean>) | null>(null);
 
   const close = useCallback((passed: boolean) => {
     const done = settle.current;
     settle.current = null;
+    openPurpose.current = null;
     setPurpose(null);
     done?.(passed);
+    const waiting = queue.current.shift();
+    if (waiting && presentRef.current) {
+      // Let the closing modal animate out before the next one opens.
+      setTimeout(() => presentRef.current?.(waiting.purpose).then(waiting.resolve), 350);
+    }
   }, []);
 
   useEffect(() => {
-    registerFaceCheckPresenter(next => new Promise<boolean>(resolve => {
-      // A second request while one is open joins the same outcome.
+    const present = (next: FaceCheckPurpose) => new Promise<boolean>(resolve => {
+      // A second request for the same purpose joins the open check. The
+      // server grades purposes differently (a deposit spends its own check),
+      // so a different purpose waits its turn instead of sharing an outcome.
       if (settle.current) {
-        const previous = settle.current;
-        settle.current = passed => { previous(passed); resolve(passed); };
+        if (openPurpose.current === next) {
+          const previous = settle.current;
+          settle.current = passed => { previous(passed); resolve(passed); };
+        } else {
+          queue.current.push({ purpose: next, resolve });
+        }
         return;
       }
+      openPurpose.current = next;
       settle.current = resolve;
       setMessage(undefined);
       setStage('intro');
       setPurpose(next);
-    }));
+    });
+    presentRef.current = present;
+    registerFaceCheckPresenter(present);
     return () => registerFaceCheckPresenter(null);
   }, []);
 
