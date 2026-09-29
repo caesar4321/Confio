@@ -307,6 +307,9 @@ def _local_countries(row):
 class FaceStepUpStatusType(graphene.ObjectType):
     enabled = graphene.Boolean(required=True)
     available = graphene.Boolean(required=True)
+    # Whether Confío Face is asked of THIS user (enabled and KYC'd); null
+    # when signed out.
+    required = graphene.Boolean()
 
 
 class SecurityQuery(graphene.ObjectType):
@@ -321,8 +324,10 @@ class SecurityQuery(graphene.ObjectType):
     business_kyc_status = graphene.Field(IdentityVerificationType, business_id=graphene.ID(required=True))
     
     def resolve_face_step_up_status(self, info):
-        from .face_step_up import checks_available, step_up_enabled
-        return FaceStepUpStatusType(enabled=step_up_enabled(), available=checks_available())
+        from .face_step_up import checks_available, step_up_applies, step_up_enabled
+        user = getattr(info.context, 'user', None) if info is not None else None
+        required = step_up_applies(user) if user is not None and user.is_authenticated else None
+        return FaceStepUpStatusType(enabled=step_up_enabled(), available=checks_available(), required=required)
 
     def resolve_my_devices(self, info):
         user = info.context.user

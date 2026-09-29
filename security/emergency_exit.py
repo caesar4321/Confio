@@ -11,8 +11,10 @@ door:
   itself spends from;
 - the server says whether the account is really banned, so a faked 403
   cannot route a healthy account here;
-- a banned account must pass Confío Face before the exit runs, with no
-  waiting-period fallback;
+- a banned account that went through KYC must pass Confío Face before the
+  exit runs, with no waiting-period fallback; one that never did (there is
+  no face to check, and it is what a ring's pooling account looks like)
+  waits the normal route's period instead;
 - every step requires a Firebase App Check token (Play Integrity / App
   Attest), so the face capture comes from the genuine app on a genuine
   device, not a script or an injected camera.
@@ -28,7 +30,7 @@ import secrets
 from django.core.cache import cache
 
 from .face_step_up import (
-    FaceStepUpError, complete_face_check, start_face_check, step_up_enabled,
+    FaceStepUpError, complete_face_check, start_face_check, step_up_applies, step_up_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -127,13 +129,18 @@ def open_session(address: str, nonce: str, signature: str, app_check_token: str)
     _require_app_check(user, app_check_token)
 
     banned = _is_banned(user)
-    face_required = banned and step_up_enabled()
-    result = {'banned': banned, 'face_required': face_required, 'token': ''}
+    face_required = banned and step_up_applies(user)
+    # A banned account that never did KYC has no face to check. It is also
+    # what a ring's pooling account looks like, so it gets the normal
+    # route's waiting period instead of an immediate exit.
+    wait_required = banned and step_up_enabled() and not face_required
+    result = {'banned': banned, 'face_required': face_required, 'wait_required': wait_required, 'token': ''}
     if face_required:
         token = secrets.token_urlsafe(32)
         cache.set(_session_key(token), user.id, SESSION_TTL)
         result['token'] = token
-    logger.info('Emergency exit session: user=%s banned=%s face_required=%s', user.id, banned, face_required)
+    logger.info('Emergency exit session: user=%s banned=%s face_required=%s wait_required=%s',
+                user.id, banned, face_required, wait_required)
     return result
 
 

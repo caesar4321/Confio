@@ -175,6 +175,13 @@ describe('confirmBannedExit', () => {
     expect(presentFace).not.toHaveBeenCalled();
   });
 
+  it('sends a banned account without KYC to the waiting period, never straight out', async () => {
+    const { fetchImpl } = serverWith({ success: true, banned: true, faceRequired: false, waitRequired: true, token: '' });
+    const presentFace = jest.fn();
+    await expect(confirmBannedExit(wallet, API, deps(fetchImpl, presentFace))).resolves.toEqual({ outcome: 'wait' });
+    expect(presentFace).not.toHaveBeenCalled();
+  });
+
   it('passes without a face while the server does not enforce it', async () => {
     const { fetchImpl } = serverWith({ success: true, banned: true, faceRequired: false, token: '' });
     await expect(confirmBannedExit(wallet, API, deps(fetchImpl))).resolves.toEqual({ outcome: 'passed' });

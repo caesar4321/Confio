@@ -5,8 +5,10 @@
 // proves the account by signing a one-time challenge with the account's own
 // BSC key. The server then says whether the account is really banned — a
 // faked 403 cannot route a healthy account here — and, if so, the exit runs
-// only after Confío Face passes. There is no waiting-period fallback on this
-// route. Every call carries an App Check token (Play Integrity / App Attest).
+// only after Confío Face passes, with no waiting-period fallback. A banned
+// account that never did KYC has no face to check and gets the normal
+// waiting period instead. Every call carries an App Check token (Play
+// Integrity / App Attest).
 
 import type { DerivedEvmWallet } from '../evmWallet';
 import type { FaceCheckBackend, FaceCheckGrade, FaceCheckStart } from '../faceStepUp';
@@ -16,6 +18,8 @@ export type BannedExitOutcome =
   | { outcome: 'passed' }
   /** The server says this account is not banned: use the normal route. */
   | { outcome: 'not_banned' }
+  /** Banned without KYC (no face to check): the normal waiting period applies. */
+  | { outcome: 'wait' }
   | { outcome: 'failed'; message: string };
 
 export interface BannedExitDeps {
@@ -91,6 +95,7 @@ export const confirmBannedExit = async (
   }
   if (!session?.success) return { outcome: 'failed', message: session?.error || NETWORK_MESSAGE };
   if (!session.banned) return { outcome: 'not_banned' };
+  if (session.waitRequired) return { outcome: 'wait' };
   if (!session.faceRequired) return { outcome: 'passed' };
 
   const backend: FaceCheckBackend = {

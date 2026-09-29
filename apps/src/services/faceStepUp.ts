@@ -55,16 +55,23 @@ const STATUS = gql`
     faceStepUpStatus {
       enabled
       available
+      required
     }
   }
 `;
 
-/** Whether the server enforces Confío Face; null when it cannot be read. */
-export const fetchFaceStepUpStatus = async (): Promise<{ enabled: boolean } | null> => {
+/**
+ * Whether the server enforces Confío Face, and whether it asks it of this
+ * user (only people who went through KYC); null when it cannot be read.
+ */
+export const fetchFaceStepUpStatus = async (): Promise<{ enabled: boolean; required: boolean | null } | null> => {
   try {
     const { apolloClient } = await import('../apollo/client');
     const { data } = await apolloClient.query({ query: STATUS, fetchPolicy: 'network-only' });
-    return data?.faceStepUpStatus ? { enabled: !!data.faceStepUpStatus.enabled } : null;
+    const status = data?.faceStepUpStatus;
+    return status
+      ? { enabled: !!status.enabled, required: typeof status.required === 'boolean' ? status.required : null }
+      : null;
   } catch {
     return null;
   }

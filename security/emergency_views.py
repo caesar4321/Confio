@@ -61,6 +61,7 @@ def emergency_exit_session(request):
         'success': True,
         'banned': result['banned'],
         'faceRequired': result['face_required'],
+        'waitRequired': result['wait_required'],
         'token': result['token'],
     })
 

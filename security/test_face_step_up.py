@@ -235,6 +235,21 @@ class FaceStepUpTests(TestCase):
                                  status='failed', completed_at=timezone.now())
         self.assertEqual(fsu.require_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
 
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_users_who_never_did_kyc_are_never_asked(self):
+        IdentityVerification.all_documents.filter(user=self.user).update(status='rejected')
+        self.assertFalse(fsu.step_up_applies(self.user))
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), '')
+        self.assertEqual(fsu.claim_on_ramp_check(self.user, 'order-1'), (True, None))
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_kycd_user_without_a_stored_selfie_is_not_waved_through(self):
+        # No FaceReference was stored for self.user in setUp.
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
+        with self.assertRaises(fsu.FaceStepUpError) as ctx:
+            fsu.start_face_check(self.user, 'withdrawal')
+        self.assertEqual(str(ctx.exception), fsu.NO_REFERENCE_MESSAGE)
+
     def test_deposit_orders_cannot_use_the_non_spending_gate(self):
         with self.assertRaises(ValueError):
             fsu.require_face_step_up(self.user, 'on_ramp')
@@ -246,6 +261,12 @@ class SendStepUpTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create(
             username='send-user', email='send@example.com', firebase_uid='send-user-uid')
+        IdentityVerification.all_documents.create(
+            user=self.user, verified_first_name='Ana', verified_last_name='Perez',
+            verified_date_of_birth='1994-07-21', verified_nationality='COL', verified_address='-',
+            verified_city='-', verified_state='-', verified_country='COL', document_type='national_id',
+            document_number='1065000009', document_issuing_country='COL', status='verified',
+            verified_at=timezone.now())
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_every_personal_send_needs_a_recent_face(self):
@@ -267,12 +288,33 @@ class SendStepUpTests(TestCase):
         from send.bsc_flow import _send_step_up
         self.assertEqual(_send_step_up(self.user, None, None), '')
 
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_users_without_kyc_keep_sending(self):
+        from send.bsc_flow import _send_step_up
+        IdentityVerification.all_documents.filter(user=self.user).delete()
+        self.assertEqual(_send_step_up(self.user, None, None), '')
+
 
 class FaceStepUpStatusQueryTests(TestCase):
     def test_status_mirrors_the_flags(self):
         from security.schema import SecurityQuery
         status = SecurityQuery().resolve_face_step_up_status(None)
-        self.assertEqual((status.enabled, status.available), (False, False))
+        self.assertEqual((status.enabled, status.available, status.required), (False, False, None))
         with override_settings(FACE_STEP_UP_ENABLED=True):
             status = SecurityQuery().resolve_face_step_up_status(None)
             self.assertEqual((status.enabled, status.available), (True, True))
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_required_is_per_user(self):
+        from security.schema import SecurityQuery
+        user = get_user_model().objects.create(
+            username='status-user', email='status@example.com', firebase_uid='status-user-uid')
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        self.assertFalse(SecurityQuery().resolve_face_step_up_status(info).required)
+        IdentityVerification.all_documents.create(
+            user=user, verified_first_name='Ana', verified_last_name='Perez',
+            verified_date_of_birth='1994-07-21', verified_nationality='COL', verified_address='-',
+            verified_city='-', verified_state='-', verified_country='COL', document_type='national_id',
+            document_number='1065000010', document_issuing_country='COL', status='verified',
+            verified_at=timezone.now())
+        self.assertTrue(SecurityQuery().resolve_face_step_up_status(info).required)

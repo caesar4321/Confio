@@ -219,8 +219,9 @@ step-up release). Decided by Julian on 2026-09-29.
 
 | Client-observed state | Route | Wait |
 |---|---|---|
-| Server-confirmed ban (Confío reachable) | **ban route** | Confío Face, then immediate. **No waiting-period fallback.** |
-| Normal (Confío reachable) | normal | 72h cooloff, then Confío Face or a second 72h wait |
+| Server-confirmed ban, KYC'd (Confío reachable) | **ban route** | Confío Face, then immediate. **No waiting-period fallback.** |
+| Server-confirmed ban, never did KYC | ban route | 72h cooloff (no face to check; a ring's pooling account looks like this) |
+| Normal (Confío reachable) | normal | 72h cooloff, then Confío Face (KYC'd users only) or a second 72h wait |
 | `blocked`: Confío unreachable from the phone, up per the Worker | normal | same as normal; the face check cannot run, so the second wait |
 | Outage confirmed by the Worker (down since T) | outage | immediate once T is 72h old (chain time) |
 | Confío and the Worker both unreachable | outage | immediate after 72h of local observation |
@@ -248,9 +249,16 @@ step-up release). Decided by Julian on 2026-09-29.
   blocked too, and dates a real outage from when the Worker first saw it.
   Until its URL and public key are set in `outageStatusConfig.ts` the app
   keeps the local rule.
-- **Sends**: every personal BSC send, to a Confío user as much as to an
-  external address, needs a recent Confío Face (15-minute window). Business
-  senders and the server-only activation fee stay exempt.
+- **Confío Face is asked only of users who went through KYC** (an approved
+  personal identity verification, `step_up_applies`). A recruited identity
+  exists to pass KYC, which opens the fiat ramps and bank payouts, so the
+  money enters through a KYC'd account and its first hop out needs the
+  holder. Users who never verified keep sending as before. A KYC'd user
+  whose stored selfie is missing is asked to verify again, never waved
+  through.
+- **Sends**: every personal BSC send from a KYC'd user, to a Confío user as
+  much as to an external address, needs a recent Confío Face (15-minute
+  window). Business senders and the server-only activation fee stay exempt.
 
 ## Rejected: raw key export (Exportar claves)
 

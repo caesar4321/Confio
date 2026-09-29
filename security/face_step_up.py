@@ -80,6 +80,19 @@ def step_up_enabled() -> bool:
     return bool(_setting('FACE_STEP_UP_ENABLED', False, bool))
 
 
+def step_up_applies(user) -> bool:
+    """Confío Face is asked only of people who went through KYC.
+
+    A recruited identity exists to pass KYC (it is what opens the fiat
+    ramps and bank payouts), so the face gate sits on the KYC'd account the
+    money enters through; its first send out needs the holder. Users who
+    never verified keep sending as before. "Went through KYC" is an approved
+    personal verification, not a stored selfie: a KYC'd user whose selfie
+    copy is missing is asked to verify again, never waved through.
+    """
+    return step_up_enabled() and bool(getattr(user, 'is_identity_verified', False))
+
+
 def checks_available() -> bool:
     """Sessions may be opened while enforcement is still off (app rollout)."""
     return step_up_enabled() or bool(_setting('FACE_STEP_UP_AVAILABLE', False, bool))
@@ -305,7 +318,7 @@ def _usable_on_ramp_checks(user, now):
 
 def missing_face_step_up(user, purpose: str) -> str:
     """'' when a usable check exists (nothing is spent), else the message."""
-    if not step_up_enabled():
+    if not step_up_applies(user):
         return ''
     now = timezone.now()
     if purpose == 'on_ramp':
@@ -319,10 +332,11 @@ def missing_face_step_up(user, purpose: str) -> str:
 def claim_on_ramp_check(user, consumed_by: str):
     """Spend one fresh deposit check right before the provider order.
 
-    Returns (ok, check_id). ok is True with check_id None when enforcement is
-    off. Release the claim only when the provider definitely made no order.
+    Returns (ok, check_id). ok is True with check_id None when no face is
+    asked of this user. Release the claim only when the provider definitely
+    made no order.
     """
-    if not step_up_enabled():
+    if not step_up_applies(user):
         return True, None
     now = timezone.now()
     with transaction.atomic():
