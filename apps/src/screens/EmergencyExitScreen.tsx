@@ -174,9 +174,13 @@ export const EmergencyExitScreen: React.FC = () => {
     setEvaluating(true);
     try {
       let state = await evaluateEmergencyState(emergencyStore, API_URL);
-      if (state.state === 'banned' && accountKey && (await hasBanRouteWait(emergencyStore, accountKey))) {
+      if (state.state === 'banned' && accountKey
+        && (await hasBanRouteWait(emergencyStore, accountKey, state.chainNowSec))) {
         // Banned without KYC: the normal waiting period, still prominent.
         state = { ...state, immediate: false };
+      } else if (state.state === 'normal' && accountKey) {
+        // Confío answers and no ban: any earlier ban's wait is over.
+        await clearBanRouteWait(emergencyStore, accountKey);
       }
       setEs(state);
       // Immediate states (ban, 72h outage) don't touch the per-account
@@ -319,7 +323,7 @@ export const EmergencyExitScreen: React.FC = () => {
         // No face to check: only an elapsed waiting period opens the exit.
         const waited = await getExitEligibility(emergencyStore, accountKey, { ...es, immediate: false });
         if (!waited.eligible) {
-          await markBanRouteWait(emergencyStore, accountKey);
+          await markBanRouteWait(emergencyStore, accountKey, es.chainNowSec);
           Alert.alert(
             'Espera de seguridad',
             'Tu cuenta está suspendida y no tenemos una verificación de identidad con la que confirmar tu rostro. Tu salida se habilita 72 horas después de solicitarla.',

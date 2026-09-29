@@ -300,11 +300,25 @@ const banWaitKey = (accountKey: string) => `confio_emergency_ban_wait_v1:${accou
  * route. Remembered locally so the screen shows the wait; it can only slow
  * the exit, and the server is asked again before anything is sent.
  */
-export const markBanRouteWait = async (store: KVStore, accountKey: string): Promise<void> =>
-  store.set(banWaitKey(accountKey), '1');
+export const markBanRouteWait = async (
+  store: KVStore, accountKey: string, nowSec: number | null,
+): Promise<void> => store.set(banWaitKey(accountKey), String(nowSec ?? 0));
 
-export const hasBanRouteWait = async (store: KVStore, accountKey: string): Promise<boolean> =>
-  (await store.get(banWaitKey(accountKey))) === '1';
+/**
+ * Bounded to one wait episode (request + validity window): a flag left from
+ * an earlier ban must not slow a later ban route that can use Confío Face.
+ */
+export const hasBanRouteWait = async (
+  store: KVStore, accountKey: string, nowSec: number | null,
+): Promise<boolean> => {
+  const raw = await store.get(banWaitKey(accountKey));
+  if (raw === null) return false;
+  const markedAt = parseInt(raw, 10);
+  if (nowSec === null || !markedAt) return true;
+  if (nowSec - markedAt < NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS) return true;
+  await store.del(banWaitKey(accountKey));
+  return false;
+};
 
 export const clearBanRouteWait = async (store: KVStore, accountKey: string): Promise<void> =>
   store.del(banWaitKey(accountKey));
