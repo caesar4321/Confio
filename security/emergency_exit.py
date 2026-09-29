@@ -51,8 +51,11 @@ class EmergencyExitError(Exception):
     """The message is safe to show."""
 
 
-def _challenge_key(address: str) -> str:
-    return f'emergency_exit:challenge:{address}'
+def _challenge_key(address: str, nonce: str) -> str:
+    # Keyed by nonce too: anyone can ask for a challenge for a public
+    # address, so a stranger's request must not replace (or, at the session
+    # step, burn) the one the owner is about to sign.
+    return f'emergency_exit:challenge:{address}:{nonce}'
 
 
 def _session_key(token: str) -> str:
@@ -63,11 +66,13 @@ def challenge_message(address: str, nonce: str) -> str:
     return f'Confío · Salida de emergencia\nCuenta: {address}\nCódigo: {nonce}'
 
 
-def issue_challenge(address: str) -> dict:
+def issue_challenge(address: str, client_ip: str = '') -> dict:
     if not isinstance(address, str) or not ADDRESS_RE.match(address):
         raise EmergencyExitError(INVALID_MESSAGE)
     address = address.lower()
-    count_key = f'emergency_exit:challenges:{address}'
+    # Counted per address AND caller: a per-address budget alone lets anyone
+    # who knows the (public) address spend it and lock the owner out.
+    count_key = f'emergency_exit:challenges:{address}:{client_ip}'
     cache.add(count_key, 0, 3600)
     try:
         count = cache.incr(count_key)
@@ -77,7 +82,7 @@ def issue_challenge(address: str) -> dict:
     if count > MAX_CHALLENGES_PER_HOUR:
         raise EmergencyExitError(TOO_MANY_MESSAGE)
     nonce = secrets.token_hex(16)
-    cache.set(_challenge_key(address), nonce, CHALLENGE_TTL)
+    cache.set(_challenge_key(address, nonce), 1, CHALLENGE_TTL)
     return {'nonce': nonce, 'message': challenge_message(address, nonce)}
 
 
@@ -105,6 +110,11 @@ def _require_app_check(user, app_check_token: str) -> None:
         raise EmergencyExitError(DEVICE_MESSAGE)
 
 
+def _has_face_reference(user) -> bool:
+    from .models import FaceReference
+    return FaceReference.objects.filter(user=user, is_active=True).exists()
+
+
 def _is_banned(user) -> bool:
     from .utils import check_user_banned
     return check_user_banned(user)[0]
@@ -115,10 +125,12 @@ def open_session(address: str, nonce: str, signature: str, app_check_token: str)
     if not isinstance(address, str) or not ADDRESS_RE.match(address):
         raise EmergencyExitError(INVALID_MESSAGE)
     address = address.lower()
-    expected = cache.get(_challenge_key(address))
+    if not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{32}', nonce):
+        raise EmergencyExitError(EXPIRED_MESSAGE)
     # One signature, one session: the challenge is spent even on failure.
-    cache.delete(_challenge_key(address))
-    if not expected or not isinstance(nonce, str) or not secrets.compare_digest(expected, nonce):
+    # delete() reports whether it removed the key, so two concurrent
+    # requests cannot both spend the same challenge.
+    if not cache.delete(_challenge_key(address, nonce)):
         raise EmergencyExitError(EXPIRED_MESSAGE)
     if _recover(challenge_message(address, nonce), signature or '') != address:
         raise EmergencyExitError(INVALID_MESSAGE)
@@ -129,10 +141,12 @@ def open_session(address: str, nonce: str, signature: str, app_check_token: str)
     _require_app_check(user, app_check_token)
 
     banned = _is_banned(user)
-    face_required = banned and step_up_applies(user)
-    # A banned account that never did KYC has no face to check. It is also
-    # what a ring's pooling account looks like, so it gets the normal
-    # route's waiting period instead of an immediate exit.
+    # Confío Face needs a stored KYC selfie to compare against. A banned
+    # account without one (never did KYC — what a ring's pooling account
+    # looks like — or a selfie copy that was never stored, which a banned
+    # user cannot fix by verifying again) gets the normal route's waiting
+    # period instead: never an immediate exit, never a permanent lockout.
+    face_required = banned and step_up_applies(user) and _has_face_reference(user)
     wait_required = banned and step_up_enabled() and not face_required
     result = {'banned': banned, 'face_required': face_required, 'wait_required': wait_required, 'token': ''}
     if face_required:

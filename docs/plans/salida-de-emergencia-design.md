@@ -220,7 +220,7 @@ step-up release). Decided by Julian on 2026-09-29.
 | Client-observed state | Route | Wait |
 |---|---|---|
 | Server-confirmed ban, KYC'd (Confío reachable) | **ban route** | Confío Face, then immediate. **No waiting-period fallback.** |
-| Server-confirmed ban, never did KYC | ban route | 72h cooloff (no face to check; a ring's pooling account looks like this) |
+| Server-confirmed ban, no KYC selfie on file | ban route | 72h cooloff (no face to check; a ring's pooling account looks like this, and a banned user cannot re-verify) |
 | Normal (Confío reachable) | normal | 72h cooloff, then Confío Face (KYC'd users only) or a second 72h wait |
 | `blocked`: Confío unreachable from the phone, up per the Worker | normal | same as normal; the face check cannot run, so the second wait |
 | Outage confirmed by the Worker (down since T) | outage | immediate once T is 72h old (chain time) |
