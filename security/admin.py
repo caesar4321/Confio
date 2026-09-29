@@ -8,7 +8,7 @@ from django.db.models import Count, Q
 from .models import (
     IdentityVerification, SuspiciousActivity, UserBan,
     IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck, IPDeviceUser,
-    IntegrityVerdict
+    IntegrityVerdict, FaceReference, FaceCheck
 )
 from notifications.utils import create_notification
 from notifications.models import NotificationType as NotificationTypeChoices
@@ -1572,3 +1572,25 @@ class IntegrityVerdictAdmin(admin.ModelAdmin):
             json.dumps(obj.raw_response, indent=2)
         )
     raw_response_display.short_description = 'Raw Response'
+
+
+class FaceReferenceAdmin(admin.ModelAdmin):
+    """Read-only: references are created from Didit, never by hand."""
+    list_display = ('id', 'user', 'source', 'is_active', 'created_at')
+    list_filter = ('is_active', 'source')
+    search_fields = ('user__username', 'user__email')
+    readonly_fields = ('user', 'identity_verification', 's3_key', 'sha256', 'source', 'is_active', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+
+class FaceCheckAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'purpose', 'status', 'failure_reason', 'liveness_confidence',
+                    'similarity', 'completed_at', 'consumed_at')
+    list_filter = ('purpose', 'status', 'failure_reason')
+    search_fields = ('user__username', 'user__email', 'liveness_session_id')
+    readonly_fields = [f.name for f in FaceCheck._meta.fields]
+
+    def has_add_permission(self, request):
+        return False

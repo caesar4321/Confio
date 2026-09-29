@@ -76,6 +76,13 @@ class LiveOnRampGuardTests(TestCase):
         self._rejections(5, hours_ago=25)
         self.assertFalse(on_ramp_rejection_locked(self.user))
 
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_live_order_asks_for_the_face_first(self):
+        result, provider = _live_order(self.user, 'PE')
+        self.assertFalse(result.success)
+        self.assertEqual(result.next_step, 'face_check')
+        provider.assert_not_called()
+
     def test_expired_orders_do_not_count(self):
         for _ in range(6):
             RampTransaction.objects.create(

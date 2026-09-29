@@ -465,10 +465,71 @@ class VerifyAppCheck(graphene.Mutation):
             )
 
 
+class StartFaceCheck(graphene.Mutation):
+    """Open a liveness session and hand the app single-action credentials."""
+
+    class Arguments:
+        purpose = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    session_id = graphene.String()
+    region = graphene.String()
+    access_key_id = graphene.String()
+    secret_access_key = graphene.String()
+    session_token = graphene.String()
+    expiration = graphene.String()
+
+    def mutate(self, info, purpose):
+        from .face_step_up import FaceStepUpError, start_face_check
+        user = getattr(info.context, 'user', None)
+        if not (user and user.is_authenticated):
+            return StartFaceCheck(success=False, error='Authentication required')
+        try:
+            data = start_face_check(user, purpose)
+        except FaceStepUpError as exc:
+            return StartFaceCheck(success=False, error=str(exc))
+        except Exception:
+            logger.exception('Face check could not start for user %s', user.id)
+            return StartFaceCheck(success=False, error='No pudimos iniciar la verificación. Intenta de nuevo.')
+        return StartFaceCheck(success=True, **data)
+
+
+class CompleteFaceCheck(graphene.Mutation):
+    """Grade the session. Only pass/fail is returned, never the reason."""
+
+    class Arguments:
+        session_id = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    passed = graphene.Boolean()
+    error = graphene.String()
+
+    def mutate(self, info, session_id):
+        from .face_step_up import FaceStepUpError, complete_face_check
+        user = getattr(info.context, 'user', None)
+        if not (user and user.is_authenticated):
+            return CompleteFaceCheck(success=False, passed=False, error='Authentication required')
+        try:
+            passed = complete_face_check(user, session_id)
+        except FaceStepUpError as exc:
+            return CompleteFaceCheck(success=False, passed=False, error=str(exc))
+        except Exception:
+            logger.exception('Face check could not complete for user %s', user.id)
+            return CompleteFaceCheck(success=False, passed=False,
+                                     error='No pudimos completar la verificación. Intenta de nuevo.')
+        return CompleteFaceCheck(
+            success=True, passed=passed,
+            error=None if passed else 'No pudimos confirmar tu identidad. Intenta de nuevo.',
+        )
+
+
 class SecurityMutation(graphene.ObjectType):
     check_kyc_status = CheckKYCStatus.Field()
     request_integrity_nonce = RequestIntegrityNonce.Field()
     verify_app_check = VerifyAppCheck.Field()
+    start_face_check = StartFaceCheck.Field()
+    complete_face_check = CompleteFaceCheck.Field()
 
 
 # Export for main schema
