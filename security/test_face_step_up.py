@@ -709,21 +709,18 @@ class FaceChallengeLevelTests(TestCase):
         # 90 spent: another 45 reaches 100 and needs a full check.
         self.assertEqual(self._claim(fsu.Decimal('45')), fsu.FACE_STEP_UP_MESSAGE)
 
-    def test_the_refusing_gate_picks_the_next_sessions_challenge(self):
+    def test_a_session_without_a_movement_is_full(self):
+        # A refused small send leaves nothing behind that could downgrade
+        # the next check, which may be for a bank withdrawal.
         self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)
         fsu.start_face_check(self.user, 'withdrawal')
-        self.assertEqual(self._started_preferences()[0], {'Type': 'FaceMovementChallenge'})
-        self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'light')
-        # The note is used once: a later unrelated check is full again.
-        FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
-        fsu.start_face_check(self.user, 'withdrawal')
         self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
+        self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'full')
 
     def test_other_purposes_always_run_the_full_challenge(self):
-        self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)  # notes light
         for purpose in ('on_ramp', 'emergency_exit', 'payroll_authority', 'payin_release'):
             FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
-            fsu.start_face_check(self.user, purpose)
+            fsu.start_face_check(self.user, purpose, movement=('20', 'cUSD', False))
             self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
 
     def test_an_sdk_without_challenge_preferences_runs_a_full_check(self):
@@ -759,13 +756,6 @@ class FaceChallengeLevelTests(TestCase):
             self.assertTrue(fsu.complete_face_check(self.user, 'asked-light'))
         check.refresh_from_db()
         self.assertEqual(check.challenge, 'full')
-
-    def test_spending_a_check_clears_the_note(self):
-        self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)
-        self._check('light')
-        self.assertEqual(self._claim(fsu.Decimal('10')), '')
-        fsu.start_face_check(self.user, 'withdrawal')
-        self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
 
     def test_send_terms(self):
         from send.bsc_flow import _send_face_terms

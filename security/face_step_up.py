@@ -33,7 +33,6 @@ import requests
 from botocore.exceptions import ParamValidationError
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.utils import timezone
@@ -290,15 +289,6 @@ def record_app_check(user, app_check_token, stage: str):
         return None
 
 
-def _challenge_note_key(user_id) -> str:
-    return f'face_step_up:challenge:{user_id}'
-
-
-def _note_required_challenge(user, challenge: str) -> None:
-    """Remember what the refusing gate needs, for the session opened next."""
-    cache.set(_challenge_note_key(user.pk), challenge, int(WITHDRAWAL_WINDOW.total_seconds()))
-
-
 def _session_challenge(user, purpose: str, movement=None) -> str:
     """Which challenge a new session runs. Full unless an outgoing movement
     is known to be small enough.
@@ -306,22 +296,14 @@ def _session_challenge(user, purpose: str, movement=None) -> str:
     `movement` is the app's description of what it is about to do: amount,
     token and whether the money leaves Confío. It is only a hint: the gate
     that spends the check decides from the server's own terms, so a false
-    hint buys a light check that no larger movement accepts. Without one, the
-    last refusing gate's note decides.
+    hint buys a light check that no larger movement accepts. Without one
+    (P2P, bank withdrawals, older apps) the check is full: nothing else can
+    tie a session to the movement it will approve.
     """
-    if purpose != 'withdrawal':
+    if purpose != 'withdrawal' or movement is None:
         return CHALLENGE_FULL
-    if movement is not None:
-        amount, token_type, leaves_confio = movement
-        return required_challenge(user, dollar_amount(amount, token_type), leaves_confio is not False)
-    # One session per note: a light note left by an abandoned movement must
-    # not downgrade a later, unrelated check (e.g. a P2P or bank withdrawal
-    # that authenticates before its own gate runs).
-    note_key = _challenge_note_key(user.pk)
-    if cache.get(note_key) == CHALLENGE_LIGHT:
-        cache.delete(note_key)
-        return CHALLENGE_LIGHT
-    return CHALLENGE_FULL
+    amount, token_type, leaves_confio = movement
+    return required_challenge(user, dollar_amount(amount, token_type), leaves_confio is not False)
 
 
 def _create_liveness_session(challenge: str):
@@ -609,10 +591,7 @@ def missing_face_step_up(user, purpose: str, *, amount_usd=None, cash_out=True) 
         return '' if _usable_on_ramp_checks(user, now).exists() else FACE_STEP_UP_MESSAGE
     if purpose == 'withdrawal':
         challenge = required_challenge(user, amount_usd, cash_out, now)
-        if _usable_withdrawal_checks(user, now, challenge).exists():
-            return ''
-        _note_required_challenge(user, challenge)
-        return FACE_STEP_UP_MESSAGE
+        return '' if _usable_withdrawal_checks(user, now, challenge).exists() else FACE_STEP_UP_MESSAGE
     raise ValueError(f'Unknown step-up purpose {purpose}')
 
 
@@ -699,12 +678,10 @@ def require_face_step_up(user, purpose: str, *, action_key=None, consume=False,
             Case(When(challenge=CHALLENGE_LIGHT, then=0), default=1, output_field=IntegerField()),
             '-completed_at', '-pk').first()
         if not check:
-            _note_required_challenge(user, challenge)
             return FACE_STEP_UP_MESSAGE
         if consume:
             check.consumed_at = now
             check.consumed_by = action_key
             check.amount_usd = None if amount_usd is None else Decimal(str(amount_usd))
             check.save(update_fields=['consumed_at', 'consumed_by', 'amount_usd'])
-            cache.delete(_challenge_note_key(user.pk))
         return ''
