@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
+import { navigationRef } from '../navigation/RootNavigation';
 import {
   FaceCheckBackend,
   FaceCheckPurpose,
@@ -89,6 +90,21 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   const [purpose, setPurpose] = useState<FaceCheckPurpose | null>(null);
   const [stage, setStage] = useState<Stage>('intro');
   const [message, setMessage] = useState<string | undefined>();
+  // The privacy policy opens in the app's own screen: the sheet steps aside
+  // (the check stays pending) and comes back when the person returns.
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const openPolicy = useCallback(() => {
+    if (!navigationRef.isReady()) return;
+    setPolicyOpen(true);
+    (navigationRef as any).navigate('LegalDocument', { docType: 'privacy' });
+  }, []);
+  useEffect(() => {
+    if (!policyOpen) return;
+    const unsubscribe = navigationRef.addListener('state', () => {
+      if (navigationRef.getCurrentRoute()?.name !== 'LegalDocument') setPolicyOpen(false);
+    });
+    return unsubscribe;
+  }, [policyOpen]);
   const settle = useRef<((passed: boolean) => void) | null>(null);
   const openPurpose = useRef<FaceCheckPurpose | null>(null);
   const openBackend = useRef<FaceCheckBackend | undefined>(undefined);
@@ -100,6 +116,7 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   const presentRef = useRef<((purpose: FaceCheckPurpose, backend?: FaceCheckBackend) => Promise<boolean>) | null>(null);
 
   const close = useCallback((passed: boolean) => {
+    setPolicyOpen(false);
     if (successTimer.current) clearTimeout(successTimer.current);
     successTimer.current = null;
     requestId.current += 1;
@@ -184,7 +201,7 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   return (
     <>
       {children}
-      <Modal visible={purpose !== null} transparent animationType="slide"
+      <Modal visible={purpose !== null && !policyOpen} transparent animationType="slide"
         onRequestClose={() => { if (!captureBusy.current) close(false); }}>
         <View style={styles.backdrop}>
           <View style={styles.sheet}>
@@ -227,6 +244,15 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
                       <Tip icon="alert-triangle"
                         text="La pantalla mostrará luces de colores unos segundos. Si eres sensible a luces intermitentes, no continúes." />
                     </View>
+                    {/* Consent for biometric data: continuing is the affirmative act. */}
+                    <Text style={styles.consent}>
+                      Al continuar, aceptas que usemos tu rostro para confirmar que eres tú y proteger tu cuenta. No
+                      guardamos el video.{' '}
+                      <Text style={styles.consentLink} accessibilityRole="link"
+                        onPress={openPolicy}>
+                        Política de privacidad
+                      </Text>
+                    </Text>
                     <Pressable style={styles.primary} onPress={start}>
                       <Text style={styles.primaryText}>Confirmar con mi rostro</Text>
                     </Pressable>
@@ -273,6 +299,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   tipText: { flex: 1, fontSize: 14, lineHeight: 20, color: INK },
+  consent: { fontSize: 12, lineHeight: 17, color: MUTED, textAlign: 'center', marginTop: -8, marginBottom: 14 },
+  consentLink: { color: EMERALD, fontWeight: '600' },
   primary: {
     alignSelf: 'stretch', backgroundColor: EMERALD, borderRadius: 16, paddingVertical: 16, alignItems: 'center',
   },

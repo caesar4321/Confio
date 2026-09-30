@@ -424,6 +424,15 @@ const VerificationScreen = () => {
         <Icon name="chevron-right" size={20} color={colors.textSecondary} />
       </TouchableOpacity>
       <Text style={styles.hint}>Tus datos deben coincidir en todos tus documentos: mismo nombre y fecha de nacimiento.</Text>
+      {/* Consent for Confío's own use of the selfie (Didit's screen covers only Didit). */}
+      <Text style={styles.consent}>
+        Al continuar, aceptas que usemos tu selfie para verificar tu identidad y, más adelante, para confirmar con
+        tu rostro que eres tú.{' '}
+        <Text style={styles.consentLink} accessibilityRole="link"
+          onPress={() => navigation.navigate('LegalDocument', { docType: 'privacy' })}>
+          Política de privacidad
+        </Text>
+      </Text>
     </View>
   );
 
@@ -641,6 +650,8 @@ const styles = StyleSheet.create({
   optionTitle: { fontSize: 15, fontWeight: '800', color: colors.dark },
   optionBody: { fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 2 },
   hint: { fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginHorizontal: 4 },
+  consent: { fontSize: 12, lineHeight: 17, color: colors.textSecondary, marginHorizontal: 4, marginTop: 10 },
+  consentLink: { color: colors.primaryDark, fontWeight: '600' },
 
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   stepNumber: {

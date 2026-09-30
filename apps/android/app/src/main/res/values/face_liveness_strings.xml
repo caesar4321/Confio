@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App resources override AWS Liveness 1.5.0 defaults to match Confío's Spanish UI. -->
+<resources>
+    <string name="amplify_ui_liveness_challenge_a11y_cancel_content_description">Cancelar verificación</string>
+    <string name="amplify_ui_liveness_challenge_connecting">Conectando…</string>
+    <string name="amplify_ui_liveness_challenge_instruction_hold_face_during_freshness">Quédate quieto/a</string>
+    <string name="amplify_ui_liveness_challenge_instruction_move_face">Coloca el rostro frente a la cámara</string>
+    <string name="amplify_ui_liveness_challenge_instruction_move_face_closer">Acércate un poco</string>
+    <string name="amplify_ui_liveness_challenge_instruction_move_face_further">Aléjate un poco</string>
+    <string name="amplify_ui_liveness_challenge_instruction_multiple_faces_detected">Solo debe aparecer un rostro</string>
+    <string name="amplify_ui_liveness_challenge_recording_indicator_label">VERIFICANDO</string>
+    <string name="amplify_ui_liveness_challenge_verifying">Verificando</string>
+    <string name="amplify_ui_liveness_get_ready_a11y_photosensitivity_icon_content_description">Información sobre fotosensibilidad</string>
+    <string name="amplify_ui_liveness_get_ready_begin_check">Iniciar verificación</string>
+    <string name="amplify_ui_liveness_get_ready_center_face_label">Centra el rostro</string>
+    <string name="amplify_ui_liveness_get_ready_photosensitivity_description">Esta verificación muestra destellos de distintos colores. Ten precaución si eres fotosensible.</string>
+    <string name="amplify_ui_liveness_get_ready_photosensitivity_dialog_description">Algunas personas pueden sufrir convulsiones epilépticas al exponerse a luces de colores. Ten precaución si tú o alguien de tu familia tiene epilepsia.</string>
+    <string name="amplify_ui_liveness_get_ready_photosensitivity_dialog_dismiss">Entendido</string>
+    <string name="amplify_ui_liveness_get_ready_photosensitivity_dialog_title">Aviso de fotosensibilidad</string>
+    <string name="amplify_ui_liveness_get_ready_photosensitivity_title">Aviso de fotosensibilidad</string>
+</resources>

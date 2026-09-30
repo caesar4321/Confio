@@ -557,12 +557,49 @@ def terms_view(request):
 		return redirect_response
 	return render(request, 'terms.html')
 
+_PRIVACY_GROUP_LABELS = {
+	'personal_info': 'Información personal',
+	'kyc_info': 'Verificación de identidad (KYC)',
+	'biometric_info': 'Datos biométricos (rostro)',
+	'device_info': 'Información técnica y del dispositivo',
+	'payments_and_ramps': 'Pagos, recargas y retiros',
+	'support_and_content': 'Soporte y contenido',
+	'business_and_payroll': 'Negocios y nómina',
+}
+_MONTHS_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+	'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+
 def privacy_view(request):
-	"""View for Privacy Policy page."""
+	"""Privacy Policy page, rendered from the same binding document the app and
+	the website read (users/legal/documents.py), so there is one policy."""
 	redirect_response = _redirect_if_trailing_slash(request)
 	if redirect_response:
 		return redirect_response
-	return render(request, 'privacy.html')
+	from datetime import date
+	from users.legal.documents import PRIVACY
+	sections = []
+	for section in PRIVACY['sections']:
+		content = section['content']
+		entry = {'title': section['title'], 'items': [], 'groups': [], 'contact': None}
+		if isinstance(content, list):
+			entry['items'] = content
+		elif isinstance(content, dict) and {'email', 'telegram'} & set(content):
+			entry['contact'] = content
+		elif isinstance(content, dict):
+			entry['groups'] = [
+				{'label': _PRIVACY_GROUP_LABELS.get(key, key.replace('_', ' ').capitalize()), 'items': items}
+				for key, items in content.items()
+			]
+		else:
+			entry['items'] = [str(content)]
+		sections.append(entry)
+	updated = date.fromisoformat(PRIVACY['last_updated'])
+	return render(request, 'privacy.html', {
+		'sections': sections,
+		'version': PRIVACY['version'],
+		'last_updated': f'{updated.day} de {_MONTHS_ES[updated.month - 1]} de {updated.year}',
+	})
 
 def deletion_view(request):
     """View for Data Deletion page."""
