@@ -139,10 +139,16 @@ describe('faceStepUp', () => {
     let during: boolean | undefined;
     start.mockImplementationOnce(async () => { during = isFaceCaptureRunning(); return 'complete'; });
     mockMutate.mockResolvedValueOnce(started).mockResolvedValueOnce(completed(true));
-    expect(isFaceCaptureRunning()).toBe(false);
+    const now = jest.spyOn(Date, 'now');
+    const t0 = 1_800_000_000_000;
+    now.mockReturnValue(t0);
     await runFaceCapture('withdrawal');
     expect(during).toBe(true);
+    // Still flagged while the capture screen closes, then clear.
+    expect(isFaceCaptureRunning()).toBe(true);
+    now.mockReturnValue(t0 + 3001);
     expect(isFaceCaptureRunning()).toBe(false);
+    now.mockRestore();
   });
 
   it('never passes without a mounted presenter', async () => {

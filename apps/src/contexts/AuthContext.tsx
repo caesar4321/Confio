@@ -737,6 +737,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       }
       // enable() already performed a biometric prompt, so avoid prompting again
       lastBiometricSuccessRef.current = Date.now();
+      deviceLockEnrolledRef.current = true;
       return { ok: true, alreadyEnabled: false, didAuthenticate: true };
     } catch (error) {
       console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
