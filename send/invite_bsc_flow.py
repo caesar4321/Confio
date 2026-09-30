@@ -200,6 +200,12 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
     inviter_addr = ((getattr(acct, 'bsc_address', None) or '') or '').lower()
     if not inviter_addr:
         return {'success': False, 'error': 'no_bsc_address'}
+    # An invite is a send (to a phone instead of an account): the same
+    # Confío Face gate as bsc_flow, so pooling cannot route around it.
+    from .bsc_flow import _send_step_up
+    step_up = _send_step_up(user, sender_business, None)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     # "Dollars" are one product in the app, but the sender's actual BSC
     # representation is jurisdiction-dependent. Legacy builds always submit
@@ -388,6 +394,13 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     now = int(time.time())
     if not (now + 30 <= int(deadline) <= now + 1800):
         return {'success': False, 'error': 'bad_deadline'}
+
+    # Rechecked here, like bsc_flow: an invite prepared earlier must not
+    # leave once the face window has lapsed.
+    from .bsc_flow import _send_step_up
+    step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     # EVERYTHING that can reject without side effects happens BEFORE the row is
     # taken (Codex follow-up audit 2026-08-02 P1). Validating after the CAS left

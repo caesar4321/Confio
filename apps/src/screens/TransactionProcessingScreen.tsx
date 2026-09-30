@@ -10,6 +10,7 @@ import { PAY_INVOICE } from '../apollo/queries';
 import { AccountManager } from '../utils/accountManager';
 import algorandService from '../services/algorandService';
 import { inviteSendService } from '../services/inviteSendService';
+import { FACE_STEP_UP_MESSAGE } from '../services/faceStepUp';
 import { useAccount } from '../contexts/AccountContext';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import * as nacl from 'tweetnacl';
@@ -830,6 +831,8 @@ export const TransactionProcessingScreen = () => {
         const code = e?.message || '';
         setTransactionError(
           BSC_SEND_ERRORS[code]
+          // Confío Face declined or not passed: say so, not "check your connection".
+          || (code === FACE_STEP_UP_MESSAGE ? code : '')
           || 'No se pudo enviar. Revisa tu conexión e inténtalo de nuevo.',
         );
         setIsComplete(true);
@@ -870,6 +873,8 @@ export const TransactionProcessingScreen = () => {
         const code = e?.message || '';
         setTransactionError(
           BSC_INVITE_ERRORS[code]
+          // Confío Face declined or not passed: say so, not "check your connection".
+          || (code === FACE_STEP_UP_MESSAGE ? code : '')
           || 'No se pudo enviar la invitación. Revisa tu conexión e inténtalo de nuevo.',
         );
         setIsComplete(true);

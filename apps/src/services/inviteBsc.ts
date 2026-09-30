@@ -179,7 +179,9 @@ export const createBscInvite = async (params: BscInviteParams): Promise<BscInvit
   }
   const wallet = await getActiveEvmWallet();
 
-  const { data } = await apolloClient.mutate({
+  const { ensureFaceCheck, FACE_STEP_UP_MESSAGE, FaceCheckError, isFaceStepUpRequired } =
+    await import('./faceStepUp');
+  const prepare = async () => (await apolloClient.mutate({
     mutation: PREPARE_INVITE,
     variables: {
       phone: params.phone,
@@ -187,8 +189,13 @@ export const createBscInvite = async (params: BscInviteParams): Promise<BscInvit
       amount: String(params.amount),
       tokenType: params.tokenType,
     },
-  });
-  const prep = data?.prepareBscInvite;
+  })).data?.prepareBscInvite;
+  let prep = await prepare();
+  if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
+    // An invite is a send: Confío Face, then once more.
+    if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+    prep = await prepare();
+  }
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
 
   const calls: BatchCall[] = (prep.calls || []).map((c: any) => ({
@@ -213,6 +220,11 @@ export const createBscInvite = async (params: BscInviteParams): Promise<BscInvit
       },
     });
     const sub = res.data?.submitBscInvite;
+    if (!sub?.success && isFaceStepUpRequired(sub?.error) && attempt === 0) {
+      // The face window lapsed between prepare and submit: confirm again.
+      if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+      continue;
+    }
     if (!sub?.success) {
       lastError = sub?.error || 'sponsor rejected';
       // Nonce races are retryable with fresh reads; policy errors are not.
