@@ -359,8 +359,9 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   };
 
   const runBsc = async () => {
-    // Online routes below already authenticate with Face (or establish that
-    // no KYC exists). Only the server-independent fallback uses local auth.
+    // Online routes authenticate with Confío Face. The phone's biometric is
+    // used where no face is checked: the server-independent fallback, a face
+    // waiver, and any route where no face is asked (no KYC, not enforced).
     // One successful prompt covers this tap; later checks only add one when
     // nothing has authenticated yet.
     let locallyAuthenticated = false;
