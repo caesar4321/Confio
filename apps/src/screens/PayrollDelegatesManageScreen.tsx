@@ -127,7 +127,7 @@ export const PayrollDelegatesManageScreen = () => {
       return;
     }
     const next = !current;
-    const ok = await authenticateWithFace('withdrawal');
+    const ok = await authenticateWithFace('payroll_authority');
     if (!ok) {
       Alert.alert('Autenticación requerida', 'No se pudo validar tu identidad.');
       return;

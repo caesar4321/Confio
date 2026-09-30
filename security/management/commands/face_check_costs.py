@@ -36,8 +36,11 @@ class Command(BaseCommand):
     def handle(self, *args, months=3, **options):
         liveness_unit = Decimal(str(_setting('FACE_LIVENESS_UNIT_USD', DEFAULT_LIVENESS_UNIT_USD)))
         compare_unit = Decimal(str(_setting('FACE_COMPARE_UNIT_USD', DEFAULT_COMPARE_UNIT_USD)))
-        since = (timezone.now() - timedelta(days=31 * months)).replace(day=1, hour=0, minute=0, second=0,
-                                                                       microsecond=0)
+        # Calendar months, current one included, so totals line up with the AWS bill.
+        start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        for _ in range(max(months, 1) - 1):
+            start = (start - timedelta(days=1)).replace(day=1)
+        since = start
         rows = (FaceCheck.objects.filter(created_at__gte=since)
                 .annotate(month=TruncMonth('created_at'))
                 .values('month', 'purpose')

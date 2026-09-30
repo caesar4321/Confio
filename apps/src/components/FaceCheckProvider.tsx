@@ -41,6 +41,7 @@ const PURPOSE_COPY: Record<FaceCheckPurpose, string> = {
   withdrawal: 'Solo tú puedes mover tu dinero. Confirma con tu rostro para continuar.',
   emergency_exit: 'Para proteger tu salida de emergencia, confirma con tu rostro que eres tú.',
   payin_release: 'Tienes dinero por recibir. Confirma con tu rostro que eres tú para recibirlo.',
+  payroll_authority: 'Vas a autorizar pagos de nómina en nombre de tu negocio. Confirma con tu rostro que eres tú.',
 };
 
 const FaceGlyph = ({ color, spinning }: { color: string; spinning: boolean }) => {

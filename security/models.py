@@ -1337,6 +1337,10 @@ class FaceCheck(models.Model):
         ('withdrawal', 'Withdrawal'),
         ('emergency_exit', 'Emergency exit'),
         ('payin_release', 'Receive held pay-in'),
+        # Granting payroll delegation / setup: someone else may then move the
+        # business's money. Its own purpose so it never stands in for a
+        # withdrawal check (missing_face_step_up only counts 'withdrawal').
+        ('payroll_authority', 'Payroll authority change'),
     ]
     STATUS_CHOICES = [
         ('created', 'Created'),

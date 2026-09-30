@@ -568,13 +568,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           return;
         }
         const lastInactive = lastInactiveAtRef.current;
-        const needsUnlock = isAuthenticated && !!lastInactive && Date.now() - lastInactive > 10000;
-        if (needsUnlock) {
+        const awayLong = isAuthenticated && !!lastInactive && Date.now() - lastInactive > 10000;
+        if (awayLong) {
           if (isAuthenticating) return;
           isAuthenticating = true;
           lastPromptedCycle = currentCycle;
-          // Cover Main before any Keychain/network await. Offline refresh must
-          // never leave the previous authenticated screen interactive.
+        }
+        // Only a phone with a lock set up for Confío locks on resume, as before
+        // Confío Face: without one there is nothing to unlock with, and locking
+        // would just throw the user back to Home. A local read, not network.
+        const needsUnlock = awayLong && await deviceLockEnrolled();
+        if (awayLong && !needsUnlock) isAuthenticating = false;
+        if (needsUnlock) {
+          // Cover Main before the Keychain/network awaits below. Offline refresh
+          // must never leave the previous authenticated screen interactive.
           resumeAuthenticationRef.current = true;
           lockApp();
         }
@@ -665,11 +672,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // tied to that movement as evidence; an app-open check proves nothing and
   // would dominate cost. Devices without a lock screen, or without
   // enrollment, open as before.
-  const deviceUnlock = async (reason: string = 'Desbloquea Confío'): Promise<boolean> => {
-    const supported = await biometricAuthService.isSupported();
-    if (!supported || !(await biometricAuthService.isEnabled())) return true;
-    return biometricAuthService.authenticate(reason);
-  };
+  const deviceLockEnrolled = async (): Promise<boolean> =>
+    (await biometricAuthService.isSupported()) && (await biometricAuthService.isEnabled());
+  const deviceUnlock = async (reason: string = 'Desbloquea Confío'): Promise<boolean> =>
+    !(await deviceLockEnrolled()) || biometricAuthService.authenticate(reason);
 
   const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean; silent?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
     const skipRevalidate = options?.skipRevalidate === true;
