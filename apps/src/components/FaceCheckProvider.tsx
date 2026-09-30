@@ -260,7 +260,7 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
                       <Tip icon="sun" text="Busca buena luz y mira de frente a la cámara." />
                       <Tip icon="eye" text="Sin gafas oscuras, gorra ni mascarilla." />
                       <Tip icon="alert-triangle"
-                        text="La pantalla mostrará luces de colores unos segundos. Si eres sensible a luces intermitentes, no continúes." />
+                        text="Según el monto, la pantalla puede mostrar luces de colores unos segundos. Si eres sensible a luces intermitentes, no continúes." />
                     </View>
                     {/* Consent for biometric data: continuing is the affirmative act. */}
                     <Text style={styles.consent}>

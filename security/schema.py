@@ -493,6 +493,12 @@ class StartFaceCheck(graphene.Mutation):
 
     class Arguments:
         purpose = graphene.String(required=True)
+        # What the app is about to do, so a small movement inside Confío
+        # gets the light challenge. A hint only: the gate that spends the
+        # check applies the server's own terms (face_step_up._session_challenge).
+        amount = graphene.String()
+        token_type = graphene.String()
+        leaves_confio = graphene.Boolean()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -503,14 +509,15 @@ class StartFaceCheck(graphene.Mutation):
     session_token = graphene.String()
     expiration = graphene.String()
 
-    def mutate(self, info, purpose):
+    def mutate(self, info, purpose, amount=None, token_type=None, leaves_confio=None):
         from .face_step_up import FaceStepUpError, start_face_check
         user = getattr(info.context, 'user', None)
         if not (user and user.is_authenticated):
             return StartFaceCheck(success=False, error='Authentication required')
+        movement = (amount, token_type, leaves_confio) if amount is not None else None
         try:
             # App Check is recorded on the FaceCheck, never enforced here.
-            data = start_face_check(user, purpose, app_check_token=_app_check_header(info))
+            data = start_face_check(user, purpose, app_check_token=_app_check_header(info), movement=movement)
         except FaceStepUpError as exc:
             return StartFaceCheck(success=False, error=str(exc))
         except Exception:

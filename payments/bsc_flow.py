@@ -244,7 +244,13 @@ def _merchant_kyb_verified(merchant_business) -> bool:
         risk_factors__business_id=str(merchant_business.id)).exists()
 
 
-def _payment_step_up(user, payer_business, merchant_business, **claim) -> str:
+def _payment_face_terms(invoice) -> dict:
+    """A payment stays inside Confío; its dollar value picks light or full."""
+    from security.face_step_up import dollar_amount
+    return {'amount_usd': dollar_amount(invoice.amount, invoice.token_type), 'cash_out': False}
+
+
+def _payment_step_up(user, payer_business, merchant_business, invoice=None, **claim) -> str:
     """'' or the Confío Face message for a payment.
 
     Pay stays face-free at verified merchants. Confío Face (for payers who
@@ -263,6 +269,8 @@ def _payment_step_up(user, payer_business, merchant_business, **claim) -> str:
         return ''
     if not _pays_own_business(user, merchant_business) and _merchant_kyb_verified(merchant_business):
         return ''
+    if invoice is not None:
+        claim.update(_payment_face_terms(invoice))
     return require_face_step_up(user, 'withdrawal', **claim)
 
 
@@ -382,7 +390,8 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
     if not merchant_addr:
         _notify_merchant_needs_app(invoice, user)
         return {'success': False, 'error': 'merchant_no_bsc_address'}
-    step_up = _payment_step_up(user, payer_business, invoice.merchant_business)
+    step_up = _payment_step_up(user, payer_business, invoice.merchant_business,
+                               invoice=invoice)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -962,7 +971,7 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
         int(getattr(settings, 'BSC_CHAIN_ID', 56)),
         (payment_tx.payer_address or '').lower(), payment_tx.blockchain_data or {}])
     step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business,
-                               action_key=face_action)
+                               action_key=face_action, invoice=invoice)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -996,7 +1005,7 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
                 authorization, payer_addr, chain_id)
 
         step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business,
-                                   action_key=face_action, consume=True)
+                                   action_key=face_action, consume=True, invoice=invoice)
         if step_up:
             return {'success': False, 'error': step_up}
         tx_hash, batch = sponsor_7702.send_sponsored_batch(

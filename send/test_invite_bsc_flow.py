@@ -732,7 +732,9 @@ class InviteFaceStepUpTests(SimpleTestCase):
             result = f.prepare_create(
                 user, {'account_type': 'personal', 'account_index': 0}, '57:3001234567', 'CUSD_PLUS', '10')
         self.assertEqual(result, {'success': False, 'error': self.MESSAGE})
-        gate.assert_called_once_with(user, None, None)
+        # An invite stays inside Confío: its dollar value picks the challenge.
+        from decimal import Decimal
+        gate.assert_called_once_with(user, None, None, amount_usd=Decimal('10'), cash_out=False)
 
     def test_submit_rechecks_the_face_window(self):
         import time
