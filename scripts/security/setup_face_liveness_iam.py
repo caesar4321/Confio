@@ -7,8 +7,8 @@ Creates or updates, idempotently:
    rekognition:StartFaceLivenessSession. Only the backend role may assume it,
    and only with the `face-liveness-<user_id>` session name the code uses.
 2. An inline policy on the backend role: create/read liveness sessions and
-   CompareFaces in the Rekognition region (eu-central-1, no eu-central-2
-   endpoint), assume the client role, and read/write the stored KYC selfies
+   CompareFaces in the Face Liveness region (eu-west-1, Ireland), assume
+   the client role, and read/write the stored KYC selfies
    under face-references/ in the eu-central-2 verification bucket.
 
 Dry run by default; pass --apply to change anything.
@@ -16,7 +16,8 @@ Dry run by default; pass --apply to change anything.
     AWS_PROFILE=Julian python scripts/security/setup_face_liveness_iam.py \\
         --backend-role <ec2-instance-role-name> --bucket <AWS_VERIFICATION_BUCKET> --apply
 
-Then set FACE_LIVENESS_CLIENT_ROLE_ARN (printed at the end) and
+Then set FACE_REKOGNITION_REGION=eu-west-1,
+FACE_LIVENESS_CLIENT_ROLE_ARN (printed at the end), and
 FACE_STEP_UP_AVAILABLE=True in the backend environment. FACE_STEP_UP_ENABLED
 turns on enforcement once the app build with the liveness screen is out.
 """
@@ -29,7 +30,7 @@ from botocore.exceptions import ClientError
 CLIENT_ROLE_NAME = 'confio-face-liveness-client'
 CLIENT_POLICY_NAME = 'start-face-liveness-session'
 BACKEND_POLICY_NAME = 'confio-face-step-up'
-REKOGNITION_REGION = 'eu-central-1'
+REKOGNITION_REGION = 'eu-west-1'
 REFERENCE_PREFIX = 'face-references'  # security/face_step_up.py REFERENCE_PREFIX
 
 
@@ -47,7 +48,7 @@ def client_trust_policy(backend_role_arn: str) -> dict:
 
 def client_permissions_policy() -> dict:
     # StartFaceLivenessSession has no resource-level scoping; '*' is the
-    # narrowest AWS allows. The region condition keeps it to Frankfurt.
+    # narrowest AWS allows. The region condition keeps it to Ireland.
     return {
         'Version': '2012-10-17',
         'Statement': [{
