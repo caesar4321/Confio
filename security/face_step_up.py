@@ -30,6 +30,7 @@ from decimal import Decimal, InvalidOperation
 
 import boto3
 import requests
+from botocore.exceptions import ParamValidationError
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -313,17 +314,39 @@ def _session_challenge(user, purpose: str, movement=None) -> str:
     if movement is not None:
         amount, token_type, leaves_confio = movement
         return required_challenge(user, dollar_amount(amount, token_type), leaves_confio is not False)
-    if cache.get(_challenge_note_key(user.pk)) == CHALLENGE_LIGHT:
+    # One session per note: a light note left by an abandoned movement must
+    # not downgrade a later, unrelated check (e.g. a P2P or bank withdrawal
+    # that authenticates before its own gate runs).
+    note_key = _challenge_note_key(user.pk)
+    if cache.get(note_key) == CHALLENGE_LIGHT:
+        cache.delete(note_key)
         return CHALLENGE_LIGHT
     return CHALLENGE_FULL
 
 
-def _challenge_preferences(challenge: str) -> list:
+def _create_liveness_session(challenge: str):
+    """(session, challenge asked for). Frames come back as bytes (no S3
+    output in Ireland); we keep them in our own bucket in Zurich, see
+    _store_evidence.
+
+    Only a light check names its challenge: AWS runs the full one by default,
+    so a full check needs no ChallengePreferences, which boto3 older than
+    1.38.32 rejects before any request is sent. On such an SDK a light check
+    falls back to a full one rather than failing.
+    """
+    settings_ = {'AuditImagesLimit': AUDIT_IMAGES_LIMIT}
     if challenge == CHALLENGE_LIGHT:
         # In order of preference: a client that cannot run the light
         # challenge gets the full one (recorded as such when graded).
-        return [{'Type': AWS_CHALLENGE_TYPES[CHALLENGE_LIGHT]}, {'Type': AWS_CHALLENGE_TYPES[CHALLENGE_FULL]}]
-    return [{'Type': AWS_CHALLENGE_TYPES[CHALLENGE_FULL]}]
+        light = dict(settings_, ChallengePreferences=[
+            {'Type': AWS_CHALLENGE_TYPES[CHALLENGE_LIGHT]}, {'Type': AWS_CHALLENGE_TYPES[CHALLENGE_FULL]}])
+        try:
+            return _rekognition().create_face_liveness_session(
+                ClientRequestToken=uuid.uuid4().hex, Settings=light), CHALLENGE_LIGHT
+        except ParamValidationError:
+            logger.error('boto3 predates ChallengePreferences; running a full check. Reinstall requirements.txt')
+    return _rekognition().create_face_liveness_session(
+        ClientRequestToken=uuid.uuid4().hex, Settings=settings_), CHALLENGE_FULL
 
 
 def start_face_check(user, purpose: str, app_check_token=None, movement=None) -> dict:
@@ -345,14 +368,7 @@ def start_face_check(user, purpose: str, app_check_token=None, movement=None) ->
         if checks.filter(status='created', created_at__gte=now - SESSION_MAX_AGE).count() >= MAX_OPEN_SESSIONS:
             raise FaceStepUpError(TOO_MANY_MESSAGE)
         credentials = _client_credentials(user.id)
-        challenge = _session_challenge(user, purpose, movement)
-        session = _rekognition().create_face_liveness_session(
-            ClientRequestToken=uuid.uuid4().hex,
-            # Frames come back as bytes (no S3 output in Ireland); we keep them
-            # in our own bucket in Zurich, see _store_evidence.
-            Settings={'AuditImagesLimit': AUDIT_IMAGES_LIMIT,
-                      'ChallengePreferences': _challenge_preferences(challenge)},
-        )
+        session, challenge = _create_liveness_session(_session_challenge(user, purpose, movement))
         check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'],
                                          challenge=challenge)
     # After the lock (verifying the token is a network call) and only for a

@@ -196,8 +196,8 @@ class FaceStepUpTests(TestCase):
         self._store_reference()
         data = fsu.start_face_check(self.user, 'on_ramp')
         self.assertEqual(data['session_id'], 'sess-1')
-        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {
-            'AuditImagesLimit': 4, 'ChallengePreferences': [{'Type': 'FaceMovementAndLightChallenge'}]})
+        # Full is AWS's default: no ChallengePreferences, which old boto3 rejects.
+        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {'AuditImagesLimit': 4})
         self._liveness()
         self.assertTrue(fsu.complete_face_check(self.user, 'sess-1'))
         compare = self.rek.compare_faces.call_args.kwargs
@@ -654,7 +654,8 @@ class FaceChallengeLevelTests(TestCase):
                                         amount_usd=amount_usd, cash_out=cash_out)
 
     def _started_preferences(self):
-        return self.rek.create_face_liveness_session.call_args.kwargs['Settings']['ChallengePreferences']
+        settings_ = self.rek.create_face_liveness_session.call_args.kwargs['Settings']
+        return settings_.get('ChallengePreferences', [{'Type': 'FaceMovementAndLightChallenge'}])
 
     def test_level_rules(self):
         level = fsu.required_challenge
@@ -713,6 +714,10 @@ class FaceChallengeLevelTests(TestCase):
         fsu.start_face_check(self.user, 'withdrawal')
         self.assertEqual(self._started_preferences()[0], {'Type': 'FaceMovementChallenge'})
         self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'light')
+        # The note is used once: a later unrelated check is full again.
+        FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
+        fsu.start_face_check(self.user, 'withdrawal')
+        self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
 
     def test_other_purposes_always_run_the_full_challenge(self):
         self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)  # notes light
@@ -720,6 +725,15 @@ class FaceChallengeLevelTests(TestCase):
             FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
             fsu.start_face_check(self.user, purpose)
             self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
+
+    def test_an_sdk_without_challenge_preferences_runs_a_full_check(self):
+        from botocore.exceptions import ParamValidationError
+        self.rek.create_face_liveness_session.side_effect = [
+            ParamValidationError(report='Unknown parameter in Settings: "ChallengePreferences"'),
+            {'SessionId': 'sess-level'}]
+        fsu.start_face_check(self.user, 'withdrawal', movement=('20', 'cUSD', False))
+        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {'AuditImagesLimit': 4})
+        self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'full')
 
     def test_the_apps_movement_hint_picks_the_challenge(self):
         fsu.start_face_check(self.user, 'withdrawal', movement=('20', 'cUSD', False))
