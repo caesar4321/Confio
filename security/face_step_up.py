@@ -480,21 +480,27 @@ def purge_expired_evidence(batch=500) -> int:
 
     Held instead, with the KYC record, for the case: every check of a user
     with a ban on record (active or lifted) or a SuspiciousActivity case
-    that was not dismissed. Opening a case is how a fraud alert, compliance
-    escalation or partner / law-enforcement request keeps the frames. The
+    that was not dismissed, as its subject or one of its related users (the
+    other accounts of a duplicate-identity case, for instance). Opening a
+    case is how a fraud alert, compliance escalation or partner /
+    law-enforcement request keeps the frames. The
     check rows themselves (scores, what each approved) are never purged.
     Pages by row id, so checks whose deletion failed never block later ones;
     they are retried on the next run.
     """
     from .models import SuspiciousActivity, UserBan
     cutoff = timezone.now() - EVIDENCE_RETENTION
+    open_cases = SuspiciousActivity.objects.exclude(status='dismissed')
     eligible = FaceCheck.objects.filter(
         Q(completed_at__lt=cutoff) | Q(completed_at__isnull=True, created_at__lt=cutoff),
         evidence_purged_at__isnull=True,
     ).exclude(evidence_keys=[]).exclude(
         user_id__in=UserBan.all_objects.values('user_id'),
     ).exclude(
-        user_id__in=SuspiciousActivity.objects.exclude(status='dismissed').values('user_id'),
+        user_id__in=open_cases.values('user_id'),
+    ).exclude(
+        user_id__in=SuspiciousActivity.related_users.through.objects.filter(
+            suspiciousactivity_id__in=open_cases.values('pk')).values('user_id'),
     ).order_by('pk')
     purged, after = 0, 0
     while True:
