@@ -159,8 +159,6 @@ const normalizePhoneLookupKey = (value?: string | null): string => {
 
 export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
-  // Same guard as Home: blocked countries go to Efectivo, not into a ramp
-  // flow their country cannot complete.
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
