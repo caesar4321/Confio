@@ -714,3 +714,31 @@ class ClaimFinalityTests(SimpleTestCase):
         receipt = {'status': '0x0', 'blockNumber': '0x64', 'blockHash': '0xbb'}
         iobjs, _ = self._run(receipt)
         self.assertIn('pending', iobjs.statuses_written())
+
+
+class InviteFaceStepUpTests(SimpleTestCase):
+    """An invite is a send: the same Confío Face gate, at prepare and submit."""
+
+    MESSAGE = 'Confirma que eres tú con tu rostro para continuar.'
+
+    def test_prepare_asks_for_a_face(self):
+        acct = mock.Mock(bsc_address='0x' + '11' * 20)
+        user = mock.Mock()
+        user.accounts.filter.return_value.first.return_value = acct
+        with mock.patch.object(f, '_enabled', return_value=True), \
+                mock.patch('send.bsc_flow._send_step_up', return_value=self.MESSAGE) as gate:
+            result = f.prepare_create(
+                user, {'account_type': 'personal', 'account_index': 0}, '57:3001234567', 'CUSD_PLUS', '10')
+        self.assertEqual(result, {'success': False, 'error': self.MESSAGE})
+        gate.assert_called_once_with(user, None, None)
+
+    def test_submit_rechecks_the_face_window(self):
+        import time
+        user = mock.Mock(id=7)
+        invite = mock.Mock(inviter_user_id=7, status='draft', inviter_address='0x' + '11' * 20,
+                           invitation_id='ab' * 32)
+        invite.send_transaction.sender_business = None
+        with mock.patch.object(f, '_stored_create_calls', return_value=[{'to': '0x1'}]), \
+                mock.patch('send.bsc_flow._send_step_up', return_value=self.MESSAGE):
+            result = f.submit_create(user, invite, 1, int(time.time()) + 300, '0xsig')
+        self.assertEqual(result, {'success': False, 'error': self.MESSAGE})

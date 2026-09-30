@@ -258,7 +258,10 @@ step-up release). Decided by Julian on 2026-09-29.
   through.
 - **Sends**: every personal BSC send from a KYC'd user, to a Confío user as
   much as to an external address, needs a recent Confío Face (15-minute
-  window). Business senders and the server-only activation fee stay exempt.
+  window). Phone invites (money escrowed for a phone that is not on Confío
+  yet) are sends too and take the same gate. Business senders and the
+  server-only activation fee stay exempt. Open: merchant/invoice payments
+  (`payments/bsc_flow.py`) do not ask for a face yet.
 
 ## Rejected: raw key export (Exportar claves)
 
