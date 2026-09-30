@@ -114,7 +114,7 @@ export const PayrollSetupWizard = () => {
 
   const handleActivate = useCallback(async () => {
     const authMessage = 'Autoriza la activación de nómina';
-    let ok = await authenticateWithFace('app_unlock');
+    let ok = await authenticateWithFace('withdrawal');
     if (!ok) {
       // Offer retry if authentication fails
       const shouldRetry = await new Promise<boolean>((resolve) => {
@@ -129,7 +129,7 @@ export const PayrollSetupWizard = () => {
       });
 
       if (shouldRetry) {
-        ok = await authenticateWithFace('app_unlock');
+        ok = await authenticateWithFace('withdrawal');
       }
 
       if (!ok) return;

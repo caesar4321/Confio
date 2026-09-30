@@ -15,8 +15,10 @@ jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn() }));
 let mockExpired = false;
 jest.mock('jwt-decode', () => ({ jwtDecode: () => ({ exp: Date.now() / 1000 + (mockExpired ? -1 : 3600) }) }));
 const mockAuthenticate = jest.fn(async (..._args: unknown[]) => true);
+// Confío Face is for money movements only: opening the app must never reach it.
+const mockFace = jest.fn(async (..._args: unknown[]) => true);
 jest.mock('../../services/faceAuthentication', () => ({
-  authenticateWithFace: (...args: unknown[]) => mockAuthenticate(...args),
+  authenticateWithFace: (...args: unknown[]) => mockFace(...args),
   isFaceAuthenticating: () => false,
 }));
 jest.mock('../../services/biometricAuthService', () => ({
@@ -253,26 +255,41 @@ describe('session loss after biometric unlock', () => {
     });
   });
 
-  it.each(['login', 'phone'] as const)('enters directly after %s without an enrollment screen', async source => {
+  it.each(['login', 'phone'] as const)('routes %s to device biometric setup, never Confío Face', async source => {
     await mount();
     mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: '123', phoneCountry: 'AR' } } });
-    mockAuthenticate.mockClear();
+    mockFace.mockClear();
     navigationRef.current.reset.mockClear();
     await act(async () => {
       if (source === 'login') await authState!.handleSuccessfulLogin(true);
       else await authState!.completePhoneVerification();
     });
-    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
-    expect(mockAuthenticate).toHaveBeenCalledWith('app_unlock');
-    expect(authState!.isAuthenticated).toBe(true);
-    expect(JSON.stringify(navigationRef.current.reset.mock.calls)).not.toContain('BiometricSetup');
+    // (Login queues the same route; it applies once the Auth stack mounts,
+    // which this already-signed-in harness never does.)
+    if (source === 'phone') {
+      expect(JSON.stringify(navigationRef.current.reset.mock.calls)).toContain('BiometricSetup');
+    }
+    expect(mockFace).not.toHaveBeenCalled();
   });
 
-  it('keeps failed fresh-login Face authentication locked, preserving recovery access', async () => {
+  it('opens the app with the device biometric at startup and on resume, never Confío Face', async () => {
+    const handlers: Array<(state: string) => unknown> = [];
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.push(handler);
+      return { remove: jest.fn() };
+    }) as any);
+    mockFace.mockClear();
+    mockAuthenticate.mockClear();
     await mount();
-    mockAuthenticate.mockResolvedValue(false);
-    await act(async () => { await authState!.handleSuccessfulLogin(true); });
-    expect(authState!.isLocked).toBe(true);
-    expect(authState!.isAuthenticated).toBe(false);
+    const nowSpy = jest.spyOn(Date, 'now');
+    const t0 = Date.now();
+    nowSpy.mockReturnValue(t0);
+    await act(async () => { await Promise.all(handlers.map(h => h('background'))); });
+    nowSpy.mockReturnValue(t0 + 60_000);
+    await act(async () => { await Promise.all(handlers.map(h => h('active'))); });
+    nowSpy.mockRestore();
+    expect(mockAuthenticate).toHaveBeenCalledWith('Desbloquea Confío');
+    expect(mockFace).not.toHaveBeenCalled();
+    expect(authState!.isLocked).toBe(false);
   });
 });

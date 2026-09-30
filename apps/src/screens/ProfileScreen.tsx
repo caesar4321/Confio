@@ -1,4 +1,3 @@
-import { authenticateWithFace } from '../services/faceAuthentication';
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, AppState, AppStateStatus } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -203,8 +202,8 @@ export const ProfileScreen = () => {
   // Handle Backup Press with Biometric Check
   const handleBackupPress = async () => {
     // Require biometric authentication if available and enabled
-    {
-      const bioSuccess = await authenticateWithFace('app_unlock');
+    if (biometricAvailable && biometricEnabled) {
+      const bioSuccess = await biometricAuthService.authenticate('Autoriza el respaldo en Google Drive');
       if (!bioSuccess) return;
     }
     setShowBackupModal(true);
@@ -230,6 +229,32 @@ export const ProfileScreen = () => {
     }
   };
 
+  const handleBiometricUpdate = React.useCallback(async () => {
+    if (biometricLoading || biometricActionLoading) return;
+    setBiometricError(null);
+    setBiometricActionLoading(true);
+    try {
+      if (!biometricAvailable) {
+        setBiometricError('Este dispositivo no soporta biometría.');
+        return;
+      }
+
+      // Always end with biometría activa; if ya está, re-registra por seguridad
+      if (biometricEnabled) {
+        await biometricAuthService.disable();
+      }
+      const enabled = await biometricAuthService.enable();
+      setBiometricEnabled(enabled);
+      if (!enabled) {
+        setBiometricError('No pudimos activar la biometría. Inténtalo nuevamente.');
+      }
+    } catch (error) {
+      setBiometricError('Ocurrió un problema al actualizar la biometría.');
+    } finally {
+      setBiometricActionLoading(false);
+      setBiometricLoading(false);
+    }
+  }, [biometricAvailable, biometricEnabled, biometricActionLoading, biometricLoading]);
 
   // Force refresh when screen comes into focus to ensure latest state
   useFocusEffect(
@@ -744,13 +769,31 @@ export const ProfileScreen = () => {
             </View>
           </View>
           <View style={styles.cardOptions}>
-            <View style={styles.cardOption}>
-              <Icon name="shield" size={18} color={colors.primaryDark} />
+            <TouchableOpacity
+              style={[
+                styles.cardOption,
+                (!biometricAvailable || biometricLoading || biometricActionLoading) && styles.cardOptionDisabled
+              ]}
+              onPress={handleBiometricUpdate}
+              disabled={!biometricAvailable || biometricLoading || biometricActionLoading}
+            >
+              <Icon name="smartphone" size={18} color={biometricAvailable ? colors.primaryDark : colors.text.light} />
               <View style={styles.biometricTextContainer}>
-                <Text style={styles.biometricTitle}>Confío Face</Text>
-                <Text style={styles.biometricStatusText}>Protección para identidades verificadas</Text>
+                <Text style={styles.biometricTitle}>Biometría / PIN</Text>
+                {biometricLoading ? (
+                  <Text style={styles.biometricStatusText}>Verificando...</Text>
+                ) : !biometricAvailable ? (
+                  <Text style={styles.biometricStatusUnavailable}>No disponible</Text>
+                ) : biometricEnabled ? (
+                  <Text style={styles.biometricStatusActive}>Activa</Text>
+                ) : (
+                  <Text style={styles.biometricStatusText}>Toca para activar</Text>
+                )}
               </View>
-            </View>
+              {biometricAvailable && !biometricLoading && (
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
+              )}
+            </TouchableOpacity>
 
             {/* Google Drive Backup Option */}
             <TouchableOpacity

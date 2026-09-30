@@ -248,6 +248,22 @@ class FaceStepUpTests(TestCase):
                     fsu.complete_face_check(self.user, 'sess-1', app_check_token='tok')
         self.assertEqual(verify.call_count, 1)
 
+    def test_cost_report_counts_sessions_and_compares_by_purpose(self):
+        from io import StringIO
+        from django.core.management import call_command
+        now = timezone.now()
+        FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='c-1',
+                                 status='passed', similarity=99, completed_at=now)
+        FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='c-2',
+                                 status='failed', completed_at=now)  # failed before the face match
+        out = StringIO()
+        with override_settings(FACE_LIVENESS_UNIT_USD='0.015', FACE_COMPARE_UNIT_USD='0.001'):
+            call_command('face_check_costs', months=1, stdout=out)
+        line = next(l for l in out.getvalue().splitlines() if ' withdrawal ' in l)
+        # 2 sessions x 0.015 + 1 compare x 0.001
+        self.assertIn(' 2 ', line)
+        self.assertTrue(line.rstrip().endswith('0.03'), line)
+
     # Evidence for abuse investigations
 
     def _finished_with_frames(self, status='SUCCEEDED', similarity=98.5):

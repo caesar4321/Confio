@@ -1,4 +1,3 @@
-import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Platform, StatusBar, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -9,6 +8,7 @@ import { MainStackParamList } from '../types/navigation';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_USER_PROFILE, UPDATE_USERNAME, GET_ME, GET_MY_PERSONAL_KYC_STATUS, GET_MY_PERSONAL_VERIFIED_KYC } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
+import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
@@ -148,7 +148,9 @@ export const EditProfileScreen = () => {
   const handleChangePhoneNumber = async () => {
     if (isVerified) {
       try {
-        const authenticated = await authenticateWithFace('app_unlock');
+        const authenticated = await biometricAuthService.authenticate(
+          'Verifica tu identidad para cambiar tu número de teléfono'
+        );
         if (!authenticated) {
           return;
         }

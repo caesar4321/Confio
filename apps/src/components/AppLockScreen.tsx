@@ -64,7 +64,11 @@ export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }:
     );
   };
 
-  const methodLabel = 'Confío Face';
+  // The phone's own lock (Face ID, fingerprint, PIN) opens Confío. Confío
+  // Face is only asked when money moves.
+  const methodLabel = Platform.OS === 'ios'
+    ? 'Face ID, Touch ID o tu código'
+    : 'tu huella, PIN o patrón';
 
   if (!visible) return null;
 
