@@ -16,7 +16,7 @@ user_agents==2.2.0
 django-leaflet==0.31.0
 geopy==2.4.1
 django-import-export==4.3.7
-boto3==1.37.34
+boto3==1.38.32  # >=1.38.32: Rekognition ChallengePreferences (security/face_step_up.py)
 requests==2.32.3
 Telethon>=1.36.0,<2.0
 google-api-python-client==2.167.0
