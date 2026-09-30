@@ -183,6 +183,9 @@ def start_face(token: str, app_check_token: str) -> dict:
     # older passed check (a withdrawal the holder did weeks ago, whose id the
     # device may have logged) must not stand in for a face shown now.
     cache.set(_face_key(token), data['session_id'], SESSION_TTL)
+    # Each capture gets the full window to be graded, so a retry late in
+    # the session does not expire mid-grading.
+    cache.touch(_session_key(token), SESSION_TTL)
     return data
 
 
