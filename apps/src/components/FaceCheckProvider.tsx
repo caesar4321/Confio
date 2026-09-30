@@ -11,6 +11,7 @@ import {
   Animated,
   Easing,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -36,7 +37,6 @@ const DANGER = '#DC2626';
 type Stage = 'intro' | 'capturing' | 'grading' | 'passed' | 'failed' | 'unavailable';
 
 const PURPOSE_COPY: Record<FaceCheckPurpose, string> = {
-  app_unlock: 'Confirma con tu rostro que eres tú para abrir Confío.',
   on_ramp: 'Antes de crear tu recarga, confirma con tu rostro que eres tú.',
   withdrawal: 'Solo tú puedes mover tu dinero. Confirma con tu rostro para continuar.',
   emergency_exit: 'Para proteger tu salida de emergencia, confirma con tu rostro que eres tú.',
@@ -250,6 +250,12 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
                   <>
                     <Text style={styles.body}>{purpose ? PURPOSE_COPY[purpose] : ''}</Text>
                     <View style={styles.tips}>
+                      {/* Users unlock the phone and the app with Face ID / their
+                          fingerprint; say plainly this is something else. */}
+                      <Tip icon="info"
+                        text={Platform.OS === 'ios'
+                          ? 'No es Face ID: es una verificación de Confío con tu cámara, solo cuando mueves dinero.'
+                          : 'No es el desbloqueo de tu teléfono: es una verificación de Confío con tu cámara, solo cuando mueves dinero.'} />
                       <Tip icon="sun" text="Busca buena luz y mira de frente a la cámara." />
                       <Tip icon="eye" text="Sin gafas oscuras, gorra ni mascarilla." />
                       <Tip icon="alert-triangle"

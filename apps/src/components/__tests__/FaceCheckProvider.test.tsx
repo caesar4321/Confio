@@ -78,7 +78,7 @@ test('privacy policy opens inside the sheet, even before the navigator is usable
   act(() => { tree = renderer.create(<FaceCheckProvider><></></FaceCheckProvider>); });
   const present = jest.mocked(registerFaceCheckPresenter).mock.calls[0][0]!;
   const settled = jest.fn();
-  act(() => { void present('app_unlock').then(settled); });
+  act(() => { void present('withdrawal').then(settled); });
   const link = tree.root.findAll(n => n.props.accessibilityRole === 'link' && typeof n.props.onPress === 'function')[0];
   act(() => { link.props.onPress(); });
   const modal = () => tree.root.findByType(Modal);
