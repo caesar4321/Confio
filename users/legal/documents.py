@@ -129,7 +129,7 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.5.1',
+    'version': '1.6.0',
     'last_updated': '2026-09-30',
     'is_legally_binding': True,
     'sections': [
@@ -253,7 +253,7 @@ PRIVACY = {
                 'Conservamos datos personales, transaccionales, de seguridad y de soporte durante el tiempo necesario para prestar el servicio, proteger la plataforma y cumplir con obligaciones legales o regulatorias',
                 'Los datos KYC/AML y los registros vinculados a transacciones pueden conservarse por el tiempo requerido por la regulación aplicable, incluyendo al menos 5 años después de la última transacción cuando corresponda',
                 'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales',
-                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de una verificación aprobada se eliminan a los 180 días; las de una verificación rechazada, o de una cuenta que tenga o haya tenido una sanción, se conservan junto con sus datos KYC para investigar el caso. Confío no conserva el video',
+                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de cada verificación, aprobada o rechazada, se eliminan a los 12 meses, porque los reportes de fraude y las consultas de socios y autoridades suelen llegar meses después de la operación. Si su cuenta tiene o ha tenido una sanción, o tiene un caso de fraude o cumplimiento que no haya sido descartado (incluido un requerimiento de un socio o de una autoridad), sus imágenes se conservan junto con sus datos KYC para investigar el caso. Confío no conserva el video',
                 'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano'
             ]
         },

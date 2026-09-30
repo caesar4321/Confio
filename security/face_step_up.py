@@ -56,7 +56,10 @@ REFERENCE_PREFIX = 'face-references'
 # (never the video, which AWS does not return), in the verification bucket.
 EVIDENCE_PREFIX = 'face-checks'
 AUDIT_IMAGES_LIMIT = 4
-EVIDENCE_RETENTION = timedelta(days=180)
+# Our choice, not a legal ceiling (LGPD and Colombian law set none): fraud
+# reports and partner or provider inquiries often arrive months after the
+# movement, and a check that passed is exactly what they question.
+EVIDENCE_RETENTION = timedelta(days=365)
 MAX_REFERENCE_BYTES = 5 * 1024 * 1024
 LIVENESS_TERMINAL_STATUSES = {'SUCCEEDED', 'FAILED', 'EXPIRED'}
 
@@ -472,18 +475,27 @@ def _store_evidence(check: FaceCheck, result: dict) -> None:
 
 
 def purge_expired_evidence(batch=500) -> int:
-    """Delete the frames of passed checks older than EVIDENCE_RETENTION.
+    """Delete the frames of checks older than EVIDENCE_RETENTION, passed or
+    failed (an unfinished check counts from when it was opened).
 
-    Kept instead: failed checks (retained with the KYC record) and every check
-    of a user with a ban on record (active or lifted), for the fraud case.
+    Held instead, with the KYC record, for the case: every check of a user
+    with a ban on record (active or lifted) or a SuspiciousActivity case
+    that was not dismissed. Opening a case is how a fraud alert, compliance
+    escalation or partner / law-enforcement request keeps the frames. The
+    check rows themselves (scores, what each approved) are never purged.
     Pages by row id, so checks whose deletion failed never block later ones;
     they are retried on the next run.
     """
-    from .models import UserBan
+    from .models import SuspiciousActivity, UserBan
     cutoff = timezone.now() - EVIDENCE_RETENTION
     eligible = FaceCheck.objects.filter(
-        status='passed', completed_at__lt=cutoff, evidence_purged_at__isnull=True,
-    ).exclude(evidence_keys=[]).exclude(user_id__in=UserBan.all_objects.values('user_id')).order_by('pk')
+        Q(completed_at__lt=cutoff) | Q(completed_at__isnull=True, created_at__lt=cutoff),
+        evidence_purged_at__isnull=True,
+    ).exclude(evidence_keys=[]).exclude(
+        user_id__in=UserBan.all_objects.values('user_id'),
+    ).exclude(
+        user_id__in=SuspiciousActivity.objects.exclude(status='dismissed').values('user_id'),
+    ).order_by('pk')
     purged, after = 0, 0
     while True:
         rows = list(eligible.filter(pk__gt=after)[:batch])
