@@ -313,7 +313,20 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
     return (await ensureFaceCheck('emergency_exit')) ? 'passed' : 'failed';
   };
 
+  const startCooloffBusy = useRef(false);
   const startCooloff = async () => {
+    // The face check below can take a while (status fetch, App Check, the
+    // capture itself): a second tap must not queue a second face check.
+    if (startCooloffBusy.current) return;
+    startCooloffBusy.current = true;
+    try {
+      await startCooloffInner();
+    } finally {
+      startCooloffBusy.current = false;
+    }
+  };
+
+  const startCooloffInner = async () => {
     // Starting a waiting period does not move funds or unlock the app, but a
     // ring should learn now, not in 72 hours, that the holder must show up.
     // Never a veto: the wait may start anyway, and the face is asked again
@@ -348,8 +361,17 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   const runBsc = async () => {
     // Online routes below already authenticate with Face (or establish that
     // no KYC exists). Only the server-independent fallback uses local auth.
+    // One successful prompt covers this tap; later checks only add one when
+    // nothing has authenticated yet.
+    let locallyAuthenticated = false;
+    const requireLocalAuth = async (): Promise<boolean> => {
+      if (locallyAuthenticated) return true;
+      locallyAuthenticated = await biometricAuthService.authenticateEmergencyExit(
+        'Confirmar salida de emergencia (BNB Smart Chain)');
+      return locallyAuthenticated;
+    };
     if ((es?.state !== 'normal' && es?.state !== 'banned') || await hasFaceWaiver(emergencyStore, accountKey)) {
-      if (!(await biometricAuthService.authenticateEmergencyExit('Confirmar salida de emergencia (BNB Smart Chain)'))) return;
+      if (!(await requireLocalAuth())) return;
     }
     const exitCtx = selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined;
     if (es?.state === 'banned') {
@@ -390,7 +412,7 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
       if (outcome.outcome === 'wait' || (outcome.outcome === 'passed' && !outcome.faceChecked)) {
         // No face was checked (none on file, or not enforced): the phone's
         // own biometric is the only authentication left.
-        if (!(await biometricAuthService.authenticateEmergencyExit('Confirmar salida de emergencia (BNB Smart Chain)'))) return;
+        if (!(await requireLocalAuth())) return;
       }
     } else if ((es?.state === 'normal' || es?.state === 'blocked') && !(await hasFaceWaiver(emergencyStore, accountKey))) {
       // The normal route also asks for Confío Face (while the server
@@ -404,7 +426,7 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
       if (face === 'not_asked') {
         // No face to check: the phone's own biometric is the only
         // authentication left, so it is never skipped here.
-        if (!(await biometricAuthService.authenticateEmergencyExit('Confirmar salida de emergencia (BNB Smart Chain)'))) return;
+        if (!(await requireLocalAuth())) return;
       }
       if (face === 'failed') {
         Alert.alert(
