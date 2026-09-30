@@ -65,6 +65,13 @@ class FaceStepUpTests(TestCase):
         self.assertIn('0 verified users without a face reference', out.getvalue())
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_payroll_authority_never_authorizes_money_movement(self):
+        FaceCheck.objects.create(user=self.user, purpose='payroll_authority', status='passed',
+            liveness_session_id='payroll-only', completed_at=timezone.now())
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'on_ramp'), fsu.FACE_STEP_UP_MESSAGE)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_app_unlock_never_authorizes_money_movement(self):
         FaceCheck.objects.create(user=self.user, purpose='app_unlock', status='passed',
             liveness_session_id='unlock-only', completed_at=timezone.now())

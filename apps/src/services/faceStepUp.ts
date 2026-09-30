@@ -16,7 +16,7 @@ import { NativeModules } from 'react-native';
 
 // Money movements only. Opening the app uses the phone's own biometric
 // ('app_unlock' remains a server purpose for older builds and history).
-export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'emergency_exit' | 'payin_release';
+export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'emergency_exit' | 'payin_release' | 'payroll_authority';
 export type FaceCaptureOutcome = 'passed' | 'failed' | 'cancelled' | 'unavailable';
 
 // Mirrors security/face_step_up.py. The server sends this exact text when a

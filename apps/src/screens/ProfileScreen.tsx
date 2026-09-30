@@ -239,8 +239,16 @@ export const ProfileScreen = () => {
         return;
       }
 
-      // Always end with biometría activa; if ya está, re-registra por seguridad
+      // A working enrollment is only confirmed, never switched off first: a
+      // cancelled prompt must not leave the app unprotected. Re-register only
+      // when the key is permanently invalidated (e.g. fingerprints changed).
       if (biometricEnabled) {
+        const stillValid = await biometricAuthService.authenticate('Confirma tu biometría', true, true);
+        if (stillValid) return;
+        if (!biometricAuthService.isPermanentInvalidation()) {
+          setBiometricError('No pudimos confirmar tu biometría. Inténtalo nuevamente.');
+          return;
+        }
         await biometricAuthService.disable();
       }
       const enabled = await biometricAuthService.enable();
