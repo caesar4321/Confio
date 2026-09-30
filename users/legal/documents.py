@@ -129,7 +129,7 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.5.0',
+    'version': '1.5.1',
     'last_updated': '2026-09-30',
     'is_legally_binding': True,
     'sections': [
@@ -156,7 +156,7 @@ PRIVACY = {
                 ],
                 'biometric_info': [
                     'Imagen de su rostro tomada en la verificación de identidad (KYC), que guardamos como referencia para confirmar que es usted',
-                    'Verificación con su rostro (Confío Face): un breve video de su rostro que se analiza en el momento para comprobar que es una persona real y presente, y una imagen de ese video que se compara con su imagen de referencia. De cada verificación guardamos hasta cinco imágenes; el video no se guarda',
+                    'Verificación con su rostro (Confío Face): un breve video de su rostro que se analiza en el momento para comprobar que es una persona real y presente, y una imagen de ese video que se compara con su imagen de referencia. De cada verificación Confío guarda hasta cinco imágenes; Confío no recibe ni guarda el video',
                     'Resultado de cada verificación con su rostro: si fue aprobada, niveles de coincidencia y de detección de persona real, motivo de rechazo, operación para la que se pidió y fecha y hora',
                     'Usamos su rostro solo con su consentimiento, que usted da al continuar en la pantalla de Confío Face, para confirmar que es usted y proteger su cuenta contra abusos'
                 ],
@@ -215,7 +215,7 @@ PRIVACY = {
                 'Para proteger nuestros derechos',
                 'Con su consentimiento explícito',
                 'Con proveedores de servicios de verificación KYC y cumplimiento regulatorio',
-                'Con Amazon Web Services (AWS), que como encargado del tratamiento analiza la verificación con su rostro por cuenta de Confío en la Unión Europea (Irlanda). AWS no entrega el video a Confío; solo imágenes de la verificación, que Confío guarda en Suiza',
+                'Con Amazon Web Services (AWS), que analiza la verificación con su rostro. Confío la envía a AWS en la Unión Europea (Irlanda); AWS puede conservar y usar esos datos conforme a sus propios términos. AWS no entrega el video a Confío; solo imágenes de la verificación, que Confío guarda en Suiza',
                 'Con proveedores de recargas, retiros, pagos, transferencias y conversión de activos cuando sea necesario para ejecutar una operación solicitada por usted',
                 'Con proveedores de infraestructura, almacenamiento, autenticación, notificaciones push y seguridad que actúan como encargados del tratamiento',
                 'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario',
@@ -253,7 +253,7 @@ PRIVACY = {
                 'Conservamos datos personales, transaccionales, de seguridad y de soporte durante el tiempo necesario para prestar el servicio, proteger la plataforma y cumplir con obligaciones legales o regulatorias',
                 'Los datos KYC/AML y los registros vinculados a transacciones pueden conservarse por el tiempo requerido por la regulación aplicable, incluyendo al menos 5 años después de la última transacción cuando corresponda',
                 'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales',
-                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de una verificación aprobada se eliminan a los 180 días; las de una verificación rechazada, o de una cuenta con una sanción, se conservan junto con sus datos KYC para investigar el caso. El video no se conserva',
+                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de una verificación aprobada se eliminan a los 180 días; las de una verificación rechazada, o de una cuenta que tenga o haya tenido una sanción, se conservan junto con sus datos KYC para investigar el caso. Confío no conserva el video',
                 'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano'
             ]
         },

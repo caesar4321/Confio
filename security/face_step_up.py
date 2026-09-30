@@ -11,8 +11,10 @@ result and compare its reference frame with the stored KYC selfie.
 
 Region: Face Liveness is available in eu-west-1 (Ireland), not Frankfurt.
 Liveness and comparison run there using bytes, without an S3 output location
-(AuditImagesLimit=0, no OutputConfig). The stored KYC selfie stays in the
-eu-central-2 verification bucket.
+(no OutputConfig). The reference frame and up to AUDIT_IMAGES_LIMIT audit
+frames come back as bytes and are kept, with the KYC selfie, in the
+eu-central-2 verification bucket (see _store_evidence). The video itself
+never reaches Confío's servers.
 
 Server enforcement covers the server-mediated money paths (ramp orders,
 sponsored BSC sends). The emergency exit is signed and broadcast by the app

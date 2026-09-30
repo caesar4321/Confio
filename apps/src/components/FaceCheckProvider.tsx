@@ -257,8 +257,8 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
                     </View>
                     {/* Consent for biometric data: continuing is the affirmative act. */}
                     <Text style={styles.consent}>
-                      Al continuar, aceptas que usemos tu rostro para confirmar que eres tú y proteger tu cuenta. No
-                      guardamos el video.{' '}
+                      Al continuar, aceptas que usemos tu rostro para confirmar que eres tú y proteger tu
+                      cuenta.{' '}
                       <Text style={styles.consentLink} accessibilityRole="link"
                         onPress={openPolicy}>
                         Política de privacidad
