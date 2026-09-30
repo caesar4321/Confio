@@ -9,17 +9,9 @@ jest.mock('../../services/faceStepUp', () => ({
   registerFaceCheckPresenter: jest.fn(),
   runFaceCapture: jest.fn(),
 }));
-const mockNav = { route: 'Home', listeners: [] as Array<() => void> };
-jest.mock('../../navigation/RootNavigation', () => ({
-  navigationRef: {
-    isReady: () => true,
-    navigate: jest.fn((name: string) => { mockNav.route = name; }),
-    getCurrentRoute: () => ({ name: mockNav.route }),
-    addListener: (_event: string, fn: () => void) => {
-      mockNav.listeners.push(fn);
-      return () => { mockNav.listeners = mockNav.listeners.filter(l => l !== fn); };
-    },
-  },
+jest.mock('../LegalDocumentView', () => ({
+  LegalDocumentView: ({ renderHeader }: { renderHeader: (title: string) => unknown }) =>
+    renderHeader('Política de Privacidad'),
 }));
 
 beforeEach(() => { jest.useFakeTimers(); jest.clearAllMocks(); });
@@ -81,19 +73,21 @@ test('rapid taps launch only one capture and late completion after unmount is ig
   expect(settled).toHaveBeenCalledWith(false);
 });
 
-test('privacy policy opens in the app and the pending check comes back', async () => {
-  const { navigationRef } = require('../../navigation/RootNavigation');
+test('privacy policy opens inside the sheet, even before the navigator is usable', async () => {
   let tree!: renderer.ReactTestRenderer;
   act(() => { tree = renderer.create(<FaceCheckProvider><></></FaceCheckProvider>); });
   const present = jest.mocked(registerFaceCheckPresenter).mock.calls[0][0]!;
   const settled = jest.fn();
-  act(() => { void present('withdrawal').then(settled); });
+  act(() => { void present('app_unlock').then(settled); });
   const link = tree.root.findAll(n => n.props.accessibilityRole === 'link' && typeof n.props.onPress === 'function')[0];
   act(() => { link.props.onPress(); });
-  expect(navigationRef.navigate).toHaveBeenCalledWith('LegalDocument', { docType: 'privacy' });
-  expect(tree.root.findByType(Modal).props.visible).toBe(false);
-  act(() => { mockNav.route = 'Home'; mockNav.listeners.forEach(l => l()); });
-  expect(tree.root.findByType(Modal).props.visible).toBe(true);
+  const modal = () => tree.root.findByType(Modal);
+  expect(modal().props.visible).toBe(true);
+  expect(tree.root.findAll(n => n.props.accessibilityLabel === 'Volver').length).toBeGreaterThan(0);
+  // Android back closes the policy, not the pending check.
+  act(() => { modal().props.onRequestClose(); });
+  expect(tree.root.findAll(n => n.props.accessibilityLabel === 'Volver').length).toBe(0);
+  expect(modal().props.visible).toBe(true);
   expect(settled).not.toHaveBeenCalled();
   await act(async () => { tree.unmount(); });
 });
