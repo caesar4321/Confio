@@ -7,6 +7,7 @@ export type AuthStackParamList = {
   PhoneVerification: undefined;
   Registration: undefined;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
+  BiometricSetup: { origin?: 'login' | 'phoneVerification' } | undefined;
   // Ban flow, reachable pre-Main: sign-in mutations pass the security
   // middleware unauthenticated, so a banned user's ban lands mid-auth-flow
   // (first authenticated call 403s). Both screens exist in this stack so

@@ -147,6 +147,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
   const resumeAuthenticationRef = useRef(false);
+  // Last known "the phone has a lock set up for Confío"; null until read.
+  const deviceLockEnrolledRef = useRef<boolean | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   // Failed/cancelled device-auth unlock: unmount Main (which also dismisses
   // any open modal) but KEEP the stored session, so the lock screen can retry
@@ -575,11 +577,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           lastPromptedCycle = currentCycle;
         }
         // Only a phone with a lock set up for Confío locks on resume, as before
-        // Confío Face: without one there is nothing to unlock with, and locking
-        // would just throw the user back to Home. A local read, not network.
-        const needsUnlock = awayLong && await deviceLockEnrolled();
+        // Confío Face: without one there is nothing to unlock with. The last
+        // known answer covers Main at once (no taps on the wallet while the
+        // Keychain is read); a stale "enrolled" just reopens below without a
+        // prompt, since deviceUnlock() re-checks.
+        const coverNow = awayLong && deviceLockEnrolledRef.current !== false;
+        if (coverNow) {
+          resumeAuthenticationRef.current = true;
+          lockApp();
+        }
+        const needsUnlock = coverNow || (awayLong && await deviceLockEnrolled());
         if (awayLong && !needsUnlock) isAuthenticating = false;
-        if (needsUnlock) {
+        if (needsUnlock && !coverNow) {
           // Cover Main before the Keychain/network awaits below. Offline refresh
           // must never leave the previous authenticated screen interactive.
           resumeAuthenticationRef.current = true;
@@ -672,8 +681,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // tied to that movement as evidence; an app-open check proves nothing and
   // would dominate cost. Devices without a lock screen, or without
   // enrollment, open as before.
-  const deviceLockEnrolled = async (): Promise<boolean> =>
-    (await biometricAuthService.isSupported()) && (await biometricAuthService.isEnabled());
+  const deviceLockEnrolled = async (): Promise<boolean> => {
+    const enrolled = (await biometricAuthService.isSupported()) && (await biometricAuthService.isEnabled());
+    deviceLockEnrolledRef.current = enrolled;
+    return enrolled;
+  };
   const deviceUnlock = async (reason: string = 'Desbloquea Confío'): Promise<boolean> =>
     !(await deviceLockEnrolled()) || biometricAuthService.authenticate(reason);
 
@@ -938,6 +950,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             // Token refresh happens in parallel so it's ready by the time biometric completes.
             const biometricStateStart = Date.now();
             const bioEnabled = await biometricAuthService.isEnabled();
+            deviceLockEnrolledRef.current = bioEnabled;
             perfLog('biometricAuthService.isEnabled on startup', biometricStateStart, {
               bioEnabled,
             });
