@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from security import face_step_up as fsu
@@ -20,6 +20,21 @@ def _decision(url=SIGNED_URL):
 
 def _download(status=200, body=b'kyc-selfie', content_type='image/jpeg'):
     return SimpleNamespace(status_code=status, content=body, headers={'Content-Type': content_type})
+
+
+class FaceRegionTests(SimpleTestCase):
+    def test_runtime_and_both_iam_policies_use_supported_ireland_region(self):
+        from scripts.security import setup_face_liveness_iam as iam
+        self.assertEqual(fsu.REKOGNITION_REGION, 'eu-west-1')
+        self.assertEqual(iam.REKOGNITION_REGION, fsu.REKOGNITION_REGION)
+        for policy in (iam.client_permissions_policy(),
+                       iam.backend_policy('arn:aws:iam::123456789012:role/client', 'test-bucket')):
+            self.assertEqual(policy['Statement'][0]['Condition']['StringEquals']
+                             ['aws:RequestedRegion'], 'eu-west-1')
+        with mock.patch.object(fsu, '_setting', side_effect=lambda name, default: default), \
+                mock.patch.object(fsu.boto3, 'client') as client:
+            fsu._rekognition()
+        client.assert_called_once_with('rekognition', region_name='eu-west-1')
 
 
 class FaceStepUpTests(TestCase):
@@ -88,7 +103,7 @@ class FaceStepUpTests(TestCase):
             mock.patch.object(fsu, '_resolve_bucket', return_value='confio-verification'),
             mock.patch.object(fsu, '_client_credentials', return_value={
                 'access_key_id': 'AK', 'secret_access_key': 'SK', 'session_token': 'ST',
-                'expiration': 'soon', 'region': 'eu-central-1'}),
+                'expiration': 'soon', 'region': 'eu-west-1'}),
         ]
         for p in patches:
             p.start()

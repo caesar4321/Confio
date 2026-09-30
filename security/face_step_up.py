@@ -9,9 +9,9 @@ Flow: start → the app streams a Rekognition Face Liveness video with
 short-lived, single-action credentials → complete → we fetch the liveness
 result and compare its reference frame with the stored KYC selfie.
 
-Region: Rekognition has no endpoint in eu-central-2, so the comparison runs in
-eu-central-1 (Frankfurt) on bytes sent per call; nothing is stored there
-(AuditImagesLimit=0, no OutputConfig). The selfie itself stays in the
+Region: Face Liveness is available in eu-west-1 (Ireland), not Frankfurt.
+Liveness and comparison run there using bytes, without an S3 output location
+(AuditImagesLimit=0, no OutputConfig). The stored KYC selfie stays in the
 eu-central-2 verification bucket.
 
 Server enforcement covers the server-mediated money paths (ramp orders,
@@ -38,7 +38,7 @@ from .s3_utils import _build_s3_client_params, _resolve_bucket
 
 logger = logging.getLogger(__name__)
 
-REKOGNITION_REGION = 'eu-central-1'
+REKOGNITION_REGION = 'eu-west-1'
 LIVENESS_MIN_CONFIDENCE = Decimal('85')
 FACE_MIN_SIMILARITY = Decimal('90')
 SESSION_MAX_AGE = timedelta(minutes=10)

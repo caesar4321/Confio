@@ -16,7 +16,7 @@ import {
 const started = {
   data: {
     startFaceCheck: {
-      success: true, sessionId: 'sess-1', region: 'eu-central-1', accessKeyId: 'AK',
+      success: true, sessionId: 'sess-1', region: 'eu-west-1', accessKeyId: 'AK',
       secretAccessKey: 'SK', sessionToken: 'ST', expiration: '2026-09-29T20:15:00+00:00',
     },
   },
@@ -61,7 +61,7 @@ describe('faceStepUp', () => {
   it('passes scoped credentials to the native capture and returns the server grade', async () => {
     mockMutate.mockResolvedValueOnce(started).mockResolvedValueOnce(completed(true));
     await expect(runFaceCapture('withdrawal')).resolves.toEqual({ outcome: 'passed' });
-    expect(start).toHaveBeenCalledWith('sess-1', 'eu-central-1', {
+    expect(start).toHaveBeenCalledWith('sess-1', 'eu-west-1', {
       accessKeyId: 'AK', secretAccessKey: 'SK', sessionToken: 'ST',
       expirationEpochSeconds: Math.floor(Date.parse('2026-09-29T20:15:00+00:00') / 1000),
     });
