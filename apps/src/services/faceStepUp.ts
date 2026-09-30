@@ -183,6 +183,7 @@ export const runFaceCapture = async (
     return { outcome: 'unavailable', message: start?.error || 'No pudimos iniciar la verificación.' };
   }
   const sessionId = start.sessionId;
+  nativeCaptures += 1;
   try {
     await native.start(sessionId, start.region, {
       accessKeyId: start.accessKeyId,
@@ -194,6 +195,8 @@ export const runFaceCapture = async (
     if (error?.code === 'UserCancelledException') return { outcome: 'cancelled' };
     if (CAMERA_DENIED_CODES.has(error?.code)) return { outcome: 'unavailable', message: CAMERA_DENIED_MESSAGE };
     // A capture error still lets the server record the session as failed.
+  } finally {
+    nativeCaptures -= 1;
   }
   onGrading?.();
   // AWS may still be processing the video: the server answers PENDING_MESSAGE
@@ -217,6 +220,14 @@ export const runFaceCapture = async (
 
 type Presenter = (purpose: FaceCheckPurpose, backend?: FaceCheckBackend) => Promise<boolean>;
 let presenter: Presenter | null = null;
+/**
+ * The native liveness screen is up. On Android it is its own Activity, so
+ * the app briefly reads as backgrounded: the resume lock must not fire for
+ * it. Only the capture itself, not the whole Confío Face sheet, counts.
+ */
+let nativeCaptures = 0;
+export const isFaceCaptureRunning = () => nativeCaptures > 0;
+
 let activePresentations = 0;
 export const isFaceCheckActive = () => activePresentations > 0;
 

@@ -7,6 +7,7 @@ import {
   FaceCheckError,
   ensureFaceCheck,
   isFaceCheckActive,
+  isFaceCaptureRunning,
   isFaceStepUpRequired,
   registerFaceCheckPresenter,
   runFaceCapture,
@@ -132,6 +133,16 @@ describe('faceStepUp', () => {
     await expect(withFaceStepUp('withdrawal', action, (r: any) => isFaceStepUpRequired(r.nextStep)))
       .rejects.toBeInstanceOf(FaceCheckError);
     expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it('flags only the native capture as running (the resume lock skips just that)', async () => {
+    let during: boolean | undefined;
+    start.mockImplementationOnce(async () => { during = isFaceCaptureRunning(); return 'complete'; });
+    mockMutate.mockResolvedValueOnce(started).mockResolvedValueOnce(completed(true));
+    expect(isFaceCaptureRunning()).toBe(false);
+    await runFaceCapture('withdrawal');
+    expect(during).toBe(true);
+    expect(isFaceCaptureRunning()).toBe(false);
   });
 
   it('never passes without a mounted presenter', async () => {
