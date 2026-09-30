@@ -369,3 +369,21 @@ class BannedPhoneReuseTests(TestCase):
         self.assertEqual(len(self.ban.phone_hash), 64)
         self.take_number(previous_owner=self.banned)
         self.assertEqual(self.check(), MESSAGE)
+
+    def test_admin_bulk_dismissal_releases_a_phone_case_only_with_notes(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from django.contrib.admin.sites import AdminSite
+        from security.admin import SuspiciousActivityAdmin
+        self.take_number(previous_owner=self.banned)
+        self.check()
+        cases = SuspiciousActivity.objects.filter(user=self.newcomer, detection_data__trigger='phone_reuse_active_ban')
+        admin = SuspiciousActivityAdmin(SuspiciousActivity, AdminSite())
+        request = SimpleNamespace(user=self.reviewer)
+        with patch.object(admin, 'message_user'):
+            admin.mark_as_dismissed(request, cases)
+            self.assertEqual(self.check(), MESSAGE)
+            cases.update(investigation_notes='Carrier-recycled number; unrelated person.')
+            admin.mark_as_dismissed(request, cases)
+        self.assertEqual(self.check(), '')
+        self.assertEqual(cases.get().investigated_by_id, self.reviewer.pk)

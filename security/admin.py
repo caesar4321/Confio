@@ -603,8 +603,8 @@ class SuspiciousActivityAdmin(admin.ModelAdmin):
     mark_as_confirmed.short_description = "Mark as confirmed"
     
     def mark_as_dismissed(self, request, queryset):
-        from .identity_reuse import TRIGGER
-        identity_cases = queryset.filter(detection_data__trigger=TRIGGER)
+        from .identity_reuse import PHONE_TRIGGER, TRIGGER
+        identity_cases = queryset.filter(detection_data__trigger__in=[TRIGGER, PHONE_TRIGGER])
         # A bulk dismissal without a documented reviewer is not an override.
         # Operators first add investigation notes on each case's detail page.
         releasable_ids = [case.pk for case in identity_cases if case.investigation_notes.strip()]
