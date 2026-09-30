@@ -89,8 +89,10 @@ def step_up_applies(user) -> bool:
     never verified keep sending as before. "Went through KYC" is an approved
     personal verification, not a stored selfie: a KYC'd user whose selfie
     copy is missing is asked to verify again, never waved through.
+    Any verified personal document counts, primary or additional: a passport
+    verified for a local-money rail opens that rail on its own.
     """
-    return step_up_enabled() and bool(getattr(user, 'is_identity_verified', False))
+    return step_up_enabled() and bool(getattr(user, 'has_verified_identity_document', False))
 
 
 def checks_available() -> bool:

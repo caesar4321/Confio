@@ -243,6 +243,14 @@ class FaceStepUpTests(TestCase):
         self.assertEqual(fsu.claim_on_ramp_check(self.user, 'order-1'), (True, None))
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_an_additional_document_alone_still_counts_as_kyc(self):
+        # A passport verified for a local-money rail opens that rail by itself.
+        IdentityVerification.all_documents.filter(user=self.user).update(is_additional_document=True)
+        self.assertFalse(self.user.is_identity_verified)
+        self.assertTrue(fsu.step_up_applies(self.user))
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_kycd_user_without_a_stored_selfie_is_not_waved_through(self):
         # No FaceReference was stored for self.user in setUp.
         self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
