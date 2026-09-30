@@ -232,6 +232,10 @@ configurations.all {
 }
 
 dependencies {
+    // AWS liveness selects OkHttp 5. Align RN's cookie adapter and Didit's
+    // interceptor too: the 4.x adapter references internal.Util, removed in 5.x.
+    implementation platform('com.squareup.okhttp3:okhttp-bom:5.0.0-alpha.14')
+    testImplementation 'junit:junit:4.13.2'
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("com.facebook.react:hermes-android")

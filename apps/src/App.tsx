@@ -8,7 +8,7 @@ import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { EmergencyExitScreen } from './screens/EmergencyExitScreen';
+import { EmergencyRecoveryScreen, emergencyRecoveryOptions } from './screens/EmergencyRecoveryScreen';
 import { HeaderProvider } from './contexts/HeaderContext';
 import { ScanProvider } from './contexts/ScanContext';
 import { AccountProvider } from './contexts/AccountContext';
@@ -80,10 +80,9 @@ const Navigation: React.FC = () => {
         }}
       >
         {recoveryOnly ? (
-          <Stack.Screen name="EmergencyRecovery" component={EmergencyExitScreen}
-            options={{ headerShown: true, title: 'Salida de emergencia', headerLeft: () => (
-              <Text onPress={() => setRecoveryOnly(false)}>Volver</Text>
-            ) }} />
+          <Stack.Screen name="EmergencyRecovery" options={emergencyRecoveryOptions}>
+            {() => <EmergencyRecoveryScreen onClose={() => setRecoveryOnly(false)} />}
+          </Stack.Screen>
         ) : !isAuthenticated ? (
           <Stack.Screen name="Auth" component={AuthNavigator} />
         ) : (

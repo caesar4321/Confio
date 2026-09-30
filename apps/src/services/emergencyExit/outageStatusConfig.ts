@@ -5,5 +5,7 @@
 //
 // Shipped in the bundle on purpose: the exit must be able to check the
 // Worker when Confío's servers are gone.
-export const OUTAGE_STATUS_URLS: readonly string[] = [];
-export const OUTAGE_STATUS_PUBLIC_KEY_HEX = '';
+export const OUTAGE_STATUS_URLS: readonly string[] = [
+  'https://confio-outage-status.julianmoon.workers.dev/v1/status',
+];
+export const OUTAGE_STATUS_PUBLIC_KEY_HEX = '93097fe839a948ae71819eaadcaffb5fdeb55dbdce52c7ea34aa75f725a7fbfe';

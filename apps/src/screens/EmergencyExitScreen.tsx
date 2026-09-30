@@ -120,8 +120,12 @@ const truncAddr = (a: string): string => (a.length > 20 ? `${a.slice(0, 8)}…${
 
 type EmState = (ReachabilityResult & { chainNowSec: number | null }) | null;
 
-export const EmergencyExitScreen: React.FC = () => {
+export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const navigation = useNavigation<any>();
+  const leaveScreen = () => {
+    if (onClose) onClose();
+    else navigation.goBack();
+  };
   // Account context comes from the KEYCHAIN (AuthService) and the local
   // roster mirror (accountRoster), never from server-hydrated accounts: a
   // banned user's GetUserAccounts 403s, so anything depending on
@@ -819,7 +823,7 @@ export const EmergencyExitScreen: React.FC = () => {
                 onPress={() => {
                   // Inside the wizard, ← walks the steps before leaving.
                   if (eligible && wStep > 0) goToStep(wStep - 1);
-                  else navigation.goBack();
+                  else leaveScreen();
                 }}
                 style={styles.headerIconBtn}
               >
@@ -1097,7 +1101,7 @@ export const EmergencyExitScreen: React.FC = () => {
             )}
 
             {exitDone && (
-              <TouchableOpacity style={styles.ghostBtn} onPress={() => navigation.goBack()}>
+              <TouchableOpacity style={styles.ghostBtn} onPress={leaveScreen}>
                 <Text style={styles.doneBtnText}>Volver</Text>
               </TouchableOpacity>
             )}

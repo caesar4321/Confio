@@ -771,15 +771,15 @@ export const ProfileScreen = () => {
 
             {/* Emergency exit — ALWAYS present, by design: its existence is
                 never server-gated (docs/plans/salida-de-emergencia-design.md).
-                Low-key here; outage/ban states surface it prominently. */}
+                Green identifies the security feature, not immediate eligibility. */}
             <TouchableOpacity
               style={styles.cardOption}
               onPress={() => navigation.navigate('EmergencyExit' as never)}
             >
-              <Icon name="life-buoy" size={18} color={colors.text.secondary} />
+              <Icon name="life-buoy" size={18} color={colors.primaryDark} />
               <View style={styles.biometricTextContainer}>
                 <Text style={styles.biometricTitle}>Salida de emergencia</Text>
-                <Text style={styles.biometricStatusText}>Mueve tu dinero sin Confío</Text>
+                <Text style={styles.biometricStatusText}>Mueve tu dinero sin depender de Confío.</Text>
               </View>
               <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>
