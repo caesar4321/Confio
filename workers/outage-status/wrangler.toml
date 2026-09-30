@@ -2,8 +2,10 @@
 # No secrets here — the Ed25519 signing key is a Worker secret:
 #   wrangler secret put STATUS_SIGNING_KEY   (PKCS8, base64; see README.md)
 name = "confio-outage-status"
+account_id = "eb342b2ed055215d1fe99c74bc1dcfc2"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
+workers_dev = true
 
 [vars]
 CONFIO_GRAPHQL_URL = "https://confio.lat/graphql/"
@@ -13,5 +15,4 @@ crons = ["*/5 * * * *"]
 
 [[kv_namespaces]]
 binding = "STATUS"
-# Create with `wrangler kv namespace create STATUS` and paste the id here.
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "9bd886ca09f240018d0a0b5c274327b7"

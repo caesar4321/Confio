@@ -15,6 +15,31 @@ local block:
 
 ## Deploy
 
+Production is `https://confio-outage-status.julianmoon.workers.dev/v1/status`.
+The account and dedicated KV namespace are pinned in `wrangler.toml`.
+The signing secret is stored only in Cloudflare; the matching public key and
+URL are bundled in the shared iOS/Android app config. Shipping those values
+to installed apps still requires a mobile release.
+
+For subsequent deployments (do **not** regenerate the signing key):
+
+```bash
+npm ci
+npm test
+npm run build
+npm run deploy
+npm run verify:live
+```
+
+Tests require Node.js 22.6+ with TypeScript stripping support. The live
+verification checks the signature against the app's actual configured key,
+rejects a tampered response, and checks that the probe is no older than
+30 minutes. After first deployment, wait for cron propagation and the first
+five-minute probe; `503 no_probe_yet` is expected until then. Never seed a
+synthetic "up" or "down" observation just to make the endpoint pass.
+
+For a **new, separate installation** only:
+
 ```bash
 npm install
 npx wrangler kv namespace create STATUS      # paste the id into wrangler.toml
