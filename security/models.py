@@ -1372,9 +1372,9 @@ class FaceCheck(models.Model):
     # or not in dollars); feeds the 24h total that decides light vs full.
     amount_usd = models.DecimalField(max_digits=19, decimal_places=6, null=True, blank=True)
     # Frames AWS returns for the check (reference + audit images), kept in the
-    # verification bucket to investigate abuse. Passed checks are purged after
-    # EVIDENCE_RETENTION unless the user has a ban on record; failed ones are
-    # kept with the KYC record (security/face_step_up.purge_expired_evidence).
+    # verification bucket to investigate abuse. Purged after EVIDENCE_RETENTION
+    # unless the user has a ban or an undismissed fraud case on record
+    # (security/face_step_up.purge_expired_evidence).
     evidence_keys = models.JSONField(default=list, blank=True)
     evidence_purged_at = models.DateTimeField(null=True, blank=True)
     # App Check (Play Integrity / App Attest) verdicts of the requests that

@@ -364,8 +364,11 @@ class FaceStepUpTests(TestCase):
         self.assertTrue(self._finished_with_frames())
         self.assertEqual(FaceCheck.objects.get().evidence_keys, [])
 
-    def test_purge_keeps_failed_and_banned_and_recent(self):
-        from security.models import UserBan
+    def test_purge_deletes_old_frames_and_keeps_held_and_recent(self):
+        from security.models import SuspiciousActivity, UserBan
+        User = get_user_model()
+        flagged, cleared = (User.objects.create(username=n, email=f'{n}@example.com', firebase_uid=n)
+                            for n in ('face-flagged', 'face-cleared'))
         old = timezone.now() - fsu.EVIDENCE_RETENTION - timedelta(days=1)
         make = lambda user, status, when, session: FaceCheck.objects.create(
             user=user, purpose='withdrawal', liveness_session_id=session, status=status,
@@ -374,14 +377,24 @@ class FaceStepUpTests(TestCase):
         failed = make(self.user, 'failed', old, 'b')
         recent = make(self.user, 'passed', timezone.now(), 'c')
         banned = make(self.other, 'passed', old, 'd')
+        held = make(flagged, 'passed', old, 'e')
+        dismissed = make(cleared, 'failed', old, 'f')
+        unfinished = make(self.user, 'created', None, 'g')
+        FaceCheck.objects.filter(pk=unfinished.pk).update(created_at=old)
         UserBan.all_objects.create(user=self.other, ban_type='permanent', reason='fraud')
-        self.assertEqual(fsu.purge_expired_evidence(), 1)
-        self.s3.delete_objects.assert_called_once()
-        self.assertEqual(self.s3.delete_objects.call_args.kwargs['Delete']['Objects'], [{'Key': 'face-checks/a.jpg'}])
-        for row, kept in ((expired, False), (failed, True), (recent, True), (banned, True)):
+        # A fraud alert, compliance escalation or partner request is a case.
+        SuspiciousActivity.objects.create(user=flagged, activity_type='money_laundering', status='investigating',
+                                          detection_data={})
+        SuspiciousActivity.objects.create(user=cleared, activity_type='unusual_pattern', status='dismissed',
+                                          detection_data={})
+        self.assertEqual(fsu.purge_expired_evidence(), 4)
+        for row, kept in ((expired, False), (failed, False), (recent, True), (banned, True),
+                          (held, True), (dismissed, False), (unfinished, False)):
             row.refresh_from_db()
             self.assertEqual(bool(row.evidence_keys), kept, row.liveness_session_id)
         self.assertIsNotNone(expired.evidence_purged_at)
+        # The check records themselves are never purged.
+        self.assertEqual(FaceCheck.objects.count(), 7)
 
     @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_unfinished_session_stays_retryable(self):
