@@ -318,7 +318,7 @@ class BannedPhoneReuseTests(TestCase):
     def check(self):
         return require_face_step_up(self.newcomer, 'withdrawal')
 
-    def test_the_ban_records_a_keyed_hash_never_the_number(self):
+    def test_the_ban_records_a_hash_never_the_number(self):
         self.assertEqual(len(self.ban.phone_hash), 64)
         self.assertNotIn('3001234567', self.ban.phone_hash)
 
