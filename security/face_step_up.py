@@ -237,13 +237,44 @@ def _client_credentials(user_id: int) -> dict:
     }
 
 
-def start_face_check(user, purpose: str) -> dict:
+# ── Device attestation (recorded, never enforced) ───────────────────────
+#
+# A liveness check is beaten by injecting video past the camera (root,
+# emulator, virtual camera), not by a better deepfake in front of it, so the
+# device matters as much as the video. Every Rekognition call records the
+# request's Firebase App Check verdict (Play Integrity / App Attest) on the
+# FaceCheck. Pass-through by decision: Play Integrity fails on some genuine
+# phones (Motorola, uncertified LATAM devices), so a failed verdict never
+# blocks a face check; it is evidence for review and later risk tiers.
+
+APP_CHECK_ACTIONS = {'start': 'face_check_start', 'complete': 'face_check_complete'}
+
+
+def record_app_check(user, app_check_token, stage: str):
+    """The IntegrityVerdict id for this Rekognition call, or None. Never raises."""
+    if app_check_token is None:
+        return None  # caller has no request to read a token from
+    try:
+        from .integrity_service import app_check_service
+        result = app_check_service.verify_and_record(
+            user=user, token=app_check_token, action=APP_CHECK_ACTIONS[stage], should_enforce=False)
+        return result.get('verdict_id')
+    except Exception:  # noqa: BLE001 — attestation trouble never changes a face check
+        logger.exception('Face check App Check could not be recorded: user=%s stage=%s', user.id, stage)
+        return None
+
+
+def start_face_check(user, purpose: str, app_check_token=None) -> dict:
+    """Open a liveness session. `app_check_token` is the request's
+    X-Firebase-AppCheck value ('' when absent), recorded, never enforced."""
     if purpose not in dict(FaceCheck.PURPOSE_CHOICES):
         raise FaceStepUpError('Propósito no válido.')
     if not checks_available():
         raise FaceStepUpError(UNAVAILABLE_MESSAGE)
     if not _active_reference(user):
         raise FaceStepUpError(NO_REFERENCE_MESSAGE)
+    # Outside the lock: verifying the token is a network call.
+    start_verdict_id = record_app_check(user, app_check_token, 'start')
     now = timezone.now()
     with transaction.atomic():
         _lock_user(user.id)
@@ -259,15 +290,25 @@ def start_face_check(user, purpose: str) -> dict:
             # in our own bucket in Zurich, see _store_evidence.
             Settings={'AuditImagesLimit': AUDIT_IMAGES_LIMIT},
         )
-        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'])
+        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'],
+                                         start_integrity_id=start_verdict_id)
     return {'session_id': check.liveness_session_id, **credentials}
 
 
-def complete_face_check(user, session_id: str) -> bool:
+def complete_face_check(user, session_id: str, app_check_token=None) -> bool:
     """Grade the liveness session against the KYC selfie. Returns pass/fail only.
 
-    Raises FaceStepUpPending while AWS is still processing the video.
+    Raises FaceStepUpPending while AWS is still processing the video. The
+    request's App Check verdict is recorded once per check (the app polls
+    while AWS processes), never enforced.
     """
+    if app_check_token is not None:
+        ungraded = FaceCheck.objects.filter(
+            user=user, liveness_session_id=session_id, status='created', complete_integrity__isnull=True)
+        if ungraded.exists():
+            verdict_id = record_app_check(user, app_check_token, 'complete')
+            if verdict_id:
+                ungraded.update(complete_integrity_id=verdict_id)
     graded = {}
     try:
         return _grade(user, session_id, graded)

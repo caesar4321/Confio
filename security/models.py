@@ -1170,6 +1170,9 @@ class IntegrityVerdict(models.Model):
         ('payroll', 'Payroll'),
         ('topup_sell', 'TopUp/Sell'),
         ('payment', 'Payment'),
+        ('face_check_start', 'Confío Face start'),
+        ('face_check_complete', 'Confío Face grading'),
+        ('emergency_exit_face', 'Emergency exit (ban route)'),
     ]
     
     APP_RECOGNITION_CHOICES = [
@@ -1351,6 +1354,13 @@ class FaceCheck(models.Model):
     # kept with the KYC record (security/face_step_up.purge_expired_evidence).
     evidence_keys = models.JSONField(default=list, blank=True)
     evidence_purged_at = models.DateTimeField(null=True, blank=True)
+    # App Check (Play Integrity / App Attest) verdicts of the requests that
+    # opened and graded this check. Recorded, never enforced
+    # (face_step_up.record_app_check); null when no token could be read.
+    start_integrity = models.ForeignKey(
+        'IntegrityVerdict', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    complete_integrity = models.ForeignKey(
+        'IntegrityVerdict', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
     class Meta:
         indexes = [models.Index(fields=['user', 'status', 'completed_at'])]

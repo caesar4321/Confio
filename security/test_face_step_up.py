@@ -194,6 +194,53 @@ class FaceStepUpTests(TestCase):
         self.assertEqual(compare['SourceImage'], {'Bytes': b'live-frame'})
         self.assertEqual(compare['TargetImage'], {'Bytes': b'kyc-selfie'})
 
+    # Device attestation: recorded on every Rekognition call, never enforced
+
+    def _verdict(self, passed):
+        from security.models import IntegrityVerdict
+        return IntegrityVerdict.objects.create(
+            user=self.user, app_recognition='FIREBASE_APP_CHECK', passed=passed,
+            trigger_action='face_check_start')
+
+    def test_app_check_is_recorded_on_the_check_at_start_and_grading(self):
+        self._store_reference()
+        start_v, done_v = self._verdict(True), self._verdict(True)
+        with mock.patch('security.integrity_service.app_check_service.verify_and_record',
+                        side_effect=[{'verdict_id': start_v.id}, {'verdict_id': done_v.id}]) as verify:
+            fsu.start_face_check(self.user, 'on_ramp', app_check_token='tok')
+            self._liveness()
+            self.assertTrue(fsu.complete_face_check(self.user, 'sess-1', app_check_token='tok'))
+        check = FaceCheck.objects.get(liveness_session_id='sess-1')
+        self.assertEqual((check.start_integrity_id, check.complete_integrity_id), (start_v.id, done_v.id))
+        self.assertEqual([c.kwargs['action'] for c in verify.call_args_list],
+                         ['face_check_start', 'face_check_complete'])
+        self.assertTrue(all(c.kwargs['should_enforce'] is False for c in verify.call_args_list))
+
+    def test_a_failed_or_missing_attestation_never_blocks_a_face_check(self):
+        self._store_reference()
+        failed = self._verdict(False)
+        with mock.patch('security.integrity_service.app_check_service.verify_and_record',
+                        return_value={'success': True, 'passed': False, 'verdict_id': failed.id}):
+            fsu.start_face_check(self.user, 'on_ramp', app_check_token='')
+            self._liveness()
+            self.assertTrue(fsu.complete_face_check(self.user, 'sess-1', app_check_token=''))
+        with mock.patch('security.integrity_service.app_check_service.verify_and_record',
+                        side_effect=RuntimeError('firebase down')):
+            self.rek.create_face_liveness_session.return_value = {'SessionId': 'sess-2'}
+            fsu.start_face_check(self.user, 'on_ramp', app_check_token='tok')
+
+    def test_grading_polls_record_the_attestation_once(self):
+        self._store_reference()
+        fsu.start_face_check(self.user, 'on_ramp')
+        self.rek.get_face_liveness_session_results.return_value = {'Status': 'IN_PROGRESS'}
+        done_v = self._verdict(True)
+        with mock.patch('security.integrity_service.app_check_service.verify_and_record',
+                        return_value={'verdict_id': done_v.id}) as verify:
+            for _ in range(3):
+                with self.assertRaises(fsu.FaceStepUpPending):
+                    fsu.complete_face_check(self.user, 'sess-1', app_check_token='tok')
+        self.assertEqual(verify.call_count, 1)
+
     # Evidence for abuse investigations
 
     def _finished_with_frames(self, status='SUCCEEDED', similarity=98.5):
