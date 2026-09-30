@@ -321,7 +321,11 @@ export const hasBanRouteWait = async (
     await store.set(banWaitKey(accountKey), String(nowSec));
     return true;
   }
-  if (nowSec - markedAt < NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS) return true;
+  // The episode runs from the later of the flag and the cooloff request,
+  // so a wait started late is not cut short.
+  const requestedAt = parseInt((await store.get(cooloffKey(accountKey))) || '', 10) || 0;
+  const since = Math.max(markedAt, requestedAt);
+  if (nowSec - since < NORMAL_COOLOFF_SECONDS + COOLOFF_VALID_SECONDS) return true;
   await store.del(banWaitKey(accountKey));
   return false;
 };

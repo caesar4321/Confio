@@ -193,3 +193,30 @@ describe('confirmBannedExit', () => {
     expect(result.outcome).toBe('failed');
   });
 });
+
+describe('ban-route wait flag', () => {
+  const { markBanRouteWait, hasBanRouteWait } = require('../emergencyExit/reachability');
+  const WAIT = 72 * 3600;
+  const memStore = () => {
+    const m = new Map<string, string>();
+    return {
+      get: async (k: string) => (m.has(k) ? (m.get(k) as string) : null),
+      set: async (k: string, v: string) => { m.set(k, v); },
+      del: async (k: string) => { m.delete(k); },
+    };
+  };
+
+  it('lapses one wait episode after it was set', async () => {
+    const store = memStore();
+    await markBanRouteWait(store, 'personal_0', T0);
+    expect(await hasBanRouteWait(store, 'personal_0', T0 + 2 * WAIT - 1)).toBe(true);
+    expect(await hasBanRouteWait(store, 'personal_0', T0 + 2 * WAIT)).toBe(false);
+  });
+
+  it('is not cut short when the wait was started late', async () => {
+    const store = memStore();
+    await markBanRouteWait(store, 'personal_0', T0);
+    await store.set('confio_emergency_cooloff_v1_personal_0', String(T0 + WAIT)); // requested 3 days later
+    expect(await hasBanRouteWait(store, 'personal_0', T0 + 2 * WAIT + 10)).toBe(true);
+  });
+});
