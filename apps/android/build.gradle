@@ -35,6 +35,8 @@ buildscript {
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
         // The RN plugin resolves Kotlin to 2.0.21; Compose needs the matching compiler plugin.
         classpath("org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.0.21")
+        // Vendored AWS liveness (LocalPackages/amplify-liveness) uses kotlinx.serialization.
+        classpath("org.jetbrains.kotlin:kotlin-serialization:2.0.21")
         classpath("com.google.gms:google-services:4.4.0")
         classpath("com.google.firebase:firebase-crashlytics-gradle:2.9.9")
     }

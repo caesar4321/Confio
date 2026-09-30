@@ -49,3 +49,9 @@ include(":app")
 
 include ':didit-sdk-react-native'
 project(':didit-sdk-react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@didit-protocol/sdk-react-native/android')
+
+// AWS Face Liveness 1.5.0, vendored with Confío patches (see its CONFIO_PATCH.md).
+// Named to sort after :app: the React Native plugin sets every Kotlin module's
+// toolchain while :app evaluates, and a module evaluated earlier is already final.
+include ':confio-liveness'
+project(':confio-liveness').projectDir = new File(rootProject.projectDir, 'LocalPackages/amplify-liveness')
