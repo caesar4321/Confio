@@ -326,6 +326,16 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
     }
   };
 
+  // The wait is timed on chain, so starting it needs a chain read.
+  const beginCooloff = async () => {
+    try {
+      await requestExitCooloff(emergencyStore, accountKey);
+    } catch {
+      Alert.alert('No se pudo iniciar la espera', 'Revisa tu conexión e inténtalo de nuevo.');
+    }
+    await evaluate();
+  };
+
   const startCooloffInner = async () => {
     // Starting a waiting period does not move funds or unlock the app, but a
     // ring should learn now, not in 72 hours, that the holder must show up.
@@ -340,17 +350,13 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
           { text: 'Cancelar', style: 'cancel' },
           {
             text: 'Iniciar espera',
-            onPress: async () => {
-              await requestExitCooloff(emergencyStore, accountKey);
-              await evaluate();
-            },
+            onPress: beginCooloff,
           },
         ],
       );
       return;
     }
-    await requestExitCooloff(emergencyStore, accountKey);
-    await evaluate();
+    await beginCooloff();
   };
 
   const cancelCooloff = async () => {
