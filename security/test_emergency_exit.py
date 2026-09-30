@@ -149,8 +149,8 @@ class BannedEmergencyExitTests(TestCase):
                 mock.patch.object(ee, 'complete_face_check', return_value=True) as complete:
             self.assertEqual(ee.start_face(token, 'app-check-token'), {'session_id': 's-1'})
             self.assertTrue(ee.complete_face(token, 's-1'))
-        start.assert_called_once_with(self.user, 'emergency_exit')
-        complete.assert_called_once_with(self.user, 's-1')
+        start.assert_called_once_with(self.user, 'emergency_exit', app_check_token='app-check-token')
+        complete.assert_called_once_with(self.user, 's-1', app_check_token='')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_face_cannot_replay_an_older_passed_check(self):
