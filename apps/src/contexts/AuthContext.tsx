@@ -1,4 +1,4 @@
-import { isFaceAuthenticating } from '../services/faceAuthentication';
+import { isFaceCaptureRunning } from '../services/faceStepUp';
 import React, { createContext, useContext, useState, useEffect, RefObject, useRef } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
 import { AuthService } from '../services/authService';
@@ -553,7 +553,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     let lastPromptedCycle = -1;
 
     const sub = AppState.addEventListener('change', async (state) => {
-      if (isFaceAuthenticating()) return;
+      // The native liveness capture backgrounds the app briefly; only that
+      // skips the phone lock. An open Confío Face sheet does not.
+      if (isFaceCaptureRunning()) return;
       if (state === 'background' || state === 'inactive') {
         lastInactiveAtRef.current = Date.now();
         appStateCycle += 1;
