@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 def backfill(apps, schema_editor):
-    # Same keyed hash as security.models.banned_phone_hash, for the number
+    # Same hash as security.models.banned_phone_hash, for the number
     # each already-banned account holds now.
     from security.models import banned_phone_hash
     UserBan = apps.get_model('security', 'UserBan')

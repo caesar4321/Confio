@@ -549,18 +549,19 @@ class SuspiciousActivity(SoftDeleteModel):
         return f"{self.user.username} - {self.get_activity_type_display()} ({self.status})"
 
 
-BANNED_PHONE_SALT = 'security.UserBan.phone_hash'
-
-
 def banned_phone_hash(phone_key) -> str:
-    """Keyed hash of a canonical phone key ('' for none or a shared review
-    number). Keyed with SECRET_KEY: a leaked table alone does not give the
-    numbers back, which a plain hash of a phone number would."""
-    from django.utils.crypto import salted_hmac
+    """SHA-256 of a canonical phone key ('' for none or a shared review number).
+
+    Unkeyed on purpose: a ban may have to match a number for years, and a key
+    (SECRET_KEY) rotation would silently stop every match. It keeps the
+    number out of the ban row, nothing more: phone numbers are few enough to
+    enumerate, and the users table holds them in plain text anyway.
+    """
+    import hashlib
     from users.review_numbers import is_shared_reviewer_phone_key
     if not phone_key or is_shared_reviewer_phone_key(phone_key):
         return ''
-    return salted_hmac(BANNED_PHONE_SALT, phone_key, algorithm='sha256').hexdigest()
+    return hashlib.sha256(f'confio.banned-phone:{phone_key}'.encode()).hexdigest()
 
 
 class UserBan(SoftDeleteModel):
