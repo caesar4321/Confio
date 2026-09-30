@@ -15,9 +15,9 @@ door:
   exit runs, with no waiting-period fallback; one that never did (there is
   no face to check, and it is what a ring's pooling account looks like)
   waits the normal route's period instead;
-- every step requires a Firebase App Check token (Play Integrity / App
-  Attest), so the face capture comes from the genuine app on a genuine
-  device, not a script or an injected camera.
+- opening a session requires a Firebase App Check token (Play Integrity /
+  App Attest, subject to APP_CHECK_ENFORCE); the face steps record theirs on
+  the FaceCheck without enforcing it, like every Rekognition call.
 
 The exit itself is signed and broadcast by the app, so the app enforces the
 result; this module only answers "is this account banned" and grades the

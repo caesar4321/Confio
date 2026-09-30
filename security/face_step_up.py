@@ -273,8 +273,6 @@ def start_face_check(user, purpose: str, app_check_token=None) -> dict:
         raise FaceStepUpError(UNAVAILABLE_MESSAGE)
     if not _active_reference(user):
         raise FaceStepUpError(NO_REFERENCE_MESSAGE)
-    # Outside the lock: verifying the token is a network call.
-    start_verdict_id = record_app_check(user, app_check_token, 'start')
     now = timezone.now()
     with transaction.atomic():
         _lock_user(user.id)
@@ -290,8 +288,12 @@ def start_face_check(user, purpose: str, app_check_token=None) -> dict:
             # in our own bucket in Zurich, see _store_evidence.
             Settings={'AuditImagesLimit': AUDIT_IMAGES_LIMIT},
         )
-        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'],
-                                         start_integrity_id=start_verdict_id)
+        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'])
+    # After the lock (verifying the token is a network call) and only for a
+    # session actually opened: a rate-limited start records nothing.
+    start_verdict_id = record_app_check(user, app_check_token, 'start')
+    if start_verdict_id:
+        FaceCheck.objects.filter(pk=check.pk).update(start_integrity_id=start_verdict_id)
     return {'session_id': check.liveness_session_id, **credentials}
 
 
