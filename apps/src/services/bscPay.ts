@@ -88,11 +88,19 @@ export const payInvoiceBsc = async (
   }
   const wallet = await getActiveEvmWallet();
 
-  const { data } = await apolloClient.mutate({
+  const { ensureFaceCheck, FACE_STEP_UP_MESSAGE, FaceCheckError, isFaceStepUpRequired } =
+    await import('./faceStepUp');
+  const prepare = async () => (await apolloClient.mutate({
     mutation: PREPARE,
     variables: { invoiceId, idempotencyKey: idempotencyKey || '' },
-  });
-  const prep = data?.prepareBscInvoicePayment;
+  })).data?.prepareBscInvoicePayment;
+  let prep = await prepare();
+  if (!prep?.success && isFaceStepUpRequired(prep?.error)) {
+    // Paying a business you own/work for, or one that never passed KYB:
+    // Confío Face, then once more. Verified merchants never ask.
+    if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+    prep = await prepare();
+  }
   if (!prep?.success) throw new Error(prep?.error || 'prepare_failed');
 
   const calls: BatchCall[] = (prep.calls || []).map((c: any) => ({
@@ -133,6 +141,11 @@ export const payInvoiceBsc = async (
       },
     });
     const sub = res.data?.submitBscInvoicePayment;
+    if (!sub?.success && isFaceStepUpRequired(sub?.error) && attempt === 0) {
+      // The face window lapsed between prepare and submit: confirm again.
+      if (!(await ensureFaceCheck('withdrawal'))) throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+      continue;
+    }
     if (!sub?.success) {
       lastError = sub?.error || 'sponsor rejected';
       if (sub?.authorizationRequired || sub?.error === 'stale_auth_nonce') continue;

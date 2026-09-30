@@ -23,6 +23,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel } from '../utils/tokenDisplay';
+import { FACE_STEP_UP_MESSAGE } from '../services/faceStepUp';
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -217,6 +218,8 @@ export const PaymentProcessingScreen = () => {
         const code = e?.message || '';
         setPaymentError(
           BSC_PAY_ERRORS[code]
+          // Confío Face declined or not passed: say so, not "check your connection".
+          || (code === FACE_STEP_UP_MESSAGE ? code : '')
           || 'No se pudo procesar el pago. Revisa tu conexión e inténtalo de nuevo.',
         );
       } finally {

@@ -224,6 +224,44 @@ def _notify_merchant_needs_app(invoice, payer_user) -> None:
         logger.exception('merchant-needs-app notification failed')
 
 
+def _pays_own_business(user, merchant_business) -> bool:
+    """The payer owns or works (or worked) for the merchant.
+
+    No customer pays their own shop; a ring pools a recruited account's
+    money that way. Soft-deleted records count too, so dropping the
+    employee record right before paying does not help.
+    """
+    from users.models import Account
+    from users.models_employee import BusinessEmployee
+    return (Account.all_objects.filter(business=merchant_business, user=user).exists()
+            or BusinessEmployee.all_objects.filter(business=merchant_business, user=user).exists())
+
+
+def _merchant_kyb_verified(merchant_business) -> bool:
+    from security.models import IdentityVerification
+    return IdentityVerification.objects.filter(
+        status='verified', risk_factors__account_type='business',
+        risk_factors__business_id=str(merchant_business.id)).exists()
+
+
+def _payment_step_up(user, payer_business, merchant_business) -> str:
+    """'' or the Confío Face message for a payment.
+
+    Pay stays face-free at verified merchants. Confío Face (for payers who
+    went through KYC) only where a ring would route money: into a business
+    the payer owns or works for, or into one that never passed KYB. Business
+    payers are governed by KYB and limits, as for sends.
+    """
+    if payer_business is not None or merchant_business is None:
+        return ''
+    from security.face_step_up import require_face_step_up, step_up_applies
+    if not step_up_applies(user):
+        return ''
+    if not _pays_own_business(user, merchant_business) and _merchant_kyb_verified(merchant_business):
+        return ''
+    return require_face_step_up(user, 'withdrawal')
+
+
 def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
     if getattr(invoice, 'billing_payment_intent', None) is None:
         return _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key)
@@ -340,6 +378,9 @@ def _prepare_bsc_payment_locked(user, jwt_ctx, invoice, idempotency_key: str = '
     if not merchant_addr:
         _notify_merchant_needs_app(invoice, user)
         return {'success': False, 'error': 'merchant_no_bsc_address'}
+    step_up = _payment_step_up(user, payer_business, invoice.merchant_business)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     # `gross_amount` is USD on a dollar invoice and a CONFIO COUNT on a
     # CONFIO one; gross_wei is that amount in the token's 18 decimals.
@@ -910,6 +951,11 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
         logger.warning('[PAY][BSC] user %s no longer authorized to spend from the '
                        'payer account for invoice %s', user.id, invoice.internal_id)
         return {'success': False, 'error': 'not_authorized'}
+    # Rechecked here, like sends: a payment prepared earlier must not leave
+    # once the face window has lapsed.
+    step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     payer_addr = (payment_tx.payer_address or '').lower()
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
