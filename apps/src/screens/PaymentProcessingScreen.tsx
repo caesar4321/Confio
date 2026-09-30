@@ -115,7 +115,12 @@ export const PaymentProcessingScreen = () => {
   useEffect(() => {
     (async () => {
       if (bioChecked) return;
-      const ok = await authenticateWithFace();
+      // A payment stays inside Confío: a small one gets the light check.
+      const ok = await authenticateWithFace('withdrawal', transactionData?.amount ? {
+        amount: transactionData.amount,
+        tokenType: transactionData.currency || '',
+        leavesConfio: false,
+      } : undefined);
       if (!ok) {
         Alert.alert(
           'Autenticación requerida',

@@ -202,8 +202,11 @@ def prepare_create(user, jwt_ctx, phone_key: str, token_type: str, amount,
         return {'success': False, 'error': 'no_bsc_address'}
     # An invite is a send (to a phone instead of an account): the same
     # Confío Face gate as bsc_flow, so pooling cannot route around it.
+    # The escrow is claimed into a Confío account: the money stays inside.
+    from security.face_step_up import dollar_amount
     from .bsc_flow import _send_step_up
-    step_up = _send_step_up(user, sender_business, None)
+    step_up = _send_step_up(user, sender_business, None,
+                            amount_usd=dollar_amount(amount, requested_token), cash_out=False)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -404,8 +407,10 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     from .bsc_flow import _send_step_up
     from security.face_step_up import withdrawal_action_key
     face_action = withdrawal_action_key('invite', phone_invite.pk, [chain_id, inviter_addr, calls])
+    from security.face_step_up import dollar_amount
+    face_terms = {'amount_usd': dollar_amount(phone_invite.amount, phone_invite.token_type), 'cash_out': False}
     step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None,
-                            action_key=face_action)
+                            action_key=face_action, **face_terms)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -438,7 +443,7 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     # the lock: exactly one caller can move draft → creating, and only that
     # caller broadcasts.
     step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None,
-                            action_key=face_action, consume=True)
+                            action_key=face_action, consume=True, **face_terms)
     if step_up:
         return {'success': False, 'error': step_up}
     won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='draft').update(

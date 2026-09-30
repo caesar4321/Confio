@@ -1347,6 +1347,13 @@ class FaceCheck(models.Model):
         ('passed', 'Passed'),
         ('failed', 'Failed'),
     ]
+    # Which AWS liveness challenge ran (face_step_up.required_challenge):
+    # 'light' is FaceMovementChallenge (no colour lights), allowed only for
+    # small movements inside Confío; 'full' is FaceMovementAndLightChallenge.
+    CHALLENGE_CHOICES = [
+        ('full', 'Movement and light'),
+        ('light', 'Movement only'),
+    ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='face_checks')
     purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
@@ -1360,6 +1367,10 @@ class FaceCheck(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
     consumed_by = models.CharField(max_length=80, blank=True)
+    challenge = models.CharField(max_length=5, choices=CHALLENGE_CHOICES, default='full')
+    # Dollar value of the movement that spent this check (null when unknown
+    # or not in dollars); feeds the 24h total that decides light vs full.
+    amount_usd = models.DecimalField(max_digits=19, decimal_places=6, null=True, blank=True)
     # Frames AWS returns for the check (reference + audit images), kept in the
     # verification bucket to investigate abuse. Passed checks are purged after
     # EVIDENCE_RETENTION unless the user has a ban on record; failed ones are

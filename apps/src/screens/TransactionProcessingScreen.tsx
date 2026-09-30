@@ -283,7 +283,14 @@ export const TransactionProcessingScreen = () => {
   useEffect(() => {
     (async () => {
       if (bioChecked) return;
-      const ok = await authenticateWithFace();
+      // Only a hint for the challenge (the server spends the check against the
+      // real send): a bare address may be outside Confío; a user or phone is not.
+      const ok = await authenticateWithFace('withdrawal', transactionData.amount ? {
+        amount: transactionData.amount,
+        tokenType: transactionData.tokenType || transactionData.currency || '',
+        leavesConfio: transactionData.type !== 'payment'
+          && !transactionData.recipientUserId && !transactionData.recipientPhone,
+      } : undefined);
       if (!ok) {
         Alert.alert(
           'Autenticación requerida',

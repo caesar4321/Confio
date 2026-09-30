@@ -95,6 +95,8 @@ class FaceStepUpTests(TestCase):
         self.assertEqual(result, fsu.FACE_STEP_UP_MESSAGE)
 
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()  # the challenge note must not leak between tests
         self.user = get_user_model().objects.create(
             username='face-user', email='face@example.com', firebase_uid='face-user-uid')
         self.other = get_user_model().objects.create(
@@ -194,7 +196,8 @@ class FaceStepUpTests(TestCase):
         self._store_reference()
         data = fsu.start_face_check(self.user, 'on_ramp')
         self.assertEqual(data['session_id'], 'sess-1')
-        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {'AuditImagesLimit': 4})
+        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {
+            'AuditImagesLimit': 4, 'ChallengePreferences': [{'Type': 'FaceMovementAndLightChallenge'}]})
         self._liveness()
         self.assertTrue(fsu.complete_face_check(self.user, 'sess-1'))
         compare = self.rek.compare_faces.call_args.kwargs
@@ -209,6 +212,7 @@ class FaceStepUpTests(TestCase):
             user=self.user, app_recognition='FIREBASE_APP_CHECK', passed=passed,
             trigger_action='face_check_start')
 
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_app_check_is_recorded_on_the_check_at_start_and_grading(self):
         self._store_reference()
         start_v, done_v = self._verdict(True), self._verdict(True)
@@ -223,6 +227,7 @@ class FaceStepUpTests(TestCase):
                          ['face_check_start', 'face_check_complete'])
         self.assertTrue(all(c.kwargs['should_enforce'] is False for c in verify.call_args_list))
 
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_a_failed_or_missing_attestation_never_blocks_a_face_check(self):
         self._store_reference()
         failed = self._verdict(False)
@@ -243,6 +248,7 @@ class FaceStepUpTests(TestCase):
         IntegrityVerdict.objects.create(user=self.user, passed=False, trigger_action='login')
         self.assertTrue(IntegrityVerdict.has_historical_violation(self.user))
 
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_grading_polls_record_the_attestation_once(self):
         self._store_reference()
         fsu.start_face_check(self.user, 'on_ramp')
@@ -603,6 +609,156 @@ class SendStepUpTests(TestCase):
         from send.bsc_flow import _send_step_up
         IdentityVerification.all_documents.filter(user=self.user).delete()
         self.assertEqual(_send_step_up(self.user, None, None), '')
+
+
+@override_settings(FACE_STEP_UP_ENABLED=True)
+class FaceChallengeLevelTests(TestCase):
+    """Light (no colour lights) only for small movements that stay inside Confío."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.user = get_user_model().objects.create(
+            username='level-user', email='level@example.com', firebase_uid='level-user-uid')
+        verification = IdentityVerification.all_documents.create(
+            user=self.user, verified_first_name='Ana', verified_last_name='Perez',
+            verified_date_of_birth='1994-07-21', verified_nationality='COL', verified_address='-',
+            verified_city='-', verified_state='-', verified_country='COL', document_type='national_id',
+            document_number='1065000012', document_issuing_country='COL', status='verified',
+            verified_at=timezone.now())
+        FaceReference.objects.create(user=self.user, identity_verification=verification,
+                                     s3_key='face-references/x.jpg', sha256='0' * 64, source='didit_liveness')
+        self.rek = mock.Mock()
+        self.rek.create_face_liveness_session.return_value = {'SessionId': 'sess-level'}
+        for p in (mock.patch.object(fsu, '_rekognition', return_value=self.rek),
+                  mock.patch.object(fsu, '_client_credentials', return_value={'region': 'eu-west-1'})):
+            p.start()
+            self.addCleanup(p.stop)
+        self.keys = iter(range(1000))
+
+    def _check(self, challenge, session=None):
+        return FaceCheck.objects.create(
+            user=self.user, purpose='withdrawal', status='passed', challenge=challenge,
+            liveness_session_id=session or f'{challenge}-{next(self.keys)}', completed_at=timezone.now())
+
+    def _spent(self, amount_usd, hours_ago=1):
+        FaceCheck.objects.create(
+            user=self.user, purpose='withdrawal', status='passed', challenge='full',
+            liveness_session_id=f'spent-{next(self.keys)}', completed_at=timezone.now(),
+            consumed_at=timezone.now() - timedelta(hours=hours_ago), consumed_by='out:' + 'a' * 64,
+            amount_usd=amount_usd)
+
+    def _claim(self, amount_usd, cash_out=False):
+        key = fsu.withdrawal_action_key('send', next(self.keys), [])
+        return fsu.require_face_step_up(self.user, 'withdrawal', action_key=key, consume=True,
+                                        amount_usd=amount_usd, cash_out=cash_out)
+
+    def _started_preferences(self):
+        return self.rek.create_face_liveness_session.call_args.kwargs['Settings']['ChallengePreferences']
+
+    def test_level_rules(self):
+        level = fsu.required_challenge
+        D = fsu.Decimal
+        self.assertEqual(level(self.user, D('49.99'), False), 'light')
+        self.assertEqual(level(self.user, D('50'), False), 'full')
+        self.assertEqual(level(self.user, D('10'), True), 'full')    # leaves Confío
+        self.assertEqual(level(self.user, None, False), 'full')      # not dollars
+        self.assertEqual(level(self.user, D('10')), 'full')          # defaults: full
+        self.assertEqual(level(self.user, D('-1'), False), 'full')
+
+    def test_the_24h_total_includes_this_movement(self):
+        self._spent(fsu.Decimal('60'))
+        self.assertEqual(fsu.required_challenge(self.user, fsu.Decimal('39.99'), False), 'light')
+        self.assertEqual(fsu.required_challenge(self.user, fsu.Decimal('40'), False), 'full')
+        self._spent(fsu.Decimal('500'), hours_ago=25)  # outside the window
+        self.assertEqual(fsu.required_challenge(self.user, fsu.Decimal('39.99'), False), 'light')
+
+    def test_a_spent_movement_of_unknown_value_counts_as_over_the_cap(self):
+        self._spent(None)  # a bank payout, an external outflow, CONFIO
+        self.assertEqual(fsu.required_challenge(self.user, fsu.Decimal('5'), False), 'full')
+
+    def test_a_light_check_never_approves_what_needs_a_full_one(self):
+        self._check('light')
+        self.assertEqual(self._claim(fsu.Decimal('50')), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(self._claim(fsu.Decimal('10'), cash_out=True), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(self._claim(None), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(self._claim(fsu.Decimal('10')), '')
+
+    def test_a_full_check_approves_anything_and_records_the_amount(self):
+        check = self._check('full')
+        self.assertEqual(self._claim(fsu.Decimal('10')), '')
+        check.refresh_from_db()
+        self.assertEqual(check.amount_usd, fsu.Decimal('10'))
+        self.assertIsNotNone(check.consumed_at)
+
+    def test_light_checks_are_spent_first(self):
+        full, light = self._check('full'), self._check('light')
+        self.assertEqual(self._claim(fsu.Decimal('10')), '')
+        full.refresh_from_db()
+        light.refresh_from_db()
+        self.assertIsNotNone(light.consumed_at)
+        self.assertIsNone(full.consumed_at)
+
+    def test_light_claims_stop_at_the_daily_total(self):
+        for _ in range(3):
+            self._check('light')
+        self.assertEqual(self._claim(fsu.Decimal('45')), '')
+        self.assertEqual(self._claim(fsu.Decimal('45')), '')
+        # 90 spent: another 45 reaches 100 and needs a full check.
+        self.assertEqual(self._claim(fsu.Decimal('45')), fsu.FACE_STEP_UP_MESSAGE)
+
+    def test_the_refusing_gate_picks_the_next_sessions_challenge(self):
+        self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)
+        fsu.start_face_check(self.user, 'withdrawal')
+        self.assertEqual(self._started_preferences()[0], {'Type': 'FaceMovementChallenge'})
+        self.assertEqual(FaceCheck.objects.get(liveness_session_id='sess-level').challenge, 'light')
+
+    def test_other_purposes_always_run_the_full_challenge(self):
+        self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)  # notes light
+        for purpose in ('on_ramp', 'emergency_exit', 'payroll_authority', 'payin_release'):
+            FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
+            fsu.start_face_check(self.user, purpose)
+            self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
+
+    def test_the_apps_movement_hint_picks_the_challenge(self):
+        fsu.start_face_check(self.user, 'withdrawal', movement=('20', 'cUSD', False))
+        self.assertEqual(self._started_preferences(), [
+            {'Type': 'FaceMovementChallenge'}, {'Type': 'FaceMovementAndLightChallenge'}])
+        for movement in (('20', 'cUSD', True), ('20', 'CONFIO', False), ('75', 'cUSD', False),
+                         ('NaN', 'cUSD', False), ('x', 'cUSD', False), ('20', 'cUSD', None)):
+            FaceCheck.objects.filter(liveness_session_id='sess-level').delete()
+            fsu.start_face_check(self.user, 'withdrawal', movement=movement)
+            self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}], movement)
+
+    def test_what_ran_decides_not_what_was_asked(self):
+        # A client that cannot run the light challenge falls back to full.
+        check = self._check('light', session='asked-light')
+        check.status, check.completed_at = 'created', None
+        check.save()
+        self.rek.get_face_liveness_session_results.return_value = {
+            'Status': 'SUCCEEDED', 'Confidence': 97, 'ReferenceImage': {'Bytes': b'live'},
+            'Challenge': {'Type': 'FaceMovementAndLightChallenge', 'Version': '2.0.0'}}
+        self.rek.compare_faces.return_value = {'FaceMatches': [{'Similarity': 99}]}
+        with mock.patch.object(fsu, '_reference_bytes', return_value=b'kyc'), \
+                mock.patch.object(fsu, '_store_evidence'):
+            self.assertTrue(fsu.complete_face_check(self.user, 'asked-light'))
+        check.refresh_from_db()
+        self.assertEqual(check.challenge, 'full')
+
+    def test_spending_a_check_clears_the_note(self):
+        self.assertEqual(self._claim(fsu.Decimal('10')), fsu.FACE_STEP_UP_MESSAGE)
+        self._check('light')
+        self.assertEqual(self._claim(fsu.Decimal('10')), '')
+        fsu.start_face_check(self.user, 'withdrawal')
+        self.assertEqual(self._started_preferences(), [{'Type': 'FaceMovementAndLightChallenge'}])
+
+    def test_send_terms(self):
+        from send.bsc_flow import _send_face_terms
+        self.assertEqual(_send_face_terms(fsu.Decimal('20'), 'CUSD', 7, None),
+                         {'amount_usd': fsu.Decimal('20'), 'cash_out': False})
+        self.assertEqual(_send_face_terms(fsu.Decimal('20'), 'USDT', None, None)['cash_out'], True)
+        self.assertIsNone(_send_face_terms(fsu.Decimal('20'), 'CONFIO', 7, None)['amount_usd'])
 
 
 class FaceStepUpStatusQueryTests(TestCase):

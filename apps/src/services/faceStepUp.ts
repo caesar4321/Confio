@@ -40,6 +40,24 @@ const START = gql`
   }
 `;
 
+// With the movement the check is for, so a small one inside Confío gets the
+// light challenge (no colour lights). Its own document: a server without
+// these arguments rejects it, and the plain START is used instead.
+const START_FOR_MOVEMENT = gql`
+  mutation StartFaceCheckForMovement($purpose: String!, $amount: String!, $tokenType: String!, $leavesConfio: Boolean!) {
+    startFaceCheck(purpose: $purpose, amount: $amount, tokenType: $tokenType, leavesConfio: $leavesConfio) {
+      success
+      error
+      sessionId
+      region
+      accessKeyId
+      secretAccessKey
+      sessionToken
+      expiration
+    }
+  }
+`;
+
 const COMPLETE = gql`
   mutation CompleteFaceCheck($sessionId: String!) {
     completeFaceCheck(sessionId: $sessionId) {
@@ -148,6 +166,19 @@ const primeAppCheck = async (): Promise<void> => {
   } catch { /* recorded as missing; never blocks the check */ }
 };
 
+/**
+ * What a withdrawal-purpose check is about to approve. Only a hint for which
+ * challenge to run: the server spends the check against its own terms, so an
+ * understated movement just gets a check that cannot approve it.
+ */
+export interface FaceCheckMovement {
+  amount: string | number;
+  /** e.g. 'cUSD', 'USDT', 'CONFIO' (only dollar tokens can get the light challenge). */
+  tokenType: string;
+  /** True when the money leaves Confío (external address, bank). */
+  leavesConfio: boolean;
+}
+
 const graphqlBackend: FaceCheckBackend = {
   async start(purpose) {
     await primeAppCheck();
@@ -162,6 +193,31 @@ const graphqlBackend: FaceCheckBackend = {
     return data?.completeFaceCheck;
   },
 };
+
+/** The GraphQL backend, opening the session with the movement it is for. */
+export const movementBackend = (movement: FaceCheckMovement): FaceCheckBackend => ({
+  async start(purpose) {
+    await primeAppCheck();
+    const { apolloClient } = await import('../apollo/client');
+    try {
+      const { data } = await apolloClient.mutate({
+        mutation: START_FOR_MOVEMENT,
+        variables: {
+          purpose,
+          amount: String(movement.amount),
+          tokenType: movement.tokenType,
+          leavesConfio: movement.leavesConfio,
+        },
+      });
+      if (data?.startFaceCheck) return data.startFaceCheck;
+    } catch {
+      // Older server without the movement arguments: a full check still works.
+    }
+    const { data } = await apolloClient.mutate({ mutation: START, variables: { purpose } });
+    return data?.startFaceCheck;
+  },
+  complete: graphqlBackend.complete,
+});
 
 /** Server session → native capture → server grade. Never throws. */
 export const runFaceCapture = async (

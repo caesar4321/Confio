@@ -26,13 +26,15 @@ import json
 import logging
 import uuid
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import boto3
 import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.utils import timezone
 
 from .models import FaceCheck, FaceReference
@@ -57,6 +59,26 @@ AUDIT_IMAGES_LIMIT = 4
 EVIDENCE_RETENTION = timedelta(days=180)
 MAX_REFERENCE_BYTES = 5 * 1024 * 1024
 LIVENESS_TERMINAL_STATUSES = {'SUCCEEDED', 'FAILED', 'EXPIRED'}
+
+# Two strengths of check, chosen by risk (required_challenge):
+# - light: AWS FaceMovementChallenge, no colour lights (about 3s faster);
+#   only for a movement under LIGHT_MAX_MOVEMENT_USD that stays inside
+#   Confío, while the face-approved outgoing total of the last DAILY_WINDOW,
+#   this movement included, stays under LIGHT_MAX_DAILY_USD;
+# - full: AWS FaceMovementAndLightChallenge, AWS's most spoof-resistant.
+#   Everything else: money leaving Confío (bank payouts, external sends),
+#   deposits, the emergency exit, payroll authority, non-dollar amounts.
+# A light check is never spent where a full one is required.
+CHALLENGE_FULL = 'full'
+CHALLENGE_LIGHT = 'light'
+AWS_CHALLENGE_TYPES = {
+    CHALLENGE_LIGHT: 'FaceMovementChallenge',
+    CHALLENGE_FULL: 'FaceMovementAndLightChallenge',
+}
+LIGHT_MAX_MOVEMENT_USD = Decimal('50')
+LIGHT_MAX_DAILY_USD = Decimal('100')
+DAILY_WINDOW = timedelta(hours=24)
+DOLLAR_TOKENS = frozenset({'CUSD', 'CUSD_PLUS', 'USDT', 'USDC'})
 
 FACE_STEP_UP_NEXT_STEP = 'face_check'
 FACE_STEP_UP_MESSAGE = 'Confirma que eres tú con tu rostro para continuar.'
@@ -267,9 +289,47 @@ def record_app_check(user, app_check_token, stage: str):
         return None
 
 
-def start_face_check(user, purpose: str, app_check_token=None) -> dict:
+def _challenge_note_key(user_id) -> str:
+    return f'face_step_up:challenge:{user_id}'
+
+
+def _note_required_challenge(user, challenge: str) -> None:
+    """Remember what the refusing gate needs, for the session opened next."""
+    cache.set(_challenge_note_key(user.pk), challenge, int(WITHDRAWAL_WINDOW.total_seconds()))
+
+
+def _session_challenge(user, purpose: str, movement=None) -> str:
+    """Which challenge a new session runs. Full unless an outgoing movement
+    is known to be small enough.
+
+    `movement` is the app's description of what it is about to do: amount,
+    token and whether the money leaves Confío. It is only a hint: the gate
+    that spends the check decides from the server's own terms, so a false
+    hint buys a light check that no larger movement accepts. Without one, the
+    last refusing gate's note decides.
+    """
+    if purpose != 'withdrawal':
+        return CHALLENGE_FULL
+    if movement is not None:
+        amount, token_type, leaves_confio = movement
+        return required_challenge(user, dollar_amount(amount, token_type), leaves_confio is not False)
+    if cache.get(_challenge_note_key(user.pk)) == CHALLENGE_LIGHT:
+        return CHALLENGE_LIGHT
+    return CHALLENGE_FULL
+
+
+def _challenge_preferences(challenge: str) -> list:
+    if challenge == CHALLENGE_LIGHT:
+        # In order of preference: a client that cannot run the light
+        # challenge gets the full one (recorded as such when graded).
+        return [{'Type': AWS_CHALLENGE_TYPES[CHALLENGE_LIGHT]}, {'Type': AWS_CHALLENGE_TYPES[CHALLENGE_FULL]}]
+    return [{'Type': AWS_CHALLENGE_TYPES[CHALLENGE_FULL]}]
+
+
+def start_face_check(user, purpose: str, app_check_token=None, movement=None) -> dict:
     """Open a liveness session. `app_check_token` is the request's
-    X-Firebase-AppCheck value ('' when absent), recorded, never enforced."""
+    X-Firebase-AppCheck value ('' when absent), recorded, never enforced.
+    `movement` is an optional (amount, token_type, leaves_confio) hint."""
     if purpose not in dict(FaceCheck.PURPOSE_CHOICES):
         raise FaceStepUpError('Propósito no válido.')
     if not checks_available():
@@ -285,13 +345,16 @@ def start_face_check(user, purpose: str, app_check_token=None) -> dict:
         if checks.filter(status='created', created_at__gte=now - SESSION_MAX_AGE).count() >= MAX_OPEN_SESSIONS:
             raise FaceStepUpError(TOO_MANY_MESSAGE)
         credentials = _client_credentials(user.id)
+        challenge = _session_challenge(user, purpose, movement)
         session = _rekognition().create_face_liveness_session(
             ClientRequestToken=uuid.uuid4().hex,
             # Frames come back as bytes (no S3 output in Ireland); we keep them
             # in our own bucket in Zurich, see _store_evidence.
-            Settings={'AuditImagesLimit': AUDIT_IMAGES_LIMIT},
+            Settings={'AuditImagesLimit': AUDIT_IMAGES_LIMIT,
+                      'ChallengePreferences': _challenge_preferences(challenge)},
         )
-        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'])
+        check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'],
+                                         challenge=challenge)
     # After the lock (verifying the token is a network call) and only for a
     # session actually opened: a rate-limited start records nothing.
     start_verdict_id = record_app_check(user, app_check_token, 'start')
@@ -352,6 +415,12 @@ def _grade(user, session_id: str, graded: dict) -> bool:
                 return _finish(check, False, 'session_expired')
             raise FaceStepUpPending(PENDING_MESSAGE)
         _store_evidence(check, result)
+        # What actually ran decides what the check may approve, not what was
+        # asked for (a client may fall back from light to full).
+        ran = (result.get('Challenge') or {}).get('Type')
+        for level, aws_type in AWS_CHALLENGE_TYPES.items():
+            if ran == aws_type:
+                check.challenge = level
         if status != 'SUCCEEDED':
             return _finish(check, False, f'liveness_{status.lower()}')
         if expired:
@@ -471,7 +540,46 @@ def _usable_on_ramp_checks(user, now):
     )
 
 
-def missing_face_step_up(user, purpose: str) -> str:
+def dollar_amount(amount, token_type):
+    """The movement's value in dollars, or None when it is not a dollar token."""
+    if amount is None or not isinstance(token_type, str) or token_type.upper() not in DOLLAR_TOKENS:
+        return None
+    try:
+        value = Decimal(str(amount))
+    except (InvalidOperation, ValueError):
+        return None
+    return value if value.is_finite() else None
+
+
+def _daily_outgoing_usd(user, now):
+    """Face-approved outgoing dollars in the last DAILY_WINDOW, or None when
+    one of those movements has no known dollar value (a bank payout, an
+    external outflow, CONFIO): it may have been any size."""
+    spent = FaceCheck.objects.filter(user=user, purpose='withdrawal', consumed_at__gte=now - DAILY_WINDOW)
+    totals = spent.aggregate(total=Sum('amount_usd'), unknown=Count('pk', filter=Q(amount_usd__isnull=True)))
+    if totals['unknown']:
+        return None
+    return totals['total'] or Decimal('0')
+
+
+def required_challenge(user, amount_usd=None, cash_out=True, now=None) -> str:
+    """Light only for a small dollar movement that stays inside Confío.
+
+    Callers that do not know the amount, or whose money leaves Confío, get
+    the defaults: a full check.
+    """
+    if cash_out or amount_usd is None:
+        return CHALLENGE_FULL
+    amount = Decimal(str(amount_usd))
+    if amount < 0 or amount >= LIGHT_MAX_MOVEMENT_USD:
+        return CHALLENGE_FULL
+    earlier = _daily_outgoing_usd(user, now or timezone.now())
+    if earlier is None or earlier + amount >= LIGHT_MAX_DAILY_USD:
+        return CHALLENGE_FULL
+    return CHALLENGE_LIGHT
+
+
+def missing_face_step_up(user, purpose: str, *, amount_usd=None, cash_out=True) -> str:
     """'' when a usable check exists (nothing is spent), else the message."""
     if purpose == 'withdrawal':
         from .identity_reuse import outgoing_identity_restriction
@@ -484,8 +592,11 @@ def missing_face_step_up(user, purpose: str) -> str:
     if purpose == 'on_ramp':
         return '' if _usable_on_ramp_checks(user, now).exists() else FACE_STEP_UP_MESSAGE
     if purpose == 'withdrawal':
-        recent = _usable_withdrawal_checks(user, now)
-        return '' if recent.exists() else FACE_STEP_UP_MESSAGE
+        challenge = required_challenge(user, amount_usd, cash_out, now)
+        if _usable_withdrawal_checks(user, now, challenge).exists():
+            return ''
+        _note_required_challenge(user, challenge)
+        return FACE_STEP_UP_MESSAGE
     raise ValueError(f'Unknown step-up purpose {purpose}')
 
 
@@ -521,18 +632,26 @@ def withdrawal_action_key(namespace, identifier, payload) -> str:
     return 'out:' + hashlib.sha256(encoded).hexdigest()
 
 
-def _usable_withdrawal_checks(user, now):
-    return FaceCheck.objects.filter(
+def _usable_withdrawal_checks(user, now, challenge=CHALLENGE_FULL):
+    checks = FaceCheck.objects.filter(
         user=user, status='passed', purpose='withdrawal', consumed_at__isnull=True,
         completed_at__gte=now - WITHDRAWAL_WINDOW)
+    if challenge == CHALLENGE_FULL:
+        checks = checks.filter(challenge=CHALLENGE_FULL)
+    return checks
 
 
-def require_face_step_up(user, purpose: str, *, action_key=None, consume=False) -> str:
+def require_face_step_up(user, purpose: str, *, action_key=None, consume=False,
+                         amount_usd=None, cash_out=True) -> str:
     """Peek during preparation; claim after validation and before side effects.
 
     An exact operation can retry after consumption. Callers MUST bind all
     economic terms and enforce durable operation idempotency, or include the
     exact signed nonce/deadline. Never release after an ambiguous broadcast.
+
+    `amount_usd` (None when unknown or not dollars) and `cash_out` (the money
+    leaves Confío) decide whether a light check is enough; the defaults ask
+    for a full one. Pass the same terms when peeking and when claiming.
     """
     if purpose != 'withdrawal':
         raise ValueError('Deposit orders must claim a check with claim_on_ramp_check')
@@ -554,11 +673,22 @@ def require_face_step_up(user, purpose: str, *, action_key=None, consume=False) 
                 user=user, purpose='withdrawal', status='passed',
                 consumed_by=action_key, consumed_at__isnull=False).exists():
             return ''
-        check = _usable_withdrawal_checks(user, timezone.now()).order_by('-completed_at', '-pk').first()
+        now = timezone.now()
+        # Under the user lock, so concurrent claims cannot both count the
+        # same 24h total.
+        challenge = required_challenge(user, amount_usd, cash_out, now)
+        check = _usable_withdrawal_checks(user, now, challenge).order_by(
+            # Spend a light check where one is enough; keep full ones for
+            # movements that need them.
+            Case(When(challenge=CHALLENGE_LIGHT, then=0), default=1, output_field=IntegerField()),
+            '-completed_at', '-pk').first()
         if not check:
+            _note_required_challenge(user, challenge)
             return FACE_STEP_UP_MESSAGE
         if consume:
-            check.consumed_at = timezone.now()
+            check.consumed_at = now
             check.consumed_by = action_key
-            check.save(update_fields=['consumed_at', 'consumed_by'])
+            check.amount_usd = None if amount_usd is None else Decimal(str(amount_usd))
+            check.save(update_fields=['consumed_at', 'consumed_by', 'amount_usd'])
+            cache.delete(_challenge_note_key(user.pk))
         return ''
