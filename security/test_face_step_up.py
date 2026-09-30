@@ -229,6 +229,13 @@ class FaceStepUpTests(TestCase):
             self.rek.create_face_liveness_session.return_value = {'SessionId': 'sess-2'}
             fsu.start_face_check(self.user, 'on_ramp', app_check_token='tok')
 
+    def test_a_failed_face_attestation_is_not_a_reward_violation(self):
+        from security.models import IntegrityVerdict
+        self._verdict(False)  # trigger_action='face_check_start'
+        self.assertFalse(IntegrityVerdict.has_historical_violation(self.user))
+        IntegrityVerdict.objects.create(user=self.user, passed=False, trigger_action='login')
+        self.assertTrue(IntegrityVerdict.has_historical_violation(self.user))
+
     def test_grading_polls_record_the_attestation_once(self):
         self._store_reference()
         fsu.start_face_check(self.user, 'on_ramp')

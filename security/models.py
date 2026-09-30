@@ -1175,6 +1175,10 @@ class IntegrityVerdict(models.Model):
         ('emergency_exit_face', 'Emergency exit (ban route)'),
     ]
     
+    # Recorded for review, never a verdict against the user (see
+    # has_historical_violation and face_step_up.record_app_check).
+    RECORD_ONLY_ACTIONS = ('face_check_start', 'face_check_complete')
+
     APP_RECOGNITION_CHOICES = [
         ('PLAY_RECOGNIZED', 'Play Recognized'),
         ('UNRECOGNIZED_VERSION', 'Unrecognized Version'),
@@ -1276,11 +1280,15 @@ class IntegrityVerdict(models.Model):
         Check if user has ANY failed integrity check in their history.
         Used to block reward claims from users who previously used
         emulator/rooted devices.
+
+        Confío Face verdicts are evidence only (recorded, never enforced):
+        a failed one — a Motorola phone, a token that timed out — must not
+        quietly cost the user their rewards.
         """
         return cls.objects.filter(
             user=user,
             passed=False
-        ).exists()
+        ).exclude(trigger_action__in=cls.RECORD_ONLY_ACTIONS).exists()
     
     @classmethod
     def has_emulator_history(cls, user) -> bool:

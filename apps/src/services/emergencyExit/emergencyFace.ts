@@ -105,7 +105,7 @@ export const confirmBannedExit = async (
     start: async (): Promise<FaceCheckStart> =>
       post('/api/emergency-exit/face/start/', { token: session.token }, true),
     complete: async (sessionId: string): Promise<FaceCheckGrade> =>
-      post('/api/emergency-exit/face/complete/', { token: session.token, sessionId }),
+      post('/api/emergency-exit/face/complete/', { token: session.token, sessionId }, true),
   };
   const passed = await (deps.presentFace ?? defaultPresentFace)(backend);
   return passed ? { outcome: 'passed', faceChecked: true } : { outcome: 'failed', message: FACE_FAILED_MESSAGE };

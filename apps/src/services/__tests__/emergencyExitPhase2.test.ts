@@ -158,6 +158,8 @@ describe('confirmBannedExit', () => {
     expect(calls[2].body).toEqual({ token: 't-1' });
     expect(calls[2].headers['X-Firebase-AppCheck']).toBe('app-check-token');
     expect(calls[3].body).toEqual({ token: 't-1', sessionId: 's-1' });
+    // Grading records the device verdict too (never enforced).
+    expect(calls[3].headers['X-Firebase-AppCheck']).toBe('app-check-token');
     // Never a JWT on this route: the middleware would refuse a banned user.
     calls.forEach(c => expect(c.headers.Authorization).toBeUndefined());
   });
