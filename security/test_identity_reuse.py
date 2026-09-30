@@ -292,3 +292,80 @@ class IdentityReuseTests(TestCase):
                                parent_type=mutation_type,
                                schema=SimpleNamespace(mutation_type=mutation_type))
         self.assertEqual(IdentityReviewMiddleware().resolve(lambda *a, **kw: 'allowed', None, info), 'allowed')
+
+
+@override_settings(FACE_STEP_UP_ENABLED=False)
+class BannedPhoneReuseTests(TestCase):
+    """A banned account's verified number, verified again by another account."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.banned = User.objects.create_user(
+            username='banned-phone', firebase_uid='banned-phone', phone_number='3001234567', phone_country='CO')
+        self.newcomer = User.objects.create_user(username='newcomer-phone', firebase_uid='newcomer-phone')
+        self.reviewer = User.objects.create_user(username='phone-reviewer', firebase_uid='phone-reviewer',
+                                                 is_staff=True)
+        self.ban = UserBan.objects.create(user=self.banned, ban_type='permanent', reason='fraud')
+
+    def take_number(self, previous_owner=None):
+        # What users.phone_linking does: the number leaves its old owner.
+        if previous_owner is not None:
+            previous_owner.phone_number = previous_owner.phone_country = None
+            previous_owner.save()
+        self.newcomer.phone_number, self.newcomer.phone_country = '3001234567', 'CO'
+        self.newcomer.save()
+
+    def check(self):
+        return require_face_step_up(self.newcomer, 'withdrawal')
+
+    def test_the_ban_records_a_keyed_hash_never_the_number(self):
+        self.assertEqual(len(self.ban.phone_hash), 64)
+        self.assertNotIn('3001234567', self.ban.phone_hash)
+
+    def test_a_relinked_number_holds_the_new_account(self):
+        self.assertEqual(self.check(), '')
+        self.take_number(previous_owner=self.banned)
+        self.assertEqual(self.check(), MESSAGE)
+        case = SuspiciousActivity.objects.get(user=self.newcomer, detection_data__trigger='phone_reuse_active_ban')
+        self.assertEqual(list(case.related_users.values_list('pk', flat=True)), [self.banned.pk])
+
+    def test_deleting_the_banned_account_does_not_free_the_number(self):
+        self.banned.soft_delete()
+        self.take_number()
+        self.assertEqual(self.check(), MESSAGE)
+
+    def test_a_lifted_or_expired_ban_releases_the_number(self):
+        self.take_number(previous_owner=self.banned)
+        self.ban.soft_delete()
+        self.assertEqual(self.check(), '')
+        UserBan.objects.create(user=self.banned, ban_type='temporary', reason='fraud',
+                               expires_at=timezone.now() - timedelta(seconds=1),
+                               phone_hash=self.ban.phone_hash)
+        self.assertEqual(self.check(), '')
+
+    def test_support_releases_a_recycled_number_with_notes(self):
+        # Carriers reassign inactive numbers: the new owner may be innocent.
+        self.take_number(previous_owner=self.banned)
+        self.assertEqual(self.check(), MESSAGE)
+        case = SuspiciousActivity.objects.get(user=self.newcomer, detection_data__trigger='phone_reuse_active_ban')
+        case.status, case.investigated_by = 'dismissed', self.reviewer
+        case.investigation_notes = 'Carrier-recycled number; unrelated person.'
+        case.save()
+        self.assertEqual(self.check(), '')
+
+    def test_the_banned_account_itself_is_not_held_twice(self):
+        self.assertEqual(require_face_step_up(self.banned, 'withdrawal'), '')
+
+    def test_a_ban_without_a_number_records_nothing(self):
+        ban = UserBan.objects.create(user=self.newcomer, ban_type='permanent', reason='fraud')
+        self.assertEqual(ban.phone_hash, '')
+
+    def test_existing_bans_are_backfilled(self):
+        import importlib
+        from django.apps import apps
+        UserBan.all_objects.filter(pk=self.ban.pk).update(phone_hash='')
+        importlib.import_module('security.migrations.0021_userban_phone_hash').backfill(apps, None)
+        self.ban.refresh_from_db()
+        self.assertEqual(len(self.ban.phone_hash), 64)
+        self.take_number(previous_owner=self.banned)
+        self.assertEqual(self.check(), MESSAGE)

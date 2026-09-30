@@ -3,6 +3,11 @@
 Use live bans and verified document namespaces, not names, IPs or devices.
 Historical verified documents remain evidence even if soft deleted. A dismissed
 case releases only its exact document/ban combination, never future bans.
+
+A verified phone number that a live ban recorded (UserBan.phone_hash) holds
+the same way: a banned account's number moves to any account that verifies
+it, and carriers also hand inactive numbers to new people, so a match is a
+review hold, never a refusal to sign up.
 """
 import hashlib
 import json
@@ -12,9 +17,10 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import IdentityVerification, SuspiciousActivity, UserBan
+from .models import IdentityVerification, SuspiciousActivity, UserBan, banned_phone_hash
 
 TRIGGER = 'identity_reuse_active_ban'
+PHONE_TRIGGER = 'phone_reuse_active_ban'
 MESSAGE = 'Las salidas de tu cuenta están temporalmente restringidas. Contacta con soporte para revisar tu cuenta.'
 
 
@@ -137,6 +143,15 @@ def _personal_documents():
     ).exclude(document_number_normalized='').exclude(document_issuing_country__in=['', 'UNK'])
 
 
+def _live_bans():
+    return UserBan.objects.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+
+
+def _ban_binding(ban):
+    return [ban.pk, ban.banned_at.isoformat(), ban.ban_type, ban.reason,
+            ban.expires_at.isoformat() if ban.expires_at else None]
+
+
 def outgoing_identity_restriction(user):
     """Return a safe user message, or ''. Independent of Face rollout/exemptions.
 
@@ -155,13 +170,16 @@ def outgoing_identity_restriction(user):
             continue
         others = documents.filter(document_issuing_country=country, document_type=kind,
                                   document_number_normalized=number).exclude(user_id=user.pk)
-        bans = UserBan.objects.filter(user_id__in=others.values('user_id')).filter(
-            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
-        for ban in bans:
-            binding = [country, kind, number, ban.pk, ban.banned_at.isoformat(),
-                       ban.ban_type, ban.reason, ban.expires_at.isoformat() if ban.expires_at else None]
+        for ban in _live_bans().filter(user_id__in=others.values('user_id')):
+            binding = [country, kind, number, *_ban_binding(ban)]
             fingerprint = hashlib.sha256(json.dumps(binding).encode()).hexdigest()
-            matches[fingerprint] = ban
+            matches[fingerprint] = (ban, TRIGGER)
+    phone_hash = banned_phone_hash(getattr(user, 'phone_key', None))
+    if phone_hash:
+        for ban in _live_bans().filter(phone_hash=phone_hash).exclude(user_id=user.pk):
+            binding = ['phone', phone_hash, *_ban_binding(ban)]
+            fingerprint = hashlib.sha256(json.dumps(binding).encode()).hexdigest()
+            matches[fingerprint] = (ban, PHONE_TRIGGER)
     if not matches:
         return ''
     held = False
@@ -169,17 +187,19 @@ def outgoing_identity_restriction(user):
         # All automatic case creation takes this same lock; simultaneous
         # requests cannot create conflicting review decisions for one match.
         get_user_model().objects.select_for_update().get(pk=user.pk)
-        for fingerprint, ban in matches.items():
+        for fingerprint, (ban, trigger) in matches.items():
             case = SuspiciousActivity.objects.filter(
-                user=user, detection_data__trigger=TRIGGER,
+                user=user, detection_data__trigger=trigger,
                 detection_data__match_key=fingerprint).order_by('-pk').first()
             if case is None:
                 case = SuspiciousActivity.objects.create(
                     user=user, activity_type='multiple_accounts', status='pending',
                     severity_score=9,
-                    detection_data={'trigger': TRIGGER, 'match_key': fingerprint,
+                    detection_data={'trigger': trigger, 'match_key': fingerprint,
                                     'matched_user_id': ban.user_id, 'ban_id': ban.pk},
-                    action_taken='New outgoing activity restricted pending identity review.')
+                    action_taken=('New outgoing activity restricted pending review: this verified phone '
+                                  'number belonged to a banned account.' if trigger == PHONE_TRIGGER else
+                                  'New outgoing activity restricted pending identity review.'))
                 case.related_users.add(ban.user_id)
             released = (case.status == 'dismissed' and case.investigated_by_id is not None
                         and bool(case.investigation_notes.strip()))
