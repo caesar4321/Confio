@@ -22,13 +22,14 @@ django_asgi_app = get_asgi_application()
 
 from p2p_exchange.routing import websocket_urlpatterns
 from p2p_exchange.middleware import JWTAuthMiddleware
+from security.face_client import FaceClientWebSocketMiddleware
 # Allowed origins for WebSocket connections (explicit list avoids 403 on valid clients)
 allowed_ws_origins = [
     "https://confio.lat",
     "https://www.confio.lat",
 ]
 
-websocket_app = JWTAuthMiddleware(URLRouter(websocket_urlpatterns))
+websocket_app = JWTAuthMiddleware(FaceClientWebSocketMiddleware(URLRouter(websocket_urlpatterns)))
 if not settings.DEBUG:
     websocket_app = OriginValidator(websocket_app, allowed_ws_origins)
 else:

@@ -303,6 +303,8 @@ class CreateUSDCWithdrawal(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, input):
         logger.info(f"CreateUSDCWithdrawal mutation called with input: {input}")
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, 'user', None))
         
         user = getattr(info.context, 'user', None)
         logger.info(f"User: {user}, Authenticated: {getattr(user, 'is_authenticated', False) if user else False}")

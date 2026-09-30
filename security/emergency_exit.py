@@ -32,7 +32,7 @@ from django.core import signing
 from django.core.cache import cache
 
 from .face_step_up import (
-    FaceStepUpError, complete_face_check, start_face_check, step_up_applies, step_up_enabled,
+    FaceStepUpError, complete_face_check, start_face_check, step_up_applies, face_enforced,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ def open_session(address: str, nonce: str, signature: str, app_check_token: str)
     # user cannot fix by verifying again) gets the normal route's waiting
     # period instead: never an immediate exit, never a permanent lockout.
     face_required = banned and step_up_applies(user) and _has_face_reference(user)
-    wait_required = banned and step_up_enabled() and not face_required
+    wait_required = banned and face_enforced() and not face_required
     result = {'banned': banned, 'face_required': face_required, 'wait_required': wait_required, 'token': ''}
     if face_required:
         token = secrets.token_urlsafe(32)

@@ -1488,6 +1488,16 @@ class SubmitBscTransaction(graphene.Mutation):
                     return SubmitBscTransaction(
                         success=False, error='mint_below_redeemable_minimum')
 
+        from .face_step_up import claim_external_outflow
+        step_up = claim_external_outflow(
+            user, _ctx,
+            [{'to': to_addr, 'value': str(int.from_bytes(fields[4], 'big')),
+              'data': '0x' + fields[5].hex()}],
+            active_addr, namespace='bsc_relay', identifier=raw.lower(),
+            payload={'chain': chain_id, 'source': active_addr}, legacy=True)
+        if step_up:
+            return SubmitBscTransaction(success=False, error=step_up)
+
         from .tasks import _rpc
         try:
             tx_hash = _rpc('eth_sendRawTransaction', [raw])
@@ -1834,6 +1844,19 @@ class SponsorBscBatch(graphene.Mutation):
                     return SponsorBscBatch(
                         success=False, authorization_required=True,
                         error='stale_auth_nonce')
+
+            from .face_step_up import claim_external_outflow
+            # Durable request IDs have a unique SponsoredBatch slot. Older
+            # clients have no slot: include nonce/deadline via the digest so
+            # a fresh signed transfer cannot reuse this approval. The legacy
+            # signature compatibility branch binds the same calls and nonce.
+            step_up = claim_external_outflow(
+                user, _ctx, policy_calls, user_addr,
+                namespace='bsc_sponsor', identifier=request_id or digest.hex(),
+                payload={'chain': chain_id, 'source': user_addr,
+                         'calls': norm_calls, 'kind': kind})
+            if step_up:
+                return SponsorBscBatch(success=False, error=step_up)
 
             tx_hash, batch = sponsor_7702.send_sponsored_batch(
                 user, user_addr, norm_calls, nonce_i, deadline_i,

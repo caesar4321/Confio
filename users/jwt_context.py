@@ -60,6 +60,31 @@ def check_role_permission(role, permission):
     allowed_permissions = ROLE_PERMISSIONS.get(role, set())
     return permission in allowed_permissions
 
+
+def business_permission_is_current(user, business_id, permission):
+    """Revalidate a stored business action without trusting an earlier JWT gate.
+
+    Ownership is an Account relationship, not an employee role string.
+    Delegates must still be active and their explicit revocations take priority
+    over the role matrix, matching the preparation-time authorization rule.
+    """
+    from .models import Account
+    from .models_employee import BusinessEmployee
+
+    if Account.objects.filter(
+            user=user, business_id=business_id, account_type='business',
+            deleted_at__isnull=True, business__deleted_at__isnull=True).exists():
+        return True
+    employee = BusinessEmployee.objects.filter(
+        user=user, business_id=business_id, is_active=True,
+        deleted_at__isnull=True, business__deleted_at__isnull=True).first()
+    if employee is None:
+        return False
+    overrides = employee.permissions or {}
+    if permission in overrides and not overrides[permission]:
+        return False
+    return check_role_permission(employee.role, permission)
+
 # Actions that move money between the business and a BANK (fiat ramps) are
 # the OWNER's alone. No employee role qualifies — `manage_bank_accounts`
 # governs which payout methods are on file, not the authority to move funds
@@ -165,6 +190,7 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
     user = info.context.user
     if not user or not user.is_authenticated:
         return None
+
     
     # For business accounts, validate access through BusinessEmployee OR ownership
     if jwt_context['account_type'] == 'business' and jwt_context['business_id']:

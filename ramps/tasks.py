@@ -86,7 +86,7 @@ def sync_koywe_bank_info():
 @shared_task
 def poll_koywe_ramp_transactions():
     """
-    Poll recent active orders and all unresolved invalid-payout refunds.
+    Poll recent active orders, all unpaid deposits and unresolved payout refunds.
     Webhooks are the primary source of truth; this is a reconciliation fallback.
     """
     client = KoyweClient()
@@ -99,6 +99,9 @@ def poll_koywe_ramp_transactions():
         provider='koywe',
     ).filter(
         Q(created_at__gte=threshold, status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'])
+        # Unpaid deposits occupy the per-user slot even after seven days.
+        # Keep reconciling them; age alone must neither release nor strand it.
+        | Q(direction='on_ramp', status='PENDING')
         | Q(direction='off_ramp', status='FAILED', status_detail__startswith='invalid_withdrawals_details')
         | Q(direction='off_ramp', status='FAILED', status_detail__startswith='refund_')
         | Q(koywe_refund__state__in=['pending', 'requesting', 'unknown', 'requested', 'started', 'in_progress'])

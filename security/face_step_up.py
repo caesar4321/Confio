@@ -2,7 +2,7 @@
 
 A recruited-identity ring gets the holder in front of the camera once, for
 KYC, and then runs the account alone. Re-proving the face at the moments
-money moves (every deposit order, withdrawals within a short window, the
+money moves (every deposit order, each outgoing operation, the
 emergency exit) forces the ring to bring the holder back each time.
 
 Flow: start → the app streams a Rekognition Face Liveness video with
@@ -80,6 +80,11 @@ def step_up_enabled() -> bool:
     return bool(_setting('FACE_STEP_UP_ENABLED', False, bool))
 
 
+def face_enforced() -> bool:
+    from .face_context import face_client_supported
+    return step_up_enabled() or face_client_supported.get()
+
+
 def step_up_applies(user) -> bool:
     """Confío Face is asked only of people who went through KYC.
 
@@ -92,12 +97,12 @@ def step_up_applies(user) -> bool:
     Any verified personal document counts, primary or additional: a passport
     verified for a local-money rail opens that rail on its own.
     """
-    return step_up_enabled() and bool(getattr(user, 'has_verified_identity_document', False))
+    return face_enforced() and bool(getattr(user, 'has_verified_identity_document', False))
 
 
 def checks_available() -> bool:
     """Sessions may be opened while enforcement is still off (app rollout)."""
-    return step_up_enabled() or bool(_setting('FACE_STEP_UP_AVAILABLE', False, bool))
+    return face_enforced() or bool(_setting('FACE_STEP_UP_AVAILABLE', False, bool))
 
 
 def _rekognition():
@@ -308,8 +313,7 @@ def _finish(check: FaceCheck, passed: bool, reason: str) -> bool:
 # ── Enforcement ─────────────────────────────────────────────────────────────
 #
 # A deposit order spends its own fresh check (one face, one order). A
-# withdrawal accepts any passed check from the last few minutes, so a
-# deposit-then-withdraw sitting asks for the face once.
+# withdrawal spends its own approval, bound to one immutable operation.
 
 def _usable_on_ramp_checks(user, now):
     return FaceCheck.objects.filter(
@@ -320,13 +324,18 @@ def _usable_on_ramp_checks(user, now):
 
 def missing_face_step_up(user, purpose: str) -> str:
     """'' when a usable check exists (nothing is spent), else the message."""
+    if purpose == 'withdrawal':
+        from .identity_reuse import outgoing_identity_restriction
+        restriction = outgoing_identity_restriction(user)
+        if restriction:
+            return restriction
     if not step_up_applies(user):
         return ''
     now = timezone.now()
     if purpose == 'on_ramp':
         return '' if _usable_on_ramp_checks(user, now).exists() else FACE_STEP_UP_MESSAGE
     if purpose == 'withdrawal':
-        recent = FaceCheck.objects.filter(user=user, status='passed', completed_at__gte=now - WITHDRAWAL_WINDOW)
+        recent = _usable_withdrawal_checks(user, now)
         return '' if recent.exists() else FACE_STEP_UP_MESSAGE
     raise ValueError(f'Unknown step-up purpose {purpose}')
 
@@ -356,8 +365,51 @@ def release_on_ramp_check(check_id) -> None:
         FaceCheck.objects.filter(pk=check_id).update(consumed_at=None, consumed_by='')
 
 
-def require_face_step_up(user, purpose: str) -> str:
-    """Gate for withdrawal-type actions that spend nothing."""
+def withdrawal_action_key(namespace, identifier, payload) -> str:
+    """Bind an approval to server-validated economic terms, never just a row ID."""
+    encoded = json.dumps([namespace, str(identifier), payload], sort_keys=True,
+                         separators=(',', ':'), default=str).encode()
+    return 'out:' + hashlib.sha256(encoded).hexdigest()
+
+
+def _usable_withdrawal_checks(user, now):
+    return FaceCheck.objects.filter(
+        user=user, status='passed', purpose='withdrawal', consumed_at__isnull=True,
+        completed_at__gte=now - WITHDRAWAL_WINDOW)
+
+
+def require_face_step_up(user, purpose: str, *, action_key=None, consume=False) -> str:
+    """Peek during preparation; claim after validation and before side effects.
+
+    An exact operation can retry after consumption. Callers MUST bind all
+    economic terms and enforce durable operation idempotency, or include the
+    exact signed nonce/deadline. Never release after an ambiguous broadcast.
+    """
     if purpose != 'withdrawal':
         raise ValueError('Deposit orders must claim a check with claim_on_ramp_check')
-    return missing_face_step_up(user, purpose)
+    from .identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(user)
+    if restriction:
+        return restriction
+    if consume and not action_key:
+        raise ValueError('An immutable action key is required to consume a check')
+    if action_key is not None and (not action_key.startswith('out:') or len(action_key) != 68):
+        raise ValueError('Use withdrawal_action_key for outgoing operations')
+    if not step_up_applies(user):
+        return ''
+    with transaction.atomic():
+        # Serialize claims even when there are several fresh approvals. Row
+        # locks on the selected check alone cannot serialize exact retries.
+        _lock_user(user.pk)
+        if action_key and FaceCheck.objects.filter(
+                user=user, purpose='withdrawal', status='passed',
+                consumed_by=action_key, consumed_at__isnull=False).exists():
+            return ''
+        check = _usable_withdrawal_checks(user, timezone.now()).order_by('-completed_at', '-pk').first()
+        if not check:
+            return FACE_STEP_UP_MESSAGE
+        if consume:
+            check.consumed_at = timezone.now()
+            check.consumed_by = action_key
+            check.save(update_fields=['consumed_at', 'consumed_by'])
+        return ''

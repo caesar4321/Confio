@@ -951,6 +951,17 @@ def send_sponsored_batch(user, user_addr: str, calls: list, nonce: int, deadline
     from blockchain.evm_kms_signer import get_bsc_sponsor_signer_from_settings
     from blockchain.models import SponsoredBatch
 
+    # Generic conversion calls are checked at the schema's validated outflow
+    # boundary (which excludes mandatory incoming funding fees). Domain sends,
+    # Pay, payroll, bridge funding and purchases must not bypass identity holds.
+    if kind not in {'subscribe', 'redeem', 'wrap_cusd', 'unwrap_to_cusd',
+                    'mint_cusd', 'stock_buy', 'stock_sell', 'invite_claim', 'invite_reclaim',
+                    'payroll_withdraw', 'payroll_set_delegate'}:
+        from security.identity_reuse import outgoing_identity_restriction
+        restriction = outgoing_identity_restriction(user)
+        if restriction:
+            raise PolicyError(restriction)
+
     chain_id = int(getattr(settings, 'BSC_CHAIN_ID', 56))
     signer = get_bsc_sponsor_signer_from_settings()
     sponsor = signer.address

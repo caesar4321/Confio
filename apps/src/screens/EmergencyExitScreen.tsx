@@ -291,10 +291,7 @@ export const EmergencyExitScreen: React.FC = () => {
   const offline = es?.state === 'offline';
 
   const startCooloff = async () => {
-    const ok = await biometricAuthService.authenticate(
-      'Iniciar espera de seguridad para la salida de emergencia',
-    );
-    if (!ok) return;
+    // Starting a waiting period does not move funds or unlock the app.
     await requestExitCooloff(emergencyStore, accountKey);
     await evaluate();
   };
@@ -305,8 +302,11 @@ export const EmergencyExitScreen: React.FC = () => {
   };
 
   const runBsc = async () => {
-    const ok = await biometricAuthService.authenticate('Confirmar salida de emergencia (BNB Smart Chain)');
-    if (!ok) return;
+    // Online routes below already authenticate with Face (or establish that
+    // no KYC exists). Only the server-independent fallback uses local auth.
+    if ((es?.state !== 'normal' && es?.state !== 'banned') || await hasFaceWaiver(emergencyStore, accountKey)) {
+      if (!(await biometricAuthService.authenticateEmergencyExit('Confirmar salida de emergencia (BNB Smart Chain)'))) return;
+    }
     const exitCtx = selCtx ? { type: selCtx.type, index: selCtx.index, businessId: selCtx.businessId } : undefined;
     if (es?.state === 'banned') {
       // The ban route: the server confirms the ban (a faked 403 cannot

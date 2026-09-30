@@ -109,6 +109,49 @@ describe('biometricAuthService weak-sensor fallback', () => {
     expect(mockStore.get(PREFS_SERVICE)?.password).toBe('enabled');
   });
 
+  it('provisions and prompts for emergency recovery on a fresh install', async () => {
+    const service = freshService();
+    expect(await service.authenticateEmergencyExit('Emergency exit')).toBe(true);
+    expect(mockStore.get(GUARD_SERVICE)?.accessControl).toBe('DevicePasscode');
+    expect(mockStore.get(PREFS_SERVICE)?.password).toBe('enabled:passcode');
+  });
+
+  it('does not reuse a recent local approval for emergency recovery', async () => {
+    const service = freshService();
+    expect(await service.enable()).toBe(true);
+    const authenticate = jest.spyOn(service, 'authenticate');
+    expect(await service.authenticateEmergencyExit('Emergency exit')).toBe(true);
+    expect(authenticate).toHaveBeenCalledWith('Emergency exit', true, true);
+  });
+
+  it('fails closed if fresh recovery guard provisioning fails', async () => {
+    const service = freshService();
+    jest.spyOn(service, 'enable').mockResolvedValue(false);
+    expect(await service.authenticateEmergencyExit('Emergency exit')).toBe(false);
+  });
+
+  it('serializes fresh emergency enrollment before any asynchronous work', async () => {
+    const service = freshService();
+    let finish!: (ok: boolean) => void;
+    const enable = jest.spyOn(service, 'enable').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const first = service.authenticateEmergencyExit('Emergency exit');
+    expect(await service.authenticateEmergencyExit('Emergency exit')).toBe(false);
+    await Promise.resolve();
+    finish(true);
+    expect(await first).toBe(true);
+    expect(enable).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([true, false])('repairs only permanent invalidation (%s)', async permanent => {
+    const service = freshService();
+    jest.spyOn(service, 'isEnabled').mockResolvedValue(true);
+    jest.spyOn(service, 'authenticate').mockResolvedValue(false);
+    jest.spyOn(service, 'isPermanentInvalidation').mockReturnValue(permanent);
+    const enable = jest.spyOn(service, 'enable').mockResolvedValue(true);
+    expect(await service.authenticateEmergencyExit('Emergency exit')).toBe(permanent);
+    expect(enable).toHaveBeenCalledTimes(permanent ? 1 : 0);
+  });
+
   it('prompts with the persisted passcode gate on later authentications', async () => {
     const Keychain = require('react-native-keychain');
     // Simulate a prior fallback enrollment persisted on the device.

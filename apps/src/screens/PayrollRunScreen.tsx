@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, Alert, ScrollView, Image, Platform, StatusBar } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -7,7 +8,6 @@ import { MainStackParamList } from '../types/navigation';
 import { GET_PAYROLL_RECIPIENTS, CREATE_PAYROLL_RUN } from '../apollo/queries';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
-import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { APP_LAYOUT } from '../config/layout';
 import { Button } from '../components/common/Button';
@@ -90,17 +90,8 @@ export const PayrollRunScreen = () => {
       ? 'Autoriza la creación de nómina'
       : `Autoriza la nómina ${selectedSchedule?.label.toLowerCase()}`;
 
-    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    let authenticated = await authenticateWithFace();
     if (!authenticated) {
-      const lockout = biometricAuthService.isLockout();
-      if (lockout) {
-        Alert.alert(
-          'Biometría bloqueada',
-          'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'Entendido', style: 'default' }],
-        );
-        return;
-      }
 
       const shouldRetry = await new Promise<boolean>((resolve) => {
         Alert.alert(
@@ -114,7 +105,7 @@ export const PayrollRunScreen = () => {
       });
 
       if (shouldRetry) {
-        authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+        authenticated = await authenticateWithFace();
         if (!authenticated) {
           Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
           return;

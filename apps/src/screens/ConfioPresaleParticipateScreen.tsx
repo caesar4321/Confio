@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Buffer } from 'buffer';
@@ -14,7 +15,6 @@ import { TelegramGroupModal } from '../components/TelegramGroupModal';
 import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import algorandService from '../services/algorandService';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
@@ -215,13 +215,9 @@ export const ConfioPresaleParticipateScreen = () => {
         return;
       }
 
-      const bioOk = await biometricAuthService.authenticate(
-        'Autoriza esta compra de preventa (operación crítica)',
-        false,
-        false
-      );
+      const bioOk = await authenticateWithFace();
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'Entendido' }]);
+        Alert.alert('Autenticación requerida', 'Confirma con Confío Face para continuar.', [{ text: 'Entendido' }]);
         return;
       }
 

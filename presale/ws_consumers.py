@@ -318,6 +318,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _prepare(self, amount, platform: str = "", accepted_terms: bool = False, require_terms: bool = True, not_us_attestation: bool = False, require_not_us_attestation: bool = False, client_ip: str | None = None, user_agent: str = "", ip_country_hint: str | None = None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(self.scope.get('user'))
         from decimal import Decimal
         from django.utils import timezone
         from presale.models import PresalePhase, PresalePurchase, UserPresaleLimit, PresaleSettings
@@ -978,6 +980,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _submit(self, purchase_id, signed_transactions, sponsor_transactions):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(self.scope.get('user'))
         from presale.models import PresalePurchase
         from algosdk.v2client import algod
         import base64
@@ -994,7 +998,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         # Load purchase
         try:
-            purchase = PresalePurchase.objects.get(internal_id=purchase_id)
+            purchase = PresalePurchase.objects.get(internal_id=purchase_id, user=self.scope.get('user'))
         except PresalePurchase.DoesNotExist:
             return {"success": False, "error": "purchase_not_found"}
 

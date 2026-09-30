@@ -5,7 +5,6 @@ import { AuthScreen } from '../screens/AuthScreen';
 import BackupCompletionScreen from '../screens/BackupCompletionScreen';
 import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import LegalDocumentScreen from '../screens/LegalDocumentScreen';
-import { BiometricSetupScreen } from '../screens/BiometricSetupScreen';
 import { BlockedAccountScreen } from '../screens/BlockedAccountScreen';
 import { EmergencyExitScreen } from '../screens/EmergencyExitScreen';
 
@@ -22,7 +21,6 @@ export const AuthNavigator = () => {
       <Stack.Screen name="Login" component={AuthScreen} />
       <Stack.Screen name="BackupCompletion" component={BackupCompletionScreen} />
       <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
-      <Stack.Screen name="BiometricSetup" component={BiometricSetupScreen} />
       <Stack.Screen 
         name="LegalDocument" 
         component={LegalDocumentScreen}

@@ -1,10 +1,11 @@
 import os
+from io import StringIO
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from security import face_step_up as fsu
@@ -22,6 +23,55 @@ def _download(status=200, body=b'kyc-selfie', content_type='image/jpeg'):
 
 
 class FaceStepUpTests(TestCase):
+    def test_backfill_includes_additional_personal_documents(self):
+        from django.core.management import call_command
+        self.verification.is_additional_document = True
+        self.verification.risk_factors = {'didit': {'session_id': 'additional-session'}}
+        self.verification.save()
+        module = 'security.management.commands.backfill_face_references'
+        with mock.patch(f'{module}._didit_request', return_value=_decision()) as fetch, \
+                mock.patch(f'{module}.store_face_reference_from_didit', return_value=True) as store, \
+                mock.patch(f'{module}.time.sleep'):
+            call_command('backfill_face_references', dry_run=True, stdout=StringIO())
+            fetch.assert_not_called()
+            call_command('backfill_face_references', stdout=StringIO())
+            fetch.assert_called_once_with('GET', '/v3/session/additional-session/decision/')
+            self.assertEqual(store.call_args.args[0].pk, self.verification.pk)
+
+    def test_backfill_reports_missing_sessions_and_excludes_business(self):
+        from django.core.management import call_command
+        out = StringIO()
+        call_command('backfill_face_references', dry_run=True, stdout=out)
+        self.assertIn('1 verified users without a reference or usable Didit session', out.getvalue())
+        self.verification.risk_factors = {'account_type': 'business', 'didit': {'session_id': 'business'}}
+        self.verification.save()
+        out = StringIO()
+        call_command('backfill_face_references', dry_run=True, stdout=out)
+        self.assertIn('0 verified users without a face reference', out.getvalue())
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_app_unlock_never_authorizes_money_movement(self):
+        FaceCheck.objects.create(user=self.user, purpose='app_unlock', status='passed',
+            liveness_session_id='unlock-only', completed_at=timezone.now())
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'on_ramp'), fsu.FACE_STEP_UP_MESSAGE)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True, FACE_MIN_APP_VERSION='5.1.5', FACE_MIN_ANDROID_BUILD=157)
+    def test_supported_client_headers_cannot_replace_rekognition_approval(self):
+        from security.face_client import FaceClientCompatibilityMiddleware
+        mutation_type = object()
+        info = SimpleNamespace(
+            field_name='submitBscSend', parent_type=mutation_type,
+            schema=SimpleNamespace(mutation_type=mutation_type),
+            context=SimpleNamespace(user=self.user, headers={
+                'X-Confio-Platform': 'android', 'X-Confio-Version': '5.1.5',
+                'X-Confio-Build': '157', 'X-Confio-Face-Capable': '1',
+                'X-Confio-Face-Passed': 'true',
+            }))
+        result = FaceClientCompatibilityMiddleware().resolve(
+            lambda root, info: fsu.require_face_step_up(self.user, 'withdrawal'), None, info)
+        self.assertEqual(result, fsu.FACE_STEP_UP_MESSAGE)
+
     def setUp(self):
         self.user = get_user_model().objects.create(
             username='face-user', email='face@example.com', firebase_uid='face-user-uid')
@@ -230,6 +280,35 @@ class FaceStepUpTests(TestCase):
         self.assertEqual(fsu.require_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_outgoing_approval_is_single_use_with_exact_retry(self):
+        check = self._passed('withdrawal')
+        key = fsu.withdrawal_action_key('send', 1, {'amount': '10', 'to': 'alice'})
+        changed = fsu.withdrawal_action_key('send', 1, {'amount': '20', 'to': 'alice'})
+        self.assertEqual(fsu.require_face_step_up(self.user, 'withdrawal', action_key=key, consume=True), '')
+        self.assertEqual(fsu.require_face_step_up(self.user, 'withdrawal', action_key=key, consume=True), '')
+        self.assertEqual(fsu.require_face_step_up(self.user, 'withdrawal', action_key=changed, consume=True), fsu.FACE_STEP_UP_MESSAGE)
+        self.assertEqual(fsu.missing_face_step_up(self.user, 'withdrawal'), fsu.FACE_STEP_UP_MESSAGE)
+        check.refresh_from_db()
+        self.assertEqual(check.consumed_by, key)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_other_purpose_approvals_cannot_authorize_outgoing(self):
+        self._passed('on_ramp', session='deposit-proof')
+        self._passed('emergency_exit', session='exit-proof')
+        key = fsu.withdrawal_action_key('send', 1, [])
+        self.assertEqual(fsu.require_face_step_up(self.user, 'withdrawal', action_key=key, consume=True), fsu.FACE_STEP_UP_MESSAGE)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_retry_does_not_spend_a_second_approval(self):
+        self._passed('withdrawal', session='first')
+        key = fsu.withdrawal_action_key('send', 1, [])
+        fsu.require_face_step_up(self.user, 'withdrawal', action_key=key, consume=True)
+        second = self._passed('withdrawal', session='second')
+        fsu.require_face_step_up(self.user, 'withdrawal', action_key=key, consume=True)
+        second.refresh_from_db()
+        self.assertIsNone(second.consumed_at)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
     def test_failed_check_never_counts(self):
         FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='s-c',
                                  status='failed', completed_at=timezone.now())
@@ -261,6 +340,31 @@ class FaceStepUpTests(TestCase):
     def test_deposit_orders_cannot_use_the_non_spending_gate(self):
         with self.assertRaises(ValueError):
             fsu.require_face_step_up(self.user, 'on_ramp')
+
+
+@override_settings(FACE_STEP_UP_ENABLED=True)
+class WithdrawalClaimConcurrencyTests(TransactionTestCase):
+    def test_only_one_distinct_operation_can_claim_a_single_approval(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from django.db import connections
+        user = get_user_model().objects.create(username='concurrent-face', firebase_uid='concurrent-face')
+        FaceCheck.objects.create(user=user, purpose='withdrawal', liveness_session_id='concurrent',
+                                 status='passed', completed_at=timezone.now())
+        barrier = Barrier(2)
+
+        def claim(identifier):
+            try:
+                barrier.wait(timeout=10)
+                return fsu.require_face_step_up(user, 'withdrawal', consume=True,
+                    action_key=fsu.withdrawal_action_key('send', identifier, []))
+            finally:
+                connections['default'].close()
+
+        with mock.patch.object(fsu, 'step_up_applies', return_value=True):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = list(pool.map(claim, [1, 2]))
+        self.assertCountEqual(outcomes, ['', fsu.FACE_STEP_UP_MESSAGE])
 
 
 class SendStepUpTests(TestCase):

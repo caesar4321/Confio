@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,7 +32,6 @@ import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { flagFromIso2 } from '../utils/humanitarianCountry';
 import algorandService from '../services/algorandService';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { HumanitarianWsSession } from '../services/humanitarianWs';
 import { countryInfo } from '../utils/humanitarianCountry';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -254,13 +254,9 @@ export const HumanitarianAidScreen = () => {
 
   const executeDonation = async () => {
     try {
-      const bioOk = await biometricAuthService.authenticate(
-        'Autoriza esta donación humanitaria',
-        false,
-        false
-      );
+      const bioOk = await authenticateWithFace();
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.');
+        Alert.alert('Autenticación requerida', 'Confirma con Confío Face para continuar.');
         return;
       }
 

@@ -8,6 +8,7 @@ import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { EmergencyExitScreen } from './screens/EmergencyExitScreen';
 import { HeaderProvider } from './contexts/HeaderContext';
 import { ScanProvider } from './contexts/ScanContext';
 import { AccountProvider } from './contexts/AccountContext';
@@ -46,6 +47,7 @@ initializeNotifee().catch(error => {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const Navigation: React.FC = () => {
+  const [recoveryOnly, setRecoveryOnly] = React.useState(false);
   const { isAuthenticated, isLoading, isLocked, unlockApp, signOut } = useAuth();
   console.log('Navigation render:', { isAuthenticated, isLoading });
 
@@ -77,19 +79,26 @@ const Navigation: React.FC = () => {
           animation: 'none'
         }}
       >
-        {!isAuthenticated ? (
+        {recoveryOnly ? (
+          <Stack.Screen name="EmergencyRecovery" component={EmergencyExitScreen}
+            options={{ headerShown: true, title: 'Salida de emergencia', headerLeft: () => (
+              <Text onPress={() => setRecoveryOnly(false)}>Volver</Text>
+            ) }} />
+        ) : !isAuthenticated ? (
           <Stack.Screen name="Auth" component={AuthNavigator} />
         ) : (
           <Stack.Screen name="Main" component={MainNavigator} />
         )}
       </Stack.Navigator>
       {/* Loading overlay — covers navigator while auth resolves, then disappears */}
-      {isLoading && (
+      {isLoading && !recoveryOnly && (
         <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', zIndex: 10 }]}>
           <ActivityIndicator size="large" />
+          <Text onPress={() => setRecoveryOnly(true)} style={{ marginTop: 24 }}>Salida de emergencia</Text>
         </View>
       )}
-      <AppLockScreen visible={isLocked} onUnlock={unlockApp} onSignOut={signOut} />
+      <AppLockScreen visible={isLocked && !recoveryOnly} onUnlock={unlockApp} onSignOut={signOut}
+        onEmergencyExit={() => setRecoveryOnly(true)} />
     </View>
   );
 };

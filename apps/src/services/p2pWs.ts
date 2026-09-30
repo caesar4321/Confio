@@ -1,3 +1,4 @@
+import { createMobileWebSocket } from "./mobileClientHeaders";
 /* Lightweight WS client for P2P flows (prepare + submit) */
 
 type PrepareArgs = {
@@ -59,7 +60,7 @@ export class P2PWsSession {
       try {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
-        const wsUrl = `${getWsBase()}ws/p2p_session?token=${encodeURIComponent(token)}`;        const ws = new WebSocket(wsUrl);
+        const wsUrl = `${getWsBase()}ws/p2p_session?token=${encodeURIComponent(token)}`;        const ws = createMobileWebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => { reject(new Error('open_timeout')); }, 15000);
         ws.onopen = () => { clearTimeout(timeout); resolve(); };
@@ -154,4 +155,3 @@ export class P2PWsSession {
 export function toJSONStringArray(arr: any[]): string[] {
   return (arr || []).map((e) => (typeof e === 'string' ? e : JSON.stringify(e)));
 }
-

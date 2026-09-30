@@ -1321,6 +1321,7 @@ class FaceCheck(models.Model):
     """
 
     PURPOSE_CHOICES = [
+        ('app_unlock', 'App unlock'),
         ('on_ramp', 'Deposit order'),
         ('withdrawal', 'Withdrawal'),
         ('emergency_exit', 'Emergency exit'),

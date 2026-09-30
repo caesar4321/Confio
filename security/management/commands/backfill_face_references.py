@@ -8,7 +8,7 @@ URLs. Idempotent: users with an active reference are skipped.
 """
 import time
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from security.didit import _didit_request
 from security.face_step_up import FaceStepUpError, store_face_reference_from_didit
@@ -23,18 +23,24 @@ class Command(BaseCommand):
         parser.add_argument('--limit', type=int, default=0)
 
     def handle(self, *args, dry_run=False, limit=0, **options):
+        if limit < 0:
+            raise CommandError('--limit must be non-negative')
         has_reference = set(FaceReference.objects.filter(is_active=True).values_list('user_id', flat=True))
         todo = []
-        for verification in IdentityVerification.objects.filter(status='verified').order_by('-verified_at'):
-            if verification.user_id in has_reference or verification.is_additional_document:
+        uncovered = set()
+        for verification in IdentityVerification.all_documents.filter(status='verified').order_by('-verified_at', '-pk'):
+            if verification.user_id in has_reference:
                 continue
             factors = verification.risk_factors or {}
             if factors.get('account_type') == 'business':
                 continue
+            uncovered.add(verification.user_id)
             session_id = (factors.get('didit') or {}).get('session_id')
             if session_id:
                 todo.append((verification, session_id))
                 has_reference.add(verification.user_id)
+        missing_session = uncovered - {verification.user_id for verification, _ in todo}
+        self.stdout.write(f'{len(missing_session)} verified users without a reference or usable Didit session')
         if limit:
             todo = todo[:limit]
         self.stdout.write(f'{len(todo)} verified users without a face reference')

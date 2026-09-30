@@ -7,10 +7,9 @@ from typing import Optional, Dict
 from django.utils import timezone
 import requests
 from django.conf import settings
-from django.core.cache import cache
 from user_agents import parse
 
-from .models import IPAddress, UserSession, DeviceFingerprint, UserDevice, UserBan
+from .models import IPAddress, UserSession, DeviceFingerprint, UserDevice
 from .request_utils import extract_client_ip_from_meta
 from .utils import calculate_device_fingerprint, check_ip_reputation
 
@@ -29,6 +28,11 @@ class SecurityMiddleware:
             if self.check_user_banned(request.user):
                 from django.http import HttpResponseForbidden
                 return HttpResponseForbidden("Your account has been suspended. Please contact support.")
+            # Materialize review cases outside the view transaction. Reads,
+            # support and inbound funding remain available; money-out guards
+            # independently recheck the live match before allowing execution.
+            from .identity_reuse import outgoing_identity_restriction
+            outgoing_identity_restriction(request.user)
         
         # Get client IP string first
         ip_str = self.get_client_ip(request)
@@ -70,23 +74,13 @@ class SecurityMiddleware:
         return response
     
     def check_user_banned(self, user) -> bool:
-        """Check if user has active ban"""
-        # Cache ban status for 5 minutes to reduce DB queries
-        cache_key = f"user_ban_status_{user.id}"
-        banned = cache.get(cache_key)
-        
-        if banned is None:
-            banned = UserBan.objects.filter(
-                user=user,
-                deleted_at__isnull=True
-            ).exclude(
-                ban_type='temporary',
-                expires_at__lt=timezone.now()
-            ).exists()
-            
-            cache.set(cache_key, banned, 300)  # Cache for 5 minutes
-        
-        return banned
+        """Read authoritative state: bans and bulk lifts apply next request.
+
+        Caching either result delayed suspensions or kept lifted bans active.
+        Save-signal invalidation alone cannot cover bulk administrative updates.
+        """
+        from .utils import check_user_banned
+        return check_user_banned(user)[0]
     
     def get_client_ip(self, request) -> str:
         """Extract client IP from request"""

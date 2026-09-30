@@ -249,10 +249,10 @@ const PhoneVerificationScreen = () => {
             navigation.goBack();
           } else {
             // Auth flow - phone is verified server-side. Hand off to
-            // completePhoneVerification, which resets the nav stack to
-            // BiometricSetup. We MUST NOT also call safeNavigateToMain
+            // completePhoneVerification, which authenticates with Face if
+            // needed and enters the app. Do not also call safeNavigateToMain
             // here — Main isn't mounted yet (isAuthenticated is still
-            // false until biometric completes), and a follow-up navigate
+            // false until authentication completes), and a follow-up navigate
             // on the same navigationRef can race the reset and leave the
             // user pinned on PhoneVerification. If they retry the verify
             // they hit "phone already in use" because the first verify

@@ -73,10 +73,6 @@ class CreateCobreJourney(graphene.Mutation):
             bridge = PaymentBridgeTransfer.objects.get(internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None
             credit = LedgerEntry.objects.get(internal_id=credit_id, financial_account__provider_profile__confio_account=owner) if credit_id else None
             destination = PayoutDestination.objects.get(internal_id=destination_id, confio_account=owner) if destination_id else None
-            if kwargs.get('direction') == 'to_bank' and not CobreJourney.objects.filter(
-                    confio_account=owner, request_id=kwargs.get('request_id')).exists():
-                from .schema import _require_face_step_up
-                _require_face_step_up(owner)
             row = create_journey(owner=owner, local_account=local, crypto_account=crypto, copco_account=copco,
                                  bridge=bridge, credit=credit, destination=destination, **kwargs)
             return cls(success=True, errors=[], journey=row)

@@ -378,6 +378,10 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
 
     if phone_invite.inviter_user_id != user.id or phone_invite.status != 'draft':
         return {'success': False, 'error': 'invite_not_pending'}
+    from users.jwt_context import business_permission_is_current
+    business_id = getattr(phone_invite.send_transaction, 'sender_business_id', None)
+    if business_id and not business_permission_is_current(user, business_id, 'send_funds'):
+        return {'success': False, 'error': 'sender_not_authorized'}
 
     # The address prepare escrowed FROM, not a re-derived one: prepare honours
     # the JWT's business context, so re-resolving personal/0 here would check
@@ -398,7 +402,10 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     # Rechecked here, like bsc_flow: an invite prepared earlier must not
     # leave once the face window has lapsed.
     from .bsc_flow import _send_step_up
-    step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None)
+    from security.face_step_up import withdrawal_action_key
+    face_action = withdrawal_action_key('invite', phone_invite.pk, [chain_id, inviter_addr, calls])
+    step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None,
+                            action_key=face_action)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -430,6 +437,10 @@ def submit_create(user, phone_invite, nonce, deadline, intent_signature, authori
     # the row's fate — leaving the funded slot with no way back. The UPDATE is
     # the lock: exactly one caller can move draft → creating, and only that
     # caller broadcasts.
+    step_up = _send_step_up(user, getattr(phone_invite.send_transaction, 'sender_business', None), None,
+                            action_key=face_action, consume=True)
+    if step_up:
+        return {'success': False, 'error': step_up}
     won = PhoneInvite.objects.filter(pk=phone_invite.pk, status='draft').update(
         status='creating')
     if not won:

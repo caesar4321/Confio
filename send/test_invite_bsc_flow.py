@@ -474,7 +474,9 @@ class SubmitDoesNotStrandTheRowTests(SimpleTestCase):
             inviter_address=INVITER, invitation_id='ab' * 32,
             amount=Decimal('5'), token_type='CUSD_PLUS',
             send_transaction=SimpleNamespace(
-                pk=7, status='PENDING', save=mock.Mock()),
+                pk=7, status='PENDING', save=mock.Mock(),
+                bsc_calls_json=json.dumps({'calls': f.build_create_calls(
+                    'CUSD_PLUS', 5 * WAD, '0x' + 'ab' * 32)})),
             send_transaction_id=7, save=mock.Mock())
 
     def _submit(self, which, delegated, authorization, signer_addr=INVITER):
@@ -738,6 +740,7 @@ class InviteFaceStepUpTests(SimpleTestCase):
         invite = mock.Mock(inviter_user_id=7, status='draft', inviter_address='0x' + '11' * 20,
                            invitation_id='ab' * 32)
         invite.send_transaction.sender_business = None
+        invite.send_transaction.sender_business_id = None
         with mock.patch.object(f, '_stored_create_calls', return_value=[{'to': '0x1'}]), \
                 mock.patch('send.bsc_flow._send_step_up', return_value=self.MESSAGE):
             result = f.submit_create(user, invite, 1, int(time.time()) + 300, '0xsig')

@@ -621,6 +621,9 @@ def guardarian_transaction_proxy(request):
     # creates a REAL Guardarian order (including off-ramps to a bank), so
     # guarding only the GraphQL side would leave the whole rule bypassable by
     # calling this URL directly.
+    from security.face_client import request_update_required, UPDATE_CODE, UPDATE_MESSAGE
+    if request_update_required(request):
+        return JsonResponse({'error': UPDATE_MESSAGE, 'code': UPDATE_CODE, 'next_step': 'update_app'}, status=426)
     if payload.get('account_type') == 'business':
         from users.jwt_context import RAMP_OWNER_ONLY_MESSAGE, is_business_employee
         if is_business_employee(user, payload.get('business_id')):
@@ -647,6 +650,23 @@ def guardarian_transaction_proxy(request):
     # Common fiat currencies (sell destination). If not sure, treat as buy (crypto destination).
     fiat_currencies = ['USD', 'EUR', 'GBP', 'BRL', 'ARS', 'MXN', 'COP', 'CLP', 'PEN', 'CAD', 'AUD', 'JPY', 'CHF']
     is_sell_transaction = to_currency_clean in fiat_currencies
+    if is_sell_transaction:
+        from security.identity_reuse import outgoing_identity_restriction
+        restriction = outgoing_identity_restriction(user)
+        if restriction:
+            return JsonResponse({'error': restriction, 'code': 'IDENTITY_REVIEW_REQUIRED'}, status=403)
+
+    from security.face_step_up import (
+        FACE_STEP_UP_MESSAGE, FACE_STEP_UP_NEXT_STEP, missing_face_step_up,
+        claim_on_ramp_check,
+    )
+    face_purpose = 'withdrawal' if is_sell_transaction else 'on_ramp'
+    # A sell checkout does not move funds. Its signed funding transaction
+    # enforces withdrawal Face, including the business-sender exemption.
+    face_error = '' if is_sell_transaction else missing_face_step_up(user, face_purpose)
+    if face_error:
+        return JsonResponse({'error': face_error, 'next_step': FACE_STEP_UP_NEXT_STEP,
+                             'face_purpose': face_purpose}, status=403)
 
     # Priority Logic: Server (DB) > Client Request
     # We want the database to be the single source of truth for the address and email.
@@ -949,6 +969,18 @@ def guardarian_transaction_proxy(request):
                 {'error': 'Las conversiones de dólares están pausadas temporalmente.'},
                 status=503,
             )
+
+    # Spend a deposit approval immediately before the external side effect.
+    # A timeout is ambiguous, so never release it. Sell orders only prepare
+    # checkout; the separate, signed outgoing transfer consumes its approval.
+    if is_sell_transaction:
+        face_error = ''
+    else:
+        claimed, _ = claim_on_ramp_check(user, consumed_by=f'guardarian:{uuid.uuid4()}')
+        face_error = '' if claimed else FACE_STEP_UP_MESSAGE
+    if face_error:
+        return JsonResponse({'error': face_error, 'next_step': FACE_STEP_UP_NEXT_STEP,
+                             'face_purpose': face_purpose}, status=403)
 
     try:
         resp = requests.post(

@@ -1,3 +1,4 @@
+import { createMobileWebSocket } from "./mobileClientHeaders";
 /* WebSocket client for Presale (prepare + submit + app opt-in) */
 
 import { Platform } from 'react-native';
@@ -47,7 +48,7 @@ export class PresaleWsSession {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
         const wsUrl = `${getWsBase()}ws/presale_session?token=${encodeURIComponent(token)}`;
-        const ws = new WebSocket(wsUrl);
+        const ws = createMobileWebSocket(wsUrl);
         this.ws = ws;
         const t = setTimeout(() => reject(new Error('open_timeout')), 15000);
         ws.onopen = () => { clearTimeout(t); resolve(); };

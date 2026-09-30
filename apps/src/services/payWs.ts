@@ -1,3 +1,4 @@
+import { createMobileWebSocket } from "./mobileClientHeaders";
 import appCheckService from './appCheckService';
 
 /* Lightweight WS client for payment flow (prepare + submit) with fallback hooks */
@@ -70,7 +71,7 @@ export class PayWsSession {
 
         const appCheckToken = await appCheckService.waitForToken() || '';
 
-        const wsUrl = `${getWsBase()}ws/pay_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
+        const wsUrl = `${getWsBase()}ws/pay_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = createMobileWebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => {          reject(new Error('open_timeout'));
         }, 15000);

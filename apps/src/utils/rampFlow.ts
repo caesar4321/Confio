@@ -1,6 +1,6 @@
 import { Alert } from 'react-native';
 
-import { biometricAuthService } from '../services/biometricAuthService';
+import { authenticateWithFace } from '../services/faceAuthentication';
 import { formatRampMoney } from './rampFormat';
 
 const ACTION_COPY = {
@@ -27,19 +27,11 @@ export const requestRampCriticalAuth = async ({
     ? `Autoriza ${definite} de ${formatRampMoney(amount, assetUnit)}${assetNote ? ` (${assetNote})` : ''}`
     : `Autoriza ${demonstrative}`;
 
-  let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+  let authenticated = await authenticateWithFace(actionLabel === 'compra' ? 'on_ramp' : 'withdrawal');
   if (authenticated) {
     return true;
   }
 
-  if (biometricAuthService.isLockout()) {
-    Alert.alert(
-      'Biometría bloqueada',
-      'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-      [{ text: 'OK', style: 'default' }],
-    );
-    return false;
-  }
 
   const shouldRetry = await new Promise<boolean>((resolve) => {
     Alert.alert(
@@ -56,7 +48,7 @@ export const requestRampCriticalAuth = async ({
     return false;
   }
 
-  authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+  authenticated = await authenticateWithFace(actionLabel === 'compra' ? 'on_ramp' : 'withdrawal');
   if (!authenticated) {
     Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
     return false;
@@ -64,4 +56,3 @@ export const requestRampCriticalAuth = async ({
 
   return true;
 };
-

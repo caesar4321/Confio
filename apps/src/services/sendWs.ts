@@ -1,3 +1,4 @@
+import { createMobileWebSocket } from "./mobileClientHeaders";
 /* Lightweight WS client for send flow (prepare + submit) */
 import appCheckService from './appCheckService';
 
@@ -69,7 +70,7 @@ export class SendWsSession {
           throw new Error(OFFICIAL_APP_REQUIRED_ERROR);
         }
 
-        const wsUrl = `${getWsBase()}ws/send_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
+        const wsUrl = `${getWsBase()}ws/send_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = createMobileWebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => {          reject(new Error('open_timeout'));
         }, 15000);

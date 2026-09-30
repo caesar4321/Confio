@@ -57,6 +57,8 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, amount, asset_type='CUSD', internal_id=None,
               note=None, create_receipt=False):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         try:
             # The untracked (non-invoice) mode is GONE (Codex round 5 [P2]).
             # It built a signable group that no PaymentTransaction recorded,
@@ -531,6 +533,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
     
     @classmethod  
     def mutate(cls, root, info, signed_transactions, internal_id=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         try:
             t0 = time.time()
             user = info.context.user

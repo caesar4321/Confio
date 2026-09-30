@@ -38,6 +38,11 @@ from ramps.koywe import (
     get_country_ramp_config,
     on_ramp_paused,
     on_ramp_rejection_locked,
+    has_unpaid_koywe_order,
+    unpaid_koywe_orders,
+    UnpaidKoyweOrderError,
+    lock_koywe_on_ramp_slot,
+    UNPAID_ORDER_MESSAGE,
     quote_ramp,
     sync_country_payment_methods,
 )
@@ -531,6 +536,7 @@ class RampOrderType(graphene.ObjectType):
     error = graphene.String()
     order_id = graphene.String()
     direction = graphene.String()
+    destination = graphene.String()
     country_code = graphene.String()
     fiat_currency = graphene.String()
     payment_method_code = graphene.String()
@@ -889,6 +895,21 @@ class UpsertRampUserAddress(graphene.Mutation):
         return cls(success=True, error=None, ramp_address=ramp_address)
 
 
+def _unpaid_order_response(order):
+    metadata = order.metadata or {}
+    # Do not return a stale QR/checkout URL. Instructions fetch fresh provider
+    # state using the owned order ID, even across the user's wallet accounts.
+    return RampOrderType(
+        success=False, error=UNPAID_ORDER_MESSAGE,
+        next_step='resume_order' if order.provider_order_id else None,
+        order_id=order.provider_order_id or None, direction='ON_RAMP',
+        destination=order.destination, country_code=order.country_code,
+        fiat_currency=order.fiat_currency,
+        payment_method_code=metadata.get('payment_method_code'),
+        payment_method_display=metadata.get('payment_method_display'),
+    )
+
+
 def _release_proven_empty_koywe_reservation(reservation, *, account_id: int) -> None:
     """Remove a placeholder only when Koywe definitively created no order."""
     if reservation is None:
@@ -1008,6 +1029,10 @@ class CreateRampOrder(graphene.Mutation):
             )
 
         if normalized_direction == 'ON_RAMP':
+            if has_unpaid_koywe_order(user):
+                unpaid = unpaid_koywe_orders(user).first()
+                if unpaid:
+                    return _unpaid_order_response(unpaid)
             if on_ramp_paused(resolved_country_code):
                 return RampOrderType(success=False, error='Las recargas en este país no están disponibles por ahora.')
             if on_ramp_rejection_locked(user):
@@ -1266,14 +1291,16 @@ class CreateRampOrder(graphene.Mutation):
             # lock used by wallet reenrollment. That makes an in-flight order
             # visible to the destructive stale-address gate even while the
             # external request is still running.
-            if savings_rail:
+            if savings_rail or normalized_direction == 'ON_RAMP':
                 with transaction.atomic():
+                    if normalized_direction == 'ON_RAMP':
+                        lock_koywe_on_ramp_slot(user)
                     locked_account = Account.objects.select_for_update().filter(
                         pk=current_account.pk,
                         deleted_at__isnull=True,
                     ).first()
                     locked_address = (
-                        getattr(locked_account, 'bsc_address', None) or ''
+                        getattr(locked_account, 'bsc_address' if savings_rail else 'algorand_address', None) or ''
                     ).lower()
                     if not locked_account or locked_address != actor_address.lower():
                         return RampOrderType(
@@ -1292,7 +1319,7 @@ class CreateRampOrder(graphene.Mutation):
                         provider_order_id='',
                         actor_user=user,
                         actor_address__iexact=actor_address,
-                        destination='cusd_plus',
+                        destination=destination,
                     ).exists()
                     if unresolved_reservation:
                         return RampOrderType(
@@ -1315,12 +1342,12 @@ class CreateRampOrder(graphene.Mutation):
                         actor_type=actor_type,
                         actor_display_name=actor_display_name,
                         actor_address=actor_address,
-                        destination='cusd_plus',
+                        destination=destination,
                         fiat_currency=fiat_currency or _get_country_fiat_currency(resolved_country_code),
                         # The provider has not delivered or converted anything
                         # yet. Do not guess cUSD versus cUSD+ from the requested
                         # destination; the completed conversion is authoritative.
-                        final_currency='USDT BSC',
+                        final_currency='USDT BSC' if savings_rail else 'CUSD',
                         status_detail='Koywe order creation reserved',
                         metadata={
                             'wallet_address_reserved': True,
@@ -1356,6 +1383,8 @@ class CreateRampOrder(graphene.Mutation):
                     prior_auth_email=previous_auth_email,
                 ),
             )
+        except UnpaidKoyweOrderError as exc:
+            return _unpaid_order_response(exc.order)
         except KoyweOrderCreationAmbiguousError as exc:
             _mark_ambiguous_koywe_reservation(address_reservation)
             return RampOrderType(

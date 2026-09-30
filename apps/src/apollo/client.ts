@@ -12,8 +12,7 @@ import { shouldSkipStoredJwt } from './authPolicy';
 // RN-free module — safe to import statically (heavier emergencyExit modules
 // like the keychain store stay behind dynamic imports).
 import { successProvesUnbanned } from '../services/emergencyExit/banSignal';
-import DeviceInfo from 'react-native-device-info';
-import { Platform } from 'react-native';
+import { mobileClientHeaders } from '../services/mobileClientHeaders';
 
 // Extract constants to avoid circular dependency
 export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
@@ -368,8 +367,7 @@ const authLink = setContext(async (operation, previousContext) => {
   const nextHeaders: Record<string, string> = {
     ...sanitizeHeaders(headers),
     'Content-Type': 'application/json',
-    'X-Confio-Platform': Platform.OS,
-    'X-Confio-Build': DeviceInfo.getBuildNumber(),
+    ...mobileClientHeaders(),
     // Capability, not authorization. Legacy builds omit it and remain
     // operational with their old gross-output withdrawal semantics.
     'X-Confio-Fee-Capable': '1',

@@ -122,6 +122,8 @@ class HumanitarianSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _donation_prepare(self, campaign_slug, amount):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(self.scope.get('user'))
         from algosdk.v2client import algod
         from blockchain.algorand_account_manager import AlgorandAccountManager
         from blockchain.humanitarian_transaction_builder import HumanitarianTransactionBuilder
@@ -225,12 +227,15 @@ class HumanitarianSessionConsumer(AsyncJsonWebsocketConsumer):
         from humanitarian.models import HumanitarianDonation
 
         try:
-            donation = HumanitarianDonation.objects.select_related("campaign").get(public_id=donation_id)
+            donation = HumanitarianDonation.objects.select_related("campaign").get(
+                public_id=donation_id, donor_user=self.scope.get('user'))
         except HumanitarianDonation.DoesNotExist:
             return {"success": False, "error": "donation_not_found"}
 
         if donation.status == "confirmed" and donation.transaction_hash:
             return {"success": True, "txid": donation.transaction_hash}
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(self.scope.get('user'))
         if not isinstance(signed_transactions, list) or not signed_transactions:
             return {"success": False, "error": "signed_transactions_required"}
 

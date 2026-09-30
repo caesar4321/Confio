@@ -10,6 +10,7 @@ from payment_accounts.models import FinancialAccount, AccountCapability, LedgerE
 from payment_accounts.infinia_journeys import create_journey, advance_journey
 from payment_accounts.bridge_execution import reconcile_provider_credit
 from payment_accounts.services import PaymentAccountError, _sync_flow_status
+from security.models import FaceCheck
 from .test_bridge import BridgeQuoteTests
 from .test_bridge_execution import BridgeExecutionTests, DEST_HASH
 
@@ -594,6 +595,49 @@ class JourneyTests(TestCase):
                         side_effect=AssertionError('Monthly limits must not gate a journey')):
             first = create_journey(**args)
             self.assertEqual(create_journey(**args).pk, first.pk)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_outbound_journey_spends_one_face_and_exact_retry_reuses_it(self):
+        check = FaceCheck.objects.create(
+            user=self.user, purpose='withdrawal', liveness_session_id='infinia-face',
+            status='passed', completed_at=timezone.now(),
+        )
+        bridge, _ = self.prepared()
+        request_id = uuid.uuid4()
+        args = dict(
+            owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+            request_id=request_id, direction='to_bank', bridge=bridge,
+            destination=self.dest, minimum_fx_output='30',
+        )
+
+        first = create_journey(**args)
+        args['minimum_fx_output'] = '30.0'
+        second = create_journey(**args)
+
+        check.refresh_from_db()
+        first.money_flow.refresh_from_db()
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(check.consumed_by, first.money_flow.metadata['face_action_key'])
+        self.assertTrue(check.consumed_by.startswith('out:'))
+        self.assertEqual(len(check.consumed_by), 68)
+
+        unused = FaceCheck.objects.create(
+            user=self.user, purpose='withdrawal', liveness_session_id='infinia-face-unused',
+            status='passed', completed_at=timezone.now(),
+        )
+        args['minimum_fx_output'] = '31'
+        with self.assertRaisesRegex(PaymentAccountError, 'different journey details'):
+            create_journey(**args)
+        unused.refresh_from_db()
+        self.assertIsNone(unused.consumed_at)
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_inbound_third_party_funding_does_not_spend_withdrawal_face(self):
+        # A personal pay-in converts only after its own (unspent) payin_release check.
+        FaceCheck.objects.create(user=self.user, purpose='payin_release', liveness_session_id='infinia-payin-release',
+                                 status='passed', completed_at=timezone.now())
+        journey = self.inbound()
+        self.assertNotIn('face_action_key', journey.money_flow.metadata)
 
     def test_outbound_correlates_infinia_credit_to_bridge_then_pays_local_account(self):
         t,_=self.prepared(); t.status='delivered';t.destination_tx_hash=DEST_HASH;t.save()

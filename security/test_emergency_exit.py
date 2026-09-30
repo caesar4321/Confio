@@ -18,6 +18,18 @@ def _sign(message, key):
 
 
 class BannedEmergencyExitTests(TestCase):
+    @override_settings(FACE_STEP_UP_ENABLED=False)
+    def test_supported_client_uses_ban_face_and_wait_rules_during_rollout(self):
+        from security.face_context import face_client_supported
+        token = face_client_supported.set(True)
+        try:
+            self._ban()
+            self.assertTrue(self._open()['wait_required'])
+            self._kyc()
+            self.assertTrue(self._open()['face_required'])
+        finally:
+            face_client_supported.reset(token)
+
     def setUp(self):
         cache.clear()
         self.wallet = EthAccount.create()
@@ -155,7 +167,9 @@ class BannedEmergencyExitTests(TestCase):
             ee.start_face('not-a-token', 'app-check-token')
 
     @override_settings(FACE_STEP_UP_ENABLED=True)
-    def test_endpoints_need_no_jwt(self):
+    @mock.patch('config.middleware.close_old_connections')
+    def test_endpoints_need_no_jwt(self, _close_connections):
+        # Preserve TestCase's atomic connection while exercising middleware.
         self._ban()
         self._kyc()
         issued = self.client.post('/api/emergency-exit/challenge/', json.dumps({'address': self.address}),

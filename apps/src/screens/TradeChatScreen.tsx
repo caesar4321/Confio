@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -37,7 +38,6 @@ import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMappi
 import { useAccount } from '../contexts/AccountContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { exitToDiscover } from '../navigation/exitToDiscover';
 
@@ -1413,11 +1413,9 @@ export const TradeChatScreen: React.FC = () => {
   const confirmMarkAsPaid = async () => {
     setShowConfirmPaidModal(false);
     try {
-      const bioOk = await biometricAuthService.authenticate(
-        'Autoriza marcar como pagado (operación crítica)'
-      );
+      const bioOk = await authenticateWithFace();
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'Entendido' }]);
+        Alert.alert('Autenticación requerida', 'Confirma con Confío Face para continuar.', [{ text: 'Entendido' }]);
         return;
       }
 
@@ -1487,11 +1485,9 @@ export const TradeChatScreen: React.FC = () => {
 
   const confirmReleaseFunds = async () => {
     try {
-      const bioOk = await biometricAuthService.authenticate(
-        'Autoriza liberar fondos (operación crítica)'
-      );
+      const bioOk = await authenticateWithFace();
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'Entendido' }]);
+        Alert.alert('Autenticación requerida', 'Confirma con Confío Face para continuar.', [{ text: 'Entendido' }]);
         return;
       }
 

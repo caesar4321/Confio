@@ -1,13 +1,13 @@
 {
-  "originHash" : "d0a249b44a1ec0abbb5356e6d52e9f47dc6148a448e25c4b3dfe8f3bb9b06856",
+  "originHash" : "dbef33cc5f6a5163d3d5f4bd1823d1658bcec0bb3aee64f24c545e6c74b14e2c",
   "pins" : [
     {
       "identity" : "amplify-swift",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/aws-amplify/amplify-swift",
       "state" : {
-        "revision" : "24b6c264211c0579a62d48e0656d674551334ebb",
-        "version" : "2.62.0"
+        "revision" : "af54a8f84ceb4c771418b0e5d8f275bc02ad834f",
+        "version" : "2.58.3"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/aws-amplify/amplify-ui-swift-liveness",
       "state" : {
-        "revision" : "01f63ff68c10b36650d95296c4e396159aacefd1",
-        "version" : "1.4.9"
+        "revision" : "2ae8ad657ac668484843acd4f7e7a812f76f240e",
+        "version" : "1.4.4"
       }
     },
     {
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/awslabs/aws-crt-swift",
       "state" : {
-        "revision" : "d1678252cb3da2d34f70db43e402927360df4d8c",
-        "version" : "0.64.1"
+        "revision" : "d754d289d594adc240f55c90eab212bac818509c",
+        "version" : "0.58.1"
       }
     },
     {
@@ -51,8 +51,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/awslabs/aws-sdk-swift",
       "state" : {
-        "revision" : "61b8c1968aeae4d42226e3b452ab864fd0b96523",
-        "version" : "1.7.60"
+        "revision" : "6518f3491768180ff4c89f5c6425c4fc04713772",
+        "version" : "1.6.71"
       }
     },
     {
@@ -60,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/smithy-lang/smithy-swift",
       "state" : {
-        "revision" : "31336dfea2e448523630ea1fe4d83ddc1156de3c",
-        "version" : "0.242.0"
+        "revision" : "60bc71892ac8c206df0cc2e14c987455d45ace68",
+        "version" : "0.191.0"
       }
     },
     {
@@ -80,15 +80,6 @@
       "state" : {
         "revision" : "87e50f483c54e6efd60e885f7f5aa946cee68023",
         "version" : "1.2.1"
-      }
-    },
-    {
-      "identity" : "swift-argument-parser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser.git",
-      "state" : {
-        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
-        "version" : "1.8.2"
       }
     },
     {

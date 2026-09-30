@@ -1,3 +1,4 @@
+import { createMobileWebSocket } from "./mobileClientHeaders";
 /* Lightweight WS client for USDC withdrawals (prepare + submit) */
 import appCheckService from './appCheckService';
 
@@ -59,7 +60,7 @@ export class WithdrawWsSession {
 
         const appCheckToken = await appCheckService.waitForToken() || '';
 
-        const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
+        const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = createMobileWebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => { reject(new Error('open_timeout')); }, 15000);
         const resolveOpen = () => {

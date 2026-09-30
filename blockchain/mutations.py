@@ -1051,6 +1051,8 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
     
     @classmethod
     def mutate(cls, root, info, recipient_address=None, recipient_user_id=None, recipient_phone=None, amount=None, asset_type='CUSD', note=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         try:
             # Debug logging to see what parameters are received
             logger.info(f"AlgorandSponsoredSend received parameters:")
@@ -1411,6 +1413,8 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
     
     @classmethod
     def mutate(cls, root, info, signed_user_txn, signed_sponsor_txn=None):
+        from security.identity_reuse import require_identity_for_signed_algorand
+        require_identity_for_signed_algorand(getattr(info.context, 'user', None), signed_user_txn)
         try:
             logger.info(f"SubmitSponsoredGroupMutation called")
             logger.info(f"User transaction size: {len(signed_user_txn)} chars")
@@ -3676,6 +3680,10 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             except Conversion.DoesNotExist:
                 return cls(success=False, error='conversion_not_found')
 
+            user = getattr(info.context, 'user', None)
+            if not user or not user.is_authenticated or conv.actor_user_id != user.pk:
+                return cls(success=False, error='conversion_not_found')
+
             if not isinstance(signed_transactions, list) or not signed_transactions:
                 return cls(success=False, error='signed_transactions_required')
 
@@ -3840,6 +3848,11 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             )
 
             ordered_txids = [summary.get('txid') for summary in tx_summaries]
+
+            # Classify the signed value flow, not a client withdrawal_id or
+            # conversion type: cUSD->USDC can also be a purely internal burn.
+            from security.identity_reuse import require_identity_for_autoswap
+            require_identity_for_autoswap(user, ordered_bytes, conv.actor_address)
 
             try:
                 txid = algod_client.send_raw_transaction(combined_b64)
@@ -4158,6 +4171,8 @@ class BuildBurnAndSendMutation(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, amount, recipient_address, note=None, ramp_provider=None, provider_order_id=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         try:
             user = info.context.user
             if not user.is_authenticated:

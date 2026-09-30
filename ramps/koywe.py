@@ -348,6 +348,44 @@ def on_ramp_paused(country_code: str | None) -> bool:
 ON_RAMP_REJECTION_LIMIT = 5
 ON_RAMP_REJECTION_WINDOW_HOURS = 24
 
+UNPAID_ORDER_MESSAGE = (
+    'Ya tienes una recarga pendiente. Completa esa recarga o espera a que '
+    'Koywe confirme su cancelación o vencimiento antes de crear otra. '
+    'Si el estado no se actualiza, contacta a soporte.'
+)
+
+
+def unpaid_koywe_orders(user):
+    # No clock-based expiry: a locally old QR can still be payable. Unknown
+    # creation outcomes are PENDING too and must remain fail-closed.
+    return RampTransaction.objects.filter(
+        provider='koywe', direction='on_ramp', actor_user_id=user.pk,
+        status='PENDING',
+    ).order_by('created_at', 'pk')
+
+
+def has_unpaid_koywe_order(user):
+    return unpaid_koywe_orders(user).exists()
+
+
+class UnpaidKoyweOrderError(Exception):
+    def __init__(self, order):
+        super().__init__(UNPAID_ORDER_MESSAGE)
+        self.order = order
+
+
+def lock_koywe_on_ramp_slot(user):
+    """Caller must insert its reservation in this same atomic transaction.
+
+    Lock the user, not the wallet/account: different accounts, destinations,
+    countries and simultaneous devices share this one unpaid-order slot.
+    """
+    from django.contrib.auth import get_user_model
+    get_user_model().objects.select_for_update().get(pk=user.pk)
+    order = unpaid_koywe_orders(user).first()
+    if order:
+        raise UnpaidKoyweOrderError(order)
+
 
 def on_ramp_rejection_locked(user) -> bool:
     """Too many provider-rejected deposits in the window; clears on its own.

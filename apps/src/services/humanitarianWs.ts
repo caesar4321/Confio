@@ -1,3 +1,4 @@
+import { createMobileWebSocket } from "./mobileClientHeaders";
 import { Platform } from 'react-native';
 
 type DonationPreparePack = {
@@ -44,7 +45,7 @@ export class HumanitarianWsSession {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
         const wsUrl = `${getWsBase()}ws/humanitarian_session?token=${encodeURIComponent(token)}`;
-        const ws = new WebSocket(wsUrl);
+        const ws = createMobileWebSocket(wsUrl);
         this.ws = ws;
         const t = setTimeout(() => reject(new Error('open_timeout')), 15000);
         ws.onopen = () => { clearTimeout(t); resolve(); };

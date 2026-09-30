@@ -13,6 +13,7 @@
 
 import { gql } from '@apollo/client';
 import { setBscTransport } from './evmWallet';
+import { isFaceStepUpRequired, withFaceStepUp } from './faceStepUp';
 
 const BSC_RPC_QUERY = gql`
   query BscRpc($method: String!, $params: String!) {
@@ -89,24 +90,29 @@ export const sponsorBscBatch = async (variables: {
   };
 }): Promise<SponsorBatchResult> => {
   const { apolloClient } = await import('../apollo/client');
-  try {
-    const { data } = await apolloClient.mutate({
-      mutation: SPONSOR_BSC_BATCH,
-      variables,
-    });
-    return (data?.sponsorBscBatch || { success: false, error: 'no response' }) as SponsorBatchResult;
-  } catch (e) {
-    // The server VALIDATES, BROADCASTS, and only then answers. A transport
-    // failure in between means the batch may already be on the network — we
-    // simply never saw the verdict. Reporting that as a plain failure is
-    // what let a caller retry and pay an already-funded provider order a
-    // second time (audit 2026-08-03 [P1] #2).
-    //
-    // Failures we can PROVE happened before the broadcast stay ordinary
-    // errors, so an offline phone or an expired session can retry cleanly.
-    if (isDefinitivelyUnsent(e)) throw e;
-    throw new BscSubmitOutcomeUnknownError(e);
-  }
+  const submit = async (): Promise<SponsorBatchResult> => {
+    try {
+      const { data } = await apolloClient.mutate({
+        mutation: SPONSOR_BSC_BATCH,
+        variables,
+      });
+      return (data?.sponsorBscBatch || { success: false, error: 'no response' }) as SponsorBatchResult;
+    } catch (e) {
+      // The server VALIDATES, BROADCASTS, and only then answers. A transport
+      // failure in between means the batch may already be on the network — we
+      // simply never saw the verdict. Reporting that as a plain failure is
+      // what let a caller retry and pay an already-funded provider order a
+      // second time (audit 2026-08-03 [P1] #2).
+      //
+      // Failures we can PROVE happened before the broadcast stay ordinary
+      // errors, so an offline phone or an expired session can retry cleanly.
+      if (isDefinitivelyUnsent(e)) throw e;
+      throw new BscSubmitOutcomeUnknownError(e);
+    }
+  };
+  // Retry the SAME signed intent. A face rejection proves no broadcast took
+  // place; transport ambiguity still escapes without an automatic retry.
+  return withFaceStepUp('withdrawal', submit, result => isFaceStepUpRequired(result.error));
 };
 
 /** A money-moving mutation whose verdict never came back. Carries
@@ -176,21 +182,25 @@ export const installBscServerTransport = (): void => {
     },
     submit: async (rawTx: string) => {
       const { apolloClient } = await import('../apollo/client');
-      let data;
-      try {
-        ({ data } = await apolloClient.mutate({
-          mutation: SUBMIT_BSC_TX,
-          variables: { rawTx },
-        }));
-      } catch (e) {
-        // Same rule as the sponsored batch: the relay broadcasts before it
-        // answers, so a lost response is outcome-unknown, not a failure. A
-        // retry would sign a NEW tx at a fresh nonce and could spend twice.
-        // Provably-unsent failures stay retryable.
-        if (isDefinitivelyUnsent(e)) throw e;
-        throw new BscSubmitOutcomeUnknownError(e);
-      }
-      const res = data?.submitBscTransaction;
+      const submit = async () => {
+        let data;
+        try {
+          ({ data } = await apolloClient.mutate({
+            mutation: SUBMIT_BSC_TX,
+            variables: { rawTx },
+          }));
+        } catch (e) {
+          // Same rule as the sponsored batch: the relay broadcasts before it
+          // answers, so a lost response is outcome-unknown, not a failure. A
+          // retry would sign a NEW tx at a fresh nonce and could spend twice.
+          // Provably-unsent failures stay retryable.
+          if (isDefinitivelyUnsent(e)) throw e;
+          throw new BscSubmitOutcomeUnknownError(e);
+        }
+        return data?.submitBscTransaction;
+      };
+      const res = await withFaceStepUp('withdrawal', submit,
+        result => isFaceStepUpRequired(result?.error));
       // A server-side REJECTION is definitive — nothing was broadcast.
       if (!res?.success) throw new Error(`bsc relay submit: ${res?.error || 'failed'}`);
       return res.txHash as string;

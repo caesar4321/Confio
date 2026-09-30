@@ -324,10 +324,10 @@ class SecurityQuery(graphene.ObjectType):
     business_kyc_status = graphene.Field(IdentityVerificationType, business_id=graphene.ID(required=True))
     
     def resolve_face_step_up_status(self, info):
-        from .face_step_up import checks_available, step_up_applies, step_up_enabled
+        from .face_step_up import checks_available, step_up_applies, face_enforced
         user = getattr(info.context, 'user', None) if info is not None else None
         required = step_up_applies(user) if user is not None and user.is_authenticated else None
-        return FaceStepUpStatusType(enabled=step_up_enabled(), available=checks_available(), required=required)
+        return FaceStepUpStatusType(enabled=face_enforced(), available=checks_available(), required=required)
 
     def resolve_my_devices(self, info):
         user = info.context.user

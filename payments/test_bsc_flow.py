@@ -444,9 +444,10 @@ class PaymentBatchInvariantTests(SimpleTestCase):
         user = SimpleNamespace(id=7)
         invoice = SimpleNamespace(
             status='PENDING', is_expired=False, settlement_chain='BSC',
-            internal_id='invoice-race')
+            internal_id='invoice-race', merchant_business=None)
         payment = SimpleNamespace(
             id=88, internal_id='payment-race', payer_user_id=7,
+            payer_business=None,
             payer_address=PAYER, merchant_address=MERCHANT,
             status='PENDING_BLOCKCHAIN', invoice=invoice,
             blockchain_data={'kind': 'pay_cusd', 'bsc_calls': []},
