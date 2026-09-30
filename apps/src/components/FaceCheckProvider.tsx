@@ -12,13 +12,14 @@ import {
   Easing,
   Modal,
   Pressable,
+  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
-import { navigationRef } from '../navigation/RootNavigation';
+import { LegalDocumentView } from './LegalDocumentView';
 import {
   FaceCheckBackend,
   FaceCheckPurpose,
@@ -90,21 +91,11 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   const [purpose, setPurpose] = useState<FaceCheckPurpose | null>(null);
   const [stage, setStage] = useState<Stage>('intro');
   const [message, setMessage] = useState<string | undefined>();
-  // The privacy policy opens in the app's own screen: the sheet steps aside
-  // (the check stays pending) and comes back when the person returns.
+  // The privacy policy opens inside this modal, never through navigation:
+  // the sheet can show before the navigator is usable (cold start, lock
+  // screen), where a pushed screen would sit hidden under those overlays.
   const [policyOpen, setPolicyOpen] = useState(false);
-  const openPolicy = useCallback(() => {
-    if (!navigationRef.isReady()) return;
-    setPolicyOpen(true);
-    (navigationRef as any).navigate('LegalDocument', { docType: 'privacy' });
-  }, []);
-  useEffect(() => {
-    if (!policyOpen) return;
-    const unsubscribe = navigationRef.addListener('state', () => {
-      if (navigationRef.getCurrentRoute()?.name !== 'LegalDocument') setPolicyOpen(false);
-    });
-    return unsubscribe;
-  }, [policyOpen]);
+  const openPolicy = useCallback(() => setPolicyOpen(true), []);
   const settle = useRef<((passed: boolean) => void) | null>(null);
   const openPurpose = useRef<FaceCheckPurpose | null>(null);
   const openBackend = useRef<FaceCheckBackend | undefined>(undefined);
@@ -201,8 +192,28 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   return (
     <>
       {children}
-      <Modal visible={purpose !== null && !policyOpen} transparent animationType="slide"
-        onRequestClose={() => { if (!captureBusy.current) close(false); }}>
+      <Modal visible={purpose !== null} transparent animationType="slide"
+        onRequestClose={() => {
+          if (policyOpen) setPolicyOpen(false);
+          else if (!captureBusy.current) close(false);
+        }}>
+        {policyOpen ? (
+          <SafeAreaView style={styles.policyPage}>
+            <LegalDocumentView
+              docType="privacy"
+              renderHeader={(title) => (
+                <View style={styles.policyHeader}>
+                  <Pressable onPress={() => setPolicyOpen(false)} accessibilityRole="button"
+                    accessibilityLabel="Volver" hitSlop={12} style={styles.policyBack}>
+                    <Icon name="chevron-left" size={22} color={INK} />
+                    <Text style={styles.policyBackText}>Volver</Text>
+                  </Pressable>
+                  <Text style={styles.policyTitle} numberOfLines={1}>{title}</Text>
+                </View>
+              )}
+            />
+          </SafeAreaView>
+        ) : (
         <View style={styles.backdrop}>
           <View style={styles.sheet}>
             {stage === 'passed' ? (
@@ -266,6 +277,7 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
             )}
           </View>
         </View>
+        )}
       </Modal>
     </>
   );
@@ -280,6 +292,14 @@ const Tip = ({ icon, text }: { icon: string; text: string }) => (
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(17,24,39,0.45)', justifyContent: 'flex-end' },
+  policyPage: { flex: 1, backgroundColor: '#FFFFFF' },
+  policyHeader: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB',
+  },
+  policyBack: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
+  policyBackText: { fontSize: 15, color: INK, marginLeft: 2 },
+  policyTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: INK },
   sheet: {
     backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28,
     paddingHorizontal: 24, paddingTop: 28, paddingBottom: 40,
