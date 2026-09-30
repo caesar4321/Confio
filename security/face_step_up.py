@@ -48,6 +48,11 @@ MAX_OPEN_SESSIONS = 3
 FAILURE_WINDOW = timedelta(hours=1)
 MAX_FAILURES_PER_WINDOW = 5
 REFERENCE_PREFIX = 'face-references'
+# Evidence for abuse investigations: the frames AWS returns for each check
+# (never the video, which AWS does not return), in the verification bucket.
+EVIDENCE_PREFIX = 'face-checks'
+AUDIT_IMAGES_LIMIT = 4
+EVIDENCE_RETENTION = timedelta(days=180)
 MAX_REFERENCE_BYTES = 5 * 1024 * 1024
 LIVENESS_TERMINAL_STATUSES = {'SUCCEEDED', 'FAILED', 'EXPIRED'}
 
@@ -248,7 +253,9 @@ def start_face_check(user, purpose: str) -> dict:
         credentials = _client_credentials(user.id)
         session = _rekognition().create_face_liveness_session(
             ClientRequestToken=uuid.uuid4().hex,
-            Settings={'AuditImagesLimit': 0},
+            # Frames come back as bytes (no S3 output in Ireland); we keep them
+            # in our own bucket in Zurich, see _store_evidence.
+            Settings={'AuditImagesLimit': AUDIT_IMAGES_LIMIT},
         )
         check = FaceCheck.objects.create(user=user, purpose=purpose, liveness_session_id=session['SessionId'])
     return {'session_id': check.liveness_session_id, **credentials}
@@ -259,9 +266,29 @@ def complete_face_check(user, session_id: str) -> bool:
 
     Raises FaceStepUpPending while AWS is still processing the video.
     """
+    graded = {}
+    try:
+        return _grade(user, session_id, graded)
+    except Exception:
+        # Frames already in the bucket must stay reachable (admin) and purgeable
+        # even when grading fails after storing them and the row rolls back.
+        check = graded.get('check')
+        if check is not None and check.evidence_keys:
+            with transaction.atomic():
+                stored = FaceCheck.objects.select_for_update().filter(pk=check.pk).first()
+                if stored:
+                    known = list(stored.evidence_keys or [])
+                    merged = known + [key for key in check.evidence_keys if key not in known]
+                    if merged != known:
+                        FaceCheck.objects.filter(pk=check.pk).update(evidence_keys=merged)
+        raise
+
+
+def _grade(user, session_id: str, graded: dict) -> bool:
     with transaction.atomic():
         check = FaceCheck.objects.select_for_update().filter(
             user=user, liveness_session_id=session_id).first()
+        graded['check'] = check
         if not check:
             raise FaceStepUpError('Sesión no encontrada.')
         if check.status != 'created':
@@ -276,6 +303,7 @@ def complete_face_check(user, session_id: str) -> bool:
             if expired:
                 return _finish(check, False, 'session_expired')
             raise FaceStepUpPending(PENDING_MESSAGE)
+        _store_evidence(check, result)
         if status != 'SUCCEEDED':
             return _finish(check, False, f'liveness_{status.lower()}')
         if expired:
@@ -298,6 +326,79 @@ def complete_face_check(user, session_id: str) -> bool:
         if similarity < Decimal(str(_setting('FACE_MIN_SIMILARITY', FACE_MIN_SIMILARITY))):
             return _finish(check, False, 'face_mismatch')
         return _finish(check, True, '')
+
+
+def _store_evidence(check: FaceCheck, result: dict) -> None:
+    """Keep the frames of a finished check for abuse investigations.
+
+    Best effort: storage trouble never changes the outcome of a check.
+    """
+    frames = [('reference', (result.get('ReferenceImage') or {}).get('Bytes'))]
+    frames += [(f'audit-{i}', (image or {}).get('Bytes'))
+               for i, image in enumerate(result.get('AuditImages') or [])]
+    frames = [(name, body) for name, body in frames if body][:1 + AUDIT_IMAGES_LIMIT]
+    if not frames:
+        return
+    keys = []
+    try:
+        s3, bucket = _s3(), _resolve_bucket(None)
+        for name, body in frames:
+            key = f'{EVIDENCE_PREFIX}/{check.user_id}/{check.pk}/{name}.jpg'
+            s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType='image/jpeg',
+                          ServerSideEncryption='AES256')
+            keys.append(key)
+    except Exception:
+        logger.exception('Face check evidence partly stored: check=%s stored=%s', check.pk, len(keys))
+    # Whatever reached the bucket is recorded, so it can be viewed and purged.
+    # Merged: a retry never drops frames an earlier attempt stored (keys are
+    # fixed per check, so the same frame is never listed twice).
+    existing = list(check.evidence_keys or [])
+    check.evidence_keys = existing + [key for key in keys if key not in existing]
+
+
+def purge_expired_evidence(batch=500) -> int:
+    """Delete the frames of passed checks older than EVIDENCE_RETENTION.
+
+    Kept instead: failed checks (retained with the KYC record) and every check
+    of a user with a ban on record (active or lifted), for the fraud case.
+    Pages by row id, so checks whose deletion failed never block later ones;
+    they are retried on the next run.
+    """
+    from .models import UserBan
+    cutoff = timezone.now() - EVIDENCE_RETENTION
+    eligible = FaceCheck.objects.filter(
+        status='passed', completed_at__lt=cutoff, evidence_purged_at__isnull=True,
+    ).exclude(evidence_keys=[]).exclude(user_id__in=UserBan.all_objects.values('user_id')).order_by('pk')
+    purged, after = 0, 0
+    while True:
+        rows = list(eligible.filter(pk__gt=after)[:batch])
+        if not rows:
+            return purged
+        purged += _purge_rows(rows)
+        after = rows[-1].pk
+
+
+def _purge_rows(rows) -> int:
+    s3, bucket = _s3(), _resolve_bucket(None)
+    purged = 0
+    for check in rows:
+        try:
+            response = s3.delete_objects(Bucket=bucket, Delete={
+                'Objects': [{'Key': key} for key in check.evidence_keys], 'Quiet': True})
+        except Exception:
+            logger.exception('Face check evidence purge failed: check=%s', check.pk)
+            continue
+        # A 200 can still list per-object failures: keep those keys to retry.
+        errors = response.get('Errors') if isinstance(response, dict) else None
+        failed = {error.get('Key') for error in errors or []}
+        remaining = [key for key in check.evidence_keys if key in failed]
+        if remaining:
+            logger.error('Face check evidence purge incomplete: check=%s failed=%s', check.pk, len(remaining))
+            FaceCheck.objects.filter(pk=check.pk).update(evidence_keys=remaining)
+            continue
+        FaceCheck.objects.filter(pk=check.pk).update(evidence_keys=[], evidence_purged_at=timezone.now())
+        purged += 1
+    return purged
 
 
 def _finish(check: FaceCheck, passed: bool, reason: str) -> bool:

@@ -20,15 +20,6 @@
       }
     },
     {
-      "identity" : "amplify-ui-swift-liveness",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/aws-amplify/amplify-ui-swift-liveness",
-      "state" : {
-        "revision" : "2ae8ad657ac668484843acd4f7e7a812f76f240e",
-        "version" : "1.4.4"
-      }
-    },
-    {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swift-server/async-http-client.git",

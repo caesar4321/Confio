@@ -187,12 +187,118 @@ class FaceStepUpTests(TestCase):
         self._store_reference()
         data = fsu.start_face_check(self.user, 'on_ramp')
         self.assertEqual(data['session_id'], 'sess-1')
-        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {'AuditImagesLimit': 0})
+        self.assertEqual(self.rek.create_face_liveness_session.call_args.kwargs['Settings'], {'AuditImagesLimit': 4})
         self._liveness()
         self.assertTrue(fsu.complete_face_check(self.user, 'sess-1'))
         compare = self.rek.compare_faces.call_args.kwargs
         self.assertEqual(compare['SourceImage'], {'Bytes': b'live-frame'})
         self.assertEqual(compare['TargetImage'], {'Bytes': b'kyc-selfie'})
+
+    # Evidence for abuse investigations
+
+    def _finished_with_frames(self, status='SUCCEEDED', similarity=98.5):
+        self._store_reference()
+        fsu.start_face_check(self.user, 'withdrawal')
+        self._liveness(status=status, similarity=similarity)
+        self.rek.get_face_liveness_session_results.return_value['AuditImages'] = [
+            {'Bytes': b'audit-a'}, {'Bytes': b'audit-b'}]
+        self.s3.put_object.reset_mock()
+        return fsu.complete_face_check(self.user, 'sess-1')
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_frames_of_each_check_are_kept_encrypted_in_our_bucket(self):
+        self.assertTrue(self._finished_with_frames())
+        check = FaceCheck.objects.get()
+        prefix = f'face-checks/{self.user.pk}/{check.pk}/'
+        self.assertEqual(check.evidence_keys, [prefix + 'reference.jpg', prefix + 'audit-0.jpg', prefix + 'audit-1.jpg'])
+        stored = {c.kwargs['Key']: c.kwargs for c in self.s3.put_object.call_args_list}
+        self.assertEqual(stored[prefix + 'audit-1.jpg']['Body'], b'audit-b')
+        self.assertTrue(all(c['ServerSideEncryption'] == 'AES256' for c in stored.values()))
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_failed_checks_keep_their_frames_too(self):
+        self.assertFalse(self._finished_with_frames(similarity=30))
+        self.assertEqual(len(FaceCheck.objects.get().evidence_keys), 3)
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_frames_that_did_upload_are_still_recorded(self):
+        self.s3.put_object.side_effect = [None, RuntimeError('s3 down'), None]
+        self._store_reference = lambda: FaceReference.objects.create(
+            user=self.user, identity_verification=self.verification, s3_key='k', sha256='x', source='test')
+        self.assertTrue(self._finished_with_frames())
+        self.assertEqual([k.rsplit('/', 1)[-1] for k in FaceCheck.objects.get().evidence_keys], ['reference.jpg'])
+
+    def test_a_failed_deletion_never_blocks_later_checks(self):
+        old = timezone.now() - fsu.EVIDENCE_RETENTION - timedelta(days=1)
+        for i in range(3):
+            FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id=f'b{i}',
+                status='passed', completed_at=old, evidence_keys=[f'face-checks/b{i}.jpg'])
+        self.s3.delete_objects.side_effect = [{'Errors': [{'Key': 'face-checks/b0.jpg'}]}, {}, {}]
+        self.assertEqual(fsu.purge_expired_evidence(batch=1), 2)
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_frames_stay_recorded_when_grading_fails_after_storing_them(self):
+        self._store_reference()
+        fsu.start_face_check(self.user, 'withdrawal')
+        self._liveness()
+        self.rek.compare_faces.side_effect = RuntimeError('rekognition down')
+        with self.assertRaises(RuntimeError):
+            fsu.complete_face_check(self.user, 'sess-1')
+        check = FaceCheck.objects.get()
+        self.assertEqual((check.status, len(check.evidence_keys)), ('created', 1))
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_a_retry_never_drops_frames_an_earlier_attempt_stored(self):
+        self._store_reference()
+        fsu.start_face_check(self.user, 'withdrawal')
+        self._liveness()
+        self.rek.get_face_liveness_session_results.return_value['AuditImages'] = [{'Bytes': b'audit-a'}]
+        self.rek.compare_faces.side_effect = RuntimeError('rekognition down')
+        with self.assertRaises(RuntimeError):
+            fsu.complete_face_check(self.user, 'sess-1')
+        self.rek.compare_faces.side_effect = None
+        self.s3.put_object.side_effect = RuntimeError('s3 down')  # retry stores nothing new
+        self.assertTrue(fsu.complete_face_check(self.user, 'sess-1'))
+        self.assertEqual([k.rsplit('/', 1)[-1] for k in FaceCheck.objects.get().evidence_keys],
+                         ['reference.jpg', 'audit-0.jpg'])
+
+    def test_purge_retries_objects_s3_failed_to_delete(self):
+        old = timezone.now() - fsu.EVIDENCE_RETENTION - timedelta(days=1)
+        check = FaceCheck.objects.create(user=self.user, purpose='withdrawal', liveness_session_id='p',
+            status='passed', completed_at=old, evidence_keys=['face-checks/x/reference.jpg', 'face-checks/x/audit-0.jpg'])
+        self.s3.delete_objects.return_value = {'Errors': [{'Key': 'face-checks/x/audit-0.jpg', 'Code': 'InternalError'}]}
+        self.assertEqual(fsu.purge_expired_evidence(), 0)
+        check.refresh_from_db()
+        self.assertEqual((check.evidence_keys, check.evidence_purged_at), (['face-checks/x/audit-0.jpg'], None))
+        self.s3.delete_objects.return_value = {}
+        self.assertEqual(fsu.purge_expired_evidence(), 1)
+
+    @override_settings(FACE_STEP_UP_AVAILABLE=True)
+    def test_storage_trouble_never_changes_the_outcome(self):
+        self.s3.put_object.side_effect = RuntimeError('s3 down')
+        self._store_reference = lambda: FaceReference.objects.create(
+            user=self.user, identity_verification=self.verification, s3_key='k', sha256='x', source='test')
+        self.assertTrue(self._finished_with_frames())
+        self.assertEqual(FaceCheck.objects.get().evidence_keys, [])
+
+    def test_purge_keeps_failed_and_banned_and_recent(self):
+        from security.models import UserBan
+        old = timezone.now() - fsu.EVIDENCE_RETENTION - timedelta(days=1)
+        make = lambda user, status, when, session: FaceCheck.objects.create(
+            user=user, purpose='withdrawal', liveness_session_id=session, status=status,
+            completed_at=when, evidence_keys=[f'face-checks/{session}.jpg'])
+        expired = make(self.user, 'passed', old, 'a')
+        failed = make(self.user, 'failed', old, 'b')
+        recent = make(self.user, 'passed', timezone.now(), 'c')
+        banned = make(self.other, 'passed', old, 'd')
+        UserBan.all_objects.create(user=self.other, ban_type='permanent', reason='fraud')
+        self.assertEqual(fsu.purge_expired_evidence(), 1)
+        self.s3.delete_objects.assert_called_once()
+        self.assertEqual(self.s3.delete_objects.call_args.kwargs['Delete']['Objects'], [{'Key': 'face-checks/a.jpg'}])
+        for row, kept in ((expired, False), (failed, True), (recent, True), (banned, True)):
+            row.refresh_from_db()
+            self.assertEqual(bool(row.evidence_keys), kept, row.liveness_session_id)
+        self.assertIsNotNone(expired.evidence_purged_at)
 
     @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_unfinished_session_stays_retryable(self):

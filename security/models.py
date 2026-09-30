@@ -1345,6 +1345,12 @@ class FaceCheck(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     consumed_at = models.DateTimeField(null=True, blank=True)
     consumed_by = models.CharField(max_length=80, blank=True)
+    # Frames AWS returns for the check (reference + audit images), kept in the
+    # verification bucket to investigate abuse. Passed checks are purged after
+    # EVIDENCE_RETENTION unless the user has a ban on record; failed ones are
+    # kept with the KYC record (security/face_step_up.purge_expired_evidence).
+    evidence_keys = models.JSONField(default=list, blank=True)
+    evidence_purged_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=['user', 'status', 'completed_at'])]

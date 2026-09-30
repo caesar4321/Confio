@@ -129,8 +129,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.4.0',
-    'last_updated': '2026-09-15',
+    'version': '1.5.0',
+    'last_updated': '2026-09-30',
     'is_legally_binding': True,
     'sections': [
         {
@@ -153,6 +153,12 @@ PRIVACY = {
                     'Información de dirección residencial',
                     'Datos del documento, como país emisor y fecha de expiración',
                     'Resultados de verificación, rechazos, motivos de revisión y señales de riesgo o AML'
+                ],
+                'biometric_info': [
+                    'Imagen de su rostro tomada en la verificación de identidad (KYC), que guardamos como referencia para confirmar que es usted',
+                    'Verificación con su rostro (Confío Face): un breve video de su rostro que se analiza en el momento para comprobar que es una persona real y presente, y una imagen de ese video que se compara con su imagen de referencia. De cada verificación guardamos hasta cinco imágenes; el video no se guarda',
+                    'Resultado de cada verificación con su rostro: si fue aprobada, niveles de coincidencia y de detección de persona real, motivo de rechazo, operación para la que se pidió y fecha y hora',
+                    'Usamos su rostro solo con su consentimiento, que usted da al continuar en la pantalla de Confío Face, para confirmar que es usted y proteger su cuenta contra abusos'
                 ],
                 'device_info': [
                     'Sistema operativo',
@@ -194,6 +200,8 @@ PRIVACY = {
                 'Análisis operativo y estadístico para mejorar la experiencia del usuario',
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
+                'Investigar y prevenir abusos, por ejemplo cuando otra persona intenta verificarse en nombre del titular de la cuenta',
+                'Confirmar con su rostro que es usted, y no otra persona con acceso a su cuenta, antes de operaciones sensibles: recargas, retiros, envíos y pagos según su nivel de riesgo, recibir transferencias bancarias en cuentas personales y la salida de emergencia',
                 'Cumplir con requisitos de KYC/AML',
                 'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP',
                 'Confirmar que Bre-B está disponible en su ubicación al solicitarlo y al usarlo, mediante la ubicación precisa del dispositivo en ese momento, la verificación de integridad de la app (Apple o Google) y el país de su dirección IP',
@@ -207,6 +215,7 @@ PRIVACY = {
                 'Para proteger nuestros derechos',
                 'Con su consentimiento explícito',
                 'Con proveedores de servicios de verificación KYC y cumplimiento regulatorio',
+                'Con Amazon Web Services (AWS), que como encargado del tratamiento analiza la verificación con su rostro por cuenta de Confío en la Unión Europea (Irlanda). AWS no entrega el video a Confío; solo imágenes de la verificación, que Confío guarda en Suiza',
                 'Con proveedores de recargas, retiros, pagos, transferencias y conversión de activos cuando sea necesario para ejecutar una operación solicitada por usted',
                 'Con proveedores de infraestructura, almacenamiento, autenticación, notificaciones push y seguridad que actúan como encargados del tratamiento',
                 'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario',
@@ -221,6 +230,7 @@ PRIVACY = {
                 'Monitoreo regular de seguridad',
                 'Actualizaciones de seguridad',
                 'Almacenamiento seguro de documentos KYC',
+                'Su imagen de referencia y las imágenes de sus verificaciones con su rostro se guardan cifradas en Suiza, con acceso restringido al equipo de seguridad y cumplimiento',
                 'Verificación de identidad mediante proveedores certificados',
                 'Controles antifraude, registros de sesión, monitoreo de dispositivos y verificaciones de integridad'
             ]
@@ -233,7 +243,8 @@ PRIVACY = {
                 'Solicitar la eliminación de datos',
                 'Oponerse al procesamiento',
                 'Exportar sus datos',
-                'Solicitar información sobre el uso de sus datos KYC y de seguridad'
+                'Solicitar información sobre el uso de sus datos KYC y de seguridad',
+                'Oponerse al uso de su rostro. Como la verificación con su rostro protege su dinero, sin ella no podremos habilitar las operaciones que la requieren'
             ]
         },
         {
@@ -242,6 +253,7 @@ PRIVACY = {
                 'Conservamos datos personales, transaccionales, de seguridad y de soporte durante el tiempo necesario para prestar el servicio, proteger la plataforma y cumplir con obligaciones legales o regulatorias',
                 'Los datos KYC/AML y los registros vinculados a transacciones pueden conservarse por el tiempo requerido por la regulación aplicable, incluyendo al menos 5 años después de la última transacción cuando corresponda',
                 'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales',
+                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de una verificación aprobada se eliminan a los 180 días; las de una verificación rechazada, o de una cuenta con una sanción, se conservan junto con sus datos KYC para investigar el caso. El video no se conserva',
                 'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano'
             ]
         },

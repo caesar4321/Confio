@@ -24,6 +24,11 @@ try:
 except ImportError:
     pass  # Blockchain app not yet installed
 
+app.conf.beat_schedule.setdefault('security-purge-face-check-evidence', {
+    'task': 'security.purge_face_check_evidence',
+    'schedule': crontab(hour=4, minute=20),
+})
+
 app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
     'task': 'users.rollup_funnel_events',
     'schedule': crontab(hour=3, minute=30),

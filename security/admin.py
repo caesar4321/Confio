@@ -1601,7 +1601,18 @@ class FaceCheckAdmin(admin.ModelAdmin):
                     'similarity', 'completed_at', 'consumed_at')
     list_filter = ('purpose', 'status', 'failure_reason')
     search_fields = ('user__username', 'user__email', 'liveness_session_id')
-    readonly_fields = [f.name for f in FaceCheck._meta.fields]
+    readonly_fields = [f.name for f in FaceCheck._meta.fields] + ['evidence_display']
+
+    def evidence_display(self, obj):
+        """Frames of the check via 5-minute links: the bucket stays private."""
+        from django.utils.html import format_html, format_html_join
+        from .s3_utils import generate_presigned_get
+        if not obj.evidence_keys:
+            return 'Purged' if obj.evidence_purged_at else '—'
+        return format_html_join(' ', '<a href="{0}" target="_blank" rel="noopener">'
+                                '<img src="{0}" style="height:140px;border-radius:6px;margin:2px" alt="{1}"></a>',
+                                ((generate_presigned_get(key=key), key.rsplit('/', 1)[-1]) for key in obj.evidence_keys))
+    evidence_display.short_description = 'Evidence'
 
     def has_add_permission(self, request):
         return False
