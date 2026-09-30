@@ -705,11 +705,28 @@ class InfiniaFeeDebt(models.Model):
 
 
 class AutomaticPayin(models.Model):
-    """Durable, once-per-credit work; old ledger history is never auto-enqueued."""
+    """Durable, once-per-credit work; old ledger history is never auto-enqueued.
+
+    A personal account's pay-in waits in ``awaiting_face`` until its person
+    passes Confío Face (docs/plans/infinia-payin-face-hold.md); unconfirmed
+    for 24 hours it is returned to the payer (``returning`` → ``returned`` or
+    ``return_failed``).
+    """
     entry = models.OneToOneField(LedgerEntry, on_delete=models.PROTECT, related_name='automatic_payin')
     status = models.CharField(max_length=20, default='pending', choices=[
-        ('pending', 'Pending'), ('started', 'Started'), ('review', 'Review')])
+        ('pending', 'Pending'), ('started', 'Started'), ('review', 'Review'),
+        ('awaiting_face', 'Awaiting Confío Face'), ('returning', 'Returning to payer'),
+        ('returned', 'Returned to payer'), ('return_failed', 'Return failed')])
     reason = models.CharField(max_length=100, blank=True)
+    awaiting_since = models.DateTimeField(null=True, blank=True)
+    # Durable consent: once the person's face released it, a slow conversion
+    # never re-holds it and the 24h return no longer applies.
+    released_at = models.DateTimeField(null=True, blank=True)
+    return_method = models.CharField(max_length=20, blank=True)  # provider_refund | payout
+    return_idempotency_key = models.CharField(max_length=128, blank=True)
+    return_provider_id = models.CharField(max_length=100, blank=True)
+    return_details = models.JSONField(default=dict, blank=True)
+    returned_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

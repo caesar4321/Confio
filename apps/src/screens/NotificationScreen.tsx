@@ -381,9 +381,12 @@ export const NotificationScreen = () => {
 
     // Parse data blob once
     const parsedData: any = parseNotificationData(notification.data);
-    const localRoute = notifType === 'LOCAL_TRANSFER_UPDATED' ? localTransferRoute(parsedData.local_transfer_id) : null;
+    const localRoute = notifType === 'LOCAL_TRANSFER_UPDATED'
+      ? (localTransferRoute(parsedData.local_transfer_id) ?? localTransferRoute(notification.actionUrl))
+      : null;
     if (localRoute) {
-      navigation.navigate(localRoute.screen, localRoute.params);
+      if (localRoute.screen === 'PendingIncoming') navigation.navigate('PendingIncoming');
+      else navigation.navigate('LocalTransferStatus', localRoute.params);
       return;
     }
 

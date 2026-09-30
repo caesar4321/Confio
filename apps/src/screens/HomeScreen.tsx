@@ -71,6 +71,7 @@ import {
   formatDeferredReferralError,
 } from '../utils/deferredReferralRegistration';
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
+import { PendingIncomingCard, usePendingIncoming } from '../components/PendingIncomingCard';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
@@ -284,11 +285,17 @@ export const HomeScreen = () => {
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
 
+  const { waiting: pendingIncoming, unresolved: unresolvedIncoming, refresh: refreshPendingIncoming } =
+    usePendingIncoming(activeAccount?.id, !!isPersonalAccount);
+
   // F-005: single promo slot. Only the highest-priority pending item renders on Home,
   // instead of stacking every banner between the balance and the quick actions.
-  // Priority: user's unclaimed money > payroll needing signatures > unclaimed presale tokens > campaigns.
-  const homePromo: 'inviteClaim' | 'payroll' | 'presaleClaim' | 'humanitarian' | null =
-    showInviteClaimCard ? 'inviteClaim'
+  // Priority: bank money awaiting Confío Face (expires) > user's unclaimed money > payroll needing signatures
+  // > unclaimed presale tokens > campaigns.
+  const homePromo: 'pendingIncoming' | 'inviteClaim' | 'payroll' | 'presaleClaim' | 'humanitarian' | null =
+    // Bank money waiting for Confío Face goes back to the payer in 24h: first.
+    pendingIncoming.length > 0 || unresolvedIncoming.length > 0 ? 'pendingIncoming'
+      : showInviteClaimCard ? 'inviteClaim'
       : showPayrollCard ? 'payroll'
         : (isPresaleClaimsUnlocked && !presaleDismissed) ? 'presaleClaim'
           : activeHumanitarianCampaign ? 'humanitarian'
@@ -755,13 +762,15 @@ export const HomeScreen = () => {
         // check. (Server-side read cache is 30s, so this is as fresh as the
         // server will serve.)
         refetchSavingsPortfolioRef.current?.() ?? Promise.resolve(),
+        // Money waiting for Confío Face is on a 24h clock: the gesture must show it.
+        refreshPendingIncoming(),
       ]);
       setStatsRefreshNonce((nonce) => nonce + 1);
     } catch (error) {
     } finally {
       setRefreshing(false);
     }
-  }, [isAuthReady, isPersonalAccount, refreshAccounts, refetchBillingSummary, refetchMyBalances]);
+  }, [isAuthReady, isPersonalAccount, refreshAccounts, refetchBillingSummary, refetchMyBalances, refreshPendingIncoming]);
 
   const handleClaimInvite = useCallback(async () => {
     if (claimingInvite) return;
@@ -1261,6 +1270,11 @@ export const HomeScreen = () => {
           </View>
         </Animated.View>
 
+
+        {homePromo === 'pendingIncoming' && (
+          <PendingIncomingCard waiting={pendingIncoming} unresolved={unresolvedIncoming}
+            onPress={() => navigation.navigate('PendingIncoming')} />
+        )}
 
         {homePromo === 'inviteClaim' && (
           <View style={styles.inviteClaimCard}>
