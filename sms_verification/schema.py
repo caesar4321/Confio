@@ -219,7 +219,10 @@ class InitiateSMSVerification(graphene.Mutation):
             # 6. Limit per Device Fingerprint / Integrity fingerprint (3 per hour)
             from security.models import IntegrityVerdict
             
-            latest_verdict = IntegrityVerdict.objects.filter(user=user).order_by('-created_at').first()
+            # Confío Face App Check records carry no device id; they must not
+            # become the "latest" verdict and switch this limit off.
+            latest_verdict = IntegrityVerdict.objects.filter(user=user).exclude(
+                trigger_action__in=IntegrityVerdict.RECORD_ONLY_ACTIONS).order_by('-created_at').first()
             device_id = extract_device_id(getattr(latest_verdict, 'device_fingerprint', None))
             
             if device_id:

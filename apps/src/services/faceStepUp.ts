@@ -197,6 +197,7 @@ export const runFaceCapture = async (
     // A capture error still lets the server record the session as failed.
   } finally {
     nativeCaptures -= 1;
+    lastCaptureEndedAt = Date.now();
   }
   onGrading?.();
   // AWS may still be processing the video: the server answers PENDING_MESSAGE
@@ -226,7 +227,12 @@ let presenter: Presenter | null = null;
  * it. Only the capture itself, not the whole Confío Face sheet, counts.
  */
 let nativeCaptures = 0;
-export const isFaceCaptureRunning = () => nativeCaptures > 0;
+let lastCaptureEndedAt = 0;
+// The capture's promise settles a moment before its screen is gone and the
+// app reads as active again, so the flag outlives it briefly.
+const CAPTURE_SETTLE_MS = 3000;
+export const isFaceCaptureRunning = () =>
+  nativeCaptures > 0 || Date.now() - lastCaptureEndedAt < CAPTURE_SETTLE_MS;
 
 let activePresentations = 0;
 export const isFaceCheckActive = () => activePresentations > 0;
