@@ -367,8 +367,8 @@ class FaceStepUpTests(TestCase):
     def test_purge_deletes_old_frames_and_keeps_held_and_recent(self):
         from security.models import SuspiciousActivity, UserBan
         User = get_user_model()
-        flagged, cleared = (User.objects.create(username=n, email=f'{n}@example.com', firebase_uid=n)
-                            for n in ('face-flagged', 'face-cleared'))
+        flagged, cleared, linked = (User.objects.create(username=n, email=f'{n}@example.com', firebase_uid=n)
+                                    for n in ('face-flagged', 'face-cleared', 'face-linked'))
         old = timezone.now() - fsu.EVIDENCE_RETENTION - timedelta(days=1)
         make = lambda user, status, when, session: FaceCheck.objects.create(
             user=user, purpose='withdrawal', liveness_session_id=session, status=status,
@@ -380,21 +380,23 @@ class FaceStepUpTests(TestCase):
         held = make(flagged, 'passed', old, 'e')
         dismissed = make(cleared, 'failed', old, 'f')
         unfinished = make(self.user, 'created', None, 'g')
+        related = make(linked, 'passed', old, 'h')
         FaceCheck.objects.filter(pk=unfinished.pk).update(created_at=old)
         UserBan.all_objects.create(user=self.other, ban_type='permanent', reason='fraud')
         # A fraud alert, compliance escalation or partner request is a case.
-        SuspiciousActivity.objects.create(user=flagged, activity_type='money_laundering', status='investigating',
-                                          detection_data={})
+        case = SuspiciousActivity.objects.create(user=flagged, activity_type='money_laundering',
+                                                 status='investigating', detection_data={})
+        case.related_users.add(linked)
         SuspiciousActivity.objects.create(user=cleared, activity_type='unusual_pattern', status='dismissed',
                                           detection_data={})
         self.assertEqual(fsu.purge_expired_evidence(), 4)
         for row, kept in ((expired, False), (failed, False), (recent, True), (banned, True),
-                          (held, True), (dismissed, False), (unfinished, False)):
+                          (held, True), (dismissed, False), (unfinished, False), (related, True)):
             row.refresh_from_db()
             self.assertEqual(bool(row.evidence_keys), kept, row.liveness_session_id)
         self.assertIsNotNone(expired.evidence_purged_at)
         # The check records themselves are never purged.
-        self.assertEqual(FaceCheck.objects.count(), 7)
+        self.assertEqual(FaceCheck.objects.count(), 8)
 
     @override_settings(FACE_STEP_UP_AVAILABLE=True)
     def test_unfinished_session_stays_retryable(self):
