@@ -549,6 +549,20 @@ class SuspiciousActivity(SoftDeleteModel):
         return f"{self.user.username} - {self.get_activity_type_display()} ({self.status})"
 
 
+BANNED_PHONE_SALT = 'security.UserBan.phone_hash'
+
+
+def banned_phone_hash(phone_key) -> str:
+    """Keyed hash of a canonical phone key ('' for none or a shared review
+    number). Keyed with SECRET_KEY: a leaked table alone does not give the
+    numbers back, which a plain hash of a phone number would."""
+    from django.utils.crypto import salted_hmac
+    from users.review_numbers import is_shared_reviewer_phone_key
+    if not phone_key or is_shared_reviewer_phone_key(phone_key):
+        return ''
+    return salted_hmac(BANNED_PHONE_SALT, phone_key, algorithm='sha256').hexdigest()
+
+
 class UserBan(SoftDeleteModel):
     """Track banned users and reasons"""
     
@@ -623,7 +637,13 @@ class UserBan(SoftDeleteModel):
         related_name='ban_appeals_reviewed'
     )
     appeal_decision = models.TextField(blank=True)
-    
+
+    # The number the account held when banned (banned_phone_hash). A verified
+    # phone moves to whichever account verifies it next, and a deleted
+    # account's number is free at once, so the ban keeps it: another account
+    # verifying it is held for review (security/identity_reuse.py).
+    phone_hash = models.CharField(max_length=64, blank=True, db_index=True, editable=False)
+
     class Meta:
         ordering = ['-banned_at']
         verbose_name = "User Ban"
@@ -631,7 +651,12 @@ class UserBan(SoftDeleteModel):
     
     def __str__(self):
         return f"{self.user.username} - {self.get_ban_type_display()} - {self.reason}"
-    
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and not self.phone_hash:
+            self.phone_hash = banned_phone_hash(self.user.phone_key)
+        super().save(*args, **kwargs)
+
     @property
     def is_active(self):
         """Check if ban is currently active"""
