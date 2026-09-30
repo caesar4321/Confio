@@ -23,7 +23,6 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { isRampBlockedCountry } from '../config/env';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -59,7 +58,6 @@ import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { useSavingsResume } from '../hooks/useSavingsResume';
-import { useRampCountry } from '../hooks/useRampCountry';
 import { colors } from '../config/theme';
 import { getTierMeta } from '../components/StatusTierBadge';
 import { formatTokenLabel, conversionPair, isConversionIncoming } from '../utils/tokenDisplay';
@@ -163,7 +161,6 @@ export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
   // Same guard as Home: blocked countries go to Efectivo, not into a ramp
   // flow their country cannot complete.
-  const { navigateToRampOrEfectivo } = useRampCountry();
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
@@ -1816,23 +1813,6 @@ export const AccountDetailScreen = () => {
     navigation.navigate('Send' as any);
   }, [navigation]);
 
-  // Retirar mirrors Home: where no ramp provider operates, point to the
-  // Efectivo directory up front instead of failing inside the provider flow.
-  const handleRetirar = useCallback(() => {
-    if (isRampBlockedCountry(userProfile?.phoneCountry)) {
-      Alert.alert(
-        'No disponible en tu país',
-        'Los retiros con proveedores aún no están disponibles en tu país. Puedes cambiar efectivo con financieras locales verificadas cerca de ti.',
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Ver financieras', onPress: () => (navigation as any).navigate('Financieras') },
-        ],
-      );
-      return;
-    }
-    (navigation as any).navigate('Sell', isSavingsAccount ? { destination: 'cusd_plus' } : undefined);
-  }, [isSavingsAccount, navigation, userProfile?.phoneCountry]);
-
   const hasActiveFilters = useCallback(() => {
     const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
     const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
@@ -2212,12 +2192,11 @@ export const AccountDetailScreen = () => {
         />
       )}
 
-      {/* Action Buttons */}
-      {/* The card tucks under the green header (negative margin); when a banner
-          sits in between, drop the overlap so it doesn't cover the banner. */}
-      <View style={[styles.actionButtonsContainer, (copyBanner || isCusdRetiroOnly) && styles.actionButtonsContainerBelowBanner]}>
-        {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
-          // Employee welcome message
+      {/* Enviar / Recibir / Pagar / Recargar / Retirar live on Home only: the
+          account screen is for the balance and its history. Employees without
+          send permission still get their welcome note here. */}
+      {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds && (
+        <View style={[styles.actionButtonsContainer, (copyBanner || isCusdRetiroOnly) && styles.actionButtonsContainerBelowBanner]}>
           <View style={styles.employeeMessageContainer}>
             <View style={styles.employeeMessageIcon}>
               <Icon name="briefcase" size={32} color={colors.secondaryDark} />
@@ -2239,150 +2218,8 @@ export const AccountDetailScreen = () => {
                   })()}.
             </Text>
           </View>
-        ) : (
-          <View style={styles.actionButtons}>
-            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.sendFunds) && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleSend}
-                accessibilityRole="button"
-                accessibilityLabel="Enviar"
-              >
-                <View style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: colors.primary,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  marginBottom: 8,
-                }}>
-                  <Icon name="send" size={22} color={colors.white} />
-                </View>
-                <Text style={styles.actionButtonText}>Enviar</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Algorand receive hides for cUSD once deposits pause (the
-                phase-out blocks the deposit UI); CONFIO keeps its receive —
-                no BSC alternative exists for it yet. */}
-            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) &&
-              !isCusdRetiroOnly && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => {
-                  // Same verb, per-account destination: the savings account
-                  // receives USDT-BSC on its own address, not an Algorand asset.
-                  if (isSavingsAccount) {
-                    (navigation as any).navigate('ReceiveSavings', {
-                      destination: savingsIsYield ? 'cusd_plus' : 'usdt',
-                    });
-                    return;
-                  }
-                  navigation.navigate('USDCDeposit', {
-                    tokenType: isCusd ? 'cusd' : 'confio'
-                  });
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Recibir"
-              >
-                <View style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: colors.primary,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  marginBottom: 8,
-                }}>
-                  <Icon name="download" size={22} color={colors.white} />
-                </View>
-                <Text style={styles.actionButtonText}>Recibir</Text>
-              </TouchableOpacity>
-            )}
-
-            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => {
-                  // @ts-ignore - Navigation type mismatch, but should work at runtime
-                  const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-                  (navigation as any).navigate('BottomTabs', {
-                    screen: isBusinessAccount ? 'Charge' : 'Scan'
-                  });
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Pagar"
-              >
-                <View style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: colors.secondary,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  marginBottom: 8,
-                }}>
-                  <Icon name="shopping-bag" size={22} color={colors.white} />
-                </View>
-                <Text style={styles.actionButtonText}>Pagar</Text>
-              </TouchableOpacity>
-            )}
-
-            {!activeAccount?.isEmployee && !isCusdRetiroOnly && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => {
-                  // "Ahorrar" was never a separate verb — recharging the
-                  // savings account IS this button, pointed at the BSC rail.
-                  navigateToRampOrEfectivo('TopUp',
-                    isSavingsAccount ? { destination: 'cusd_plus' } : undefined);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Recargar"
-              >
-                <View style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: colors.accent,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  marginBottom: 8,
-                }}>
-                  <Icon name="dollar-sign" size={22} color={colors.white} />
-                </View>
-                <Text style={styles.actionButtonText}>Recargar</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Retirar — the dollar accounts only (CONFIO has no off-ramp).
-                Both settle through the same Sell flow; `destination` picks
-                the rail. */}
-            {(isCusd || isSavingsAccount) && !activeAccount?.isEmployee && (
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleRetirar}
-                accessibilityRole="button"
-                accessibilityLabel="Retirar"
-              >
-                <View style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 26,
-                  backgroundColor: colors.offRampIcon,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  marginBottom: 8,
-                }}>
-                  <MCIcon name="bank" size={22} color={colors.white} />
-                </View>
-                <Text style={styles.actionButtonText}>Retirar</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </View>
+        </View>
+      )}
       <SectionList
         style={styles.scrollView}
         sections={groupedTransactions}
@@ -3052,43 +2889,6 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 20,
-  },
-  actionButtons: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  actionButton: {
-    alignItems: 'center',
-    flex: 1,
-    paddingHorizontal: 4,
-  },
-  actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  actionButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.text.primary,
-    textAlign: 'center',
   },
   usdcSection: {
     paddingHorizontal: 16,
