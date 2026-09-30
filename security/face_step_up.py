@@ -256,8 +256,11 @@ def record_app_check(user, app_check_token, stage: str):
         return None  # caller has no request to read a token from
     try:
         from .integrity_service import app_check_service
-        result = app_check_service.verify_and_record(
-            user=user, token=app_check_token, action=APP_CHECK_ACTIONS[stage], should_enforce=False)
+        # A savepoint: a database error here must not break the caller's
+        # transaction (ATOMIC_REQUESTS) along with the face check.
+        with transaction.atomic():
+            result = app_check_service.verify_and_record(
+                user=user, token=app_check_token, action=APP_CHECK_ACTIONS[stage], should_enforce=False)
         return result.get('verdict_id')
     except Exception:  # noqa: BLE001 — attestation trouble never changes a face check
         logger.exception('Face check App Check could not be recorded: user=%s stage=%s', user.id, stage)
