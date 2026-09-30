@@ -29,6 +29,41 @@ class PaymentAccountError(RuntimeError):
     pass
 
 
+def face_amount(value):
+    """Canonical decimal text for stable Face bindings across ORM reloads."""
+    return format(Decimal(str(value)).normalize(), 'f')
+
+
+def require_outgoing_face(confio_account, namespace, identifier, payload):
+    """Claim one withdrawal Face grant for one immutable provider action.
+
+    Business accounts keep their existing KYB/limits exemption. Personal
+    users who never completed KYC remain exempt inside ``require_face_step_up``.
+    The returned key is safe to persist as audit/idempotency metadata.
+    """
+    from security.identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(confio_account.user)
+    if restriction:
+        raise PaymentAccountError(restriction)
+    if getattr(confio_account, 'account_type', None) == 'business':
+        return ''
+    from security.face_step_up import (
+        require_face_step_up, step_up_applies, withdrawal_action_key,
+    )
+    if not step_up_applies(confio_account.user):
+        return ''
+    action_key = withdrawal_action_key(namespace, identifier, payload)
+    message = require_face_step_up(
+        confio_account.user,
+        'withdrawal',
+        action_key=action_key,
+        consume=True,
+    )
+    if message:
+        raise PaymentAccountError(message)
+    return action_key
+
+
 def _require_provider_enabled(provider):
     setting_name = f'{provider.upper()}_PAYMENT_ACCOUNTS_ENABLED'
     if not getattr(settings, setting_name, False):
@@ -908,17 +943,44 @@ def create_and_submit_payout(
         external_destination['provider_counterparty_id'] = destination.provider_destination_id
     else:
         external_destination['destination_account'] = destination.details
-    operation = create_money_operation(
-        confio_account=confio_account,
-        provider=source_account.provider,
-        operation_type='payout',
-        source_asset=source_account.asset,
-        source_amount=amount,
-        source_account=source_account,
-        external_destination=external_destination,
-        kind='withdraw',
-        client_request_id=client_request_id,
-    )
+    # Keep an unapproved operation invisible to recovery workers: both the
+    # durable idempotency row and Face claim commit, or neither does.
+    with transaction.atomic():
+        operation = create_money_operation(
+            confio_account=confio_account,
+            provider=source_account.provider,
+            operation_type='payout',
+            source_asset=source_account.asset,
+            source_amount=amount,
+            source_account=source_account,
+            external_destination=external_destination,
+            kind='withdraw',
+            client_request_id=client_request_id,
+        )
+        # The durable operation validates exact retry terms before the Face
+        # claim. An altered payload under the same request id cannot consume a
+        # second approval; an exact retry reuses the bound action key.
+        face_action_key = require_outgoing_face(
+            confio_account,
+            'payment_accounts.payout',
+            operation.idempotency_key,
+            {
+                'confio_account_id': str(confio_account.id),
+                'user_id': str(confio_account.user_id),
+                'provider': operation.provider,
+                'operation_type': operation.operation_type,
+                'source_account_id': str(source_account.internal_id),
+                'source_asset': operation.source_asset,
+                'source_amount': face_amount(operation.source_amount),
+                'external_destination': operation.external_destination,
+            },
+        )
+        if face_action_key and operation.money_flow.metadata.get('face_action_key') != face_action_key:
+            operation.money_flow.metadata = dict(
+                operation.money_flow.metadata,
+                face_action_key=face_action_key,
+            )
+            operation.money_flow.save(update_fields=['metadata', 'updated_at'])
     return submit_money_operation(operation)
 
 

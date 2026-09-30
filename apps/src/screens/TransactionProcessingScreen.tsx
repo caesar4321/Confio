@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Platform, Animated, ScrollView, BackHandler, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -16,7 +17,6 @@ import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
 import { Buffer } from 'buffer';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { gql } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
@@ -283,13 +283,11 @@ export const TransactionProcessingScreen = () => {
   useEffect(() => {
     (async () => {
       if (bioChecked) return;
-      const ok = await biometricAuthService.authenticate(
-        'Autoriza esta operación crítica (envío/pago)'
-      );
+      const ok = await authenticateWithFace();
       if (!ok) {
         Alert.alert(
-          'Se requiere biometría',
-          Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.',
+          'Autenticación requerida',
+          'Confirma con Confío Face para continuar.',
           [{ text: 'Entendido', onPress: () => navigation.goBack() }]
         );
         return;

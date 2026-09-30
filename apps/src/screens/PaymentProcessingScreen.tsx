@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import { Buffer } from 'buffer';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -19,7 +20,6 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
 import { ProcessingHero } from '../components/common/ProcessingHero';
 // Removed GET_INVOICES and AccountManager in WS-only flow
-import { biometricAuthService } from '../services/biometricAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { formatTokenLabel } from '../utils/tokenDisplay';
@@ -115,17 +115,16 @@ export const PaymentProcessingScreen = () => {
   useEffect(() => {
     (async () => {
       if (bioChecked) return;
-      const ok = await biometricAuthService.authenticate(
-        'Autoriza esta operación crítica (pago)'
-      );
-      setBioChecked(true);
+      const ok = await authenticateWithFace();
       if (!ok) {
         Alert.alert(
-          'Se requiere biometría',
-          Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.',
+          'Autenticación requerida',
+          'Confirma con Confío Face para continuar.',
           [{ text: 'Entendido', onPress: () => navigation.goBack() }]
         );
+        return;
       }
+      setBioChecked(true);
     })();
   }, [bioChecked, navigation]);
 

@@ -292,6 +292,20 @@ const TopUpScreen = () => {
         throw faceError;
       }
       const result = response?.data?.createRampOrder;
+      if (result?.nextStep === 'resume_order' && result.orderId) {
+        Alert.alert('Ya tienes una recarga pendiente', getFriendlyRampError(result.error), [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Ver recarga pendiente', onPress: () => navigation.replace('RampInstructions', {
+            direction: 'ON_RAMP', orderId: result.orderId,
+            countryCode: result.countryCode || undefined,
+            fiatCurrency: result.fiatCurrency || undefined,
+            paymentMethodCode: result.paymentMethodCode || undefined,
+            paymentMethodDisplay: result.paymentMethodDisplay || undefined,
+            assetUnit: result.destination === 'cusd_plus' ? USD_UNIT : 'cUSD',
+          }) },
+        ]);
+        return;
+      }
       if (!result?.success || !result?.orderId) {
         Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
         return;

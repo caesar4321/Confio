@@ -220,3 +220,4 @@ describe('ban-route wait flag', () => {
     expect(await hasBanRouteWait(store, 'personal_0', T0 + 2 * WAIT + 10)).toBe(true);
   });
 });
+jest.mock('react-native-device-info', () => ({ getVersion: () => '5.1.5', getBuildNumber: () => '157' }));

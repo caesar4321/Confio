@@ -172,6 +172,8 @@ class PrepareP2PCreateTrade(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, trade_id: str, amount: float, asset_type: str = 'CUSD'):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         user = info.context.user
         if not user.is_authenticated:
             return P2PPreparedGroup(success=False, error='Not authenticated')
@@ -331,6 +333,8 @@ class SubmitP2PCreateTrade(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, signed_user_txns: List[str], sponsor_transactions: List[str], trade_id: str):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         user = info.context.user
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')

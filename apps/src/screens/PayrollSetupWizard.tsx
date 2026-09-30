@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Alert, ActivityIndicator, FlatList, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -10,7 +11,6 @@ import { CREATE_PAYROLL_RECIPIENT, SET_BUSINESS_DELEGATES_BY_EMPLOYEE } from '..
 import { useAccount } from '../contexts/AccountContext';
 import { useAlgorand } from '../hooks/useAlgorand';
 import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { APP_LAYOUT } from '../config/layout';
@@ -114,7 +114,7 @@ export const PayrollSetupWizard = () => {
 
   const handleActivate = useCallback(async () => {
     const authMessage = 'Autoriza la activación de nómina';
-    let ok = await biometricAuthService.authenticate(authMessage, true, true);
+    let ok = await authenticateWithFace('app_unlock');
     if (!ok) {
       // Offer retry if authentication fails
       const shouldRetry = await new Promise<boolean>((resolve) => {
@@ -129,7 +129,7 @@ export const PayrollSetupWizard = () => {
       });
 
       if (shouldRetry) {
-        ok = await biometricAuthService.authenticate(authMessage, true, true);
+        ok = await authenticateWithFace('app_unlock');
       }
 
       if (!ok) return;

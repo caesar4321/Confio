@@ -74,6 +74,8 @@ class PrepareInviteForPhone(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, phone, amount, phone_country=None, asset_type='CUSD', message=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         user = info.context.user
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
@@ -271,6 +273,8 @@ class SubmitInviteForPhone(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, signed_user_txn: str, sponsor_transactions: list[SponsorTxnInput], invitation_id: str, message: Optional[str] = ''):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         user = info.context.user
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')

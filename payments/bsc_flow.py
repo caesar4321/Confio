@@ -244,7 +244,7 @@ def _merchant_kyb_verified(merchant_business) -> bool:
         risk_factors__business_id=str(merchant_business.id)).exists()
 
 
-def _payment_step_up(user, payer_business, merchant_business) -> str:
+def _payment_step_up(user, payer_business, merchant_business, **claim) -> str:
     """'' or the Confío Face message for a payment.
 
     Pay stays face-free at verified merchants. Confío Face (for payers who
@@ -252,6 +252,10 @@ def _payment_step_up(user, payer_business, merchant_business) -> str:
     the payer owns or works for, or into one that never passed KYB. Business
     payers are governed by KYB and limits, as for sends.
     """
+    from security.identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(user)
+    if restriction:
+        return restriction
     if payer_business is not None or merchant_business is None:
         return ''
     from security.face_step_up import require_face_step_up, step_up_applies
@@ -259,7 +263,7 @@ def _payment_step_up(user, payer_business, merchant_business) -> str:
         return ''
     if not _pays_own_business(user, merchant_business) and _merchant_kyb_verified(merchant_business):
         return ''
-    return require_face_step_up(user, 'withdrawal')
+    return require_face_step_up(user, 'withdrawal', **claim)
 
 
 def prepare_bsc_payment(user, jwt_ctx, invoice, idempotency_key: str = '') -> dict:
@@ -953,7 +957,12 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
         return {'success': False, 'error': 'not_authorized'}
     # Rechecked here, like sends: a payment prepared earlier must not leave
     # once the face window has lapsed.
-    step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business)
+    from security.face_step_up import withdrawal_action_key
+    face_action = withdrawal_action_key('payment', payment_tx.id, [
+        int(getattr(settings, 'BSC_CHAIN_ID', 56)),
+        (payment_tx.payer_address or '').lower(), payment_tx.blockchain_data or {}])
+    step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business,
+                               action_key=face_action)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -986,6 +995,10 @@ def submit_bsc_payment(user, payment_tx, nonce, deadline, intent_signature,
             auth_dict = sponsor_7702.normalize_and_validate_authorization(
                 authorization, payer_addr, chain_id)
 
+        step_up = _payment_step_up(user, payment_tx.payer_business, invoice.merchant_business,
+                                   action_key=face_action, consume=True)
+        if step_up:
+            return {'success': False, 'error': step_up}
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, payer_addr, calls, int(nonce), int(deadline),
             intent_signature, auth_dict, kind, source_id=payment_tx.id)

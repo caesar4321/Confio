@@ -6,6 +6,7 @@ import {
   FACE_STEP_UP_MESSAGE,
   FaceCheckError,
   ensureFaceCheck,
+  isFaceCheckActive,
   isFaceStepUpRequired,
   registerFaceCheckPresenter,
   runFaceCapture,
@@ -31,6 +32,15 @@ const pending = {
 };
 
 describe('faceStepUp', () => {
+  it('marks server-triggered captures active so app resume does not add an unlock scan', async () => {
+    let finish!: (passed: boolean) => void;
+    registerFaceCheckPresenter(() => new Promise(resolve => { finish = resolve; }));
+    const capture = ensureFaceCheck('withdrawal');
+    expect(isFaceCheckActive()).toBe(true);
+    finish(true);
+    await expect(capture).resolves.toBe(true);
+    expect(isFaceCheckActive()).toBe(false);
+  });
   const start = jest.fn();
 
   beforeEach(() => {

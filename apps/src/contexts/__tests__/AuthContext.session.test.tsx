@@ -12,8 +12,13 @@ jest.mock('../../services/authService', () => ({
   ensureBscAddressRegistered: jest.fn(),
 }));
 jest.mock('react-native-keychain', () => ({ getGenericPassword: jest.fn() }));
-jest.mock('jwt-decode', () => ({ jwtDecode: () => ({ exp: Date.now() / 1000 + 3600 }) }));
+let mockExpired = false;
+jest.mock('jwt-decode', () => ({ jwtDecode: () => ({ exp: Date.now() / 1000 + (mockExpired ? -1 : 3600) }) }));
 const mockAuthenticate = jest.fn(async (..._args: unknown[]) => true);
+jest.mock('../../services/faceAuthentication', () => ({
+  authenticateWithFace: (...args: unknown[]) => mockAuthenticate(...args),
+  isFaceAuthenticating: () => false,
+}));
 jest.mock('../../services/biometricAuthService', () => ({
   biometricAuthService: {
     isEnabled: async () => true,
@@ -61,6 +66,7 @@ describe('session loss after biometric unlock', () => {
     mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: '123', phoneCountry: 'AR' } } });
     mockClient.mutate.mockResolvedValue({ data: {} });
     mockAuthenticate.mockResolvedValue(true);
+    mockExpired = false;
   });
 
   afterEach(async () => {
@@ -201,6 +207,33 @@ describe('session loss after biometric unlock', () => {
     expect(authState!.isAuthenticated).toBe(true);
   });
 
+  it('covers Main before resume refresh and remains locked when refresh fails offline', async () => {
+    const handlers = new Set<(state: string) => unknown>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: any) => {
+      handlers.add(handler);
+      return { remove: () => handlers.delete(handler) };
+    }) as any);
+    await mount();
+    mockExpired = true;
+    let rejectRefresh!: (error: Error) => void;
+    mockClient.mutate.mockImplementation(() => new Promise((_, reject) => { rejectRefresh = reject; }));
+    const t0 = Date.now();
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(t0);
+    await act(async () => { await Promise.all([...handlers].map(h => h('background'))); });
+    nowSpy.mockReturnValue(t0 + 60_000);
+    let resume!: Promise<unknown[]>;
+    await act(async () => { resume = Promise.all([...handlers].map(h => h('active'))); });
+    expect(authState!.isLocked).toBe(true);
+    expect(authState!.isAuthenticated).toBe(false);
+    await act(async () => { await authState!.signOut(); });
+    expect(Alert.alert).toHaveBeenCalledWith('Verificación en curso', expect.any(String));
+    expect(await Keychain.getGenericPassword()).toBeTruthy();
+    await act(async () => { rejectRefresh(new Error('offline')); await resume; });
+    expect(authState!.isLocked).toBe(true);
+    expect(authState!.isAuthenticated).toBe(false);
+    expect(await Keychain.getGenericPassword()).toBeTruthy();
+  });
+
   it('stays locked when the retry also fails', async () => {
     mockAuthenticate.mockResolvedValue(false);
     await mount();
@@ -218,5 +251,28 @@ describe('session loss after biometric unlock', () => {
     expect(navigationRef.current.reset).toHaveBeenCalledWith({
       index: 0, routes: [{ name: 'Auth', params: { screen: 'BackupCompletion', params: undefined } }],
     });
+  });
+
+  it.each(['login', 'phone'] as const)('enters directly after %s without an enrollment screen', async source => {
+    await mount();
+    mockClient.query.mockResolvedValue({ data: { me: { id: '1', phoneNumber: '123', phoneCountry: 'AR' } } });
+    mockAuthenticate.mockClear();
+    navigationRef.current.reset.mockClear();
+    await act(async () => {
+      if (source === 'login') await authState!.handleSuccessfulLogin(true);
+      else await authState!.completePhoneVerification();
+    });
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+    expect(mockAuthenticate).toHaveBeenCalledWith('app_unlock');
+    expect(authState!.isAuthenticated).toBe(true);
+    expect(JSON.stringify(navigationRef.current.reset.mock.calls)).not.toContain('BiometricSetup');
+  });
+
+  it('keeps failed fresh-login Face authentication locked, preserving recovery access', async () => {
+    await mount();
+    mockAuthenticate.mockResolvedValue(false);
+    await act(async () => { await authState!.handleSuccessfulLogin(true); });
+    expect(authState!.isLocked).toBe(true);
+    expect(authState!.isAuthenticated).toBe(false);
   });
 });

@@ -218,7 +218,7 @@ def _resolve_recipient(recipient_user_id, recipient_phone, recipient_address):
     return None, None, None, 'recipient_required'
 
 
-def _send_step_up(user, sender_business, activation_id) -> str:
+def _send_step_up(user, sender_business, activation_id, **claim) -> str:
     """'' or the face step-up message for a personal send.
 
     Every send, to a Confío user as much as to an external address: a ring
@@ -227,10 +227,14 @@ def _send_step_up(user, sender_business, activation_id) -> str:
     accounts are governed by KYB and limits (cashiers, API payers), and the
     server-only activation fee goes to Confío itself.
     """
+    from security.identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(user)
+    if restriction:
+        return restriction
     if sender_business is not None or activation_id:
         return ''
     from security.face_step_up import require_face_step_up
-    return require_face_step_up(user, 'withdrawal')
+    return require_face_step_up(user, 'withdrawal', **claim)
 
 
 def _lock_internal_recipient_account(recipient_user, recipient_business):
@@ -331,10 +335,6 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
         if recipient_user is not None:
             _notify_recipient_needs_app(recipient_user, user)
         return {'success': False, 'error': 'recipient_no_bsc_address'}
-    step_up = _send_step_up(user, sender_business, activation_id)
-    if step_up:
-        return {'success': False, 'error': step_up}
-
     # Server-only activation intent: collect cUSD at the snapshotted treasury
     # without treating it as an external USDT exit. Never exposed on generic GraphQL sends.
     activation_payment = None
@@ -385,6 +385,13 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
             'net_amount': (json.loads(existing.bsc_calls_json) or {}).get('receipt', {}).get('net'),
             'fee_bps': (json.loads(existing.bsc_calls_json) or {}).get('receipt', {}).get('fee_bps', 0),
         }
+
+    # Returning the exact stored preparation above is read-only. Requiring
+    # an unspent approval there would strand retries of an already claimed
+    # send; submission still validates/claims that operation's approval.
+    step_up = _send_step_up(user, sender_business, activation_id)
+    if step_up:
+        return {'success': False, 'error': step_up}
 
     amount_wei = int(amount_usd * WAD)
     receipt_gross_wei = amount_wei
@@ -973,6 +980,10 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
 
     if send_tx.sender_user_id != user.id:
         return {'success': False, 'error': 'not_your_send'}
+    from users.jwt_context import business_permission_is_current
+    business_id = getattr(send_tx, 'sender_business_id', None)
+    if business_id and not business_permission_is_current(user, business_id, 'send_funds'):
+        return {'success': False, 'error': 'sender_not_authorized'}
     if send_tx.status != 'PENDING' or not send_tx.bsc_calls_json:
         return {'success': False, 'error': 'send_not_pending'}
 
@@ -989,7 +1000,9 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
 
     # Rechecked here: a send prepared earlier (or before enforcement) must
     # not leave once the face window has lapsed.
-    step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'))
+    from security.face_step_up import withdrawal_action_key
+    face_action = withdrawal_action_key('send', send_tx.id, [chain_id, sender_addr, kind, calls])
+    step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'), action_key=face_action)
     if step_up:
         return {'success': False, 'error': step_up}
 
@@ -1011,6 +1024,10 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
             auth_dict = sponsor_7702.normalize_and_validate_authorization(
                 authorization, sender_addr, chain_id)
 
+        step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'),
+                                action_key=face_action, consume=True)
+        if step_up:
+            return {'success': False, 'error': step_up}
         tx_hash, batch = sponsor_7702.send_sponsored_batch(
             user, sender_addr, calls, int(nonce), int(deadline),
             intent_signature, auth_dict, kind, source_id=send_tx.id)

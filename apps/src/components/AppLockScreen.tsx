@@ -17,6 +17,7 @@ interface AppLockScreenProps {
   visible: boolean;
   onUnlock: () => Promise<boolean>;
   onSignOut: () => Promise<void>;
+  onEmergencyExit: () => void;
 }
 
 /**
@@ -28,7 +29,7 @@ interface AppLockScreenProps {
  * screen modal), and on iOS a <Modal> silently fails to present while another
  * one is still up.
  */
-export function AppLockScreen({ visible, onUnlock, onSignOut }: AppLockScreenProps) {
+export function AppLockScreen({ visible, onUnlock, onSignOut, onEmergencyExit }: AppLockScreenProps) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -63,9 +64,7 @@ export function AppLockScreen({ visible, onUnlock, onSignOut }: AppLockScreenPro
     );
   };
 
-  const methodLabel = Platform.OS === 'ios'
-    ? 'Face ID, Touch ID o tu código'
-    : 'tu huella, PIN o patrón';
+  const methodLabel = 'Confío Face';
 
   if (!visible) return null;
 
@@ -92,6 +91,9 @@ export function AppLockScreen({ visible, onUnlock, onSignOut }: AppLockScreenPro
       </View>
 
       <View style={styles.actions}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={onEmergencyExit} accessibilityRole="button">
+          <Text style={styles.secondaryButtonText}>Salida de emergencia</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.primaryButton, busy && styles.buttonDisabled]}
           onPress={handleUnlock}

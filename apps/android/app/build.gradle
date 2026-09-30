@@ -104,8 +104,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
         targetSdkVersion 36
-        versionCode 156
-        versionName "5.1.4"
+        versionCode 157
+        versionName "5.1.5"
         ndk {
             abiFilters(*releaseAbis)
         }
@@ -187,6 +187,10 @@ android {
         }
     }
     packagingOptions {
+        resources {
+            // Preserve license notices that share a path across AWS dependencies.
+            merges += ['META-INF/LICENSE.txt']
+        }
         jniLibs {
             // Extract RN native libraries so SoLoader's ApplicationSoSource can resolve
             // libreactnative.so reliably on split APK/App Bundle installs.

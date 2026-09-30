@@ -480,6 +480,7 @@ class SponsorBscBatchTests(SimpleTestCase):
 
         rpc = _rpc_factory(rpc_overrides, delegated=delegated, sent_raws=sent_raws)
         with mock.patch.object(sponsor_7702, '_rpc', side_effect=rpc), \
+             mock.patch('security.identity_reuse.outgoing_identity_restriction', return_value=''), \
              mock.patch('payment_accounts.infinia_fee_collection.mint_policy_calls',
                         side_effect=lambda calls, *args: calls), \
              mock.patch('cusd_plus.schema._active_bsc_address', return_value=user_addr), \
@@ -497,6 +498,46 @@ class SponsorBscBatchTests(SimpleTestCase):
         return res, ledger, receipt_task
 
     # ── gates ──
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
+    def test_external_transfer_claims_face_before_sponsorship(self):
+        calls = [_call(USDT, '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + '44' * 20) + _word(10))]
+        with mock.patch('security.face_step_up.require_face_step_up', return_value='face') as gate:
+            result, ledger, _ = self._mutate(calls=calls, delegated=True)
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, 'face')
+        self.assertTrue(gate.call_args.kwargs['consume'])
+        ledger.create.assert_not_called()
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
+    def test_legacy_intents_at_different_nonces_get_distinct_face_claims(self):
+        calls = [_call(USDT, '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + '44' * 20) + _word(10))]
+        with mock.patch('security.face_step_up.require_face_step_up', return_value='face') as gate:
+            self._mutate(calls=calls, delegated=True, nonce='0')
+            self._mutate(calls=calls, delegated=True, nonce='1')
+        self.assertNotEqual(gate.call_args_list[0].kwargs['action_key'], gate.call_args_list[1].kwargs['action_key'])
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
+    def test_durable_request_face_claim_survives_nonce_retry_but_not_changed_terms(self):
+        calls = [_call(USDT, '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + '44' * 20) + _word(10))]
+        changed = [_call(USDT, '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + '44' * 20) + _word(11))]
+        with mock.patch('security.face_step_up.require_face_step_up', return_value='face') as gate:
+            self._mutate(calls=calls, delegated=True, nonce='0', request_id='face-retry-request-1')
+            self._mutate(calls=calls, delegated=True, nonce='1', request_id='face-retry-request-1')
+            self._mutate(calls=changed, delegated=True, nonce='1', request_id='face-retry-request-1')
+        self.assertEqual(gate.call_count, 3)
+        keys = [args.kwargs['action_key'] for args in gate.call_args_list]
+        self.assertEqual(keys[0], keys[1])
+        self.assertNotEqual(keys[0], keys[2])
+
+    @override_settings(CUSD_CONVERSION_FEE_ENABLED=False)
+    def test_invalid_signature_does_not_consume_face(self):
+        calls = [_call(USDT, '0x' + sponsor_7702.SEL_TRANSFER + _word('0x' + '44' * 20) + _word(10))]
+        with mock.patch('security.face_step_up.require_face_step_up') as gate:
+            result, ledger, _ = self._mutate(calls=calls, delegated=True, intent_sig='0x' + '00' * 65)
+        self.assertFalse(result.success)
+        gate.assert_not_called()
+        ledger.create.assert_not_called()
 
     @override_settings(CUSD_PLUS_7702_ENABLED=False)
     def test_disabled_gate(self):

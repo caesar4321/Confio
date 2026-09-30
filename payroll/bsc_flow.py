@@ -632,6 +632,11 @@ def prepare_bsc_payroll_admin(user, jwt_ctx, action: str, amount=None,
                               delegate_user_ids=None,
                               include_self: bool = False,
                               token_type: str = '') -> dict:
+    if action == 'fund':
+        from security.identity_reuse import outgoing_identity_restriction
+        restriction = outgoing_identity_restriction(user)
+        if restriction:
+            return {'success': False, 'error': restriction}
     from cusd_plus import vault as cp_vault
     from django.contrib.auth import get_user_model
 
@@ -865,6 +870,10 @@ def _notify_recipient_needs_app(recipient_user, business) -> None:
 
 
 def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
+    from security.identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(user)
+    if restriction:
+        return {'success': False, 'error': restriction}
     from cusd_plus import vault as cp_vault
     from cusd_plus.eligibility import is_ondo_eligible
 
@@ -1052,6 +1061,10 @@ def prepare_bsc_payroll_payout(user, jwt_ctx, item) -> dict:
 
 
 def submit_bsc_payroll_payout(user, jwt_ctx, item, signature: str) -> dict:
+    from security.identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(user)
+    if restriction:
+        return {'success': False, 'error': restriction}
     from cusd_plus import sponsor_7702
     from cusd_plus.sponsor_7702 import (
         PolicyError,

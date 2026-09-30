@@ -521,6 +521,8 @@ class PreparePayrollItemPayout(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, payroll_item_id, note=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return PreparePayrollItemPayout(item=None, run=None, success=False, errors=["Authentication required"])
@@ -752,6 +754,8 @@ class SubmitPayrollItemPayout(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, payroll_item_id, signed_transaction, sponsor_signature=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         # Firebase App Check
         from security.integrity_service import app_check_service
         ac_result = app_check_service.verify_request_header(info.context, action='payroll', should_enforce=True)
@@ -939,6 +943,8 @@ class PreparePayrollVaultFunding(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, amount):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return PreparePayrollVaultFunding(unsigned_transactions=None, success=False, errors=["Authentication required"])
@@ -1021,6 +1027,8 @@ class SubmitPayrollVaultFunding(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, signed_transactions, sponsor_app_call=None):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(getattr(info.context, "user", None))
         # Firebase App Check
         from security.integrity_service import app_check_service
         ac_result = app_check_service.verify_request_header(info.context, action='payroll', should_enforce=True)

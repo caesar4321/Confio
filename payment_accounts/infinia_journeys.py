@@ -12,7 +12,10 @@ from .allbridge_next import address
 from .clients import InfiniaClient
 from .eligibility import context_from_identity, enforce_and_record
 from .models import InfiniaJourney, MoneyFlow, MoneyOperation, LedgerEntry
-from .services import PaymentAccountError, _require_provider_enabled, _require_capability, submit_money_operation, require_unreserved_source
+from .services import (PaymentAccountError, _require_provider_enabled,
+                       _require_capability, submit_money_operation,
+                       require_unreserved_source, require_outgoing_face,
+                       face_amount)
 from .infinia_bridge import SETTLED_BRIDGE_FAILURES, live_journeys
 
 
@@ -155,12 +158,44 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         raise PaymentAccountError('Ya tienes un pago local en curso.')
     if credit and InfiniaJourney.objects.filter(funding_credit=credit).exists():
         raise PaymentAccountError('Deposit already used by a journey')
+    face_action_key = ''
+    if direction == 'to_bank':
+        quote = bridge.quote
+        face_action_key = require_outgoing_face(
+            owner,
+            'payment_accounts.infinia_journey',
+            request_id,
+            {
+                'confio_account_id': str(owner.pk),
+                'user_id': str(owner.user_id),
+                'provider': 'infinia',
+                'direction': direction,
+                'local_account_id': str(local_account.internal_id),
+                'crypto_account_id': str(crypto_account.internal_id),
+                'minimum_fx_output': face_amount(minimum),
+                'minimum_wallet_output': None,
+                'destination': snapshot,
+                'wallet_address': wallet,
+                'bridge': {
+                    'id': str(bridge.internal_id),
+                    'quote_id': str(quote.internal_id),
+                    'source_token_id': quote.source_token_id,
+                    'destination_token_id': quote.destination_token_id,
+                    'amount_units': quote.amount_units,
+                    'source_amount': face_amount(quote.money_flow.source_amount),
+                    'source_address': quote.source_address,
+                    'destination_address': quote.destination_address,
+                },
+                'fee': fee,
+            },
+        )
     flow = MoneyFlow.objects.create(confio_account=owner, kind='withdraw' if direction == 'to_bank' else 'fund',
         source_asset='USDT_BSC' if direction == 'to_bank' else local_account.asset,
         source_amount=bridge.quote.money_flow.source_amount if bridge else credit.amount,
         target_asset=local_account.asset if direction == 'to_bank' else 'USDT_BSC',
         metadata={'orchestrator': 'infinia', 'minimum_fx_output': str(minimum),
-                  **({'infinia_fee': fee} if fee else {})})
+                  **({'infinia_fee': fee} if fee else {}),
+                  **({'face_action_key': face_action_key} if face_action_key else {})})
     if direction == 'to_wallet':
         from .infinia_maintenance import reserve
         reserve(fee, flow)

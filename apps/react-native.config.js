@@ -19,11 +19,10 @@ module.exports = {
       },
     },
     '@didit-protocol/sdk-react-native': {
-      // Manual on both platforms: needs a custom maven repo on Android
-      // (settings.gradle) and a remote podspec on iOS (Podfile).
+      // Android is linked manually for its custom Maven repository.
+      // iOS must remain enabled so React Native generates SdkReactNativeSpec.
       platforms: {
         android: null,
-        ios: null,
       },
     },
   },

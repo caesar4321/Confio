@@ -11,6 +11,7 @@
 // Integrity / App Attest).
 
 import type { DerivedEvmWallet } from '../evmWallet';
+import { mobileClientHeaders } from '../mobileClientHeaders';
 import type { FaceCheckBackend, FaceCheckGrade, FaceCheckStart } from '../faceStepUp';
 
 export type BannedExitOutcome =
@@ -68,7 +69,7 @@ export const confirmBannedExit = async (
 
   // Never an Authorization header: the middleware would 403 a banned user.
   const post = async (path: string, body: object, withAppCheck = false): Promise<any> => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...mobileClientHeaders() };
     if (withAppCheck) {
       const token = await getAppCheckToken();
       if (token) headers['X-Firebase-AppCheck'] = token;

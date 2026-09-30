@@ -16,6 +16,14 @@ import { ApolloClient, ApolloLink, ApolloProvider, InMemoryCache, Observable, gq
 import { Text } from 'react-native';
 
 const Q = gql`query AhorroPortfolio { cusdPlusSummary { savingsEnabled balanceUsd } }`;
+const clients: ApolloClient<any>[] = [];
+let mounted: TestRenderer.ReactTestRenderer | undefined;
+
+afterEach(() => {
+  act(() => { mounted?.unmount(); });
+  mounted = undefined;
+  clients.splice(0).forEach(client => client.stop());
+});
 
 const flush = async (ms = 20) => {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
@@ -34,16 +42,18 @@ const makeClient = (state: { account: string; calls: number }) => {
       obs.complete();
     }, 5);
   }));
-  return new ApolloClient({
+  const client = new ApolloClient({
     link,
     cache: new InMemoryCache({ typePolicies: { Query: { fields: { cusdPlusSummary: { merge: true } } } } }),
   });
+  clients.push(client);
+  return client;
 };
 
-const Row: React.FC<{ authReady: boolean }> = ({ authReady }) => {
+const Row: React.FC<{ authReady: boolean; pollInterval?: number }> = ({ authReady, pollInterval = 200 }) => {
   const { data } = useQuery(Q, {
     fetchPolicy: 'cache-and-network',
-    pollInterval: 200,
+    pollInterval,
     skip: !authReady,
   });
   const enabled = data?.cusdPlusSummary?.savingsEnabled ?? true;
@@ -58,15 +68,17 @@ describe('Home eligibility row across auth-ready and account switch', () => {
     const client = makeClient(state);
     let renderer!: TestRenderer.ReactTestRenderer;
     await act(async () => {
-      renderer = TestRenderer.create(
-        <ApolloProvider client={client}><Row authReady={false} /></ApolloProvider>,
+      mounted = renderer = TestRenderer.create(
+        <ApolloProvider client={client}><Row authReady={false} pollInterval={0} /></ApolloProvider>,
       );
     });
     expect(state.calls).toBe(0);
     expect(label(renderer)).toBe('Confío Dollar+'); // fail-open default while gated
 
     await act(async () => {
-      renderer.update(<ApolloProvider client={client}><Row authReady /></ApolloProvider>);
+      // This case checks the auth transition, not polling. A busy build host
+      // can exceed the poll window even during the nominal 40ms flush.
+      renderer.update(<ApolloProvider client={client}><Row authReady pollInterval={0} /></ApolloProvider>);
     });
     await flush(40);
     expect(state.calls).toBe(1);
@@ -78,7 +90,7 @@ describe('Home eligibility row across auth-ready and account switch', () => {
     const client = makeClient(state);
     let renderer!: TestRenderer.ReactTestRenderer;
     await act(async () => {
-      renderer = TestRenderer.create(
+      mounted = renderer = TestRenderer.create(
         <ApolloProvider client={client}><Row authReady /></ApolloProvider>,
       );
     });
@@ -110,7 +122,7 @@ describe('Home eligibility row across auth-ready and account switch', () => {
     const client = makeClient(state);
     let renderer!: TestRenderer.ReactTestRenderer;
     await act(async () => {
-      renderer = TestRenderer.create(
+      mounted = renderer = TestRenderer.create(
         <ApolloProvider client={client}><Row authReady /></ApolloProvider>,
       );
     });

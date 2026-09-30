@@ -18,7 +18,9 @@ from .eligibility import context_from_identity, enforce_and_record
 from .infinia_journeys import positive, _state
 from .infinia_bridge import SETTLED_BRIDGE_FAILURES
 from .models import CobreJourney, FinancialAccount, LedgerEntry, MoneyFlow, MoneyOperation, PayoutDestination
-from .services import PaymentAccountError, _require_provider_enabled, _require_capability, submit_money_operation
+from .services import (PaymentAccountError, _require_provider_enabled,
+                       _require_capability, submit_money_operation,
+                       require_outgoing_face, face_amount)
 
 TERMINAL = {'completed', 'failed', 'needs_review'}
 FAILED = {'failed', 'reversed', 'needs_review'}
@@ -119,10 +121,41 @@ def create_journey(*, owner, local_account, crypto_account, copco_account, reque
         raise PaymentAccountError('An existing provider operation is still pending')
     if credit and CobreJourney.objects.filter(funding_credit=credit).exists():
         raise PaymentAccountError('Deposit already used by a journey')
+    face_action_key = ''
+    if direction == 'to_bank':
+        quote = bridge.quote
+        face_action_key = require_outgoing_face(
+            owner,
+            'payment_accounts.cobre_journey',
+            request_id,
+            {
+                'confio_account_id': str(owner.pk),
+                'user_id': str(owner.user_id),
+                'provider': 'cobre',
+                'direction': direction,
+                'local_account_id': str(local_account.internal_id),
+                'crypto_account_id': str(crypto_account.internal_id),
+                'copco_account_id': str(copco_account.internal_id),
+                'minimum_fx_output': face_amount(minimum),
+                'destination': snapshot,
+                'wallet_address': wallet,
+                'bridge': {
+                    'id': str(bridge.internal_id),
+                    'quote_id': str(quote.internal_id),
+                    'source_token_id': quote.source_token_id,
+                    'destination_token_id': quote.destination_token_id,
+                    'amount_units': quote.amount_units,
+                    'source_amount': face_amount(quote.money_flow.source_amount),
+                    'source_address': quote.source_address,
+                    'destination_address': quote.destination_address,
+                },
+            },
+        )
     flow = MoneyFlow.objects.create(confio_account=owner, kind='withdraw' if direction == 'to_bank' else 'fund',
         source_asset='USDT_BSC' if bridge else 'COP', source_amount=bridge.quote.money_flow.source_amount if bridge else credit.amount,
         target_asset='COP' if direction == 'to_bank' else 'USDT_BSC',
-        metadata={'orchestrator': 'cobre', 'minimum_fx_output': str(minimum), 'settlement_type': 'standard'})
+        metadata={'orchestrator': 'cobre', 'minimum_fx_output': str(minimum), 'settlement_type': 'standard',
+                  **({'face_action_key': face_action_key} if face_action_key else {})})
     return CobreJourney.objects.create(money_flow=flow, confio_account=owner, request_id=request_id,
         direction=direction, local_account=local_account, crypto_account=crypto_account, copco_account=copco_account,
         bridge=bridge, funding_credit=credit, minimum_fx_output=minimum,

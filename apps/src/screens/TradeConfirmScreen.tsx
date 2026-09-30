@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState } from 'react';
 import {
   View,
@@ -25,7 +26,6 @@ import { CREATE_P2P_TRADE, GET_USER_BANK_ACCOUNTS, GET_MY_P2P_TRADES } from '../
 import { useCurrency } from '../hooks/useCurrency';
 import { useAccount } from '../contexts/AccountContext';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { biometricAuthService } from '../services/biometricAuthService';
 
 type TradeConfirmRouteProp = RouteProp<MainStackParamList, 'TradeConfirm'>;
 type TradeConfirmNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeConfirm'>;
@@ -141,11 +141,9 @@ export const TradeConfirmScreen: React.FC = () => {
       return;
     }
 
-    const bioOk = await biometricAuthService.authenticate(
-      'Autoriza esta operación de intercambio'
-    );
+    const bioOk = await authenticateWithFace();
     if (!bioOk) {
-      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'Entendido' }]);
+      Alert.alert('Autenticación requerida', 'Confirma con Confío Face para continuar.', [{ text: 'Entendido' }]);
       return;
     }
 

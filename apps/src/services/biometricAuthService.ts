@@ -18,6 +18,7 @@ class BiometricAuthService {
   private readonly SUCCESS_COOLDOWN_MS = 10000; // Skip new prompts for 10s after a success
   private lastError: string | null = null;
   private lastLockout: boolean = false;
+  private emergencyAuthenticationPending = false;
 
   /**
    * Use a pure passcode policy when the device has no enrolled biometrics.
@@ -224,6 +225,25 @@ class BiometricAuthService {
   /**
    * Require biometric authentication. Returns true when passed or not enabled.
    */
+  async authenticateEmergencyExit(reason: string): Promise<boolean> {
+    // Enrollment is no longer part of login. Provision and verify a local
+    // guard on first recovery use; never treat a missing preference as consent.
+    if (this.emergencyAuthenticationPending) return false;
+    this.emergencyAuthenticationPending = true;
+    try {
+      if (!(await this.isEnabled())) return await this.enable();
+      if (await this.authenticate(reason, true, true)) return true;
+      // Biometric enrollment changes may invalidate an older guard. Repair
+      // only confirmed invalidation, never an ordinary cancellation/lockout.
+      if (this.isPermanentInvalidation()) return await this.enable();
+      return false;
+    } catch {
+      return false;
+    } finally {
+      this.emergencyAuthenticationPending = false;
+    }
+  }
+
   async authenticate(
     reason?: string,
     forcePrompt = false,
@@ -241,7 +261,7 @@ class BiometricAuthService {
       return false;
     }
 
-    if (this.lastSuccessTime > 0 && timeSinceLastSuccess < this.SUCCESS_COOLDOWN_MS) {
+    if (!forcePrompt && this.lastSuccessTime > 0 && timeSinceLastSuccess < this.SUCCESS_COOLDOWN_MS) {
       return true;
     }
 

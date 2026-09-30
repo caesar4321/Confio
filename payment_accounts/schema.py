@@ -634,20 +634,6 @@ def _require_breb_location(info, owner, *accounts):
             require_for_country(owner, row.country, meta)
 
 
-def _require_face_step_up(account):
-    """Fiat leaving to a bank needs a recent face of the account's person.
-
-    Business accounts are governed by KYB and limits instead: cashiers and
-    API payers cannot present the owner's face on every payout.
-    """
-    from security.face_step_up import require_face_step_up, step_up_enabled
-    if not step_up_enabled() or getattr(account, 'account_type', None) == 'business':
-        return
-    step_up = require_face_step_up(account.user, 'withdrawal')
-    if step_up:
-        raise PaymentAccountError(step_up)
-
-
 class CreatePaymentPayout(graphene.Mutation):
     class Arguments:
         financial_account_id = graphene.UUID(required=True)
@@ -674,7 +660,6 @@ class CreatePaymentPayout(graphene.Mutation):
             if not source or not destination:
                 raise PaymentAccountError('Source account or destination not found')
             _require_breb_location(info, account, source)
-            _require_face_step_up(account)
             operation = create_and_submit_payout(
                 confio_account=account,
                 source_account=source,

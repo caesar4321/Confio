@@ -7,6 +7,17 @@ from ramps.schema import CreateRampOrder
 
 
 class BscOfframpSourceTests(SimpleTestCase):
+    def setUp(self):
+        # These unit tests isolate the fee/source perimeter using fake users;
+        # database-backed admission and identity checks have their own suites.
+        for target, value in (
+            ('ramps.schema.has_unpaid_koywe_order', False),
+            ('security.face_step_up.missing_face_step_up', ''),
+        ):
+            patcher = mock.patch(target, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def _create_onramp(self, *, meta):
         user = SimpleNamespace(is_authenticated=True, id=8, phone_country='BR')
         account = SimpleNamespace(

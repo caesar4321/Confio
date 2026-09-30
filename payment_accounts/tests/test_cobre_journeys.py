@@ -12,6 +12,7 @@ from payment_accounts.services import PaymentAccountError, _sync_flow_status, su
 from payment_accounts.providers.cobre import CobreProvider
 from payment_accounts.providers.base import ProviderCapabilityError
 from payment_accounts.bridge_execution import reconcile_provider_credit
+from security.models import FaceCheck
 from .test_bridge import BridgeQuoteTests
 from .test_bridge_execution import BridgeExecutionTests, DEST_HASH, receipt
 
@@ -89,6 +90,42 @@ class CobreJourneyTests(TestCase):
         self.post_leg(j,'ramp',self.copco,'10000','onramp_credit');advance_journey(j.pk,client=self.api)
         self.post_leg(j,'fx',self.crypto,'2.5','cbmm_credit');advance_journey(j.pk,client=self.api);j.refresh_from_db()
         return j
+
+    @override_settings(FACE_STEP_UP_ENABLED=True)
+    def test_outbound_journey_spends_one_face_and_binds_all_terms(self):
+        check = FaceCheck.objects.create(
+            user=self.user, purpose='withdrawal', liveness_session_id='cobre-face',
+            status='passed', completed_at=timezone.now(),
+        )
+
+        journey = self.start(direction='to_bank')
+        retry = create_journey(
+            owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+            copco_account=self.copco, request_id=journey.request_id,
+            minimum_fx_output='30000.0', direction='to_bank',
+            bridge=journey.bridge, destination=self.dest,
+        )
+
+        check.refresh_from_db()
+        journey.money_flow.refresh_from_db()
+        self.assertEqual(retry.pk, journey.pk)
+        self.assertEqual(check.consumed_by, journey.money_flow.metadata['face_action_key'])
+        self.assertTrue(check.consumed_by.startswith('out:'))
+        self.assertEqual(len(check.consumed_by), 68)
+
+        unused = FaceCheck.objects.create(
+            user=self.user, purpose='withdrawal', liveness_session_id='cobre-face-unused',
+            status='passed', completed_at=timezone.now(),
+        )
+        with self.assertRaisesRegex(PaymentAccountError, 'different journey details'):
+            create_journey(
+                owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                copco_account=self.copco, request_id=journey.request_id,
+                minimum_fx_output='30001', direction='to_bank',
+                bridge=journey.bridge, destination=self.dest,
+            )
+        unused.refresh_from_db()
+        self.assertIsNone(unused.consumed_at)
 
     def test_inbound_requires_onramp_and_fx_credits_before_wallet_payout(self):
         j=self.start();self.quote_response();advance_journey(j.pk,client=self.api);j.refresh_from_db()

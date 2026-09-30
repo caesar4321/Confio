@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator, Modal, Image, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -8,7 +9,6 @@ import { useQuery, useMutation, gql } from '@apollo/client';
 import { GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
 import { usePayrollDelegates } from '../hooks/usePayrollDelegates';
 import { useAccount } from '../contexts/AccountContext';
-import { biometricAuthService } from '../services/biometricAuthService';
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { colors } from '../config/theme';
@@ -127,13 +127,9 @@ export const PayrollDelegatesManageScreen = () => {
       return;
     }
     const next = !current;
-    const ok = await biometricAuthService.authenticate(
-      next ? 'Autoriza la delegación de nómina (igual que tu primer ingreso a Confío)' : 'Autoriza la revocación de nómina',
-      true,
-      true
-    );
+    const ok = await authenticateWithFace('app_unlock');
     if (!ok) {
-      Alert.alert('Biometría requerida', 'No se pudo validar tu identidad.');
+      Alert.alert('Autenticación requerida', 'No se pudo validar tu identidad.');
       return;
     }
     setSigningModalVisible(true);

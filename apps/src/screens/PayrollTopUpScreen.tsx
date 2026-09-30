@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useMemo, useState } from 'react';
 import {
   View,
@@ -29,7 +30,6 @@ import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
 import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
-import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
@@ -175,17 +175,8 @@ const PayrollTopUpScreen = () => {
     // Require biometric authentication for funding the vault
     const authMessage = `Autoriza fondear $${parsed.toFixed(2)} a la bóveda`;
 
-    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    let authenticated = await authenticateWithFace();
     if (!authenticated) {
-      const lockout = biometricAuthService.isLockout();
-      if (lockout) {
-        Alert.alert(
-          'Biometría bloqueada',
-          'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'Entendido', style: 'default' }],
-        );
-        return;
-      }
 
       const shouldRetry = await new Promise<boolean>((resolve) => {
         Alert.alert(
@@ -199,7 +190,7 @@ const PayrollTopUpScreen = () => {
       });
 
       if (shouldRetry) {
-        authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+        authenticated = await authenticateWithFace();
         if (!authenticated) {
           Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
           return;
@@ -342,17 +333,8 @@ const PayrollTopUpScreen = () => {
     }
 
     const authMessage = `Autoriza retirar $${parsed.toFixed(2)} de la bóveda`;
-    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    let authenticated = await authenticateWithFace();
     if (!authenticated) {
-      const lockout = biometricAuthService.isLockout();
-      if (lockout) {
-        Alert.alert(
-          'Biometría bloqueada',
-          'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'Entendido', style: 'default' }],
-        );
-        return;
-      }
       const shouldRetry = await new Promise<boolean>((resolve) => {
         Alert.alert(
           'Autenticación requerida',
@@ -364,7 +346,7 @@ const PayrollTopUpScreen = () => {
         );
       });
       if (shouldRetry) {
-        authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+        authenticated = await authenticateWithFace();
         if (!authenticated) {
           Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
           return;

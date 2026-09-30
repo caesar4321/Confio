@@ -1,3 +1,4 @@
+import { authenticateWithFace, isFaceAuthenticating } from '../services/faceAuthentication';
 import React, { createContext, useContext, useState, useEffect, RefObject, useRef } from 'react';
 import { Alert, AppState, Platform } from 'react-native';
 import { AuthService } from '../services/authService';
@@ -9,7 +10,6 @@ import { jwtDecode } from 'jwt-decode';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 
@@ -145,6 +145,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastInactiveAtRef = useRef<number | null>(null);
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
+  const resumeAuthenticationRef = useRef(false);
   const [isLocked, setIsLocked] = useState(false);
   // Failed/cancelled device-auth unlock: unmount Main (which also dismisses
   // any open modal) but KEEP the stored session, so the lock screen can retry
@@ -545,12 +546,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // Refresh on resume to ensure valid access token before UI queries
   useEffect(() => {
     let isAuthenticating = false;
-    let lastAuthAttempt = 0;
-    const BIOMETRIC_DEBOUNCE_MS = 2000; // Prevent multiple prompts within 2 seconds
     let appStateCycle = 0; // Tracks background/foreground cycles to avoid double prompts per resume
     let lastPromptedCycle = -1;
 
     const sub = AppState.addEventListener('change', async (state) => {
+      if (isFaceAuthenticating()) return;
       if (state === 'background' || state === 'inactive') {
         lastInactiveAtRef.current = Date.now();
         appStateCycle += 1;
@@ -565,6 +565,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         if (sinceLastBiometric < 5000) {
           lastPromptedCycle = currentCycle; // Mark this cycle as satisfied
           return;
+        }
+        const lastInactive = lastInactiveAtRef.current;
+        const needsFace = isAuthenticated && !!lastInactive && Date.now() - lastInactive > 10000;
+        if (needsFace) {
+          if (isAuthenticating) return;
+          isAuthenticating = true;
+          lastPromptedCycle = currentCycle;
+          // Cover Main before any Keychain/network await. Offline refresh must
+          // never leave the previous authenticated screen interactive.
+          resumeAuthenticationRef.current = true;
+          lockApp();
         }
         try {
           const creds = await Keychain.getGenericPassword({
@@ -616,20 +627,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           }
 
           // Require biometric on resume if user was away for a bit
-          const lastInactive = lastInactiveAtRef.current;
-          const awayMs = lastInactive ? Date.now() - lastInactive : 0;
-          const timeSinceLastAuth = Date.now() - lastAuthAttempt;
-
-          // Only prompt if authenticated, was away > 10s, not currently authenticating, and debounce passed
-          if (isAuthenticated && awayMs > 10000 && !isAuthenticating && timeSinceLastAuth > BIOMETRIC_DEBOUNCE_MS) {
-            const supported = await biometricAuthService.isSupported();
-            const enabled = await biometricAuthService.isEnabled();
-
-            if (supported && enabled) {
+          if (needsFace) {
+            {
               isAuthenticating = true;
-              lastAuthAttempt = Date.now();
               lastPromptedCycle = currentCycle;
-              const ok = await biometricAuthService.authenticate('Desbloquea Confío');
+              const ok = await authenticateWithFace('app_unlock');
               isAuthenticating = false;
 
               if (!ok) {
@@ -638,12 +640,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               }
               if (ok) {
                 lastBiometricSuccessRef.current = Date.now();
+                await checkAuthState({ unlocked: true });
+                setIsLocked(false);
               }
             }
           }
         } catch (e) {
           isAuthenticating = false;
+          if (needsFace) lockApp();
           console.error('[AuthContext] Refresh-on-resume failed:', e);
+        } finally {
+          isAuthenticating = false;
+          if (needsFace) resumeAuthenticationRef.current = false;
         }
       }
     });
@@ -652,61 +660,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   // Enforce biometric enrollment on supported devices; returns if enrollment is ready
   const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean; silent?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
-    const skipRevalidate = options?.skipRevalidate === true;
-    const silent = options?.silent === true;
-    try {
-      const supported = await biometricAuthService.isSupported();
-      if (!supported) return { ok: true, alreadyEnabled: true, didAuthenticate: false };
-
-      const alreadyEnabled = await biometricAuthService.isEnabled();
-      if (alreadyEnabled) {
-        if (skipRevalidate) {
-          return { ok: true, alreadyEnabled: true, didAuthenticate: false };
-        }
-        // Re-validate in case biometrics were disabled in device settings
-        const stillValid = await biometricAuthService.authenticate(
-          'Valida tu biometría para continuar',
-          true,
-          true
-        );
-        if (stillValid) {
-          lastBiometricSuccessRef.current = Date.now();
-          return { ok: true, alreadyEnabled: true, didAuthenticate: true };
-        }
-        // A failed revalidation used to disable() unconditionally and fall
-        // through to enable(). But authenticate() also returns false when the
-        // user simply taps Cancel, when the sensor is in lockout, or on a
-        // re-entrant call — so one cancelled prompt destroyed a WORKING
-        // enrollment and demanded a fresh one. If that re-enrollment then
-        // failed, the user was stuck being asked to set up protection they
-        // had already set up. Only wipe when the key is genuinely invalidated.
-        if (!biometricAuthService.isPermanentInvalidation()) {
-          return { ok: false, alreadyEnabled: true, didAuthenticate: false };
-        }
-        await biometricAuthService.disable();
-      }
-
-      const enabledNow = await biometricAuthService.enable();
-      if (!enabledNow) {
-        if (!silent) Alert.alert(
-          'Autenticación requerida',
-          Platform.OS === 'ios' ? 'Necesitamos tu autenticación (Biometría o Código) para proteger tus operaciones críticas.' : 'Necesitamos tu autenticación (Biometría, PIN o Patrón) para proteger tus operaciones críticas.',
-          [{ text: 'OK' }]
-        );
-        return { ok: false, alreadyEnabled: false, didAuthenticate: false };
-      }
-      // enable() already performed a biometric prompt, so avoid prompting again
-      lastBiometricSuccessRef.current = Date.now();
-      return { ok: true, alreadyEnabled: false, didAuthenticate: true };
-    } catch (error) {
-      console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
-      if (!silent) Alert.alert(
-        'Seguridad requerida',
-        'No pudimos activar la seguridad. Inténtalo nuevamente.',
-        [{ text: 'OK' }]
-      );
-      return { ok: false, alreadyEnabled: false, didAuthenticate: false };
-    }
+    if (options?.skipRevalidate) return { ok: true, alreadyEnabled: true, didAuthenticate: false };
+    const ok = await authenticateWithFace('app_unlock');
+    return { ok, alreadyEnabled: true, didAuthenticate: ok };
   };
 
   // Shared opt-in logic: ensures user has all required asset opt-ins.
@@ -818,33 +774,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   const completeBiometricAndEnter = async (source: 'login' | 'phoneVerification' = 'login'): Promise<boolean> => {
-    const supported = await biometricAuthService.isSupported();
-    if (!supported) {
-      // Devices with no lock screen at all: enforceBiometricEnrollment() and
-      // the setup screen's own hint both say we continue, and cold start does.
-      // Blocking only the fresh-login path stranded these users.
-      await completeAuthenticatedEntry(source);
-      return true;
-    }
-
-    const biometricResult = await enforceBiometricEnrollment();
-    if (!biometricResult.ok) {
+    if (!(await authenticateWithFace('app_unlock'))) {
+      lockApp();
       return false;
     }
-
-    // If enrollment flow already performed a successful prompt, avoid asking again here
-    const authOk = biometricResult.didAuthenticate
-      ? true
-      : await biometricAuthService.authenticate(
-        'Confirma tu biometría para continuar',
-        true,
-        true
-      );
-    if (!authOk) {
-      Alert.alert('Autenticación requerida', Platform.OS === 'ios' ? 'Confirma con Biometría o Código para continuar.' : 'Confirma con tu biometría o código del dispositivo para continuar.', [{ text: 'OK' }]);
-      return false;
-    }
-
+    setIsLocked(false);
     lastBiometricSuccessRef.current = Date.now();
     await completeAuthenticatedEntry(source);
     return true;
@@ -858,8 +792,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       }
 
       if (isPhoneVerified) {
-        // Route to biometric setup screen; completion will trigger the remaining flow
-        resetAuthStack('BiometricSetup', { origin: 'login' as const });
+        // Non-KYC users continue directly; verified users see Face itself.
+        await completeBiometricAndEnter('login');
       } else {
         // Don't set isAuthenticated to true yet - keep user in Auth flow
         resetAuthStack('PhoneVerification');
@@ -911,7 +845,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             // Show biometric prompt FIRST — it's local and doesn't need a valid token.
             // Token refresh happens in parallel so it's ready by the time biometric completes.
             const biometricStateStart = Date.now();
-            const bioEnabled = await biometricAuthService.isEnabled();
+            const bioEnabled = true; // Face is not an optional device preference.
             perfLog('biometricAuthService.isEnabled on startup', biometricStateStart, {
               bioEnabled,
             });
@@ -999,9 +933,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
             // Run biometric auth and token refresh in parallel
             try {
+              await tokenRefreshPromise; // Face needs a valid server session.
               if (bioEnabled && !unlocked) {
                 const startupBiometricStart = Date.now();
-                const bioOk = await biometricAuthService.authenticate('Desbloquea Confío');
+                const bioOk = await authenticateWithFace('app_unlock');
                 perfLog('Startup biometricAuthService.authenticate', startupBiometricStart, {
                   bioOk,
                 });
@@ -1075,7 +1010,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               ? true
               : enrollmentResult.didAuthenticate
                 ? true
-                : await biometricAuthService.authenticate('Desbloquea Confío');
+                : await authenticateWithFace('app_unlock');
             perfLog('Fallback startup biometricAuthService.authenticate', unlockPromptStart, {
               biometricOk,
               skippedBecauseBioEnabled: bioEnabled,
@@ -1263,6 +1198,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // prompt rather than leaving the user stuck on the lock screen.
   // The lock screen shows its own inline error, so enrollment runs silently.
   const unlockApp = async (): Promise<boolean> => {
+    if (resumeAuthenticationRef.current) return false;
     const result = await enforceBiometricEnrollment({ silent: true });
     if (!result.ok) return false;
     lastBiometricSuccessRef.current = Date.now();
@@ -1273,6 +1209,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   const signOut = async () => {
+    // Resume can still be refreshing/persisting this account's tokens. Do not
+    // let an account switch race that work and resurrect the old session.
+    if (resumeAuthenticationRef.current) {
+      Alert.alert('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta. La salida de emergencia sigue disponible.');
+      return;
+    }
     setIsLocked(false);
     try {
       resetAuthReady();
@@ -1291,21 +1233,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   const completePhoneVerification = async () => {
     try {
-      // After phone verification, send user to biometric setup flow
-      if (isNavigationReady && navigationRef.current) {
-        navigationRef.current.reset({
-          index: 0,
-          routes: [
-            {
-              name: 'Auth',
-              params: {
-                screen: 'BiometricSetup',
-                params: { origin: 'phoneVerification' as const },
-              },
-            },
-          ],
-        });
-      }
+      await completeBiometricAndEnter('phoneVerification');
     } catch (error) {
       console.error('Error completing phone verification:', error);
     }

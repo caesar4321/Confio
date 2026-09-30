@@ -136,6 +136,8 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _prepare(self, amount: str, destination_address: str):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(self.scope.get('user'))
         from django.conf import settings
         from algosdk.v2client import algod
         from algosdk import transaction as algo_txn
@@ -257,6 +259,8 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _submit(self, internal_id: str, signed_transactions, sponsor_transactions):
+        from security.identity_reuse import require_outgoing_identity
+        require_outgoing_identity(self.scope.get('user'))
         from django.conf import settings
         from algosdk.v2client import algod
         import base64, json as _json, msgpack
@@ -266,7 +270,7 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
         from django.utils import timezone as dj_tz
 
         try:
-            w = USDCWithdrawal.objects.get(internal_id=internal_id)
+            w = USDCWithdrawal.objects.get(internal_id=internal_id, actor_user=self.scope.get('user'))
         except USDCWithdrawal.DoesNotExist:
             return {"success": False, "error": "withdrawal_not_found"}
 

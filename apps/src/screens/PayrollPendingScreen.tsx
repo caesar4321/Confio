@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -13,7 +14,6 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAtomicAccountSwitch } from '../hooks/useAtomicAccountSwitch';
 import { payrollPayAccountFor, isPayrollContextReady } from './payrollPayContext';
 import { usePayrollDelegates, payrollInstrument } from '../hooks/usePayrollDelegates';
-import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
@@ -136,17 +136,8 @@ export const PayrollPendingScreen = () => {
     const recipientName = item.recipientUser?.firstName || item.recipientUser?.username || 'destinatario';
     const authMessage = `Autoriza pagar $${item.netAmount} a ${recipientName}`;
 
-    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    let authenticated = await authenticateWithFace();
     if (!authenticated) {
-      const lockout = biometricAuthService.isLockout();
-      if (lockout) {
-        Alert.alert(
-          'Biometría bloqueada',
-          'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'Entendido', style: 'default' }],
-        );
-        return;
-      }
 
       const shouldRetry = await new Promise<boolean>((resolve) => {
         Alert.alert(
@@ -160,7 +151,7 @@ export const PayrollPendingScreen = () => {
       });
 
       if (shouldRetry) {
-        authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+        authenticated = await authenticateWithFace();
         if (!authenticated) {
           Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
           return;

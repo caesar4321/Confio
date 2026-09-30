@@ -34,6 +34,7 @@ const DANGER = '#DC2626';
 type Stage = 'intro' | 'capturing' | 'grading' | 'passed' | 'failed' | 'unavailable';
 
 const PURPOSE_COPY: Record<FaceCheckPurpose, string> = {
+  app_unlock: 'Confirma con tu rostro que eres tú para abrir Confío.',
   on_ramp: 'Antes de crear tu recarga, confirma con tu rostro que eres tú.',
   withdrawal: 'Solo tú puedes mover tu dinero. Confirma con tu rostro para continuar.',
   emergency_exit: 'Para proteger tu salida de emergencia, confirma con tu rostro que eres tú.',
@@ -91,11 +92,18 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
   const settle = useRef<((passed: boolean) => void) | null>(null);
   const openPurpose = useRef<FaceCheckPurpose | null>(null);
   const openBackend = useRef<FaceCheckBackend | undefined>(undefined);
+  const requestId = useRef(0);
+  const captureBusy = useRef(false);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   type Waiting = { purpose: FaceCheckPurpose; backend?: FaceCheckBackend; resolve: (passed: boolean) => void };
   const queue = useRef<Waiting[]>([]);
   const presentRef = useRef<((purpose: FaceCheckPurpose, backend?: FaceCheckBackend) => Promise<boolean>) | null>(null);
 
   const close = useCallback((passed: boolean) => {
+    if (successTimer.current) clearTimeout(successTimer.current);
+    successTimer.current = null;
+    requestId.current += 1;
+    captureBusy.current = false;
     const done = settle.current;
     settle.current = null;
     openPurpose.current = null;
@@ -104,8 +112,8 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
     done?.(passed);
     const waiting = queue.current.shift();
     if (waiting && presentRef.current) {
-      // Let the closing modal animate out before the next one opens.
-      setTimeout(() => presentRef.current?.(waiting.purpose, waiting.backend).then(waiting.resolve), 350);
+      // Advance in place; no delayed callback may settle another request.
+      void presentRef.current(waiting.purpose, waiting.backend).then(waiting.resolve);
     }
   }, []);
 
@@ -125,6 +133,7 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
         return;
       }
       openPurpose.current = next;
+      requestId.current += 1;
       openBackend.current = backend;
       settle.current = resolve;
       setMessage(undefined);
@@ -133,32 +142,50 @@ export const FaceCheckProvider = ({ children }: { children: React.ReactNode }) =
     });
     presentRef.current = present;
     registerFaceCheckPresenter(present);
-    return () => registerFaceCheckPresenter(null);
+    return () => {
+      registerFaceCheckPresenter(null);
+      presentRef.current = null;
+      requestId.current += 1;
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = null;
+      settle.current?.(false);
+      settle.current = null;
+      queue.current.splice(0).forEach(waiting => waiting.resolve(false));
+    };
   }, []);
 
   const start = useCallback(async () => {
-    if (!purpose) return;
+    if (!purpose || captureBusy.current) return;
+    captureBusy.current = true;
+    const id = requestId.current;
     setMessage(undefined);
     setStage('capturing');
-    const result = await runFaceCapture(purpose, () => setStage('grading'), openBackend.current);
+    const result = await runFaceCapture(purpose, () => {
+      if (id === requestId.current) setStage('grading');
+    }, openBackend.current);
+    if (id !== requestId.current) return;
     if (result.outcome === 'passed') {
       setStage('passed');
-      setTimeout(() => close(true), 900);
+      successTimer.current = setTimeout(() => {
+        if (id === requestId.current) close(true);
+      }, 900);
     } else if (result.outcome === 'cancelled') {
+      captureBusy.current = false;
       setStage('intro');
     } else {
+      captureBusy.current = false;
       setMessage(result.message);
       setStage(result.outcome === 'unavailable' ? 'unavailable' : 'failed');
     }
   }, [purpose, close]);
 
-  const busy = stage === 'capturing' || stage === 'grading';
+  const busy = stage === 'capturing' || stage === 'grading' || stage === 'passed';
 
   return (
     <>
       {children}
       <Modal visible={purpose !== null} transparent animationType="slide"
-        onRequestClose={() => { if (!busy) close(false); }}>
+        onRequestClose={() => { if (!captureBusy.current) close(false); }}>
         <View style={styles.backdrop}>
           <View style={styles.sheet}>
             {stage === 'passed' ? (

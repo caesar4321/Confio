@@ -3,9 +3,9 @@
  *
  * The server asks for a face step-up (next_step 'face_check', or the exact
  * FACE_STEP_UP_MESSAGE) before a deposit order, a withdrawal, or a send to an
- * external address. We open an AWS Face Liveness capture with credentials
- * the server scopes to that one session, then the server grades it against
- * the KYC selfie and only tells us pass/fail.
+ * external address. We open an AWS Face Liveness capture with short-lived
+ * credentials limited to streaming liveness video. The server binds the
+ * session to this user, grades it against the KYC selfie, and returns pass/fail.
  *
  * Service code (sends, journeys) runs outside React, so the modal host
  * (FaceCheckProvider) registers a presenter here and callers use
@@ -14,7 +14,7 @@
 import { gql } from '@apollo/client';
 import { NativeModules } from 'react-native';
 
-export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'emergency_exit' | 'payin_release';
+export type FaceCheckPurpose = 'app_unlock' | 'on_ramp' | 'withdrawal' | 'emergency_exit' | 'payin_release';
 export type FaceCaptureOutcome = 'passed' | 'failed' | 'cancelled' | 'unavailable';
 
 // Mirrors security/face_step_up.py. The server sends this exact text when a
@@ -67,7 +67,7 @@ const STATUS = gql`
 export const fetchFaceStepUpStatus = async (): Promise<{ enabled: boolean; required: boolean | null } | null> => {
   try {
     const { apolloClient } = await import('../apollo/client');
-    const { data } = await apolloClient.query({ query: STATUS, fetchPolicy: 'network-only' });
+    const { data } = await withTimeout(apolloClient.query({ query: STATUS, fetchPolicy: 'network-only' }), 15000);
     const status = data?.faceStepUpStatus;
     return status
       ? { enabled: !!status.enabled, required: typeof status.required === 'boolean' ? status.required : null }
@@ -201,6 +201,8 @@ export const runFaceCapture = async (
 
 type Presenter = (purpose: FaceCheckPurpose, backend?: FaceCheckBackend) => Promise<boolean>;
 let presenter: Presenter | null = null;
+let activePresentations = 0;
+export const isFaceCheckActive = () => activePresentations > 0;
 
 /** Called once by FaceCheckProvider. */
 export const registerFaceCheckPresenter = (fn: Presenter | null) => {
@@ -213,7 +215,12 @@ export const ensureFaceCheck = async (
   backend?: FaceCheckBackend,
 ): Promise<boolean> => {
   if (!presenter) return false;
-  return presenter(purpose, backend);
+  activePresentations += 1;
+  try {
+    return await presenter(purpose, backend);
+  } finally {
+    activePresentations -= 1;
+  }
 };
 
 /**

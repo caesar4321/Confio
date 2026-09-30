@@ -1,3 +1,4 @@
+import { authenticateWithFace } from '../services/faceAuthentication';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -28,7 +29,6 @@ import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import { oauthStorage } from '../services/oauthStorageService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { migrationService } from '../services/migrationService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
@@ -281,11 +281,9 @@ export const USDCConversionScreen = () => {
       return;
     }
 
-    const bioOk = await biometricAuthService.authenticate(
-      'Autoriza esta conversión (operación crítica)'
-    );
+    const bioOk = await authenticateWithFace();
     if (!bioOk) {
-      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para convertir.' : 'Confirma con tu huella digital para convertir.', [{ text: 'Entendido' }]);
+      Alert.alert('Autenticación requerida', 'Confirma con Confío Face para convertir.', [{ text: 'Entendido' }]);
       return;
     }
 

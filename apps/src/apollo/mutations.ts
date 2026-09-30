@@ -88,6 +88,7 @@ export const CREATE_RAMP_ORDER_SAVINGS = gql`
       nextStep
       nextActionUrl
       paymentDetails
+      destination
     }
   }
 `;
@@ -126,6 +127,7 @@ export const CREATE_RAMP_ORDER = gql`
       nextStep
       nextActionUrl
       paymentDetails
+      destination
     }
   }
 `;

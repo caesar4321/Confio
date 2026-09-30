@@ -10,7 +10,7 @@ jest.mock('../../services/appCheckService', () => ({
   __esModule: true,
   default: { getTokenForHeader: async () => null, getLastErrorForDebug: () => null },
 }));
-jest.mock('react-native-device-info', () => ({ getBuildNumber: () => '1' }));
+jest.mock('react-native-device-info', () => ({ getVersion: () => '5.1.5', getBuildNumber: () => '1' }));
 jest.mock('../../services/emergencyExit/banSignal', () => ({
   successProvesUnbanned: () => false,
   looksLikeBanResponse: () => true,

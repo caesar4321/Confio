@@ -707,6 +707,12 @@ class IdempotencyTests(SimpleTestCase):
         self.assertEqual(result['send_id'], 'old123')
         self.assertEqual(result['calls'], [{'to': USDT_BSC, 'value': '0', 'data': '0x'}])
 
+    def test_exact_preparation_retry_does_not_need_an_unspent_face(self):
+        with mock.patch.object(bsc_flow, '_send_step_up', return_value='face required') as gate:
+            result = self._prepare(self._existing(amount='10'))
+        self.assertTrue(result['success'], result)
+        gate.assert_not_called()
+
     def test_different_amount_conflicts(self):
         result = self._prepare(self._existing(amount='10'), amount='20')
         self.assertEqual(result['error'], 'idempotency_key_conflict')

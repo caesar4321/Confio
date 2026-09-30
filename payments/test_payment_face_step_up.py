@@ -49,7 +49,7 @@ class PaymentFaceStepUpTests(TestCase):
 
     def test_a_deleted_employee_record_still_counts(self):
         employee = BusinessEmployee.objects.create(user=self.payer, business=self.shop, role='cashier')
-        employee.delete()
+        employee.soft_delete()
         self.assertEqual(_payment_step_up(self.payer, None, self.shop), fsu.FACE_STEP_UP_MESSAGE)
 
     def test_paying_your_own_business_asks(self):

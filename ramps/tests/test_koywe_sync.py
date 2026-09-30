@@ -352,7 +352,7 @@ class KoyweAddressReservationTests(TestCase):
             context=SimpleNamespace(user=self.user, META={}),
         )
 
-    def _mutate_with_error(self, error):
+    def _mutate_with_error(self, error, destination='cusd_plus'):
         client = mock.Mock(is_configured=True)
         client.create_ramp_order.side_effect = error
         with mock.patch('ramps.schema.KoyweClient', return_value=client), \
@@ -373,7 +373,7 @@ class KoyweAddressReservationTests(TestCase):
                 payment_method_code='WIREPE',
                 country_code='PE',
                 fiat_currency='PEN',
-                destination='cusd_plus',
+                destination=destination,
             )
 
     def test_definitive_order_rejection_releases_address_reservation(self):
@@ -383,6 +383,24 @@ class KoyweAddressReservationTests(TestCase):
             )
         )
 
+        self.assertFalse(result.success)
+        self.assertFalse(RampTransaction.objects.exists())
+
+    def test_legacy_deposit_ambiguous_creation_also_retains_user_slot(self):
+        self.account.algorand_address = 'A' * 58
+        self.account.save(update_fields=['algorand_address'])
+        result = self._mutate_with_error(KoyweOrderCreationAmbiguousError('timeout'), destination='cusd')
+        self.assertFalse(result.success)
+        row = RampTransaction.objects.get()
+        self.assertEqual(row.destination, 'cusd')
+        self.assertEqual(row.status, 'PENDING')
+        self.assertEqual(row.provider_order_id, '')
+        self.assertTrue(ramps_schema.has_unpaid_koywe_order(self.user))
+
+    def test_legacy_deposit_definitive_rejection_releases_user_slot(self):
+        self.account.algorand_address = 'A' * 58
+        self.account.save(update_fields=['algorand_address'])
+        result = self._mutate_with_error(KoyweError('rejected before creation'), destination='cusd')
         self.assertFalse(result.success)
         self.assertFalse(RampTransaction.objects.exists())
 
@@ -534,7 +552,7 @@ class KoyweAddressReservationTests(TestCase):
             )
 
         self.assertFalse(result.success)
-        self.assertIn('operación de ahorro en proceso', result.error)
+        self.assertIn('recarga pendiente', result.error)
         client.create_ramp_order.assert_not_called()
         self.assertEqual(RampTransaction.objects.count(), 1)
 

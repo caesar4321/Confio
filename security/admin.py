@@ -603,7 +603,18 @@ class SuspiciousActivityAdmin(admin.ModelAdmin):
     mark_as_confirmed.short_description = "Mark as confirmed"
     
     def mark_as_dismissed(self, request, queryset):
-        count = queryset.update(status='dismissed')
+        from .identity_reuse import TRIGGER
+        identity_cases = queryset.filter(detection_data__trigger=TRIGGER)
+        # A bulk dismissal without a documented reviewer is not an override.
+        # Operators first add investigation notes on each case's detail page.
+        releasable_ids = [case.pk for case in identity_cases if case.investigation_notes.strip()]
+        count = queryset.exclude(pk__in=identity_cases.values('pk')).update(status='dismissed')
+        count += identity_cases.filter(pk__in=releasable_ids).update(
+            status='dismissed', investigated_by=request.user, updated_at=timezone.now(),
+            action_taken='Identity match reviewed; outgoing restriction released for this match only.')
+        skipped = identity_cases.exclude(pk__in=releasable_ids).count()
+        if skipped:
+            self.message_user(request, f'{skipped} identity review cases require investigation notes before release.', level='warning')
         self.message_user(request, f"{count} activities marked as dismissed.")
     mark_as_dismissed.short_description = "Mark as dismissed"
 

@@ -234,9 +234,9 @@ step-up release). Decided by Julian on 2026-09-29.
   key. The server confirms the ban, so a faked 403 (MITM, a tampered
   proxy) cannot route a healthy account here, and a ban flag while Confío
   is unreachable unlocks nothing. This supersedes principle 2 for banned
-  accounts: the server can now withhold a banned account's exit (face
-  failed, no KYC selfie on file) — by decision, since the ban route is how
-  a ring would otherwise move a recruited account out.
+  accounts: the immediate route requires a successful face check when a
+  KYC reference is available. Without that reference, the waiting-period
+  route remains available, as specified in the amended matrix above.
 - **Device attestation on the exit only**: every ban-route call and the
   normal route's `startFaceCheck(purpose: emergency_exit)` require a
   Firebase App Check token (Play Integrity / App Attest), so the face
@@ -257,15 +257,95 @@ step-up release). Decided by Julian on 2026-09-29.
   whose stored selfie is missing is asked to verify again, never waved
   through.
 - **Sends**: every personal BSC send from a KYC'd user, to a Confío user as
-  much as to an external address, needs a recent Confío Face (15-minute
-  window). Phone invites (money escrowed for a phone that is not on Confío
+  much as to an external address, needs its own Confío Face approval. An
+  unspent withdrawal approval expires after 15 minutes; a deposit or emergency
+  exit approval cannot authorize a withdrawal. The server atomically consumes
+  the approval immediately before execution, bound to the operation's source,
+  destination, asset and amount via its validated calls. Exact retries retain
+  that approval; a different operation or changed terms need a new one. Phone
+  invites (money escrowed for a phone that is not on Confío
   yet) are sends too and take the same gate. Business senders and the
   server-only activation fee stay exempt.
 - **Pay** (`payments/bsc_flow.py`, risk-based so checkout stays one tap):
-  paying a KYB-verified merchant never asks. A KYC'd payer is asked for
+  paying an unrelated KYB-verified merchant never asks. A KYC'd payer is asked for
   Confío Face only when paying a business they own or work for (soft-deleted
   employee records count) or one that never passed KYB — the two ways a ring
   would pool money through Pay. Business payers stay exempt.
+- **Generic sponsorship and legacy relay**: policy-validated external outflows
+  receive the same single-use gate. Self-conversions remain exempt. A generic
+  request without durable idempotency binds to its exact signed intent (including
+  nonce and deadline); it cannot authorize another transfer with a fresh nonce.
+  Koywe off-ramp order creation only checks availability: funding is the outgoing
+  operation that consumes the approval. Ambiguous broadcast outcomes do not
+  release an approval for another operation.
+- **Bank payouts and journeys**: a direct payout binds its immutable provider
+  instruction; an outgoing Infinia/Cobre journey binds its destination snapshot
+  and bridge quote. Approval consumption and instruction creation commit in one
+  database transaction, so a rejected Face check cannot leave a runnable payout
+  for a worker. Already-authorized journey legs complete under that instruction
+  without consuming another approval. Exact retries validate stored terms first.
+- **Limits of this control**: this is presence verification, not evidence of a
+  legitimate source of funds or customer intent. A cooperating verified holder
+  can still approve transactions. Third-party funding remains supported; this
+  change does not impose payer-name matching or change non-KYC/business exemptions.
+- **Identity recycling hold**: independently of the Face rollout flag, new
+  outgoing activity is restricted when a verified personal document matches an
+  actively banned account by issuing country, document type and normalized
+  number. Additional and soft-deleted verified documents count. Names, IPs and
+  device matches alone do not trigger this hold. Checks use live bans, including
+  bans created after KYC; expired/lifted bans cease to trigger it.
+  `SuspiciousActivity` cases with trigger `identity_reuse_active_ban` record each
+  match. To release one after manual review, enter investigation notes and use
+  the admin dismissal action, which records the reviewer. A generic duplicate
+  identity dismissal does not release it; a new ban or changed ban terms needs
+  another review. Business/merchant Face exemptions do not bypass this hold.
+  Login, reads, support, incoming funding and the independent emergency exit
+  remain available. Already-broadcast transactions cannot be undone by this gate.
+
+### Face release update gate (5.1.5)
+
+- Leave `FACE_STEP_UP_ENABLED=false` until **both** App Store and Google Play
+  distribute the Face-capable release. Supported 5.1.5+ clients enforce Face
+  even while this switch is off; the switch forces legacy clients to update.
+  Headers select rollout policy, never prove successful identity verification.
+  Before global enforcement, legacy/missing headers still follow legacy policy.
+- App opening uses a separate `app_unlock` Face purpose that cannot authorize
+  deposits or outgoing transactions. Each outgoing operation still consumes its
+  own approval. Non-KYC users skip additional Face authentication only after a
+  successful server eligibility response. Unknown/offline responses do not unlock
+  the normal app; a recovery-only route remains available from the lock screen.
+- Transaction and online account-action device prompts are replaced by Face.
+  Emergency Exit retains local device protection only on the server-independent
+  fallback, without a preceding device prompt on online Face routes. Its existing
+  eligibility/wait requirements remain; opening recovery does not authorize exit.
+  The fallback provisions and verifies its local guard on first use (not during
+  login), repairs confirmed permanent invalidation, and rejects concurrent
+  attempts. Resume unmounts Main before network checks; account switching waits
+  for the automatic check to finish, while recovery remains accessible.
+- Deploy the backend and `0016_face_app_unlock` migration before the app.
+- Once enabled, transaction GraphQL fields, Guardarian order creation and
+  money-moving WebSocket frames require `X-Confio-Platform`, `X-Confio-Version`,
+  `X-Confio-Build`, and `X-Confio-Face-Capable: 1`. Missing/malformed metadata
+  fails closed with `APP_UPDATE_REQUIRED` and a Spanish update message.
+- Defaults: `FACE_MIN_APP_VERSION=5.1.5`, `FACE_MIN_ANDROID_BUILD=157`,
+  `FACE_MIN_IOS_BUILD=1`. Build floors apply within the minimum marketing
+  version; later iOS releases can reset their build to 1. Confirm these values
+  match the uploaded binaries before enabling. No enforcement toggle is
+  changed by this code or by publishing an app build.
+- The GraphQL gate uses resolved schema field names, so aliases and misleading
+  operation names do not bypass it. WebSockets recheck on each financial frame,
+  including sockets opened before enablement. Reads, login, support, claim and
+  recovery routes are not globally blocked.
+- These headers are **untrusted compatibility hints**, never proof of liveness.
+  Existing backend Rekognition result grading, KYC/merchant exemptions, and
+  single-operation Face-grant claims remain the authorization controls.
+- Guardarian deposit orders also check and consume a fresh on-ramp Face
+  approval before contacting the provider. Ambiguous provider failures do not
+  release it. Sell checkout creation does not consume a withdrawal approval;
+  its signed funding transaction enforces that separately. The app retries
+  only an explicit Face rejection, once, after a successful Face check.
+- Old clients may still cancel expired P2P escrows or open disputes; these
+  recovery/support actions are exempt from the financial-frame update gate.
 
 ## Rejected: raw key export (Exportar claves)
 

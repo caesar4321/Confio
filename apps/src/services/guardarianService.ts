@@ -2,8 +2,8 @@ import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import appCheckService from './appCheckService';
-import DeviceInfo from 'react-native-device-info';
-import { Platform } from 'react-native';
+import { mobileClientHeaders } from './mobileClientHeaders';
+import { ensureFaceCheck, FaceCheckError, isFaceStepUpRequired, FACE_STEP_UP_MESSAGE } from './faceStepUp';
 
 export interface GuardarianTransactionParams {
   amount: number;
@@ -158,22 +158,27 @@ export async function createGuardarianTransaction(
 
   const headers = {
     'Content-Type': 'application/json',
-    'X-Confio-Platform': Platform.OS,
-    'X-Confio-Build': DeviceInfo.getBuildNumber(),
+    ...mobileClientHeaders(),
     'X-Confio-Fee-Capable': '1',
     ...(await getAuthHeaders()),
   };
 
-  const res = await fetch(PROXY_URL, {
+  const requestOrder = () => fetch(PROXY_URL, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
 
-  let data: any = null;
-  try {
-    data = await res.json();
-  } catch (parseErr) {
+  let res = await requestOrder();
+  let data: any = await res.json().catch(() => null);
+  if (res.status === 403 && isFaceStepUpRequired(data?.next_step)
+      && (data?.face_purpose === 'on_ramp' || data?.face_purpose === 'withdrawal')) {
+    if (!await ensureFaceCheck(data.face_purpose)) {
+      throw new FaceCheckError('cancelled', FACE_STEP_UP_MESSAGE);
+    }
+    // Retry only an explicit pre-provider Face rejection, never a timeout.
+    res = await requestOrder();
+    data = await res.json().catch(() => null);
   }
 
   if (!res.ok) {
