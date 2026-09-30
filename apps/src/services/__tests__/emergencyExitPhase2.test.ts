@@ -151,7 +151,7 @@ describe('confirmBannedExit', () => {
       await backend.complete('s-1');
       return true;
     });
-    await expect(confirmBannedExit(wallet, API, deps(fetchImpl, presentFace))).resolves.toEqual({ outcome: 'passed' });
+    await expect(confirmBannedExit(wallet, API, deps(fetchImpl, presentFace))).resolves.toEqual({ outcome: 'passed', faceChecked: true });
     expect(calls[0].body).toEqual({ address: wallet.address.toLowerCase() });
     expect(calls[1].body).toEqual({ address: wallet.address.toLowerCase(), nonce: 'n-1', signature: 'sig(sign me)' });
     expect(calls[1].headers['X-Firebase-AppCheck']).toBe('app-check-token');
@@ -184,7 +184,7 @@ describe('confirmBannedExit', () => {
 
   it('passes without a face while the server does not enforce it', async () => {
     const { fetchImpl } = serverWith({ success: true, banned: true, faceRequired: false, token: '' });
-    await expect(confirmBannedExit(wallet, API, deps(fetchImpl))).resolves.toEqual({ outcome: 'passed' });
+    await expect(confirmBannedExit(wallet, API, deps(fetchImpl))).resolves.toEqual({ outcome: 'passed', faceChecked: false });
   });
 
   it('fails closed when Confío cannot be reached', async () => {

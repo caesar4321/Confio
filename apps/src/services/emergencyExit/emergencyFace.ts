@@ -16,7 +16,7 @@ import type { FaceCheckBackend, FaceCheckGrade, FaceCheckStart } from '../faceSt
 
 export type BannedExitOutcome =
   /** Face passed, or the server does not ask for one: the exit may run. */
-  | { outcome: 'passed' }
+  | { outcome: 'passed'; faceChecked: boolean }
   /** The server says this account is not banned: use the normal route. */
   | { outcome: 'not_banned' }
   /** Banned with no KYC selfie to compare against: the normal waiting period applies. */
@@ -99,7 +99,7 @@ export const confirmBannedExit = async (
   if (!session?.success) return { outcome: 'failed', message: session?.error || NETWORK_MESSAGE };
   if (!session.banned) return { outcome: 'not_banned' };
   if (session.waitRequired) return { outcome: 'wait' };
-  if (!session.faceRequired) return { outcome: 'passed' };
+  if (!session.faceRequired) return { outcome: 'passed', faceChecked: false };
 
   const backend: FaceCheckBackend = {
     start: async (): Promise<FaceCheckStart> =>
@@ -108,5 +108,5 @@ export const confirmBannedExit = async (
       post('/api/emergency-exit/face/complete/', { token: session.token, sessionId }),
   };
   const passed = await (deps.presentFace ?? defaultPresentFace)(backend);
-  return passed ? { outcome: 'passed' } : { outcome: 'failed', message: FACE_FAILED_MESSAGE };
+  return passed ? { outcome: 'passed', faceChecked: true } : { outcome: 'failed', message: FACE_FAILED_MESSAGE };
 };

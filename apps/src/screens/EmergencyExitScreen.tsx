@@ -294,8 +294,48 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
   const eligible = !!elig?.eligible;
   const offline = es?.state === 'offline';
 
+  /**
+   * Confío Face for the normal route, asked twice: when the wait starts and
+   * again before anything is sent. 'not_asked' when enforcement is off or
+   * the user never did KYC (nothing to compare against).
+   */
+  const confirmExitFace = async (): Promise<'passed' | 'not_asked' | 'failed'> => {
+    const status = await fetchFaceStepUpStatus();
+    // An unreadable status must use the same face-or-wait path; only an
+    // explicit disabled / not-required response skips it.
+    if (status?.enabled === false || status?.required === false) return 'not_asked';
+    // startFaceCheck for the exit requires App Check, and the GraphQL link
+    // only attaches a token already cached: fetch one first.
+    try {
+      const { appCheckService } = await import('../services/appCheckService');
+      await appCheckService.waitForToken();
+    } catch { /* the server's answer says what failed */ }
+    return (await ensureFaceCheck('emergency_exit')) ? 'passed' : 'failed';
+  };
+
   const startCooloff = async () => {
-    // Starting a waiting period does not move funds or unlock the app.
+    // Starting a waiting period does not move funds or unlock the app, but a
+    // ring should learn now, not in 72 hours, that the holder must show up.
+    // Never a veto: the wait may start anyway, and the face is asked again
+    // before sending ('blocked' cannot reach the check at all, so it only
+    // meets that second ask).
+    if (es?.state === 'normal' && (await confirmExitFace()) === 'failed') {
+      Alert.alert(
+        'Confío Face no confirmado',
+        'Puedes iniciar la espera igual. Al terminar te pediremos tu rostro de nuevo; si no se confirma, la salida necesitará una segunda espera de 72 horas.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Iniciar espera',
+            onPress: async () => {
+              await requestExitCooloff(emergencyStore, accountKey);
+              await evaluate();
+            },
+          },
+        ],
+      );
+      return;
+    }
     await requestExitCooloff(emergencyStore, accountKey);
     await evaluate();
   };
@@ -347,6 +387,11 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
         Alert.alert('No se puede continuar', outcome.message);
         return;
       }
+      if (outcome.outcome === 'wait' || (outcome.outcome === 'passed' && !outcome.faceChecked)) {
+        // No face was checked (none on file, or not enforced): the phone's
+        // own biometric is the only authentication left.
+        if (!(await biometricAuthService.authenticateEmergencyExit('Confirmar salida de emergencia (BNB Smart Chain)'))) return;
+      }
     } else if ((es?.state === 'normal' || es?.state === 'blocked') && !(await hasFaceWaiver(emergencyStore, accountKey))) {
       // The normal route also asks for Confío Face (while the server
       // enforces it): a ring holding someone else's account must bring them
@@ -355,25 +400,13 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
       // wait. 'blocked' (Confío hidden from this phone, up per the outage
       // Worker) cannot reach the face check at all, so it goes straight to
       // that choice.
-      let faceOk = false;
-      if (es.state === 'normal') {
-        const status = await fetchFaceStepUpStatus();
-        // An unreadable status must use the same face-or-wait path; only an
-        // explicit disabled response skips it.
-        // Nor is it asked of users who never did KYC (there is no face to
-        // check): for them the waiting period is the whole normal route.
-        if (status?.enabled !== false && status?.required !== false) {
-          // startFaceCheck for the exit requires App Check, and the GraphQL
-          // link only attaches a token already cached: fetch one first.
-          try {
-            const { appCheckService } = await import('../services/appCheckService');
-            await appCheckService.waitForToken();
-          } catch { /* the server's answer says what failed */ }
-        }
-        faceOk = status?.enabled === false || status?.required === false
-          || (await ensureFaceCheck('emergency_exit'));
+      const face = es.state === 'normal' ? await confirmExitFace() : 'failed';
+      if (face === 'not_asked') {
+        // No face to check: the phone's own biometric is the only
+        // authentication left, so it is never skipped here.
+        if (!(await biometricAuthService.authenticateEmergencyExit('Confirmar salida de emergencia (BNB Smart Chain)'))) return;
       }
-      if (!faceOk) {
+      if (face === 'failed') {
         Alert.alert(
           'Salida sin Confío Face',
           es.state === 'blocked'
