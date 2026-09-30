@@ -1,0 +1,79 @@
+// Vendored AWS Amplify UI Android Liveness 1.5.0 (see CONFIO_PATCH.md).
+// Mirrors upstream's convention plugins: same dependencies and versions as
+// the published com.amplifyframework.ui:liveness:1.5.0 POM.
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "org.jetbrains.kotlin.plugin.compose"
+apply plugin: "org.jetbrains.kotlin.plugin.serialization"
+
+android {
+    namespace "com.amplifyframework.ui.liveness"
+    compileSdk rootProject.ext.compileSdkVersion
+    ndkVersion rootProject.ext.ndkVersion
+
+    defaultConfig {
+        minSdkVersion 24
+        consumerProguardFiles "consumer-rules.pro"
+        // Reported to AWS with each session; stays the upstream version.
+        buildConfigField "String", "LIVENESS_VERSION_NAME", "\"1.5.0\""
+        buildConfigField "String", "VERSION_NAME", "\"1.5.0\""
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+        compose true
+    }
+
+    androidResources {
+        noCompress "tflite"
+    }
+
+    // Java/Kotlin toolchain (17) is set on every module by the React Native plugin.
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+    }
+}
+
+// Same opt-ins as upstream's ComponentConventionPlugin: the library uses
+// Amplify-internal APIs of the matching aws-api/aws-predictions version.
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions {
+        freeCompilerArgs += [
+            "-opt-in=com.amplifyframework.annotations.InternalApiWarning",
+            "-opt-in=com.amplifyframework.annotations.InternalAmplifyApi",
+        ]
+    }
+}
+
+dependencies {
+    implementation platform("androidx.compose:compose-bom:2025.03.01")
+
+    api "com.amplifyframework:aws-api:2.29.0"
+    api "com.amplifyframework:aws-predictions:2.29.0"
+
+    implementation "androidx.camera:camera-core:1.4.2"
+    implementation "androidx.camera:camera-camera2:1.4.2"
+    implementation "androidx.camera:camera-lifecycle:1.4.2"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.ui:ui-tooling"
+
+    implementation "androidx.concurrent:concurrent-futures:1.1.0"
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.4.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.3"
+    implementation "org.tensorflow:tensorflow-lite:2.0.0"
+    implementation "org.tensorflow:tensorflow-lite-support:0.3.0"
+
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
+}
