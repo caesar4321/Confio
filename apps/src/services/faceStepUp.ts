@@ -194,8 +194,19 @@ const graphqlBackend: FaceCheckBackend = {
   },
 };
 
-/** The GraphQL backend, opening the session with the movement it is for. */
-export const movementBackend = (movement: FaceCheckMovement): FaceCheckBackend => ({
+/**
+ * The GraphQL backend, opening the session with the movement it is for.
+ * The same movement returns the same backend object: FaceCheckProvider joins
+ * a second request to the open check only when its backend is identical.
+ */
+let lastMovement: { key: string; backend: FaceCheckBackend } | null = null;
+export const movementBackend = (movement: FaceCheckMovement): FaceCheckBackend => {
+  const key = JSON.stringify([String(movement.amount), movement.tokenType, movement.leavesConfio]);
+  if (lastMovement?.key !== key) lastMovement = { key, backend: buildMovementBackend(movement) };
+  return lastMovement.backend;
+};
+
+const buildMovementBackend = (movement: FaceCheckMovement): FaceCheckBackend => ({
   async start(purpose) {
     await primeAppCheck();
     const { apolloClient } = await import('../apollo/client');
