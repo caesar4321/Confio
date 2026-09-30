@@ -490,7 +490,9 @@ def purge_expired_evidence(batch=500) -> int:
     """
     from .models import SuspiciousActivity, UserBan
     cutoff = timezone.now() - EVIDENCE_RETENTION
-    open_cases = SuspiciousActivity.objects.exclude(status='dismissed')
+    # all_objects, like the bans: a soft-deleted case is still on record, and
+    # purged frames cannot be restored with it.
+    open_cases = SuspiciousActivity.all_objects.exclude(status='dismissed')
     eligible = FaceCheck.objects.filter(
         Q(completed_at__lt=cutoff) | Q(completed_at__isnull=True, created_at__lt=cutoff),
         evidence_purged_at__isnull=True,
