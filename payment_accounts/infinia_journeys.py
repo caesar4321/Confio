@@ -103,6 +103,9 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
             raise PaymentAccountError('An unspent local deposit credit is required')
         from .payin_admission import require_admitted
         require_admitted(credit)
+        # Held pay-ins (Confío Face) and pay-ins being returned convert by no path.
+        from .payin_hold import require_conversion_allowed
+        require_conversion_allowed(owner, credit)
     validate_accounts(owner, local_account, crypto_account, snapshot['country'])
     source, target = (crypto_account, local_account) if direction == 'to_bank' else (local_account, crypto_account)
     _require_capability(source, 'convert')

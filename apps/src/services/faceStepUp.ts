@@ -14,7 +14,7 @@
 import { gql } from '@apollo/client';
 import { NativeModules } from 'react-native';
 
-export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'emergency_exit';
+export type FaceCheckPurpose = 'on_ramp' | 'withdrawal' | 'emergency_exit' | 'payin_release';
 export type FaceCaptureOutcome = 'passed' | 'failed' | 'cancelled' | 'unavailable';
 
 // Mirrors security/face_step_up.py. The server sends this exact text when a

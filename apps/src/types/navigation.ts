@@ -47,6 +47,7 @@ export type MainStackParamList = {
   Send: undefined;
   Discover: undefined;
   LocalTransferStatus: { journeyId?: string } | undefined;
+  PendingIncoming: undefined;
   LocalLimitIncrease: undefined;
   AdditionalDocument: { idCountry?: string; documentTypes?: string[]; reason?: string } | undefined;
   LocalAccountApplication: { methodId: string };

@@ -39,6 +39,7 @@ import LocalAccountFundingScreen from '../screens/LocalAccountFundingScreen';
 import LocalSendScreen from '../screens/LocalSendScreen';
 import LocalReceiveScreen from '../screens/LocalReceiveScreen';
 import LocalTransferStatusScreen from '../screens/LocalTransferStatusScreen';
+import PendingIncomingScreen from '../screens/PendingIncomingScreen';
 import LocalLimitIncreaseScreen from '../screens/LocalLimitIncreaseScreen';
 import AdditionalDocumentScreen from '../screens/AdditionalDocumentScreen';
 import LocalAccountApplicationScreen from '../screens/LocalAccountApplicationScreen';
@@ -298,6 +299,7 @@ export const MainNavigator = () => {
         <Stack.Screen name="Discover" component={DiscoverEntryScreen} />
         <Stack.Screen name="Employees" component={EmployeesScreen} options={{ headerShown: true, title: 'Empleados' }} />
         <Stack.Screen name="LocalTransferStatus" component={LocalTransferStatusScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="PendingIncoming" component={PendingIncomingScreen} options={{ headerShown: false }} />
         <Stack.Screen name="LocalLimitIncrease" component={LocalLimitIncreaseScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AdditionalDocument" component={AdditionalDocumentScreen} options={{ headerShown: false }} />
         <Stack.Screen name="LocalAccountApplication" component={LocalAccountApplicationScreen} options={{ headerShown: false }} />

@@ -329,6 +329,24 @@ class InfiniaClient(BaseProviderClient):
         return self.request('GET', f'/v1/bank-account-validation/{validation_id}/',
                             timeout=getattr(settings, 'LOCAL_MONEY_VALIDATION_TIMEOUT_SECONDS', 8))
 
+    def refund_deposit(self, *, movement_id, idempotency_key, description=''):
+        """Return a credited deposit, in full, to its payer on the same rail.
+
+        No amount field exists: Infinia refunds the whole movement. A SUCCESS can
+        still turn FAILED later (callback / list), so poll until final.
+        """
+        payload = {'movement_id': int(movement_id), 'idempotency_key': idempotency_key}
+        if description:
+            payload['description'] = description
+        return self.request('POST', '/v1/accounts/movements/refund/', payload=payload)
+
+    def find_deposit_refund(self, idempotency_key):
+        rows = self.request('GET', '/v1/accounts/movements/refund/',
+                            params={'idempotency_key': idempotency_key, 'page_size': 5})
+        if isinstance(rows, dict):
+            rows = rows.get('results') or rows.get('items') or rows.get('data') or []
+        return next((row for row in rows or [] if row.get('idempotency_key') == idempotency_key), None)
+
     def find_operation(self, operation_type, idempotency_key):
         if operation_type == 'payout':
             path, params = '/v2/payouts/', {'origin_id': idempotency_key}

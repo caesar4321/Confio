@@ -106,8 +106,9 @@ export async function createInfiniaJourney(variables: Record<string, unknown>) {
   const {withBrebLocationRetry} = await import('./brebLocation');
   const {isFaceStepUpRequired, withFaceStepUp} = await import('./faceStepUp');
   // A new bank withdrawal needs Confío Face; show it and try once more.
+  // Receiving a held deposit asks for the receive face; sending to a bank, the withdrawal one.
   const result = await withFaceStepUp(
-    'withdrawal',
+    variables.direction === 'to_wallet' ? 'payin_release' : 'withdrawal',
     () => withBrebLocationRetry(async () => {
       const response = await apolloClient.mutate({mutation: CREATE_JOURNEY, variables});
       return response.data?.createInfiniaJourney;

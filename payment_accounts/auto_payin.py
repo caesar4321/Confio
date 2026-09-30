@@ -14,9 +14,19 @@ def has_unallocated_debit(entry):
     require review, rather than assuming a pooled provider balance is safe.
     """
     checked = set()
+    from .payin_hold import is_own_refund_debit, refund_debit_unnamed
+    from .services import PaymentAccountError
     for debit in LedgerEntry.objects.filter(financial_account=entry.financial_account,
             direction='debit', occurred_at__gte=entry.occurred_at).select_related('operation'):
         op = debit.operation
+        # Webhooks give every uncorrelated debit an unsolicited operation with
+        # no provider id; our deposit refunds arrive exactly that way.
+        if not op or not op.provider_operation_id:
+            if is_own_refund_debit(debit):
+                continue  # our 24h return of another held deposit, not spending of this one
+            if refund_debit_unnamed(entry.financial_account_id):
+                # Retryable: stays pending until Infinia names the refund's debit.
+                raise PaymentAccountError('Waiting for a refund debit to be identified')
         if not op or not op.provider_operation_id:
             return True
         if op.pk in checked:
@@ -79,6 +89,8 @@ def process(pk):
     from .local_money import deposit_quote, _active_pair
     from .infinia_journeys import create_journey, enabled
     enabled()
+    from .payin_hold import record_open_consent
+    record_open_consent(pk)
     # Owner lock is shared with manual creation; no quote creates economic legs.
     # The periodic worker retries unavailable quotes and pending reservations.
     with transaction.atomic():
@@ -98,18 +110,28 @@ def process(pk):
             row.status, row.reason = 'review', 'not_external_payin'
         else:
             from .services import require_unreserved_source
-            # A debit can arrive before its conversion completion event. Wait
-            # for the existing owner of those funds before evaluating proof;
-            # an in-flight receipt must not become a permanent review hold.
-            require_unreserved_source('infinia', account, None)
-            if has_unallocated_debit(entry):
-                row.status, row.reason = 'review', 'subsequent_debit_requires_review'
-                row.save(update_fields=['status', 'reason', 'updated_at'])
-                return row
+            from .payin_hold import hold, needs_face
+            # Personal pay-in awaiting Confío Face: parked (and visible, on its
+            # 24h clock) even while another journey holds the account. The
+            # reservation and debit checks run when the face releases it.
+            held = needs_face(owner) and not row.released_at
+            if not held:
+                # A debit can arrive before its conversion completion event. Wait
+                # for the existing owner of those funds before evaluating proof;
+                # an in-flight receipt must not become a permanent review hold.
+                require_unreserved_source('infinia', account, None)
+                if has_unallocated_debit(entry):
+                    row.status, row.reason = 'review', 'subsequent_debit_requires_review'
+                    row.save(update_fields=['status', 'reason', 'updated_at'])
+                    return row
             sync_verified_rail(account)
             admission = assess(entry)
             if not admission or not admission.allowed:
                 row.reason = admission.reason if admission else 'admission_missing'
+            elif held:
+                # Personal pay-in: waits for Confío Face before any quote or
+                # conversion (docs/plans/infinia-payin-face-hold.md).
+                hold(row, owner)
             else:
                 local, crypto = _active_pair(owner, account.country, account.asset)
                 require_unreserved_source('infinia', local, None)
@@ -123,7 +145,7 @@ def process(pk):
                     automatic_payin=True, automatic_payin_policy='quoted-minima-v1')
                 journey.money_flow.save(update_fields=['metadata'])
                 row.status, row.reason = 'started', ''
-        row.save(update_fields=['status', 'reason', 'updated_at'])
+        row.save(update_fields=['status', 'reason', 'awaiting_since', 'updated_at'])
         return row
 
 
@@ -140,3 +162,11 @@ def reconcile(limit=50):
             AutomaticPayin.objects.filter(pk=pk, status='pending').update(reason='waiting_for_safe_quote_or_account')
         finally:
             AutomaticPayin.objects.filter(pk=pk).update(updated_at=timezone.now())
+    # Held pay-ins: release those whose person has an open face window, and
+    # return the ones nobody confirmed within 24 hours.
+    from . import payin_hold
+    for step in (payin_hold.release_open_windows, payin_hold.start_expired_returns, payin_hold.sync_returns):
+        try:
+            step(limit)
+        except Exception:
+            logger.exception('Held pay-in step failed: %s', step.__name__)

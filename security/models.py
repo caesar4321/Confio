@@ -1324,6 +1324,7 @@ class FaceCheck(models.Model):
         ('on_ramp', 'Deposit order'),
         ('withdrawal', 'Withdrawal'),
         ('emergency_exit', 'Emergency exit'),
+        ('payin_release', 'Receive held pay-in'),
     ]
     STATUS_CHOICES = [
         ('created', 'Created'),
