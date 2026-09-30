@@ -260,8 +260,12 @@ step-up release). Decided by Julian on 2026-09-29.
   much as to an external address, needs a recent Confío Face (15-minute
   window). Phone invites (money escrowed for a phone that is not on Confío
   yet) are sends too and take the same gate. Business senders and the
-  server-only activation fee stay exempt. Open: merchant/invoice payments
-  (`payments/bsc_flow.py`) do not ask for a face yet.
+  server-only activation fee stay exempt.
+- **Pay** (`payments/bsc_flow.py`, risk-based so checkout stays one tap):
+  paying a KYB-verified merchant never asks. A KYC'd payer is asked for
+  Confío Face only when paying a business they own or work for (soft-deleted
+  employee records count) or one that never passed KYB — the two ways a ring
+  would pool money through Pay. Business payers stay exempt.
 
 ## Rejected: raw key export (Exportar claves)
 
