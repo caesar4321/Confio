@@ -93,6 +93,10 @@
 	<string>Confío necesita usar NFC para leer chips de pasaportes o documentos compatibles durante la verificación.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need access to your microphone for video recording</string>
+	<!-- Face Liveness links AWSPredictionsPlugin, including unused Speech APIs.
+	     This declaration does not request authorization or enable transcription. -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Confío no utiliza reconocimiento de voz ni transcribe tu audio. Esta declaración se incluye porque el SDK utilizado para la verificación facial contiene funciones de reconocimiento de voz que Confío no activa.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>We need access to save QR codes to your photo library</string>
 	<key>NSContactsUsageDescription</key>
@@ -108,6 +112,10 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Confío usa tu ubicación precisa para verificar que puedes activar y usar Bre-B desde tu ubicación actual. No rastreamos tu ubicación en segundo plano.</string>
+	<!-- The linked geolocation SDK references Always authorization. Confío's
+	     Bre-B flow requests WhenInUse only; do not enable background location. -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Confío usa tu ubicación únicamente mientras usas la app para verificar la disponibilidad de Bre-B. No solicitamos acceso permanente ni rastreamos tu ubicación en segundo plano.</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string>A0000002471001</string>
