@@ -134,13 +134,27 @@ export interface FaceCheckBackend {
   complete(sessionId: string): Promise<FaceCheckGrade | undefined>;
 }
 
+/**
+ * The server records the App Check verdict (Play Integrity / App Attest) of
+ * every face check. The GraphQL link only attaches a token already cached,
+ * so fetch one first; a failure just means the check is recorded without one.
+ */
+const primeAppCheck = async (): Promise<void> => {
+  try {
+    const { appCheckService } = await import('./appCheckService');
+    await appCheckService.waitForToken();
+  } catch { /* recorded as missing; never blocks the check */ }
+};
+
 const graphqlBackend: FaceCheckBackend = {
   async start(purpose) {
+    await primeAppCheck();
     const { apolloClient } = await import('../apollo/client');
     const { data } = await apolloClient.mutate({ mutation: START, variables: { purpose } });
     return data?.startFaceCheck;
   },
   async complete(sessionId) {
+    await primeAppCheck();
     const { apolloClient } = await import('../apollo/client');
     const { data } = await apolloClient.mutate({ mutation: COMPLETE, variables: { sessionId } });
     return data?.completeFaceCheck;

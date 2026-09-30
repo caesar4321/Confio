@@ -482,6 +482,12 @@ class VerifyAppCheck(graphene.Mutation):
             )
 
 
+def _app_check_header(info) -> str:
+    request = getattr(info, 'context', None)
+    headers = getattr(request, 'headers', None)
+    return (headers.get('X-Firebase-AppCheck', '') if headers is not None else '') or ''
+
+
 class StartFaceCheck(graphene.Mutation):
     """Open a liveness session and hand the app single-action credentials."""
 
@@ -502,18 +508,9 @@ class StartFaceCheck(graphene.Mutation):
         user = getattr(info.context, 'user', None)
         if not (user and user.is_authenticated):
             return StartFaceCheck(success=False, error='Authentication required')
-        if purpose == 'emergency_exit':
-            # The exit is signed and broadcast by the app, so its face check is
-            # the last server-side gate: require a genuine app on a genuine
-            # device (Play Integrity / App Attest via App Check).
-            from .emergency_exit import APP_CHECK_ACTION, DEVICE_MESSAGE
-            from .integrity_service import app_check_service
-            app_check = app_check_service.verify_request_header(
-                info.context, APP_CHECK_ACTION, should_enforce=True)
-            if not app_check.get('success'):
-                return StartFaceCheck(success=False, error=DEVICE_MESSAGE)
         try:
-            data = start_face_check(user, purpose)
+            # App Check is recorded on the FaceCheck, never enforced here.
+            data = start_face_check(user, purpose, app_check_token=_app_check_header(info))
         except FaceStepUpError as exc:
             return StartFaceCheck(success=False, error=str(exc))
         except Exception:
@@ -538,7 +535,7 @@ class CompleteFaceCheck(graphene.Mutation):
         if not (user and user.is_authenticated):
             return CompleteFaceCheck(success=False, passed=False, error='Authentication required')
         try:
-            passed = complete_face_check(user, session_id)
+            passed = complete_face_check(user, session_id, app_check_token=_app_check_header(info))
         except FaceStepUpError as exc:
             return CompleteFaceCheck(success=False, passed=False, error=str(exc))
         except Exception:

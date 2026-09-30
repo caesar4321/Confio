@@ -174,9 +174,10 @@ def _session_user(token: str):
 
 def start_face(token: str, app_check_token: str) -> dict:
     user = _session_user(token)
-    _require_app_check(user, app_check_token)
     try:
-        data = start_face_check(user, 'emergency_exit')
+        # App Check is recorded on the FaceCheck, never enforced (like every
+        # Rekognition call); the session step above keeps its own check.
+        data = start_face_check(user, 'emergency_exit', app_check_token=app_check_token or '')
     except FaceStepUpError as exc:
         raise EmergencyExitError(str(exc)) from None
     # Only the liveness session opened here may be graded for this exit: an
@@ -189,9 +190,9 @@ def start_face(token: str, app_check_token: str) -> dict:
     return data
 
 
-def complete_face(token: str, session_id: str) -> bool:
+def complete_face(token: str, session_id: str, app_check_token: str = '') -> bool:
     """Pass/fail; raises FaceStepUpPending while AWS is still processing."""
     user = _session_user(token)
     if not isinstance(session_id, str) or not session_id or cache.get(_face_key(token)) != session_id:
         raise EmergencyExitError(EXPIRED_MESSAGE)
-    return complete_face_check(user, session_id)
+    return complete_face_check(user, session_id, app_check_token=app_check_token or '')

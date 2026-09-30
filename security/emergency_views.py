@@ -93,7 +93,7 @@ def emergency_exit_face_start(request):
 def emergency_exit_face_complete(request):
     data = _body(request)
     try:
-        passed = complete_face(data.get('token'), data.get('sessionId'))
+        passed = complete_face(data.get('token'), data.get('sessionId'), _app_check(request))
     except FaceStepUpPending as exc:
         # Same contract as completeFaceCheck: success=false with the pending text; retry.
         return JsonResponse({'success': False, 'passed': False, 'error': str(exc)}, status=202)

@@ -304,12 +304,7 @@ export const EmergencyExitScreen: React.FC<{ onClose?: () => void }> = ({ onClos
     // An unreadable status must use the same face-or-wait path; only an
     // explicit disabled / not-required response skips it.
     if (status?.enabled === false || status?.required === false) return 'not_asked';
-    // startFaceCheck for the exit requires App Check, and the GraphQL link
-    // only attaches a token already cached: fetch one first.
-    try {
-      const { appCheckService } = await import('../services/appCheckService');
-      await appCheckService.waitForToken();
-    } catch { /* the server's answer says what failed */ }
+    // (The face check fetches an App Check token itself; see faceStepUp.ts.)
     return (await ensureFaceCheck('emergency_exit')) ? 'passed' : 'failed';
   };
 
