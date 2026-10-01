@@ -2303,6 +2303,12 @@ export const AccountDetailScreen = () => {
         contentContainerStyle={filteredTransactions.length === 0 ? styles.emptyListContainer : undefined}
         ListHeaderComponent={() => (
           <>
+            {/* The gap the removed action-button row used to give, for whichever
+                section comes first. The employee note keeps that slot and its
+                own bottom margin, so no extra gap after it. */}
+            {!(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds) && (
+              <View style={styles.listHeaderTopSpacing} />
+            )}
             {/* USDC Balance Section (Gestión Avanzada) - commented out: USDC is auto-converted to cUSD */}
             {/* {route.params.accountType === 'cusd' && usdcAccount && (
               <View style={styles.usdcSection}>
@@ -2755,6 +2761,7 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     marginBottom: 4,
   },
+  listHeaderTopSpacing: { height: 16 },
   partnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
