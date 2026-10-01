@@ -20,6 +20,7 @@ import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge, TierProgress } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
+import DeviceInfo from 'react-native-device-info';
 import { Button } from '../components/common/Button';
 import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 
@@ -975,9 +976,14 @@ export const ProfileScreen = () => {
           variant="ghost"
           onPress={signOut}
           accessibilityLabel="Cerrar sesión"
-          style={{ marginTop: 16, marginBottom: 32 }}
+          style={{ marginTop: 16, marginBottom: 8 }}
           textStyle={{ color: colors.danger, fontWeight: '500' }}
         />
+
+        {/* For support: the same version/build the app reports to the server. */}
+        <Text style={styles.appVersion} selectable accessibilityLabel={`Versión de Confío ${DeviceInfo.getVersion()}`}>
+          Confío {DeviceInfo.getVersion()} ({DeviceInfo.getBuildNumber()})
+        </Text>
       </ScrollView>
       <ReferralInputModal
         visible={showReferralModal}
@@ -1009,6 +1015,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.white,
+  },
+  appVersion: {
+    textAlign: 'center',
+    fontSize: 12,
+    color: colors.text.light,
+    marginBottom: 32,
   },
   scrollContent: {
     flexGrow: 1,
