@@ -237,14 +237,31 @@ def _send_step_up(user, sender_business, activation_id, **claim) -> str:
     return require_face_step_up(user, 'withdrawal', **claim)
 
 
-def _send_face_terms(amount, token_type, recipient_user_id, recipient_business_id) -> dict:
+def _routes_to_own_business(user, recipient_business_id) -> bool:
+    """The sender owns or works (or worked) for the recipient business.
+
+    A business account sends without Confío Face, so a personal send into
+    the sender's own or employer business is the first hop out, not a
+    movement inside Confío. Soft-deleted records count, as in Pay.
+    """
+    if recipient_business_id is None:
+        return False
+    from users.models import Account
+    from users.models_employee import BusinessEmployee
+    return (Account.all_objects.filter(business_id=recipient_business_id, user=user).exists()
+            or BusinessEmployee.all_objects.filter(business_id=recipient_business_id, user=user).exists())
+
+
+def _send_face_terms(user, amount, token_type, recipient_user_id, recipient_business_id) -> dict:
     """What decides a light or full Confío Face for a send
     (security.face_step_up.required_challenge): its dollar value and whether
-    it leaves Confío (no Confío account behind the recipient address)."""
+    it leaves Confío: no Confío account behind the recipient address, or a
+    business of the sender's own that can send on without a face."""
     from security.face_step_up import dollar_amount
     return {
         'amount_usd': dollar_amount(amount, token_type),
-        'cash_out': recipient_user_id is None and recipient_business_id is None,
+        'cash_out': (recipient_user_id is None and recipient_business_id is None)
+                    or _routes_to_own_business(user, recipient_business_id),
     }
 
 
@@ -402,7 +419,7 @@ def prepare_bsc_send(user, jwt_ctx, amount, recipient_user_id=None,
     # send; submission still validates/claims that operation's approval.
     # Every non-CONFIO shape moves `amount_usd` dollars.
     step_up = _send_step_up(user, sender_business, activation_id, **_send_face_terms(
-        amount_usd, 'CONFIO' if requested == 'CONFIO' else 'USDT',
+        user, amount_usd, 'CONFIO' if requested == 'CONFIO' else 'USDT',
         recipient_user.id if recipient_user else None,
         recipient_business.id if recipient_business else None))
     if step_up:
@@ -1017,7 +1034,7 @@ def submit_bsc_send(user, send_tx, nonce, deadline, intent_signature,
     # not leave once the face window has lapsed.
     from security.face_step_up import withdrawal_action_key
     face_action = withdrawal_action_key('send', send_tx.id, [chain_id, sender_addr, kind, calls])
-    face_terms = _send_face_terms(send_tx.amount, send_tx.token_type,
+    face_terms = _send_face_terms(user, send_tx.amount, send_tx.token_type,
                                   send_tx.recipient_user_id, send_tx.recipient_business_id)
     step_up = _send_step_up(user, send_tx.sender_business, meta.get('activation_id'), action_key=face_action,
                             **face_terms)

@@ -129,7 +129,7 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.6.0',
+    'version': '1.6.1',
     'last_updated': '2026-09-30',
     'is_legally_binding': True,
     'sections': [
@@ -201,7 +201,7 @@ PRIVACY = {
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
                 'Investigar y prevenir abusos, por ejemplo cuando otra persona intenta verificarse en nombre del titular de la cuenta',
-                'Confirmar con su rostro que es usted, y no otra persona con acceso a su cuenta, antes de operaciones sensibles: recargas, retiros, envíos y pagos según su nivel de riesgo, recibir transferencias bancarias en cuentas personales y la salida de emergencia',
+                'Confirmar con su rostro que es usted, y no otra persona con acceso a su cuenta, antes de operaciones sensibles: recargas, retiros, envíos y pagos según su nivel de riesgo, recibir transferencias bancarias en cuentas personales, autorizar nóminas y la salida de emergencia',
                 'Cumplir con requisitos de KYC/AML',
                 'Determinar la elegibilidad geográfica de funciones sujetas a reglas de emisores terceros, usando el país de su número de teléfono verificado y, cuando corresponde, el país estimado a partir de su dirección IP',
                 'Confirmar que Bre-B está disponible en su ubicación al solicitarlo y al usarlo, mediante la ubicación precisa del dispositivo en ese momento, la verificación de integridad de la app (Apple o Google) y el país de su dirección IP',
@@ -253,7 +253,7 @@ PRIVACY = {
                 'Conservamos datos personales, transaccionales, de seguridad y de soporte durante el tiempo necesario para prestar el servicio, proteger la plataforma y cumplir con obligaciones legales o regulatorias',
                 'Los datos KYC/AML y los registros vinculados a transacciones pueden conservarse por el tiempo requerido por la regulación aplicable, incluyendo al menos 5 años después de la última transacción cuando corresponda',
                 'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales',
-                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de cada verificación, aprobada o rechazada, se eliminan a los 12 meses, porque los reportes de fraude y las consultas de socios y autoridades suelen llegar meses después de la operación. Si su cuenta tiene o ha tenido una sanción, o está vinculada a un caso de fraude o cumplimiento que no haya sido descartado (incluido un requerimiento de un socio o de una autoridad), sus imágenes se conservan junto con sus datos KYC para investigar el caso. Confío no conserva el video',
+                'Conservamos su imagen de referencia junto con sus datos KYC y por el mismo plazo. El resultado de cada verificación con su rostro se conserva como registro de seguridad y auditoría. Las imágenes de cada verificación, aprobada o rechazada, se eliminan a los 12 meses, porque los reportes de fraude y las consultas de socios y autoridades suelen llegar meses después de la operación. Si su cuenta tiene o ha tenido una sanción, o está vinculada a un caso o una alerta de fraude o cumplimiento que no haya sido descartado, incluidas las alertas automáticas de nuestros sistemas de seguridad y los requerimientos de un socio o de una autoridad, sus imágenes se conservan junto con sus datos KYC para investigar el caso. Confío no conserva el video',
                 'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano'
             ]
         },

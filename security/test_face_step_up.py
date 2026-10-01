@@ -774,10 +774,30 @@ class FaceChallengeLevelTests(TestCase):
 
     def test_send_terms(self):
         from send.bsc_flow import _send_face_terms
-        self.assertEqual(_send_face_terms(fsu.Decimal('20'), 'CUSD', 7, None),
+        self.assertEqual(_send_face_terms(self.user, fsu.Decimal('20'), 'CUSD', 7, None),
                          {'amount_usd': fsu.Decimal('20'), 'cash_out': False})
-        self.assertEqual(_send_face_terms(fsu.Decimal('20'), 'USDT', None, None)['cash_out'], True)
-        self.assertIsNone(_send_face_terms(fsu.Decimal('20'), 'CONFIO', 7, None)['amount_usd'])
+        self.assertEqual(_send_face_terms(self.user, fsu.Decimal('20'), 'USDT', None, None)['cash_out'], True)
+        self.assertIsNone(_send_face_terms(self.user, fsu.Decimal('20'), 'CONFIO', 7, None)['amount_usd'])
+
+    def test_a_send_into_the_senders_own_or_employer_business_is_never_light(self):
+        # A business sends on without a face: that hop leaves the holder's control.
+        from send.bsc_flow import _send_face_terms
+        from users.models import Account, Business
+        from users.models_employee import BusinessEmployee
+        own = Business.objects.create(name='Mi tienda')
+        Account.objects.create(user=self.user, account_type='business', business=own)
+        employer = Business.objects.create(name='Mi empleador')
+        BusinessEmployee.objects.create(user=self.user, business=employer, role='cashier')
+        other = Business.objects.create(name='Otra tienda')
+        for business, cash_out in ((own, True), (employer, True), (other, False)):
+            self.assertEqual(_send_face_terms(self.user, fsu.Decimal('20'), 'USDT', None, business.id)['cash_out'],
+                             cash_out, business.name)
+
+    def test_a_face_gated_payment_is_never_light(self):
+        from types import SimpleNamespace
+        from payments.bsc_flow import _payment_face_terms
+        terms = _payment_face_terms(SimpleNamespace(amount=fsu.Decimal('5'), token_type='USDT'))
+        self.assertTrue(terms['cash_out'])
 
 
 class FaceStepUpStatusQueryTests(TestCase):
