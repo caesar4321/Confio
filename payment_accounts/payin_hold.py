@@ -60,7 +60,10 @@ def received_at(row):
 
 
 def returns_at(row):
-    return received_at(row) + RETURN_AFTER
+    """24 hours from when the pay-in started waiting for the face, not from
+    when it arrived: a pay-in admitted late (e.g. a third-party grant switched
+    on days after it arrived) still gets its full day to be confirmed."""
+    return (row.awaiting_since or received_at(row)) + RETURN_AFTER
 
 
 def hold(row, owner) -> None:
@@ -85,7 +88,8 @@ def _notify_waiting(owner, entry) -> None:
         create_notification(
             user=owner.user, account=owner, notification_type='LOCAL_TRANSFER_UPDATED',
             title='Tienes dinero por recibir',
-            message=f'Tienes {amount} por recibir. Confirma con tu rostro para recibirlo.',
+            message=(f'Tienes {amount} por recibir. Confirma con tu rostro para recibirlo '
+                     '(si no ves la opción, actualiza Confío).'),
             data={'kind': 'payin_awaiting_face', 'entry_id': str(entry.internal_id)},
             action_url='confio://pending-incoming',
         )
@@ -220,13 +224,13 @@ def start_expired_returns(limit=50) -> None:
         return  # holds drain through release_open_windows instead
     cutoff = timezone.now() - RETURN_AFTER
     pks = list(AutomaticPayin.objects.filter(status=ACTIVE_HOLD, released_at__isnull=True,
-                                             entry__occurred_at__lte=cutoff)
+                                             awaiting_since__lte=cutoff)
                .values_list('pk', flat=True)[:limit])
     for pk in pks:
         with transaction.atomic():
             row = AutomaticPayin.objects.select_for_update().select_related('entry').get(pk=pk)
             # Locked: a face pass that released it first wins.
-            if row.status != ACTIVE_HOLD or row.released_at or received_at(row) > cutoff:
+            if row.status != ACTIVE_HOLD or row.released_at or returns_at(row) > timezone.now():
                 continue
             if InfiniaJourney.objects.filter(funding_credit=row.entry).exists():
                 # Converted by any path: nothing left to return.
