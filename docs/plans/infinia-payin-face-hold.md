@@ -81,7 +81,7 @@ type PendingIncomingPayin {
   country: String!        # ISO-2
   payerName: String       # as reported by the rail; null if unknown
   receivedAt: DateTime!
-  returnsAt: DateTime!    # receivedAt + 24h (server clock)
+  returnsAt: DateTime!    # 24h after the hold started (awaiting_since), server clock
   returnAmount: String    # server-computed amount the payer would get back
   returnDeduction: String # server-computed total deducted (fee + Infinia costs)
   journeyId: ID           # set once released, for the transfer status screen

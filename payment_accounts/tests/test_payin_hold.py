@@ -111,7 +111,10 @@ class PayinHoldTests(TestCase):
     # Return after 24 hours
 
     def _expire(self, entry):
-        LedgerEntry.objects.filter(pk=entry.pk).update(occurred_at=timezone.now() - timedelta(hours=25))
+        # The 24h clock runs from when the pay-in started waiting for the face.
+        past = timezone.now() - timedelta(hours=25)
+        LedgerEntry.objects.filter(pk=entry.pk).update(occurred_at=past)
+        AutomaticPayin.objects.filter(entry=entry).update(awaiting_since=past)
 
     def test_unconfirmed_payin_is_refunded_in_full_once(self):
         entry, row, _ = self._held()
@@ -185,7 +188,8 @@ class PayinHoldTests(TestCase):
             items = PendingPayinQuery().resolve_pending_incoming_payins(self._info())
         self.assertEqual(len(items), 1)
         self.assertEqual((items[0].state, items[0].id), ('awaiting_face', str(entry.internal_id)))
-        self.assertEqual(items[0].returns_at - items[0].received_at, timedelta(hours=24))
+        self.assertAlmostEqual((items[0].returns_at - items[0].received_at).total_seconds(),
+                               timedelta(hours=24).total_seconds(), delta=60)
 
     def test_release_mutation_asks_for_a_face_first(self):
         from payment_accounts.pending_payin_schema import ReleasePendingPayins
@@ -373,3 +377,15 @@ class PayinHoldTests(TestCase):
         payin_hold._apply_refund_status(row.pk, {'id': 'r1', 'status': 'SUCCESS'})
         row.refresh_from_db()
         self.assertEqual(row.status, 'return_failed')
+
+    # Late admission (e.g. a third-party grant switched on days after arrival)
+
+    def test_a_payin_held_late_still_gets_its_full_day(self):
+        entry, row, _ = self._held()
+        LedgerEntry.objects.filter(pk=entry.pk).update(occurred_at=timezone.now() - timedelta(days=3))
+        with mock.patch('payment_accounts.clients.InfiniaClient.refund_deposit') as refund:
+            payin_hold.start_expired_returns()
+        refund.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(row.status, 'awaiting_face')
+        self.assertGreater(payin_hold.returns_at(row), timezone.now() + timedelta(hours=23))
