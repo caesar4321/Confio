@@ -1,14 +1,14 @@
 """Tag existing Google Play pre-launch robot accounts (analytics only).
 
-Same rule as security/platform_test_accounts.py: a session from a Google
-network on a device that never produced a valid App Check token.
+Same rule as security/platform_test_accounts.py: a device that never produced
+a valid App Check token and was seen on a Google network.
 Dry run by default; --apply writes.
 """
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 from security.models import IPDeviceUser
-from security.platform_test_accounts import device_never_passed_app_check, is_google_network
+from security.platform_test_accounts import is_google_network, is_prelaunch_robot
 
 
 class Command(BaseCommand):
@@ -22,10 +22,14 @@ class Command(BaseCommand):
         candidates = set()
         rows = (IPDeviceUser.objects.select_related('ip_address', 'device_fingerprint')
                 .filter(user__is_platform_test_account=False))
+        cache = {}
         for row in rows.iterator():
             ip = getattr(row.ip_address, 'ip_address', '')
             fingerprint = getattr(row.device_fingerprint, 'fingerprint', '')
-            if is_google_network(ip) and device_never_passed_app_check(fingerprint):
+            key = (fingerprint, is_google_network(ip))
+            if key not in cache:  # one verdict per device and network kind
+                cache[key] = is_prelaunch_robot(ip, fingerprint)
+            if cache[key]:
                 candidates.add(row.user_id)
         self.stdout.write(f'{len(candidates)} pre-launch robot account(s): {sorted(candidates)}')
         if options['apply'] and candidates:
