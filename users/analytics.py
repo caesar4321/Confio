@@ -41,6 +41,13 @@ def _localize_arg(naive_dt: datetime) -> datetime:
     return naive_dt.replace(tzinfo=ARG_TZ)
 
 
+def _users():
+    """Users for every metric: Google Play pre-launch robots are not users."""
+    from users.models import User
+
+    return User.objects.exclude(is_platform_test_account=True)
+
+
 def get_real_users_queryset():
     """
     Return the canonical "real users" queryset.
@@ -50,7 +57,7 @@ def get_real_users_queryset():
     """
     from users.models import User
 
-    return User.objects.exclude(phone_number__isnull=True).exclude(phone_number='')
+    return _users().exclude(phone_number__isnull=True).exclude(phone_number='')
 
 
 def get_argentina_day_bounds(target_date):
@@ -75,7 +82,7 @@ def count_all_signups_for_date(target_date):
     from users.models import User
 
     start_time, end_time = get_argentina_day_bounds(target_date)
-    return User.objects.filter(created_at__gte=start_time, created_at__lte=end_time).count()
+    return _users().filter(created_at__gte=start_time, created_at__lte=end_time).count()
 
 
 def count_real_signups_for_date(target_date, country_code=None):
@@ -119,7 +126,7 @@ def calculate_dau(target_date=None):
     end_time_arg = _localize_arg(naive_end)
     end_time = end_time_arg.astimezone(UTC_TZ)
     
-    dau = User.objects.filter(
+    dau = _users().filter(
         phone_number__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
@@ -161,7 +168,7 @@ def calculate_wau(target_date=None):
     start_time_arg = _localize_arg(naive_start)
     start_time = start_time_arg.astimezone(UTC_TZ)
     
-    wau = User.objects.filter(
+    wau = _users().filter(
         phone_number__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
@@ -203,7 +210,7 @@ def calculate_mau(target_date=None):
     start_time_arg = _localize_arg(naive_start)
     start_time = start_time_arg.astimezone(UTC_TZ)
     
-    mau = User.objects.filter(
+    mau = _users().filter(
         phone_number__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
@@ -258,7 +265,7 @@ def calculate_country_metrics(target_date=None):
     mau_start = start_arg_mau.astimezone(UTC_TZ)
     
     # Get all countries with users
-    countries = User.objects.filter(
+    countries = _users().filter(
         phone_country__isnull=False
     ).values_list('phone_country', flat=True).distinct()
     
@@ -268,7 +275,7 @@ def calculate_country_metrics(target_date=None):
         if not country_code:
             continue
             
-        country_users = User.objects.filter(phone_country=country_code)
+        country_users = _users().filter(phone_country=country_code)
         
         # Calculate DAU for this country
         dau = country_users.filter(
@@ -348,14 +355,14 @@ def snapshot_daily_metrics(target_date=None):
     end_time_arg = _localize_arg(naive_end)
     end_time = end_time_arg.astimezone(UTC_TZ)
     
-    total_users = User.objects.filter(phone_number__isnull=False, created_at__lte=end_time).count()
+    total_users = _users().filter(phone_number__isnull=False, created_at__lte=end_time).count()
     
     # Calculate new users on target date
     # start_time is start of target_date in Argentina
     naive_start = datetime.combine(target_date, datetime.min.time())
     start_time_arg = _localize_arg(naive_start)
     start_time = start_time_arg.astimezone(UTC_TZ)
-    new_users_today = User.objects.filter(
+    new_users_today = _users().filter(
         phone_number__isnull=False,
         created_at__gte=start_time,
         created_at__lte=end_time

@@ -92,7 +92,7 @@ class Command(BaseCommand):
             ('Last 90 days', 90),
         ]
 
-        total_users = User.objects.count()
+        total_users = User.objects.exclude(is_platform_test_account=True).count()
 
         for label, days_count in periods:
             count = get_active_users(days=days_count).count()
@@ -107,7 +107,7 @@ class Command(BaseCommand):
         last_24h = now - timedelta(hours=24)
 
         # NEW METHOD: Single field
-        new_dau = User.objects.filter(last_activity_at__gte=last_24h).count()
+        new_dau = User.objects.exclude(is_platform_test_account=True).filter(last_activity_at__gte=last_24h).count()
 
         # OLD METHOD: Union of all tables (legacy)
         active_user_ids = set()
@@ -227,8 +227,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('✓ Activity tracking appears to be working correctly!'))
 
         # Show coverage stats
-        total_users = User.objects.count()
-        users_with_activity = User.objects.filter(last_activity_at__isnull=False).count()
+        total_users = User.objects.exclude(is_platform_test_account=True).count()
+        users_with_activity = User.objects.exclude(is_platform_test_account=True).filter(last_activity_at__isnull=False).count()
         coverage = (users_with_activity / total_users * 100) if total_users > 0 else 0
 
         self.stdout.write('')

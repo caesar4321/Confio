@@ -1290,6 +1290,8 @@ class IntegrityVerdict(models.Model):
         verbose_name_plural = "Integrity Verdicts"
         indexes = [
             models.Index(fields=['user', 'passed']),
+            # Pre-launch robot tagging looks up a device's App Check history.
+            models.Index(fields=['device_fingerprint', 'passed']),
             models.Index(fields=['user', 'trigger_action', 'created_at']),
             models.Index(fields=['is_emulator']),
             models.Index(fields=['is_rooted']),

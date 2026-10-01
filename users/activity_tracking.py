@@ -147,7 +147,7 @@ def get_active_users(days=1):
     from users.models import User
 
     cutoff = timezone.now() - timedelta(days=days)
-    return User.objects.filter(last_activity_at__gte=cutoff)
+    return User.objects.exclude(is_platform_test_account=True).filter(last_activity_at__gte=cutoff)
 
 
 def get_activity_metrics():
@@ -163,7 +163,7 @@ def get_activity_metrics():
     """
     from users.models import User
 
-    total_users = User.objects.count()
+    total_users = User.objects.exclude(is_platform_test_account=True).count()
 
     return {
         'dau': get_active_users(days=1).count(),
