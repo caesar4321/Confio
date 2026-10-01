@@ -245,9 +245,12 @@ def _merchant_kyb_verified(merchant_business) -> bool:
 
 
 def _payment_face_terms(invoice) -> dict:
-    """A payment stays inside Confío; its dollar value picks light or full."""
+    """Always the full Confío Face: a payment only asks for a face when it
+    goes into a business the payer owns or works for, or one without KYB.
+    Both are routing hops (a business pays on without a face), never a
+    small movement inside Confío, so the light challenge never applies."""
     from security.face_step_up import dollar_amount
-    return {'amount_usd': dollar_amount(invoice.amount, invoice.token_type), 'cash_out': False}
+    return {'amount_usd': dollar_amount(invoice.amount, invoice.token_type), 'cash_out': True}
 
 
 def _payment_step_up(user, payer_business, merchant_business, invoice=None, **claim) -> str:

@@ -285,11 +285,13 @@ export const TransactionProcessingScreen = () => {
       if (bioChecked) return;
       // Only a hint for the challenge (the server spends the check against the
       // real send): a bare address may be outside Confío; a user or phone is not.
-      const ok = await authenticateWithFace('withdrawal', transactionData.amount ? {
+      // Payments get no hint: a face-gated payment always needs the full check.
+      // A small send that turns out to go into the sender's own business is
+      // refused as light and retried with a full check by sendBscDollar.
+      const ok = await authenticateWithFace('withdrawal', transactionData.amount && transactionData.type !== 'payment' ? {
         amount: transactionData.amount,
         tokenType: transactionData.tokenType || transactionData.currency || '',
-        leavesConfio: transactionData.type !== 'payment'
-          && !transactionData.recipientUserId && !transactionData.recipientPhone,
+        leavesConfio: !transactionData.recipientUserId && !transactionData.recipientPhone,
       } : undefined);
       if (!ok) {
         Alert.alert(

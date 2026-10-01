@@ -115,12 +115,11 @@ export const PaymentProcessingScreen = () => {
   useEffect(() => {
     (async () => {
       if (bioChecked) return;
-      // A payment stays inside Confío: a small one gets the light check.
-      const ok = await authenticateWithFace('withdrawal', transactionData?.amount ? {
-        amount: transactionData.amount,
-        tokenType: transactionData.currency || '',
-        leavesConfio: false,
-      } : undefined);
+      // No movement hint: the server only asks a face for payments into a
+      // business the payer owns or works for, or one without KYB. Those are
+      // routing hops and always need the full check (payments/bsc_flow.py
+      // _payment_face_terms), so a light check could never approve them.
+      const ok = await authenticateWithFace('withdrawal');
       if (!ok) {
         Alert.alert(
           'Autenticación requerida',
