@@ -18,5 +18,10 @@ vendored package (apps/ios/LocalPackages/amplify-ui-swift-liveness):
 2. `ui/RecordingIndicator.kt`: emerald dot instead of the red recording light;
    the label is "VERIFICANDO" via app/src/main/res/values/face_liveness_strings.xml.
 
+Build changes backported from upstream 6abe43e ("16kb Page Support for
+Liveness", in 1.5.1+): CMake `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON`, and
+LiteRT 1.4.0 instead of TensorFlow Lite 2.0.0 / support 0.3.0 (Google Play
+rejects native libraries that are not 16 KB-aligned).
+
 To upgrade: copy the new tag's `liveness/src/main`, re-apply both patches,
 update versions in build.gradle from its published POM.
