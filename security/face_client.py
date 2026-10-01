@@ -4,9 +4,12 @@ FACE_STEP_UP_ENABLED forces legacy clients to update. Supported clients always
 enforce Face, even during the store rollout. Recovery/read/support routes
 are deliberately not included in the transaction gate.
 """
+import logging
 import re
 
 from .face_step_up import _setting, step_up_enabled
+
+logger = logging.getLogger(__name__)
 
 UPDATE_CODE = 'APP_UPDATE_REQUIRED'
 UPDATE_MESSAGE = 'Actualiza Confío desde App Store o Google Play para continuar. La nueva versión incluye la verificación Confío Face.'
@@ -56,6 +59,17 @@ def update_required(headers):
     return step_up_enabled() and not supports_face(headers)
 
 
+def log_update_refusal(headers, user, where: str) -> None:
+    """What the client reported when it was told to update: no other trace
+    exists of why a client failed supports_face."""
+    headers = {str(k).lower(): str(v) for k, v in headers.items()}
+    logger.warning(
+        'App update required: where=%s user=%s platform=%r version=%r build=%r face_capable=%r ua=%r',
+        where, getattr(user, 'id', None), headers.get('x-confio-platform', ''),
+        headers.get('x-confio-version', ''), headers.get('x-confio-build', ''),
+        headers.get('x-confio-face-capable', ''), headers.get('user-agent', '')[:80])
+
+
 def request_headers(request):
     headers = getattr(request, 'headers', None)
     if headers is None:
@@ -94,6 +108,7 @@ class FaceClientCompatibilityMiddleware:
                 and (info.field_name in TRANSACTION_FIELDS or is_funding)
                 and getattr(user, 'is_authenticated', False)
                 and request_update_required(info.context)):
+            log_update_refusal(request_headers(info.context), user, info.field_name)
             from graphql import GraphQLError
             raise GraphQLError(UPDATE_MESSAGE, extensions={
                 'code': UPDATE_CODE, 'nextStep': 'update_app',
@@ -139,6 +154,7 @@ class FaceClientWebSocketMiddleware:
                                 and payload.get('action') in ('cancel', 'open_dispute'))
                     if (isinstance(payload, dict) and payload.get('type') in guarded and not recovery
                             and update_required(headers)):
+                        log_update_refusal(headers, scope.get('user'), scope.get('path', ''))
                         await send({'type': 'websocket.send', 'text': json.dumps({
                             'type': 'error', 'code': UPDATE_CODE, 'message': UPDATE_MESSAGE,
                             'next_step': 'update_app',
