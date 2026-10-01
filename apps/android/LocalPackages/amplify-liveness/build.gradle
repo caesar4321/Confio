@@ -20,6 +20,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++17"
+                // Google Play requires 16 KB-aligned native libraries (as upstream 6abe43e).
+                arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
             }
         }
     }
@@ -72,8 +74,10 @@ dependencies {
     implementation "androidx.concurrent:concurrent-futures:1.1.0"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.4.0"
     implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.3"
-    implementation "org.tensorflow:tensorflow-lite:2.0.0"
-    implementation "org.tensorflow:tensorflow-lite-support:0.3.0"
+    // LiteRT replaces TensorFlow Lite 2.0.0, whose x86_64 JNI library is not
+    // 16 KB-aligned (upstream 6abe43e). Same org.tensorflow.lite packages.
+    implementation "com.google.ai.edge.litert:litert:1.4.0"
+    implementation "com.google.ai.edge.litert:litert-support:1.4.0"
 
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
 }
