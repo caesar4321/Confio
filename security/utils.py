@@ -530,6 +530,13 @@ def track_user_device(user, device_fingerprint_data: Dict, request=None):
                 # Calculate risk factors for this association
                 risk_factors = ip_device_user.calculate_risk_factors()
                 
+                # Google Play pre-launch robots: left out of analytics only.
+                try:
+                    from .platform_test_accounts import tag_if_prelaunch_robot
+                    tag_if_prelaunch_robot(user, ip_str, fingerprint_hash)
+                except Exception:
+                    logger.exception('Pre-launch robot tagging failed: user=%s', getattr(user, 'id', None))
+
                 logger.info(
                     f"IP-Device-User association tracked: "
                     f"user={user.id}, device={fingerprint_hash[:8]}..., "

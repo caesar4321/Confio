@@ -106,6 +106,9 @@ class User(AbstractUser, SoftDeleteModel):
     wallet_recovery_drive_ids = models.JSONField(default=list, blank=True)
     # Unified activity timestamp for MAU/WAU/DAU (updated on any user activity)
     last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Google Play pre-launch report robots (security/platform_test_accounts.py).
+    # Left out of analytics only; never used to block or restrict anything.
+    is_platform_test_account = models.BooleanField(default=False, db_index=True)
     phone_country = models.CharField(
         max_length=2,
         blank=True,

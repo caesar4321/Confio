@@ -77,10 +77,10 @@ def admin_dashboard_stats(request):
         
         # User Statistics
         user_stats = {
-            'total_users': User.objects.filter(is_active=True).count(),
-            'new_users_today': User.objects.filter(date_joined__gte=today_start).count(),
-            'new_users_week': User.objects.filter(date_joined__gte=week_start).count(),
-            'verified_phones': User.objects.filter(
+            'total_users': User.objects.exclude(is_platform_test_account=True).filter(is_active=True).count(),
+            'new_users_today': User.objects.exclude(is_platform_test_account=True).filter(date_joined__gte=today_start).count(),
+            'new_users_week': User.objects.exclude(is_platform_test_account=True).filter(date_joined__gte=week_start).count(),
+            'verified_phones': User.objects.exclude(is_platform_test_account=True).filter(
                 phone_number__isnull=False,
                 phone_country__isnull=False
             ).exclude(phone_number='').count(),

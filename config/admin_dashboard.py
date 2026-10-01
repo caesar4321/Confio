@@ -96,13 +96,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         # User metrics
         # DAU/MAU now uses centralized last_activity_at field (single source of truth)
         # See users/activity_tracking.py for activity tracking implementation
-        real_users = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='')
+        from users.analytics import get_real_users_queryset
+        real_users = get_real_users_queryset()
         context['total_users'] = real_users.count()
         context['active_users_today'] = real_users.filter(last_activity_at__gte=last_24h).count()
         context['active_users_week'] = real_users.filter(last_activity_at__gte=last_7_start).count()
         context['active_users_month'] = real_users.filter(last_activity_at__gte=now - timedelta(days=30)).count()
         context['new_users_last_7_days'] = real_users.filter(created_at__gte=last_7_start).count()
-        context['all_signups_last_7_days'] = User.objects.filter(created_at__gte=last_7_start).count()
+        context['all_signups_last_7_days'] = User.objects.exclude(is_platform_test_account=True).filter(created_at__gte=last_7_start).count()
         context['phone_completion_last_7_days'] = (
             context['new_users_last_7_days'] / context['all_signups_last_7_days'] * 100
             if context['all_signups_last_7_days'] else 0
@@ -140,8 +141,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         }
         
         # OS Stats (Explicit from Login)
-        ios_users = User.objects.filter(platform_os='ios').count()
-        android_users = User.objects.filter(platform_os='android').count()
+        ios_users = User.objects.exclude(is_platform_test_account=True).filter(platform_os='ios').count()
+        android_users = User.objects.exclude(is_platform_test_account=True).filter(platform_os='android').count()
         
         context['os_stats'] = {
             'ios_count': ios_users,
@@ -1342,7 +1343,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         start_date_arg = (now_arg - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
         start_date_utc = start_date_arg.astimezone(dt_timezone.utc)
         
-        daily_signups = User.objects.filter(
+        daily_signups = User.objects.exclude(is_platform_test_account=True).filter(
             phone_number__isnull=False,
             created_at__gte=start_date_utc
         ).annotate(
@@ -1354,7 +1355,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['daily_signups'] = list(daily_signups)
         
         # Verification funnel
-        context['users_total'] = User.objects.filter(phone_number__isnull=False).count()
+        context['users_total'] = User.objects.exclude(is_platform_test_account=True).filter(phone_number__isnull=False).count()
         context['users_with_verification'] = IdentityVerification.objects.values(
             'user'
         ).distinct().count()
@@ -1387,7 +1388,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         activity_metrics = []
         for label, days in active_ranges:
             cutoff = timezone.now() - timedelta(days=days)
-            count = User.objects.filter(phone_number__isnull=False, last_activity_at__gte=cutoff).count()
+            count = User.objects.exclude(is_platform_test_account=True).filter(phone_number__isnull=False, last_activity_at__gte=cutoff).count()
             activity_metrics.append({
                 'label': label,
                 'count': count,

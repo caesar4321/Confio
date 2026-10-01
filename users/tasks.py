@@ -413,7 +413,8 @@ def rollup_funnel_events(target_date_str=None):
 
         logger.info("Starting funnel rollup for %s", target_date)
 
-        day_events = FunnelEvent.objects.filter(created_at__date=target_date)
+        # Google Play pre-launch robots are not users (security/platform_test_accounts.py).
+        day_events = FunnelEvent.objects.filter(created_at__date=target_date).exclude(user__is_platform_test_account=True)
         if target_date_str and not day_events.exists():
             logger.info("Skipping funnel rollup for %s: no raw events to rebuild", target_date)
             return {
