@@ -77,6 +77,7 @@ def _verified_sessions(user_id) -> set[str]:
 
 def sync_face_blocklist(user_id) -> None:
     from django.contrib.auth import get_user_model
+    failure = None
     with transaction.atomic():
         # One sync per user at a time: never two entries for one session.
         get_user_model().all_objects.select_for_update().filter(pk=user_id).first()
@@ -87,24 +88,38 @@ def sync_face_blocklist(user_id) -> None:
                 return
             list_uuid = face_blocklist_uuid()
             for session_id in sorted(missing):
-                created = _call('POST', f'/v3/lists/{list_uuid}/entries/', {
-                    'reference_session_id': session_id,
-                    'display_label': f'confio-user-{user_id}',
-                    'comment': COMMENT,
-                    'metadata': {'reference_type': 'vendor_user', 'confio_user_id': user_id},
-                })
+                try:
+                    created = _call('POST', f'/v3/lists/{list_uuid}/entries/', {
+                        'reference_session_id': session_id,
+                        'display_label': f'confio-user-{user_id}',
+                        'comment': COMMENT,
+                        'metadata': {'reference_type': 'vendor_user', 'confio_user_id': user_id},
+                    })
+                except DiditAPIError as exc:
+                    # Keep the entries Didit already created: rolling their
+                    # rows back would leave them on Didit untracked, never
+                    # removed when the ban is lifted.
+                    failure = exc
+                    break
                 entry_uuid = str(created.get('uuid') or created.get('id') or '')
                 if not entry_uuid:
-                    raise DiditAPIError('Didit did not return the blocklist entry id')
+                    failure = DiditAPIError('Didit did not return the blocklist entry id')
+                    break
                 DiditFaceBlocklistEntry.objects.create(user_id=user_id, session_id=session_id,
                                                        list_uuid=list_uuid, entry_uuid=entry_uuid)
                 logger.info('Face blocklisted: user=%s session=%s', user_id, session_id)
-            return
-        for entry in active:
-            _call('DELETE', f'/v3/lists/{entry.list_uuid}/entries/{entry.entry_uuid}/', missing_ok=True)
-            entry.removed_at = timezone.now()
-            entry.save(update_fields=['removed_at'])
-            logger.info('Face blocklist entry removed: user=%s session=%s', user_id, entry.session_id)
+        else:
+            for entry in active:
+                try:
+                    _call('DELETE', f'/v3/lists/{entry.list_uuid}/entries/{entry.entry_uuid}/', missing_ok=True)
+                except DiditAPIError as exc:
+                    failure = exc
+                    break
+                entry.removed_at = timezone.now()
+                entry.save(update_fields=['removed_at'])
+                logger.info('Face blocklist entry removed: user=%s session=%s', user_id, entry.session_id)
+    if failure is not None:
+        raise failure
 
 
 def reconcile_face_blocklist() -> int:

@@ -111,15 +111,45 @@ class SamePersonFaceTests(TestCase):
         extra = _document(self.user, 'P-5', status='pending', is_additional_document=True)
         self.rek.compare_faces.side_effect = RuntimeError('rekognition down')
         self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision()), ('pending', ''))
+        self.assertIn(didit.SAME_FACE_RETRY_KEY, extra.risk_factors)  # retried hourly
         self.rek.compare_faces.side_effect = None
         self.assertEqual(didit._review_additional_document(extra, _extracted(), _decision(url='')),
                          ('pending', ''))  # no selfie in this session
 
-    def test_an_anchor_whose_selfie_is_gone_keeps_the_document_pending(self):
+    def test_an_account_with_no_selfie_on_file_is_bound_by_identity_data_and_recorded(self):
+        # Verified before selfies were kept, or Didit's media is gone: retrying
+        # cannot help, so the rule from before applies, on the record.
         _document(self.user, 'P-6', is_additional_document=True)
         primary = _document(self.user, 'V-6', status='pending')
         with mock.patch.object(didit, '_didit_request', return_value={'liveness_checks': []}):
-            self.assertEqual(didit._bind_to_person(primary, _extracted(), _decision()), ('pending', ''))
+            self.assertEqual(didit._bind_to_person(primary, _extracted(), _decision()), ('verified', ''))
+        self.assertEqual(primary.risk_factors.get('same_face'), 'no_reference_selfie')
+        self.rek.compare_faces.assert_not_called()
+
+    def test_the_accounts_kyc_selfie_stands_in_for_an_anchor_without_one(self):
+        first = _document(self.user, 'P-13', is_additional_document=True)
+        FaceReference.objects.create(user=self.user, identity_verification=_document(self.user, 'V-13'),
+                                     s3_key='k', sha256='0' * 64, source='didit_liveness')
+        primary = _document(self.user, 'V-14', status='pending')
+        with mock.patch.object(didit, '_didit_request') as fetch:
+            self.assertEqual(didit._same_face(first, _decision()), didit.FACE_MATCH)
+        fetch.assert_not_called()
+        self.assertEqual(self.compared(), (b'new-selfie', b'reference-selfie'))
+        self.assertIsNotNone(primary)
+
+    def test_waiting_documents_are_retried_for_a_week(self):
+        recent = _document(self.user, 'P-15', status='pending', is_additional_document=True,
+                           risk_factors={'didit': {'session_id': 's-recent'},
+                                         didit.SAME_FACE_RETRY_KEY: timezone.now().isoformat()})
+        _document(self.user, 'P-16', status='pending', is_additional_document=True,
+                  risk_factors={'didit': {'session_id': 's-old'}, didit.SAME_FACE_RETRY_KEY:
+                                (timezone.now() - timezone.timedelta(days=8)).isoformat()})
+        _document(self.user, 'P-17', status='pending', is_additional_document=True,
+                  risk_factors={'didit': {'session_id': 's-unrelated'}})
+        with mock.patch.object(didit, 'sync_didit_session') as sync:
+            self.assertEqual(didit.retry_pending_same_face(), 1)
+        sync.assert_called_once_with(session_id='s-recent', expected_user=self.user)
+        self.assertEqual(recent.status, 'pending')
 
     def test_an_already_verified_document_is_not_compared_again(self):
         _document(self.user, 'V-7')
@@ -173,7 +203,7 @@ class DuplicatedFaceHoldTests(TestCase):
             with self.subTest(primary_flagged=primary_flagged):
                 IdentityVerification.all_documents.filter(user=self.user).delete()
                 SuspiciousActivity.objects.filter(user=self.user).delete()
-                flag = {'provider': 'didit', 'duplicated_face': ['DUPLICATED_FACE']}
+                flag = {'provider': 'didit', 'duplicated_face': {'risks': ['DUPLICATED_FACE'], 'matched_user_ids': []}}
                 _document(self.user, 'V-9', risk_factors=flag if primary_flagged else {'provider': 'didit'})
                 _document(self.user, 'P-9', is_additional_document=True,
                           risk_factors={'provider': 'didit'} if primary_flagged else flag)
@@ -185,10 +215,67 @@ class DuplicatedFaceHoldTests(TestCase):
                 self.assertEqual(self.check(), '')
 
     def test_an_unverified_or_company_verification_does_not_hold(self):
-        flag = {'provider': 'didit', 'duplicated_face': ['DUPLICATED_FACE']}
+        flag = {'provider': 'didit', 'duplicated_face': {'risks': ['DUPLICATED_FACE'], 'matched_user_ids': []}}
         _document(self.user, 'V-10', status='rejected', risk_factors=flag)
         _document(self.user, 'J-10', risk_factors={**flag, 'account_type': 'business'})
         self.assertEqual(self.check(), '')
+
+    def sync_with_duplicate(self, others, number='P-11'):
+        row = _document(self.user, number, status='pending',
+                        risk_factors={'provider': 'didit', 'didit': {'session_id': f's-{number}'}})
+        approved = {
+            'session_id': f's-{number}', 'status': 'Approved',
+            'vendor_data': f'{{"user_id":{self.user.id},"account_type":"personal"}}',
+            'first_name': 'Ana', 'last_name': 'Perez', 'date_of_birth': '1990-01-01',
+            'id_verifications': [{'nationality': 'VEN', 'document_type': 'Passport', 'document_number': number,
+                                  'issuing_state': 'VEN', 'expiration_date': '2030-12-31'}],
+            'liveness_checks': [{'warnings': [{'risk': 'DUPLICATED_FACE', 'log_type': 'information'}]}],
+        }
+        with mock.patch('security.didit.retrieve_didit_decision', return_value=approved), \
+                mock.patch('security.didit._notify_verification_status_change'), \
+                mock.patch('security.didit._store_face_reference'), \
+                mock.patch('security.didit.other_users_with_face', return_value=others) as search:
+            didit.sync_didit_session(session_id=f's-{number}', expected_user=self.user)
+            didit.sync_didit_session(session_id=f's-{number}', expected_user=self.user)
+        self.assertEqual(search.call_count, 1)  # once per session
+        row.refresh_from_db()
+        return row
+
+    def test_the_persons_own_kyb_or_edd_sessions_are_not_a_duplicate(self):
+        row = self.sync_with_duplicate([])
+        self.assertNotIn('duplicated_face', row.risk_factors)
+        self.assertEqual(self.check(), '')
+
+    def test_another_users_face_holds_and_links_that_user(self):
+        other = get_user_model().objects.create_user(username='dup-other', firebase_uid='dup-other')
+        row = self.sync_with_duplicate([other.pk])
+        self.assertEqual(row.risk_factors['duplicated_face'],
+                         {'risks': ['DUPLICATED_FACE'], 'matched_user_ids': [other.pk]})
+        self.assertEqual(self.check(), MESSAGE)
+        case = SuspiciousActivity.objects.get(user=self.user, detection_data__trigger='didit_duplicated_face')
+        self.assertEqual(list(case.related_users.values_list('pk', flat=True)), [other.pk])
+
+    def test_a_face_search_that_cannot_run_still_holds(self):
+        row = self.sync_with_duplicate(None)
+        self.assertIn('duplicated_face', row.risk_factors)
+        self.assertEqual(self.check(), MESSAGE)
+
+    def test_face_search_leaves_out_the_persons_own_sessions_and_weak_matches(self):
+        body = {'face_search': {'matches': [
+            {'vendor_data': f'{{"user_id":{self.user.id},"account_type":"business","business_id":"9"}}',
+             'similarity_percentage': 99},
+            {'vendor_data': '{"user_id":42,"account_type":"personal"}', 'similarity_percentage': 93},
+            {'vendor_data': '{"user_id":43,"account_type":"personal"}', 'similarity_percentage': 50},
+            {'vendor_data': 'imported-row-7', 'similarity_percentage': 91},
+        ]}}
+        response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
+        with override_settings(DIDIT_API_KEY='key'), \
+                mock.patch('security.face_step_up._download_selfie', return_value=(b'img', 'image/jpeg')), \
+                mock.patch('security.didit.requests.post', return_value=response) as post:
+            self.assertEqual(didit.other_users_with_face(self.user, _decision()), [0, 42])
+        self.assertNotIn('Content-Type', post.call_args.kwargs['headers'])  # multipart
+        with mock.patch('security.face_step_up._download_selfie', side_effect=didit.requests.ConnectionError()):
+            self.assertIsNone(didit.other_users_with_face(self.user, _decision()))
 
     def test_the_sync_records_the_flag_and_keeps_it(self):
         row = _document(self.user, 'P-11', status='pending',
@@ -203,18 +290,20 @@ class DuplicatedFaceHoldTests(TestCase):
         }
         with mock.patch('security.didit.retrieve_didit_decision', return_value=approved), \
                 mock.patch('security.didit._notify_verification_status_change'), \
-                mock.patch('security.didit._store_face_reference'):
+                mock.patch('security.didit._store_face_reference'), \
+                mock.patch('security.didit.other_users_with_face', return_value=[0]):
             didit.sync_didit_session(session_id='s-dup', expected_user=self.user)
             approved['liveness_checks'] = [{'warnings': []}]
             didit.sync_didit_session(session_id='s-dup', expected_user=self.user)
         row.refresh_from_db()
-        self.assertEqual((row.status, row.risk_factors.get('duplicated_face')), ('verified', ['DUPLICATED_FACE']))
+        self.assertEqual((row.status, row.risk_factors.get('duplicated_face')),
+                         ('verified', {'risks': ['DUPLICATED_FACE'], 'matched_user_ids': [0]}))
         self.assertEqual(self.check(), MESSAGE)
 
     def test_admin_bulk_dismissal_releases_a_duplicated_face_case_with_notes(self):
         from django.contrib.admin.sites import AdminSite
         from security.admin import SuspiciousActivityAdmin
-        _document(self.user, 'V-12', risk_factors={'provider': 'didit', 'duplicated_face': ['DUPLICATED_FACE']})
+        _document(self.user, 'V-12', risk_factors={'provider': 'didit', 'duplicated_face': {'risks': ['DUPLICATED_FACE']}})
         self.check()
         cases = SuspiciousActivity.objects.filter(user=self.user, detection_data__trigger='didit_duplicated_face')
         admin = SuspiciousActivityAdmin(SuspiciousActivity, AdminSite())

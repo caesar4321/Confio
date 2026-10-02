@@ -34,6 +34,11 @@ app.conf.beat_schedule.setdefault('security-reconcile-face-blocklist', {
     'schedule': crontab(minute=17),
 })
 
+app.conf.beat_schedule.setdefault('security-retry-pending-same-face', {
+    'task': 'security.retry_pending_same_face',
+    'schedule': crontab(minute=41),
+})
+
 app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
     'task': 'users.rollup_funnel_events',
     'schedule': crontab(hour=3, minute=30),

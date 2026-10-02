@@ -359,6 +359,47 @@ def duplicated_face_risks(response_payload: dict[str, Any]) -> list[str]:
     return sorted(found)
 
 
+FACE_SEARCH_MIN_SIMILARITY = 70  # Didit: 70-89 "possible match", 90+ "strong match"
+
+
+def other_users_with_face(user, response_payload: dict[str, Any]) -> list[int] | None:
+    """Other Confío users whose approved Didit sessions show this session's
+    face; None when Didit's face search cannot be run.
+
+    The decision's duplicate warning does not say whose session matched, and
+    Didit tells sessions apart by vendor_data, which differs between a
+    person's KYC and their company's KYB or an EDD session. Face search
+    (free, 1:N) returns each match's vendor_data, so the person's own
+    sessions are left out and the others can be linked to the review case.
+    """
+    from .face_step_up import FaceStepUpError, _didit_selfie_url, _download_selfie
+    try:
+        url = _didit_selfie_url(response_payload)
+        if not url:
+            return None
+        image, content_type = _download_selfie(url)
+        headers = {key: value for key, value in _didit_headers().items() if key.lower() != 'content-type'}
+        response = requests.post(_didit_url('/v3/face-search/'), headers=headers, timeout=DIDIT_TIMEOUT_SECONDS,
+                                 files={'user_image': ('selfie', image, content_type)},
+                                 data={'save_api_request': 'false'})
+        response.raise_for_status()
+        matches = ((response.json() or {}).get('face_search') or {}).get('matches') or []
+    except (requests.RequestException, ValueError, FaceStepUpError, DiditConfigurationError) as exc:
+        logger.error('Didit face search unavailable for session %s (%s)',
+                     response_payload.get('session_id'), type(exc).__name__)
+        return None
+    others = set()
+    for match in matches:
+        if not isinstance(match, dict) or float(match.get('similarity_percentage') or 0) < FACE_SEARCH_MIN_SIMILARITY:
+            continue
+        owner = str(_safe_json_loads(match.get('vendor_data')).get('user_id') or '')
+        if owner == str(user.pk):
+            continue
+        # A match without our vendor_data is someone else all the same.
+        others.add(int(owner) if owner.isdigit() else 0)
+    return sorted(others)
+
+
 def user_facing_decline_reason(response_payload: dict[str, Any]) -> str:
     """The retry hint for a Didit decline, or '' for the generic copy."""
     warnings = []
@@ -1244,32 +1285,51 @@ def _same_person(primary: IdentityVerification, extracted: dict[str, Any]) -> bo
 
 
 NOT_SAME_PERSON_MESSAGE = 'El documento no coincide con tu identidad verificada.'
+# When a document started waiting for the face comparison (AWS or Didit was
+# unreachable); retry_pending_same_face re-syncs those sessions for a week.
+SAME_FACE_RETRY_KEY = 'same_face_retry_since'
+SAME_FACE_RETRY_WINDOW_DAYS = 7
+
+
+class _NoSelfie(Exception):
+    """No selfie of the anchor exists anywhere (an account verified before
+    selfies were kept, or whose Didit media is gone): retrying cannot help."""
 
 
 def _anchor_selfie(anchor: IdentityVerification) -> bytes:
-    """The live selfie of the anchor's own Didit session.
+    """A selfie of the person the anchor document belongs to.
 
-    The stored KYC reference when it came from this verification (no Didit
-    call); otherwise, e.g. an extra document verified before the primary,
-    Didit's decision for that session, whose media links are fresh.
+    In order: the KYC reference stored from the anchor itself; the account's
+    active KYC reference (every verified personal document of an account is
+    bound to that same person); the anchor session's selfie from Didit (an
+    extra document verified before the primary, whose media links are fresh).
+    Raises _NoSelfie when none exists, DiditAPIError/FaceStepUpError when it
+    cannot be fetched right now.
     """
     from .face_step_up import _didit_selfie_url, _download_selfie, _reference_bytes
     from .models import FaceReference
-    reference = FaceReference.objects.filter(identity_verification=anchor).order_by('-is_active', '-pk').first()
+    reference = (FaceReference.objects.filter(identity_verification=anchor).order_by('-is_active', '-pk').first()
+                 or FaceReference.objects.filter(user_id=anchor.user_id, is_active=True).first())
     if reference is not None:
         return _reference_bytes(reference)
     session_id = ((anchor.risk_factors or {}).get('didit') or {}).get('session_id')
     if not session_id:
-        raise DiditAPIError('The verified document has no Didit session')
+        raise _NoSelfie()
     url = _didit_selfie_url(_didit_request('GET', f'/v3/session/{session_id}/decision/'))
     if not url:
-        raise DiditAPIError('The verified document has no selfie')
+        raise _NoSelfie()
     return _download_selfie(url)[0]
 
 
-def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -> bool | None:
-    """Whether this session's selfie is the anchor session's face; None when it
-    cannot be compared now (the caller keeps the document pending).
+FACE_MATCH, FACE_MISMATCH, FACE_UNAVAILABLE, FACE_NO_REFERENCE = 'match', 'mismatch', 'unavailable', 'no_reference'
+
+
+def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -> str:
+    """Whether this session's selfie is the anchor's person.
+
+    FACE_MATCH / FACE_MISMATCH; FACE_UNAVAILABLE when it cannot be compared
+    right now (the caller keeps the document pending and it is retried);
+    FACE_NO_REFERENCE when no selfie of the anchor exists anywhere.
 
     Didit proves each document's portrait matches the selfie of ITS session.
     Only this proves both sessions had the same person in front of the camera:
@@ -1288,15 +1348,41 @@ def _same_face(anchor: IdentityVerification, response_payload: dict[str, Any]) -
             SourceImage={'Bytes': current}, TargetImage={'Bytes': _anchor_selfie(anchor)},
             SimilarityThreshold=0,
         ).get('FaceMatches') or []
+    except _NoSelfie:
+        logger.warning('Same-person face check: no selfie on file for anchor=%s', anchor.pk)
+        return FACE_NO_REFERENCE
     except (DiditAPIError, FaceStepUpError) as exc:
         logger.error('Same-person face check unavailable: verification=%s anchor=%s (%s)',
                      response_payload.get('session_id'), anchor.pk, exc)
-        return None
+        return FACE_UNAVAILABLE
     except Exception as exc:  # Rekognition / S3 trouble; never log request details
         logger.error('Same-person face check failed: anchor=%s (%s)', anchor.pk, type(exc).__name__)
-        return None
+        return FACE_UNAVAILABLE
     similarity = max((Decimal(str(m.get('Similarity') or 0)) for m in matches), default=Decimal('0'))
-    return similarity >= Decimal(str(_setting('FACE_MIN_SIMILARITY', FACE_MIN_SIMILARITY)))
+    threshold = Decimal(str(_setting('FACE_MIN_SIMILARITY', FACE_MIN_SIMILARITY)))
+    return FACE_MATCH if similarity >= threshold else FACE_MISMATCH
+
+
+def retry_pending_same_face() -> int:
+    """Hourly: re-sync documents left pending because the face comparison
+    could not run, for SAME_FACE_RETRY_WINDOW_DAYS. Returns how many synced."""
+    from datetime import timedelta
+    cutoff = (timezone.now() - timedelta(days=SAME_FACE_RETRY_WINDOW_DAYS)).isoformat()
+    waiting = IdentityVerification.all_documents.filter(
+        status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__gte': cutoff},
+    ).values_list('user_id', 'risk_factors__didit__session_id')
+    from django.contrib.auth import get_user_model
+    users = get_user_model().all_objects
+    synced = 0
+    for user_id, session_id in waiting:
+        if not session_id:
+            continue
+        try:
+            sync_didit_session(session_id=session_id, expected_user=users.get(pk=user_id))
+            synced += 1
+        except Exception:
+            logger.exception('Same-face retry failed: session=%s', session_id)
+    return synced
 
 
 def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any],
@@ -1331,10 +1417,20 @@ def _bind_to_person(verification: IdentityVerification, extracted: dict[str, Any
     # Once: a later sync of an already verified document neither pays for
     # another comparison nor drops the KYC to pending when AWS is unreachable.
     if response_payload is not None and verification.status != 'verified':
+        factors = dict(verification.risk_factors or {})
         same = _same_face(anchor, response_payload)
-        if same is None:
+        if same == FACE_UNAVAILABLE:
+            # retry_pending_same_face re-syncs it: Didit sends its webhook once.
+            factors.setdefault(SAME_FACE_RETRY_KEY, timezone.now().isoformat())
+            verification.risk_factors = factors
             return 'pending', ''
-        if not same:
+        factors.pop(SAME_FACE_RETRY_KEY, None)
+        if same == FACE_NO_REFERENCE:
+            # An account verified before selfies were kept: bound by identity
+            # data alone, as before; recorded for audit.
+            factors['same_face'] = 'no_reference_selfie'
+        verification.risk_factors = factors
+        if same == FACE_MISMATCH:
             return 'rejected', NOT_SAME_PERSON_MESSAGE
     return 'verified', ''
 
@@ -1455,11 +1551,15 @@ def _sync_didit_session(*, session_id: str, expected_user=None, expected_account
         risk_factors['account_type'] = 'business'
     if business_id:
         risk_factors['business_id'] = str(business_id)
-    duplicated = duplicated_face_risks(response_payload)
-    if duplicated and account_type != 'business':
-        # Sticky: a later sync without the warning never clears the hold
-        # (security/identity_reuse.py); support releases it.
-        risk_factors['duplicated_face'] = duplicated
+    if account_type != 'business' and 'duplicated_face_checked' not in risk_factors:
+        duplicated = duplicated_face_risks(response_payload)
+        if duplicated:
+            # Once per session. Sticky: a later sync never clears the hold
+            # (security/identity_reuse.py); support releases it.
+            risk_factors['duplicated_face_checked'] = True
+            others = other_users_with_face(user, response_payload)
+            if others is None or others:
+                risk_factors['duplicated_face'] = {'risks': duplicated, 'matched_user_ids': others or []}
 
     verification.verified_first_name = extracted['verified_first_name']
     verification.verified_last_name = extracted['verified_last_name']
