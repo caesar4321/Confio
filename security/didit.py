@@ -1427,6 +1427,13 @@ def retry_pending_same_face() -> int:
                 'rejected', FACE_UNCONFIRMED_MESSAGE, factors)
             expired.save(update_fields=['status', 'rejected_reason', 'risk_factors', 'updated_at'])
         logger.warning('Same-face retries exhausted: verification=%s', verification_id)
+        if not expired.is_additional_document:
+            # As a sync's rejection would: the user learns to verify again.
+            try:
+                _notify_verification_status_change(verification=expired, account_type='personal', business_id=None,
+                                                   previous_status='pending', new_status='rejected')
+            except Exception:
+                logger.exception('Same-face rejection not notified: verification=%s', verification_id)
     waiting = IdentityVerification.all_documents.filter(
         status='pending', **{f'risk_factors__{SAME_FACE_RETRY_KEY}__gte': cutoff},
     ).values_list('user_id', 'risk_factors__didit__session_id')

@@ -164,6 +164,19 @@ class SamePersonFaceTests(TestCase):
         self.assertEqual((old.status, old.rejected_reason), ('rejected', didit.FACE_UNCONFIRMED_MESSAGE))
         self.assertNotIn(didit.SAME_FACE_RETRY_KEY, old.risk_factors)
 
+    def test_a_primary_rejected_after_the_window_is_notified_and_others_still_run(self):
+        stale = (timezone.now() - timezone.timedelta(days=8)).isoformat()
+        for number in ('V-21', 'V-22'):
+            _document(self.user, number, status='pending',
+                      risk_factors={'didit': {'session_id': f's-{number}'}, didit.SAME_FACE_RETRY_KEY: stale})
+        with mock.patch.object(didit, '_notify_verification_status_change',
+                               side_effect=[RuntimeError('push down'), None]) as notify:
+            didit.retry_pending_same_face()
+        self.assertEqual(notify.call_count, 2)
+        self.assertEqual(notify.call_args.kwargs['new_status'], 'rejected')
+        self.assertEqual(set(IdentityVerification.all_documents.filter(document_number__in=['V-21', 'V-22'])
+                             .values_list('status', flat=True)), {'rejected'})
+
     def test_a_session_or_selfie_deleted_at_didit_counts_as_no_selfie_on_file(self):
         import requests as http
         _document(self.user, 'P-18', is_additional_document=True)
