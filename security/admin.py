@@ -1609,6 +1609,10 @@ class DiditFaceBlocklistEntryAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         return False
 
+    def has_delete_permission(self, request, obj=None):
+        # Deleting the row would leave its Didit entry untracked.
+        return False
+
 
 class FaceCheckAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'purpose', 'status', 'failure_reason', 'liveness_confidence',
